@@ -2,9 +2,9 @@
 from dataclasses import dataclass, field
 from typing import Any
 
-from fastvideo.v1.configs.models.base import ArchConfig, ModelConfig
-from fastvideo.v1.layers.quantization import QuantizationConfig
-from fastvideo.v1.platforms import AttentionBackendEnum
+from fastvideo.configs.models.base import ArchConfig, ModelConfig
+from fastvideo.layers.quantization import QuantizationConfig
+from fastvideo.platforms import AttentionBackendEnum
 
 
 @dataclass

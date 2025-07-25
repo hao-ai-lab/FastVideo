@@ -19,28 +19,28 @@ from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm.auto import tqdm
 
-import fastvideo.v1.envs as envs
-from fastvideo.v1.attention.backends.video_sparse_attn import (
+import fastvideo.envs as envs
+from fastvideo.attention.backends.video_sparse_attn import (
     VideoSparseAttentionMetadata)
-from fastvideo.v1.configs.sample import SamplingParam
-from fastvideo.v1.dataset import build_parquet_map_style_dataloader
-from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema_t2v
-from fastvideo.v1.dataset.validation_dataset import ValidationDataset
-from fastvideo.v1.distributed import (cleanup_dist_env_and_memory,
-                                      get_local_torch_device, get_sp_group,
-                                      get_world_group)
-from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
-from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.pipelines import (ComposedPipelineBase, ForwardBatch,
-                                    LoRAPipeline, TrainingBatch)
-from fastvideo.v1.training.activation_checkpoint import (
+from fastvideo.configs.sample import SamplingParam
+from fastvideo.dataset import build_parquet_map_style_dataloader
+from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
+from fastvideo.dataset.validation_dataset import ValidationDataset
+from fastvideo.distributed import (cleanup_dist_env_and_memory,
+                                   get_local_torch_device, get_sp_group,
+                                   get_world_group)
+from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.forward_context import set_forward_context
+from fastvideo.logger import init_logger
+from fastvideo.pipelines import (ComposedPipelineBase, ForwardBatch,
+                                 LoRAPipeline, TrainingBatch)
+from fastvideo.training.activation_checkpoint import (
     apply_activation_checkpointing)
-from fastvideo.v1.training.training_utils import (
+from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
     normalize_dit_input, save_checkpoint, shard_latents_across_sp)
-from fastvideo.v1.utils import is_vsa_available, set_random_seed, shallow_asdict
+from fastvideo.utils import is_vsa_available, set_random_seed, shallow_asdict
 
 import wandb  # isort: skip
 

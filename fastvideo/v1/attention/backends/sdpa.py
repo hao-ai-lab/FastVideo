@@ -2,11 +2,9 @@
 
 import torch
 
-from fastvideo.v1.attention.backends.abstract import (
-    AttentionBackend)  # FlashAttentionMetadata,
-from fastvideo.v1.attention.backends.abstract import (AttentionImpl,
-                                                      AttentionMetadata)
-from fastvideo.v1.logger import init_logger
+from fastvideo.attention.backends.abstract import (  # FlashAttentionMetadata,
+    AttentionBackend, AttentionImpl, AttentionMetadata)
+from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 

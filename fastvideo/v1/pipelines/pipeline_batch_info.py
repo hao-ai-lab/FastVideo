@@ -14,9 +14,8 @@ from typing import Any
 import PIL.Image
 import torch
 
-from fastvideo.v1.attention import AttentionMetadata
-from fastvideo.v1.configs.sample.teacache import (TeaCacheParams,
-                                                  WanTeaCacheParams)
+from fastvideo.attention import AttentionMetadata
+from fastvideo.configs.sample.teacache import TeaCacheParams, WanTeaCacheParams
 
 
 @dataclass

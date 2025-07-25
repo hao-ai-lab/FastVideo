@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.pipelines import ComposedPipelineBase, build_pipeline
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.pipelines import ComposedPipelineBase, build_pipeline
 
 
 class WorkflowBase(ABC):

@@ -14,8 +14,8 @@ import torch
 from safetensors.torch import safe_open
 from tqdm.auto import tqdm
 
-from fastvideo.v1.distributed import get_local_torch_device
-from fastvideo.v1.logger import init_logger
+from fastvideo.distributed import get_local_torch_device
+from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 

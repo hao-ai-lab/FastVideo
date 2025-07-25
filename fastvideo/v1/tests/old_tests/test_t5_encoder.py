@@ -5,8 +5,8 @@ import numpy as np
 import torch
 from transformers import AutoConfig, AutoTokenizer, UMT5EncoderModel
 
-from fastvideo.v1.distributed import (maybe_init_distributed_environment_and_model_parallel)
-from fastvideo.v1.logger import init_logger
+from fastvideo.distributed import (maybe_init_distributed_environment_and_model_parallel)
+from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
@@ -43,7 +43,7 @@ def test_t5_encoder():
         device).eval()
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
-    from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
+    from fastvideo.models.loader.component_loader import TextEncoderLoader
     loader = TextEncoderLoader()
     model2 = loader.load_model(model_path, hf_config, device)
 

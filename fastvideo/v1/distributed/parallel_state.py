@@ -38,14 +38,14 @@ import torch
 import torch.distributed
 from torch.distributed import Backend, ProcessGroup, ReduceOp
 
-import fastvideo.v1.envs as envs
-from fastvideo.v1.distributed.device_communicators.base_device_communicator import (
+import fastvideo.envs as envs
+from fastvideo.distributed.device_communicators.base_device_communicator import (
     DeviceCommunicatorBase)
-from fastvideo.v1.distributed.device_communicators.cpu_communicator import (
+from fastvideo.distributed.device_communicators.cpu_communicator import (
     CpuCommunicator)
-from fastvideo.v1.distributed.utils import StatelessProcessGroup
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.platforms import current_platform
+from fastvideo.distributed.utils import StatelessProcessGroup
+from fastvideo.logger import init_logger
+from fastvideo.platforms import current_platform
 
 logger = init_logger(__name__)
 
@@ -184,7 +184,7 @@ class GroupCoordinator:
             print(f"rank: {self.rank} group not found")
             raise e
 
-        from fastvideo.v1.platforms import current_platform
+        from fastvideo.platforms import current_platform
 
         # TODO: fix it for other platforms
         self.device = get_local_torch_device()
@@ -195,7 +195,7 @@ class GroupCoordinator:
         if use_device_communicator and self.world_size > 1:
             # Platform-aware device communicator selection
             if current_platform.is_cuda_alike():
-                from fastvideo.v1.distributed.device_communicators.cuda_communicator import (
+                from fastvideo.distributed.device_communicators.cuda_communicator import (
                     CudaCommunicator)
                 self.device_communicator = CudaCommunicator(
                     cpu_group=self.cpu_group,
@@ -214,7 +214,7 @@ class GroupCoordinator:
 
         self.mq_broadcaster = None
 
-        from fastvideo.v1.platforms import current_platform
+        from fastvideo.platforms import current_platform
 
         # TODO(will): check if this is needed
         # self.use_custom_op_call = current_platform.is_cuda_alike()
@@ -258,7 +258,7 @@ class GroupCoordinator:
     def graph_capture(self,
                       graph_capture_context: GraphCaptureContext | None = None):
         # Platform-aware graph capture
-        from fastvideo.v1.platforms import current_platform
+        from fastvideo.platforms import current_platform
 
         if current_platform.is_cuda_alike():
             if graph_capture_context is None:
@@ -775,7 +775,7 @@ def init_distributed_environment(
     device_id: torch.device | None = None,
 ):
     # Determine the appropriate backend based on the platform
-    from fastvideo.v1.platforms import current_platform
+    from fastvideo.platforms import current_platform
     if backend == "nccl" and not current_platform.is_cuda_alike():
         # Use gloo backend for non-CUDA platforms (MPS, CPU)
         backend = "gloo"

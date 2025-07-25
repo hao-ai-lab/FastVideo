@@ -5,8 +5,8 @@ from typing import Any
 import torch
 from torch import nn
 
-from fastvideo.v1.configs.models import DiTConfig
-from fastvideo.v1.platforms import AttentionBackendEnum
+from fastvideo.configs.models import DiTConfig
+from fastvideo.platforms import AttentionBackendEnum
 
 
 # TODO

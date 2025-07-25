@@ -3,8 +3,8 @@
 import torch
 import torch.nn as nn
 
-from fastvideo.v1.layers.activation import get_act_fn
-from fastvideo.v1.layers.linear import ReplicatedLinear
+from fastvideo.layers.activation import get_act_fn
+from fastvideo.layers.linear import ReplicatedLinear
 
 
 class MLP(nn.Module):

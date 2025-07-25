@@ -18,20 +18,19 @@ from torch.distributed import init_device_mesh
 from transformers import AutoImageProcessor, AutoTokenizer
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
-from fastvideo.v1.configs.models import EncoderConfig
-from fastvideo.v1.distributed import get_local_torch_device
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.hf_transformer_utils import get_diffusers_config
-from fastvideo.v1.models.loader.fsdp_load import (maybe_load_fsdp_model,
-                                                  shard_model)
-from fastvideo.v1.models.loader.utils import set_default_torch_dtype
-from fastvideo.v1.models.loader.weight_utils import (
+from fastvideo.configs.models import EncoderConfig
+from fastvideo.distributed import get_local_torch_device
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
+from fastvideo.models.hf_transformer_utils import get_diffusers_config
+from fastvideo.models.loader.fsdp_load import maybe_load_fsdp_model, shard_model
+from fastvideo.models.loader.utils import set_default_torch_dtype
+from fastvideo.models.loader.weight_utils import (
     filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
     pt_weights_iterator, safetensors_weights_iterator)
-from fastvideo.v1.models.registry import ModelRegistry
-from fastvideo.v1.platforms import current_platform
-from fastvideo.v1.utils import PRECISION_TO_TYPE
+from fastvideo.models.registry import ModelRegistry
+from fastvideo.platforms import current_platform
+from fastvideo.utils import PRECISION_TO_TYPE
 
 logger = init_logger(__name__)
 

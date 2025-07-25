@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
 
-from fastvideo.v1.configs.sample.base import CacheParams
+from fastvideo.configs.sample.base import CacheParams
 
 
 @dataclass

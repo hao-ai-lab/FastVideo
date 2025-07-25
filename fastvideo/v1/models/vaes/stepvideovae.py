@@ -18,8 +18,8 @@ from einops import rearrange
 from torch import nn
 from torch.nn import functional as F
 
-from fastvideo.v1.configs.models.vaes import StepVideoVAEConfig
-from fastvideo.v1.models.vaes.common import ParallelTiledVAE
+from fastvideo.configs.models.vaes import StepVideoVAEConfig
+from fastvideo.models.vaes.common import ParallelTiledVAE
 
 
 def base_group_norm(x,

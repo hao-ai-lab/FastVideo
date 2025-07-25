@@ -4,12 +4,12 @@ from dataclasses import dataclass, field
 
 import torch
 
-from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
-from fastvideo.v1.configs.models.dits import WanVideoConfig
-from fastvideo.v1.configs.models.encoders import (BaseEncoderOutput,
-                                                  CLIPVisionConfig, T5Config)
-from fastvideo.v1.configs.models.vaes import WanVAEConfig
-from fastvideo.v1.configs.pipelines.base import PipelineConfig
+from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
+from fastvideo.configs.models.dits import WanVideoConfig
+from fastvideo.configs.models.encoders import (BaseEncoderOutput,
+                                               CLIPVisionConfig, T5Config)
+from fastvideo.configs.models.vaes import WanVAEConfig
+from fastvideo.configs.pipelines.base import PipelineConfig
 
 
 def t5_postprocess_text(outputs: BaseEncoderOutput) -> torch.tensor:

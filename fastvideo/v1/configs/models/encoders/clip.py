@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
 
-from fastvideo.v1.configs.models.encoders.base import (ImageEncoderArchConfig,
-                                                       ImageEncoderConfig,
-                                                       TextEncoderArchConfig,
-                                                       TextEncoderConfig)
+from fastvideo.configs.models.encoders.base import (ImageEncoderArchConfig,
+                                                    ImageEncoderConfig,
+                                                    TextEncoderArchConfig,
+                                                    TextEncoderConfig)
 
 
 def _is_transformer_layer(n: str, m) -> bool:

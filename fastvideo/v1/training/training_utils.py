@@ -12,13 +12,13 @@ import torch.distributed.checkpoint as dcp
 from einops import rearrange
 from safetensors.torch import save_file
 
-from fastvideo.v1.distributed.parallel_state import (get_sp_parallel_rank,
-                                                     get_sp_world_size)
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.training.checkpointing_utils import (ModelWrapper,
-                                                       OptimizerWrapper,
-                                                       RandomStateWrapper,
-                                                       SchedulerWrapper)
+from fastvideo.distributed.parallel_state import (get_sp_parallel_rank,
+                                                  get_sp_world_size)
+from fastvideo.logger import init_logger
+from fastvideo.training.checkpointing_utils import (ModelWrapper,
+                                                    OptimizerWrapper,
+                                                    RandomStateWrapper,
+                                                    SchedulerWrapper)
 
 logger = init_logger(__name__)
 
@@ -251,7 +251,7 @@ def normalize_dit_input(model_type, latents, args=None) -> torch.Tensor:
     if model_type == "hunyuan_hf" or model_type == "hunyuan":
         return latents * 0.476986
     elif model_type == "wan":
-        from fastvideo.v1.configs.models.vaes.wanvae import WanVAEConfig
+        from fastvideo.configs.models.vaes.wanvae import WanVAEConfig
         vae_config = WanVAEConfig()
         latents_mean = torch.tensor(vae_config.arch_config.latents_mean)
         latents_std = 1.0 / torch.tensor(vae_config.arch_config.latents_std)

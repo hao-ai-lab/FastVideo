@@ -6,7 +6,7 @@ import gradio as gr
 import torch
 
 from fastvideo import VideoGenerator
-from fastvideo.v1.configs.sample.base import SamplingParam
+from fastvideo.configs.sample.base import SamplingParam
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="FastVideo Gradio Demo")

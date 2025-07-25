@@ -2,13 +2,13 @@
 import sys
 from copy import deepcopy
 
-from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.schedulers.scheduling_flow_unipc_multistep import (
+from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.logger import init_logger
+from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler)
-from fastvideo.v1.pipelines.wan.wan_pipeline import WanPipeline
-from fastvideo.v1.training.training_pipeline import TrainingPipeline
-from fastvideo.v1.utils import is_vsa_available
+from fastvideo.pipelines.wan.wan_pipeline import WanPipeline
+from fastvideo.training.training_pipeline import TrainingPipeline
+from fastvideo.utils import is_vsa_available
 
 vsa_available = is_vsa_available()
 
@@ -64,8 +64,8 @@ def main(args) -> None:
 
 if __name__ == "__main__":
     argv = sys.argv
-    from fastvideo.v1.fastvideo_args import TrainingArgs
-    from fastvideo.v1.utils import FlexibleArgumentParser
+    from fastvideo.fastvideo_args import TrainingArgs
+    from fastvideo.utils import FlexibleArgumentParser
     parser = FlexibleArgumentParser()
     parser = TrainingArgs.add_cli_args(parser)
     parser = FastVideoArgs.add_cli_args(parser)

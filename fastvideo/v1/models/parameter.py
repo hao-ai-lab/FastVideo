@@ -8,9 +8,9 @@ from typing import Any
 import torch
 from torch.nn import Parameter
 
-from fastvideo.v1.distributed import get_tp_rank
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.utils import _make_synced_weight_loader
+from fastvideo.distributed import get_tp_rank
+from fastvideo.logger import init_logger
+from fastvideo.models.utils import _make_synced_weight_loader
 
 logger = init_logger(__name__)
 
@@ -44,7 +44,7 @@ class BasevLLMParameter(Parameter):
         # tensor, which is param.data, leading to the redundant memory usage.
         # This sometimes causes OOM errors during model loading. To avoid this,
         # we sync the param tensor after its weight loader is called.
-        from fastvideo.v1.platforms import current_platform
+        from fastvideo.platforms import current_platform
         if current_platform.is_tpu():
             weight_loader = _make_synced_weight_loader(weight_loader)
 

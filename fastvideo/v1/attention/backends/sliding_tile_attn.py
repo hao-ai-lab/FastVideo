@@ -7,17 +7,17 @@ import torch
 from einops import rearrange
 from st_attn import sliding_tile_attention
 
-import fastvideo.v1.envs as envs
-from fastvideo.v1.attention.backends.abstract import (AttentionBackend,
-                                                      AttentionImpl,
-                                                      AttentionMetadata,
-                                                      AttentionMetadataBuilder)
-from fastvideo.v1.distributed import get_sp_group
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.forward_context import ForwardContext, get_forward_context
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.v1.utils import dict_to_3d_list
+import fastvideo.envs as envs
+from fastvideo.attention.backends.abstract import (AttentionBackend,
+                                                   AttentionImpl,
+                                                   AttentionMetadata,
+                                                   AttentionMetadataBuilder)
+from fastvideo.distributed import get_sp_group
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.forward_context import ForwardContext, get_forward_context
+from fastvideo.logger import init_logger
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.utils import dict_to_3d_list
 
 logger = init_logger(__name__)
 

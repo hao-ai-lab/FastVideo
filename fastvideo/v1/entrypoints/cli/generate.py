@@ -7,12 +7,12 @@ import os
 from typing import cast
 
 from fastvideo import VideoGenerator
-from fastvideo.v1.configs.sample.base import SamplingParam
-from fastvideo.v1.entrypoints.cli.cli_types import CLISubcommand
-from fastvideo.v1.entrypoints.cli.utils import RaiseNotImplementedAction
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.utils import FlexibleArgumentParser
+from fastvideo.configs.sample.base import SamplingParam
+from fastvideo.entrypoints.cli.cli_types import CLISubcommand
+from fastvideo.entrypoints.cli.utils import RaiseNotImplementedAction
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
+from fastvideo.utils import FlexibleArgumentParser
 
 logger = init_logger(__name__)
 

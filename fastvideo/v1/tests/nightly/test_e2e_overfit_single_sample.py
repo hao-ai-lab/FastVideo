@@ -4,7 +4,7 @@ from huggingface_hub import snapshot_download
 import shutil
 import subprocess
 import sys
-from fastvideo.v1.tests.ssim.test_inference_similarity import compute_video_ssim_torchvision
+from fastvideo.tests.ssim.test_inference_similarity import compute_video_ssim_torchvision
 
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))

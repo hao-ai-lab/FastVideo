@@ -13,35 +13,34 @@ import torch
 from einops import rearrange
 from tqdm.auto import tqdm
 
-from fastvideo.v1.attention import get_attn_backend
-from fastvideo.v1.configs.pipelines.base import STA_Mode
-from fastvideo.v1.distributed import (get_local_torch_device,
-                                      get_sp_parallel_rank, get_sp_world_size,
-                                      get_world_group)
-from fastvideo.v1.distributed.communication_op import (
+from fastvideo.attention import get_attn_backend
+from fastvideo.configs.pipelines.base import STA_Mode
+from fastvideo.distributed import (get_local_torch_device, get_sp_parallel_rank,
+                                   get_sp_world_size, get_world_group)
+from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather)
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.loader.component_loader import TransformerLoader
-from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import (
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.forward_context import set_forward_context
+from fastvideo.logger import init_logger
+from fastvideo.models.loader.component_loader import TransformerLoader
+from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.stages.validators import StageValidators as V
-from fastvideo.v1.pipelines.stages.validators import VerificationResult
-from fastvideo.v1.platforms import AttentionBackendEnum
-from fastvideo.v1.utils import dict_to_3d_list
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.stages.base import PipelineStage
+from fastvideo.pipelines.stages.validators import StageValidators as V
+from fastvideo.pipelines.stages.validators import VerificationResult
+from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.utils import dict_to_3d_list
 
 try:
-    from fastvideo.v1.attention.backends.sliding_tile_attn import (
+    from fastvideo.attention.backends.sliding_tile_attn import (
         SlidingTileAttentionBackend)
     st_attn_available = True
 except ImportError:
     st_attn_available = False
 
 try:
-    from fastvideo.v1.attention.backends.video_sparse_attn import (
+    from fastvideo.attention.backends.video_sparse_attn import (
         VideoSparseAttentionBackend)
     vsa_available = True
 except ImportError:
@@ -407,7 +406,7 @@ class DenoisingStage(PipelineStage):
             fastvideo_args: The inference arguments.
         """
         # TODO(kevin): STA mask search, currently only support Wan2.1 with 69x768x1280
-        from fastvideo.v1.STA_configuration import configure_sta
+        from fastvideo.STA_configuration import configure_sta
         STA_mode = fastvideo_args.STA_mode
         skip_time_steps = fastvideo_args.skip_time_steps
         if batch.timesteps is None:
@@ -482,7 +481,7 @@ class DenoisingStage(PipelineStage):
                 save_dir=f'output/mask_search_strategy_{size[0]}x{size[1]}/',
                 timesteps=timesteps_num)
         elif STA_mode == STA_Mode.STA_INFERENCE:
-            import fastvideo.v1.envs as envs
+            import fastvideo.envs as envs
             config_file = envs.FASTVIDEO_ATTENTION_CONFIG
             if config_file is None:
                 raise ValueError("FASTVIDEO_ATTENTION_CONFIG is not set")
@@ -514,7 +513,7 @@ class DenoisingStage(PipelineStage):
             raise NotImplementedError(
                 "STA mask search is not supported for this resolution")
 
-        from fastvideo.v1.STA_configuration import save_mask_search_results
+        from fastvideo.STA_configuration import save_mask_search_results
         if batch.mask_search_final_result_pos is not None and batch.prompt is not None:
             save_mask_search_results(
                 [
@@ -748,7 +747,7 @@ class DmdDenoisingStage(DenoisingStage):
                             **pos_cond_kwargs,
                         ).permute(0, 2, 1, 3, 4)
 
-                    from fastvideo.v1.training.training_utils import (
+                    from fastvideo.training.training_utils import (
                         pred_noise_to_pred_video)
                     pred_video = pred_noise_to_pred_video(
                         pred_noise=pred_noise.flatten(0, 1),

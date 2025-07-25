@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 # TODO (will): remove this dependency
-from fastvideo.v1.layers.custom_op import CustomOp
+from fastvideo.layers.custom_op import CustomOp
 
 
 @CustomOp.register("silu_and_mul")

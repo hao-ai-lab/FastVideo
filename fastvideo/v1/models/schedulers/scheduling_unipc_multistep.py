@@ -33,7 +33,7 @@ from diffusers.schedulers.scheduling_utils import (KarrasDiffusionSchedulers,
                                                    SchedulerOutput)
 from diffusers.utils import deprecate
 
-from fastvideo.v1.models.schedulers.base import BaseScheduler
+from fastvideo.models.schedulers.base import BaseScheduler
 
 
 # Copied from diffusers.schedulers.scheduling_ddpm.betas_for_alpha_bar

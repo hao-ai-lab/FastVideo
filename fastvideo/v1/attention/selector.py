@@ -9,11 +9,11 @@ from typing import cast
 
 import torch
 
-import fastvideo.v1.envs as envs
-from fastvideo.v1.attention.backends.abstract import AttentionBackend
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.platforms import AttentionBackendEnum, current_platform
-from fastvideo.v1.utils import STR_BACKEND_ENV_VAR, resolve_obj_by_qualname
+import fastvideo.envs as envs
+from fastvideo.attention.backends.abstract import AttentionBackend
+from fastvideo.logger import init_logger
+from fastvideo.platforms import AttentionBackendEnum, current_platform
+from fastvideo.utils import STR_BACKEND_ENV_VAR, resolve_obj_by_qualname
 
 logger = init_logger(__name__)
 

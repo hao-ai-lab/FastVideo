@@ -6,9 +6,9 @@ import torch
 import pytest
 
 from fastvideo import VideoGenerator
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.tests.utils import compute_video_ssim_torchvision, write_ssim_results
-from fastvideo.v1.worker.multiproc_executor import MultiprocExecutor
+from fastvideo.logger import init_logger
+from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results
+from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
 

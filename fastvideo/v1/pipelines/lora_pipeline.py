@@ -10,14 +10,14 @@ from safetensors.torch import load_file
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor
 
-from fastvideo.v1.distributed import get_local_torch_device
-from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
-from fastvideo.v1.layers.lora.linear import (BaseLayerWithLoRA, get_lora_layer,
-                                             replace_submodule)
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.loader.utils import get_param_names_mapping
-from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.v1.utils import maybe_download_lora
+from fastvideo.distributed import get_local_torch_device
+from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.layers.lora.linear import (BaseLayerWithLoRA, get_lora_layer,
+                                          replace_submodule)
+from fastvideo.logger import init_logger
+from fastvideo.models.loader.utils import get_param_names_mapping
+from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.utils import maybe_download_lora
 
 logger = init_logger(__name__)
 

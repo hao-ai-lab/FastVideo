@@ -8,7 +8,7 @@ from typing import Any
 
 import torch
 
-from fastvideo.v1.logger import init_logger
+from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 

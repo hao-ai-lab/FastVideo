@@ -12,10 +12,10 @@ from abc import ABC, abstractmethod
 
 import torch
 
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.v1.pipelines.stages.validators import VerificationResult
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.stages.validators import VerificationResult
 
 logger = init_logger(__name__)
 
@@ -40,7 +40,7 @@ class PipelineStage(ABC):
         Verify the input for the stage.
 
         Example:
-            from fastvideo.v1.pipelines.stages.validators import V, VerificationResult
+            from fastvideo.pipelines.stages.validators import V, VerificationResult
             
             def verify_input(self, batch, fastvideo_args):
                 result = VerificationResult()

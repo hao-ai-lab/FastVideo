@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from fastvideo.v1.utils import dict_to_3d_list
+from fastvideo.utils import dict_to_3d_list
 
 
 def configure_sta(mode: str = 'STA_searching',

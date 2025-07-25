@@ -6,10 +6,10 @@ import pathlib
 import datasets
 from torch.utils.data import IterableDataset
 
-from fastvideo.v1.distributed import (get_sp_world_size, get_world_rank,
-                                      get_world_size)
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.vision_utils import load_image, load_video
+from fastvideo.distributed import (get_sp_world_size, get_world_rank,
+                                   get_world_size)
+from fastvideo.logger import init_logger
+from fastvideo.models.vision_utils import load_image, load_video
 
 logger = init_logger(__name__)
 

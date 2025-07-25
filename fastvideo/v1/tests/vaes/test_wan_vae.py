@@ -6,12 +6,12 @@ import pytest
 import torch
 from diffusers import AutoencoderKLWan
 
-from fastvideo.v1.configs.pipelines import PipelineConfig
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.loader.component_loader import VAELoader
-from fastvideo.v1.configs.models.vaes import WanVAEConfig
-from fastvideo.v1.utils import maybe_download_model
+from fastvideo.configs.pipelines import PipelineConfig
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
+from fastvideo.models.loader.component_loader import VAELoader
+from fastvideo.configs.models.vaes import WanVAEConfig
+from fastvideo.utils import maybe_download_model
 
 logger = init_logger(__name__)
 

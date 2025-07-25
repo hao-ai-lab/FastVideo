@@ -16,7 +16,7 @@ import sys
 # Run it with `python collect_env.py` or `python -m torch.utils.collect_env`
 from collections import namedtuple
 
-from fastvideo.v1.envs import environment_variables
+from fastvideo.envs import environment_variables
 
 try:
     import torch

@@ -3,7 +3,7 @@
 
 import argparse
 
-from fastvideo.v1.utils import FlexibleArgumentParser
+from fastvideo.utils import FlexibleArgumentParser
 
 
 class CLISubcommand:

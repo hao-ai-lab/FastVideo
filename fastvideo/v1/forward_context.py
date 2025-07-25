@@ -9,11 +9,11 @@ from typing import TYPE_CHECKING, Optional
 
 import torch
 
-from fastvideo.v1.logger import init_logger
+from fastvideo.logger import init_logger
 
 if TYPE_CHECKING:
-    from fastvideo.v1.attention import AttentionMetadata
-    from fastvideo.v1.pipelines import ForwardBatch
+    from fastvideo.attention import AttentionMetadata
+    from fastvideo.pipelines import ForwardBatch
 
 logger = init_logger(__name__)
 

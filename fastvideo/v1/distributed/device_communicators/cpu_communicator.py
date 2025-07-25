@@ -6,8 +6,8 @@ import os
 import torch
 from torch.distributed import ProcessGroup
 
-from fastvideo.v1.platforms import current_platform
-from fastvideo.v1.platforms.interface import CpuArchEnum
+from fastvideo.platforms import current_platform
+from fastvideo.platforms.interface import CpuArchEnum
 
 from .base_device_communicator import DeviceCommunicatorBase
 

@@ -11,13 +11,13 @@ import numpy as np
 import torch
 from PIL import Image
 
-from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema_i2v
-from fastvideo.v1.distributed import get_local_torch_device
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.pipelines.preprocess.preprocess_pipeline_base import (
+from fastvideo.dataset.dataloader.schema import pyarrow_schema_i2v
+from fastvideo.distributed import get_local_torch_device
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.forward_context import set_forward_context
+from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (
     BasePreprocessPipeline)
-from fastvideo.v1.pipelines.stages import ImageEncodingStage, TextEncodingStage
+from fastvideo.pipelines.stages import ImageEncodingStage, TextEncodingStage
 
 
 class PreprocessPipeline_I2V(BasePreprocessPipeline):

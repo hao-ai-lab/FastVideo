@@ -7,13 +7,13 @@ from pathlib import Path
 import torch
 import json
 from huggingface_hub import snapshot_download
-from fastvideo.v1.utils import logger
+from fastvideo.utils import logger
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
-from fastvideo.v1.training.wan_training_pipeline import main
-from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
-from fastvideo.v1.utils import FlexibleArgumentParser
-from fastvideo.v1.training.wan_training_pipeline import WanTrainingPipeline
+from fastvideo.training.wan_training_pipeline import main
+from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.utils import FlexibleArgumentParser
+from fastvideo.training.wan_training_pipeline import WanTrainingPipeline
 
 wandb_name = "test_training_loss"
 a40_reference_wandb_summary_file = "fastvideo/tests/training/Vanilla/a40_reference_wandb_summary.json"

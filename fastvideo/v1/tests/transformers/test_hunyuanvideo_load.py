@@ -6,17 +6,17 @@ import os
 import pytest
 import torch
 
-from fastvideo.v1.configs.pipelines.base import PipelineConfig
-from fastvideo.v1.distributed.parallel_state import (
+from fastvideo.configs.pipelines.base import PipelineConfig
+from fastvideo.distributed.parallel_state import (
     get_sp_parallel_rank,
     get_sp_world_size)
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.loader.component_loader import TransformerLoader
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.utils import maybe_download_model
-from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.configs.models.dits import HunyuanVideoConfig
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.logger import init_logger
+from fastvideo.models.loader.component_loader import TransformerLoader
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.utils import maybe_download_model
+from fastvideo.forward_context import set_forward_context
+from fastvideo.configs.models.dits import HunyuanVideoConfig
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
 logger = init_logger(__name__)
 

@@ -2,10 +2,10 @@
 
 import torch
 
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.platforms import AttentionBackendEnum
-from fastvideo.v1.platforms.interface import (DeviceCapability, Platform,
-                                              PlatformEnum)
+from fastvideo.logger import init_logger
+from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.platforms.interface import (DeviceCapability, Platform,
+                                           PlatformEnum)
 
 logger = init_logger(__name__)
 
@@ -55,12 +55,12 @@ class MpsPlatform(Platform):
                              head_size: int, dtype: torch.dtype) -> str:
         # MPS supports SDPA (Scaled Dot-Product Attention) which is the most compatible
         logger.info("Using Torch SDPA backend for MPS.")
-        return "fastvideo.v1.attention.backends.sdpa.SDPABackend"
+        return "fastvideo.attention.backends.sdpa.SDPABackend"
 
     @classmethod
     def get_device_communicator_cls(cls) -> str:
         # Use base communicator for MPS
-        return "fastvideo.v1.distributed.device_communicators.base_device_communicator.DeviceCommunicatorBase"
+        return "fastvideo.distributed.device_communicators.base_device_communicator.DeviceCommunicatorBase"
 
     @classmethod
     def seed_everything(cls, seed: int | None = None) -> None:

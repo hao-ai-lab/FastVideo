@@ -6,24 +6,23 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from fastvideo.v1.attention import DistributedAttention, LocalAttention
-from fastvideo.v1.configs.models.dits import HunyuanVideoConfig
-from fastvideo.v1.configs.sample.teacache import TeaCacheParams
-from fastvideo.v1.distributed.parallel_state import get_sp_world_size
-from fastvideo.v1.forward_context import get_forward_context
-from fastvideo.v1.layers.layernorm import (LayerNormScaleShift, ScaleResidual,
-                                           ScaleResidualLayerNormScaleShift)
-from fastvideo.v1.layers.linear import ReplicatedLinear
+from fastvideo.attention import DistributedAttention, LocalAttention
+from fastvideo.configs.models.dits import HunyuanVideoConfig
+from fastvideo.configs.sample.teacache import TeaCacheParams
+from fastvideo.distributed.parallel_state import get_sp_world_size
+from fastvideo.forward_context import get_forward_context
+from fastvideo.layers.layernorm import (LayerNormScaleShift, ScaleResidual,
+                                        ScaleResidualLayerNormScaleShift)
+from fastvideo.layers.linear import ReplicatedLinear
 # TODO(will-PY-refactor): RMSNorm ....
-from fastvideo.v1.layers.mlp import MLP
-from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
-                                                  get_rotary_pos_embed)
-from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
-                                                  PatchEmbed, TimestepEmbedder,
-                                                  unpatchify)
-from fastvideo.v1.models.dits.base import CachableDiT
-from fastvideo.v1.models.utils import modulate
-from fastvideo.v1.platforms import AttentionBackendEnum
+from fastvideo.layers.mlp import MLP
+from fastvideo.layers.rotary_embedding import (_apply_rotary_emb,
+                                               get_rotary_pos_embed)
+from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed,
+                                               TimestepEmbedder, unpatchify)
+from fastvideo.models.dits.base import CachableDiT
+from fastvideo.models.utils import modulate
+from fastvideo.platforms import AttentionBackendEnum
 
 
 class HunyuanRMSNorm(nn.Module):

@@ -16,17 +16,17 @@ import torch
 from einops import rearrange, repeat
 from torch import nn
 
-from fastvideo.v1.attention import DistributedAttention, LocalAttention
-from fastvideo.v1.configs.models.dits import StepVideoConfig
-from fastvideo.v1.distributed.parallel_state import get_sp_world_size
-from fastvideo.v1.layers.layernorm import LayerNormScaleShift
-from fastvideo.v1.layers.linear import ReplicatedLinear
-from fastvideo.v1.layers.mlp import MLP
-from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
-                                                  get_rotary_pos_embed)
-from fastvideo.v1.layers.visual_embedding import TimestepEmbedder
-from fastvideo.v1.models.dits.base import BaseDiT
-from fastvideo.v1.platforms import AttentionBackendEnum
+from fastvideo.attention import DistributedAttention, LocalAttention
+from fastvideo.configs.models.dits import StepVideoConfig
+from fastvideo.distributed.parallel_state import get_sp_world_size
+from fastvideo.layers.layernorm import LayerNormScaleShift
+from fastvideo.layers.linear import ReplicatedLinear
+from fastvideo.layers.mlp import MLP
+from fastvideo.layers.rotary_embedding import (_apply_rotary_emb,
+                                               get_rotary_pos_embed)
+from fastvideo.layers.visual_embedding import TimestepEmbedder
+from fastvideo.models.dits.base import BaseDiT
+from fastvideo.platforms import AttentionBackendEnum
 
 
 class PatchEmbed2D(nn.Module):

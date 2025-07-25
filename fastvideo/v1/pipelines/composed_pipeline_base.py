@@ -12,16 +12,16 @@ from typing import Any, cast
 
 import torch
 
-from fastvideo.v1.configs.pipelines import PipelineConfig
-from fastvideo.v1.distributed import (
+from fastvideo.configs.pipelines import PipelineConfig
+from fastvideo.distributed import (
     maybe_init_distributed_environment_and_model_parallel)
-from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.v1.pipelines.stages import PipelineStage
-from fastvideo.v1.utils import (maybe_download_model,
-                                verify_model_config_and_directory)
+from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.logger import init_logger
+from fastvideo.models.loader.component_loader import PipelineComponentLoader
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.stages import PipelineStage
+from fastvideo.utils import (maybe_download_model,
+                             verify_model_config_and_directory)
 
 logger = init_logger(__name__)
 

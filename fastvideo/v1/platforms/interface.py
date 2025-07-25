@@ -8,7 +8,7 @@ from typing import NamedTuple
 import numpy as np
 import torch
 
-from fastvideo.v1.logger import init_logger
+from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
@@ -217,7 +217,7 @@ class Platform:
         """
         Get device specific communicator class for distributed communication.
         """
-        return "fastvideo.v1.distributed.device_communicators.base_device_communicator.DeviceCommunicatorBase"  # noqa
+        return "fastvideo.distributed.device_communicators.base_device_communicator.DeviceCommunicatorBase"  # noqa
 
     @classmethod
     def get_cpu_architecture(cls) -> CpuArchEnum:

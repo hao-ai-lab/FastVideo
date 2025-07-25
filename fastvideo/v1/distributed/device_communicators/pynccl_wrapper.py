@@ -32,8 +32,8 @@ from typing import Any
 import torch
 from torch.distributed import ReduceOp
 
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.utils import find_nccl_library
+from fastvideo.logger import init_logger
+from fastvideo.utils import find_nccl_library
 
 logger = init_logger(__name__)
 

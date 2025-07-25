@@ -7,13 +7,13 @@ import torch
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter, UninitializedParameter
 
-from fastvideo.v1.distributed import (divide, get_tp_rank, get_tp_world_size,
-                                      tensor_model_parallel_all_reduce)
-from fastvideo.v1.layers.quantization.base_config import (
+from fastvideo.distributed import (divide, get_tp_rank, get_tp_world_size,
+                                   tensor_model_parallel_all_reduce)
+from fastvideo.layers.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase, method_has_implemented_embedding)
-from fastvideo.v1.models.parameter import BasevLLMParameter
-from fastvideo.v1.models.utils import set_weight_attrs
-from fastvideo.v1.platforms import current_platform
+from fastvideo.models.parameter import BasevLLMParameter
+from fastvideo.models.utils import set_weight_attrs
+from fastvideo.platforms import current_platform
 
 DEFAULT_VOCAB_PADDING_SIZE = 64
 

@@ -5,10 +5,10 @@ from dataclasses import field
 import torch
 from torch import nn
 
-from fastvideo.v1.configs.models.encoders import (BaseEncoderOutput,
-                                                  ImageEncoderConfig,
-                                                  TextEncoderConfig)
-from fastvideo.v1.platforms import AttentionBackendEnum
+from fastvideo.configs.models.encoders import (BaseEncoderOutput,
+                                               ImageEncoderConfig,
+                                               TextEncoderConfig)
+from fastvideo.platforms import AttentionBackendEnum
 
 
 class TextEncoder(nn.Module, ABC):

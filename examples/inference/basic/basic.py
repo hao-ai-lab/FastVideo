@@ -1,6 +1,6 @@
 from fastvideo import VideoGenerator
 
-# from fastvideo.v1.configs.sample import SamplingParam
+# from fastvideo.configs.sample import SamplingParam
 
 OUTPUT_PATH = "video_samples"
 def main():

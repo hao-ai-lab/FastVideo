@@ -6,8 +6,8 @@ from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar
 
 if TYPE_CHECKING:
-    from fastvideo.v1.fastvideo_args import FastVideoArgs
-    from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+    from fastvideo.fastvideo_args import FastVideoArgs
+    from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 
 import torch
 

@@ -17,12 +17,12 @@ import torch
 import torchvision
 from einops import rearrange
 
-from fastvideo.v1.configs.sample import SamplingParam
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.pipelines import ForwardBatch
-from fastvideo.v1.utils import align_to, shallow_asdict
-from fastvideo.v1.worker.executor import Executor
+from fastvideo.configs.sample import SamplingParam
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
+from fastvideo.pipelines import ForwardBatch
+from fastvideo.utils import align_to, shallow_asdict
+from fastvideo.worker.executor import Executor
 
 logger = init_logger(__name__)
 

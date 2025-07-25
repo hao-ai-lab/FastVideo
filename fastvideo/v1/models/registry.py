@@ -16,7 +16,7 @@ from typing import NoReturn, TypeVar, cast
 import cloudpickle
 from torch import nn
 
-from fastvideo.v1.logger import logger
+from fastvideo.logger import logger
 
 # huggingface class name: (component_name, fastvideo module name, fastvideo class name)
 _TEXT_TO_VIDEO_DIT_MODELS = {
@@ -68,9 +68,7 @@ _FAST_VIDEO_MODELS = {
     **_SCHEDULERS,
 }
 
-_SUBPROCESS_COMMAND = [
-    sys.executable, "-m", "fastvideo.v1.models.dits.registry"
-]
+_SUBPROCESS_COMMAND = [sys.executable, "-m", "fastvideo.models.dits.registry"]
 
 _T = TypeVar("_T")
 
@@ -169,7 +167,7 @@ def _try_load_model_cls(
     model_arch: str,
     model: _BaseRegisteredModel,
 ) -> type[nn.Module] | None:
-    from fastvideo.v1.platforms import current_platform
+    from fastvideo.platforms import current_platform
     current_platform.verify_model_arch(model_arch)
     try:
         return model.load_model_cls()
@@ -302,7 +300,7 @@ class _ModelRegistry:
 ModelRegistry = _ModelRegistry({
     model_arch:
     _LazyRegisteredModel(
-        module_name=f"fastvideo.v1.models.{component_name}.{mod_relname}",
+        module_name=f"fastvideo.models.{component_name}.{mod_relname}",
         component_name=component_name,
         class_name=cls_name,
     )

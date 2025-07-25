@@ -12,12 +12,12 @@ from typing import TypeVar
 import torch
 from typing_extensions import ParamSpec
 
-import fastvideo.v1.envs as envs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.platforms.interface import (AttentionBackendEnum,
-                                              DeviceCapability, Platform,
-                                              PlatformEnum)
-from fastvideo.v1.utils import import_pynvml
+import fastvideo.envs as envs
+from fastvideo.logger import init_logger
+from fastvideo.platforms.interface import (AttentionBackendEnum,
+                                           DeviceCapability, Platform,
+                                           PlatformEnum)
+from fastvideo.utils import import_pynvml
 
 logger = init_logger(__name__)
 
@@ -119,11 +119,11 @@ class CudaPlatformBase(Platform):
             try:
                 from st_attn import sliding_tile_attention  # noqa: F401
 
-                from fastvideo.v1.attention.backends.sliding_tile_attn import (  # noqa: F401
+                from fastvideo.attention.backends.sliding_tile_attn import (  # noqa: F401
                     SlidingTileAttentionBackend)
                 logger.info("Using Sliding Tile Attention backend.")
 
-                return "fastvideo.v1.attention.backends.sliding_tile_attn.SlidingTileAttentionBackend"
+                return "fastvideo.attention.backends.sliding_tile_attn.SlidingTileAttentionBackend"
             except ImportError as e:
                 logger.error(
                     "Failed to import Sliding Tile Attention backend: %s",
@@ -134,11 +134,11 @@ class CudaPlatformBase(Platform):
             try:
                 from sageattention import sageattn  # noqa: F401
 
-                from fastvideo.v1.attention.backends.sage_attn import (  # noqa: F401
+                from fastvideo.attention.backends.sage_attn import (  # noqa: F401
                     SageAttentionBackend)
                 logger.info("Using Sage Attention backend.")
 
-                return "fastvideo.v1.attention.backends.sage_attn.SageAttentionBackend"
+                return "fastvideo.attention.backends.sage_attn.SageAttentionBackend"
             except ImportError as e:
                 logger.info(e)
                 logger.info(
@@ -148,11 +148,11 @@ class CudaPlatformBase(Platform):
             try:
                 from vsa import block_sparse_attn  # noqa: F401
 
-                from fastvideo.v1.attention.backends.video_sparse_attn import (  # noqa: F401
+                from fastvideo.attention.backends.video_sparse_attn import (  # noqa: F401
                     VideoSparseAttentionBackend)
                 logger.info("Using Video Sparse Attention backend.")
 
-                return "fastvideo.v1.attention.backends.video_sparse_attn.VideoSparseAttentionBackend"
+                return "fastvideo.attention.backends.video_sparse_attn.VideoSparseAttentionBackend"
             except ImportError as e:
                 logger.error(
                     "Failed to import Video Sparse Attention backend: %s",
@@ -161,7 +161,7 @@ class CudaPlatformBase(Platform):
                     "Video Sparse Attention backend is not installed. ") from e
         elif selected_backend == AttentionBackendEnum.TORCH_SDPA:
             logger.info("Using Torch SDPA backend.")
-            return "fastvideo.v1.attention.backends.sdpa.SDPABackend"
+            return "fastvideo.attention.backends.sdpa.SDPABackend"
         elif selected_backend == AttentionBackendEnum.FLASH_ATTN or selected_backend is None:
             pass
         elif selected_backend:
@@ -185,7 +185,7 @@ class CudaPlatformBase(Platform):
             try:
                 import flash_attn  # noqa: F401
 
-                from fastvideo.v1.attention.backends.flash_attn import (  # noqa: F401
+                from fastvideo.attention.backends.flash_attn import (  # noqa: F401
                     FlashAttentionBackend)
 
                 supported_sizes = \
@@ -205,15 +205,15 @@ class CudaPlatformBase(Platform):
         if target_backend == AttentionBackendEnum.TORCH_SDPA:
             logger.info("Using Torch SDPA backend.")
 
-            return "fastvideo.v1.attention.backends.sdpa.SDPABackend"
+            return "fastvideo.attention.backends.sdpa.SDPABackend"
 
         logger.info("Using Flash Attention backend.")
 
-        return "fastvideo.v1.attention.backends.flash_attn.FlashAttentionBackend"
+        return "fastvideo.attention.backends.flash_attn.FlashAttentionBackend"
 
     @classmethod
     def get_device_communicator_cls(cls) -> str:
-        return "fastvideo.v1.distributed.device_communicators.cuda_communicator.CudaCommunicator"  # noqa
+        return "fastvideo.distributed.device_communicators.cuda_communicator.CudaCommunicator"  # noqa
 
 
 # NVML utils

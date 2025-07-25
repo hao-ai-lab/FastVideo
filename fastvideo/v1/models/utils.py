@@ -79,7 +79,7 @@ def set_weight_attrs(
         # This sometimes causes OOM errors during model loading. To avoid this,
         # we sync the param tensor after its weight loader is called.
         # TODO(woosuk): Remove this hack once we have a better solution.
-        from fastvideo.v1.platforms import current_platform
+        from fastvideo.platforms import current_platform
         if current_platform.is_tpu() and key == "weight_loader":
             value = _make_synced_weight_loader(value)
         setattr(weight, key, value)

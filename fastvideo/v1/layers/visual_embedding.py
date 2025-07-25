@@ -5,9 +5,9 @@ import math
 import torch
 import torch.nn as nn
 
-from fastvideo.v1.layers.activation import get_act_fn
-from fastvideo.v1.layers.linear import ReplicatedLinear
-from fastvideo.v1.layers.mlp import MLP
+from fastvideo.layers.activation import get_act_fn
+from fastvideo.layers.linear import ReplicatedLinear
+from fastvideo.layers.mlp import MLP
 
 
 class PatchEmbed(nn.Module):

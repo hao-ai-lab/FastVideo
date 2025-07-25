@@ -9,7 +9,7 @@ import torch
 from torch import nn
 
 if TYPE_CHECKING:
-    from fastvideo.v1.layers.quantization import QuantizationMethods
+    from fastvideo.layers.quantization import QuantizationMethods
 else:
     QuantizationMethods = str
 

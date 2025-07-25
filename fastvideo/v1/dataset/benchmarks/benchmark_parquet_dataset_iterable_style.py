@@ -7,13 +7,13 @@ import time
 import torch.distributed as dist
 import torch.distributed.checkpoint as dist_cp
 
-from fastvideo.v1.dataset.parquet_dataset_iterable_style import (
+from fastvideo.dataset.parquet_dataset_iterable_style import (
     build_parquet_iterable_style_dataloader)
-from fastvideo.v1.distributed import get_world_rank
-from fastvideo.v1.distributed.parallel_state import (
+from fastvideo.distributed import get_world_rank
+from fastvideo.distributed.parallel_state import (
     cleanup_dist_env_and_memory, get_local_torch_device,
     maybe_init_distributed_environment_and_model_parallel)
-from fastvideo.v1.logger import init_logger
+from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 

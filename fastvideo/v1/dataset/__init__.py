@@ -2,13 +2,12 @@
 from torchvision import transforms
 from torchvision.transforms import Lambda
 
-from fastvideo.v1.dataset.parquet_dataset_map_style import (
+from fastvideo.dataset.parquet_dataset_map_style import (
     build_parquet_map_style_dataloader)
-from fastvideo.v1.dataset.preprocessing_datasets import (
-    VideoCaptionMergedDataset)
-from fastvideo.v1.dataset.transform import (CenterCropResizeVideo, Normalize255,
-                                            TemporalRandomCrop)
-from fastvideo.v1.dataset.validation_dataset import ValidationDataset
+from fastvideo.dataset.preprocessing_datasets import VideoCaptionMergedDataset
+from fastvideo.dataset.transform import (CenterCropResizeVideo, Normalize255,
+                                         TemporalRandomCrop)
+from fastvideo.dataset.validation_dataset import ValidationDataset
 
 
 def getdataset(args) -> VideoCaptionMergedDataset:

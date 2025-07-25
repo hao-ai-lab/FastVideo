@@ -8,13 +8,13 @@ from torch.distributed.tensor import DTensor
 from torch.testing import assert_close
 from transformers import AutoConfig, AutoTokenizer, UMT5EncoderModel
 
-from fastvideo.v1.configs.pipelines import PipelineConfig
-from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
-from fastvideo.v1.utils import maybe_download_model, PRECISION_TO_TYPE
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.configs.models.encoders import T5Config
+from fastvideo.configs.pipelines import PipelineConfig
+from fastvideo.forward_context import set_forward_context
+from fastvideo.logger import init_logger
+from fastvideo.models.loader.component_loader import TextEncoderLoader
+from fastvideo.utils import maybe_download_model, PRECISION_TO_TYPE
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.configs.models.encoders import T5Config
 
 logger = init_logger(__name__)
 

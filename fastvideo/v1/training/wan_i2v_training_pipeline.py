@@ -5,18 +5,17 @@ from typing import Any
 
 import torch
 
-from fastvideo.v1.configs.sample import SamplingParam
-from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema_i2v
-from fastvideo.v1.distributed import get_local_torch_device
-from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.schedulers.scheduling_flow_unipc_multistep import (
+from fastvideo.configs.sample import SamplingParam
+from fastvideo.dataset.dataloader.schema import pyarrow_schema_i2v
+from fastvideo.distributed import get_local_torch_device
+from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.logger import init_logger
+from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler)
-from fastvideo.v1.pipelines.pipeline_batch_info import (ForwardBatch,
-                                                        TrainingBatch)
-from fastvideo.v1.pipelines.wan.wan_i2v_pipeline import WanImageToVideoPipeline
-from fastvideo.v1.training.training_pipeline import TrainingPipeline
-from fastvideo.v1.utils import is_vsa_available, shallow_asdict
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
+from fastvideo.pipelines.wan.wan_i2v_pipeline import WanImageToVideoPipeline
+from fastvideo.training.training_pipeline import TrainingPipeline
+from fastvideo.utils import is_vsa_available, shallow_asdict
 
 vsa_available = is_vsa_available()
 
@@ -220,8 +219,8 @@ def main(args) -> None:
 
 if __name__ == "__main__":
     argv = sys.argv
-    from fastvideo.v1.fastvideo_args import TrainingArgs
-    from fastvideo.v1.utils import FlexibleArgumentParser
+    from fastvideo.fastvideo_args import TrainingArgs
+    from fastvideo.utils import FlexibleArgumentParser
     parser = FlexibleArgumentParser()
     parser = TrainingArgs.add_cli_args(parser)
     parser = FastVideoArgs.add_cli_args(parser)

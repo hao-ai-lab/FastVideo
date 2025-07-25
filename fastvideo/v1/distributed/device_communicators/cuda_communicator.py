@@ -4,7 +4,7 @@
 import torch
 from torch.distributed import ProcessGroup
 
-from fastvideo.v1.distributed.device_communicators.base_device_communicator import (
+from fastvideo.distributed.device_communicators.base_device_communicator import (
     DeviceCommunicatorBase)
 
 
@@ -17,7 +17,7 @@ class CudaCommunicator(DeviceCommunicatorBase):
                  unique_name: str = ""):
         super().__init__(cpu_group, device, device_group, unique_name)
 
-        from fastvideo.v1.distributed.device_communicators.pynccl import (
+        from fastvideo.distributed.device_communicators.pynccl import (
             PyNcclCommunicator)
 
         self.pynccl_comm: PyNcclCommunicator | None = None

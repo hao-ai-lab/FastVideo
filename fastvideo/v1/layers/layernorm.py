@@ -6,8 +6,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from fastvideo.v1.layers.custom_op import CustomOp
-from fastvideo.v1.platforms import current_platform
+from fastvideo.layers.custom_op import CustomOp
+from fastvideo.platforms import current_platform
 
 
 @CustomOp.register("rms_norm")

@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from typing import Any
 
-from fastvideo.v1.logger import init_logger
+from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
@@ -66,7 +66,7 @@ class SamplingParam:
 
     @classmethod
     def from_pretrained(cls, model_path: str) -> "SamplingParam":
-        from fastvideo.v1.configs.sample.registry import (
+        from fastvideo.configs.sample.registry import (
             get_sampling_param_cls_for_name)
         sampling_cls = get_sampling_param_cls_for_name(model_path)
         if sampling_cls is not None:

@@ -9,16 +9,16 @@ from torch.distributed._composable.fsdp import (CPUOffloadPolicy, OffloadPolicy,
                                                 fully_shard)
 from torch.distributed.tensor import DTensor
 
-from fastvideo.v1.distributed import (get_local_torch_device, get_tp_rank,
-                                      split_tensor_along_last_dim,
-                                      tensor_model_parallel_all_gather,
-                                      tensor_model_parallel_all_reduce)
-from fastvideo.v1.layers.linear import (ColumnParallelLinear, LinearBase,
-                                        MergedColumnParallelLinear,
-                                        QKVParallelLinear, ReplicatedLinear,
-                                        RowParallelLinear)
-from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
-from fastvideo.v1.utils import get_mixed_precision_state
+from fastvideo.distributed import (get_local_torch_device, get_tp_rank,
+                                   split_tensor_along_last_dim,
+                                   tensor_model_parallel_all_gather,
+                                   tensor_model_parallel_all_reduce)
+from fastvideo.layers.linear import (ColumnParallelLinear, LinearBase,
+                                     MergedColumnParallelLinear,
+                                     QKVParallelLinear, ReplicatedLinear,
+                                     RowParallelLinear)
+from fastvideo.layers.vocab_parallel_embedding import VocabParallelEmbedding
+from fastvideo.utils import get_mixed_precision_state
 
 torch._dynamo.config.recompile_limit = 16
 

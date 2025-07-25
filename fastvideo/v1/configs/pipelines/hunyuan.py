@@ -5,12 +5,12 @@ from typing import TypedDict
 
 import torch
 
-from fastvideo.v1.configs.models import DiTConfig, EncoderConfig, VAEConfig
-from fastvideo.v1.configs.models.dits import HunyuanVideoConfig
-from fastvideo.v1.configs.models.encoders import (BaseEncoderOutput,
-                                                  CLIPTextConfig, LlamaConfig)
-from fastvideo.v1.configs.models.vaes import HunyuanVAEConfig
-from fastvideo.v1.configs.pipelines.base import PipelineConfig
+from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
+from fastvideo.configs.models.dits import HunyuanVideoConfig
+from fastvideo.configs.models.encoders import (BaseEncoderOutput,
+                                               CLIPTextConfig, LlamaConfig)
+from fastvideo.configs.models.vaes import HunyuanVAEConfig
+from fastvideo.configs.pipelines.base import PipelineConfig
 
 PROMPT_TEMPLATE_ENCODE_VIDEO = (
     "<|start_header_id|>system<|end_header_id|>\n\nDescribe the video by detailing the following aspects: "

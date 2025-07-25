@@ -9,21 +9,20 @@ import torch
 import torch.nn as nn
 
 # from transformers.modeling_attn_mask_utils import _create_4d_causal_attention_mask, _prepare_4d_attention_mask
-from fastvideo.v1.attention import LocalAttention
-from fastvideo.v1.configs.models.encoders import (BaseEncoderOutput,
-                                                  CLIPTextConfig,
-                                                  CLIPVisionConfig)
-from fastvideo.v1.distributed import divide, get_tp_world_size
-from fastvideo.v1.layers.activation import get_act_fn
-from fastvideo.v1.layers.linear import (ColumnParallelLinear, QKVParallelLinear,
-                                        RowParallelLinear)
-from fastvideo.v1.layers.quantization import QuantizationConfig
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.encoders.base import ImageEncoder, TextEncoder
-from fastvideo.v1.models.encoders.vision import resolve_visual_encoder_outputs
+from fastvideo.attention import LocalAttention
+from fastvideo.configs.models.encoders import (BaseEncoderOutput,
+                                               CLIPTextConfig, CLIPVisionConfig)
+from fastvideo.distributed import divide, get_tp_world_size
+from fastvideo.layers.activation import get_act_fn
+from fastvideo.layers.linear import (ColumnParallelLinear, QKVParallelLinear,
+                                     RowParallelLinear)
+from fastvideo.layers.quantization import QuantizationConfig
+from fastvideo.logger import init_logger
+from fastvideo.models.encoders.base import ImageEncoder, TextEncoder
+from fastvideo.models.encoders.vision import resolve_visual_encoder_outputs
 # TODO: support quantization
 # from vllm.model_executor.layers.quantization import QuantizationConfig
-from fastvideo.v1.models.loader.weight_utils import default_weight_loader
+from fastvideo.models.loader.weight_utils import default_weight_loader
 
 logger = init_logger(__name__)
 

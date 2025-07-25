@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from einops import rearrange
 from transformers.modeling_utils import PretrainedConfig, PreTrainedModel
 
-from fastvideo.v1.models.dits.stepvideo import StepVideoRMSNorm
+from fastvideo.models.dits.stepvideo import StepVideoRMSNorm
 
 
 class EmptyInitOnDevice(torch.overrides.TorchFunctionMode):

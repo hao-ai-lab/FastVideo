@@ -1,21 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Diffusion pipelines for fastvideo.v1.
+Diffusion pipelines for fastvideo.
 
 This package contains diffusion pipelines for generating videos and images.
 """
 
 from typing import cast
 
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.v1.pipelines.lora_pipeline import LoRAPipeline
-from fastvideo.v1.pipelines.pipeline_batch_info import (ForwardBatch,
-                                                        TrainingBatch)
-from fastvideo.v1.pipelines.pipeline_registry import PipelineRegistry
-from fastvideo.v1.utils import (maybe_download_model,
-                                verify_model_config_and_directory)
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
+from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.pipelines.lora_pipeline import LoRAPipeline
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
+from fastvideo.pipelines.pipeline_registry import PipelineRegistry
+from fastvideo.utils import (maybe_download_model,
+                             verify_model_config_and_directory)
 
 logger = init_logger(__name__)
 

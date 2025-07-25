@@ -70,7 +70,7 @@ test = [
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
 
 [project.scripts]
-fastvideo = "fastvideo.v1.entrypoints.cli.main:main"
+fastvideo = "fastvideo.entrypoints.cli.main:main"
 
 [tool.setuptools.packages.find]
 exclude = ["assets*", "docker*", "docs", "scripts*"]

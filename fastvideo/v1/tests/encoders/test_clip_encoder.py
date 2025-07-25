@@ -6,12 +6,12 @@ import pytest
 import torch
 from transformers import AutoConfig, AutoTokenizer, CLIPTextModel
 import gc
-from fastvideo.v1.configs.pipelines import PipelineConfig
-from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.utils import maybe_download_model
-from fastvideo.v1.configs.models.encoders import CLIPTextConfig
+from fastvideo.configs.pipelines import PipelineConfig
+from fastvideo.forward_context import set_forward_context
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
+from fastvideo.utils import maybe_download_model
+from fastvideo.configs.models.encoders import CLIPTextConfig
 from torch.distributed.tensor import DTensor
 from torch.testing import assert_close
 
@@ -33,7 +33,7 @@ def test_clip_encoder():
     """
     Tests compatibility between two different implementations for loading text encoders:
     1. load_text_encoder from fastvideo.models.hunyuan.text_encoder
-    2. TextEncoderLoader from fastvideo.v1.models.loader
+    2. TextEncoderLoader from fastvideo.models.loader
     
     The test verifies that both implementations:
     - Load models with the same weights and parameters
@@ -54,7 +54,7 @@ def test_clip_encoder():
     # Load HuggingFace implementation
     model1 = CLIPTextModel.from_pretrained(TEXT_ENCODER_PATH).to(torch.float16).to(device).eval()
 
-    from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
+    from fastvideo.models.loader.component_loader import TextEncoderLoader
     loader = TextEncoderLoader()
     model2 = loader.load(TEXT_ENCODER_PATH, args)
 

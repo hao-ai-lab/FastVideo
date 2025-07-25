@@ -14,19 +14,19 @@ from typing import Any
 import torch
 from huggingface_hub import hf_hub_download
 
-from fastvideo.v1.distributed import get_local_torch_device
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.encoders.bert import HunyuanClip  # type: ignore
-from fastvideo.v1.models.encoders.stepllm import STEP1TextEncoder
-from fastvideo.v1.models.loader.component_loader import PipelineComponentLoader
-from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.v1.pipelines.lora_pipeline import LoRAPipeline
-from fastvideo.v1.pipelines.stages import (DecodingStage, DenoisingStage,
-                                           InputValidationStage,
-                                           LatentPreparationStage,
-                                           StepvideoPromptEncodingStage,
-                                           TimestepPreparationStage)
+from fastvideo.distributed import get_local_torch_device
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
+from fastvideo.models.encoders.bert import HunyuanClip  # type: ignore
+from fastvideo.models.encoders.stepllm import STEP1TextEncoder
+from fastvideo.models.loader.component_loader import PipelineComponentLoader
+from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.pipelines.lora_pipeline import LoRAPipeline
+from fastvideo.pipelines.stages import (DecodingStage, DenoisingStage,
+                                        InputValidationStage,
+                                        LatentPreparationStage,
+                                        StepvideoPromptEncodingStage,
+                                        TimestepPreparationStage)
 
 logger = init_logger(__name__)
 

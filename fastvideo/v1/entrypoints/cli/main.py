@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/entrypoints/cli/main.py
 
-from fastvideo.v1.entrypoints.cli.cli_types import CLISubcommand
-from fastvideo.v1.entrypoints.cli.generate import cmd_init as generate_cmd_init
-from fastvideo.v1.utils import FlexibleArgumentParser
+from fastvideo.entrypoints.cli.cli_types import CLISubcommand
+from fastvideo.entrypoints.cli.generate import cmd_init as generate_cmd_init
+from fastvideo.utils import FlexibleArgumentParser
 
 
 def cmd_init() -> list[CLISubcommand]:

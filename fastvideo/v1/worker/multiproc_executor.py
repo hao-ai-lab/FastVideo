@@ -10,11 +10,11 @@ from collections.abc import Callable
 from multiprocessing.process import BaseProcess
 from typing import Any, cast
 
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.v1.worker.executor import Executor
-from fastvideo.v1.worker.gpu_worker import run_worker_process
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.worker.executor import Executor
+from fastvideo.worker.gpu_worker import run_worker_process
 
 logger = init_logger(__name__)
 

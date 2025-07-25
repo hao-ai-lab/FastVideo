@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field, fields
 from typing import Any
 
-from fastvideo.v1.logger import init_logger
+from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 

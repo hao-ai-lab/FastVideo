@@ -5,12 +5,12 @@ import os
 import torch
 import torch.nn as nn
 
-from fastvideo.v1.distributed.parallel_state import (
+from fastvideo.distributed.parallel_state import (
     cleanup_dist_env_and_memory, destroy_distributed_environment,
     destroy_model_parallel, get_tp_rank,
     get_tp_world_size, maybe_init_distributed_environment_and_model_parallel, get_world_group)
-from fastvideo.v1.layers.linear import ColumnParallelLinear, RowParallelLinear
-from fastvideo.v1.logger import init_logger
+from fastvideo.layers.linear import ColumnParallelLinear, RowParallelLinear
+from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 

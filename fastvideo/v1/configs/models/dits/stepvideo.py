@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
 
-from fastvideo.v1.configs.models.dits.base import DiTArchConfig, DiTConfig
+from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
 
 
 @dataclass

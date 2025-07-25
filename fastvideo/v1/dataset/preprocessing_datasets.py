@@ -16,7 +16,7 @@ from einops import rearrange
 from PIL import Image
 from transformers import AutoTokenizer
 
-from fastvideo.v1.logger import init_logger
+from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 

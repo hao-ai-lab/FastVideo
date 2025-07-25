@@ -31,8 +31,8 @@ from huggingface_hub import snapshot_download
 from remote_pdb import RemotePdb
 from torch.distributed.fsdp import MixedPrecisionPolicy
 
-import fastvideo.v1.envs as envs
-from fastvideo.v1.logger import init_logger
+import fastvideo.envs as envs
+from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
@@ -92,7 +92,7 @@ torch.cuda.set_stream = _patched_set_stream
 
 def current_stream() -> torch.cuda.Stream | None:
     """
-    replace `torch.cuda.current_stream()` with `fastvideo.v1.utils.current_stream()`.
+    replace `torch.cuda.current_stream()` with `fastvideo.utils.current_stream()`.
     it turns out that `torch.cuda.current_stream()` is quite expensive,
     as it will construct a new stream object at each call.
     here we patch `torch.cuda.set_stream` to keep track of the current stream
@@ -101,7 +101,7 @@ def current_stream() -> torch.cuda.Stream | None:
     the underlying hypothesis is that we do not call `torch._C._cuda_setStream`
     from C/C++ code.
     """
-    from fastvideo.v1.platforms import current_platform
+    from fastvideo.platforms import current_platform
 
     # For non-CUDA platforms, return None
     if not current_platform.is_cuda_alike():
@@ -457,7 +457,7 @@ def import_pynvml():
     After all the troubles, we decide to copy the official `pynvml`
     module to our codebase, and use it directly.
     """
-    import fastvideo.v1.third_party.pynvml as pynvml
+    import fastvideo.third_party.pynvml as pynvml
     return pynvml
 
 
@@ -805,7 +805,7 @@ def dict_to_3d_list(
 
 
 def set_random_seed(seed: int) -> None:
-    from fastvideo.v1.platforms import current_platform
+    from fastvideo.platforms import current_platform
     current_platform.seed_everything(seed)
 
 

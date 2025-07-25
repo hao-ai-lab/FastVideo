@@ -7,7 +7,7 @@ from typing import Generic, TypeVar
 import torch
 from transformers import PretrainedConfig
 
-from fastvideo.v1.logger import init_logger
+from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 

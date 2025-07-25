@@ -5,15 +5,15 @@ import os
 import pytest
 
 from fastvideo import VideoGenerator
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.tests.utils import compute_video_ssim_torchvision, write_ssim_results
+from fastvideo.logger import init_logger
+from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results
 from diffusers import DiffusionPipeline
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.pipelines import build_pipeline
-from fastvideo.v1.models.loader.utils import hf_to_custom_state_dict, get_param_names_mapping
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.pipelines import build_pipeline
+from fastvideo.models.loader.utils import hf_to_custom_state_dict, get_param_names_mapping
 from torch.testing import assert_close
 from torch.distributed.tensor import DTensor
-from fastvideo.v1.worker import MultiprocExecutor
+from fastvideo.worker import MultiprocExecutor
 import torch
 logger = init_logger(__name__)
 os.environ["MASTER_ADDR"] = "localhost"

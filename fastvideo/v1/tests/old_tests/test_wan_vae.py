@@ -7,8 +7,8 @@ import torch
 from diffusers import AutoencoderKLWan
 from safetensors.torch import load_file
 
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.vaes.wanvae import AutoencoderKLWan as MyWanVAE
+from fastvideo.logger import init_logger
+from fastvideo.models.vaes.wanvae import AutoencoderKLWan as MyWanVAE
 
 logger = init_logger(__name__)
 

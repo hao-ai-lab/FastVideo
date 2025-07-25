@@ -2,16 +2,16 @@ import argparse
 import os
 
 from fastvideo import PipelineConfig
-from fastvideo.v1.configs.models.vaes import WanVAEConfig
-from fastvideo.v1.distributed import (
+from fastvideo.configs.models.vaes import WanVAEConfig
+from fastvideo.distributed import (
     get_world_size, maybe_init_distributed_environment_and_model_parallel)
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.pipelines.preprocess.preprocess_pipeline_i2v import (
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
+from fastvideo.pipelines.preprocess.preprocess_pipeline_i2v import (
     PreprocessPipeline_I2V)
-from fastvideo.v1.pipelines.preprocess.preprocess_pipeline_t2v import (
+from fastvideo.pipelines.preprocess.preprocess_pipeline_t2v import (
     PreprocessPipeline_T2V)
-from fastvideo.v1.utils import maybe_download_model
+from fastvideo.utils import maybe_download_model
 
 logger = init_logger(__name__)
 

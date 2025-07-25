@@ -7,27 +7,27 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-import fastvideo.v1.envs as envs
-from fastvideo.v1.attention import (DistributedAttention,
-                                    DistributedAttention_VSA, LocalAttention)
-from fastvideo.v1.configs.models.dits import WanVideoConfig
-from fastvideo.v1.configs.sample.wan import WanTeaCacheParams
-from fastvideo.v1.distributed.parallel_state import get_sp_world_size
-from fastvideo.v1.forward_context import get_forward_context
-from fastvideo.v1.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift,
-                                           RMSNorm, ScaleResidual,
-                                           ScaleResidualLayerNormScaleShift)
-from fastvideo.v1.layers.linear import ReplicatedLinear
+import fastvideo.envs as envs
+from fastvideo.attention import (DistributedAttention, DistributedAttention_VSA,
+                                 LocalAttention)
+from fastvideo.configs.models.dits import WanVideoConfig
+from fastvideo.configs.sample.wan import WanTeaCacheParams
+from fastvideo.distributed.parallel_state import get_sp_world_size
+from fastvideo.forward_context import get_forward_context
+from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift,
+                                        RMSNorm, ScaleResidual,
+                                        ScaleResidualLayerNormScaleShift)
+from fastvideo.layers.linear import ReplicatedLinear
 # from torch.nn import RMSNorm
 # TODO: RMSNorm ....
-from fastvideo.v1.layers.mlp import MLP
-from fastvideo.v1.layers.rotary_embedding import (_apply_rotary_emb,
-                                                  get_rotary_pos_embed)
-from fastvideo.v1.layers.visual_embedding import (ModulateProjection,
-                                                  PatchEmbed, TimestepEmbedder)
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.dits.base import CachableDiT
-from fastvideo.v1.platforms import AttentionBackendEnum, current_platform
+from fastvideo.layers.mlp import MLP
+from fastvideo.layers.rotary_embedding import (_apply_rotary_emb,
+                                               get_rotary_pos_embed)
+from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed,
+                                               TimestepEmbedder)
+from fastvideo.logger import init_logger
+from fastvideo.models.dits.base import CachableDiT
+from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 logger = init_logger(__name__)
 

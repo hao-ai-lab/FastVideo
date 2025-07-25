@@ -30,20 +30,20 @@ import torch
 from torch import nn
 
 # from vllm.model_executor.layers.quantization import QuantizationConfig
-from fastvideo.v1.attention import LocalAttention
+from fastvideo.attention import LocalAttention
 # from ..utils import (extract_layer_index)
-from fastvideo.v1.configs.models.encoders import BaseEncoderOutput, LlamaConfig
-from fastvideo.v1.distributed import get_tp_world_size
-from fastvideo.v1.layers.activation import SiluAndMul
-from fastvideo.v1.layers.layernorm import RMSNorm
-from fastvideo.v1.layers.linear import (MergedColumnParallelLinear,
-                                        QKVParallelLinear, RowParallelLinear)
-from fastvideo.v1.layers.quantization import QuantizationConfig
-from fastvideo.v1.layers.rotary_embedding import get_rope
-from fastvideo.v1.layers.vocab_parallel_embedding import VocabParallelEmbedding
-from fastvideo.v1.models.encoders.base import TextEncoder
-from fastvideo.v1.models.loader.weight_utils import (default_weight_loader,
-                                                     maybe_remap_kv_scale_name)
+from fastvideo.configs.models.encoders import BaseEncoderOutput, LlamaConfig
+from fastvideo.distributed import get_tp_world_size
+from fastvideo.layers.activation import SiluAndMul
+from fastvideo.layers.layernorm import RMSNorm
+from fastvideo.layers.linear import (MergedColumnParallelLinear,
+                                     QKVParallelLinear, RowParallelLinear)
+from fastvideo.layers.quantization import QuantizationConfig
+from fastvideo.layers.rotary_embedding import get_rope
+from fastvideo.layers.vocab_parallel_embedding import VocabParallelEmbedding
+from fastvideo.models.encoders.base import TextEncoder
+from fastvideo.models.loader.weight_utils import (default_weight_loader,
+                                                  maybe_remap_kv_scale_name)
 
 
 class LlamaMLP(nn.Module):

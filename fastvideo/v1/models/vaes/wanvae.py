@@ -21,11 +21,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from fastvideo.v1.configs.models.vaes import WanVAEConfig
-from fastvideo.v1.layers.activation import get_act_fn
-from fastvideo.v1.models.vaes.common import (DiagonalGaussianDistribution,
-                                             ParallelTiledVAE)
-from fastvideo.v1.platforms import current_platform
+from fastvideo.configs.models.vaes import WanVAEConfig
+from fastvideo.layers.activation import get_act_fn
+from fastvideo.models.vaes.common import (DiagonalGaussianDistribution,
+                                          ParallelTiledVAE)
+from fastvideo.platforms import current_platform
 
 CACHE_T = 2
 

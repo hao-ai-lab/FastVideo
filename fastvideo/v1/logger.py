@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/logger.py
-"""Logging configuration for fastvideo.v1."""
+"""Logging configuration for fastvideo."""
 import datetime
 import json
 import logging
@@ -13,7 +13,7 @@ from os import path
 from types import MethodType
 from typing import Any, cast
 
-import fastvideo.v1.envs as envs
+import fastvideo.envs as envs
 
 FASTVIDEO_CONFIGURE_LOGGING = envs.FASTVIDEO_CONFIGURE_LOGGING
 FASTVIDEO_LOGGING_CONFIG_PATH = envs.FASTVIDEO_LOGGING_CONFIG_PATH
@@ -34,7 +34,7 @@ _DATE_FORMAT = "%m-%d %H:%M:%S"
 DEFAULT_LOGGING_CONFIG = {
     "formatters": {
         "fastvideo": {
-            "class": "fastvideo.v1.logging_utils.NewLineFormatter",
+            "class": "fastvideo.logging_utils.NewLineFormatter",
             "datefmt": _DATE_FORMAT,
             "format": _FORMAT,
         },
@@ -204,8 +204,8 @@ def _configure_fastvideo_root_logger() -> None:
 
     for formatter in logging_config.get("formatters", {}).values():
         # This provides backwards compatibility after #10134.
-        if formatter.get("class") == "fastvideo.v1.logging.NewLineFormatter":
-            formatter["class"] = "fastvideo.v1.logging_utils.NewLineFormatter"
+        if formatter.get("class") == "fastvideo.logging.NewLineFormatter":
+            formatter["class"] = "fastvideo.logging_utils.NewLineFormatter"
 
     if logging_config:
         dictConfig(logging_config)

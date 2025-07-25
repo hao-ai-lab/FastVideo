@@ -27,8 +27,8 @@ from typing import Any
 
 import torch
 
-from fastvideo.v1.distributed.parallel_state import get_sp_group
-from fastvideo.v1.layers.custom_op import CustomOp
+from fastvideo.distributed.parallel_state import get_sp_group
+from fastvideo.layers.custom_op import CustomOp
 
 
 def _rotate_neox(x: torch.Tensor) -> torch.Tensor:

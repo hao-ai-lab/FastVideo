@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 import torch
 
-from fastvideo.v1.configs.models.dits.base import DiTArchConfig, DiTConfig
+from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
 
 
 def is_double_block(n: str, m) -> bool:

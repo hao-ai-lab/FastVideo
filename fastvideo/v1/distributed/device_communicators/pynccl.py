@@ -6,12 +6,12 @@ import torch
 import torch.distributed as dist
 from torch.distributed import ProcessGroup, ReduceOp
 
-from fastvideo.v1.distributed.device_communicators.pynccl_wrapper import (
+from fastvideo.distributed.device_communicators.pynccl_wrapper import (
     NCCLLibrary, buffer_type, cudaStream_t, ncclComm_t, ncclDataTypeEnum,
     ncclRedOpTypeEnum, ncclUniqueId)
-from fastvideo.v1.distributed.utils import StatelessProcessGroup
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.utils import current_stream
+from fastvideo.distributed.utils import StatelessProcessGroup
+from fastvideo.logger import init_logger
+from fastvideo.utils import current_stream
 
 logger = init_logger(__name__)
 

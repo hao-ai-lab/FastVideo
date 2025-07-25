@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 import torch
 
-from fastvideo.v1.configs.models.vaes.base import VAEArchConfig, VAEConfig
+from fastvideo.configs.models.vaes.base import VAEArchConfig, VAEConfig
 
 
 @dataclass

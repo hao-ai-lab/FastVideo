@@ -4,7 +4,7 @@ import pytest
 import torch
 import numpy as np
 
-from fastvideo.v1.distributed import (maybe_init_distributed_environment_and_model_parallel,
+from fastvideo.distributed import (maybe_init_distributed_environment_and_model_parallel,
                                       cleanup_dist_env_and_memory)
 
 

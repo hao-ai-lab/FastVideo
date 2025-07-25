@@ -6,18 +6,17 @@ Encoding stage for diffusion pipelines.
 import PIL.Image
 import torch
 
-from fastvideo.v1.distributed import get_local_torch_device
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.vaes.common import ParallelTiledVAE
-from fastvideo.v1.models.vision_utils import (get_default_height_width,
-                                              normalize, numpy_to_pt,
-                                              pil_to_numpy, resize)
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.stages.validators import V  # Import validators
-from fastvideo.v1.pipelines.stages.validators import VerificationResult
-from fastvideo.v1.utils import PRECISION_TO_TYPE
+from fastvideo.distributed import get_local_torch_device
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
+from fastvideo.models.vaes.common import ParallelTiledVAE
+from fastvideo.models.vision_utils import (get_default_height_width, normalize,
+                                           numpy_to_pt, pil_to_numpy, resize)
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.stages.base import PipelineStage
+from fastvideo.pipelines.stages.validators import V  # Import validators
+from fastvideo.pipelines.stages.validators import VerificationResult
+from fastvideo.utils import PRECISION_TO_TYPE
 
 logger = init_logger(__name__)
 

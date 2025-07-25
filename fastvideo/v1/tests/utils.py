@@ -2,7 +2,7 @@
 import argparse
 import os
 import json
-from fastvideo.v1.logger import init_logger
+from fastvideo.logger import init_logger
 
 import numpy as np
 import torch

@@ -6,8 +6,8 @@ from typing import Any
 
 import torch
 
-from fastvideo.v1.configs.models.base import ArchConfig, ModelConfig
-from fastvideo.v1.utils import StoreBoolean
+from fastvideo.configs.models.base import ArchConfig, ModelConfig
+from fastvideo.utils import StoreBoolean
 
 
 @dataclass

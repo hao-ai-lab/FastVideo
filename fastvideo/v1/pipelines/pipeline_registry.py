@@ -8,9 +8,9 @@ from collections.abc import Set
 from dataclasses import dataclass, field
 from functools import lru_cache
 
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.v1.pipelines.lora_pipeline import LoRAPipeline
+from fastvideo.logger import init_logger
+from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 
 logger = init_logger(__name__)
 
@@ -51,7 +51,7 @@ class _PipelineRegistry:
 @lru_cache
 def import_pipeline_classes():
     pipeline_arch_name_to_cls = {}
-    package_name = "fastvideo.v1.pipelines"
+    package_name = "fastvideo.pipelines"
     package = importlib.import_module(package_name)
     for _, name, ispkg in pkgutil.iter_modules(package.__path__,
                                                package_name + "."):

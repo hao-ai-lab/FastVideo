@@ -5,7 +5,7 @@ import platform
 
 import torch
 
-from fastvideo.v1.platforms.interface import CpuArchEnum, Platform, PlatformEnum
+from fastvideo.platforms.interface import CpuArchEnum, Platform, PlatformEnum
 
 
 class CpuPlatform(Platform):
@@ -13,8 +13,6 @@ class CpuPlatform(Platform):
     device_name = "CPU"
     device_type = "cpu"
     dispatch_key = "CPU"
-    simple_compile_backend = "inductor"
-    supported_quantization = []
 
     @classmethod
     def get_cpu_architecture(cls) -> CpuArchEnum:
@@ -54,4 +52,4 @@ class CpuPlatform(Platform):
 
     @classmethod
     def get_device_communicator_cls(cls) -> str:
-        return "fastvideo.v1.distributed.device_communicators.cpu_communicator.CpuCommunicator"
+        return "fastvideo.distributed.device_communicators.cpu_communicator.CpuCommunicator"

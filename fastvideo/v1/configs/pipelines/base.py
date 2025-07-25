@@ -7,13 +7,12 @@ from typing import Any, cast
 
 import torch
 
-from fastvideo.v1.configs.models import (DiTConfig, EncoderConfig, ModelConfig,
-                                         VAEConfig)
-from fastvideo.v1.configs.models.encoders import BaseEncoderOutput
-from fastvideo.v1.configs.utils import update_config_from_args
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.utils import (FlexibleArgumentParser, StoreBoolean,
-                                shallow_asdict)
+from fastvideo.configs.models import (DiTConfig, EncoderConfig, ModelConfig,
+                                      VAEConfig)
+from fastvideo.configs.models.encoders import BaseEncoderOutput
+from fastvideo.configs.utils import update_config_from_args
+from fastvideo.logger import init_logger
+from fastvideo.utils import FlexibleArgumentParser, StoreBoolean, shallow_asdict
 
 logger = init_logger(__name__)
 
@@ -213,11 +212,11 @@ class PipelineConfig:
         )
 
         # Add VAE configuration arguments
-        from fastvideo.v1.configs.models.vaes.base import VAEConfig
+        from fastvideo.configs.models.vaes.base import VAEConfig
         VAEConfig.add_cli_args(parser, prefix=f"{prefix_with_dot}vae-config")
 
         # Add DiT configuration arguments
-        from fastvideo.v1.configs.models.dits.base import DiTConfig
+        from fastvideo.configs.models.dits.base import DiTConfig
         DiTConfig.add_cli_args(parser, prefix=f"{prefix_with_dot}dit-config")
 
         return parser
@@ -241,7 +240,7 @@ class PipelineConfig:
         """
         use the pipeline class setting from model_path to match the pipeline config
         """
-        from fastvideo.v1.configs.pipelines.registry import (
+        from fastvideo.configs.pipelines.registry import (
             get_pipeline_config_cls_from_name)
         pipeline_config_cls = get_pipeline_config_cls_from_name(model_path)
 
@@ -256,7 +255,7 @@ class PipelineConfig:
         kwargs: dictionary of kwargs
         config_cli_prefix: prefix of CLI arguments for this PipelineConfig instance
         """
-        from fastvideo.v1.configs.pipelines.registry import (
+        from fastvideo.configs.pipelines.registry import (
             get_pipeline_config_cls_from_name)
 
         prefix_with_dot = f"{config_cli_prefix}." if (config_cli_prefix.strip()

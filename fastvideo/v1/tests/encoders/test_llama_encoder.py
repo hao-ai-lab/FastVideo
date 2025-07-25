@@ -6,13 +6,13 @@ import pytest
 import torch
 from transformers import AutoConfig, AutoTokenizer, LlamaModel
 import gc
-from fastvideo.v1.configs.pipelines import PipelineConfig
-from fastvideo.v1.forward_context import set_forward_context
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.loader.component_loader import TextEncoderLoader
-from fastvideo.v1.utils import maybe_download_model
-from fastvideo.v1.configs.models.encoders import LlamaConfig
+from fastvideo.configs.pipelines import PipelineConfig
+from fastvideo.forward_context import set_forward_context
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
+from fastvideo.models.loader.component_loader import TextEncoderLoader
+from fastvideo.utils import maybe_download_model
+from fastvideo.configs.models.encoders import LlamaConfig
 from torch.distributed.tensor import DTensor
 from torch.testing import assert_close
 logger = init_logger(__name__)
@@ -33,7 +33,7 @@ def test_llama_encoder():
     """
     Tests compatibility between two different implementations for loading text encoders:
     1. load_text_encoder from fastvideo.models.hunyuan.text_encoder
-    2. TextEncoderLoader from fastvideo.v1.models.loader
+    2. TextEncoderLoader from fastvideo.models.loader
     
     The test verifies that both implementations:
     - Load models with the same weights and parameters

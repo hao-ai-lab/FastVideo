@@ -1,6 +1,6 @@
 from typing import Literal, get_args
 
-from fastvideo.v1.layers.quantization.base_config import QuantizationConfig
+from fastvideo.layers.quantization.base_config import QuantizationConfig
 
 QuantizationMethods = Literal[None]
 
@@ -20,9 +20,9 @@ def register_quantization_config(quantization: str):
         quantization (str): The quantization method name.
 
     Examples:
-        >>> from fastvideo.v1.layers.quantization import register_quantization_config
-        >>> from fastvideo.v1.layers.quantization import get_quantization_config
-        >>> from fastvideo.v1.layers.quantization.base_config import QuantizationConfig
+        >>> from fastvideo.layers.quantization import register_quantization_config
+        >>> from fastvideo.layers.quantization import get_quantization_config
+        >>> from fastvideo.layers.quantization.base_config import QuantizationConfig
         >>>
         >>> @register_quantization_config("my_quant")
         ... class MyQuantConfig(QuantizationConfig):

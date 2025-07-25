@@ -6,18 +6,20 @@ This module contains an implementation of the Wan video diffusion pipeline
 using the modular pipeline architecture.
 """
 
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.v1.pipelines.lora_pipeline import LoRAPipeline
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
+from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 
 # isort: off
-from fastvideo.v1.pipelines.stages import (
-    ImageEncodingStage, ConditioningStage, DecodingStage, DenoisingStage,
-    EncodingStage, InputValidationStage, LatentPreparationStage,
-    TextEncodingStage, TimestepPreparationStage)
+from fastvideo.pipelines.stages import (ImageEncodingStage, ConditioningStage,
+                                        DecodingStage, DenoisingStage,
+                                        EncodingStage, InputValidationStage,
+                                        LatentPreparationStage,
+                                        TextEncodingStage,
+                                        TimestepPreparationStage)
 # isort: on
-from fastvideo.v1.models.schedulers.scheduling_flow_unipc_multistep import (
+from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler)
 
 logger = init_logger(__name__)

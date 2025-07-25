@@ -20,9 +20,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from fastvideo.v1.configs.models.vaes import HunyuanVAEConfig
-from fastvideo.v1.layers.activation import get_act_fn
-from fastvideo.v1.models.vaes.common import ParallelTiledVAE
+from fastvideo.configs.models.vaes import HunyuanVAEConfig
+from fastvideo.layers.activation import get_act_fn
+from fastvideo.models.vaes.common import ParallelTiledVAE
 
 
 def prepare_causal_attention_mask(

@@ -5,13 +5,13 @@ Input validation stage for diffusion pipelines.
 
 import torch
 
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.vision_utils import load_image, load_video
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.v1.pipelines.stages.base import PipelineStage
-from fastvideo.v1.pipelines.stages.validators import (StageValidators,
-                                                      VerificationResult)
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
+from fastvideo.models.vision_utils import load_image, load_video
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.pipelines.stages.base import PipelineStage
+from fastvideo.pipelines.stages.validators import (StageValidators,
+                                                   VerificationResult)
 
 logger = init_logger(__name__)
 

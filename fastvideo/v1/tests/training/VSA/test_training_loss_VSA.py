@@ -7,9 +7,9 @@ from huggingface_hub import snapshot_download
 
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
-from fastvideo.v1.training.wan_training_pipeline import main
-from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
-from fastvideo.v1.utils import FlexibleArgumentParser
+from fastvideo.training.wan_training_pipeline import main
+from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
+from fastvideo.utils import FlexibleArgumentParser
 
 wandb_name = "test_training_loss_VSA"
 reference_wandb_summary_file = "fastvideo/tests/training/VSA/reference_wandb_summary_VSA.json"

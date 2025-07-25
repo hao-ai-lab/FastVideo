@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
 
-from fastvideo.v1.configs.models import DiTConfig, VAEConfig
-from fastvideo.v1.configs.models.dits import StepVideoConfig
-from fastvideo.v1.configs.models.vaes import StepVideoVAEConfig
-from fastvideo.v1.configs.pipelines.base import PipelineConfig
+from fastvideo.configs.models import DiTConfig, VAEConfig
+from fastvideo.configs.models.dits import StepVideoConfig
+from fastvideo.configs.models.vaes import StepVideoVAEConfig
+from fastvideo.configs.pipelines.base import PipelineConfig
 
 
 @dataclass

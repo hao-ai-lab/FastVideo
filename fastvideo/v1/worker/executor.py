@@ -3,9 +3,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any, TypeVar, cast
 
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.pipelines import ForwardBatch
-from fastvideo.v1.utils import init_logger
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.pipelines import ForwardBatch
+from fastvideo.utils import init_logger
 
 logger = init_logger(__name__)
 
@@ -26,7 +26,7 @@ class Executor(ABC):
     @classmethod
     def get_class(cls, fastvideo_args: FastVideoArgs) -> type["Executor"]:
         if fastvideo_args.distributed_executor_backend == "mp":
-            from fastvideo.v1.worker.multiproc_executor import MultiprocExecutor
+            from fastvideo.worker.multiproc_executor import MultiprocExecutor
             return cast(type["Executor"], MultiprocExecutor)
         else:
             raise ValueError(

@@ -14,7 +14,7 @@ from diffusers.schedulers.scheduling_utils import (KarrasDiffusionSchedulers,
                                                    SchedulerOutput)
 from diffusers.utils import deprecate
 
-from fastvideo.v1.models.schedulers.base import BaseScheduler
+from fastvideo.models.schedulers.base import BaseScheduler
 
 
 class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):

@@ -7,22 +7,22 @@ import torch
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
 
-from fastvideo.v1.distributed import (divide, get_tp_rank, get_tp_world_size,
-                                      split_tensor_along_last_dim,
-                                      tensor_model_parallel_all_gather,
-                                      tensor_model_parallel_all_reduce)
-from fastvideo.v1.layers.quantization.base_config import (QuantizationConfig,
-                                                          QuantizeMethodBase)
-from fastvideo.v1.logger import init_logger
+from fastvideo.distributed import (divide, get_tp_rank, get_tp_world_size,
+                                   split_tensor_along_last_dim,
+                                   tensor_model_parallel_all_gather,
+                                   tensor_model_parallel_all_reduce)
+from fastvideo.layers.quantization.base_config import (QuantizationConfig,
+                                                       QuantizeMethodBase)
+from fastvideo.logger import init_logger
 # yapf: disable
-from fastvideo.v1.models.parameter import (BasevLLMParameter,
-                                           BlockQuantScaleParameter,
-                                           PackedColumnParameter,
-                                           PackedvLLMParameter,
-                                           PerTensorScaleParameter,
-                                           RowvLLMParameter)
+from fastvideo.models.parameter import (BasevLLMParameter,
+                                        BlockQuantScaleParameter,
+                                        PackedColumnParameter,
+                                        PackedvLLMParameter,
+                                        PerTensorScaleParameter,
+                                        RowvLLMParameter)
 # yapf: enable
-from fastvideo.v1.models.utils import set_weight_attrs
+from fastvideo.models.utils import set_weight_attrs
 
 logger = init_logger(__name__)
 

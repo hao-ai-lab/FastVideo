@@ -4,7 +4,7 @@
 import torch
 import torch.distributed
 
-from fastvideo.v1.distributed.parallel_state import get_sp_group, get_tp_group
+from fastvideo.distributed.parallel_state import get_sp_group, get_tp_group
 
 
 def tensor_model_parallel_all_reduce(input_: torch.Tensor) -> torch.Tensor:

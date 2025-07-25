@@ -17,11 +17,11 @@ from torch.distributed.fsdp import (CPUOffloadPolicy, FSDPModule,
                                     MixedPrecisionPolicy, fully_shard)
 from torch.nn.modules.module import _IncompatibleKeys
 
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.models.loader.utils import (get_param_names_mapping,
-                                              hf_to_custom_state_dict)
-from fastvideo.v1.models.loader.weight_utils import safetensors_weights_iterator
-from fastvideo.v1.utils import set_mixed_precision_policy
+from fastvideo.logger import init_logger
+from fastvideo.models.loader.utils import (get_param_names_mapping,
+                                           hf_to_custom_state_dict)
+from fastvideo.models.loader.weight_utils import safetensors_weights_iterator
+from fastvideo.utils import set_mixed_precision_policy
 
 logger = init_logger(__name__)
 
@@ -94,7 +94,7 @@ def maybe_load_fsdp_model(
     use_fsdp = training_mode or fsdp_inference
 
     # Disable FSDP for MPS as it's not compatible
-    from fastvideo.v1.platforms import current_platform
+    from fastvideo.platforms import current_platform
     if current_platform.is_mps():
         use_fsdp = False
         logger.info("Disabling FSDP for MPS platform as it's not compatible")
