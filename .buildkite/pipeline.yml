@@ -16,9 +16,9 @@ steps:
           diff: 'git fetch origin "$BUILDKITE_PULL_REQUEST_BASE_BRANCH" && git diff --name-only origin/"$BUILDKITE_PULL_REQUEST_BASE_BRANCH"...HEAD'
           watch:
             - path: 
-                - "fastvideo/v1/models/encoders/**"
-                - "fastvideo/v1/models/loader/**"
-                - "fastvideo/v1/tests/encoders/**"
+                - "fastvideo/models/encoders/**"
+                - "fastvideo/models/loader/**"
+                - "fastvideo/tests/encoders/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -29,9 +29,9 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "fastvideo/v1/models/vaes/**"
-                - "fastvideo/v1/models/loader/**"
-                - "fastvideo/v1/tests/vaes/**"
+                - "fastvideo/models/vaes/**"
+                - "fastvideo/models/loader/**"
+                - "fastvideo/tests/vaes/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -42,11 +42,11 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "fastvideo/v1/models/dits/**"
-                - "fastvideo/v1/models/loader/**"
-                - "fastvideo/v1/tests/transformers/**"
-                - "fastvideo/v1/layers/**"
-                - "fastvideo/v1/attention/**"
+                - "fastvideo/models/dits/**"
+                - "fastvideo/models/loader/**"
+                - "fastvideo/tests/transformers/**"
+                - "fastvideo/layers/**"
+                - "fastvideo/attention/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -57,7 +57,7 @@ steps:
                 agents:
                   queue: "default"
             - path: 
-                - "fastvideo/v1/**/*.py"
+                - "fastvideo/**/*.py"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -68,11 +68,11 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "fastvideo/v1/tests/lora/**"
-                - "fastvideo/v1/models/loader/**"
-                - "fastvideo/v1/tests/transformers/**"
-                - "fastvideo/v1/pipelines/**"
-                - "fastvideo/v1/layers/lora/**"
+                - "fastvideo/tests/lora/**"
+                - "fastvideo/models/loader/**"
+                - "fastvideo/tests/transformers/**"
+                - "fastvideo/pipelines/**"
+                - "fastvideo/layers/lora/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -83,7 +83,7 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "fastvideo/v1/**"
+                - "fastvideo/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -94,7 +94,7 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "fastvideo/v1/**"
+                - "fastvideo/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -105,7 +105,7 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "fastvideo/v1/**"
+                - "fastvideo/**"
                 - "csrc/attn/vsa/**"
                 - "csrc/attn/tk/**"
                 - "csrc/attn/setup_vsa.py"
@@ -121,7 +121,7 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "fastvideo/v1/**"
+                - "fastvideo/**"
                 - "csrc/attn/st_attn/**"
                 - "csrc/attn/setup_sta.py"
                 - "csrc/attn/config_sta.py"

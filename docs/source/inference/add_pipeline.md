@@ -46,25 +46,25 @@ FastVideo uses the Hugging Face Diffusers format for model organization:
 ### Implementing Modules
 
 Place new modules in the appropriate directories:
-- Encoders: `fastvideo/v1/models/encoders/`
-- VAEs: `fastvideo/v1/models/vaes/`
-- Transformer models: `fastvideo/v1/models/dits/`
-- Schedulers: `fastvideo/v1/models/schedulers/`
+- Encoders: `fastvideo/models/encoders/`
+- VAEs: `fastvideo/models/vaes/`
+- Transformer models: `fastvideo/models/dits/`
+- Schedulers: `fastvideo/models/schedulers/`
 
 ### Adapting Model Layers
 
 #### Layer Replacements
 Replace standard PyTorch layers with FastVideo optimized versions:
-- nn.LayerNorm → fastvideo.v1.layers.layernorm.RMSNorm
-- Embedding layers → fastvideo.v1.layers.vocab_parallel_embedding modules
-- Activation functions → versions from fastvideo.v1.layers.activation
+- nn.LayerNorm → fastvideo.layers.layernorm.RMSNorm
+- Embedding layers → fastvideo.layers.vocab_parallel_embedding modules
+- Activation functions → versions from fastvideo.layers.activation
 
 #### Distributed Linear Layers
 Use appropriate parallel layers for distribution:
 
 ```python
 # Output dimension parallelism
-from fastvideo.v1.layers.linear import ColumnParallelLinear
+from fastvideo.layers.linear import ColumnParallelLinear
 self.q_proj = ColumnParallelLinear(
     input_size=hidden_size,
     output_size=head_size * num_heads,
@@ -73,7 +73,7 @@ self.q_proj = ColumnParallelLinear(
 )
 
 # Fused QKV projection
-from fastvideo.v1.layers.linear import QKVParallelLinear
+from fastvideo.layers.linear import QKVParallelLinear
 self.qkv_proj = QKVParallelLinear(
     hidden_size=hidden_size,
     head_size=attention_head_dim,
@@ -82,7 +82,7 @@ self.qkv_proj = QKVParallelLinear(
 )
 
 # Input dimension parallelism
-from fastvideo.v1.layers.linear import RowParallelLinear
+from fastvideo.layers.linear import RowParallelLinear
 self.out_proj = RowParallelLinear(
     input_size=head_size * num_heads,
     output_size=hidden_size,
@@ -96,8 +96,8 @@ Replace standard attention with FastVideo's optimized attention:
 
 ```python
 # Local attention patterns
-from fastvideo.v1.attention import LocalAttention
-from fastvideo.v1.attention.backends.abstract import _Backend
+from fastvideo.attention import LocalAttention
+from fastvideo.attention.backends.abstract import _Backend
 self.attn = LocalAttention(
     num_heads=num_heads,
     head_size=head_dim,
@@ -108,7 +108,7 @@ self.attn = LocalAttention(
 )
 
 # Distributed attention for long sequences
-from fastvideo.v1.attention import DistributedAttention
+from fastvideo.attention import DistributedAttention
 self.attn = DistributedAttention(
     num_heads=num_heads,
     head_size=head_dim,
@@ -130,7 +130,7 @@ self.attn = DistributedAttention(
 Register implemented modules in the model registry:
 
 ```python
-# In fastvideo/v1/models/registry.py
+# In fastvideo/models/registry.py
 _TEXT_TO_VIDEO_DIT_MODELS = {
     "YourTransformerModel": ("dits", "yourmodule", "YourTransformerClass"),
 }
@@ -145,7 +145,7 @@ _VAE_MODELS = {
 Create a new directory for your pipeline:
 
 ```
-fastvideo/v1/pipelines/
+fastvideo/pipelines/
 ├── your_pipeline/
 │   ├── __init__.py
 │   └── your_pipeline.py
@@ -167,13 +167,13 @@ Pipelines are composed of stages, each handling a specific part of the diffusion
 ### Creating Your Pipeline
 
 ```python
-from fastvideo.v1.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.v1.pipelines.stages import (
+from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.pipelines.stages import (
     InputValidationStage, CLIPTextEncodingStage, TimestepPreparationStage,
     LatentPreparationStage, DenoisingStage, DecodingStage
 )
-from fastvideo.v1.fastvideo_args import FastVideoArgs
-from fastvideo.v1.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 import torch
 
 class MyCustomPipeline(ComposedPipelineBase):
@@ -246,7 +246,7 @@ EntryClass = MyCustomPipeline
 If existing stages don't meet your needs, create custom ones:
 
 ```python
-from fastvideo.v1.pipelines.stages.base import PipelineStage
+from fastvideo.pipelines.stages.base import PipelineStage
 
 class MyCustomStage(PipelineStage):
     """Custom processing stage for the pipeline."""
@@ -305,7 +305,7 @@ EntryClass = [MyCustomPipeline, MyOtherPipeline]
 ```
 
 The registry will automatically:
-1. Scan all packages under `fastvideo/v1/pipelines/`
+1. Scan all packages under `fastvideo/pipelines/`
 2. Look for `EntryClass` variables
 3. Register pipelines using their class names as identifiers
 

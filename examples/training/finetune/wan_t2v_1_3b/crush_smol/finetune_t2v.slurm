@@ -46,7 +46,7 @@ VALIDATION_DATASET_FILE="examples/training/finetune/wan_t2v_1_3b/crush_smol/vali
 # Training arguments
 training_args=(
   --tracker_project_name wan_t2v_finetune
-  --output_dir="outputs/wan_t2v_finetune"
+  --output_dir="checkpoints/wan_t2v_finetune"
   --max_train_steps=1000
   --train_batch_size=4
   --train_sp_batch_size 1
@@ -117,7 +117,7 @@ srun torchrun \
 --node_rank $SLURM_PROCID \
 --rdzv_backend=c10d \
 --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
-    fastvideo/v1/training/wan_training_pipeline.py \
+    fastvideo/training/wan_training_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

@@ -63,22 +63,33 @@ getting_started/installation
 :maxdepth: 1
 
 inference/inference_quick_start
+inference/examples/examples_inference_index
 inference/configuration
 inference/optimizations
+inference/comfyui
 inference/support_matrix
-inference/examples/examples_inference_index
 inference/cli
 inference/add_pipeline
-inference/v0_inference
 :::
 
 :::{toctree}
 :caption: Training
 :maxdepth: 1
 
+training/examples/examples_training_index
 training/data_preprocess
 training/distillation
-training/finetune
+<!-- training/finetune -->
+:::
+
+<!-- :::{toctree}
+:caption: Distillation
+:maxdepth: 1
+
+distillation/examples/examples_distillation_index
+distillation/data_preprocess
+distillation/dmd -->
+<!-- training/finetune -->
 :::
 
 % What is STA Kernel?

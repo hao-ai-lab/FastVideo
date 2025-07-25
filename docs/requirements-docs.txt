@@ -11,5 +11,5 @@ commonmark # Required by sphinx-argparse when using :markdownhelp:
 
 # packages to install to build the documentation
 cachetools
--f https://download.pytorch.org/whl/cpu
+# -f https://download.pytorch.org/whl/cpu
 torch

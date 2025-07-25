@@ -9,11 +9,11 @@
 ## Initialization Configuration
 
 ```{autodoc2-summary}
-    fastvideo.v1.configs.pipelines.PipelineConfig
+    fastvideo.configs.pipelines.PipelineConfig
 ```
 
 ## Sampling Configuration
 
 ```{autodoc2-summary}
-    fastvideo.v1.configs.sample.SamplingParam
+    fastvideo.configs.sample.SamplingParam
 ```

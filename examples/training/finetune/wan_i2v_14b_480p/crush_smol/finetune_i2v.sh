@@ -15,7 +15,7 @@ NUM_GPUS=8
 # Training arguments
 training_args=(
   --tracker_project_name "wan_i2v_finetune"
-  --output_dir "$DATA_DIR/outputs/wan_i2v_finetune"
+  --output_dir "checkpoints/wan_i2v_finetune"
   --max_train_steps 2000
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -84,7 +84,7 @@ miscellaneous_args=(
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
-    fastvideo/v1/training/wan_i2v_training_pipeline.py \
+    fastvideo/training/wan_i2v_training_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \
