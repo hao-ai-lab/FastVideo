@@ -2,16 +2,15 @@ from typing import TYPE_CHECKING
 
 from tqdm import tqdm
 
-from fastvideo.v1.dataset.dataloader.schema import pyarrow_schema_t2v
-from fastvideo.v1.pipelines.pipeline_batch_info import PreprocessBatch
+from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
+from fastvideo.pipelines.pipeline_batch_info import PreprocessBatch
 from fastvideo.workflow.preprocess.components import ParquetDatasetSaver
 from fastvideo.workflow.preprocess.preprocess_workflow import PreprocessWorkflow
 
 if TYPE_CHECKING:
     from torch.utils.data import DataLoader
 
-    from fastvideo.v1.pipelines.composed_pipeline_base import (
-        ComposedPipelineBase)
+    from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
     from fastvideo.workflow.preprocess.components import (
         VideoForwardBatchBuilder)
 

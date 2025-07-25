@@ -1,4 +1,4 @@
-from fastvideo.v1.fastvideo_args import FastVideoArgs
+from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.workflow.preprocess.preprocess_workflow import PreprocessWorkflow
 
 

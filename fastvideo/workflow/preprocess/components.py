@@ -11,8 +11,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 
-from fastvideo.v1.logger import init_logger
-from fastvideo.v1.pipelines.pipeline_batch_info import PreprocessBatch
+from fastvideo.logger import init_logger
+from fastvideo.pipelines.pipeline_batch_info import PreprocessBatch
 
 logger = init_logger(__name__)
 
