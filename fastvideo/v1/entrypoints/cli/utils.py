@@ -34,7 +34,7 @@ def launch_distributed(num_gpus: int,
     project_root = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "../../../.."))
     main_script = os.path.join(project_root,
-                               "fastvideo/v1/sample/v1_fastvideo_inference.py")
+                               "fastvideo/sample/v1_fastvideo_inference.py")
 
     cmd = [
         python_executable, "-m", "torch.distributed.run",

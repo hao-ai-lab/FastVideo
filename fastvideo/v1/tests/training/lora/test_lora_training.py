@@ -9,7 +9,7 @@ import json
 from huggingface_hub import snapshot_download
 
 wandb_name = "test_lora_training"
-l40s_reference_wandb_summary_file = "fastvideo/v1/tests/training/lora/l40s_reference_lora_wandb_summary.json"
+l40s_reference_wandb_summary_file = "fastvideo/tests/training/lora/l40s_reference_lora_wandb_summary.json"
 
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "2"
@@ -36,7 +36,7 @@ def test_lora_training():
         "--nnodes", NUM_NODES,
         "--nproc_per_node", NUM_GPUS_PER_NODE,
         "--master_port", os.environ["MASTER_PORT"],
-        "fastvideo/v1/training/wan_training_pipeline.py",
+        "fastvideo/training/wan_training_pipeline.py",
         "--model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         "--inference_mode", "False",
         "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",

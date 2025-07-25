@@ -7,7 +7,7 @@ DATA_MERGE_PATH="data/crush-smol/merge.txt"
 OUTPUT_DIR="data/crush-smol_processed_t2v/"
 
 torchrun --nproc_per_node=$GPU_NUM \
-    fastvideo/v1/pipelines/preprocess/v1_preprocess.py \
+    fastvideo/pipelines/preprocess/v1_preprocess.py \
     --model_path $MODEL_PATH \
     --data_merge_path $DATA_MERGE_PATH \
     --preprocess_video_batch_size 8 \

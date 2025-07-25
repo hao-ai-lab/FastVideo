@@ -12,7 +12,7 @@ from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.utils import FlexibleArgumentParser
 
 wandb_name = "test_training_loss_VSA"
-reference_wandb_summary_file = "fastvideo/v1/tests/training/VSA/reference_wandb_summary_VSA.json"
+reference_wandb_summary_file = "fastvideo/tests/training/VSA/reference_wandb_summary_VSA.json"
 
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "2"

@@ -16,14 +16,14 @@ MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATA_DIR = "data"
 LOCAL_RAW_DATA_DIR = Path(os.path.join(DATA_DIR, "cats"))
 NUM_GPUS_PER_NODE_PREPROCESSING = "1"
-PREPROCESSING_ENTRY_FILE_PATH = "fastvideo/v1/pipelines/preprocess/v1_preprocess.py"
+PREPROCESSING_ENTRY_FILE_PATH = "fastvideo/pipelines/preprocess/v1_preprocess.py"
 
 LOCAL_PREPROCESSED_DATA_DIR = Path(os.path.join(DATA_DIR, "cats_preprocessed_data"))
 
 
 # training
 NUM_GPUS_PER_NODE_TRAINING = "4"
-TRAINING_ENTRY_FILE_PATH = "fastvideo/v1/training/wan_training_pipeline.py"
+TRAINING_ENTRY_FILE_PATH = "fastvideo/training/wan_training_pipeline.py"
 LOCAL_TRAINING_DATA_DIR = os.path.join(LOCAL_PREPROCESSED_DATA_DIR, "combined_parquet_dataset")
 LOCAL_VALIDATION_DATASET_FILE = os.path.join(LOCAL_RAW_DATA_DIR, "validation_prompt_1_sample.json")
 LOCAL_OUTPUT_DIR = Path(os.path.join(DATA_DIR, "outputs"))

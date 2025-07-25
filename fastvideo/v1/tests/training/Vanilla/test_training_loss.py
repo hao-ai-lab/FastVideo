@@ -16,8 +16,8 @@ from fastvideo.v1.utils import FlexibleArgumentParser
 from fastvideo.v1.training.wan_training_pipeline import WanTrainingPipeline
 
 wandb_name = "test_training_loss"
-a40_reference_wandb_summary_file = "fastvideo/v1/tests/training/Vanilla/a40_reference_wandb_summary.json"
-l40s_reference_wandb_summary_file = "fastvideo/v1/tests/training/Vanilla/l40s_reference_wandb_summary.json"
+a40_reference_wandb_summary_file = "fastvideo/tests/training/Vanilla/a40_reference_wandb_summary.json"
+l40s_reference_wandb_summary_file = "fastvideo/tests/training/Vanilla/l40s_reference_wandb_summary.json"
 
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "2"
