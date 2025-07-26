@@ -6,9 +6,9 @@ from flash_attn import flash_attn_func as flash_attn_2_func
 try:
     from flash_attn_interface import flash_attn_func as flash_attn_3_func
 
-    # flash_attn 3 has slightly different API: it returns lse by default
-    flash_attn_func = lambda q, k, v, softmax_scale, causal: flash_attn_3_func(
-        q, k, v, softmax_scale, causal)[0]
+    # flash_attn 3 no longer have a different API, see following commit:
+    # https://github.com/Dao-AILab/flash-attention/commit/ed209409acedbb2379f870bbd03abce31a7a51b7
+    flash_attn_func = flash_attn_3_func
 except ImportError:
     flash_attn_func = flash_attn_2_func
 
