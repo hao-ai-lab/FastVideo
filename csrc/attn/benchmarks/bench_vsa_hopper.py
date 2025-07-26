@@ -1,9 +1,9 @@
 import torch
 import argparse
-from flash_attn.utils.benchmark import benchmark_forward
+from triton.testing import do_bench
 from vsa import block_sparse_fwd, block_sparse_bwd
 from vsa import BLOCK_M, BLOCK_N
-
+import  triton
 import numpy as np
 import random
 
@@ -23,7 +23,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='Benchmark Block Sparse Attention')
     parser.add_argument('--batch_size', type=int, default=1, help='Batch size')
     parser.add_argument('--num_heads', type=int, default=12, help='Number of heads')
-    parser.add_argument('--head_dim', type=int, default=64, help='Head dimension')
+    parser.add_argument('--head_dim', type=int, default=128, help='Head dimension')
     parser.add_argument('--topk', type=int, default=None, help='Number of kv blocks each q block attends to')
     parser.add_argument('--seq_lengths', type=int, nargs='+', default=[49152], help='Sequence lengths to benchmark')
     return parser.parse_args()
@@ -134,15 +134,14 @@ def benchmark_block_sparse_attention(q, k, v, q2k_block_sparse_index, q2k_block_
     torch.cuda.synchronize()
     
     # Benchmark forward
-    _, fwd_time = benchmark_forward(
-        block_sparse_fwd,
-        q, k, v, q2k_block_sparse_index, q2k_block_sparse_num,
-        repeats=20,
-        verbose=False,
-        desc='Block Sparse Forward'
+    fwd_time = do_bench(
+        lambda: block_sparse_fwd(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num),
+        warmup=5,
+        rep=20,
+        quantiles=None
     )
     
-    sparse_tflops = flops / fwd_time.mean * 1e-12
+    sparse_tflops = flops / fwd_time * 1e-12 * 1e3
     print(f"Block Sparse Forward - TFLOPS: {sparse_tflops:.2f}")
     
     # Backward pass
@@ -154,16 +153,15 @@ def benchmark_block_sparse_attention(q, k, v, q2k_block_sparse_index, q2k_block_
     torch.cuda.synchronize()
     
     # Benchmark backward
-    _, bwd_time = benchmark_forward(
-        block_sparse_bwd,
-        q, k, v, o, l_vec, grad_output, k2q_block_sparse_index, k2q_block_sparse_num,
-        repeats=20,
-        verbose=False,
-        desc='Block Sparse Backward'
+    bwd_time = do_bench(
+        lambda: block_sparse_bwd(q, k, v, o, l_vec, grad_output, k2q_block_sparse_index, k2q_block_sparse_num),
+        warmup=5,
+        rep=20,
+        quantiles=None
     )
     bwd_flops = 2.5 * flops  # Approximation
 
-    sparse_bwd_tflops = bwd_flops / bwd_time.mean * 1e-12
+    sparse_bwd_tflops = bwd_flops / bwd_time * 1e-12 * 1e3
     print(f"Block Sparse Backward - TFLOPS: {sparse_bwd_tflops:.2f}")
     
     return sparse_tflops, sparse_bwd_tflops
