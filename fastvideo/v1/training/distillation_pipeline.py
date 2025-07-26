@@ -193,49 +193,59 @@ class DistillationPipeline(TrainingPipeline):
         """Forward pass through student transformer and compute student losses."""
         latents = training_batch.latents
         dtype = latents.dtype
-        simulated_noisy_input = []
-        for timestep in self.denoising_step_list:
-            # Use cross-codebase generator for reproducible noise generation
-            noise = torch.randn(
-                self.video_latent_shape, device=self.device, dtype=dtype)
-            if self.sp_world_size > 1:
-                noise = rearrange(noise,
-                                    "b (n t) c h w -> b n t c h w",
-                                    n=self.sp_world_size).contiguous()
-                noise = noise[:, self.rank_in_sp_group, :, :, :, :]
+        # simulated_noisy_input = []
+        # for timestep in self.denoising_step_list:
+        #     # Use cross-codebase generator for reproducible noise generation
+        #     noise = torch.randn(
+        #         self.video_latent_shape, device=self.device, dtype=dtype)
+        #     if self.sp_world_size > 1:
+        #         noise = rearrange(noise,
+        #                             "b (n t) c h w -> b n t c h w",
+        #                             n=self.sp_world_size).contiguous()
+        #         noise = noise[:, self.rank_in_sp_group, :, :, :, :]
 
-            noisy_timestep = timestep * torch.ones(
-                self.video_latent_shape_sp[:2], device=self.device, dtype=torch.long)
+        #     noisy_timestep = timestep * torch.ones(
+        #         self.video_latent_shape_sp[:2], device=self.device, dtype=torch.long)
 
-            if timestep != 0:
-                noisy_video = self.noise_scheduler.add_noise(
-                    latents.flatten(0, 1),
-                    noise.flatten(0, 1),
-                    noisy_timestep.flatten(0, 1)
-                ).unflatten(0, self.video_latent_shape_sp[:2])
-            else:
-                noisy_video = latents
+        #     if timestep != 0:
+        #         noisy_video = self.noise_scheduler.add_noise(
+        #             latents.flatten(0, 1),
+        #             noise.flatten(0, 1),
+        #             noisy_timestep.flatten(0, 1)
+        #         ).unflatten(0, self.video_latent_shape_sp[:2])
+        #     else:
+        #         noisy_video = latents
 
-            simulated_noisy_input.append(noisy_video)
+        #     simulated_noisy_input.append(noisy_video)
 
-        simulated_noisy_input = torch.stack(simulated_noisy_input, dim=1)
+        # simulated_noisy_input = torch.stack(simulated_noisy_input, dim=1)
 
-        # Step 2: Randomly sample a timestep and pick the corresponding input
-        # Use cross-codebase generator for reproducible index generation
-        index = torch.randint(0, len(self.denoising_step_list), [
-                              self.video_latent_shape_sp[0], self.video_latent_shape_sp[1]], device=self.device, dtype=torch.long)
+        # # Step 2: Randomly sample a timestep and pick the corresponding input
+        # # Use cross-codebase generator for reproducible index generation
+        # index = torch.randint(0, len(self.denoising_step_list), [
+        #                       self.video_latent_shape_sp[0], self.video_latent_shape_sp[1]], device=self.device, dtype=torch.long)
 
-        index = self._process_timestep(index, type=self.distill_task_type)
+        # index = self._process_timestep(index, type=self.distill_task_type)
 
-        # select the corresponding timestep's noisy input from the stacked tensor [B, T, F, C, H, W]
+        # # select the corresponding timestep's noisy input from the stacked tensor [B, T, F, C, H, W]
     
-        noisy_input = torch.gather(
-            simulated_noisy_input, dim=1,
-            index=index.reshape(index.shape[0], 1, index.shape[1], 1, 1, 1).expand(
-                -1, -1, -1, *self.video_latent_shape_sp[2:])
-        ).squeeze(1)
+        # noisy_input = torch.gather(
+        #     simulated_noisy_input, dim=1,
+        #     index=index.reshape(index.shape[0], 1, index.shape[1], 1, 1, 1).expand(
+        #         -1, -1, -1, *self.video_latent_shape_sp[2:])
+        # ).squeeze(1)
         
-        timestep = self.denoising_step_list[index]
+        # timestep = self.denoising_step_list[index]
+        index = torch.randint(0, len(self.denoising_step_list), [1], device=self.device, dtype=torch.long)
+        timestep = self.denoising_step_list[index].expand(1, latents.shape[1])
+
+        noise = torch.randn(self.video_latent_shape, device=self.device, dtype=dtype)
+        if self.sp_world_size > 1:
+            noise = rearrange(noise,
+                              "(n t) c h w -> n t c h w",
+                              n=self.sp_world_size).contiguous()
+            noise = noise[self.rank_in_sp_group, :, :, :, :]
+        noisy_input = self.noise_scheduler.add_noise(latents.flatten(0, 1), noise.flatten(0, 1), timestep.flatten(0, 1)).unflatten(0, (1, latents.shape[1]))
 
         training_batch = self._build_input_kwargs(noisy_input, timestep, training_batch.conditional_dict, training_batch)
 
@@ -359,37 +369,51 @@ class DistillationPipeline(TrainingPipeline):
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata_vsa):
                 generated_video, timestep_gen = self._student_forward(training_batch)
         
-        critic_timestep = torch.randint(
-            0,
-            self.num_train_timestep,
-            self.video_latent_shape_sp[:2],
-            device=self.device,
-            dtype=torch.long
-        )
-        critic_timestep = self._process_timestep(
-            critic_timestep, type=self.distill_task_type)
-
+        # critic_timestep = torch.randint(
+        #     0,
+        #     self.num_train_timestep,
+        #     self.video_latent_shape_sp[:2],
+        #     device=self.device,
+        #     dtype=torch.long
+        # )
+        # critic_timestep = self._process_timestep(
+        #     critic_timestep, type=self.distill_task_type)
+        critic_timestep = torch.randint(0, self.num_train_timestep, [1], device=self.device, dtype=torch.long)
         # TODO: Add timestep warping
         if self.timestep_shift > 1:
             critic_timestep = self.timestep_shift * \
                 (critic_timestep / self.num_train_timestep) / (1 + (self.timestep_shift - 1) * (critic_timestep / self.num_train_timestep)) * self.num_train_timestep
 
-        critic_timestep = critic_timestep.clamp(self.min_step, self.max_step)
+        critic_timestep = critic_timestep.clamp(self.min_step, self.max_step).expand(1, generated_video.shape[1])
 
         # Use cross-codebase generator for reproducible noise generation
+        # critic_noise = torch.randn(
+        #     self.video_latent_shape, device=self.device, dtype=generated_video.dtype)
+        # if self.sp_world_size > 1:
+        #     critic_noise = rearrange(critic_noise,
+        #                             "b (n t) c h w -> b n t c h w",
+        #                             n=self.sp_world_size).contiguous()
+        #     critic_noise = critic_noise[:, self.rank_in_sp_group, :, :, :, :]
+        
+        # noisy_generated_video = self.noise_scheduler.add_noise(
+        #     generated_video.flatten(0, 1),
+        #     critic_noise.flatten(0, 1),
+        #     critic_timestep.flatten(0, 1)
+        # ).unflatten(0, self.video_latent_shape_sp[:2])
+
         critic_noise = torch.randn(
             self.video_latent_shape, device=self.device, dtype=generated_video.dtype)
         if self.sp_world_size > 1:
             critic_noise = rearrange(critic_noise,
-                                    "b (n t) c h w -> b n t c h w",
+                                    "(n t) c h w -> n t c h w",
                                     n=self.sp_world_size).contiguous()
-            critic_noise = critic_noise[:, self.rank_in_sp_group, :, :, :, :]
+            critic_noise = critic_noise[self.rank_in_sp_group, :, :, :, :]
         
         noisy_generated_video = self.noise_scheduler.add_noise(
             generated_video.flatten(0, 1),
             critic_noise.flatten(0, 1),
             critic_timestep.flatten(0, 1)
-        ).unflatten(0, self.video_latent_shape_sp[:2])
+        ).unflatten(0, (1, generated_video.shape[1]))
 
         with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata):
@@ -733,81 +757,81 @@ class DistillationPipeline(TrainingPipeline):
                 #             batch.prompt,
                 #             local_main_process_only=False)
 
-                assert batch.prompt is not None and isinstance(
-                    batch.prompt, str)
-                step_captions.append(batch.prompt)
+            #     assert batch.prompt is not None and isinstance(
+            #         batch.prompt, str)
+            #     step_captions.append(batch.prompt)
 
-            # #     # Run validation inference
-                with torch.no_grad():
-                    output_batch = self.validation_pipeline.forward(
-                        batch, training_args)
-                samples = output_batch.output
-                if self.rank_in_sp_group != 0:
-                    continue
+            #     # Run validation inference
+            #     with torch.no_grad():
+            #         output_batch = self.validation_pipeline.forward(
+            #             batch, training_args)
+            #     samples = output_batch.output
+            #     if self.rank_in_sp_group != 0:
+            #         continue
 
-                # Process outputs
-                video = rearrange(samples, "b c t h w -> t b c h w")
-                frames = []
-                for x in video:
-                    x = torchvision.utils.make_grid(x, nrow=6)
-                    x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-                    frames.append((x * 255).numpy().astype(np.uint8))
-                step_videos.append(frames)
+            #     # Process outputs
+            #     video = rearrange(samples, "b c t h w -> t b c h w")
+            #     frames = []
+            #     for x in video:
+            #         x = torchvision.utils.make_grid(x, nrow=6)
+            #         x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+            #         frames.append((x * 255).numpy().astype(np.uint8))
+            #     step_videos.append(frames)
 
-            # Log validation results for this step
-            world_group = get_world_group()
-            num_sp_groups = world_group.world_size // self.sp_group.world_size
+            # # Log validation results for this step
+            # world_group = get_world_group()
+            # num_sp_groups = world_group.world_size // self.sp_group.world_size
 
-            # Only sp_group leaders (rank_in_sp_group == 0) need to send their
-            # results to global rank 0
-            if self.rank_in_sp_group == 0:
-                if self.global_rank == 0:
-                    # Global rank 0 collects results from all sp_group leaders
-                    all_videos = step_videos  # Start with own results
-                    all_captions = step_captions
+            # # Only sp_group leaders (rank_in_sp_group == 0) need to send their
+            # # results to global rank 0
+            # if self.rank_in_sp_group == 0:
+            #     if self.global_rank == 0:
+            #         # Global rank 0 collects results from all sp_group leaders
+            #         all_videos = step_videos  # Start with own results
+            #         all_captions = step_captions
 
-                    # Receive from other sp_group leaders
-                    for sp_group_idx in range(1, num_sp_groups):
-                        src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
-                        recv_videos = world_group.recv_object(src=src_rank)
-                        recv_captions = world_group.recv_object(src=src_rank)
-                        all_videos.extend(recv_videos)
-                        all_captions.extend(recv_captions)
+            #         # Receive from other sp_group leaders
+            #         for sp_group_idx in range(1, num_sp_groups):
+            #             src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
+            #             recv_videos = world_group.recv_object(src=src_rank)
+            #             recv_captions = world_group.recv_object(src=src_rank)
+            #             all_videos.extend(recv_videos)
+            #             all_captions.extend(recv_captions)
 
-                    video_filenames = []
-                    for i, (video, caption) in enumerate(
-                            zip(all_videos, all_captions, strict=True)):
-                        os.makedirs(training_args.output_dir, exist_ok=True)
-                        filename = os.path.join(
-                            training_args.output_dir,
-                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
-                        )
-                        imageio.mimsave(filename, video, fps=sampling_param.fps)
-                        video_filenames.append(filename)
+            #         video_filenames = []
+            #         for i, (video, caption) in enumerate(
+            #                 zip(all_videos, all_captions, strict=True)):
+            #             os.makedirs(training_args.output_dir, exist_ok=True)
+            #             filename = os.path.join(
+            #                 training_args.output_dir,
+            #                 f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
+            #             )
+            #             imageio.mimsave(filename, video, fps=sampling_param.fps)
+            #             video_filenames.append(filename)
 
-                    logs = {
-                        f"validation_videos_{num_inference_steps}_steps": [
-                            wandb.Video(filename, caption=caption)
-                            for filename, caption in zip(
-                                video_filenames, all_captions, strict=True)
-                        ]
-                    }
-                    wandb.log(logs, step=global_step)
+            #         logs = {
+            #             f"validation_videos_{num_inference_steps}_steps": [
+            #                 wandb.Video(filename, caption=caption)
+            #                 for filename, caption in zip(
+            #                     video_filenames, all_captions, strict=True)
+            #             ]
+            #         }
+            #         wandb.log(logs, step=global_step)
                     
-                    # Save all prompts from all cards to txt file
-                    # prompt_filename = os.path.join(
-                    #     training_args.output_dir,
-                    #     f"validation_step_{global_step}_inference_steps_{num_inference_steps}_prompts.txt"
-                    # )
-                    # with open(prompt_filename, 'w', encoding='utf-8') as f:
-                    #     for i, caption in enumerate(all_captions):
-                    #         f.write(f"Video_{i}: {caption}\n")
-                    # logger.info(f"Saved {len(all_captions)} prompts to {prompt_filename}")
+            #         # Save all prompts from all cards to txt file
+            #         # prompt_filename = os.path.join(
+            #         #     training_args.output_dir,
+            #         #     f"validation_step_{global_step}_inference_steps_{num_inference_steps}_prompts.txt"
+            #         # )
+            #         # with open(prompt_filename, 'w', encoding='utf-8') as f:
+            #         #     for i, caption in enumerate(all_captions):
+            #         #         f.write(f"Video_{i}: {caption}\n")
+            #         # logger.info(f"Saved {len(all_captions)} prompts to {prompt_filename}")
                     
-                else:
-                    # Other sp_group leaders send their results to global rank 0
-                    world_group.send_object(step_videos, dst=0)
-                    world_group.send_object(step_captions, dst=0)
+            #     else:
+            #         # Other sp_group leaders send their results to global rank 0
+            #         world_group.send_object(step_videos, dst=0)
+            #         world_group.send_object(step_captions, dst=0)
 
         # Re-enable gradients for training
         transformer.train()
