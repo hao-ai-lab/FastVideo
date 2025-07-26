@@ -228,13 +228,13 @@ class DistillationPipeline(TrainingPipeline):
         index = self._process_timestep(index, type=self.distill_task_type)
 
         # select the corresponding timestep's noisy input from the stacked tensor [B, T, F, C, H, W]
-
+    
         noisy_input = torch.gather(
             simulated_noisy_input, dim=1,
             index=index.reshape(index.shape[0], 1, index.shape[1], 1, 1, 1).expand(
                 -1, -1, -1, *self.video_latent_shape_sp[2:])
         ).squeeze(1)
-
+        
         timestep = self.denoising_step_list[index]
 
         training_batch = self._build_input_kwargs(noisy_input, timestep, training_batch.conditional_dict, training_batch)
@@ -928,7 +928,7 @@ class DistillationPipeline(TrainingPipeline):
                     log_data.update(critic_metrics)
                 wandb.log(log_data, step=step)
                 
-            if step % self.training_args.checkpointing_steps == 0:
+            if step % self.training_args.checkpointing_steps == 0 and step > 0:
                 print("rank", self.global_rank, "save checkpoint at step", step)
                 save_checkpoint(self.transformer, self.global_rank, #TODO(yongqi)
                                 self.training_args.output_dir, step,
@@ -938,7 +938,7 @@ class DistillationPipeline(TrainingPipeline):
                     self.transformer.train()
                 self.sp_group.barrier()
                 
-            if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
+            if self.training_args.log_validation and step % self.training_args.validation_steps == 0 and step > 0:
 
 
                 self.add_visualization(training_batch.dmd_log_dict, training_batch.critic_log_dict, self.training_args, step)
