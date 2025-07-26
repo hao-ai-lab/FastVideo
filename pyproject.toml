@@ -146,6 +146,6 @@ Repository = "https://github.com/hao-ai-lab/FastVideo"
 #  Used by Comfy Registry https://comfyregistry.org
 
 [tool.comfy]
-PublisherId = "FastVideo"
+PublisherId = "fastvideo"
 DisplayName = "FastVideo"
 Icon = "https://raw.githubusercontent.com/hao-ai-lab/FastVideo/main/comfyui/assets/logo.png"
