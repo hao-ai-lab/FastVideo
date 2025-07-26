@@ -146,20 +146,20 @@ class DistillationPipeline(TrainingPipeline):
         noise = torch.randn(self.video_latent_shape, device=self.device, dtype=dtype)
         if self.sp_world_size > 1:
             noise = rearrange(noise,
-                              "(n t) c h w -> n t c h w",
+                              "b (n t) c h w -> b n t c h w",
                               n=self.sp_world_size).contiguous()
-            noise = noise[self.rank_in_sp_group, :, :, :, :]
-        noisy_latent = self.noise_scheduler.add_noise(latents, noise, timestep)
+            noise = noise[:, self.rank_in_sp_group, :, :, :, :]
+        noisy_latent = self.noise_scheduler.add_noise(latents.flatten(0, 1), noise.flatten(0, 1), timestep).unflatten(0, self.video_latent_shape_sp[:2])
 
         training_batch = self._build_input_kwargs(noisy_latent, timestep, training_batch.conditional_dict, training_batch)
 
-        pred_noise = self.transformer(**training_batch.input_kwargs)[0].permute(1, 0, 2, 3)
+        pred_noise = self.transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
         pred_video = pred_noise_to_pred_video(
-            pred_noise=pred_noise,
-            noise_input_latent=training_batch.noise_latents,
+            pred_noise=pred_noise.flatten(0, 1),
+            noise_input_latent=training_batch.noise_latents.flatten(0, 1),
             timestep=timestep,
             scheduler=self.noise_scheduler
-        )
+        ).unflatten(0, pred_noise.shape[:2])
 
         return training_batch, pred_video, timestep.float()
 
@@ -176,41 +176,41 @@ class DistillationPipeline(TrainingPipeline):
 
             if self.sp_world_size > 1:
                 noise = rearrange(noise,
-                                    "(n t) c h w -> n t c h w",
+                                    "b (n t) c h w -> b n t c h w",
                                     n=self.sp_world_size).contiguous()
-                noise = noise[self.rank_in_sp_group, :, :, :, :]
+                noise = noise[:, self.rank_in_sp_group, :, :, :, :]
                 
-            noisy_latent = self.noise_scheduler.add_noise(pred_video, noise, timestep).detach()
+            noisy_latent = self.noise_scheduler.add_noise(pred_video.flatten(0, 1), noise.flatten(0, 1), timestep).unflatten(0, self.video_latent_shape_sp[:2])
 
             # fake_score_transformer forward
             training_batch = self._build_input_kwargs(noisy_latent, timestep, training_batch.conditional_dict, training_batch)
-            pred_noise_fake_score = self.fake_score_transformer(**training_batch.input_kwargs)[0].permute(1, 0, 2, 3)
+            pred_noise_fake_score = self.fake_score_transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
             pred_fake_video = pred_noise_to_pred_video(
-                pred_noise=pred_noise_fake_score,
-                noise_input_latent=noisy_latent,
+                pred_noise=pred_noise_fake_score.flatten(0, 1),
+                noise_input_latent=noisy_latent.flatten(0, 1),
                 timestep=timestep,
                 scheduler=self.noise_scheduler
-            )
+            ).unflatten(0, pred_noise_fake_score.shape[:2])
             
             # real_score_transformer cond forward
             training_batch = self._build_input_kwargs(noisy_latent, timestep, training_batch.conditional_dict, training_batch)
-            pred_noise_real_score_cond = self.real_score_transformer(**training_batch.input_kwargs)[0].permute(1, 0, 2, 3)
+            pred_noise_real_score_cond = self.real_score_transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
             pred_real_video_cond = pred_noise_to_pred_video(
-                pred_noise=pred_noise_real_score_cond,
-                noise_input_latent=noisy_latent,
+                pred_noise=pred_noise_real_score_cond.flatten(0, 1),
+                noise_input_latent=noisy_latent.flatten(0, 1),
                 timestep=timestep,
                 scheduler=self.noise_scheduler
-            )
+            ).unflatten(0, pred_noise_real_score_cond.shape[:2])
             
             # real_score_transformer uncond forward
             training_batch = self._build_input_kwargs(noisy_latent, timestep, training_batch.unconditional_dict, training_batch)
-            pred_noise_real_score_uncond = self.real_score_transformer(**training_batch.input_kwargs)[0].permute(1, 0, 2, 3)
+            pred_noise_real_score_uncond = self.real_score_transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
             pred_real_video_uncond = pred_noise_to_pred_video(
-                pred_noise=pred_noise_real_score_uncond,
-                noise_input_latent=noisy_latent,
+                pred_noise=pred_noise_real_score_uncond.flatten(0, 1),
+                noise_input_latent=noisy_latent.flatten(0, 1),
                 timestep=timestep,
                 scheduler=self.noise_scheduler
-            )
+            ).unflatten(0, pred_noise_real_score_uncond.shape[:2])
             
             pred_real_video = pred_real_video_cond + (
                 pred_real_video_cond - pred_real_video_uncond
@@ -248,21 +248,21 @@ class DistillationPipeline(TrainingPipeline):
             self.video_latent_shape, device=self.device, dtype=generated_video.dtype)
         if self.sp_world_size > 1:
             fake_score_noise = rearrange(fake_score_noise,
-                                    "(n t) c h w -> n t c h w",
+                                    "b (n t) c h w -> b n t c h w",
                                     n=self.sp_world_size).contiguous()
-            fake_score_noise = fake_score_noise[self.rank_in_sp_group, :, :, :, :]
+            fake_score_noise = fake_score_noise[:, self.rank_in_sp_group, :, :, :, :]
         
         noisy_generated_video = self.noise_scheduler.add_noise(
-            generated_video,
-            fake_score_noise,
+            generated_video.flatten(0, 1),
+            fake_score_noise.flatten(0, 1),
             fake_score_timestep
-        )
+        ).unflatten(0, self.video_latent_shape_sp[:2])
 
         with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata):
             training_batch = self._build_input_kwargs(noisy_generated_video, fake_score_timestep, training_batch.conditional_dict, training_batch)
             
-            pred_noise_fake_score = self.fake_score_transformer(**training_batch.input_kwargs)[0].permute(1, 0, 2, 3)
+            pred_noise_fake_score = self.fake_score_transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
         target = fake_score_noise - generated_video
         denoising_loss = torch.mean((pred_noise_fake_score - target) ** 2)
@@ -314,16 +314,15 @@ class DistillationPipeline(TrainingPipeline):
         training_batch.conditional_dict = conditional_dict
         training_batch.unconditional_dict = unconditional_dict
         assert training_batch.latents is not None
-        assert training_batch.latents.shape[0] == 1, "Distillation only supports batch size 1"
         training_batch.raw_latent_shape = training_batch.latents.shape
-        training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)[0] # drop the batch dimension
-        self.video_latent_shape = training_batch.latents.shape # [T, C, H, W]
+        training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
+        self.video_latent_shape = training_batch.latents.shape # [B, T, C, H, W]
 
         if self.sp_world_size > 1:
             training_batch.latents = rearrange(training_batch.latents,
-                                "(n t) c h w -> n t c h w",
+                                "b (n t) c h w -> b n t c h w",
                                 n=self.sp_world_size).contiguous()
-            training_batch.latents = training_batch.latents[self.rank_in_sp_group, :, :, :, :]
+            training_batch.latents = training_batch.latents[:, self.rank_in_sp_group, :, :, :, :]
 
         self.video_latent_shape_sp = training_batch.latents.shape
 
@@ -464,7 +463,7 @@ class DistillationPipeline(TrainingPipeline):
         fake_score_latents_name = ['fake_scoretrain_latent', 'fake_scoretrain_noisy_latent']
 
         for latent_key in fake_score_latents_name:
-            latents = fake_score_log_dict[latent_key].unsqueeze(0) # bs, t,c, h, w
+            latents = fake_score_log_dict[latent_key] # bs, t,c, h, w
             latents = latents.permute(0, 2, 1, 3, 4)
             # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
             
@@ -497,7 +496,7 @@ class DistillationPipeline(TrainingPipeline):
         if 'dmdtrain_pred_fake_video' in generator_log_dict:
             dmd_latents_name = ['dmdtrain_pred_fake_video', 'dmdtrain_pred_real_video', 'dmdtrain_latents', 'dmdtrain_noisy_latent']
             for latent_key in dmd_latents_name:
-                latents = generator_log_dict[latent_key].unsqueeze(0)
+                latents = generator_log_dict[latent_key]
                 latents = latents.permute(0, 2, 1, 3, 4)
                 # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
                 if isinstance(self.vae.scaling_factor, torch.Tensor):

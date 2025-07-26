@@ -60,7 +60,7 @@ class WanDistillationPipeline(DistillationPipeline):
                             training_batch: TrainingBatch) -> TrainingBatch:
 
         training_batch.input_kwargs = {
-            "hidden_states": noise_input.unsqueeze(0).permute(0, 2, 1, 3, 4),
+            "hidden_states": noise_input.permute(0, 2, 1, 3, 4),
             "encoder_hidden_states": text_dict["encoder_hidden_states"],
             "encoder_attention_mask": text_dict["encoder_attention_mask"],
             "timestep": timestep,
