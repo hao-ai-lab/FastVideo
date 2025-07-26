@@ -139,3 +139,13 @@ column_limit = 80
 line_length = 80
 use_parentheses = true
 skip_gitignore = true
+
+
+[project.urls]
+Repository = "https://github.com/hao-ai-lab/FastVideo"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = "FastVideo"
+DisplayName = "FastVideo"
+Icon = ""
