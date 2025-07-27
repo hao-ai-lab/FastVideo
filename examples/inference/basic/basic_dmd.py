@@ -28,9 +28,7 @@ def main():
     sampling_param = SamplingParam.from_pretrained(model_name)
 
     prompt = (
-        "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
-        "wide with interest. The playful yet serene atmosphere is complemented by soft "
-        "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
+        "A neon-lit alley in futuristic Tokyo during a heavy rainstorm at night. The puddles reflect glowing signs in kanji, advertising ramen, karaoke, and VR arcades. A woman in a translucent raincoat walks briskly with an LED umbrella. Steam rises from a street food cart, and a cat darts across the screen. Raindrops are visible on the camera lens, creating a cinematic bokeh effect."
     )
     start_time = time.perf_counter()
     video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, sampling_param=sampling_param)
