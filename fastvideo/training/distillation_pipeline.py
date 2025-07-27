@@ -787,7 +787,7 @@ class DistillationPipeline(TrainingPipeline):
                     self.transformer.train()
                 self.sp_group.barrier()
 
-            if self.training_args.log_validation and step % self.training_args.validation_steps == 0 and step > 0:
+            if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 self._log_validation(self.transformer, self.training_args, step)
 
         wandb.finish()
