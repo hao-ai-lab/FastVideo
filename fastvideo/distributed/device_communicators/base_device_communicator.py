@@ -124,14 +124,17 @@ class DistributedAutograd:
                 seqlen = shard_seqlen * world_size
                 shard_hc = hc // world_size
 
-                input_t = input_.reshape(bs, shard_seqlen, world_size, shard_hc,
-                                         hs).transpose(0, 2).contiguous()
+                input_t = input_.reshape(
+                    bs, shard_seqlen, world_size, shard_hc,
+                    hs).transpose(0, 2).contiguous(
+                    )  # world_size, shard_seqlen, bs, shard_hc, hs
                 output = torch.empty_like(input_t)
 
                 dist.all_to_all_single(output, input_t, group=group)
 
-                output = output.reshape(seqlen, bs, shard_hc,
-                                        hs).transpose(0, 1).contiguous()
+                output = output.transpose(0, 1).reshape(seqlen, bs,
+                                                        shard_hc, hs).transpose(
+                                                            0, 1).contiguous()
                 output = output.reshape(bs, seqlen, shard_hc, hs)
 
                 return output
@@ -140,9 +143,10 @@ class DistributedAutograd:
                 hc = shard_hc * world_size
                 shard_seqlen = seqlen // world_size
 
-                input_t = input_.reshape(bs, world_size, shard_seqlen, shard_hc,
-                                         hs)
-                input_t = input_t.transpose(0, 3).transpose(0, 1).contiguous()
+                input_t = input_.reshape(bs, shard_seqlen, world_size, shard_hc,
+                                         hs).transpose(0, 1).contiguous()
+                input_t = input_t.transpose(0, 3).transpose(0, 1).contiguous(
+                )  # shard_hc, world_size, shard_seqlen, bs, hs
                 input_t = input_t.reshape(world_size, shard_hc, shard_seqlen,
                                           bs, hs)
 

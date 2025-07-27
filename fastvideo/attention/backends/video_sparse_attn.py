@@ -109,10 +109,8 @@ class VideoSparseAttentionImpl(AttentionImpl):
         self.img_seq_length: int
 
     def tile(self, x: torch.Tensor) -> torch.Tensor:
-        # TODO: this by right should move inside sequence parallel operation
         x = rearrange(x,
-                      "b (sp t h w) head d -> b (t sp) h w head d",
-                      sp=self.sp_size,
+                      "b (t h w) head d -> b t h w head d",
                       t=self.dit_seq_shape[0] // self.sp_size,
                       h=self.dit_seq_shape[1],
                       w=self.dit_seq_shape[2])
@@ -149,13 +147,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
             ts_w=self.VSA_base_tile_size[2])
         x = x[:, :self.dit_seq_shape[0], :self.dit_seq_shape[1], :self.
               dit_seq_shape[2], :, :]
-        # TODO: this by right should move inside sequence parallel operation
-        return rearrange(x,
-                         "b (t sp) h w head d -> b (sp t h w) head d",
-                         sp=self.sp_size,
-                         t=self.dit_seq_shape[0] // self.sp_size,
-                         h=self.dit_seq_shape[1],
-                         w=self.dit_seq_shape[2])
+        return x.reshape(x.shape[0], -1, x.shape[4], x.shape[5])
 
     def preprocess_qkv(
         self,
