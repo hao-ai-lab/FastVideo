@@ -334,6 +334,7 @@ class VideoGenerator:
         else:
             return {
                 "samples": samples,
+                "frames": frames,
                 "prompts": prompt,
                 "size": (target_height, target_width, batch.num_frames),
                 "generation_time": gen_time

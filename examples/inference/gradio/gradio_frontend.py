@@ -2,10 +2,15 @@ import argparse
 import os
 import requests
 import json
+import base64
+import io
 from typing import Optional
 
 import gradio as gr
 import torch
+import imageio
+from PIL import Image
+import numpy as np
 
 from fastvideo.configs.sample.base import SamplingParam
 
@@ -45,6 +50,53 @@ class RayServeClient:
             }
 
 
+def decode_and_save_video_from_frames(frames_b64: list, output_dir: str, prompt: str, fps: int = 24) -> str:
+    """Decode base64 frames and save them as a video file"""
+    if not frames_b64:
+        return "No frames to save"
+    
+    # Create safe filename from prompt
+    safe_prompt = prompt[:50].replace(' ', '_').replace('/', '_').replace('\\', '_')
+    video_filename = f"{safe_prompt}_frames.mp4"
+    video_path = os.path.join(output_dir, video_filename)
+    
+    try:
+        # Decode frames from base64
+        decoded_frames = []
+        
+        for i, frame_b64 in enumerate(frames_b64):
+            try:
+                # Remove the data URL prefix if present
+                if frame_b64.startswith('data:image/'):
+                    frame_b64 = frame_b64.split(',')[1]
+                
+                # Decode base64 to bytes
+                frame_bytes = base64.b64decode(frame_b64)
+                
+                # Create PIL Image from bytes
+                image = Image.open(io.BytesIO(frame_bytes))
+                
+                # Convert PIL Image to numpy array (same format as video_generator.py)
+                frame_array = np.array(image)
+                decoded_frames.append(frame_array)
+                
+            except Exception as e:
+                print(f"Warning: Failed to decode frame {i}: {e}")
+                continue
+        
+        if not decoded_frames:
+            return "Failed to decode any frames", ""
+        
+        # Save as video using imageio (same as video_generator.py)
+        os.makedirs(output_dir, exist_ok=True)
+        imageio.mimsave(video_path, decoded_frames, fps=fps, format="mp4")
+        
+        return f"Saved {len(decoded_frames)} frames as video: {video_path}", video_path
+        
+    except Exception as e:
+        return f"Failed to save video: {str(e)}", ""
+
+
 def create_gradio_interface(backend_url: str, default_params: SamplingParam):
     """Create the Gradio interface"""
     
@@ -65,9 +117,9 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
     ):
         # Check backend health first
         if not client.check_health():
-            return None, f"Backend is not available. Please check if Ray Serve is running at {backend_url}"
+            return None, f"Backend is not available. Please check if Ray Serve is running at {backend_url}", ""
         
-        # Prepare request data
+        # Prepare request data - always request frames for video creation
         request_data = {
             "prompt": prompt,
             "negative_prompt": negative_prompt,
@@ -78,7 +130,8 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             "height": height,
             "width": width,
             "num_inference_steps": num_inference_steps,
-            "randomize_seed": randomize_seed
+            "randomize_seed": randomize_seed,
+            "return_frames": True  # Always request frames
         }
         
         # Send request to backend
@@ -87,17 +140,33 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
         if response.get("success", False):
             output_path = response.get("output_path", "")
             used_seed = response.get("seed", seed)
+            frames_b64 = response.get("frames", [])
+            
             print(f"Used seed: {used_seed}")
             print(f"Output path: {output_path}")
             
-            # Check if the video file exists
-            if os.path.exists(output_path):
-                return output_path, used_seed
+            # Handle frame extraction and video creation
+            frames_status = ""
+            if frames_b64:
+                try:
+                    # Get the output directory from the video path
+                    output_dir = os.path.dirname(output_path) if output_path else "outputs"
+                    frames_status, video_path = decode_and_save_video_from_frames(frames_b64, output_dir, prompt)
+                    print(f"Frames: {frames_status}")
+                except Exception as e:
+                    frames_status = f"Failed to save frames video: {str(e)}"
+                    print(f"Frame extraction error: {e}")
             else:
-                return None, f"Video generated but file not found at {output_path}"
+                frames_status = "No frames returned from backend"
+            
+            # Check if the video file exists
+            if os.path.exists(video_path):
+                return video_path, used_seed, frames_status
+            else:
+                return None, f"Video generated but file not found at {video_path} {frames_status}", frames_status
         else:
             error_msg = response.get("error_message", "Unknown error occurred")
-            return None, f"Generation failed: {error_msg}"
+            return None, f"Generation failed: {error_msg}", ""
     
     # Example prompts
     examples = [
@@ -137,6 +206,7 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             
             result = gr.Video(label="Result", show_label=False)
             error_output = gr.Text(label="Error", visible=False)
+            frames_output = gr.Text(label="Frame Video Status", visible=False)
         
         with gr.Accordion("Advanced options", open=False):
             with gr.Group():
@@ -207,12 +277,31 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
         )
         
         def handle_generation(*args):
-            result_path, seed_or_error = generate_video(*args)
+            result_path, seed_or_error, frames_status = generate_video(*args)
             
             if result_path and os.path.exists(result_path):
-                return result_path, seed_or_error, gr.update(visible=False)
+                # Show frame status if available
+                if frames_status:
+                    return (
+                        result_path, 
+                        seed_or_error, 
+                        gr.update(visible=False),  # error_output
+                        gr.update(visible=True, value=frames_status)  # frames_output
+                    )
+                else:
+                    return (
+                        result_path, 
+                        seed_or_error, 
+                        gr.update(visible=False),  # error_output
+                        gr.update(visible=False)  # frames_output
+                    )
             else:
-                return None, seed_or_error, gr.update(visible=True, value=seed_or_error)
+                return (
+                    None, 
+                    seed_or_error, 
+                    gr.update(visible=True, value=seed_or_error),  # error_output
+                    gr.update(visible=False)  # frames_output
+                )
         
         run_button.click(
             fn=handle_generation,
@@ -228,7 +317,8 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                 num_inference_steps,
                 randomize_seed,
             ],
-            outputs=[result, seed_output, error_output],
+            outputs=[result, seed_output, error_output, frames_output],
+            concurrency_limit=20,
         )
         
         # Update status periodically

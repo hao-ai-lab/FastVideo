@@ -1,12 +1,17 @@
+import time
 import os
 import torch
+import base64
+import io
 from copy import deepcopy
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 import ray
 from ray import serve
 from fastapi import FastAPI
 from pydantic import BaseModel
+from PIL import Image
+import numpy as np
 
 
 class VideoGenerationRequest(BaseModel):
@@ -20,6 +25,7 @@ class VideoGenerationRequest(BaseModel):
     width: int = 832
     num_inference_steps: int = 20
     randomize_seed: bool = False
+    return_frames: bool = False  # Whether to return base64 encoded frames
 
 
 class VideoGenerationResponse(BaseModel):
@@ -27,6 +33,56 @@ class VideoGenerationResponse(BaseModel):
     seed: int
     success: bool
     error_message: Optional[str] = None
+    frames: Optional[List[str]] = None  # Base64 encoded frames
+
+
+def encode_frames_to_base64(frames: List[np.ndarray]) -> List[str]:
+    """Convert numpy frames (0-255) to base64-encoded PNG images"""
+    if not frames:
+        return []
+    
+    encoded_frames = []
+    
+    for i, frame in enumerate(frames):
+        try:
+            # Ensure frame is numpy array
+            if not isinstance(frame, np.ndarray):
+                print(f"Warning: Frame {i} is not a numpy array, skipping")
+                continue
+                
+            # Ensure frame is uint8
+            if frame.dtype != np.uint8:
+                # Clip values to 0-255 range and convert to uint8
+                frame = np.clip(frame, 0, 255).astype(np.uint8)
+            
+            # Convert numpy array to PIL Image
+            if len(frame.shape) == 3 and frame.shape[2] == 3:
+                # RGB image
+                pil_image = Image.fromarray(frame, mode='RGB')
+            elif len(frame.shape) == 3 and frame.shape[2] == 4:
+                # RGBA image
+                pil_image = Image.fromarray(frame, mode='RGBA')
+            elif len(frame.shape) == 2:
+                # Grayscale image
+                pil_image = Image.fromarray(frame, mode='L')
+            else:
+                print(f"Warning: Frame {i} has unsupported shape {frame.shape}, skipping")
+                continue
+            
+            # Save to bytes buffer as PNG
+            buffer = io.BytesIO()
+            pil_image.save(buffer, format='PNG')
+            buffer.seek(0)
+            
+            # Encode to base64
+            img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            encoded_frames.append(f"data:image/png;base64,{img_base64}")
+            
+        except Exception as e:
+            print(f"Warning: Failed to encode frame {i}: {e}")
+            continue
+    
+    return encoded_frames
 
 
 # Create FastAPI app
@@ -35,7 +91,8 @@ app = FastAPI()
 
 @serve.deployment(
     num_replicas=16,
-    ray_actor_options={"num_cpus": 10, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
+    # ray_actor_options={"num_cpus": 10, "num_gpus": 1, "runtime_env": {"conda": "fv", "working_dir": "/mnt/fast-disks/nfs/hao_lab/FastVideo"}},
+    ray_actor_options={"num_cpus": 1, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
 )
 @serve.ingress(app)
 class FastVideoAPI:
@@ -49,6 +106,7 @@ class FastVideoAPI:
         
         # Ensure output directory exists
         os.makedirs(output_path, exist_ok=True)
+        time.sleep(10)
         self._initialize_model() # Ensure model is initialized
     
     def _initialize_model(self):
@@ -109,22 +167,33 @@ class FastVideoAPI:
             # Store desired video name inside the SamplingParam to avoid unknown kwarg errors
             setattr(params, "output_video_name", safe_prompt)
             # Generate the video with proper output path and filename
-            video = self.generator.generate_video(
+            result = self.generator.generate_video(
                 prompt=request.prompt,
                 sampling_param=params,
-                save_video=False,
+                save_video=False,  # Match the params.save_video setting
             )
             
             # The actual output path where the video was saved
-            output_path = os.path.join(self.output_path, f"{safe_prompt}.mp4")
+            # output_path = os.path.join(self.output_path, f"{safe_prompt}.mp4")
             
             # Verify the file exists
-            if not os.path.exists(output_path):
-                raise FileNotFoundError(f"Video was not saved to expected location: {output_path}")
+            # if not os.path.exists(output_path):
+            #     raise FileNotFoundError(f"Video was not saved to expected location: {output_path}")
             
+            frames = result.get("frames", [])
+            
+            # Encode frames to base64 for web transmission only if requested
+            encoded_frames = None
+            if request.return_frames and frames:
+                try:
+                    encoded_frames = encode_frames_to_base64(frames)
+                except Exception as e:
+                    print(f"Warning: Failed to encode frames: {e}")
+                    encoded_frames = None
             
             response = VideoGenerationResponse(
-                output_path=output_path,
+                output_path="",
+                frames=encoded_frames,
                 seed=params.seed,
                 success=True
             )
