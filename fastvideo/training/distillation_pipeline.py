@@ -77,7 +77,6 @@ class DistillationPipeline(TrainingPipeline):
         self.vae = self.get_module("vae")
         self.vae.requires_grad_(False)
 
-        assert self.training_args is not None
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
             shift=self.timestep_shift)
@@ -182,7 +181,7 @@ class DistillationPipeline(TrainingPipeline):
         return training_batch
 
     def _generator_forward(self, training_batch: TrainingBatch) -> torch.Tensor:
-        assert training_batch.latents is not None
+
         latents = training_batch.latents
         dtype = latents.dtype
         index = torch.randint(0,
@@ -211,7 +210,7 @@ class DistillationPipeline(TrainingPipeline):
 
         pred_noise = self.transformer(**training_batch.input_kwargs).permute(
             0, 2, 1, 3, 4)
-        assert training_batch.noise_latents is not None
+
         pred_video = pred_noise_to_pred_video(
             pred_noise=pred_noise.flatten(0, 1),
             noise_input_latent=training_batch.noise_latents.flatten(0, 1),
@@ -228,7 +227,7 @@ class DistillationPipeline(TrainingPipeline):
                                      self.num_train_timestep, [1],
                                      device=self.device,
                                      dtype=torch.long)
-            assert self.timestep_shift is not None
+
             timestep = shift_timestep(
                 timestep,
                 self.timestep_shift,  # type: ignore
@@ -256,7 +255,6 @@ class DistillationPipeline(TrainingPipeline):
             fake_score_pred_noise = self.fake_score_transformer(
                 **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
-            assert training_batch.noise_latents is not None
             pred_fake_video = pred_noise_to_pred_video(
                 pred_noise=fake_score_pred_noise.flatten(0, 1),
                 noise_input_latent=training_batch.noise_latents.flatten(0, 1),
@@ -271,7 +269,6 @@ class DistillationPipeline(TrainingPipeline):
             real_score_pred_noise_cond = self.real_score_transformer(
                 **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
-            assert training_batch.noise_latents is not None
             pred_real_video_cond = pred_noise_to_pred_video(
                 pred_noise=real_score_pred_noise_cond.flatten(0, 1),
                 noise_input_latent=training_batch.noise_latents.flatten(0, 1),
@@ -286,7 +283,6 @@ class DistillationPipeline(TrainingPipeline):
             real_score_pred_noise_uncond = self.real_score_transformer(
                 **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
-            assert training_batch.noise_latents is not None
             pred_real_video_uncond = pred_noise_to_pred_video(
                 pred_noise=real_score_pred_noise_uncond.flatten(0, 1),
                 noise_input_latent=training_batch.noise_latents.flatten(0, 1),
@@ -320,7 +316,7 @@ class DistillationPipeline(TrainingPipeline):
                                             self.num_train_timestep, [1],
                                             device=self.device,
                                             dtype=torch.long)
-        assert self.timestep_shift is not None
+
         fake_score_timestep = shift_timestep(
             fake_score_timestep,
             self.timestep_shift,  # type: ignore
@@ -360,7 +356,7 @@ class DistillationPipeline(TrainingPipeline):
 
     def _clip_model_grad_norm_(self, training_batch: TrainingBatch,
                                transformer) -> TrainingBatch:
-        assert self.training_args is not None
+
         max_grad_norm = self.training_args.max_grad_norm
 
         if max_grad_norm is not None:
@@ -392,7 +388,7 @@ class DistillationPipeline(TrainingPipeline):
 
         training_batch.conditional_dict = conditional_dict
         training_batch.unconditional_dict = unconditional_dict
-        assert training_batch.latents is not None
+
         training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
         self.video_latent_shape = training_batch.latents.shape
         training_batch.raw_latent_shape = training_batch.latents.shape
@@ -488,7 +484,7 @@ class DistillationPipeline(TrainingPipeline):
 
     def _resume_from_checkpoint(self) -> None:  #TODO(yongqi)
         """Resume training from checkpoint with distillation models."""
-        assert self.training_args is not None
+
         logger.info("Loading distillation checkpoint from %s",
                     self.training_args.resume_from_checkpoint)
 
@@ -518,12 +514,12 @@ class DistillationPipeline(TrainingPipeline):
                     self.generator_update_interval)
         assert isinstance(self.training_args, TrainingArgs)
         logger.info("  Max gradient norm: %s", self.training_args.max_grad_norm)
-        assert self.real_score_transformer is not None
+
         logger.info(
             "  Real score transformer parameters: %s B",
             sum(p.numel()
                 for p in self.real_score_transformer.parameters()) / 1e9)
-        assert self.fake_score_transformer is not None
+
         logger.info(
             "  Fake score transformer parameters: %s B",
             sum(p.numel()
@@ -531,7 +527,6 @@ class DistillationPipeline(TrainingPipeline):
 
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
-        assert training_args is not None
         training_args.inference_mode = True
         training_args.dit_cpu_offload = True
         if not training_args.log_validation:
@@ -672,8 +667,6 @@ class DistillationPipeline(TrainingPipeline):
 
     def train(self) -> None:
         """Main training loop with distillation-specific logging."""
-        assert self.training_args is not None
-
         assert self.training_args.seed is not None, "seed must be set"
         seed = self.training_args.seed
 

@@ -97,12 +97,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
         self.sp_world_size = self.sp_group.world_size
         self.local_rank = world_group.local_rank
         self.transformer = self.get_module("transformer")
-        assert training_args.seed is not None
         self.seed = training_args.seed
-        assert self.transformer is not None
         self.set_schemas()
 
         # Set random seeds for deterministic training
+        assert self.seed is not None, "seed must be set"
         set_random_seed(self.seed)
         self.transformer.train()
         if training_args.enable_gradient_checkpointing_type is not None:
@@ -151,10 +150,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         self.noise_scheduler = noise_scheduler
 
-        assert training_args.gradient_accumulation_steps is not None
-        assert training_args.sp_size is not None
-        assert training_args.train_sp_batch_size is not None
-        assert training_args.max_train_steps is not None
         self.num_update_steps_per_epoch = math.ceil(
             len(self.train_dataloader) /
             training_args.gradient_accumulation_steps * training_args.sp_size /
@@ -183,10 +178,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         return training_batch
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
-        assert self.training_args is not None
-        assert self.train_loader_iter is not None
-        assert self.train_dataloader is not None
-
         batch = next(self.train_loader_iter, None)  # type: ignore
         if batch is None:
             self.current_epoch += 1
@@ -222,11 +213,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
     def _prepare_dit_inputs(self,
                             training_batch: TrainingBatch) -> TrainingBatch:
-        assert self.training_args is not None
-        assert training_batch.latents is not None
-        assert training_batch.encoder_hidden_states is not None
-        assert training_batch.encoder_attention_mask is not None
-        assert self.noise_random_generator is not None
         latents = training_batch.latents
         batch_size = latents.shape[0]
         noise = torch.randn(latents.shape,
@@ -268,13 +254,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
     def _build_attention_metadata(
             self, training_batch: TrainingBatch) -> TrainingBatch:
-        assert self.training_args is not None
-        assert training_batch.timesteps is not None
-        assert training_batch.raw_latent_shape is not None
         latents_shape = training_batch.raw_latent_shape
         patch_size = self.training_args.pipeline_config.dit_config.patch_size
         current_vsa_sparsity = training_batch.current_vsa_sparsity
-
+        assert latents_shape is not None
+        assert training_batch.timesteps is not None
         if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
             dit_seq_shape = [
                 latents_shape[2] // patch_size[0],
@@ -292,12 +276,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
     def _build_input_kwargs(self,
                             training_batch: TrainingBatch) -> TrainingBatch:
-        assert self.training_args is not None
-        assert training_batch.noisy_model_input is not None
-        assert training_batch.encoder_hidden_states is not None
-        assert training_batch.encoder_attention_mask is not None
-        assert training_batch.timesteps is not None
-
         training_batch.input_kwargs = {
             "hidden_states":
             training_batch.noisy_model_input,
@@ -315,19 +293,10 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
     def _transformer_forward_and_compute_loss(
             self, training_batch: TrainingBatch) -> TrainingBatch:
-        assert self.transformer is not None
-        assert self.training_args is not None
-        assert training_batch.noisy_model_input is not None
-        assert training_batch.latents is not None
-        assert training_batch.noise is not None
-        assert training_batch.sigmas is not None
-
         if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
             assert training_batch.attn_metadata is not None
         else:
             assert training_batch.attn_metadata is None
-
-        assert training_batch.input_kwargs is not None
         input_kwargs = training_batch.input_kwargs
 
         # if 'hunyuan' in self.training_args.model_type:
@@ -341,7 +310,10 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 attn_metadata=training_batch.attn_metadata):
             model_pred = self.transformer(**input_kwargs)
             if self.training_args.precondition_outputs:
+                assert training_batch.sigmas is not None
                 model_pred = training_batch.noisy_model_input - model_pred * training_batch.sigmas
+            assert training_batch.latents is not None
+            assert training_batch.noise is not None
             target = training_batch.latents if self.training_args.precondition_outputs else training_batch.noise - training_batch.latents
 
             # make sure no implicit broadcasting happens
@@ -361,7 +333,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         return training_batch
 
     def _clip_grad_norm(self, training_batch: TrainingBatch) -> TrainingBatch:
-        assert self.training_args is not None
         max_grad_norm = self.training_args.max_grad_norm
 
         # TODO(will): perhaps move this into transformer api so that we can do
@@ -383,8 +354,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         return training_batch
 
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
-        assert self.training_args is not None
-
         training_batch = self._prepare_training(training_batch)
 
         for _ in range(self.training_args.gradient_accumulation_steps):
@@ -423,7 +392,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         return training_batch
 
     def _resume_from_checkpoint(self) -> None:
-        assert self.training_args is not None
         logger.info("Loading checkpoint from %s",
                     self.training_args.resume_from_checkpoint)
         resumed_step = load_checkpoint(
@@ -439,12 +407,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
             self.init_steps = 0
 
     def train(self) -> None:
-
+        assert self.seed is not None, "seed must be set"
         set_random_seed(self.seed)
         logger.info('rank: %s: start training',
                     self.global_rank,
                     local_main_process_only=False)
-        assert self.training_args is not None
         if not self.post_init_called:
             self.post_init()
         num_trainable_params = _get_trainable_params(self.transformer)
@@ -550,9 +517,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
             cleanup_dist_env_and_memory()
 
     def _log_training_info(self) -> None:
-        assert self.training_args is not None
-        assert self.training_args.sp_size is not None
-        assert self.training_args.gradient_accumulation_steps is not None
         total_batch_size = (self.world_size *
                             self.training_args.gradient_accumulation_steps /
                             self.training_args.sp_size *
@@ -593,6 +557,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         sampling_param.width = training_args.num_width
         sampling_param.num_inference_steps = num_inference_steps
         sampling_param.data_type = "video"
+        assert self.seed is not None
         sampling_param.seed = self.seed
 
         latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
@@ -618,7 +583,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         """
         Generate a validation video and log it to wandb to check the quality during training.
         """
-        assert training_args is not None
         training_args.inference_mode = True
         training_args.dit_cpu_offload = True
         if not training_args.log_validation:
