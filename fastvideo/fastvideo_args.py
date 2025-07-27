@@ -655,6 +655,12 @@ class TrainingArgs(FastVideoArgs):
     lora_alpha: int | None = None
     lora_training: bool = False
 
+    # distillation args
+    generator_update_interval: int = 5
+    min_timestep_ratio: float = 0.2
+    max_timestep_ratio: float = 0.98
+    real_score_guidance_scale: float = 3.5
+
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
         provided_args = clean_cli_args(args)
@@ -954,4 +960,28 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--lora-rank", type=int, help="LoRA rank")
         parser.add_argument("--lora-alpha", type=int, help="LoRA alpha")
 
+        # Distillation arguments
+        parser.add_argument("--generator-update-interval",
+                            type=int,
+                            default=TrainingArgs.generator_update_interval,
+                            help="Ratio of student updates to critic updates.")
+        parser.add_argument("--min-timestep-ratio",
+                            type=float,
+                            default=TrainingArgs.min_timestep_ratio,
+                            help="Minimum step ratio")
+        parser.add_argument("--max-timestep-ratio",
+                            type=float,
+                            default=TrainingArgs.max_timestep_ratio,
+                            help="Maximum step ratio")
+        parser.add_argument("--real-score-guidance-scale",
+                            type=float,
+                            default=TrainingArgs.real_score_guidance_scale,
+                            help="Teacher guidance scale")
+
         return parser
+
+
+def parse_int_list(value: str) -> list[int]:
+    if not value:
+        return []
+    return [int(x.strip()) for x in value.split(",")]

@@ -40,7 +40,7 @@ class WanTrainingPipeline(TrainingPipeline):
         args_copy.pipeline_config.vae_config.load_encoder = False
         validation_pipeline = WanPipeline.from_pretrained(
             training_args.model_path,
-            args=None,
+            args=args_copy,  # type: ignore
             inference_mode=True,
             loaded_modules={
                 "transformer": self.get_module("transformer"),

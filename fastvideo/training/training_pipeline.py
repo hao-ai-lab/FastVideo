@@ -262,23 +262,24 @@ class TrainingPipeline(LoRAPipeline, ABC):
         training_batch.timesteps = timesteps
         training_batch.sigmas = sigmas
         training_batch.noise = noise
+        training_batch.raw_latent_shape = training_batch.latents.shape
 
         return training_batch
 
     def _build_attention_metadata(
             self, training_batch: TrainingBatch) -> TrainingBatch:
         assert self.training_args is not None
-        latents = training_batch.latents
-        assert latents is not None
         assert training_batch.timesteps is not None
+        assert training_batch.raw_latent_shape is not None
+        latents_shape = training_batch.raw_latent_shape
         patch_size = self.training_args.pipeline_config.dit_config.patch_size
         current_vsa_sparsity = training_batch.current_vsa_sparsity
 
         if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
             dit_seq_shape = [
-                latents.shape[2] * self.sp_world_size // patch_size[0],
-                latents.shape[3] // patch_size[1],
-                latents.shape[4] // patch_size[2]
+                latents_shape[2] // patch_size[0],
+                latents_shape[3] // patch_size[1],
+                latents_shape[4] // patch_size[2]
             ]
             training_batch.attn_metadata = VideoSparseAttentionMetadata(
                 current_timestep=training_batch.timesteps,
@@ -469,7 +470,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
-        self._log_validation(self.transformer, self.training_args, 1)
+        self._log_validation(self.transformer, self.training_args, 0)
 
         # Train!
         progress_bar = tqdm(

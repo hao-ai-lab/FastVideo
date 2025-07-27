@@ -119,13 +119,13 @@ class DenoisingStage(PipelineStage):
         sp_group = sp_world_size > 1
         if sp_group:
             latents = rearrange(batch.latents,
-                                "b t (n s) h w -> b t n s h w",
+                                "b c (n t) h w -> b c n t h w",
                                 n=sp_world_size).contiguous()
             latents = latents[:, :, rank_in_sp_group, :, :, :]
             batch.latents = latents
             if batch.image_latent is not None:
                 image_latent = rearrange(batch.image_latent,
-                                         "b t (n s) h w -> b t n s h w",
+                                         "b c (n t) h w -> b c n t h w",
                                          n=sp_world_size).contiguous()
                 image_latent = image_latent[:, :, rank_in_sp_group, :, :, :]
                 batch.image_latent = image_latent
@@ -758,9 +758,7 @@ class DmdDenoisingStage(DenoisingStage):
 
                     if i < len(timesteps) - 1:
                         next_timestep = timesteps[i + 1] * torch.ones(
-                            pred_video.shape[:2],
-                            dtype=torch.long,
-                            device=pred_video.device)
+                            [1], dtype=torch.long, device=pred_video.device)
                         noise = torch.randn(video_raw_latent_shape,
                                             device=self.device,
                                             dtype=pred_video.dtype)
@@ -771,8 +769,7 @@ class DmdDenoisingStage(DenoisingStage):
                             noise = noise[:, rank_in_sp_group, :, :, :, :]
                         latents = self.scheduler.add_noise(
                             pred_video.flatten(0, 1), noise.flatten(0, 1),
-                            next_timestep.flatten(0, 1)).unflatten(
-                                0, pred_video.shape[:2])
+                            next_timestep).unflatten(0, pred_video.shape[:2])
                     else:
                         latents = pred_video
 
