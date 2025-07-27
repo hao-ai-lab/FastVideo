@@ -117,15 +117,15 @@ class VideoSparseAttentionImpl(AttentionImpl):
                       t=self.dit_seq_shape[0] // self.sp_size,
                       h=self.dit_seq_shape[1],
                       w=self.dit_seq_shape[2])
-        t_padded_size = self.full_window_size[0] * self.VSA_base_tile_size[0] - self.dit_seq_shape[0]
-        h_padded_size = self.full_window_size[1] * self.VSA_base_tile_size[1] - self.dit_seq_shape[1]
-        w_padded_size = self.full_window_size[2] * self.VSA_base_tile_size[2] - self.dit_seq_shape[2]
+        t_padded_size = self.full_window_size[0] * self.VSA_base_tile_size[0] 
+        h_padded_size = self.full_window_size[1] * self.VSA_base_tile_size[1] 
+        w_padded_size = self.full_window_size[2] * self.VSA_base_tile_size[2]
         
-        x = F.pad(x, (0, 0, 0, w_padded_size, 0, h_padded_size, 0, t_padded_size, 0, 0, 0, 0), mode="constant", value=0)
+        x_padded = torch.zeros((x.shape[0], t_padded_size, h_padded_size, w_padded_size, x.shape[4], x.shape[5]), device=x.device, dtype=x.dtype)
+        x_padded[:, :self.dit_seq_shape[0], :self.dit_seq_shape[1], :self.dit_seq_shape[2], :, :] = x
         
-
         return rearrange(
-            x,
+            x_padded,
             "b (n_t ts_t) (n_h ts_h) (n_w ts_w) h d -> b (n_t n_h n_w ts_t ts_h ts_w) h d",
             n_t=self.full_window_size[0],
             n_h=self.full_window_size[1],
