@@ -3,7 +3,6 @@ import math
 from dataclasses import dataclass
 
 import torch
-import torch.nn.functional as F
 from einops import rearrange
 
 try:
@@ -117,13 +116,17 @@ class VideoSparseAttentionImpl(AttentionImpl):
                       t=self.dit_seq_shape[0] // self.sp_size,
                       h=self.dit_seq_shape[1],
                       w=self.dit_seq_shape[2])
-        t_padded_size = self.full_window_size[0] * self.VSA_base_tile_size[0] 
-        h_padded_size = self.full_window_size[1] * self.VSA_base_tile_size[1] 
+        t_padded_size = self.full_window_size[0] * self.VSA_base_tile_size[0]
+        h_padded_size = self.full_window_size[1] * self.VSA_base_tile_size[1]
         w_padded_size = self.full_window_size[2] * self.VSA_base_tile_size[2]
-        
-        x_padded = torch.zeros((x.shape[0], t_padded_size, h_padded_size, w_padded_size, x.shape[4], x.shape[5]), device=x.device, dtype=x.dtype)
-        x_padded[:, :self.dit_seq_shape[0], :self.dit_seq_shape[1], :self.dit_seq_shape[2], :, :] = x
-        
+
+        x_padded = torch.zeros((x.shape[0], t_padded_size, h_padded_size,
+                                w_padded_size, x.shape[4], x.shape[5]),
+                               device=x.device,
+                               dtype=x.dtype)
+        x_padded[:, :self.dit_seq_shape[0], :self.dit_seq_shape[1], :self.
+                 dit_seq_shape[2], :, :] = x
+
         return rearrange(
             x_padded,
             "b (n_t ts_t) (n_h ts_h) (n_w ts_w) h d -> b (n_t n_h n_w ts_t ts_h ts_w) h d",
@@ -144,7 +147,8 @@ class VideoSparseAttentionImpl(AttentionImpl):
             ts_t=self.VSA_base_tile_size[0],
             ts_h=self.VSA_base_tile_size[1],
             ts_w=self.VSA_base_tile_size[2])
-        x = x[:, :self.dit_seq_shape[0], :self.dit_seq_shape[1], :self.dit_seq_shape[2], :, :]
+        x = x[:, :self.dit_seq_shape[0], :self.dit_seq_shape[1], :self.
+              dit_seq_shape[2], :, :]
         # TODO: this by right should move inside sequence parallel operation
         return rearrange(x,
                          "b (t sp) h w head d -> b (sp t h w) head d",
@@ -173,7 +177,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
         attn_metadata: VideoSparseAttentionMetadata,
     ) -> torch.Tensor:
         return self.untile(output)
-    
+
     def construct_variable_block_sizes(
         self,
         dit_seq_shape: list[int],
@@ -191,32 +195,33 @@ class VideoSparseAttentionImpl(AttentionImpl):
         torch.LongTensor  # shape: [∏ full_window_size]
         """
         # unpack
-        t,  h,  w  = dit_seq_shape
+        t, h, w = dit_seq_shape
         ts_t, ts_h, ts_w = VSA_base_tile_size
-        n_t, n_h, n_w    = full_window_size
+        n_t, n_h, n_w = full_window_size
 
         def _sizes(dim_len: int, tile: int, n_tiles: int) -> torch.LongTensor:
             """Vector with the size of each tile along one dimension."""
-            sizes = torch.full((n_tiles,), tile, dtype=torch.int, device=device)
+            sizes = torch.full((n_tiles, ),
+                               tile,
+                               dtype=torch.int,
+                               device=device)
             # size of last (possibly partial) tile
             remainder = dim_len - (n_tiles - 1) * tile
             sizes[-1] = remainder if remainder > 0 else tile
             return sizes
 
-        t_sizes = _sizes(t,  ts_t, n_t)          # [n_t]
-        h_sizes = _sizes(h,  ts_h, n_h)          # [n_h]
-        w_sizes = _sizes(w,  ts_w, n_w)          # [n_w]
+        t_sizes = _sizes(t, ts_t, n_t)  # [n_t]
+        h_sizes = _sizes(h, ts_h, n_h)  # [n_h]
+        w_sizes = _sizes(w, ts_w, n_w)  # [n_w]
 
         # broadcast‑multiply to get voxels per tile, then flatten
         block_sizes = (
-            t_sizes[:, None, None]            # [n_t, 1,   1]
-            * h_sizes[None, :, None]          # [1,   n_h, 1]
-            * w_sizes[None, None, :]          # [1,   1,   n_w]
-        ).reshape(-1)                         # [n_t * n_h * n_w]
+            t_sizes[:, None, None]  # [n_t, 1,   1]
+            * h_sizes[None, :, None]  # [1,   n_h, 1]
+            * w_sizes[None, None, :]  # [1,   1,   n_w]
+        ).reshape(-1)  # [n_t * n_h * n_w]
 
         return block_sizes
-
-        
 
     def forward(  # type: ignore[override]
         self,
@@ -239,7 +244,11 @@ class VideoSparseAttentionImpl(AttentionImpl):
 
         if video_sparse_attn is None:
             raise NotImplementedError("video_sparse_attn is not installed")
-        variable_block_sizes = self.construct_variable_block_sizes(self.dit_seq_shape, self.full_window_size, self.VSA_base_tile_size, device=query.device)
+        variable_block_sizes = self.construct_variable_block_sizes(
+            self.dit_seq_shape,
+            self.full_window_size,
+            self.VSA_base_tile_size,
+            device=query.device)
         hidden_states = video_sparse_attn(
             query,
             key,
