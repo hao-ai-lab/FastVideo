@@ -21,6 +21,7 @@ from fastvideo.pipelines import ForwardBatch, build_pipeline
 from fastvideo.platforms import current_platform
 from fastvideo.utils import (get_exception_traceback,
                              kill_itself_when_parent_died)
+import fastvideo.envs as envs
 
 logger = init_logger(__name__)
 
@@ -139,7 +140,10 @@ class Worker:
                     fastvideo_args = recv_rpc['kwargs']['fastvideo_args']
                     output_batch = self.execute_forward(forward_batch,
                                                         fastvideo_args)
-                    self.pipe.send({"output_batch": output_batch.output.cpu()})
+                    logging_info = None
+                    if envs.FASTVIDEO_STAGE_LOGGING:
+                        logging_info = output_batch.logging_info
+                    self.pipe.send({"output_batch": output_batch.output.cpu(), "logging_info": logging_info})
                 elif method_name == 'set_lora_adapter':
                     lora_nickname = recv_rpc['kwargs']['lora_nickname']
                     lora_path = recv_rpc['kwargs']['lora_path']
