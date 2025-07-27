@@ -71,9 +71,6 @@ class WanI2VDistillationPipeline(DistillationPipeline):
         self.validation_pipeline = validation_pipeline
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
-        assert self.training_args is not None
-        assert self.train_dataloader is not None
-
         batch = next(self.train_loader_iter, None)  # type: ignore
         if batch is None:
             self.current_epoch += 1
@@ -118,6 +115,7 @@ class WanI2VDistillationPipeline(DistillationPipeline):
         sampling_param.image_path = validation_batch['video_path']
         sampling_param.num_inference_steps = num_inference_steps
         sampling_param.data_type = "video"
+        assert self.seed is not None
         sampling_param.seed = self.seed
 
         latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
@@ -141,13 +139,6 @@ class WanI2VDistillationPipeline(DistillationPipeline):
     def _prepare_dit_inputs(self,
                             training_batch: TrainingBatch) -> TrainingBatch:
         """Override to properly handle I2V concatenation - call parent first, then concatenate image conditioning."""
-        assert self.training_args is not None
-        assert training_batch.latents is not None
-        assert training_batch.encoder_hidden_states is not None
-        assert training_batch.encoder_attention_mask is not None
-        assert self.noise_random_generator is not None
-        assert training_batch.image_latents is not None
-
         # First, call parent method to prepare noise, timesteps, etc. for video latents
         training_batch = super()._prepare_dit_inputs(training_batch)
 
@@ -189,11 +180,8 @@ class WanI2VDistillationPipeline(DistillationPipeline):
 
     def _build_distill_input_kwargs(
             self, noise_input: torch.Tensor, timestep: torch.Tensor,
-            text_dict: dict[str, torch.Tensor] | None,
+            text_dict: dict[str, torch.Tensor],
             training_batch: TrainingBatch) -> TrainingBatch:
-        assert training_batch.image_embeds is not None
-        assert training_batch.image_latents is not None
-
         # Image Embeds for conditioning
         image_embeds = training_batch.image_embeds
         assert torch.isnan(image_embeds).sum() == 0
@@ -204,7 +192,7 @@ class WanI2VDistillationPipeline(DistillationPipeline):
             [noise_input,
              training_batch.image_latents.permute(0, 2, 1, 3, 4)],
             dim=2)
-        assert text_dict is not None
+
         training_batch.input_kwargs = {
             "hidden_states": noisy_model_input.permute(0, 2, 1, 3,
                                                        4),  # bs, c, t, h, w
