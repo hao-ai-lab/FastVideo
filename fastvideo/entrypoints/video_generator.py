@@ -288,6 +288,10 @@ class VideoGenerator:
         """ # type: ignore[attr-defined]
         logger.info(debug_str)
 
+        # Use prompt[:100] for video name
+        if sampling_param.output_video_name is None:
+            sampling_param.output_video_name = prompt[:100]
+
         # Prepare batch
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
