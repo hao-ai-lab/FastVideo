@@ -6,7 +6,7 @@ from typing import Any
 import torch
 from einops import rearrange
 from fastvideo.v1.configs.sample import SamplingParam
-from fastvideo.v1.distributed import get_local_torch_device, get_sp_parallel_rank, get_sp_world_size
+from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.dataset.dataloader.schema import (
     pyarrow_schema_i2v, pyarrow_schema_i2v_validation)
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
@@ -29,7 +29,7 @@ class WanI2VDistillationPipeline(DistillationPipeline):
     A distillation pipeline for Wan that uses a single transformer model.
     The main transformer serves as the student model, and copies are made for teacher and critic.
     """
-    _required_config_modules = ["scheduler", "transformer", "vae", "teacher_transformer", "critic_transformer"]
+    _required_config_modules = ["scheduler", "transformer", "vae", "real_score_transformer", "fake_score_transformer"]
     
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """Initialize Wan-specific scheduler."""
@@ -203,7 +203,7 @@ class WanI2VDistillationPipeline(DistillationPipeline):
             "hidden_states": noisy_model_input.permute(0, 2, 1, 3, 4), # bs, c, t, h, w
             "encoder_hidden_states": text_dict["encoder_hidden_states"],
             "encoder_attention_mask": text_dict["encoder_attention_mask"],
-            "timestep": timestep[0][:1],
+            "timestep": timestep,
             "encoder_hidden_states_image": image_embeds,
             "return_dict":
             False,

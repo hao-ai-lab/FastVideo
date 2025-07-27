@@ -667,7 +667,7 @@ class DmdDenoisingStage(DenoisingStage):
         prompt_embeds = batch.prompt_embeds
         assert torch.isnan(prompt_embeds[0]).sum() == 0
         timesteps = torch.tensor(
-            fastvideo_args.denoising_step_list, dtype=torch.long, device=get_local_torch_device())
+            fastvideo_args.dmd_denoising_steps, dtype=torch.long, device=get_local_torch_device())
 
         # Handle sequence parallelism if enabled
         sp_world_size, rank_in_sp_group = get_sp_world_size(
@@ -686,9 +686,6 @@ class DmdDenoisingStage(DenoisingStage):
                 image_latent = image_latent[:, :, rank_in_sp_group, :, :, :]
                 batch.image_latent = image_latent
 
-        # timesteps = batch.timesteps
-        # num_inference_steps = batch.num_inference_steps
-        
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):

@@ -193,12 +193,11 @@ class TrainingBatch:
     unconditional_dict: dict[str, Any] | None = None
     
     # Distillation losses
-    student_loss: float = 0.0
-    critic_loss: float = 0.0
-    regression_loss: float = 0.0
+    generator_loss: float = 0.0
+    fake_score_loss: float = 0.0
     
     # Training control
     dmd_log_dict: dict[str, Any] = field(default_factory=dict)
-    critic_log_dict: dict[str, Any] = field(default_factory=dict)
+    fake_score_log_dict: dict[str, Any] = field(default_factory=dict)
 
     

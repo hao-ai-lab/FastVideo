@@ -3,15 +3,13 @@ import sys
 from copy import deepcopy
 
 import torch
-from fastvideo.v1.distributed import get_local_torch_device
 from fastvideo.v1.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
 from fastvideo.v1.pipelines.wan.wan_dmd_pipeline import WanDmdPipeline
 from fastvideo.v1.training.distillation_pipeline import DistillationPipeline
-from fastvideo.v1.pipelines.pipeline_batch_info import (ForwardBatch,
-                                                        TrainingBatch)
+from fastvideo.v1.pipelines.pipeline_batch_info import TrainingBatch
 
 from fastvideo.v1.utils import is_vsa_available
 
@@ -25,7 +23,7 @@ class WanDistillationPipeline(DistillationPipeline):
     A distillation pipeline for Wan that uses a single transformer model.
     The main transformer serves as the student model, and copies are made for teacher and critic.
     """
-    _required_config_modules = ["scheduler", "transformer", "vae", "teacher_transformer", "critic_transformer"]
+    _required_config_modules = ["scheduler", "transformer", "vae", "real_score_transformer", "fake_score_transformer"]
     
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """Initialize Wan-specific scheduler."""

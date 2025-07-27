@@ -89,7 +89,7 @@ class FastVideoArgs:
     # Stage verification
     enable_stage_verification: bool = True
     
-    denoising_step_list: List[int] | None = field(default=None)
+    dmd_denoising_steps: List[int] | None = field(default=None)
 
     # model paths for correct deallocation
     model_paths: dict[str, str] = field(default_factory=dict)
@@ -273,9 +273,9 @@ class FastVideoArgs:
             help="Enable input/output verification for pipeline stages",
         )
 
-        parser.add_argument("--denoising-step-list",
+        parser.add_argument("--dmd-denoising-steps",
             type=parse_int_list,
-            default=FastVideoArgs.denoising_step_list,
+            default=FastVideoArgs.dmd_denoising_steps,
             help="Comma-separated list of denoising steps (e.g., '1000,757,522')",
         )
         
@@ -493,10 +493,10 @@ class TrainingArgs(FastVideoArgs):
     VSA_decay_interval_steps: int = 1  # decay interval steps -> 50
     
     # distillation args
-    student_critic_update_ratio: int = 5
-    min_step_ratio: float = 0.2
-    max_step_ratio: float = 0.98
-    teacher_guidance_scale: float = 3.5
+    generator_update_interval: int = 5
+    min_timestep_ratio: float = 0.2
+    max_timestep_ratio: float = 0.98
+    real_score_guidance_scale: float = 3.5
 
     # LoRA training parameters
     lora_rank: int | None = None
@@ -785,21 +785,21 @@ class TrainingArgs(FastVideoArgs):
             help="VSA decay interval steps")
         
         # Distillation arguments
-        parser.add_argument("--student-critic-update-ratio",
+        parser.add_argument("--generator-update-interval",
             type=int,
-            default=TrainingArgs.student_critic_update_ratio,
+            default=TrainingArgs.generator_update_interval,
             help="Ratio of student updates to critic updates.")
-        parser.add_argument("--min-step-ratio",
+        parser.add_argument("--min-timestep-ratio",
             type=float,
-            default=TrainingArgs.min_step_ratio,
+            default=TrainingArgs.min_timestep_ratio,
             help="Minimum step ratio")
-        parser.add_argument("--max-step-ratio",
+        parser.add_argument("--max-timestep-ratio",
             type=float,
-            default=TrainingArgs.max_step_ratio,
+            default=TrainingArgs.max_timestep_ratio,
             help="Maximum step ratio")
-        parser.add_argument("--teacher-guidance-scale",
+        parser.add_argument("--real-score-guidance-scale",
             type=float,
-            default=TrainingArgs.teacher_guidance_scale,
+            default=TrainingArgs.real_score_guidance_scale,
             help="Teacher guidance scale")
 
         # LoRA training parameters
