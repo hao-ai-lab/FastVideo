@@ -32,6 +32,7 @@ def main():
         "wide with interest. The playful yet serene atmosphere is complemented by soft "
         "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
     )
+    prompt = "A vintage train snakes through the mountains, its plume of white steam rising dramatically against the jagged peaks. The cars glint in the late afternoon sun, their deep crimson and gold accents lending a touch of elegance. The tracks carve a precarious path along the cliffside, revealing glimpses of a roaring river far below. Inside, passengers peer out the large windows, their faces lit with awe as the landscape unfolds."
     start_time = time.perf_counter()
     video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, sampling_param=sampling_param)
     end_time = time.perf_counter()
@@ -46,7 +47,7 @@ def main():
         "embodying the raw energy of the wild. Low angle, steady tracking shot, "
         "cinematic.")
     start_time = time.perf_counter()
-    video2 = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=True)
+    video2 = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=False)
     end_time = time.perf_counter()
     gen_time2 = end_time - start_time
 
