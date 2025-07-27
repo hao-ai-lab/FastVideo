@@ -163,7 +163,7 @@ class DistillationPipeline(TrainingPipeline):
 
     def _build_distill_input_kwargs(
             self, noise_input: torch.Tensor, timestep: torch.Tensor,
-            text_dict: dict[str, Any] | None,
+            text_dict: dict[str, torch.Tensor] | None,
             training_batch: TrainingBatch) -> TrainingBatch:
         if text_dict is None:
             raise ValueError(
