@@ -46,6 +46,7 @@ template<int D> struct fwd_globals {
 
     int32_t *__restrict__  q2k_block_sparse_index;
     int32_t *__restrict__  q2k_block_sparse_num;
+    int32_t *__restrict__  block_size;
 };
 
 
@@ -140,6 +141,7 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) { // use block siz
         }
 
         // exp
+        right_fill(att_block, att_block, g.block_size[q2k_block_sparse_index_ptr[kv_idx]], base_types::constants<float>::neg_infty());
         row_max(max_vec, att_block, max_vec);
             
         if constexpr (D == 64) { 
@@ -192,6 +194,8 @@ void fwd_attend_ker(const __grid_constant__ fwd_globals<D> g) { // use block siz
         warpgroup::mma_async_wait();      
 
         // exp
+        right_fill(att_block, att_block, g.block_size[q2k_block_sparse_index_ptr[kv_idx]], base_types::constants<float>::neg_infty());
+
         row_max(max_vec, att_block, max_vec);
             
         if constexpr (D == 64) { 
@@ -267,8 +271,9 @@ struct bwd_prep_globals {
     d_gl  d;
 };
 
+constexpr int PREP_NUM_WARPS = (1);
 template<int D>
-__global__  __launch_bounds__(4*kittens::WARP_THREADS, (D == 64) ? 2 : 1)
+__global__  __launch_bounds__(PREP_NUM_WARPS*kittens::WARP_THREADS, (D == 64) ? 6 / PREP_NUM_WARPS : 3 / PREP_NUM_WARPS)
 void bwd_attend_prep_ker(const __grid_constant__ bwd_prep_globals<D> g) {
     extern __shared__ int __shm[]; 
     tma_swizzle_allocator al((int*)&__shm[0]);
@@ -279,9 +284,9 @@ void bwd_attend_prep_ker(const __grid_constant__ bwd_prep_globals<D> g) {
     using o_tile  = st_bf<4*16, D>;
     using d_tile  = col_vec<st_fl<4*16, D>>;
 
-    og_tile (&og_smem)[4] = al.allocate<og_tile, 4>();
-    o_tile  (&o_smem) [4] = al.allocate<o_tile , 4>();
-    d_tile  (&d_smem) [4] = al.allocate<d_tile , 4>();
+    og_tile (&og_smem)[PREP_NUM_WARPS] = al.allocate<og_tile, PREP_NUM_WARPS>();
+    o_tile  (&o_smem) [PREP_NUM_WARPS] = al.allocate<o_tile , PREP_NUM_WARPS>();
+    d_tile  (&d_smem) [PREP_NUM_WARPS] = al.allocate<d_tile , PREP_NUM_WARPS>();
     
     rt_fl<4*16, D> og_reg, o_reg; 
     col_vec<rt_fl<4*16, D>> d_reg;
@@ -290,13 +295,13 @@ void bwd_attend_prep_ker(const __grid_constant__ bwd_prep_globals<D> g) {
 
     if (threadIdx.x == 0) {
         init_semaphore(smem_semaphore, 0, 1);
-        tma::expect_bytes(smem_semaphore, sizeof(og_smem[0]) * 4 * 2);
+        tma::expect_bytes(smem_semaphore, sizeof(og_smem[0]) * PREP_NUM_WARPS * 2);
     }
     __syncthreads();
 
     if (warpid == 0) {
-        for (int w = 0; w < 4; w++) {
-            coord<o_tile> tile_idx = {blockIdx.z, blockIdx.y, (blockIdx.x * 4) + w, 0};
+        for (int w = 0; w < PREP_NUM_WARPS; w++) {
+            coord<o_tile> tile_idx = {blockIdx.z, blockIdx.y, (blockIdx.x * PREP_NUM_WARPS) + w, 0};
             tma::load_async(o_smem[w],  g.o,  tile_idx, smem_semaphore);
             tma::load_async(og_smem[w], g.og, tile_idx, smem_semaphore);
         }
@@ -311,8 +316,8 @@ void bwd_attend_prep_ker(const __grid_constant__ bwd_prep_globals<D> g) {
     __syncthreads(); 
 
     if (warpid == 0) {
-        for (int w = 0; w < 4; w++) {
-            coord<d_tile> tile_idx = {blockIdx.z, blockIdx.y, 0, (blockIdx.x * 4) + w};
+        for (int w = 0; w < PREP_NUM_WARPS; w++) {
+            coord<d_tile> tile_idx = {blockIdx.z, blockIdx.y, 0, (blockIdx.x * PREP_NUM_WARPS) + w};
             tma::store_async(g.d, d_smem[w], tile_idx);
         }
     }
@@ -374,6 +379,7 @@ struct bwd_globals {
 
     int32_t *__restrict__ k2q_block_sparse_index;
     int32_t *__restrict__ k2q_block_sparse_num;
+    int32_t *__restrict__ block_size;
 };
 
 __device__ static inline void
@@ -496,7 +502,7 @@ void bwd_attend_ker(const __grid_constant__ bwd_globals<D> g) {
     
     // wait for kv
     wait(kv_b, 0);
-
+    int fill_start = g.block_size[blockIdx.x] - 16 * kittens::warpid();
     for (int qo_idx = 0; qo_idx < qo_blocks - 1; qo_idx++) {
         // preload q index
         store_qg_block_index = load_q_block_index;
@@ -515,7 +521,8 @@ void bwd_attend_ker(const __grid_constant__ bwd_globals<D> g) {
 
         if constexpr (D == 64) { mul(s_block_t, s_block_t, 1.44269504089f*0.125f); }
         else                   { mul(s_block_t, s_block_t, 1.44269504089f*0.08838834764f); }
-    
+
+        lower_fill(s_block_t, s_block_t, fill_start, base_types::constants<float>::neg_infty());
         exp2(s_block_t, s_block_t); // P_i
         copy(p_block_t, s_block_t);
         copy(p_block_t_mma, s_block_t);
@@ -593,7 +600,7 @@ void bwd_attend_ker(const __grid_constant__ bwd_globals<D> g) {
 
         if constexpr (D == 64) { mul(s_block_t, s_block_t, 1.44269504089f*0.125f); }
         else                   { mul(s_block_t, s_block_t, 1.44269504089f*0.08838834764f); }
-    
+        lower_fill(s_block_t, s_block_t, fill_start, base_types::constants<float>::neg_infty());
         exp2(s_block_t, s_block_t); // P_i
         copy(p_block_t, s_block_t);
         copy(p_block_t_mma, s_block_t);
@@ -659,7 +666,14 @@ void bwd_attend_ker(const __grid_constant__ bwd_globals<D> g) {
 #include <iostream>
 
 std::vector<torch::Tensor> 
-block_sparse_attention_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor q2k_block_sparse_index, torch::Tensor q2k_block_sparse_num)
+block_sparse_attention_forward(
+    torch::Tensor q, 
+    torch::Tensor k, 
+    torch::Tensor v, 
+    torch::Tensor q2k_block_sparse_index, 
+    torch::Tensor q2k_block_sparse_num, 
+    torch::Tensor block_size
+)
 {
     CHECK_INPUT(q);
     CHECK_INPUT(k);
@@ -671,6 +685,10 @@ block_sparse_attention_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v
     auto qo_heads = q.size(1);
     auto kv_heads = k.size(1);
     auto max_kv_blocks_per_q = q2k_block_sparse_index.size(3);
+    auto num_q_blocks = block_size.size(0);
+    TORCH_CHECK(batch==1, "Batch size dim will be removed in the future, please set batch to 1");
+    TORCH_CHECK(num_q_blocks * 64 == seq_len, "This kernel supports variable block size, but it assumes the input sequence is properly padded.");
+    TORCH_CHECK(num_q_blocks == q2k_block_sparse_index.size(2), "Number of Q blocks does not match between q2k_block_sparse_index and block_size");
     // check to see that these dimensions match for all inputs
     TORCH_CHECK(q.size(0) == batch, "Q batch dimension - idx 0 - must match for all inputs");
     TORCH_CHECK(k.size(0) == batch, "K batch dimension - idx 0 - must match for all inputs");
@@ -750,7 +768,19 @@ block_sparse_attention_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v
         l_global lg_arg{d_l, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,   static_cast<unsigned int>(seq_len)};
         o_global og_arg{d_o, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), 64U};
 
-        globals g{qg_arg, kg_arg, vg_arg, lg_arg, og_arg, static_cast<int>(seq_len), static_cast<int>(hr), static_cast<int>(max_kv_blocks_per_q), reinterpret_cast<int32_t*>(q2k_block_sparse_index.data_ptr()), reinterpret_cast<int32_t*>(q2k_block_sparse_num.data_ptr())};
+        globals g{
+            qg_arg, 
+            kg_arg, 
+            vg_arg, 
+            lg_arg, 
+            og_arg, 
+            static_cast<int>(seq_len), 
+            static_cast<int>(hr), 
+            static_cast<int>(max_kv_blocks_per_q), 
+            reinterpret_cast<int32_t*>(q2k_block_sparse_index.data_ptr()), 
+            reinterpret_cast<int32_t*>(q2k_block_sparse_num.data_ptr()),
+            reinterpret_cast<int32_t*>(block_size.data_ptr())
+        };
 
         constexpr int mem_size = 54000;
 
@@ -789,7 +819,19 @@ block_sparse_attention_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v
         l_global lg_arg{d_l, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,   static_cast<unsigned int>(seq_len)};
         o_global og_arg{d_o, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), 128U};
 
-        globals g{qg_arg, kg_arg, vg_arg, lg_arg, og_arg, static_cast<int>(seq_len), static_cast<int>(hr), static_cast<int>(max_kv_blocks_per_q), reinterpret_cast<int32_t*>(q2k_block_sparse_index.data_ptr()), reinterpret_cast<int32_t*>(q2k_block_sparse_num.data_ptr())};
+        globals g{
+            qg_arg, 
+            kg_arg, 
+            vg_arg, 
+            lg_arg, 
+            og_arg, 
+            static_cast<int>(seq_len), 
+            static_cast<int>(hr), 
+            static_cast<int>(max_kv_blocks_per_q), 
+            reinterpret_cast<int32_t*>(q2k_block_sparse_index.data_ptr()), 
+            reinterpret_cast<int32_t*>(q2k_block_sparse_num.data_ptr()),
+            reinterpret_cast<int32_t*>(block_size.data_ptr())
+        };
 
         constexpr int mem_size = 54000;
 
@@ -819,7 +861,8 @@ block_sparse_attention_backward(torch::Tensor q,
                    torch::Tensor l_vec,
                    torch::Tensor og,
                    torch::Tensor k2q_block_sparse_index,
-                   torch::Tensor k2q_block_sparse_num)
+                   torch::Tensor k2q_block_sparse_num,
+                   torch::Tensor block_size)
 {
     CHECK_INPUT(q);
     CHECK_INPUT(k);
@@ -832,7 +875,7 @@ block_sparse_attention_backward(torch::Tensor q,
     auto seq_len  = q.size(2);
     auto head_dim = q.size(3);
     auto max_q_blocks_per_kv = k2q_block_sparse_index.size(3);
-
+    TORCH_CHECK(k2q_block_sparse_index.size(2) == block_size.size(0), "k2q_block_sparse_index.size(2) must match block_size.size(0)");
     // check to see that these dimensions match for all inputs
     TORCH_CHECK(q.size(0)     == batch, "Q  batch dimension - idx 0 - must match for all inputs");
     TORCH_CHECK(k.size(0)     == batch, "K  batch dimension - idx 0 - must match for all inputs");
@@ -919,7 +962,7 @@ block_sparse_attention_backward(torch::Tensor q,
     float* d_vg = reinterpret_cast<float*>(vg_ptr);
 
     constexpr int mem_size = kittens::MAX_SHARED_MEMORY; 
-    int threads  = 4 * kittens::WARP_THREADS;
+    int threads  = PREP_NUM_WARPS * kittens::WARP_THREADS;
 
     //cudadevicesynchronize();
     const c10::cuda::OptionalCUDAGuard device_guard(q.device());    
@@ -928,7 +971,7 @@ block_sparse_attention_backward(torch::Tensor q,
     //  cudaStreamSynchronize(stream);
 
     // TORCH_CHECK(seq_len % (4*kittens::TILE_DIM*4) == 0, "sequence length must be divisible by 256");
-    dim3 grid_bwd(seq_len/(4*kittens::TILE_ROW_DIM<bf16>*4), qo_heads, batch);
+    dim3 grid_bwd(seq_len/(PREP_NUM_WARPS*kittens::TILE_ROW_DIM<bf16>*4), qo_heads, batch);
 
     if (head_dim == 64)  {
         using og_tile = st_bf<4*16, 64>;
@@ -1003,8 +1046,8 @@ block_sparse_attention_backward(torch::Tensor q,
                         static_cast<int>(hr),
                         static_cast<int>(max_q_blocks_per_kv),
                         reinterpret_cast<int32_t*>(k2q_block_sparse_index.data_ptr()),
-                        reinterpret_cast<int32_t*>(k2q_block_sparse_num.data_ptr())
-                        };
+                        reinterpret_cast<int32_t*>(k2q_block_sparse_num.data_ptr()),
+                        reinterpret_cast<int32_t*>(block_size.data_ptr())};
 
         dim3 grid_bwd_2(seq_len/64, qo_heads, batch);
         threads = 128;
@@ -1107,8 +1150,8 @@ block_sparse_attention_backward(torch::Tensor q,
                         static_cast<int>(hr),
                         static_cast<int>(max_q_blocks_per_kv),
                         reinterpret_cast<int32_t*>(k2q_block_sparse_index.data_ptr()),
-                        reinterpret_cast<int32_t*>(k2q_block_sparse_num.data_ptr())
-                        };
+                        reinterpret_cast<int32_t*>(k2q_block_sparse_num.data_ptr()),
+                        reinterpret_cast<int32_t*>(block_size.data_ptr())};
 
         dim3 grid_bwd_2(seq_len/64, qo_heads, batch);
         threads = 128;
