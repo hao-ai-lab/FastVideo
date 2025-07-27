@@ -31,15 +31,22 @@ class MultiprocExecutor(Executor):
 
         self.workers: list[BaseProcess] = []
         self.worker_pipes = []
-        self.master_port = None
-
-        for port in range(29503, 65535):
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                if s.connect_ex(('localhost', port)) != 0:
-                    self.master_port = port
-                    break
-        if self.master_port is None:
-            raise ValueError("No unused port found to use as master port")
+        
+        # Check if master_port is provided in fastvideo_args
+        if hasattr(self.fastvideo_args, 'master_port') and self.fastvideo_args.master_port is not None:
+            self.master_port = self.fastvideo_args.master_port
+            logger.info(f"Using provided master port: {self.master_port}")
+        else:
+            # Auto-find available port
+            self.master_port = None
+            for port in range(29503, 65535):
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    if s.connect_ex(('localhost', port)) != 0:
+                        self.master_port = port
+                        break
+            if self.master_port is None:
+                raise ValueError("No unused port found to use as master port")
+            logger.info(f"Auto-selected master port: {self.master_port}")
 
         # Create pipes and start workers
         for rank in range(self.world_size):

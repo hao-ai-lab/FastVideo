@@ -139,6 +139,9 @@ class FastVideoArgs:
     # VSA parameters
     VSA_sparsity: float = 0.0  # inference/validation sparsity
 
+    # Master port for distributed training/inference
+    master_port: int | None = None
+
     # Stage verification
     enable_stage_verification: bool = True
 
@@ -358,6 +361,14 @@ class FastVideoArgs:
             type=float,
             default=FastVideoArgs.VSA_sparsity,
             help="Validation sparsity for VSA",
+        )
+
+        # Master port for distributed training/inference
+        parser.add_argument(
+            "--master-port",
+            type=int,
+            default=FastVideoArgs.master_port,
+            help="Master port for distributed training/inference",
         )
 
         # Stage verification
