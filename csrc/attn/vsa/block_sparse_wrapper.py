@@ -23,6 +23,7 @@ def block_sparse_attn(
     k_padded = k_padded.contiguous()
     v_padded = v_padded.contiguous()
     q2k_block_sparse_index, q2k_block_sparse_num = map_to_index(block_map)
+    variable_block_sizes = variable_block_sizes.int()
     o_padded, lse_padded = block_sparse_fwd(q_padded, k_padded, v_padded, q2k_block_sparse_index, q2k_block_sparse_num, variable_block_sizes)
     return o_padded, lse_padded
 

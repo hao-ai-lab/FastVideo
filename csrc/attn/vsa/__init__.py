@@ -23,7 +23,7 @@ def torch_attention(q, k, v) -> Tuple[torch.Tensor, torch.Tensor]:
     return output, QK
 
 
-def video_sparse_attn(q, k, v, topk, block_size, compress_attn_weight=None):
+def video_sparse_attn(q, k, v, variable_block_sizes, topk, block_size, compress_attn_weight=None):
     """
     q: [batch_size, num_heads, seq_len, head_dim]
     k: [batch_size, num_heads, seq_len, head_dim]
@@ -33,7 +33,7 @@ def video_sparse_attn(q, k, v, topk, block_size, compress_attn_weight=None):
     video_shape: tuple of (T, H, W)
     compress_attn_weight: [batch_size, num_heads, seq_len, head_dim]
     select_attn_weight: [batch_size, num_heads, seq_len, head_dim]
-    
+    NOTE: We assume q, k, v is zero padded!!
     V1 of sparse attention. Include compress attn and sparse attn branch, use average pooling to compress. 
     Assume q, k, v is flattened in this way: [batch_size, num_heads, T//block_size[0], H//block_size[1], W//block_size[2], block_size[0], block_size[1], block_size[2]]
     """
@@ -42,16 +42,16 @@ def video_sparse_attn(q, k, v, topk, block_size, compress_attn_weight=None):
         block_size = (block_size, block_size, block_size)
 
     block_elements = block_size[0] * block_size[1] * block_size[2]
-    assert block_elements % 64 == 0 and block_elements >= 64
+    assert block_elements == 64
     assert q.shape[2] % block_elements == 0
     batch_size, num_heads, seq_len, head_dim = q.shape
     # compress attn
-    q_compress = q.view(batch_size, num_heads, seq_len // block_elements,
-                        block_elements, head_dim).mean(dim=3)
-    k_compress = k.view(batch_size, num_heads, seq_len // block_elements,
-                        block_elements, head_dim).mean(dim=3)
-    v_compress = v.view(batch_size, num_heads, seq_len // block_elements,
-                        block_elements, head_dim).mean(dim=3)
+    q_compress = (q.view(batch_size, num_heads, seq_len // block_elements,
+                        block_elements, head_dim).float().sum(dim=3) / variable_block_sizes.view(1, 1, -1, 1)).to(q.dtype)
+    k_compress = (k.view(batch_size, num_heads, seq_len // block_elements,
+                        block_elements, head_dim).float().sum(dim=3) / variable_block_sizes.view(1, 1, -1, 1)).to(k.dtype)
+    v_compress = (v.view(batch_size, num_heads, seq_len // block_elements,
+                        block_elements, head_dim).float().sum(dim=3) / variable_block_sizes.view(1, 1, -1, 1)).to(v.dtype)
 
     output_compress, block_attn_score = torch_attention(q_compress, k_compress,
                                                         v_compress)
@@ -63,65 +63,13 @@ def video_sparse_attn(q, k, v, topk, block_size, compress_attn_weight=None):
                                              1).view(batch_size, num_heads,
                                                      seq_len, head_dim)
 
-    q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num = generate_topk_block_sparse_pattern(
-        block_attn_score, topk)
-
-    output_select = block_sparse_attn(q, k, v, q2k_block_sparse_index,
-                                      q2k_block_sparse_num,
-                                      k2q_block_sparse_index,
-                                      k2q_block_sparse_num)
+    topK_indices = torch.topk(block_attn_score, topk, dim=-1).indices
+    block_mask = torch.zeros_like(block_attn_score, dtype=torch.bool).scatter_(-1, topK_indices, True)
+    output_select, _ = block_sparse_attn(q, k, v, block_mask, variable_block_sizes)
 
     if compress_attn_weight is not None:
         final_output = output_compress * compress_attn_weight + output_select
     else:
         final_output = output_compress + output_select
     return final_output
-
-
-def generate_topk_block_sparse_pattern(block_attn_score: torch.Tensor,
-                                       topk: int):
-    """
-    Generate a block sparse pattern where each q block attends to exactly topk kv blocks,
-    based on the provided attention scores.
-    
-    Args:
-        block_attn_score: [bs, h, num_q_blocks, num_kv_blocks]
-            Attention scores between query and key blocks
-        topk: int
-            Number of kv blocks each q block attends to
-        
-    Returns:
-        q2k_block_sparse_index: [bs, h, num_q_blocks, topk]
-            Contains the indices of kv blocks that each q block attends to.
-        q2k_block_sparse_num: [bs, h, num_q_blocks]
-            Contains the number of kv blocks that each q block attends to (all equal to topk).
-        k2q_block_sparse_index: [bs, h, num_kv_blocks, max_q_per_kv]
-            Contains the indices of q blocks that attend to each kv block.
-        k2q_block_sparse_num: [bs, h, num_kv_blocks]
-            Contains the number of q blocks that attend to each kv block.
-    """
-    device = block_attn_score.device
-    # Extract dimensions from block_attn_score
-    bs, h, num_q_blocks, num_kv_blocks = block_attn_score.shape
-
-    sorted_result = torch.sort(block_attn_score, dim=-1, descending=True)
-
-    sorted_indice = sorted_result.indices
-
-    q2k_block_sparse_index, _ = torch.sort(sorted_indice[:, :, :, :topk],
-                                           dim=-1)
-    q2k_block_sparse_index = q2k_block_sparse_index.to(dtype=torch.int32)
-    q2k_block_sparse_num = torch.full((bs, h, num_q_blocks),
-                                      topk,
-                                      device=device,
-                                      dtype=torch.int32)
-
-    block_map = topk_index_to_map(q2k_block_sparse_index,
-                                  num_kv_blocks,
-                                  transpose_map=True)
-    k2q_block_sparse_index, k2q_block_sparse_num = map_to_index(
-        block_map.transpose(2, 3))
-
-    return q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num
-
 
