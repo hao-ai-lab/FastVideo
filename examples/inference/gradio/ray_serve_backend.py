@@ -49,6 +49,7 @@ class FastVideoAPI:
         
         # Ensure output directory exists
         os.makedirs(output_path, exist_ok=True)
+        self._initialize_model() # Ensure model is initialized
     
     def _initialize_model(self):
         if self.generator is None:
@@ -74,8 +75,6 @@ class FastVideoAPI:
     @app.post("/generate_video", response_model=VideoGenerationResponse)
     async def generate_video(self, request: VideoGenerationRequest) -> VideoGenerationResponse:
         try:
-            self._initialize_model() # Ensure model is initialized
-            
             # Create a copy of default parameters
             params = deepcopy(self.default_params)
             
