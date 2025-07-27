@@ -34,8 +34,8 @@ app = FastAPI()
 
 
 @serve.deployment(
-    num_replicas=1,
-    ray_actor_options={"num_gpus": 1},
+    num_replicas=16,
+    ray_actor_options={"num_cpus": 10, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
 )
 @serve.ingress(app)
 class FastVideoAPI:
@@ -109,9 +109,10 @@ class FastVideoAPI:
             # Store desired video name inside the SamplingParam to avoid unknown kwarg errors
             setattr(params, "output_video_name", safe_prompt)
             # Generate the video with proper output path and filename
-            self.generator.generate_video(
+            video = self.generator.generate_video(
                 prompt=request.prompt,
                 sampling_param=params,
+                save_video=False,
             )
             
             # The actual output path where the video was saved

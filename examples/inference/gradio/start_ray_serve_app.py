@@ -18,7 +18,7 @@ project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 
-def check_backend_health(backend_url: str, max_retries: int = 30) -> bool:
+def check_backend_health(backend_url: str, max_retries: int = 100) -> bool:
     """Check if the backend is healthy"""
     health_url = f"{backend_url}/health"
     
