@@ -576,3 +576,12 @@ def pred_noise_to_pred_video(pred_noise: torch.Tensor,
     sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
     pred_video = noise_input_latent - sigma_t * pred_noise
     return pred_video.to(dtype)
+
+
+def shift_timestep(timestep: torch.Tensor, shift: float,
+                   num_train_timestep: float) -> torch.Tensor:
+    if shift == 1:
+        return timestep
+    t = timestep / num_train_timestep
+    denominator = 1 + (shift - 1) * t
+    return num_train_timestep * (shift * t / denominator)
