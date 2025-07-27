@@ -91,7 +91,6 @@ def check_correctness(h, d, num_blocks, k, mean, std, num_iterations=20, error_m
     block_mask = generate_block_sparse_mask_for_function(h, num_blocks, k, device)
     full_mask = create_full_mask_from_block_mask(block_mask, variable_block_sizes, device)
     for _ in range(num_iterations):
-        torch.manual_seed(0)
         Q = generate_tensor((1, h, S, d), mean, std, torch.bfloat16, device)
         K = generate_tensor((1, h, S, d), mean, std, torch.bfloat16, device)
         V = generate_tensor((1, h, S, d), mean, std, torch.bfloat16, device)

@@ -87,7 +87,7 @@ def _block_sparse_attn_backward_fake(
 def backward(ctx, grad_output1, grad_output2):
     q_padded, k_padded, v_padded, o_padded, lse_padded, block_map, variable_block_sizes= ctx.saved_tensors
     dq, dk, dv = block_sparse_attn_backward(grad_output1, q_padded, k_padded, v_padded, o_padded, lse_padded, block_map, variable_block_sizes)
-    return dq, dk, dv, None, None, None, None, None, None
+    return dq, dk, dv, None, None
 
 def setup_context(ctx, inputs, output):
     q_padded, k_padded, v_padded, block_map, variable_block_sizes = inputs
