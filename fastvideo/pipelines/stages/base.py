@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -145,8 +146,7 @@ class PipelineStage(ABC):
                 raise
 
         # Execute the actual stage logic
-        # envs.ENABLE_STAGE_LOGGING
-        if False:
+        if envs.FASTVIDEO_STAGE_LOGGING:
             logger.info("[%s] Starting execution", stage_name)
             start_time = time.perf_counter()
 

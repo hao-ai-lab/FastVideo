@@ -36,7 +36,7 @@ class WanTrainingPipeline(TrainingPipeline):
         args_copy = deepcopy(training_args)
 
         args_copy.inference_mode = True
-        args_copy.use_cpu_offload = True
+        args_copy.dit_cpu_offload = True
         args_copy.pipeline_config.vae_config.load_encoder = False
         validation_pipeline = WanPipeline.from_pretrained(
             training_args.model_path,
@@ -70,5 +70,5 @@ if __name__ == "__main__":
     parser = TrainingArgs.add_cli_args(parser)
     parser = FastVideoArgs.add_cli_args(parser)
     args = parser.parse_args()
-    args.use_cpu_offload = False
+    args.dit_cpu_offload = False
     main(args)

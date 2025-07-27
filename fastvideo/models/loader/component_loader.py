@@ -247,10 +247,10 @@ class TextEncoderLoader(ComponentLoader):
                    target_device: torch.device,
                    fastvideo_args: FastVideoArgs,
                    dtype: str = "fp16"):
-        use_cpu_offload = fastvideo_args.text_encoder_offload and len(
+        use_cpu_offload = fastvideo_args.text_encoder_cpu_offload and len(
             getattr(model_config, "_fsdp_shard_conditions", [])) > 0
 
-        if fastvideo_args.text_encoder_offload:
+        if fastvideo_args.text_encoder_cpu_offload:
             target_device = torch.device(
                 "mps") if current_platform.is_mps() else torch.device("cpu")
 
@@ -324,7 +324,10 @@ class ImageEncoderLoader(TextEncoderLoader):
         encoder_config = fastvideo_args.pipeline_config.image_encoder_config
         encoder_config.update_model_arch(model_config)
 
-        target_device = get_local_torch_device()
+        if fastvideo_args.image_encoder_cpu_offload:
+            target_device = torch.device("mps") if current_platform.is_mps() else torch.device("cpu")
+        else:
+            target_device = get_local_torch_device()
         # TODO(will): add support for other dtypes
         return self.load_model(
             model_path, encoder_config, target_device, fastvideo_args,
@@ -375,10 +378,15 @@ class VAELoader(ComponentLoader):
         vae_config = fastvideo_args.pipeline_config.vae_config
         vae_config.update_model_arch(config)
 
+        if fastvideo_args.vae_cpu_offload:
+            target_device = torch.device("mps") if current_platform.is_mps() else torch.device("cpu")
+        else:
+            target_device = get_local_torch_device()
+
         with set_default_torch_dtype(PRECISION_TO_TYPE[
                 fastvideo_args.pipeline_config.vae_precision]):
             vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
-            vae = vae_cls(vae_config).to(get_local_torch_device())
+            vae = vae_cls(vae_config).to(target_device)
 
         # Find all safetensors files
         safetensors_list = glob.glob(
@@ -441,7 +449,7 @@ class TransformerLoader(ComponentLoader):
             device=get_local_torch_device(),
             hsdp_replicate_dim=fastvideo_args.hsdp_replicate_dim,
             hsdp_shard_dim=fastvideo_args.hsdp_shard_dim,
-            cpu_offload=fastvideo_args.use_cpu_offload,
+            cpu_offload=fastvideo_args.dit_cpu_offload,
             fsdp_inference=fastvideo_args.use_fsdp_inference,
             # TODO(will): make these configurable
             param_dtype=torch.bfloat16,

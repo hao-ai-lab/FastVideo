@@ -16,8 +16,8 @@ def main():
         # if num_gpus > 1, FastVideo will automatically handle distributed setup
         pipeline_config=pipeline_config,
         use_fsdp_inference=False,      # Disable FSDP for MPS
-        use_cpu_offload=True,          
-        text_encoder_offload=True,    
+        dit_cpu_offload=True,          
+        text_encoder_cpu_offload=True,    
         pin_cpu_memory=True,           
         disable_autocast=False,        
         num_gpus=1, 

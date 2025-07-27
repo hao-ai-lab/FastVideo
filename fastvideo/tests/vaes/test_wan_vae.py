@@ -32,6 +32,7 @@ def test_wan_vae():
     precision_str = "bf16"
     args = FastVideoArgs(model_path=VAE_PATH, pipeline_config=PipelineConfig(vae_config=WanVAEConfig(), vae_precision=precision_str))
     args.device = device
+    args.vae_cpu_offload = False
 
     loader = VAELoader()
     model2 = loader.load(VAE_PATH, args)

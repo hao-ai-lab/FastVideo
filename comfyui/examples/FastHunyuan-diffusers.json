@@ -310,7 +310,7 @@
           "value": -99999,
           "cachedValue": "fp16"
         },
-        "use_cpu_offload": {
+        "dit_cpu_offload": {
           "isAuto": true,
           "value": -99999,
           "cachedValue": true

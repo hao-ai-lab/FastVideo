@@ -619,7 +619,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         """
         assert training_args is not None
         training_args.inference_mode = True
-        training_args.use_cpu_offload = True
+        training_args.dit_cpu_offload = True
         if not training_args.log_validation:
             return
         if self.validation_pipeline is None:

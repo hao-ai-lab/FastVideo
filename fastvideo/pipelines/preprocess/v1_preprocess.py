@@ -23,7 +23,7 @@ def main(args) -> None:
     assert num_gpus == 1, "Only support 1 GPU"
     pipeline_config = PipelineConfig.from_pretrained(args.model_path)
     kwargs = {
-        "use_cpu_offload": False,
+        "dit_cpu_offload": False,
         "vae_precision": "fp32",
         "vae_config": WanVAEConfig(load_encoder=True, load_decoder=False),
     }

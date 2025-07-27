@@ -67,7 +67,7 @@ class ImageEncodingStage(PipelineStage):
 
         batch.image_embeds.append(image_embeds)
 
-        if fastvideo_args.use_cpu_offload:
+        if fastvideo_args.image_encoder_cpu_offload:
             self.image_encoder.to('cpu')
 
         return batch

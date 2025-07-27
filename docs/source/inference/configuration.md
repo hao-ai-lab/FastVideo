@@ -27,7 +27,7 @@ def main():
     model_name = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
     config = PipelineConfig.from_pretrained(model_name)
     config.vae_precision = "fp16"
-    config.use_cpu_offload = True
+    config.dit_cpu_offload = True
 
     # Create the generator
     generator = VideoGenerator.from_pretrained(

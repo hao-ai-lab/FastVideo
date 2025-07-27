@@ -105,7 +105,7 @@ class VideoGenerator:
                 "precision": (["fp16", "bf16"], {
                     "default": "fp16"
                 }),
-                "use_cpu_offload": ([True, False], {
+                "dit_cpu_offload": ([True, False], {
                     "default": False
                 }),
             }
@@ -204,7 +204,7 @@ class VideoGenerator:
         vae_config=None,
         text_encoder_config=None,
         dit_config=None,
-        use_cpu_offload=None,
+        dit_cpu_offload=None,
     ):
         print('Running FastVideo inference')
 
@@ -259,8 +259,8 @@ class VideoGenerator:
             raw_generation_args['tp_size'] = tp_size
         if sp_size is not None:
             raw_generation_args['sp_size'] = sp_size
-        if use_cpu_offload is not None:
-            raw_generation_args['use_cpu_offload'] = use_cpu_offload
+        if dit_cpu_offload is not None:
+            raw_generation_args['dit_cpu_offload'] = dit_cpu_offload
 
         generation_args = {
             k: v

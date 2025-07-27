@@ -43,6 +43,7 @@ def test_hunyuan_vae():
     precision_str = "bf16"
     args = FastVideoArgs(model_path=VAE_PATH, pipeline_config=PipelineConfig(vae_config=HunyuanVAEConfig(), vae_precision=precision_str))
     args.device = device
+    args.vae_cpu_offload = False
 
     loader = VAELoader()
     model = loader.load(VAE_PATH, args)

@@ -98,15 +98,15 @@ class VideoGenerator:
 
     def generate_video(
         self,
-        prompt: str,
+        prompt: str | None = None,
         sampling_param: SamplingParam | None = None,
         **kwargs,
-    ) -> dict[str, Any] | list[np.ndarray]:
+    ) -> dict[str, Any] | list[np.ndarray] | list[dict[str, Any]]:
         """
         Generate a video based on the given prompt.
         
         Args:
-            prompt: The prompt to use for generation
+            prompt: The prompt to use for generation (optional if prompt_txt is provided)
             negative_prompt: The negative prompt to use (overrides the one in fastvideo_args)
             output_path: Path to save the video (overrides the one in fastvideo_args)
             output_video_name: Name of the video file to save. Default is the first 100 characters of the prompt.
@@ -123,8 +123,73 @@ class VideoGenerator:
             callback_steps: Number of steps between each callback
             
         Returns:
-            Either the output dictionary or the list of frames depending on return_frames
+            Either the output dictionary, list of frames, or list of results for batch processing
         """
+        # Handle batch processing from text file
+        if self.fastvideo_args.prompt_txt is not None:
+            prompt_txt_path = self.fastvideo_args.prompt_txt
+            if not os.path.exists(prompt_txt_path):
+                raise FileNotFoundError(
+                    f"Prompt text file not found: {prompt_txt_path}")
+
+            # Read prompts from file
+            with open(prompt_txt_path, encoding='utf-8') as f:
+                prompts = [line.strip() for line in f if line.strip()]
+
+            if not prompts:
+                raise ValueError(f"No prompts found in file: {prompt_txt_path}")
+
+            logger.info("Found %d prompts in %s", len(prompts), prompt_txt_path)
+
+            if sampling_param is not None:
+                original_output_video_name = sampling_param.output_video_name
+            else:
+                original_output_video_name = None
+
+            results = []
+            for i, batch_prompt in enumerate(prompts):
+                logger.info("Processing prompt %d/%d: %s...", i + 1,
+                            len(prompts), batch_prompt[:100])
+
+                try:
+                    # Generate video for this prompt using the same logic below
+                    if sampling_param is not None and original_output_video_name is not None:
+                        sampling_param.output_video_name = original_output_video_name + f"_{i}"
+                    result = self._generate_single_video(
+                        batch_prompt, sampling_param, **kwargs)
+
+                    # Add prompt info to result
+                    if isinstance(result, dict):
+                        result["prompt_index"] = i
+                        result["prompt"] = batch_prompt
+
+                    results.append(result)
+                    logger.info("Successfully generated video for prompt %d",
+                                i + 1)
+
+                except Exception as e:
+                    logger.error("Failed to generate video for prompt %d: %s",
+                                 i + 1, e)
+                    continue
+
+            logger.info(
+                "Completed batch processing. Generated %d videos successfully.",
+                len(results))
+            return results
+
+        # Single prompt generation (original behavior)
+        if prompt is None:
+            raise ValueError("Either prompt or prompt_txt must be provided")
+
+        return self._generate_single_video(prompt, sampling_param, **kwargs)
+
+    def _generate_single_video(
+        self,
+        prompt: str,
+        sampling_param: SamplingParam | None = None,
+        **kwargs,
+    ) -> dict[str, Any] | list[np.ndarray]:
+        """Internal method for single video generation"""
         # Create a copy of inference args to avoid modifying the original
         fastvideo_args = self.fastvideo_args
         pipeline_config = fastvideo_args.pipeline_config
@@ -222,6 +287,11 @@ class VideoGenerator:
                   output_path: {sampling_param.output_path}
         """ # type: ignore[attr-defined]
         logger.info(debug_str)
+
+        # Use prompt[:100] for video name
+        if sampling_param.output_video_name is None:
+            sampling_param.output_video_name = prompt[:100]
+
         # Prepare batch
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
@@ -229,7 +299,6 @@ class VideoGenerator:
             n_tokens=n_tokens,
             VSA_sparsity=fastvideo_args.VSA_sparsity,
             extra={},
-            output_video_name=kwargs.get("output_video_name", prompt[:100]),
         )
 
         # Run inference

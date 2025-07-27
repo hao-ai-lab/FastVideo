@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     CMAKE_BUILD_TYPE: str | None = None
     VERBOSE: bool = False
     FASTVIDEO_SERVER_DEV_MODE: bool = False
+    FASTVIDEO_STAGE_LOGGING: bool = False
 
 
 def get_default_cache_root() -> str:
@@ -172,6 +173,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # - "TORCH_SDPA": use torch.nn.MultiheadAttention
     # - "FLASH_ATTN": use FlashAttention
     # - "SLIDING_TILE_ATTN" : use Sliding Tile Attention
+    # - "VIDEO_SPARSE_ATTN": use Video Sparse Attention
     # - "SAGE_ATTN": use Sage Attention
     "FASTVIDEO_ATTENTION_BACKEND":
     lambda: os.getenv("FASTVIDEO_ATTENTION_BACKEND", None),
@@ -199,6 +201,11 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # e.g. `/reset_prefix_cache`
     "FASTVIDEO_SERVER_DEV_MODE":
     lambda: bool(int(os.getenv("FASTVIDEO_SERVER_DEV_MODE", "0"))),
+
+    # If set, fastvideo will enable stage logging, which will print the time
+    # taken for each stage
+    "FASTVIDEO_STAGE_LOGGING":
+    lambda: bool(int(os.getenv("FASTVIDEO_STAGE_LOGGING", "0"))),
 }
 
 # end-env-vars-definition

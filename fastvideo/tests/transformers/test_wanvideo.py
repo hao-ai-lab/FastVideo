@@ -34,7 +34,7 @@ def test_wan_transformer():
     precision = torch.bfloat16
     precision_str = "bf16"
     args = FastVideoArgs(model_path=TRANSFORMER_PATH,
-                         use_cpu_offload=True,
+                         dit_cpu_offload=True,
                          pipeline_config=PipelineConfig(dit_config=WanVideoConfig(), dit_precision=precision_str))
     args.device = device
 

@@ -23,6 +23,7 @@ class SamplingParam:
     negative_prompt: str | None = None
     prompt_path: str | None = None
     output_path: str = "outputs/"
+    output_video_name: str | None = None
 
     # Batch info
     num_videos_per_prompt: int = 1
@@ -105,6 +106,12 @@ class SamplingParam:
             type=str,
             default=SamplingParam.output_path,
             help="Path to save the generated video",
+        )
+        parser.add_argument(
+            "--output-video-name",
+            type=str,
+            default=SamplingParam.output_video_name,
+            help="Name of the output video",
         )
         parser.add_argument(
             "--num-videos-per-prompt",
