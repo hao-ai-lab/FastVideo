@@ -149,7 +149,7 @@ class VideoGenerator:
             results = []
             for i, batch_prompt in enumerate(prompts):
                 logger.info("Processing prompt %d/%d: %s...", i + 1,
-                            len(prompts), batch_prompt[:200])
+                            len(prompts), batch_prompt[:100])
 
                 try:
                     # Generate video for this prompt using the same logic below
@@ -288,9 +288,9 @@ class VideoGenerator:
         """ # type: ignore[attr-defined]
         logger.info(debug_str)
 
-        # Use prompt[:200] for video name
+        # Use prompt[:100] for video name
         if sampling_param.output_video_name is None:
-            sampling_param.output_video_name = prompt[:200]
+            sampling_param.output_video_name = prompt[:100]
 
         # Prepare batch
         batch = ForwardBatch(
