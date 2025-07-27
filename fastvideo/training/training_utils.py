@@ -578,8 +578,8 @@ def pred_noise_to_pred_video(pred_noise: torch.Tensor,
     return pred_video.to(dtype)
 
 
-def shift_timestep(timestep: torch.Tensor, shift: int,
-                   num_train_timestep: int) -> torch.Tensor:
+def shift_timestep(timestep: torch.Tensor, shift: float,
+                   num_train_timestep: float) -> torch.Tensor:
     if shift == 1:
         return timestep
     t = timestep / num_train_timestep

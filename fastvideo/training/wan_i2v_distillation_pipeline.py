@@ -5,17 +5,18 @@ from typing import Any
 
 import torch
 from einops import rearrange
+
 from fastvideo.configs.sample import SamplingParam
+from fastvideo.dataset.dataloader.schema import (pyarrow_schema_i2v,
+                                                 pyarrow_schema_i2v_validation)
 from fastvideo.distributed import get_local_torch_device
-from fastvideo.dataset.dataloader.schema import (
-    pyarrow_schema_i2v, pyarrow_schema_i2v_validation)
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
-from fastvideo.pipelines.pipeline_batch_info import (ForwardBatch,
-                                                        TrainingBatch)
-from fastvideo.pipelines.wan.wan_i2v_dmd_pipeline import WanImageToVideoDmdPipeline
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
+from fastvideo.pipelines.wan.wan_i2v_dmd_pipeline import (
+    WanImageToVideoDmdPipeline)
 from fastvideo.training.distillation_pipeline import DistillationPipeline
 from fastvideo.utils import is_vsa_available, shallow_asdict
 
@@ -29,8 +30,11 @@ class WanI2VDistillationPipeline(DistillationPipeline):
     A distillation pipeline for Wan that uses a single transformer model.
     The main transformer serves as the student model, and copies are made for teacher and critic.
     """
-    _required_config_modules = ["scheduler", "transformer", "vae", "real_score_transformer", "fake_score_transformer"]
-    
+    _required_config_modules = [
+        "scheduler", "transformer", "vae", "real_score_transformer",
+        "fake_score_transformer"
+    ]
+
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """Initialize Wan-specific scheduler."""
         self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
@@ -51,7 +55,7 @@ class WanI2VDistillationPipeline(DistillationPipeline):
         args_copy = deepcopy(training_args)
 
         args_copy.inference_mode = True
-        args_copy.use_cpu_offload = False
+        args_copy.dit_cpu_offload = False
         # args_copy.pipeline_config.vae_config.load_encoder = False
         # validation_pipeline = WanImageToVideoValidationPipeline.from_pretrained(
         validation_pipeline = WanImageToVideoDmdPipeline.from_pretrained(
@@ -62,7 +66,7 @@ class WanI2VDistillationPipeline(DistillationPipeline):
             tp_size=training_args.tp_size,
             sp_size=training_args.sp_size,
             num_gpus=training_args.num_gpus,
-            use_cpu_offload=True)
+            dit_cpu_offload=True)
 
         self.validation_pipeline = validation_pipeline
 
@@ -171,25 +175,25 @@ class WanI2VDistillationPipeline(DistillationPipeline):
         mask_lat_size = mask_lat_size.to(
             image_latents.device).to(dtype=torch.bfloat16)
 
-        image_latents = torch.cat(
-            [mask_lat_size, image_latents],
-            dim=1)
+        image_latents = torch.cat([mask_lat_size, image_latents], dim=1)
         training_batch.image_latents = image_latents
 
         if self.sp_world_size > 1:
             image_latents = rearrange(image_latents,
-                                        "b c (n t) h w -> b c n t h w",
-                                        n=self.sp_world_size).contiguous()
+                                      "b c (n t) h w -> b c n t h w",
+                                      n=self.sp_world_size).contiguous()
             image_latents = image_latents[:, :, self.rank_in_sp_group, :, :, :]
             training_batch.image_latents = image_latents
-    
+
         return training_batch
 
-    def _build_input_kwargs(self, noise_input: torch.Tensor, timestep: torch.Tensor, text_dict: dict[str, torch.Tensor],
-                            training_batch: TrainingBatch) -> TrainingBatch:        
+    def _build_distill_input_kwargs(
+            self, noise_input: torch.Tensor, timestep: torch.Tensor,
+            text_dict: dict[str, torch.Tensor] | None,
+            training_batch: TrainingBatch) -> TrainingBatch:
         assert training_batch.image_embeds is not None
         assert training_batch.image_latents is not None
-        
+
         # Image Embeds for conditioning
         image_embeds = training_batch.image_embeds
         assert torch.isnan(image_embeds).sum() == 0
@@ -197,20 +201,23 @@ class WanI2VDistillationPipeline(DistillationPipeline):
                                        dtype=torch.bfloat16)
 
         noisy_model_input = torch.cat(
-            [noise_input, training_batch.image_latents.permute(0, 2, 1, 3, 4)], dim=2)
-
+            [noise_input,
+             training_batch.image_latents.permute(0, 2, 1, 3, 4)],
+            dim=2)
+        assert text_dict is not None
         training_batch.input_kwargs = {
-            "hidden_states": noisy_model_input.permute(0, 2, 1, 3, 4), # bs, c, t, h, w
+            "hidden_states": noisy_model_input.permute(0, 2, 1, 3,
+                                                       4),  # bs, c, t, h, w
             "encoder_hidden_states": text_dict["encoder_hidden_states"],
             "encoder_attention_mask": text_dict["encoder_attention_mask"],
             "timestep": timestep,
             "encoder_hidden_states_image": image_embeds,
-            "return_dict":
-            False,
+            "return_dict": False,
         }
         training_batch.noise_latents = noise_input
 
         return training_batch
+
 
 def main(args) -> None:
     logger.info("Starting Wan distillation pipeline...")
@@ -218,9 +225,9 @@ def main(args) -> None:
     # Create pipeline with original args
     pipeline = WanI2VDistillationPipeline.from_pretrained(
         args.pretrained_model_name_or_path, args=args)
-    
+
     args = pipeline.training_args
-    
+
     # Start training
     pipeline.train()
     logger.info("Wan distillation pipeline completed")
@@ -232,7 +239,7 @@ if __name__ == "__main__":
     from fastvideo.utils import FlexibleArgumentParser
     parser = FlexibleArgumentParser()
     parser = TrainingArgs.add_cli_args(parser)
-    parser = FastVideoArgs.add_cli_args(parser)   
+    parser = FastVideoArgs.add_cli_args(parser)
     args = parser.parse_args()
-    args.use_cpu_offload = False
-    main(args) 
+    args.dit_cpu_offload = False
+    main(args)
