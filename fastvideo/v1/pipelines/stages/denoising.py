@@ -763,19 +763,17 @@ class DmdDenoisingStage(DenoisingStage):
                             **pos_cond_kwargs,
                         ).permute(0, 2, 1, 3, 4)
 
-                    t_shape = pred_noise.shape[1]
-                    timestep = t_expand.expand(1, t_shape)
-                    from fastvideo.v1.training.training_utils import DiffusionWrapper
-                    pred_video = DiffusionWrapper._convert_flow_pred_to_x0(
-                        flow_pred=pred_noise.flatten(0, 1),
-                        xt=noise_latents.flatten(0, 1),
-                        timestep=timestep.flatten(0, 1),
+                    from fastvideo.v1.training.training_utils import pred_noise_to_pred_video
+                    pred_video = pred_noise_to_pred_video(
+                        pred_noise=pred_noise.flatten(0, 1),
+                        noise_input_latent=noise_latents.flatten(0, 1),
+                        timestep=t_expand,
                         scheduler=self.scheduler
                     ).unflatten(0, pred_noise.shape[:2])
 
                     if i < len(timesteps) - 1:
                         next_timestep = timesteps[i + 1] * torch.ones(
-                            pred_video.shape[:2], dtype=torch.long, device=pred_video.device)
+                            [1], dtype=torch.long, device=pred_video.device)
                         noise = torch.randn(
                             video_raw_latent_shape, device=self.device, dtype=pred_video.dtype)
                         if sp_group:
@@ -786,7 +784,7 @@ class DmdDenoisingStage(DenoisingStage):
                         latents = self.scheduler.add_noise(
                             pred_video.flatten(0, 1),
                             noise.flatten(0, 1),
-                            next_timestep.flatten(0, 1)
+                            next_timestep
                         ).unflatten(0, pred_video.shape[:2])
                     else:
                         latents = pred_video

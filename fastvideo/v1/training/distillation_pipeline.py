@@ -30,15 +30,13 @@ from fastvideo.v1.pipelines import (ComposedPipelineBase, ForwardBatch,
                                     TrainingBatch)
 from fastvideo.v1.training.training_pipeline import TrainingPipeline
 from fastvideo.v1.training.training_utils import (
-    clip_grad_norm_while_handling_failing_dtensor_cases,
-    compute_density_for_timestep_sampling, get_sigmas, load_checkpoint,
-    normalize_dit_input, save_checkpoint, prepare_for_saving)
+    clip_grad_norm_while_handling_failing_dtensor_cases, load_checkpoint,
+    save_checkpoint, prepare_for_saving, shift_timestep, pred_noise_to_pred_video)
 from fastvideo.v1.utils import set_random_seed, is_vsa_available
 from fastvideo.v1.models.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from fastvideo.v1.training.activation_checkpoint import (
     apply_activation_checkpointing)
 from fastvideo.v1.dataset.validation_dataset import ValidationDataset
-from fastvideo.v1.training.training_utils import DiffusionWrapper
 
 import wandb  # isort: skip
 
@@ -77,15 +75,10 @@ class DistillationPipeline(TrainingPipeline):
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler(shift=self.timestep_shift)
         
-        # 2. Distillation-specific initialization
-        # The parent class already sets self.transformer as the student model
-        self.student_transformer = DiffusionWrapper(self.transformer, self.noise_scheduler)
-        self.teacher_transformer = DiffusionWrapper(self.get_module("teacher_transformer"), self.noise_scheduler)
-        self.critic_transformer = DiffusionWrapper(self.get_module("critic_transformer"), self.noise_scheduler)
-        # self.student_transformer.to(torch.bfloat16)
-        # self.teacher_transformer.to(torch.bfloat16)
-        # self.critic_transformer.to(torch.bfloat16)
-        # torch.distributed.breakpoint()
+        # self.transformer is the generator model
+        self.teacher_transformer = self.get_module("teacher_transformer")
+        self.critic_transformer = self.get_module("critic_transformer")
+
         self.teacher_transformer.requires_grad_(False)
         self.teacher_transformer.eval()
         self.critic_transformer.requires_grad_(True)
@@ -152,170 +145,49 @@ class DistillationPipeline(TrainingPipeline):
 
     def _prepare_distillation(self, training_batch: TrainingBatch) -> TrainingBatch:
         """Prepare training environment for distillation."""
-        self.student_transformer.requires_grad_(True)
-        self.student_transformer.train()
+        self.transformer.requires_grad_(True)
+        self.transformer.train()
         self.critic_transformer.requires_grad_(True)
         self.critic_transformer.train()
          
         return training_batch
-    
-    def _process_timestep(self, timestep: torch.Tensor, type: str) -> torch.Tensor:
-        """
-        Pre-process the randomly generated timestep based on the generator's task type.
-        Input:
-            - timestep: [batch_size, num_frame] tensor containing the randomly generated timestep.
-            - type: a string indicating the type of the current model (image, bidirectional_video, or causal_video).
-        Output Behavior:
-            - image: check that the second dimension (num_frame) is 1.
-            - bidirectional_video: broadcast the timestep to be the same for all frames.
-            - causal_video: broadcast the timestep to be the same for all frames **in a block**.
-        """
-        if type == "image":
-            assert timestep.shape[1] == 1
-            return timestep
-        elif type == "bidirectional_video":
-            # Create a new tensor to avoid in-place operations
-            new_timestep = timestep.clone()
-            for index in range(timestep.shape[0]):
-                new_timestep[index] = timestep[index, 0]
-            return new_timestep
-        elif type == "causal_video":
-            # make the noise level the same within every motion block
-            timestep = timestep.reshape(
-                timestep.shape[0], -1, self.num_frame_per_block)
-            timestep[:, :, 1:] = timestep[:, :, 0:1]
-            timestep = timestep.reshape(timestep.shape[0], -1)
-            return timestep
-        else:
-            raise NotImplementedError("Unsupported model type {}".format(type))
 
     def _student_forward(self, training_batch: TrainingBatch) -> torch.Tensor:
         """Forward pass through student transformer and compute student losses."""
         latents = training_batch.latents
         dtype = latents.dtype
-        # simulated_noisy_input = []
-        # for timestep in self.denoising_step_list:
-        #     # Use cross-codebase generator for reproducible noise generation
-        #     noise = torch.randn(
-        #         self.video_latent_shape, device=self.device, dtype=dtype)
-        #     if self.sp_world_size > 1:
-        #         noise = rearrange(noise,
-        #                             "b (n t) c h w -> b n t c h w",
-        #                             n=self.sp_world_size).contiguous()
-        #         noise = noise[:, self.rank_in_sp_group, :, :, :, :]
-
-        #     noisy_timestep = timestep * torch.ones(
-        #         self.video_latent_shape_sp[:2], device=self.device, dtype=torch.long)
-
-        #     if timestep != 0:
-        #         noisy_video = self.noise_scheduler.add_noise(
-        #             latents.flatten(0, 1),
-        #             noise.flatten(0, 1),
-        #             noisy_timestep.flatten(0, 1)
-        #         ).unflatten(0, self.video_latent_shape_sp[:2])
-        #     else:
-        #         noisy_video = latents
-
-        #     simulated_noisy_input.append(noisy_video)
-
-        # simulated_noisy_input = torch.stack(simulated_noisy_input, dim=1)
-
-        # # Step 2: Randomly sample a timestep and pick the corresponding input
-        # # Use cross-codebase generator for reproducible index generation
-        # index = torch.randint(0, len(self.denoising_step_list), [
-        #                       self.video_latent_shape_sp[0], self.video_latent_shape_sp[1]], device=self.device, dtype=torch.long)
-
-        # index = self._process_timestep(index, type=self.distill_task_type)
-
-        # # select the corresponding timestep's noisy input from the stacked tensor [B, T, F, C, H, W]
-    
-        # noisy_input = torch.gather(
-        #     simulated_noisy_input, dim=1,
-        #     index=index.reshape(index.shape[0], 1, index.shape[1], 1, 1, 1).expand(
-        #         -1, -1, -1, *self.video_latent_shape_sp[2:])
-        # ).squeeze(1)
-        
-        # timestep = self.denoising_step_list[index]
         index = torch.randint(0, len(self.denoising_step_list), [1], device=self.device, dtype=torch.long)
-        timestep = self.denoising_step_list[index].expand(1, latents.shape[1])
+        timestep = self.denoising_step_list[index]
 
         noise = torch.randn(self.video_latent_shape, device=self.device, dtype=dtype)
         if self.sp_world_size > 1:
             noise = rearrange(noise,
-                              "(n t) c h w -> n t c h w",
+                              "b (n t) c h w -> b n t c h w",
                               n=self.sp_world_size).contiguous()
-            noise = noise[self.rank_in_sp_group, :, :, :, :]
-        noisy_input = self.noise_scheduler.add_noise(latents.flatten(0, 1), noise.flatten(0, 1), timestep.flatten(0, 1)).unflatten(0, (1, latents.shape[1]))
+            noise = noise[:, self.rank_in_sp_group, :, :, :, :]
+        noisy_input = self.noise_scheduler.add_noise(latents.flatten(0, 1), noise.flatten(0, 1), timestep).unflatten(0, (1, latents.shape[1]))
 
         training_batch = self._build_input_kwargs(noisy_input, timestep, training_batch.conditional_dict, training_batch)
 
-        pred_video = self.student_transformer(training_batch, timestep)
+        pred_noise = self.transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
+        pred_video = pred_noise_to_pred_video(
+            pred_noise=pred_noise.flatten(0, 1),
+            noise_input_latent=training_batch.noise_latents.flatten(0, 1),
+            timestep=timestep,
+            scheduler=self.noise_scheduler
+        ).unflatten(0, pred_noise.shape[:2])
 
         pred_video = pred_video.type_as(noisy_input)
         return pred_video, timestep.float().detach()
-
-    def _compute_kl_grad(
-        self, noisy_video: torch.Tensor,
-        estimated_clean_video: torch.Tensor,
-        timestep: torch.Tensor,
-        training_batch: TrainingBatch,
-        normalization: bool = True
-    ) -> Tuple[torch.Tensor, dict]:
-        # critic_transformer forward
-        training_batch = self._build_input_kwargs(noisy_video, timestep, training_batch.conditional_dict, training_batch)
-        pred_fake_video = self.critic_transformer(training_batch, timestep)
-        
-        # teacher_transformer cond forward
-        training_batch = self._build_input_kwargs(noisy_video, timestep, training_batch.conditional_dict, training_batch)
-        pred_real_video_cond = self.teacher_transformer(training_batch, timestep)
-        
-        # teacher_transformer uncond forward
-        training_batch = self._build_input_kwargs(noisy_video, timestep, training_batch.unconditional_dict, training_batch)
-        pred_real_video_uncond = self.teacher_transformer(training_batch, timestep)
-        
-        pred_real_video = pred_real_video_cond + (
-            pred_real_video_cond - pred_real_video_uncond
-        ) * self.teacher_guidance_scale
-
-        grad = (pred_fake_video - pred_real_video)
-
-        if normalization:
-            p_real = (estimated_clean_video - pred_real_video)
-            normalizer = torch.abs(p_real).mean(dim=[1, 2, 3, 4], keepdim=True)
-            grad = grad / normalizer
-        grad = torch.nan_to_num(grad)
-
-        return grad, {
-            "dmdtrain_latents": estimated_clean_video.detach(),
-            "dmdtrain_noisy_latent": noisy_video.detach(),
-            "dmdtrain_pred_real_video": pred_real_video.detach(),
-            "dmdtrain_pred_fake_video": pred_fake_video.detach(),
-            "dmdtrain_gradient_norm": torch.mean(torch.abs(grad)).detach(),
-            "timestep": timestep.float().detach()
-        }
 
     def _compute_dmd_loss(self, pred_video: torch.Tensor, training_batch: TrainingBatch) -> Tuple[torch.Tensor, dict]:
         """Compute DMD (Diffusion Model Distillation) loss."""
         
         original_latent = pred_video
-        batch_size, latent_t = self.video_latent_shape_sp[:2]
         with torch.no_grad():
             # Use cross-codebase generator for reproducible timestep generation
-            timestep = torch.randint(
-                0,
-                self.num_train_timestep,
-                [batch_size, latent_t],
-                device=self.device,
-                dtype=torch.long
-            )
-
-            timestep = self._process_timestep(
-                timestep, type=self.distill_task_type)
-
-            if self.timestep_shift > 1:
-                timestep = self.timestep_shift * \
-                    (timestep / self.num_train_timestep) / \
-                    (1 + (self.timestep_shift - 1) * (timestep / self.num_train_timestep)) * self.num_train_timestep
+            timestep = torch.randint(0, self.num_train_timestep, [1], device=self.device, dtype=torch.long)
+            timestep = shift_timestep(timestep, self.timestep_shift, self.num_train_timestep)
             
             timestep = timestep.clamp(self.min_step, self.max_step)
 
@@ -328,21 +200,55 @@ class DistillationPipeline(TrainingPipeline):
                                     n=self.sp_world_size).contiguous()
                 noise = noise[:, self.rank_in_sp_group, :, :, :, :]
                 
-            noisy_latent = self.noise_scheduler.add_noise(
-                pred_video.flatten(0, 1),
-                noise.flatten(0, 1),
-                timestep.flatten(0, 1)
-            ).detach().unflatten(0, (batch_size, latent_t))
+            noisy_latent = self.noise_scheduler.add_noise(pred_video.flatten(0, 1), noise.flatten(0, 1), timestep).unflatten(0, (1, pred_video.shape[1]))
 
-            grad, dmd_log_dict = self._compute_kl_grad(
-                noisy_video=noisy_latent,
-                estimated_clean_video=original_latent,
+            # critic_transformer forward
+            training_batch = self._build_input_kwargs(noisy_latent, timestep, training_batch.conditional_dict, training_batch)
+            pred_fake_noise = self.critic_transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
+            pred_fake_video = pred_noise_to_pred_video(
+                pred_noise=pred_fake_noise.flatten(0, 1),
+                noise_input_latent=training_batch.noise_latents.flatten(0, 1),
                 timestep=timestep,
-                training_batch=training_batch
-            )
+                scheduler=self.noise_scheduler
+            ).unflatten(0, pred_fake_noise.shape[:2])
+            
+            # teacher_transformer cond forward
+            training_batch = self._build_input_kwargs(noisy_latent, timestep, training_batch.conditional_dict, training_batch)
+            pred_real_noise = self.teacher_transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
+            pred_real_video_cond = pred_noise_to_pred_video(
+                pred_noise=pred_real_noise.flatten(0, 1),
+                noise_input_latent=training_batch.noise_latents.flatten(0, 1),
+                timestep=timestep,
+                scheduler=self.noise_scheduler
+            ).unflatten(0, pred_real_noise.shape[:2])
+            
+            # teacher_transformer uncond forward
+            training_batch = self._build_input_kwargs(noisy_latent, timestep, training_batch.unconditional_dict, training_batch)
+            pred_real_noise = self.teacher_transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
+            pred_real_video_uncond = pred_noise_to_pred_video(
+                pred_noise=pred_real_noise.flatten(0, 1),
+                noise_input_latent=training_batch.noise_latents.flatten(0, 1),
+                timestep=timestep,
+                scheduler=self.noise_scheduler
+            ).unflatten(0, pred_real_noise.shape[:2])
+            
+            pred_real_video = pred_real_video_cond + (
+                pred_real_video_cond - pred_real_video_uncond
+            ) * self.teacher_guidance_scale
 
-        dmd_loss = 0.5 * F.mse_loss(original_latent.double(
-        ), (original_latent.double() - grad.double()).detach(), reduction="mean")
+            grad = (pred_fake_video - pred_real_video) / torch.abs(original_latent - pred_real_video).mean()
+            grad = torch.nan_to_num(grad)
+
+            dmd_log_dict = {
+                "dmdtrain_latents": original_latent.detach(),
+                "dmdtrain_noisy_latent": noisy_latent.detach(),
+                "dmdtrain_pred_real_video": pred_real_video.detach(),
+                "dmdtrain_pred_fake_video": pred_fake_video.detach(),
+                "dmdtrain_gradient_norm": torch.mean(torch.abs(grad)).detach(),
+                "timestep": timestep.float().detach()
+            }
+
+        dmd_loss = 0.5 * F.mse_loss(original_latent.float(), (original_latent.float() - grad.float()).detach())
         
         return dmd_loss, dmd_log_dict
 
@@ -369,65 +275,30 @@ class DistillationPipeline(TrainingPipeline):
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata_vsa):
                 generated_video, timestep_gen = self._student_forward(training_batch)
         
-        # critic_timestep = torch.randint(
-        #     0,
-        #     self.num_train_timestep,
-        #     self.video_latent_shape_sp[:2],
-        #     device=self.device,
-        #     dtype=torch.long
-        # )
-        # critic_timestep = self._process_timestep(
-        #     critic_timestep, type=self.distill_task_type)
         critic_timestep = torch.randint(0, self.num_train_timestep, [1], device=self.device, dtype=torch.long)
-        # TODO: Add timestep warping
-        if self.timestep_shift > 1:
-            critic_timestep = self.timestep_shift * \
-                (critic_timestep / self.num_train_timestep) / (1 + (self.timestep_shift - 1) * (critic_timestep / self.num_train_timestep)) * self.num_train_timestep
+        critic_timestep = shift_timestep(critic_timestep, self.timestep_shift, self.num_train_timestep)
 
-        critic_timestep = critic_timestep.clamp(self.min_step, self.max_step).expand(1, generated_video.shape[1])
-
-        # Use cross-codebase generator for reproducible noise generation
-        # critic_noise = torch.randn(
-        #     self.video_latent_shape, device=self.device, dtype=generated_video.dtype)
-        # if self.sp_world_size > 1:
-        #     critic_noise = rearrange(critic_noise,
-        #                             "b (n t) c h w -> b n t c h w",
-        #                             n=self.sp_world_size).contiguous()
-        #     critic_noise = critic_noise[:, self.rank_in_sp_group, :, :, :, :]
-        
-        # noisy_generated_video = self.noise_scheduler.add_noise(
-        #     generated_video.flatten(0, 1),
-        #     critic_noise.flatten(0, 1),
-        #     critic_timestep.flatten(0, 1)
-        # ).unflatten(0, self.video_latent_shape_sp[:2])
+        critic_timestep = critic_timestep.clamp(self.min_step, self.max_step)
 
         critic_noise = torch.randn(
             self.video_latent_shape, device=self.device, dtype=generated_video.dtype)
         if self.sp_world_size > 1:
             critic_noise = rearrange(critic_noise,
-                                    "(n t) c h w -> n t c h w",
+                                    "b (n t) c h w -> b n t c h w",
                                     n=self.sp_world_size).contiguous()
-            critic_noise = critic_noise[self.rank_in_sp_group, :, :, :, :]
+            critic_noise = critic_noise[:, self.rank_in_sp_group, :, :, :, :]
         
         noisy_generated_video = self.noise_scheduler.add_noise(
             generated_video.flatten(0, 1),
             critic_noise.flatten(0, 1),
-            critic_timestep.flatten(0, 1)
+            critic_timestep
         ).unflatten(0, (1, generated_video.shape[1]))
 
         with set_forward_context(
                 current_timestep=training_batch.timesteps, attn_metadata=training_batch.attn_metadata):
             training_batch = self._build_input_kwargs(noisy_generated_video, critic_timestep, training_batch.conditional_dict, training_batch)
             
-            pred_fake_video = self.critic_transformer(training_batch, critic_timestep)
-
-        # # Step 3: Compute the denoising loss for the fake critic
-        pred_fake_video_noise = DiffusionWrapper._convert_x0_to_flow_pred(
-            x0_pred=pred_fake_video.flatten(0, 1),
-            xt=noisy_generated_video.flatten(0, 1),
-            timestep=critic_timestep.flatten(0, 1),
-            scheduler=self.noise_scheduler
-        )
+            pred_fake_video_noise = self.critic_transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
         denoising_loss = self.denoising_loss_func(
             x=generated_video.flatten(0, 1),
@@ -438,7 +309,6 @@ class DistillationPipeline(TrainingPipeline):
         critic_log_dict = {
             "critictrain_latent": generated_video.detach(),
             "critictrain_noisy_latent": noisy_generated_video.detach(),
-            "critictrain_pred_video": pred_fake_video.detach(),
             "critic_timestep": critic_timestep.float().detach(),
             "critic_timestep_stu": timestep_gen.float().detach(),
         }
@@ -530,7 +400,7 @@ class DistillationPipeline(TrainingPipeline):
                 if total_dmd_log_dict is None:
                     total_dmd_log_dict = dmd_log_dict
                 # Only keep the first log dict, ignore subsequent ones
-            self._clip_grad_norm(batch_stu, self.student_transformer)
+            self._clip_grad_norm(batch_stu, self.transformer)
             self.optimizer.step()
             self.lr_scheduler.step()
             self.optimizer.zero_grad(set_to_none=True)
@@ -577,7 +447,7 @@ class DistillationPipeline(TrainingPipeline):
                     self.training_args.resume_from_checkpoint)
         
         resumed_step = load_checkpoint(
-            self.student_transformer.model, self.global_rank,
+            self.transformer, self.global_rank,
             self.training_args.resume_from_checkpoint, self.optimizer,
             self.train_dataloader, self.lr_scheduler,
             self.noise_random_generator)
@@ -619,7 +489,7 @@ class DistillationPipeline(TrainingPipeline):
         # decode_stage = self.validation_pipeline._stages[-1]
         
         # Process critic training data
-        critic_latents_name = ['critictrain_latent', 'critictrain_noisy_latent', 'critictrain_pred_video']
+        critic_latents_name = ['critictrain_latent', 'critictrain_noisy_latent']
         # critic_latents_name = ['critictrain_pred_video']
 
         for latent_key in critic_latents_name:
@@ -757,81 +627,81 @@ class DistillationPipeline(TrainingPipeline):
                 #             batch.prompt,
                 #             local_main_process_only=False)
 
-            #     assert batch.prompt is not None and isinstance(
-            #         batch.prompt, str)
-            #     step_captions.append(batch.prompt)
+                assert batch.prompt is not None and isinstance(
+                    batch.prompt, str)
+                step_captions.append(batch.prompt)
 
-            #     # Run validation inference
-            #     with torch.no_grad():
-            #         output_batch = self.validation_pipeline.forward(
-            #             batch, training_args)
-            #     samples = output_batch.output
-            #     if self.rank_in_sp_group != 0:
-            #         continue
+                # Run validation inference
+                with torch.no_grad():
+                    output_batch = self.validation_pipeline.forward(
+                        batch, training_args)
+                samples = output_batch.output
+                if self.rank_in_sp_group != 0:
+                    continue
 
-            #     # Process outputs
-            #     video = rearrange(samples, "b c t h w -> t b c h w")
-            #     frames = []
-            #     for x in video:
-            #         x = torchvision.utils.make_grid(x, nrow=6)
-            #         x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-            #         frames.append((x * 255).numpy().astype(np.uint8))
-            #     step_videos.append(frames)
+                # Process outputs
+                video = rearrange(samples, "b c t h w -> t b c h w")
+                frames = []
+                for x in video:
+                    x = torchvision.utils.make_grid(x, nrow=6)
+                    x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+                    frames.append((x * 255).numpy().astype(np.uint8))
+                step_videos.append(frames)
 
-            # # Log validation results for this step
-            # world_group = get_world_group()
-            # num_sp_groups = world_group.world_size // self.sp_group.world_size
+            # Log validation results for this step
+            world_group = get_world_group()
+            num_sp_groups = world_group.world_size // self.sp_group.world_size
 
-            # # Only sp_group leaders (rank_in_sp_group == 0) need to send their
-            # # results to global rank 0
-            # if self.rank_in_sp_group == 0:
-            #     if self.global_rank == 0:
-            #         # Global rank 0 collects results from all sp_group leaders
-            #         all_videos = step_videos  # Start with own results
-            #         all_captions = step_captions
+            # Only sp_group leaders (rank_in_sp_group == 0) need to send their
+            # results to global rank 0
+            if self.rank_in_sp_group == 0:
+                if self.global_rank == 0:
+                    # Global rank 0 collects results from all sp_group leaders
+                    all_videos = step_videos  # Start with own results
+                    all_captions = step_captions
 
-            #         # Receive from other sp_group leaders
-            #         for sp_group_idx in range(1, num_sp_groups):
-            #             src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
-            #             recv_videos = world_group.recv_object(src=src_rank)
-            #             recv_captions = world_group.recv_object(src=src_rank)
-            #             all_videos.extend(recv_videos)
-            #             all_captions.extend(recv_captions)
+                    # Receive from other sp_group leaders
+                    for sp_group_idx in range(1, num_sp_groups):
+                        src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
+                        recv_videos = world_group.recv_object(src=src_rank)
+                        recv_captions = world_group.recv_object(src=src_rank)
+                        all_videos.extend(recv_videos)
+                        all_captions.extend(recv_captions)
 
-            #         video_filenames = []
-            #         for i, (video, caption) in enumerate(
-            #                 zip(all_videos, all_captions, strict=True)):
-            #             os.makedirs(training_args.output_dir, exist_ok=True)
-            #             filename = os.path.join(
-            #                 training_args.output_dir,
-            #                 f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
-            #             )
-            #             imageio.mimsave(filename, video, fps=sampling_param.fps)
-            #             video_filenames.append(filename)
+                    video_filenames = []
+                    for i, (video, caption) in enumerate(
+                            zip(all_videos, all_captions, strict=True)):
+                        os.makedirs(training_args.output_dir, exist_ok=True)
+                        filename = os.path.join(
+                            training_args.output_dir,
+                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
+                        )
+                        imageio.mimsave(filename, video, fps=sampling_param.fps)
+                        video_filenames.append(filename)
 
-            #         logs = {
-            #             f"validation_videos_{num_inference_steps}_steps": [
-            #                 wandb.Video(filename, caption=caption)
-            #                 for filename, caption in zip(
-            #                     video_filenames, all_captions, strict=True)
-            #             ]
-            #         }
-            #         wandb.log(logs, step=global_step)
+                    logs = {
+                        f"validation_videos_{num_inference_steps}_steps": [
+                            wandb.Video(filename, caption=caption)
+                            for filename, caption in zip(
+                                video_filenames, all_captions, strict=True)
+                        ]
+                    }
+                    wandb.log(logs, step=global_step)
                     
-            #         # Save all prompts from all cards to txt file
-            #         # prompt_filename = os.path.join(
-            #         #     training_args.output_dir,
-            #         #     f"validation_step_{global_step}_inference_steps_{num_inference_steps}_prompts.txt"
-            #         # )
-            #         # with open(prompt_filename, 'w', encoding='utf-8') as f:
-            #         #     for i, caption in enumerate(all_captions):
-            #         #         f.write(f"Video_{i}: {caption}\n")
-            #         # logger.info(f"Saved {len(all_captions)} prompts to {prompt_filename}")
+                    # Save all prompts from all cards to txt file
+                    # prompt_filename = os.path.join(
+                    #     training_args.output_dir,
+                    #     f"validation_step_{global_step}_inference_steps_{num_inference_steps}_prompts.txt"
+                    # )
+                    # with open(prompt_filename, 'w', encoding='utf-8') as f:
+                    #     for i, caption in enumerate(all_captions):
+                    #         f.write(f"Video_{i}: {caption}\n")
+                    # logger.info(f"Saved {len(all_captions)} prompts to {prompt_filename}")
                     
-            #     else:
-            #         # Other sp_group leaders send their results to global rank 0
-            #         world_group.send_object(step_videos, dst=0)
-            #         world_group.send_object(step_captions, dst=0)
+                else:
+                    # Other sp_group leaders send their results to global rank 0
+                    world_group.send_object(step_videos, dst=0)
+                    world_group.send_object(step_captions, dst=0)
 
         # Re-enable gradients for training
         transformer.train()
@@ -871,7 +741,7 @@ class DistillationPipeline(TrainingPipeline):
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
-        self._log_validation(self.student_transformer, self.training_args, 0)
+        self._log_validation(self.transformer, self.training_args, 0)
 
         progress_bar = tqdm(
             range(0, self.training_args.max_train_steps),
@@ -966,12 +836,12 @@ class DistillationPipeline(TrainingPipeline):
 
 
                 self.add_visualization(training_batch.dmd_log_dict, training_batch.critic_log_dict, self.training_args, step)
-                self._log_validation(self.student_transformer, self.training_args, step)
+                self._log_validation(self.transformer, self.training_args, step)
 
 
 
         wandb.finish()
-        # save_checkpoint(self.student_transformer.model, self.global_rank,
+        # save_checkpoint(self.transformer, self.global_rank,
         #                 self.training_args.output_dir,
         #                 self.training_args.max_train_steps, self.optimizer,
         #                 self.train_dataloader, self.lr_scheduler,

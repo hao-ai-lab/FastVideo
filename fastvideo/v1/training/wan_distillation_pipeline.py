@@ -62,7 +62,7 @@ class WanDistillationPipeline(DistillationPipeline):
             "hidden_states": noise_input.permute(0, 2, 1, 3, 4),
             "encoder_hidden_states": text_dict["encoder_hidden_states"],
             "encoder_attention_mask": text_dict["encoder_attention_mask"],
-            "timestep": timestep[0][:1],
+            "timestep": timestep,
             "return_dict":
             False,
         }
