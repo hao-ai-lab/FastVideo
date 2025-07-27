@@ -12,6 +12,9 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import (StageValidators,
                                                    VerificationResult)
+from fastvideo.utils import best_output_size
+from PIL import Image
+import torchvision.transforms.functional as TF
 
 logger = init_logger(__name__)
 
@@ -99,6 +102,35 @@ class InputValidationStage(PipelineStage):
             else:
                 image = load_image(batch.image_path)
             batch.pil_image = image
+
+            img = batch.pil_image
+            ih, iw = img.height, img.width
+            logger.info(f"img height: {ih}, img width: {iw}")
+            patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
+            vae_stride = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
+            logger.info(f"patch_size: {patch_size}, vae_stride: {vae_stride}")
+            dh, dw = patch_size[1] * vae_stride, patch_size[2] * vae_stride
+            max_area = 704 * 1280
+            ow, oh = best_output_size(iw, ih, dw, dh, max_area)
+
+            scale = max(ow / iw, oh / ih)
+            img = img.resize((round(iw * scale), round(ih * scale)), Image.LANCZOS)
+            logger.info(f"resized img height: {img.height}, img width: {img.width}")
+
+            # center-crop
+            x1 = (img.width - ow) // 2
+            y1 = (img.height - oh) // 2
+            img = img.crop((x1, y1, x1 + ow, y1 + oh))
+            assert img.width == ow and img.height == oh
+            # logger.info(f"img shape: {img.shape}")
+
+            # to tensor
+            img = TF.to_tensor(img).sub_(0.5).div_(0.5).to(self.device).unsqueeze(1)
+            logger.info(f"img shape: {img.shape}")
+            img = img.unsqueeze(0)
+            batch.height = oh
+            batch.width = ow
+            batch.pil_image = img
 
         return batch
 
