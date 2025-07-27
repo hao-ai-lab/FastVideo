@@ -217,7 +217,7 @@ class DistillationPipeline(TrainingPipeline):
             ) * self.real_score_guidance_scale
 
             grad = (pred_fake_video - pred_real_video) / torch.abs(original_latent - pred_real_video).mean()
-            grad = torch.nan_to_num(grad).detach()
+            grad = torch.nan_to_num(grad)
 
         dmd_log_dict = {
             "dmdtrain_latents": original_latent.detach(),
@@ -228,7 +228,7 @@ class DistillationPipeline(TrainingPipeline):
             "timestep": timestep.float().detach()
         }
 
-        dmd_loss = 0.5 * F.mse_loss(original_latent.float(), (original_latent.float() - grad.float()))
+        dmd_loss = 0.5 * F.mse_loss(original_latent.float(), (original_latent.float() - grad.float()).detach())
         
         return training_batch, dmd_loss, dmd_log_dict
 
