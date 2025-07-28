@@ -18,43 +18,6 @@ import math  # small utility needed by the sparse wrapper
 # ──────────────────────────── SPARSE ADDITION END ─────────────────────────────
 
 
-@triton.jit
-def _attn_fwd_inner(acc, l_i, m_i, q,  #
-                    K_block_ptr, V_block_ptr,  #
-                    start_m, qk_scale,  #
-                    BLOCK_M: tl.constexpr, HEAD_DIM: tl.constexpr, BLOCK_N: tl.constexpr,  #
-                    STAGE: tl.constexpr, offs_m: tl.constexpr, offs_n: tl.constexpr,  #
-                    N_CTX: tl.constexpr, fp8_v: tl.constexpr):
-
-    # loop over k, v and update accumulator
-    for start_n in range(0, N_CTX, BLOCK_N):
-        # -- compute qk ----
-        k = tl.load(K_block_ptr)
-        qk = tl.dot(q, k)
-
-        m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
-        qk = qk * qk_scale - m_ij[:, None]
-        p = tl.math.exp2(qk)
-        l_ij = tl.sum(p, 1)
-        # -- update m_i and l_i
-        alpha = tl.math.exp2(m_i - m_ij)
-        l_i = l_i * alpha + l_ij
-        # -- update output accumulator --
-        acc = acc * alpha[:, None]
-        # update acc
-        v = tl.load(V_block_ptr)
-        if fp8_v:
-            p = p.to(tl.float8e5)
-        else:
-            p = p.to(tl.bfloat16)
-        acc = tl.dot(p, v, acc)
-        # update m_i and l_i
-        m_i = m_ij
-        V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
-        K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
-    return acc, l_i, m_i
-
-
 # We don't run auto-tuning every time to keep the tutorial fast. Keeping
 # the code below and commenting out the equivalent parameters is convenient for
 # re-tuning.
@@ -71,6 +34,7 @@ configs = [
 @triton.jit
 def _attn_fwd_sparse(Q, K, V, sm_scale,                         #
                      q2k_index, q2k_num, max_kv_blks,           #
+                     variable_block_sizes,
                      M, Out,                                    #
                      stride_qz, stride_qh, stride_qm, stride_qk,
                      stride_kz, stride_kh, stride_kn, stride_kk,
@@ -136,12 +100,15 @@ def _attn_fwd_sparse(Q, K, V, sm_scale,                         #
     # ----- sparse loop over valid K/V tiles -----
     for i in range(0, kv_blocks):
         kv_idx = tl.load(kv_ptr + i).to(tl.int32)
-
+        block_size = tl.load(variable_block_sizes + kv_idx)
         K_ptr = tl.advance(K_base, (0, kv_idx * BLOCK_N))
         V_ptr = tl.advance(V_base, (kv_idx * BLOCK_N, 0))
 
         k = tl.load(K_ptr)
         qk = tl.dot(q, k)
+        # mask out invalid columns
+        mask = tl.arange(0, BLOCK_N) < block_size
+        qk = tl.where(mask[None, :], qk, -float("inf"))
 
         m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
         p = tl.math.exp2(qk * qk_scale - m_ij[:, None])
@@ -189,6 +156,7 @@ def _attn_bwd_dkdv(dk, dv,  #
                    DO,  #
                    M, D,  #
                    k2q_index, k2q_num, max_q_blks,
+                   variable_block_sizes,
                    # shared by Q/K/V/DO.
                    stride_tok, stride_d,  #
                    H, N_CTX, BLOCK_M1: tl.constexpr,  #
@@ -213,6 +181,8 @@ def _attn_bwd_dkdv(dk, dv,  #
 
     q_blocks = tl.load(k2q_num  + meta_base)                 # int32
     q_ptr    = k2q_index + meta_base * max_q_blks           # ptr to list
+    block_size = tl.load(variable_block_sizes + kv_blk)
+    
     
         
     for blk_idx in range(q_blocks*2):
@@ -223,6 +193,9 @@ def _attn_bwd_dkdv(dk, dv,  #
         m = tl.load(M + offs_m)
         qkT = tl.dot(k, qT)
         pT = tl.math.exp2(qkT - m[None, :])
+        mask = tl.arange(0, BLOCK_N1) < block_size
+        pT = tl.where(mask[:, None], pT, 0.0)
+
         do = tl.load(do_ptrs + block_sparse_offset * stride_tok)
         # Compute dV.
         ppT = pT
@@ -246,6 +219,7 @@ def _attn_bwd_dq(dq, q, K, V,  #
                  do, m, D,
                  # shared by Q/K/V/DO.
                  q2k_index, q2k_num, max_kv_blks,
+                 variable_block_sizes,
                  stride_tok, stride_d,  #
                  H, N_CTX,  #
                  BLOCK_M2: tl.constexpr,  #
@@ -277,10 +251,13 @@ def _attn_bwd_dq(dq, q, K, V,  #
     
     for blk_idx in range(kv_blocks*2):
         block_sparse_offset = (tl.load(kv_ptr + blk_idx//2).to(tl.int32)*2 + blk_idx%2) *step_n * stride_tok
+        block_size = tl.load(variable_block_sizes + blk_idx//2) - (blk_idx%2) * step_n
         kT = tl.load(kT_ptrs + block_sparse_offset)
         vT = tl.load(vT_ptrs + block_sparse_offset)
         qk = tl.dot(q, kT)
         p = tl.math.exp2(qk - m)
+        mask = tl.arange(0, BLOCK_N2) < block_size.to(tl.int32)
+        p = tl.where(mask[None, :], p , 0.0)
         # Compute dP and dS.
         dp = tl.dot(do, vT).to(tl.float32)
         ds = p * (dp - Di[:, None])
@@ -300,6 +277,7 @@ def _attn_bwd(Q, K, V, sm_scale,  #
               M, D,
               q2k_index, q2k_num, max_kv_blks,
               k2q_index, k2q_num, max_q_blks,
+              variable_block_sizes,
               # shared by Q/K/V/DO.
               stride_z, stride_h, stride_tok, stride_d,  #
               H, N_CTX,  #
@@ -350,6 +328,7 @@ def _attn_bwd(Q, K, V, sm_scale,  #
         DO,  #
         M, D,  #
         k2q_index, k2q_num, max_q_blks,
+        variable_block_sizes,
         stride_tok, stride_d,  #
         H, N_CTX,  #
         BLOCK_M1, BLOCK_N1, HEAD_DIM,  #
@@ -381,6 +360,7 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     dq = _attn_bwd_dq(dq, q, K, V,  #
                       do, m, D,  #
                       q2k_index, q2k_num, max_kv_blks,
+                      variable_block_sizes,
                       stride_tok, stride_d,  #
                       H, N_CTX,  #
                       BLOCK_M2, BLOCK_N2, HEAD_DIM,  #
@@ -396,7 +376,7 @@ def _attn_bwd(Q, K, V, sm_scale,  #
 
 
 # ──────────────────────────── SPARSE ADDITION BEGIN ───────────────────────────
-def triton_block_sparse_attn_forward(q, k, v, q2k_index, q2k_num):
+def triton_block_sparse_attn_forward(q, k, v, q2k_index, q2k_num, variable_block_sizes):
     B, H, T, D = q.shape
     sm_scale = 1.0 / math.sqrt(D)
     max_kv_blks = q2k_index.shape[-1]
@@ -409,6 +389,7 @@ def triton_block_sparse_attn_forward(q, k, v, q2k_index, q2k_num):
     _attn_fwd_sparse[grid](
         q, k, v, sm_scale,
         q2k_index, q2k_num, max_kv_blks,
+        variable_block_sizes,
         M, o,
         q.stride(0), q.stride(1), q.stride(2), q.stride(3),
         k.stride(0), k.stride(1), k.stride(2), k.stride(3),
@@ -420,7 +401,7 @@ def triton_block_sparse_attn_forward(q, k, v, q2k_index, q2k_num):
 
     return o, M
 
-def triton_block_sparse_attn_backward(do, q, k, v, o, M, q2k_index, q2k_num, k2q_index, k2q_num):
+def triton_block_sparse_attn_backward(do, q, k, v, o, M, q2k_index, q2k_num, k2q_index, k2q_num, variable_block_sizes):
     assert do.is_contiguous()
     assert q.stride() == k.stride() == v.stride() == o.stride() == do.stride()
     
@@ -449,13 +430,13 @@ def triton_block_sparse_attn_backward(do, q, k, v, o, M, q2k_index, q2k_num, k2q
     max_q_blks = k2q_index.shape[-1]
     max_kv_blks = q2k_index.shape[-1]
     
-    
     grid = (N_CTX // BLOCK_N1, 1, BATCH * N_HEAD)
     _attn_bwd[grid](
         q, arg_k, v, sm_scale, do, dq, dk, dv,  #
         M, delta,  #
         q2k_index, q2k_num, max_kv_blks,
         k2q_index, k2q_num, max_q_blks,
+        variable_block_sizes,
         q.stride(0), q.stride(1), q.stride(2), q.stride(3),  #
         N_HEAD, N_CTX,  #
         BLOCK_M1=BLOCK_M1, BLOCK_N1=BLOCK_N1,  #

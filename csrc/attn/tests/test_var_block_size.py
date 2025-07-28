@@ -7,15 +7,15 @@ from tqdm import tqdm
 # Add the parent directory to the path to import block_sparse_attn
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tests.utils import generate_block_sparse_mask_for_function, create_full_mask_from_block_mask
-from vsa.block_sparse_wrapper import block_sparse_attn
+from vsa import block_sparse_attn
 
 BLOCK_M = 64
 BLOCK_N = 64
 
 def pytorch_test(Q, K, V, block_sparse_mask, dO):
-    q_ = Q.requires_grad_()
-    k_ = K.requires_grad_()
-    v_ = V.requires_grad_()
+    q_ = Q.clone().requires_grad_()
+    k_ = K.clone().requires_grad_()
+    v_ = V.clone().requires_grad_()
 
     QK = torch.matmul(q_, k_.transpose(-2, -1))
     QK /= (q_.size(-1) ** 0.5)
@@ -35,9 +35,9 @@ def pytorch_test(Q, K, V, block_sparse_mask, dO):
 
 
 def block_sparse_kernel_test(Q, K, V, block_sparse_mask, variable_block_sizes, non_pad_index, dO):
-    Q = Q.requires_grad_()
-    K = K.requires_grad_()
-    V = V.requires_grad_()
+    Q = Q.clone().requires_grad_()
+    K = K.clone().requires_grad_()
+    V = V.clone().requires_grad_()
     
     q_padded = vsa_pad(Q, non_pad_index, variable_block_sizes.shape[0], BLOCK_M)
     k_padded = vsa_pad(K, non_pad_index, variable_block_sizes.shape[0], BLOCK_M)
@@ -101,8 +101,6 @@ def check_correctness(h, d, num_blocks, k, mean, std, num_iterations=20, error_m
 
         pt_o, pt_qg, pt_kg, pt_vg = pytorch_test(Q, K, V, full_mask, dO)
         bs_o, bs_qg, bs_kg, bs_vg = block_sparse_kernel_test(Q, K, V, block_mask.unsqueeze(0), variable_block_sizes,non_pad_index, dO)
-
-
         for name, (pt, bs) in zip(['gQ', 'gK', 'gV', 'gO'], [(pt_qg, bs_qg), (pt_kg, bs_kg), (pt_vg, bs_vg), (pt_o, bs_o)]):
             if bs is not None:
                 diff = pt - bs
@@ -110,7 +108,6 @@ def check_correctness(h, d, num_blocks, k, mean, std, num_iterations=20, error_m
                 results[name]['sum_diff'] += torch.sum(abs_diff).item()
                 results[name]['sum_abs'] += torch.sum(torch.abs(pt)).item()
                 results[name]['max_diff'] = max(results[name]['max_diff'], torch.max(abs_diff).item())
-
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
@@ -153,8 +150,8 @@ def generate_error_graphs(h, d, mean, std, error_mode='all'):
 
 if __name__ == "__main__":
     h, d = 16, 128
-    mean = 1e-1
-    std = 10
+    mean = 0.0
+    std = 1
     print("Block Sparse Attention with Variable Block Sizes Analysis")
     print("=" * 60)
     for mode in ['backward']:

@@ -106,13 +106,14 @@ def block_sparse_attn_triton(
     k: torch.Tensor,
     v: torch.Tensor,
     block_map: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     q = q.contiguous()
     k = k.contiguous()
     v = v.contiguous()
-    block_map = block_map.contiguous()
+    block_map = block_map.int()
     q2k_block_sparse_index, q2k_block_sparse_num = map_to_index(block_map)
-    o, M = triton_block_sparse_attn_forward(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num)
+    o, M = triton_block_sparse_attn_forward(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, variable_block_sizes)
     return o, M
 
 
@@ -121,11 +122,12 @@ def _block_sparse_attn_triton_fake(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
-    block_map: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    block_map: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor]:
     q = q.contiguous()
     k = k.contiguous()
     v = v.contiguous()
-    block_map = block_map.contiguous()
     o = torch.empty_like(q)
     M = torch.empty((q.shape[0], q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
     return o, M
@@ -139,11 +141,13 @@ def block_sparse_attn_backward_triton(
     v_padded: torch.Tensor, 
     o_padded: torch.Tensor, 
     M: torch.Tensor, 
-    block_map: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    block_map: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     grad_output_padded = grad_output_padded.contiguous()
     q2k_block_sparse_index, q2k_block_sparse_num = map_to_index(block_map)
     k2q_block_sparse_index, k2q_block_sparse_num = map_to_index(block_map.transpose(-1, -2))
-    dq, dk, dv = triton_block_sparse_attn_backward(grad_output_padded, q_padded, k_padded, v_padded, o_padded, M, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num)
+    dq, dk, dv = triton_block_sparse_attn_backward(grad_output_padded, q_padded, k_padded, v_padded, o_padded, M, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num, variable_block_sizes)
     return dq, dk, dv
 
 @torch.library.register_fake("vsa::block_sparse_attn_backward_triton")
@@ -154,7 +158,9 @@ def _block_sparse_attn_backward_triton_fake(
     v_padded: torch.Tensor, 
     o_padded: torch.Tensor, 
     M: torch.Tensor,
-    block_map: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    block_map: torch.Tensor,
+    variable_block_sizes: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     grad_output_padded = grad_output_padded.contiguous()
     dq = torch.empty_like(grad_output_padded)
     dk = torch.empty_like(grad_output_padded)
@@ -163,14 +169,14 @@ def _block_sparse_attn_backward_triton_fake(
 
 
 def backward_triton(ctx, grad_output1, grad_output2):
-    q_padded, k_padded, v_padded, o_padded, M, block_map = ctx.saved_tensors
-    dq, dk, dv = block_sparse_attn_backward_triton(grad_output1, q_padded, k_padded, v_padded, o_padded, M, block_map)
+    q_padded, k_padded, v_padded, o_padded, M, block_map, variable_block_sizes = ctx.saved_tensors
+    dq, dk, dv = block_sparse_attn_backward_triton(grad_output1, q_padded, k_padded, v_padded, o_padded, M, block_map, variable_block_sizes)
     return dq, dk, dv, None, None
 
 
 def setup_context_triton(ctx, inputs, output):
-    q_padded, k_padded, v_padded, block_map = inputs
+    q_padded, k_padded, v_padded, block_map, variable_block_sizes = inputs
     o_padded, M = output
-    ctx.save_for_backward(q_padded, k_padded, v_padded, o_padded, M, block_map)
+    ctx.save_for_backward(q_padded, k_padded, v_padded, o_padded, M, block_map, variable_block_sizes)
     
 block_sparse_attn_triton.register_autograd(backward_triton, setup_context=setup_context_triton)

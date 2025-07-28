@@ -3,9 +3,9 @@ from typing import Tuple
 block_sparse_attn=None
 
 try:
-    from vsa_cuda import block_sparse_fwd, block_sparse_bwd, block_sparse_attn_SM90
+    from vsa_cuda import block_sparse_fwd, block_sparse_bwd
+    from vsa.block_sparse_wrapper import block_sparse_attn_SM90
     block_sparse_attn = block_sparse_attn_SM90
-    assert False # TODO: remove this
 except ImportError:
     from vsa.block_sparse_wrapper import block_sparse_attn_triton
     block_sparse_fwd = None
