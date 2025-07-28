@@ -26,7 +26,7 @@ class ExecutionMode(str, Enum):
     Inherits from str to allow string comparison for backward compatibility.
     """
     INFERENCE = "inference"
-    PREPROCESSING = "preprocessing"
+    PREPROCESS = "preprocess"
     FINETUNING = "finetuning"
     DISTILLATION = "distillation"
 
@@ -471,9 +471,8 @@ class FastVideoArgs:
                 "Mode is 'training' but inference_mode is True. Setting inference_mode to False."
             )
             self.inference_mode = False
-        elif self.mode in [
-                ExecutionMode.INFERENCE, ExecutionMode.PREPROCESSING
-        ] and not self.inference_mode:
+        elif self.mode in [ExecutionMode.INFERENCE, ExecutionMode.PREPROCESS
+                           ] and not self.inference_mode:
             logger.warning(
                 "Mode is '%s' but inference_mode is False. Setting inference_mode to True.",
                 self.mode)
@@ -510,10 +509,10 @@ class FastVideoArgs:
         self.pipeline_config.check_pipeline_config()
 
         # Add preprocessing config validation if needed
-        if self.mode == ExecutionMode.PREPROCESSING:
+        if self.mode == ExecutionMode.PREPROCESS:
             if self.preprocess_config is None:
                 raise ValueError(
-                    "preprocess_config is not set in FastVideoArgs when mode is PREPROCESSING"
+                    "preprocess_config is not set in FastVideoArgs when mode is PREPROCESS"
                 )
             if self.preprocess_config.model_path == "":
                 self.preprocess_config.model_path = self.model_path
