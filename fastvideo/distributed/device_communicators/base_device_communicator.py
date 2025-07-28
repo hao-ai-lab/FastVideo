@@ -124,14 +124,18 @@ class DistributedAutograd:
                 seqlen = shard_seqlen * world_size
                 shard_hn = hn // world_size
 
-                input_ = input_.transpose(0, 2).contiguous() # hn, shard_seqlen, bs, hd
+                input_ = input_.transpose(
+                    0, 2).contiguous()  # hn, shard_seqlen, bs, hd
                 output = torch.empty_like(input_)
 
-                dist.all_to_all_single(output, input_, group=group) # hn, shard_seqlen, bs, hd
+                dist.all_to_all_single(output, input_,
+                                       group=group)  # hn, shard_seqlen, bs, hd
 
-                output = torch.cat(output.split(shard_hn), dim=1) # sharded hn, seqlen, bs, hd
-                
-                output = output.transpose(0, 2).contiguous() # bs, seqlen, sharded_hn, hd
+                output = torch.cat(output.split(shard_hn),
+                                   dim=1)  # sharded hn, seqlen, bs, hd
+
+                output = output.transpose(
+                    0, 2).contiguous()  # bs, seqlen, sharded_hn, hd
 
                 return output
             elif scatter_dim == 1 and gather_dim == 2:
@@ -139,16 +143,20 @@ class DistributedAutograd:
                 hn = shard_hn * world_size
                 shard_seqlen = seqlen // world_size
 
-                input_ = input_.transpose(0, 2).contiguous() # shard_hn, seqlen, bs, hd
-                
-                input_ = input_.reshape(shard_hn, world_size, shard_seqlen, bs, hd).transpose(0, 1).reshape(shard_hn * world_size, shard_seqlen, bs, hd).contiguous()
+                input_ = input_.transpose(
+                    0, 2).contiguous()  # shard_hn, seqlen, bs, hd
+
+                input_ = input_.reshape(shard_hn, world_size, shard_seqlen, bs,
+                                        hd).transpose(0, 1).reshape(
+                                            shard_hn * world_size, shard_seqlen,
+                                            bs, hd).contiguous()
 
                 output = torch.empty_like(input_)
 
                 dist.all_to_all_single(output, input_, group=group)
-                
-                output = output.transpose(0, 2).contiguous() # bs, seqlen, sharded_hn, hd
 
+                output = output.transpose(
+                    0, 2).contiguous()  # bs, seqlen, sharded_hn, hd
 
                 return output
             else:
