@@ -16,7 +16,6 @@ class BlockSparseAttentionFunction(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         q, k, v, o, lse, k2q_block_sparse_index, k2q_block_sparse_num = ctx.saved_tensors
-        grad_output = grad_output.contiguous()
         grad_q, grad_k, grad_v = block_sparse_bwd(
             q, k, v, o, lse, grad_output, k2q_block_sparse_index, k2q_block_sparse_num
         )
