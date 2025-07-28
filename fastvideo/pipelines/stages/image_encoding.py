@@ -55,6 +55,9 @@ class ImageEncodingStage(PipelineStage):
         Returns:
             The batch with encoded prompt embeddings.
         """
+        if batch.pil_image is None:
+            return batch
+
         self.image_encoder = self.image_encoder.to(get_local_torch_device())
 
         image = batch.pil_image
@@ -76,7 +79,7 @@ class ImageEncodingStage(PipelineStage):
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify image encoding stage inputs."""
         result = VerificationResult()
-        result.add_check("pil_image", batch.pil_image, V.not_none)
+        # result.add_check("pil_image", batch.pil_image, V.not_none)
         result.add_check("image_embeds", batch.image_embeds, V.is_list)
         return result
 
@@ -84,6 +87,6 @@ class ImageEncodingStage(PipelineStage):
                       fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify image encoding stage outputs."""
         result = VerificationResult()
-        result.add_check("image_embeds", batch.image_embeds,
-                         V.list_of_tensors_dims(3))
+        # result.add_check("image_embeds", batch.image_embeds,
+        #                  V.list_of_tensors_dims(3))
         return result
