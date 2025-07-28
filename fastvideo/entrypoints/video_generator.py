@@ -9,8 +9,8 @@ diffusion models.
 import math
 import os
 import time
-from typing import Any
 from copy import deepcopy
+from typing import Any
 
 import imageio
 import numpy as np

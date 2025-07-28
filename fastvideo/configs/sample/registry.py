@@ -6,12 +6,11 @@ from typing import Any
 from fastvideo.configs.sample.hunyuan import (FastHunyuanSamplingParam,
                                               HunyuanSamplingParam)
 from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
-from fastvideo.configs.sample.wan import (FastWanT2V480PConfig,
+from fastvideo.configs.sample.wan import (Wan2_1_Fun_1_3B_InP_SamplingParam,
                                           WanI2V_14B_480P_SamplingParam,
                                           WanI2V_14B_720P_SamplingParam,
                                           WanT2V_1_3B_SamplingParam,
-                                          WanT2V_14B_SamplingParam,
-                                          Wan2_1_Fun_1_3B_InP_SamplingParam)
+                                          WanT2V_14B_SamplingParam)
 from fastvideo.logger import init_logger
 from fastvideo.utils import (maybe_download_model_index,
                              verify_model_config_and_directory)
@@ -19,16 +18,26 @@ from fastvideo.utils import (maybe_download_model_index,
 logger = init_logger(__name__)
 # Registry maps specific model weights to their config classes
 SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
-    "FastVideo/FastHunyuan-diffusers": FastHunyuanSamplingParam,
-    "hunyuanvideo-community/HunyuanVideo": HunyuanSamplingParam,
-    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V_1_3B_SamplingParam,
-    "Wan-AI/Wan2.1-T2V-14B-Diffusers": WanT2V_14B_SamplingParam,
-    "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V_14B_480P_SamplingParam,
-    "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V_14B_720P_SamplingParam,
-    "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers": Wan2_1_Fun_1_3B_InP_SamplingParam,
-    "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VSamplingParam,
-    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": Wan2_1_Fun_1_3B_InP_SamplingParam,
-    "FastVideo/FastWan2.1-T2V-14B-480P-Diffusers": Wan2_1_Fun_1_3B_InP_SamplingParam,
+    "FastVideo/FastHunyuan-diffusers":
+    FastHunyuanSamplingParam,
+    "hunyuanvideo-community/HunyuanVideo":
+    HunyuanSamplingParam,
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers":
+    WanT2V_1_3B_SamplingParam,
+    "Wan-AI/Wan2.1-T2V-14B-Diffusers":
+    WanT2V_14B_SamplingParam,
+    "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers":
+    WanI2V_14B_480P_SamplingParam,
+    "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers":
+    WanI2V_14B_720P_SamplingParam,
+    "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers":
+    Wan2_1_Fun_1_3B_InP_SamplingParam,
+    "FastVideo/stepvideo-t2v-diffusers":
+    StepVideoT2VSamplingParam,
+    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers":
+    Wan2_1_Fun_1_3B_InP_SamplingParam,
+    "FastVideo/FastWan2.1-T2V-14B-480P-Diffusers":
+    Wan2_1_Fun_1_3B_InP_SamplingParam,
     # Add other specific weight variants
 }
 
