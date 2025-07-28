@@ -1,13 +1,17 @@
 import torch
 from typing import Tuple
-from vsa.block_sparse_wrapper import block_sparse_attn
+block_sparse_attn=None
+
 try:
-    from vsa_cuda import block_sparse_fwd, block_sparse_bwd
+    from vsa_cuda import block_sparse_fwd, block_sparse_bwd, block_sparse_attn_SM90
+    block_sparse_attn = block_sparse_attn_SM90
+    assert False # TODO: remove this
 except ImportError:
+    from vsa.block_sparse_wrapper import block_sparse_attn_triton
     block_sparse_fwd = None
     block_sparse_bwd = None
-from vsa.block_sparse_attn_triton import attention as triton_attention, attention_sparse as triton_attention_sparse
-from vsa.index import topk_index_to_map, map_to_index
+    block_sparse_attn = block_sparse_attn_triton
+
 BLOCK_M = 64
 BLOCK_N = 64
 

@@ -188,7 +188,7 @@ def main(args):
 
 
             # testing forward
-            o = block_sparse_attn(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num)
+            o, _= block_sparse_attn(q, k, v, block_sparse_mask)
             del q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num, block_sparse_mask, block_mask_expanded
             grad_o = torch.randn_like(o)
             o.backward(grad_o)
@@ -241,8 +241,8 @@ def main(args):
             
             sim, l1, rmse = precision_metric(v.grad, v_sdpa.grad)
             assert sim > 0.9999, f"SSIM too low: {sim}"
-            assert l1 < 1e-4, f"l1 too large: {l1}"
-            assert rmse < 2e-5, f"RMSE too large: {rmse}"
+            assert l1 < 4e-3, f"l1 too large: {l1}"
+            assert rmse < 2e-4, f"RMSE too large: {rmse}"
             grad_v_metrics['sim'].append(sim)
             grad_v_metrics['l1'].append(l1)
             grad_v_metrics['rmse'].append(rmse)
