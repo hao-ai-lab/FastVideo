@@ -111,7 +111,7 @@ class VideoSparseAttentionImpl(AttentionImpl):
     def tile(self, x: torch.Tensor) -> torch.Tensor:
         x = rearrange(x,
                       "b (t h w) head d -> b t h w head d",
-                      t=self.dit_seq_shape[0] // self.sp_size,
+                      t=self.dit_seq_shape[0],
                       h=self.dit_seq_shape[1],
                       w=self.dit_seq_shape[2])
         t_padded_size = self.full_window_size[0] * self.VSA_base_tile_size[0]
