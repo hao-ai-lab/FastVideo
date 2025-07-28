@@ -6,7 +6,7 @@ from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler)
-from fastvideo.pipelines.wan.wan_pipeline import WanPipeline
+from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.utils import is_vsa_available
 
