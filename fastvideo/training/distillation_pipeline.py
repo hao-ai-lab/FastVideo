@@ -60,6 +60,8 @@ class DistillationPipeline(TrainingPipeline):
     train_dataloader: StatefulDataLoader
     train_loader_iter: Iterator[dict[str, Any]]
     current_epoch: int = 0
+    init_steps: int
+    current_trainstep: int
     video_latent_shape: tuple[int, ...]
     video_latent_shape_sp: tuple[int, ...]
 
