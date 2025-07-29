@@ -10,9 +10,9 @@ fastvideo generate \
     --sp-size $num_gpus \
     --tp-size 1 \
     --num-gpus $num_gpus \
-    --height 448 \
-    --width 832 \
-    --num-frames 61 \
+    --height 480 \
+    --width 848 \
+    --num-frames 81 \
     --num-inference-steps 3 \
     --fps 16 \
     --prompt-txt assets/prompt.txt \
