@@ -94,6 +94,17 @@ steps:
                 agents:
                   queue: "default"
             - path:
+                - "fastvideo/training/**distillation**/"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: "Distillation DMDTests"
+                env:
+                  - TEST_TYPE=distillation_dmd
+                agents:
+                  queue: "default"
+            - path:
                 - "fastvideo/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
