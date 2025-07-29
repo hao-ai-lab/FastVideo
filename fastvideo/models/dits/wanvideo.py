@@ -13,7 +13,6 @@ from fastvideo.attention import (DistributedAttention, DistributedAttention_VSA,
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.configs.sample.wan import WanTeaCacheParams
 from fastvideo.distributed.communication_op import sequence_model_parallel_all_gather, sequence_model_parallel_shard
-from fastvideo.distributed.parallel_state import get_sp_parallel_rank, get_sp_world_size
 from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift,
                                         RMSNorm, ScaleResidual,
