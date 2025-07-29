@@ -119,9 +119,6 @@ class DecodingStage(PipelineStage):
                 if not vae_autocast_enabled:
                     latents = latents.to(vae_dtype)
                 image = self.vae.decode(latents)
-            # from wan.modules.vae2_2 import Wan2_2_VAE
-            # _vae = Wan2_2_VAE(vae_pth="/mnt/weka/home/hao.zhang/wei/Wan2.2_VAE.pth", device=get_local_torch_device(), dtype=torch.float32)
-            # image = _vae.decode([latents.squeeze(0)])[0].unsqueeze(0)
 
         # Normalize image to [0, 1] range
         image = (image / 2 + 0.5).clamp(0, 1)
