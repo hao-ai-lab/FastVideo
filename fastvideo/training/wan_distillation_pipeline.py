@@ -6,7 +6,7 @@ from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
-from fastvideo.pipelines.wan.wan_dmd_pipeline import WanDMDPipeline
+from fastvideo.pipelines.basic.wan.wan_dmd_pipeline import WanDMDPipeline
 from fastvideo.training.distillation_pipeline import DistillationPipeline
 from fastvideo.utils import is_vsa_available
 
