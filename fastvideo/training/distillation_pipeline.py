@@ -786,7 +786,7 @@ class DistillationPipeline(TrainingPipeline):
                     self.transformer.train()
                 self.sp_group.barrier()
 
-            # Save inference checkpoint (for model deployment)
+            # Save weight-only checkpoint 
             if (self.training_args.weight_only_checkpointing_steps > 0
                     and step % self.training_args.weight_only_checkpointing_steps
                     == 0):
@@ -796,7 +796,7 @@ class DistillationPipeline(TrainingPipeline):
                                              self.fake_score_transformer,
                                              self.global_rank,
                                              self.training_args.output_dir,
-                                             f"{step}_generator_weight_only",
+                                             f"{step}_weight_only",
                                              only_save_generator_weight=True)
 
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
