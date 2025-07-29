@@ -786,10 +786,10 @@ class DistillationPipeline(TrainingPipeline):
                     self.transformer.train()
                 self.sp_group.barrier()
 
-            # Save weight-only checkpoint 
+            # Save weight-only checkpoint
             if (self.training_args.weight_only_checkpointing_steps > 0
-                    and step % self.training_args.weight_only_checkpointing_steps
-                    == 0):
+                    and step %
+                    self.training_args.weight_only_checkpointing_steps == 0):
                 print("rank", self.global_rank,
                       "save weight-only checkpoint at step", step)
                 save_distillation_checkpoint(self.transformer,
