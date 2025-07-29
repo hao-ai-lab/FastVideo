@@ -30,7 +30,7 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.utils import dict_to_3d_list
+from fastvideo.utils import dict_to_3d_list, masks_like
 
 try:
     from fastvideo.attention.backends.sliding_tile_attn import (
@@ -194,9 +194,21 @@ class DenoisingStage(PipelineStage):
                 # Expand latents for I2V
                 latent_model_input = latents.to(target_dtype)
                 if batch.image_latent is not None:
+                    assert not fastvideo_args.pipeline_config.ti2v_task, "image latents should not be provided for TI2V task"
                     latent_model_input = torch.cat(
                         [latent_model_input, batch.image_latent],
                         dim=1).to(target_dtype)
+                elif fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
+                    # TI2V directly replaces the first frame of the latent with
+                    # the image latent instead of appending along the channel dim
+                    assert batch.image_latent is None, "TI2V task should not have image latents"
+                    z = self.get_module("vae").encode([batch.pil_image])
+                    mask1, mask2 = masks_like([latent_model_input],
+                                              zero=True,
+                                              generator=batch.generator)
+                    latent_model_input = (
+                        1. - mask2[0]) * z[0] + mask2[0] * latent_model_input
+
                 assert torch.isnan(latent_model_input).sum() == 0
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)

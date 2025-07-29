@@ -85,6 +85,9 @@ class PipelineConfig:
     # DMD parameters
     dmd_denoising_steps: list[int] | None = field(default=None)
 
+    # Wan2.2 TI2V parameters
+    ti2v_task: bool = False
+
     # Compilation
     # enable_torch_compile: bool = False
 
