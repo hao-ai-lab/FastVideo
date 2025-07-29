@@ -787,17 +787,17 @@ class DistillationPipeline(TrainingPipeline):
                 self.sp_group.barrier()
 
             # Save inference checkpoint (for model deployment)
-            if (self.training_args.inference_checkpointing_steps > 0
-                    and step % self.training_args.inference_checkpointing_steps
+            if (self.training_args.weight_only_checkpointing_steps > 0
+                    and step % self.training_args.weight_only_checkpointing_steps
                     == 0):
                 print("rank", self.global_rank,
-                      "save inference checkpoint at step", step)
+                      "save weight-only checkpoint at step", step)
                 save_distillation_checkpoint(self.transformer,
                                              self.fake_score_transformer,
                                              self.global_rank,
                                              self.training_args.output_dir,
-                                             f"{step}_inference",
-                                             only_save_inference_generator=True)
+                                             f"{step}_generator_weight_only",
+                                             only_save_generator_weight=True)
 
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 self._log_validation(self.transformer, self.training_args, step)
@@ -814,18 +814,6 @@ class DistillationPipeline(TrainingPipeline):
             self.optimizer, self.fake_score_optimizer, self.train_dataloader,
             self.lr_scheduler, self.fake_score_lr_scheduler,
             self.noise_random_generator)
-
-        # Save final inference checkpoint
-        print("rank", self.global_rank,
-              "save final inference checkpoint at step",
-              self.training_args.max_train_steps)
-        save_distillation_checkpoint(
-            self.transformer,
-            self.fake_score_transformer,
-            self.global_rank,
-            self.training_args.output_dir,
-            f"{self.training_args.max_train_steps}_inference",
-            only_save_inference_generator=True)
 
         if get_sp_group():
             cleanup_dist_env_and_memory()

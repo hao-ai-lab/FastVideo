@@ -94,7 +94,7 @@ optimizer_args=(
   --learning_rate=1e-5
   --mixed_precision="bf16"
   --training_state_checkpointing_steps=500
-  --inference_checkpointing_steps=500
+  --weight_only_checkpointing_steps=500
   --weight_decay 0.01
   --max_grad_norm 1.0
 )

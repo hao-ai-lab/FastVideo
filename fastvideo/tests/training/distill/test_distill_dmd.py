@@ -49,7 +49,7 @@ def run_worker():
         "--learning_rate", "1e-5",
         "--mixed_precision", "bf16",
         "--training_state_checkpointing_steps", "30",
-        "--inference_checkpointing_steps", "30",
+        "--weight_only_checkpointing_steps", "30",
         "--validation_steps", "10",
         "--validation_sampling_steps", "3",
         "--log_validation",

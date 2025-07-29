@@ -200,15 +200,15 @@ def save_distillation_checkpoint(generator_transformer,
                                  generator_scheduler=None,
                                  fake_score_scheduler=None,
                                  noise_generator=None,
-                                 only_save_inference_generator=False) -> None:
+                                 only_save_generator_weight=False) -> None:
     """
     Save distillation checkpoint with both generator and fake_score models.
     Saves both distributed checkpoint and consolidated model weights.
     Only saves the generator model for inference (consolidated weights).
     
     Args:
-        only_save_inference_generator: If True, only save the generator model for inference
-                                      without saving distributed checkpoint for training resume.
+        only_save_generator_weight: If True, only save the generator model weights for inference
+                                   without saving distributed checkpoint for training resume.
     """
     save_dir = os.path.join(output_dir, f"checkpoint-{step}")
     os.makedirs(save_dir, exist_ok=True)
@@ -217,8 +217,8 @@ def save_distillation_checkpoint(generator_transformer,
     inference_save_dir = os.path.join(save_dir,
                                       "generator_inference_transformer")
 
-    # Only save distributed checkpoint if not only saving inference generator
-    if not only_save_inference_generator:
+    # Only save distributed checkpoint if not only saving generator weight
+    if not only_save_generator_weight:
         # Save generator distributed checkpoint
         generator_states = {
             "model": ModelWrapper(generator_transformer),
@@ -289,7 +289,7 @@ def save_distillation_checkpoint(generator_transformer,
 
     else:
         logger.info(
-            "rank: %s, skipping distributed checkpoint save (only_save_inference_generator=True)",
+            "rank: %s, skipping distributed checkpoint save (only_save_generator_weight=True)",
             rank,
             local_main_process_only=False)
 

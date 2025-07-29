@@ -671,7 +671,7 @@ class TrainingArgs(FastVideoArgs):
     max_timestep_ratio: float = 0.98
     real_score_guidance_scale: float = 3.5
     training_state_checkpointing_steps: int = 0  # for resuming training
-    inference_checkpointing_steps: int = 0  # for inference
+    weight_only_checkpointing_steps: int = 0  # for inference
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -837,9 +837,9 @@ class TrainingArgs(FastVideoArgs):
             help=
             "Steps between training state checkpoints (for resuming training)")
         parser.add_argument(
-            "--inference-checkpointing-steps",
+            "--weight-only-checkpointing-steps",
             type=int,
-            help="Steps between inference checkpoints (for inference)")
+            help="Steps between weight-only checkpoints (for inference)")
         parser.add_argument("--resume-from-checkpoint",
                             type=str,
                             help="Path to checkpoint to resume from")
