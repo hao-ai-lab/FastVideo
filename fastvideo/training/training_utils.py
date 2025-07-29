@@ -33,7 +33,8 @@ def gather_state_dict_on_cpu_rank0(
     cpu_state_dict = {}
     sharded_sd = model.state_dict()
     param_requires_grad = set([
-        k.replace("._checkpoint_wrapped_module.", ".") for k, v in dict(model.named_parameters()).items() if v.requires_grad
+        k.replace("._checkpoint_wrapped_module.", ".")
+        for k, v in dict(model.named_parameters()).items() if v.requires_grad
     ])
     for param_name, param in sharded_sd.items():
         if param_name not in param_requires_grad:
