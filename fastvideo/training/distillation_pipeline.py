@@ -679,10 +679,13 @@ class DistillationPipeline(TrainingPipeline):
         else:
             set_random_seed(seed + self.global_rank)
 
-        # Always create generator objects first
-        self.noise_random_generator.manual_seed(seed)
-        self.validation_random_generator.manual_seed(seed)
-        self.noise_gen_cuda = torch.Generator(device="cuda").manual_seed(seed)
+        # Set random seeds for deterministic training
+        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
+            self.seed)
+        self.noise_gen_cuda = torch.Generator(device="cuda").manual_seed(
+            self.seed)
+        self.validation_random_generator = torch.Generator(
+            device="cpu").manual_seed(self.seed)
         logger.info("Initialized random seeds with seed: %s", seed)
 
         # Resume from checkpoint if specified (this will restore random states)
@@ -766,9 +769,12 @@ class DistillationPipeline(TrainingPipeline):
                     log_data["VSA_train_sparsity"] = current_vsa_sparsity
                 wandb.log(log_data, step=step)
 
-            if step % self.training_args.checkpointing_steps == 0 and step > 0:
-                print("rank", self.global_rank, "save checkpoint at step", step)
-                # Save full training checkpoint
+            # Save training state checkpoint (for resuming training)
+            if (self.training_args.training_state_checkpointing_steps > 0
+                    and step %
+                    self.training_args.training_state_checkpointing_steps == 0):
+                print("rank", self.global_rank,
+                      "save training state checkpoint at step", step)
                 save_distillation_checkpoint(
                     self.transformer, self.fake_score_transformer,
                     self.global_rank, self.training_args.output_dir, step,
@@ -776,25 +782,32 @@ class DistillationPipeline(TrainingPipeline):
                     self.train_dataloader, self.lr_scheduler,
                     self.fake_score_lr_scheduler, self.noise_random_generator)
 
-                # Also save inference-only checkpoint every N steps (e.g., every 10th checkpoint)
-                if step % (self.training_args.checkpointing_steps * 10) == 0:
-                    save_distillation_checkpoint(
-                        self.transformer,
-                        self.fake_score_transformer,
-                        self.global_rank,
-                        self.training_args.output_dir,
-                        f"{step}_inference",
-                        only_save_inference_generator=True)
-
                 if self.transformer:
                     self.transformer.train()
                 self.sp_group.barrier()
+
+            # Save inference checkpoint (for model deployment)
+            if (self.training_args.inference_checkpointing_steps > 0
+                    and step % self.training_args.inference_checkpointing_steps
+                    == 0):
+                print("rank", self.global_rank,
+                      "save inference checkpoint at step", step)
+                save_distillation_checkpoint(self.transformer,
+                                             self.fake_score_transformer,
+                                             self.global_rank,
+                                             self.training_args.output_dir,
+                                             f"{step}_inference",
+                                             only_save_inference_generator=True)
 
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 self._log_validation(self.transformer, self.training_args, step)
 
         wandb.finish()
-        # Save final training checkpoint with all states
+
+        # Save final training state checkpoint
+        print("rank", self.global_rank,
+              "save final training state checkpoint at step",
+              self.training_args.max_train_steps)
         save_distillation_checkpoint(
             self.transformer, self.fake_score_transformer, self.global_rank,
             self.training_args.output_dir, self.training_args.max_train_steps,
@@ -802,7 +815,10 @@ class DistillationPipeline(TrainingPipeline):
             self.lr_scheduler, self.fake_score_lr_scheduler,
             self.noise_random_generator)
 
-        # Save inference-only checkpoint (only generator model)
+        # Save final inference checkpoint
+        print("rank", self.global_rank,
+              "save final inference checkpoint at step",
+              self.training_args.max_train_steps)
         save_distillation_checkpoint(
             self.transformer,
             self.fake_score_transformer,

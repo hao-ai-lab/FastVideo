@@ -284,19 +284,9 @@ def save_distillation_checkpoint(generator_transformer,
         }
         shared_dcp_dir = os.path.join(save_dir, "distributed_checkpoint",
                                       "shared")
-        logger.info("rank: %s, saving shared random state to %s",
-                    rank,
-                    shared_dcp_dir,
-                    local_main_process_only=False)
 
-        begin_time = time.perf_counter()
         dcp.save(shared_states, checkpoint_id=shared_dcp_dir)
-        end_time = time.perf_counter()
 
-        logger.info("rank: %s, shared random state saved in %.2f seconds",
-                    rank,
-                    end_time - begin_time,
-                    local_main_process_only=False)
     else:
         logger.info(
             "rank: %s, skipping distributed checkpoint save (only_save_inference_generator=True)",
@@ -513,11 +503,6 @@ def load_distillation_checkpoint(generator_transformer,
     shared_states = {
         "random_state": RandomStateWrapper(noise_generator),
     }
-
-    logger.info("rank: %s, loading shared random state from %s",
-                rank,
-                shared_dcp_dir,
-                local_main_process_only=False)
 
     begin_time = time.perf_counter()
     dcp.load(shared_states, checkpoint_id=shared_dcp_dir)
