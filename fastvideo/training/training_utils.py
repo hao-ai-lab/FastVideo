@@ -57,7 +57,7 @@ def gather_state_dict_on_cpu_rank0(
 
         if rank == 0:
             cpu_state_dict[param_name] = param.cpu()
-    torch.distributed.breakpoint()
+
     return cpu_state_dict
 
 
