@@ -68,11 +68,11 @@ def run_worker():
         "--weight_decay", "0.01",
         "--dit_precision", "fp32",
         "--max_grad_norm", "1.0",
-        "--student_critic_update_ratio", "2",
-        "--denoising_step_list", "1000,757,522",
-        "--min_step_ratio", "0.02",
-        "--max_step_ratio", "0.98",
-        "--teacher_guidance_scale", "3.5",
+        "--generator_update_interval", "5",
+        "--dmd_denoising_steps", "'1000,757,522'",
+        "--min_timestep_ratio", "0.02",
+        "--max_timestep_ratio", "0.98",
+        "--real_score_guidance_scale", "3.5",
         "--enable_gradient_checkpointing_type", "full"
     ])
     # Call the main training function
