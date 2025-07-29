@@ -28,6 +28,8 @@ from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import dict_to_3d_list
+from fastvideo.utils import randn_tensor
+
 
 try:
     from fastvideo.attention.backends.sliding_tile_attn import (
@@ -629,11 +631,7 @@ class DmdDenoisingStage(DenoisingStage):
         assert batch.latents is not None, "latents must be provided"
         latents = batch.latents
         # TODO(yongqi) hard code prepare latents
-        latents = torch.randn(
-            latents.permute(0, 2, 1, 3, 4).shape,
-            dtype=torch.bfloat16,
-            device="cuda",
-            generator=torch.Generator(device="cuda").manual_seed(42))
+        latents = latents.permute(0, 2, 1, 3, 4)
         video_raw_latent_shape = latents.shape
         prompt_embeds = batch.prompt_embeds
         assert torch.isnan(prompt_embeds[0]).sum() == 0
@@ -735,9 +733,11 @@ class DmdDenoisingStage(DenoisingStage):
                     if i < len(timesteps) - 1:
                         next_timestep = timesteps[i + 1] * torch.ones(
                             [1], dtype=torch.long, device=pred_video.device)
-                        noise = torch.randn(video_raw_latent_shape,
+                        noise = randn_tensor(video_raw_latent_shape,
                                             device=self.device,
-                                            dtype=pred_video.dtype)
+                                            dtype=pred_video.dtype,
+                                            generator=batch.generator)
+                        
                         latents = self.scheduler.add_noise(
                             pred_video.flatten(0, 1), noise.flatten(0, 1),
                             next_timestep).unflatten(0, pred_video.shape[:2])
