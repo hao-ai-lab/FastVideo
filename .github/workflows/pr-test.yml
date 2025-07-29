@@ -326,7 +326,7 @@ jobs:
       volume_size: 100
       disk_size: 100
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
-      test_command: "uv pip install -e .[test] && python csrc/attn/tests/test_block_sparse.py"
+      test_command: "uv pip install -e .[test] && python csrc/attn/tests/test_vsa.py"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
