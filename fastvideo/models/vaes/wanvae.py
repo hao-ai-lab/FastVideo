@@ -1209,10 +1209,11 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
                         out_ = self.decoder(x[:, :, i:i + 1, :, :])
                         out = torch.cat([out, out_], 2)
 
-            if self.config.clip_output:
-                out = torch.clamp(out, min=-1.0, max=1.0)
             if self.config.patch_size is not None:
                 out = unpatchify(out, patch_size=self.config.patch_size)
+                
+            out = out.float()
+            out = torch.clamp(out, min=-1.0, max=1.0)
             self.clear_cache()
         else:
             out = ParallelTiledVAE.decode(self, z)
