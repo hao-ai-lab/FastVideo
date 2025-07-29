@@ -621,14 +621,11 @@ class WanTransformer3DModel(CachableDiT):
             rope_theta=10000)
         freqs_cis = (freqs_cos.to(hidden_states.device).float(),
                      freqs_sin.to(hidden_states.device).float())
-
+        
+        
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
-        # hidden_states = sequence_model_parallel_shard(hidden_states, dim=1)
-        sp_rank = get_sp_parallel_rank()
-        sp_world_size = get_sp_world_size()
-        elements_per_rank = hidden_states.shape[1] // sp_world_size
-        hidden_states = hidden_states[:, sp_rank*elements_per_rank:(sp_rank+1)*elements_per_rank]
+        hidden_states = sequence_model_parallel_shard(hidden_states, dim=1)
 
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
             timestep, encoder_hidden_states, encoder_hidden_states_image)
@@ -674,19 +671,15 @@ class WanTransformer3DModel(CachableDiT):
         shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2,
                                                                           dim=1)
         hidden_states = self.norm_out(hidden_states, shift, scale)
-        # hidden_states = sequence_model_parallel_all_gather(hidden_states, dim=1)
-        output_tensor = [torch.empty_like(hidden_states) for _ in range(sp_world_size)]
-        hidden_states = torch.distributed.all_gather(output_tensor, hidden_states)
-        hidden_states = torch.cat(output_tensor, dim=1)
+        hidden_states = sequence_model_parallel_all_gather(hidden_states, dim=1)
         hidden_states = self.proj_out(hidden_states)
-
         hidden_states = hidden_states.reshape(batch_size, post_patch_num_frames,
                                               post_patch_height,
                                               post_patch_width, p_t, p_h, p_w,
                                               -1)
         hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
         output = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
-
+        
         return output
 
     def maybe_cache_states(self, hidden_states: torch.Tensor,

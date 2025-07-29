@@ -36,10 +36,10 @@ def sequence_model_parallel_all_gather(input_: torch.Tensor,
 
 def sequence_model_parallel_shard(input_: torch.Tensor,
                                        dim: int = 1) -> torch.Tensor:
-    """All-gather the input tensor across model parallel group."""
+    """Shard the input tensor across model parallel group."""
     sp_rank = get_sp_parallel_rank()
     sp_world_size = get_sp_world_size()
-    assert input_.shape[dim] % sp_world_size == 0, "input tensor dim={dim} must be divisible by sp_world_size"
+    assert input_.shape[dim] % sp_world_size == 0, f"input tensor dim={dim} must be divisible by sp_world_size={sp_world_size}"
     elements_per_rank = input_.shape[dim] // sp_world_size
     # sharding dim
     input_ = input_.movedim(dim, 0)

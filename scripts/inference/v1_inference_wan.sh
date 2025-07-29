@@ -1,6 +1,6 @@
 #!/bin/bash
 
-num_gpus=1
+num_gpus=2
 export FASTVIDEO_ATTENTION_BACKEND=
 export MODEL_BASE=Wan-AI/Wan2.1-T2V-1.3B-Diffusers
 # export MODEL_BASE=hunyuanvideo-community/HunyuanVideo
@@ -11,8 +11,8 @@ fastvideo generate \
     --tp-size 1 \
     --num-gpus $num_gpus \
     --height 480 \
-    --width 832 \
-    --num-frames 77 \
+    --width 848 \
+    --num-frames 81 \
     --num-inference-steps 50 \
     --fps 16 \
     --guidance-scale 6.0 \

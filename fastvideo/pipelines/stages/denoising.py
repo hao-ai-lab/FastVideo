@@ -293,8 +293,6 @@ class DenoisingStage(PipelineStage):
                         and progress_bar is not None):
                     progress_bar.update()
 
-
-
         # Update batch with final latents
         batch.latents = latents
 
@@ -752,7 +750,6 @@ class DmdDenoisingStage(DenoisingStage):
                         (i + 1) % self.scheduler.order == 0
                             and progress_bar is not None):
                         progress_bar.update()
-
 
         latents = latents.permute(0, 2, 1, 3, 4)
         # Update batch with final latents
