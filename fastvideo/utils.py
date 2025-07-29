@@ -846,3 +846,29 @@ def masks_like(tensor,
                 v[:, 0] = torch.zeros_like(v[:, 0])
 
     return out1, out2
+
+
+def best_output_size(w, h, dw, dh, expected_area):
+    # float output size
+    ratio = w / h
+    ow = (expected_area * ratio)**0.5
+    oh = expected_area / ow
+
+    # process width first
+    ow1 = int(ow // dw * dw)
+    oh1 = int(expected_area / ow1 // dh * dh)
+    assert ow1 % dw == 0 and oh1 % dh == 0 and ow1 * oh1 <= expected_area
+    ratio1 = ow1 / oh1
+
+    # process height first
+    oh2 = int(oh // dh * dh)
+    ow2 = int(expected_area / oh2 // dw * dw)
+    assert oh2 % dh == 0 and ow2 % dw == 0 and ow2 * oh2 <= expected_area
+    ratio2 = ow2 / oh2
+
+    # compare ratios
+    if max(ratio / ratio1, ratio1 / ratio) < max(ratio / ratio2,
+                                                 ratio2 / ratio):
+        return ow1, oh1
+    else:
+        return ow2, oh2

@@ -10,7 +10,9 @@ from collections.abc import Iterable
 from typing import Any
 
 import torch
+import torchvision.transforms.functional as TF
 from einops import rearrange
+from PIL import Image
 from tqdm.auto import tqdm
 
 from fastvideo.attention import get_attn_backend
@@ -30,7 +32,7 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.utils import dict_to_3d_list, masks_like
+from fastvideo.utils import best_output_size, dict_to_3d_list, masks_like
 
 try:
     from fastvideo.attention.backends.sliding_tile_attn import (
@@ -57,10 +59,11 @@ class DenoisingStage(PipelineStage):
     the initial noise into the final output.
     """
 
-    def __init__(self, transformer, scheduler, pipeline=None) -> None:
+    def __init__(self, transformer, scheduler, vae, pipeline=None) -> None:
         super().__init__()
         self.transformer = transformer
         self.scheduler = scheduler
+        self.vae = vae
         self.pipeline = weakref.ref(pipeline) if pipeline else None
         attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads
         self.attn_backend = get_attn_backend(
@@ -202,7 +205,35 @@ class DenoisingStage(PipelineStage):
                     # TI2V directly replaces the first frame of the latent with
                     # the image latent instead of appending along the channel dim
                     assert batch.image_latent is None, "TI2V task should not have image latents"
-                    z = self.get_module("vae").encode([batch.pil_image])
+                    # preprocess
+                    img = batch.pil_image
+                    assert img is not None
+                    ih, iw = img.height, img.width
+                    dh, dw = self.patch_size[1] * self.vae_stride[
+                        1], self.patch_size[2] * self.vae_stride[2]
+                    max_area = 704 * 1280
+                    ow, oh = best_output_size(iw, ih, dw, dh, max_area)
+
+                    scale = max(ow / iw, oh / ih)
+                    img = img.resize((round(iw * scale), round(ih * scale)),
+                                     Image.LANCZOS)
+
+                    # center-crop
+                    x1 = (img.width - ow) // 2
+                    y1 = (img.height - oh) // 2
+                    img = img.crop((x1, y1, x1 + ow, y1 + oh))
+                    assert img.width == ow and img.height == oh
+
+                    # to tensor
+                    img = TF.to_tensor(img).sub_(0.5).div_(0.5).to(
+                        self.device).unsqueeze(1)
+
+                    #                     return [
+                    #     self.model.encode(u.unsqueeze(0),
+                    #                       self.scale).float().squeeze(0)
+                    #     for u in videos
+                    # ]
+                    z = self.vae.encode(img.unsqueeze(0))
                     mask1, mask2 = masks_like([latent_model_input],
                                               zero=True,
                                               generator=batch.generator)
