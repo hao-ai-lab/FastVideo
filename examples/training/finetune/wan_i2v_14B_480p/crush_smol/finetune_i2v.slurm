@@ -50,10 +50,10 @@ VALIDATION_DATASET_FILE="examples/training/finetune/wan_i2v_14b_480p/crush_smol/
 training_args=(
   --tracker_project_name wan_i2v_finetune
   --output_dir="checkpoints/wan_i2v_finetune"
-  --max_train_steps=2000
-  --train_batch_size=2
+  --max_train_steps 2000
+  --train_batch_size 2
   --train_sp_batch_size 1
-  --gradient_accumulation_steps=1
+  --gradient_accumulation_steps 1
   --num_latent_t 8
   --num_height 480
   --num_width 832
@@ -93,9 +93,9 @@ validation_args=(
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate=1e-5
-  --mixed_precision="bf16"
-  --checkpointing_steps=1000
+  --learning_rate 1e-5
+  --mixed_precision "bf16"
+  --checkpointing_steps 1000
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )
