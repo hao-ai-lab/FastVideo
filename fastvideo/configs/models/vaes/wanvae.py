@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-from typing import Optional
 from dataclasses import dataclass, field
 
 import torch
@@ -10,7 +9,7 @@ from fastvideo.configs.models.vaes.base import VAEArchConfig, VAEConfig
 @dataclass
 class WanVAEArchConfig(VAEArchConfig):
     base_dim: int = 96
-    decoder_base_dim: Optional[int] = None
+    decoder_base_dim: int | None = None
     z_dim: int = 16
     dim_mult: tuple[int, ...] = (1, 2, 4, 4)
     num_res_blocks: int = 2
@@ -56,7 +55,7 @@ class WanVAEArchConfig(VAEArchConfig):
     is_residual: bool = False
     in_channels: int = 3
     out_channels: int = 3
-    patch_size: Optional[int] = None
+    patch_size: int | None = None
     scale_factor_temporal: int = 4
     scale_factor_spatial: int = 8
     clip_output: bool = True

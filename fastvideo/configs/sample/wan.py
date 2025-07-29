@@ -106,6 +106,7 @@ class FastWanT2V480PConfig(WanT2V_1_3B_SamplingParam):
     width: int = 832
     fps: int = 16
 
+
 @dataclass
 class Wan2_2_TI2V_5B_SamplingParam(SamplingParam):
     # Video parameters
