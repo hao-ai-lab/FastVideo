@@ -406,7 +406,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
     def train(self) -> None:
         assert self.seed is not None, "seed must be set"
-        set_random_seed(self.seed)
+        set_random_seed(self.seed + self.global_rank)
         logger.info('rank: %s: start training',
                     self.global_rank,
                     local_main_process_only=False)

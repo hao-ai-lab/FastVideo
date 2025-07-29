@@ -189,6 +189,158 @@ def save_checkpoint(transformer,
         logger.info("--> checkpoint saved at step %s to %s", step, weight_path)
 
 
+def save_distillation_checkpoint(generator_transformer,
+                                 fake_score_transformer,
+                                 rank,
+                                 output_dir,
+                                 step,
+                                 generator_optimizer=None,
+                                 fake_score_optimizer=None,
+                                 dataloader=None,
+                                 generator_scheduler=None,
+                                 fake_score_scheduler=None,
+                                 noise_generator=None,
+                                 only_save_inference_generator=False) -> None:
+    """
+    Save distillation checkpoint with both generator and fake_score models.
+    Saves both distributed checkpoint and consolidated model weights.
+    Only saves the generator model for inference (consolidated weights).
+    
+    Args:
+        only_save_inference_generator: If True, only save the generator model for inference
+                                      without saving distributed checkpoint for training resume.
+    """
+    save_dir = os.path.join(output_dir, f"checkpoint-{step}")
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Create directories for models
+    inference_save_dir = os.path.join(save_dir,
+                                      "generator_inference_transformer")
+
+    # Only save distributed checkpoint if not only saving inference generator
+    if not only_save_inference_generator:
+        # Save generator distributed checkpoint
+        generator_states = {
+            "model": ModelWrapper(generator_transformer),
+        }
+        if generator_optimizer is not None:
+            generator_states["optimizer"] = OptimizerWrapper(
+                generator_transformer, generator_optimizer)
+        if dataloader is not None:
+            generator_states["dataloader"] = dataloader
+        if generator_scheduler is not None:
+            generator_states["scheduler"] = SchedulerWrapper(
+                generator_scheduler)
+
+        generator_dcp_dir = os.path.join(save_dir, "distributed_checkpoint",
+                                         "generator")
+        logger.info("rank: %s, saving generator distributed checkpoint to %s",
+                    rank,
+                    generator_dcp_dir,
+                    local_main_process_only=False)
+
+        begin_time = time.perf_counter()
+        dcp.save(generator_states, checkpoint_id=generator_dcp_dir)
+        end_time = time.perf_counter()
+
+        logger.info(
+            "rank: %s, generator distributed checkpoint saved in %.2f seconds",
+            rank,
+            end_time - begin_time,
+            local_main_process_only=False)
+
+        # Save critic distributed checkpoint
+        critic_states = {
+            "model": ModelWrapper(fake_score_transformer),
+        }
+        if fake_score_optimizer is not None:
+            critic_states["optimizer"] = OptimizerWrapper(
+                fake_score_transformer, fake_score_optimizer)
+        if dataloader is not None:
+            critic_states["dataloader"] = dataloader
+        if fake_score_scheduler is not None:
+            critic_states["scheduler"] = SchedulerWrapper(fake_score_scheduler)
+
+        critic_dcp_dir = os.path.join(save_dir, "distributed_checkpoint",
+                                      "critic")
+        logger.info("rank: %s, saving critic distributed checkpoint to %s",
+                    rank,
+                    critic_dcp_dir,
+                    local_main_process_only=False)
+
+        begin_time = time.perf_counter()
+        dcp.save(critic_states, checkpoint_id=critic_dcp_dir)
+        end_time = time.perf_counter()
+
+        logger.info(
+            "rank: %s, critic distributed checkpoint saved in %.2f seconds",
+            rank,
+            end_time - begin_time,
+            local_main_process_only=False)
+
+        # Save shared random state separately
+        shared_states = {
+            "random_state": RandomStateWrapper(noise_generator),
+        }
+        shared_dcp_dir = os.path.join(save_dir, "distributed_checkpoint",
+                                      "shared")
+        logger.info("rank: %s, saving shared random state to %s",
+                    rank,
+                    shared_dcp_dir,
+                    local_main_process_only=False)
+
+        begin_time = time.perf_counter()
+        dcp.save(shared_states, checkpoint_id=shared_dcp_dir)
+        end_time = time.perf_counter()
+
+        logger.info("rank: %s, shared random state saved in %.2f seconds",
+                    rank,
+                    end_time - begin_time,
+                    local_main_process_only=False)
+    else:
+        logger.info(
+            "rank: %s, skipping distributed checkpoint save (only_save_inference_generator=True)",
+            rank,
+            local_main_process_only=False)
+
+    # Save generator model weights (consolidated) for inference
+    cpu_state = gather_state_dict_on_cpu_rank0(generator_transformer,
+                                               device=None)
+
+    if rank == 0:
+        # Save generator model weights (consolidated) for inference
+        os.makedirs(inference_save_dir, exist_ok=True)
+        weight_path = os.path.join(inference_save_dir,
+                                   "diffusion_pytorch_model.safetensors")
+        logger.info(
+            "rank: %s, saving consolidated generator inference checkpoint to %s",
+            rank,
+            weight_path,
+            local_main_process_only=False)
+
+        # Convert training format to diffusers format and save
+        diffusers_state_dict = custom_to_hf_state_dict(
+            cpu_state, generator_transformer.reverse_param_names_mapping)
+        save_file(diffusers_state_dict, weight_path)
+
+        logger.info(
+            "rank: %s, consolidated generator inference checkpoint saved to %s",
+            rank,
+            weight_path,
+            local_main_process_only=False)
+
+        # Save model config
+        config_dict = generator_transformer.hf_config
+        if "dtype" in config_dict:
+            del config_dict["dtype"]  # TODO
+        config_path = os.path.join(inference_save_dir, "config.json")
+        # save dict as json
+        with open(config_path, "w") as f:
+            json.dump(config_dict, f, indent=4)
+        logger.info("--> distillation checkpoint saved at step %s to %s", step,
+                    weight_path)
+
+
 def load_checkpoint(transformer,
                     rank,
                     checkpoint_path,
@@ -246,6 +398,136 @@ def load_checkpoint(transformer,
                 local_main_process_only=False)
     logger.info("--> checkpoint loaded from step %s", step)
 
+    return step
+
+
+def load_distillation_checkpoint(generator_transformer,
+                                 fake_score_transformer,
+                                 rank,
+                                 checkpoint_path,
+                                 generator_optimizer=None,
+                                 fake_score_optimizer=None,
+                                 dataloader=None,
+                                 generator_scheduler=None,
+                                 fake_score_scheduler=None,
+                                 noise_generator=None) -> int:
+    """
+    Load distillation checkpoint with both generator and fake_score models.
+    Returns the step number from which training should resume.
+    """
+    if not os.path.exists(checkpoint_path):
+        logger.warning("Distillation checkpoint path %s does not exist",
+                       checkpoint_path)
+        return 0
+
+    # Extract step number from checkpoint path
+    step = int(os.path.basename(checkpoint_path).split('-')[-1])
+
+    if rank == 0:
+        logger.info("Loading distillation checkpoint from step %s", step)
+
+    # Load generator distributed checkpoint
+    generator_dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint",
+                                     "generator")
+    if not os.path.exists(generator_dcp_dir):
+        logger.warning(
+            "Generator distributed checkpoint directory %s does not exist",
+            generator_dcp_dir)
+        return 0
+
+    generator_states = {
+        "model": ModelWrapper(generator_transformer),
+    }
+
+    if generator_optimizer is not None:
+        generator_states["optimizer"] = OptimizerWrapper(
+            generator_transformer, generator_optimizer)
+
+    if dataloader is not None:
+        generator_states["dataloader"] = dataloader
+
+    if generator_scheduler is not None:
+        generator_states["scheduler"] = SchedulerWrapper(generator_scheduler)
+
+    logger.info("rank: %s, loading generator distributed checkpoint from %s",
+                rank,
+                generator_dcp_dir,
+                local_main_process_only=False)
+
+    begin_time = time.perf_counter()
+    dcp.load(generator_states, checkpoint_id=generator_dcp_dir)
+    end_time = time.perf_counter()
+
+    logger.info(
+        "rank: %s, generator distributed checkpoint loaded in %.2f seconds",
+        rank,
+        end_time - begin_time,
+        local_main_process_only=False)
+
+    # Load critic distributed checkpoint
+    critic_dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint",
+                                  "critic")
+    if not os.path.exists(critic_dcp_dir):
+        logger.warning(
+            "Critic distributed checkpoint directory %s does not exist",
+            critic_dcp_dir)
+        return 0
+
+    critic_states = {
+        "model": ModelWrapper(fake_score_transformer),
+    }
+
+    if fake_score_optimizer is not None:
+        critic_states["optimizer"] = OptimizerWrapper(fake_score_transformer,
+                                                      fake_score_optimizer)
+
+    if dataloader is not None:
+        critic_states["dataloader"] = dataloader
+
+    if fake_score_scheduler is not None:
+        critic_states["scheduler"] = SchedulerWrapper(fake_score_scheduler)
+
+    logger.info("rank: %s, loading critic distributed checkpoint from %s",
+                rank,
+                critic_dcp_dir,
+                local_main_process_only=False)
+
+    begin_time = time.perf_counter()
+    dcp.load(critic_states, checkpoint_id=critic_dcp_dir)
+    end_time = time.perf_counter()
+
+    logger.info(
+        "rank: %s, critic distributed checkpoint loaded in %.2f seconds",
+        rank,
+        end_time - begin_time,
+        local_main_process_only=False)
+
+    # Load shared random state
+    shared_dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint",
+                                  "shared")
+    if not os.path.exists(shared_dcp_dir):
+        logger.warning("Shared random state directory %s does not exist",
+                       shared_dcp_dir)
+        return 0
+
+    shared_states = {
+        "random_state": RandomStateWrapper(noise_generator),
+    }
+
+    logger.info("rank: %s, loading shared random state from %s",
+                rank,
+                shared_dcp_dir,
+                local_main_process_only=False)
+
+    begin_time = time.perf_counter()
+    dcp.load(shared_states, checkpoint_id=shared_dcp_dir)
+    end_time = time.perf_counter()
+
+    logger.info("rank: %s, shared random state loaded in %.2f seconds",
+                rank,
+                end_time - begin_time,
+                local_main_process_only=False)
+    logger.info("--> distillation checkpoint loaded from step %s", step)
     return step
 
 
