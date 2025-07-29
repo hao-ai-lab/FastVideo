@@ -9,7 +9,7 @@ NUM_GPUS=4
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
-# If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
+# Make sure that num_latent_t is a multiple of sp_size
 torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     fastvideo/training/wan_training_pipeline.py\
     --model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \

@@ -141,6 +141,11 @@ class VideoGenerator:
 
             logger.info("Found %d prompts in %s", len(prompts), prompt_txt_path)
 
+            if sampling_param is not None:
+                original_output_video_name = sampling_param.output_video_name
+            else:
+                original_output_video_name = None
+
             results = []
             for i, batch_prompt in enumerate(prompts):
                 logger.info("Processing prompt %d/%d: %s...", i + 1,
@@ -148,6 +153,8 @@ class VideoGenerator:
 
                 try:
                     # Generate video for this prompt using the same logic below
+                    if sampling_param is not None and original_output_video_name is not None:
+                        sampling_param.output_video_name = original_output_video_name + f"_{i}"
                     result = self._generate_single_video(
                         batch_prompt, sampling_param, **kwargs)
 
@@ -282,7 +289,8 @@ class VideoGenerator:
         logger.info(debug_str)
 
         # Use prompt[:100] for video name
-        output_video_name = kwargs.get("output_video_name", prompt[:100])
+        if sampling_param.output_video_name is None:
+            sampling_param.output_video_name = prompt[:100]
 
         # Prepare batch
         batch = ForwardBatch(
@@ -291,7 +299,6 @@ class VideoGenerator:
             n_tokens=n_tokens,
             VSA_sparsity=fastvideo_args.VSA_sparsity,
             extra={},
-            output_video_name=output_video_name,
         )
 
         # Run inference

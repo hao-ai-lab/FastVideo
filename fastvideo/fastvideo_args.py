@@ -26,7 +26,7 @@ class ExecutionMode(str, Enum):
     Inherits from str to allow string comparison for backward compatibility.
     """
     INFERENCE = "inference"
-    PREPROCESSING = "preprocessing"
+    PREPROCESS = "preprocess"
     FINETUNING = "finetuning"
     DISTILLATION = "distillation"
 
@@ -138,6 +138,9 @@ class FastVideoArgs:
 
     # VSA parameters
     VSA_sparsity: float = 0.0  # inference/validation sparsity
+
+    # Master port for distributed training/inference
+    master_port: int | None = None
 
     # Stage verification
     enable_stage_verification: bool = True
@@ -360,6 +363,14 @@ class FastVideoArgs:
             help="Validation sparsity for VSA",
         )
 
+        # Master port for distributed training/inference
+        parser.add_argument(
+            "--master-port",
+            type=int,
+            default=FastVideoArgs.master_port,
+            help="Master port for distributed training/inference",
+        )
+
         # Stage verification
         parser.add_argument(
             "--enable-stage-verification",
@@ -460,9 +471,8 @@ class FastVideoArgs:
                 "Mode is 'training' but inference_mode is True. Setting inference_mode to False."
             )
             self.inference_mode = False
-        elif self.mode in [
-                ExecutionMode.INFERENCE, ExecutionMode.PREPROCESSING
-        ] and not self.inference_mode:
+        elif self.mode in [ExecutionMode.INFERENCE, ExecutionMode.PREPROCESS
+                           ] and not self.inference_mode:
             logger.warning(
                 "Mode is '%s' but inference_mode is False. Setting inference_mode to True.",
                 self.mode)
@@ -499,10 +509,10 @@ class FastVideoArgs:
         self.pipeline_config.check_pipeline_config()
 
         # Add preprocessing config validation if needed
-        if self.mode == ExecutionMode.PREPROCESSING:
+        if self.mode == ExecutionMode.PREPROCESS:
             if self.preprocess_config is None:
                 raise ValueError(
-                    "preprocess_config is not set in FastVideoArgs when mode is PREPROCESSING"
+                    "preprocess_config is not set in FastVideoArgs when mode is PREPROCESS"
                 )
             if self.preprocess_config.model_path == "":
                 self.preprocess_config.model_path = self.model_path
@@ -654,6 +664,12 @@ class TrainingArgs(FastVideoArgs):
     lora_rank: int | None = None
     lora_alpha: int | None = None
     lora_training: bool = False
+
+    # distillation args
+    generator_update_interval: int = 5
+    min_timestep_ratio: float = 0.2
+    max_timestep_ratio: float = 0.98
+    real_score_guidance_scale: float = 3.5
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -954,4 +970,28 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--lora-rank", type=int, help="LoRA rank")
         parser.add_argument("--lora-alpha", type=int, help="LoRA alpha")
 
+        # Distillation arguments
+        parser.add_argument("--generator-update-interval",
+                            type=int,
+                            default=TrainingArgs.generator_update_interval,
+                            help="Ratio of student updates to critic updates.")
+        parser.add_argument("--min-timestep-ratio",
+                            type=float,
+                            default=TrainingArgs.min_timestep_ratio,
+                            help="Minimum step ratio")
+        parser.add_argument("--max-timestep-ratio",
+                            type=float,
+                            default=TrainingArgs.max_timestep_ratio,
+                            help="Maximum step ratio")
+        parser.add_argument("--real-score-guidance-scale",
+                            type=float,
+                            default=TrainingArgs.real_score_guidance_scale,
+                            help="Teacher guidance scale")
+
         return parser
+
+
+def parse_int_list(value: str) -> list[int]:
+    if not value:
+        return []
+    return [int(x.strip()) for x in value.split(",")]

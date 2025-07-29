@@ -148,6 +148,8 @@ class TrainingBatch:
 
     # Dataloader batch outputs
     latents: torch.Tensor | None = None
+    raw_latent_shape: torch.Tensor | None = None
+    noise_latents: torch.Tensor | None = None
     encoder_hidden_states: torch.Tensor | None = None
     encoder_attention_mask: torch.Tensor | None = None
     # i2v
@@ -155,6 +157,7 @@ class TrainingBatch:
     image_embeds: torch.Tensor | None = None
     image_latents: torch.Tensor | None = None
     infos: list[dict[str, Any]] | None = None
+    mask_lat_size: torch.Tensor | None = None
 
     # Transformer inputs
     noisy_model_input: torch.Tensor | None = None
@@ -162,6 +165,7 @@ class TrainingBatch:
     sigmas: torch.Tensor | None = None
     noise: torch.Tensor | None = None
 
+    attn_metadata_vsa: AttentionMetadata | None = None
     attn_metadata: AttentionMetadata | None = None
 
     # input kwargs
@@ -173,3 +177,13 @@ class TrainingBatch:
     # Training outputs
     total_loss: float | None = None
     grad_norm: float | None = None
+
+    # Distillation-specific attributes
+    encoder_hidden_states_neg: torch.Tensor | None = None
+    encoder_attention_mask_neg: torch.Tensor | None = None
+    conditional_dict: dict[str, Any] | None = None
+    unconditional_dict: dict[str, Any] | None = None
+
+    # Distillation losses
+    generator_loss: float = 0.0
+    fake_score_loss: float = 0.0

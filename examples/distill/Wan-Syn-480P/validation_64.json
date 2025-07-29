@@ -1,0 +1,516 @@
+{
+  "data": [
+    {
+      "caption": "In the video, a woman is elegantly showcasing her earrings, bringing attention to their intricate design with a gentle touch of her fingers. She is bathed in ambient purple and pink lighting, which casts a soft glow on her delicate features and enhances the vivid tones of her lipstick and eye makeup. Her hair is styled to frame her face smoothly, emphasizing the contours of her jawline and cheekbones. The background features a blurred neon light, adding an artistic and modern touch to the overall aesthetic.",
+      "video_path": "Fashion/mixkit-face-of-an-elegant-and-captivating-woman-41914_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In the video, a lone rider guides a majestic horse across an expansive, open field as the sun sets in the background. The rider, dressed in a classic blue shirt and wide-brimmed hat, sits confidently in the saddle, silhouetted against the warm glow of the evening sky. The horse moves gracefully, its mane and tail flowing with each step, creating a sense of harmony between horse and rider. Surrounding the pair, towering trees form a natural border, their leaves gently rustling in the breeze. The shadows lengthen on the ground, accentuating the serene and timeless feel of the scene. The distant hills and wooden fences frame the horizon, adding depth to the tranquil landscape. A few horses graze peacefully in the background, blending into the pastoral setting. The overall ambiance evokes a sense of calmness and quietude, capturing a perfect moment in the golden light of dusk.",
+      "video_path": "Man/mixkit-a-rancher-riding-a-horse-at-sunset-1143_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In a dimly lit, eerie setting, a mysterious pink bottle labeled \"Authentic 100% organic POISON\" sits prominently in the foreground, casting a menacing aura. The bottle is accentuated by green fog, which swirls lightly around it, enhancing its sinister allure. Behind it, a shadowy golden bottle adorned with a spider emblem subtly emerges, adding an extra layer of mystery to the scene. Dim candles provide faint, flickering light, which complements the dark atmosphere, making the setting ideal for an illusion of hidden dangers.",
+      "video_path": "smoke/mixkit-poison-in-halloween-ritual-33879_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "The video opens with a tranquil scene in the heart of a dense forest, emphasizing two large, textured tree trunks in the foreground framing the view. Sunlight filters through the canopy above, casting intricate patterns of light and shadow on the trees and the ground. Between the tree trunks, a clear view of a calm, muddy river unfolds, its surface shimmering under the gentle sunlight. The riverbank is decorated with a variety of small bushes and vibrant foliage, subtly transitioning into the deep greens of tall, leafy plants. In the background, the dense forest looms, filled with dark, towering trees, their branches intertwining to form an intricate canopy. The scene is bathed in the soft glow of the sun, creating a serene and picturesque setting. Occasional sunbeams pierce through the foliage, adding a magical aura to the landscape. The vibrant reds and oranges of the smaller plants add contrast, bringing warmth to the earthy tones of the scenery. Overall, this harmonious blend of natural elements creates a peaceful and idyllic forest setting.",
+      "video_path": "forest/mixkit-view-of-a-river-between-two-old-trees-560_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In the video, a martial artist dressed in a traditional white uniform with a black belt demonstrates a series of precise movements against a stark black background. The individual gracefully transitions between stances, embodying a sense of focused discipline and control. Each motion is executed with a deliberate pace, showcasing the fluidity of martial arts techniques. The soft lighting creates subtle highlights on the uniform, adding depth to the figure as it moves. The practitioner begins with an open-hand pose, feet firmly grounded, gradually shifting to a powerful forward punch. The fluidity of the sequence displays a mastery of balance and poise. Every trajectory of the limbs is precise and deliberate, capturing the elegance and strength of martial arts. The serene, isolated setting enhances the intensity and concentration of the practitioner. This visual presentation is an elegant interplay of motion and stillness, displaying the art form's discipline and grace.",
+      "video_path": "Man/mixkit-a-young-man-practicing-his-karate-moves-49635_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A tranquil coastal scene unfolds with a drone's aerial view capturing a serene beach landscape. The camera glides over a quiet stretch of sandy shoreline, where gentle waves kiss the shore under a clear blue sky. Nestled amidst lush palm trees are a series of traditional thatched-roof huts, their earthy tones blending harmoniously with the natural surroundings. The sandy beach stretches endlessly, bordered by the rhythmic dance of ocean waves on one side and verdant greenery on the other. A pair of white umbrellas is set up on the sand, suggesting a place to relax and enjoy the sun. In the distance, two small human figures can be seen walking leisurely along the water's edge, leaving faint footprints behind them. The scene exudes a calm and inviting atmosphere, with the soft rustle of palm leaves and the whisper of the ocean breeze almost audible. The overall composition is a captivating blend of nature's tranquility and architectural simplicity. This picturesque setting invites viewers to imagine themselves steps away from this idyllic coastal escape.",
+      "video_path": "beach/mixkit-sunny-beach-in-a-dynamic-shot-from-a-drone-44383_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A lone figure stands on a large, moss-covered rock, surrounded by the soft rush of a nearby stream. The figure is wearing white sneakers and shorts, with a plaid shirt that hangs loosely in the breeze. The lighting creates dramatic shadows, enhancing the textures of the rock and the subtle movement of the water below. In the background, a waterfall cascades into the stream, completing this tranquil and serene nature scene.",
+      "video_path": "forest/mixkit-woman-standing-in-front-of-waterfall-559_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In an industrial setting, a person leans casually against a railing, exuding a sense of confidence and composure. They are wearing a striking outfit, consisting of a vibrant, patterned jacket over a simple white crop top, creating a bold contrast. The atmosphere is infused with warm, ambient lighting that casts soft shadows on the concrete walls and metallic surfaces. Intricate wiring and pipes form an intricate backdrop, enhancing the urban aesthetic. Their relaxed posture and direct, engaging gaze suggest a sense of ease in this industrial environment. This scene encapsulates a blend of modern fashion and gritty, urban architecture, creating a visually compelling narrative.",
+      "video_path": "Fashion/mixkit-portrait-of-a-hipster-woman-walking-down-a-stairs-1297_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A man is energetically stretching in an open-air setting, surrounded by rows of vibrant red seats that suggest an amphitheater or outdoor venue. He wears a sleeveless black shirt layered with a hooded vest, emphasizing his athletic build as he engages in a warm-up routine. Behind him, the striking modern architecture of the building features geometric panels, with large sections of glass and overlapping metallic beams creating a dynamic backdrop. The scene captures the contrast between his focused movements and the static, bold design of the structure, while the surrounding greenery adds a touch of nature to the environment. The overall atmosphere is one of preparation and anticipation, with the man appearing determined and ready for an upcoming event or performance.",
+      "video_path": "Sport/mixkit-man-doing-arm-stretches-595_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A young woman is seated on the floor in front of a plush, beige tufted couch, fully engrossed in sorting through a stack of papers. Her dark hair falls loosely past her shoulders, and she wears a green plaid shirt, contributing to the casual yet focused atmosphere. She gently places the papers onto a small round white table, occasionally lifting individual sheets to examine them more closely. Her expression shifts subtly, reflecting concentration and contemplation as she processes the information on the pages. Two small, round nested tables hold her documents, along with a small plant in a gray pot, adding a touch of greenery to the scene. The background features a dark paneled wall, creating a contrasting backdrop for the light-colored furniture. The setting is tranquil and organized, the couch and tables arranged symmetrically, conveying a sense of harmony. A calculator rests on the smaller table, hinting at a task involving calculations or budgeting.",
+      "video_path": "Woman/mixkit-frustrated-woman-throws-paperwork-on-the-floor-4526_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A heavily rusted metal gate stands firmly locked, with two vertical bars joined by a thick, old chain that loops elegantly around them. The chain's texture is coarse and rugged, its surface reflecting varying shades of orange and brown, indicative of years exposed to the elements. At the heart of the chain, a black iron padlock, slightly worn yet imposing, secures the gate, its curves and edges smooth against the aged links. The gate's metalwork is outlined by a backdrop of soft, blurred greenery, suggesting a serene and isolated location beyond the barrier. Tall trees rise in the distance, their trunks and leaves creating a lush, forest-like setting that contrasts with the gate's severe rust. A pathway leads away from the gate, its surface uneven with patches of moss and weathered stone visible in the soft focus, inviting yet inaccessible. The ambiance is quiet and mysterious, with a sense of abandonment hanging subtly in the air, evoking curiosity about what lies beyond. Shadows play across the gate, cast by branches swaying gently in the breeze, adding to the dynamic interaction of light and texture. This scene, rich in detail and atmosphere, captures the viewer's imagination, evoking both the allure of the forbidden and the beauty of decay.",
+      "video_path": "forest/mixkit-rusty-fence-with-a-chain-of-a-property-in-nature-5294_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In a serene and softly lit yoga studio, three individuals engage in a yoga session, each performing an upward-facing stretch. The central figure is a woman with shoulder-length brown hair, dressed in a light cropped top and green leggings, her posture reflecting grace and concentration. To her right, another participant, a woman in a purple outfit, mirrors the pose with equal poise. On her left, a person with a bun focuses intently, supported slightly by yoga blocks beneath their hands. The warm-colored wooden floor contrasts soothingly with the soft pastel mural on the back wall, featuring an abstract design and partial visage of a serene face. Natural light floods the space from a large window on the right, where lush greens peek through, adding an element of tranquility. In the corner of the room, a collection of meditation instruments, including a gong and a Buddha statue, subtly frame the peaceful setting. The mood is calm yet focused, as all three participants are deeply engaged in their practice. The scene combines elements of balance, harmony, and a shared journey towards mindfulness. This depiction captures the essence of a yoga session that blends personal growth with collective experience.",
+      "video_path": "People/mixkit-small-group-of-people-doing-yoga-together-43730_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In the deep blue expanse of the ocean, two dolphins glide effortlessly, their sleek bodies reflecting the sunlight filtering through the water. The prominent shadows and caustics create a shimmering effect on their skin, capturing the beauty of their natural habitat. Each dolphin moves with a fluid grace, occasionally interacting with gentle nudges, showcasing their playful and social nature. The scene is vibrant and dynamic, with the clear blue background accentuating the dolphins' movements, making it an ideal subject for AI recreation.",
+      "video_path": "sea/mixkit-dolphins-underwater-4133_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In the video, a young woman stands against a vibrant graffiti-covered wall, deeply engrossed in her smartphone. Her expression reflects a mix of focus and subtle satisfaction as she interacts with the screen. She wears a black floral-patterned top, which contrasts with the bright, abstract shapes and bold colors of the mural behind her. As she continues to engage with her phone, a series of like count notifications appear on the screen, indicating a growing online appreciation. The wall behind her features a striking mix of geometric and organic shapes, including swirls of teal, orange, and black, with large humanoid figures in a pop-art style. Her long, light-brown hair frames her face, adding a calm, composed aura amidst the lively backdrop. The video captures a blend of contemporary digital interaction and expressive urban art, creating a dynamic yet harmonious scene.",
+      "video_path": "Girl/mixkit-girl-looking-at-the-likes-in-her-post-4914_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A young mother and her baby sit comfortably on a bed, surrounded by an inviting, cozy atmosphere. The woman, wearing a sleeveless top and jeans, is gently engaging with the baby, who is dressed in an adorable animal-print onesie. The child is seated on the bed with colorful toys scattered around, including a plush toy and a board book. The warm glow from a hanging lamp casts a soft light on them, enhancing the serene environment. Pillows are propped up against the headboard, providing a cushioned backdrop as the mother leans slightly over to interact with the baby. A small bottle is visible beside her, suggesting a nurturing setting. Her hand gestures animatedly as she holds up a soft, white cushion with red and blue accents, likely stimulating the baby\u2019s curiosity. Their shared moment is filled with affection and joy, a perfect snapshot of familial bonding.",
+      "video_path": "Baby/mixkit-loving-mother-and-her-baby-playing-with-soft-toys-49966_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A young girl with long brown hair sits at a round wooden table, engrossed in working on her laptop. The laptop screen is a vivid green, suggesting a green screen effect is in use. To her left, a doll dressed in a yellow and white outfit is casually laid on top of some books, adding a playful and innocent touch to the scene. The setting is cozy, with sheer curtains in the background allowing soft natural light to spill into the room. The girl's posture and focused attention on the laptop suggest she is either playing a game or learning something new. This serene and domestic atmosphere is complemented by the slight blur of a dark couch in the foreground, framing the focused activity of the child.",
+      "video_path": "Girl/mixkit-little-girl-doing-homework-on-a-laptop-4757_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "An expansive view of a calm bay reveals a fleet of sailboats, each anchored in a regimented line stretching toward the horizon. The water is a serene blue, reflecting the soft hues of the early morning sky. A gentle breeze is indicated by the subtle ripples trailing behind the boats, while a single, larger vessel cuts a distinct path, leaving a graceful wake in its journey to the open sea. On one side, a cluster of modern high-rise buildings stands, contrasting against the natural simplicity of the water, suggesting a blend of urban and marine life. The distant shoreline is barely visible, softened by the atmospheric perspective, giving a sense of endless waters meeting the sky. The overall mood is peaceful and orderly, with the boats appearing almost as sentinels guarding the expanse of the tranquil bay.",
+      "video_path": "beach/mixkit-flying-backwards-over-the-sea-near-a-coast-50187_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In the video, a person is standing in the center of a dark, featureless space, illuminated by a spotlight that emphasizes their presence. The individual is dressed in a traditional martial arts uniform, known as a gi, which is predominantly white with a black belt tied around the waist, indicating a high level of expertise. The background remains pitch black, creating a stark contrast with the brightly lit figure, ensuring complete focus on them. The person's expression is serious and focused, reflecting a deep sense of discipline and concentration. Their hands move gracefully, transitioning through various martial arts stances, demonstrating practiced skill and fluidity. The uniform's crisp fabric folds and subtly reflects the light, further highlighting each precise movement. Despite the simplicity of the environment, the scene is dynamic, with each motion capturing the essence of martial arts practice. The video effectively conveys a sense of calm strength and mastery, making it ideal for an AI to recreate with attention to posture, lighting, and attire.",
+      "video_path": "Sport/mixkit-karate-fighter-bowing-to-the-front-49706_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In a dimly lit room bathed in a mix of neon purple and blue lights, a focused individual is seated in a gaming chair. She wears a white hoodie and large headphones with cat ears that glow softly, creating a striking silhouette. Her hands rest on a keyboard, typing swiftly as she concentrates intently on the screen in front of her. The atmosphere exudes a sense of intensity and immersion, with the soft-colored lighting enhancing the futuristic vibe. Her long hair cascades down her shoulders, adding a touch of elegance to the otherwise tech-centric setting. The overall scene captures the essence of a dedicated gamer deeply engaged in her virtual world.",
+      "video_path": "earth/mixkit-a-young-woman-wearing-headphones-with-rgb-lights-suddenly-gets-51621_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "Inside a dimly-lit bus, five individuals are seated along the rows of worn seats, each subtly illuminated by the colorful lights emanating from overhead. On the left, a woman sits with a relaxed posture, her curly hair accented by a patterned scarf, wearing a plaid outfit paired with bright neon socks. Next to her, a person clad in a denim jacket appears deep in thought, resting their head on a hand. Further back, another figure in a bucket hat and oversized yellow attire gazes across the aisle, evoking a sense of introspection. The atmosphere is enriched by the soft glow of red and green lights, bathing the bus interior in an almost surreal ambiance, creating a compelling tableau of urban life.",
+      "video_path": "Music/mixkit-conceptual-urban-fashion-42581_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "An aerial view captures two tennis players on a court, with one dressed in white on the left and another in red on the right. They are mid-game, each poised for action with rackets in hand, accentuated by their strategic positioning at opposite baselines. The court itself is a stark, deep blue, bordered by the vibrant green of the surrounding area, with a dark central net dividing the space. Long shadows stretch dramatically across the ground, suggesting a late afternoon setting. The subtly textured surface of the court contrasts with the crisp, white lines marking its boundaries and sections. This scene creates a vivid, balanced composition, highlighting both the competitive tension and serene atmosphere of the game.",
+      "video_path": "People/mixkit-two-people-playing-tennis-aerial-view-880_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In a vibrant, dreamlike setting, a lone figure moves energetically against a backdrop of deep blue and purple hues, casting emotive shadows that ripple with dynamic motion. The figure, almost obscured by a smeared effect, suggests a rhythmic dance or a passionate performance, arms blurred as they sweep through colorful, streaked lighting. A neon glow accentuates their form, particularly highlighting the face which is abstractly illuminated in bursts of orange and red, suggesting intense emotional expression. The scene is dominated by two primary elements \u2013 the figure\u2019s motion and the dramatic lighting, creating a synergy of human emotion and visual spectacle. Swirling trails of light seem to intertwine with the figure, like a visual symphony of movement and color that floods the space. The lighting changes, casting intricate patterns on the figure and the surrounding space, giving the impression of a kaleidoscope in motion. Despite the blurred and abstract portrayal, there is a sense of focus conveyed through the figure\u2019s intent movements, akin to a conductor orchestrating a visual and auditory performance. The environment resonates with an electric energy, suggesting a seamless fusion of art and technology. As the visual drama unfolds, the scene invites viewers to lose themselves in the abstract dance and the play of vivid luminance.",
+      "video_path": "Music/mixkit-dancer-dancing-with-a-light-bar-in-his-hands-42221_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In a brightly lit studio, a photographer wearing a denim jacket focuses intently, capturing shots with a professional camera. Facing him, a model stands gracefully, adjusting her long, flowing hair with delicate movements. The scene is characterized by strong contrasts; the model's soft pink attire and gentle gestures complement the rugged, precise demeanor of the photographer. Positioned against a minimalist backdrop, the pair work seamlessly, with the camera\u2019s lens pointed directly at the model, capturing her elegance. The soft, diffused lighting casts a gentle glow on both subjects, creating an airy and ethereal atmosphere perfect for a high-fashion photo shoot.",
+      "video_path": "Fashion/mixkit-professional-photo-session-with-a-young-female-model-41621_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "The video showcases a serene, expansive landscape covered with a variety of trees dotting the hills. The hills gently slope across the frame, with patches of dry grass contrasting against the lush green foliage. Tall trees with dense canopies stand elegantly, casting soft shadows on the ground below. The sunlight bathes the entire scene, highlighting the varied textures of the leaves and terrain. Gaps between the trees reveal a narrow dirt path meandering through the hills, suggesting a sense of quiet solitude. The undulating hills extend into the distance, creating depth and a calming sense of vast space. The verdant hues of the leaves contrast with the earthy tones of the hills, enhancing the visual richness. In the background, a faint outline of distant hills can be seen, blurred softly by the atmospheric perspective. This tranquil setting could be efficiently recreated in a virtual environment by focusing on its layered composition, color palette, and natural textures.",
+      "video_path": "forest/mixkit-aerial-panorama-of-a-sunny-mountain-landscape-40846_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A bustling ski slope comes alive with skiers descending a pristine, snow-covered hill, surrounded by towering, snow-draped evergreens. Several figures stand atop the slope, silhouetted against a clear blue sky, preparing to embark on their ski run. The chair lift on the right continuously drops off eager adventurers, adding to the excitement at the hilltop. Each skier, clad in colorful winter gear, carves distinct paths into the textured snow as they weave their way down. The interplay of sunlight and shadows accentuates the myriad tracks etched into the slope, creating a dynamic visual rhythm. The scene captures a vibrant winter wonderland, full of action and the thrill of a perfect ski day.",
+      "video_path": "Car/mixkit-skiers-on-a-snowy-slope-3327_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "The scene unfolds within a dimly lit bus, where three young individuals are seated, each absorbed in their unique world. To the left, a person with tied-back hair rests their head on their hand, dressed casually in a jacket and jeans, projecting a relaxed demeanor. Central to the frame is another individual, sitting upright with intense focus, donning a plaid blazer and oversize hoops, enhancing their confident presence. The muted green and red lighting casts an atmospheric glow, adding depth and intrigue to the setting. On the right, a person in a bucket hat and striped shirt leans back, appearing contemplative as they adjust their hat with a nonchalant gesture. The interplay of light and shadow highlights their expressions, creating an intimate and cinematic ambiance. Together, these figures form a cohesive tableau, capturing a moment of introspection amid a bustling yet serene urban environment.",
+      "video_path": "City/mixkit-three-models-posing-to-the-lens-while-on-board-a-42575_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A determined climber is scaling a massive rock face, showcasing exceptional strength and skill. The person, clad in a teal shirt and dark pants, climbs with precision, their movements measured and deliberate. They are secured by climbing gear, which includes ropes and a harness, emphasizing their commitment to safety. The rugged texture of the sandy-colored rock provides an imposing backdrop, adding drama and scale to the climb. In the distance, other large rock formations and sparse vegetation can be seen under a bright, overcast sky, contributing to the natural and adventurous atmosphere. The scene captures a moment of focus and challenge, highlighting the climber's tenacity and the breathtaking environment.",
+      "video_path": "Sport/mixkit-alpinist-climbing-a-huge-rock-in-a-desert-43306_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A woman stands confidently in front of a large array of solar panels, her navy blue jumpsuit contrasting against the lush green grass beneath her feet. Her expression is calm and focused, eyes facing directly ahead, suggesting a deep connection to the subject matter\u2014renewable energy. The sunlight bathes the scene in warm hues, casting gentle shadows and highlighting the geometric precision of the solar panels' grid-like structure. The background reveals a blend of nature and technology, as the panels are anchored on a grassy slope with foliage on the left side of the frame. This composition captures a harmonious blend of human innovation and environmental consciousness, accentuated by the serene outdoor setting.",
+      "video_path": "Business/mixkit-woman-standing-in-front-of-a-solar-panel-4880_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In the video, two people are working at a wooden desk, using an iMac computer. One person, wearing a white knit sweater, is using the apple wireless mouse with their right hand, while their left hand rests on the sleek white keyboard. Their movements are smooth yet intentional, suggesting they are focused on a task on the computer screen. The monitor displays a well-organized array of files and folders, hinting at a task that involves detailed organization or detailed data navigation. The second person, only subtly visible, sits closely by and appears to observe or assist, creating a collaborative atmosphere. Their presence adds a quiet dynamic to the scene, as if they are ready to provide input or guidance. Sticky notes with handwritten notes are attached to the monitor\u2019s stand, adding a touch of personal organization amidst the digital workspace. The focus on the keyboard and mouse emphasizes a streamlined workflow, indicative of a productive work environment. The overall ambiance is calm and focuses on teamwork, technology, and efficient workspace management.",
+      "video_path": "People/mixkit-person-with-glasses-working-on-a-desktop-computer-3248_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A man stands in front of a modern glass facade, taking off a dark hoodie to reveal his gray tank top underneath. His arms are lifted high as he maneuvers the hoodie over his head, showcasing a fluid motion that conveys a sense of calm and routine. The lighting highlights the contours of his muscles, emphasizing a combination of strength and quiet determination. Behind him, the reflective surface of the glass panels provides a subtle backdrop, enhancing the focus on his focused and serene demeanor.",
+      "video_path": "Sport/mixkit-man-puts-on-sleeveless-hoodie-603_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "The video displays a captivating dance of fiery orange flames against a stark black background, creating an intense visual contrast. The flames twist and intertwine, forming symmetrical, swirling patterns that expand and contract rhythmically across the frame. Each fiery tendril seems to be alive, moving with an almost hypnotic fluidity that captures the viewer's attention. The illumination from the flames casts subtle shadows, enhancing the depth and texture of the scene. Overall, the dynamic movement and vibrant color palette create an atmosphere of both beauty and power.",
+      "video_path": "fire/mixkit-two-orange-flames-on-black-background-685_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In this scene, a person is seated in a dimly lit room, possibly a recording studio, holding several drumsticks in their hands. The individual's face is partially obscured by sunglasses, adding a touch of mystery to their demeanor. They are wearing a colorful, patterned shirt with a mix of orange and blue tones that stands out against the darker background. The person appears focused and engaged with the drumsticks, their hands prominently displayed. The ambient light casts warm, soft shadows, emphasizing the texture and colors of their shirt and the wooden drumsticks. The room features wooden paneling, which complements the overall cozy, music-centric setting of the scene. The use of perspective centers on the drumsticks, highlighting the importance of rhythm and music in the captured moment.",
+      "video_path": "Music/mixkit-drummer-stretching-before-playing-42783_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A man is casually sitting on a sofa, engrossed in his meal and entertainment. He is holding a TV remote in one hand while reaching for food with the other, indicating a laid-back, comfortable evening. The table before him is filled with takeout containers, revealing a variety of appetizers and dishes, suggestive of a casual dining experience at home. The background is defined by colorful patterned cushions, adding a cozy, homey feel to the scene. Warm, ambient lighting highlights the relaxed atmosphere, casting soft shadows that contribute to the intimate setting. In this moment, he takes a bite of a sandwich, comfortably balancing his attention between food and whatever is playing on the screen.",
+      "video_path": "Man/mixkit-man-watching-tv-and-eating-fast-food-26089_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "The scene opens to a breathtaking view of a tranquil ocean horizon at dusk, displaying a vibrant tapestry of oranges, pinks, and purples as the sun sets. In the foreground, tall, swaying palm trees frame the scene, their silhouettes stark against the colorful sky. The ocean itself shimmers with reflections of the sunset, creating a peaceful, almost ethereal atmosphere. A small boat can be seen in the distance, centered on the horizon, adding a sense of scale and solitude to the scene. The waves gently lap the shore, creating faint patterns on the sandy beach, which stretches across the foreground. Above, the sky is dotted with scattered clouds that catch the last light of the day, enhancing the drama and beauty of the scene. The overall mood is serene and contemplative, capturing a perfect moment of nature\u2019s grandeur.",
+      "video_path": "beach/mixkit-sunset-with-sailing-boats-2166_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A man sits hunched on a couch, the weight of emotions clearly visible on his posture. He wears a simple, gray t-shirt, and his head is bowed, resting in his hands, which cover most of his face, obscuring his features. The gentle light filtering through sheer curtains in the background casts a soft glow upon him, emphasizing the contrast between his static form and the hazy brightness behind. His elbows rest upon his knees, suggesting a posture of deep contemplation or distress. The simplicity of the room, with its muted colors, highlights the focus on the man's internal struggle. Delicate detailing on the fabric of his shirt adds texture, enhancing the scene's realism. Subtle changes in the natural light indicate the passage of time, as the man remains unmoving, absorbed in thought. This intimate moment captures a profound vulnerability, making the scene universally relatable and poignant.",
+      "video_path": "Man/mixkit-worried-and-sad-man-with-his-head-down-4701_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A pair of hands, belonging to an unseen figure, carefully unrolls a large sheet of crisp, white paper on a dark wooden table. The lighting is warm, casting a gentle glow that highlights the textures of the paper and the wood grain of the table. As the paper unfurls, the edges reveal the faint beginnings of a colorful map printed on its surface. The arms, clad in a casual gray T-shirt, suggest a relaxed and focused task at hand. Each motion is deliberate, with fingers deftly guiding the paper, ensuring it lays flat without creases. In the background, a hint of a red curtain can be seen, adding a touch of color and depth to the setting. The composition of the scene emphasizes the contrast between the bright paper and the rich tones of the surroundings. This serene and methodical action evokes a sense of exploration and preparation.",
+      "video_path": "Man/mixkit-unrolling-a-world-map-on-a-table-21626_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A young woman sits on a vibrant green seat inside a bus, illuminated by the soft glow of pink and blue lights. Her outfit is a striking mix of colors: a neon pink top paired with a jacket featuring dark sleeves, and jeans that provide a neutral contrast. She wears large, hoop earrings that catch the light as she moves slightly, exuding an air of cool confidence. Her gaze is directed thoughtfully to the side, suggesting contemplation or daydreaming during her commute. The metallic pole beside her adds a geometric element to the composition, reflecting the kaleidoscope of neon hues. The background is a clean, futuristic white, serving as a blank canvas that amplifies the neon atmosphere. Her relaxed posture and the modern bus setting create a scene that captures a blend of urban life and personal introspection.",
+      "video_path": "City/mixkit-fashion-model-posing-on-a-bus-42578_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A silver SUV drives along a winding, snow-covered mountain road, with dense pine trees blanketed in snow lining both sides. The scene is serene, with the vehicle moving smoothly, possibly on a winter journey or vacation. As the SUV disappears around the bend, another, darker SUV follows, creating a sense of motion and perspective on the snow-dusted asphalt. The towering, snow-laden rock formation to the right contrasts with the dark green of the pines, highlighting the peacefulness of the wintry landscape.",
+      "video_path": "Car/mixkit-curve-on-a-snowy-forest-road-3317_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "The video showcases a vibrant urban skyline during twilight, with towering buildings reflecting the warm hues of the setting sun. A series of tall, cylindrical structures dominate the foreground, adjacent to a complex of industrial equipment and grids. The scene includes modern high-rise buildings with glass exteriors, capturing the evolving architecture of a bustling cityscape. A prominent structure labeled \"CITY OF AUSTIN POWER PLANT\" stands out, highlighting the industrial theme amidst the urban backdrop. The soft glow of city lights begins to pierce the approaching dusk, creating an inviting yet dynamic atmosphere. Shadows cast by the buildings add depth and contrast, emphasizing their massive scale and intricate designs. The overall composition is balanced between the natural light of the sunset and the artificial illumination of the city, offering a compelling visual narrative.",
+      "video_path": "Car/mixkit-slow-air-travel-in-reverse-over-a-big-city-49841_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In the scene, a striking architectural structure dominates the view, bathed in a soft, ambient light. The enormous yellow arches serve as the centerpiece, drawing the eye upwards with their majestic curves and towering presence. The smooth, clean surfaces of the structure reflect the light, highlighting the texture and depth of the architecture. In the foreground, blurred streaks of headlights and taillights suggest the motion of vehicles passing by, adding dynamic energy to the otherwise still scene. The contrast between the fast-moving lights and the static arches creates a balanced composition. To the left, a lone streetlamp and a small tree provide a touch of nature and urban elements against the monumental backdrop. The night sky subtly peeks through the gaps in the structure, hinting at a clear, calm evening. Shadows from the arches create patterns on the ground, adding an intricate detail to the scene. Overall, the combination of light, shadow, and movement makes for a dramatic and visually captivating moment.",
+      "video_path": "Car/mixkit-a-fast-timelapse-of-the-street-with-a-monumental-yellow-50993_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A tranquil marina comes into full view under the golden hues of a setting sun. A collection of gleaming yachts and boats are neatly moored, their reflections shimmering softly on the gentle water. The sun's low position casts elongated shadows over the bustling harbor scene, while rolling hillsides surround the distant cityscape. The skyline is interspersed with modern buildings and clusters of residences, adding layers to the vibrant community. At the center, a broad wooden pier juts confidently into the harbor, extending an invitation for leisurely strolls. To the left, various shops and colorful structures line the waterfront, indicating a vibrant coastal economy. The entire atmosphere exudes a serene yet lively charm, balancing the hustle of maritime activity with the peacefulness of the encroaching dusk. It's a scene of calm anticipation, as if the whole place holds its breath before the night's events unfold.",
+      "video_path": "beach/mixkit-harbor-on-a-tourist-coast-with-many-boats-and-yachts-40077_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "The video features a confident individual standing atop a structure against a clear blue sky, exuding a sense of freedom and style. The person is clad in a striking yellow button-up shirt tied at the waist, and beneath it, they wear a simple white top that adds to their relaxed yet stylish appearance. Completing the ensemble are high-waisted white jeans paired with a black belt, adding a touch of contrast. Around their neck is a bold red scarf, providing a splash of color and an air of vintage flair. The person's sunglasses, tinted in yellow, reflect the sunlight and contribute to the overall cool and composed demeanor. Their hair is styled elegantly, pulled back with headphones resting over the ears, suggesting they are immersed in music. One hand casually grazes the headphones, while the other rests gently on the railing, grounding the individual in the moment. The scene is an effortless blend of fashion and tranquility, capturing the spirit of sunny, carefree days.",
+      "video_path": "Music/mixkit-standing-woman-listening-to-music-460_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A ballerina gracefully spins and moves across a pink-hued studio, her poised figure accentuated by a shimmering white tutu and bodice. The background, a continuous wash of soft pink, provides a serene and ethereal atmosphere, emphasizing her fluid movements. Her arms extend with elegance, highlighting the delicacy and precision of her ballet pose, while her focused expression adds intensity to the scene. The subtle details of her costume, combined with the pink monochromatic ambiance, create a dreamlike spectacle, ideal for an AI to envision a oneiric dance setting.",
+      "video_path": "Dance/mixkit-portrait-of-a-ballerina-spinning-with-pink-background-40163_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "The scene unfolds with two human figures in the distance, making their way through a serene meadow, thick with tall golden grass swaying gently in the breeze. The sun hangs low in the sky, casting a soft, diffused glow that illuminates the landscape with a warm, ethereal light. These figures, clad in hiking gear, move deliberately, suggesting they're either embarking on or concluding a journey. Their silhouettes contrast against the lush greenery of the surrounding trees, whose branches reach out, framing the horizon. The play of light and shadow among the trees creates a quilt of textures, with each leaf catching a hint of the sun's dying rays. This tranquil setting evokes a sense of calm and adventure, capturing the quintessential beauty of nature\u2019s landscape.",
+      "video_path": "People/mixkit-landscape-in-nature-while-two-people-are-jogging-44348_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A large cargo ship is docked at an industrial port, its white superstructure contrasting with the deep green and yellow of its deck. The foreground is dominated by the calm, deep blue waters of the harbor, which reflect the vessel\u2019s imposing presence. Surrounding the ship, a series of industrial buildings and storage facilities are visible, hinting at the bustling activity of the port. The deck is intricately detailed, featuring an array of pipes, equipment, and railings, showcasing the ship's functionality and purpose. In the background, a paved area with green patches and a few parked vehicles adds to the busy, industrious atmosphere of the scene.",
+      "video_path": "sea/mixkit-empty-cargo-ship-waiting-at-the-port-4209_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A lone climber ascends a towering rock face, clad in a pink shirt and gray pants, displaying a determined and focused expression. The climber navigates the rugged surface, where the texture of the rock is peppered with natural pockets and crevices that offer handholds and footholds. Sunlight casts soft shadows across the cliff, highlighting the intricate patterns and the climber\u2019s strategic movements. The cliff looms high, with sparse vegetation breaking the monotony of the stone, while distant rocky formations form a dramatic backdrop against the clear blue sky. The climber\u2019s gear, including a harness and chalk bag, underscores the adventure and challenge woven into this majestic, vertical journey.",
+      "video_path": "Sport/mixkit-mountaineer-girl-climbing-a-steep-rocky-mountain-41089_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A person is seen in a close-up shot, skillfully adjusting the tuning pegs of a guitar, showcasing a focused and practiced hand. The image is in black and white, highlighting the contrast between the textures of the instrument and the clothing. The individual's shirt, visible in the background, adds a soft, subtle texture, while the dark tones of the guitar neck create depth in the scene. This composition captures a moment of concentration and finesse, perfect for recreating an intimate musical setting.",
+      "video_path": "Music/mixkit-guitarist-playing-so-inspired-black-and-white-shot-44178_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A musician is playing a large brass instrument with the words \"Brass Band\" clearly visible on its bell. The scene is set against a vibrant yellow backdrop, casting a warm glow on the subject. The musician wears a dark cap and a matching suit, adding a formal touch to his attire. He is deeply focused on his performance, with the instrument's intricate tubing adding complexity to the visual composition. The lighting creates dramatic shadows and highlights, emphasizing the musician's expression and the instrument's metallic sheen. This harmonious blend of color and form captures the essence of a live brass band performance.",
+      "video_path": "Music/mixkit-musician-playing-the-trombone-while-dancing-43752_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In the video, a lone musician stands gracefully in front of a grand cathedral, playing an accordion while surrounded by the lively water display of a central fountain. Dressed in a casual ensemble, he wears a light-colored shirt, dark pants, and a flat cap that gives him a vintage charm. His posture is relaxed, yet engaged, as he sways gently in rhythm with the music, casting soft shadows on the cobblestone steps beneath him. The backdrop features the cathedral's towering twin spires, with intricate stonework that casts a rich, historical aura around the scene. Sunlight bathes the entire setting, enhancing the golden hues of the cathedral facade and creating a halo-like effect around the musician. The fountain's water jets splash playfully, catching glimmers of light and adding a dynamic element to the tranquil atmosphere. The scene captures a harmonious blend of architectural majesty and human creativity, framed by the clear, azure sky that extends infinitely above. It's a vivid depiction of solitude and artistry, set against a timeless urban landscape.",
+      "video_path": "Music/mixkit-man-plays-an-accordion-in-front-of-a-fountain-630_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In the tranquil video, a person sits in a meditative pose on a gentle hillside, silhouetted against the dawning sky. The person is facing the breathtaking sunrise, with their back slightly turned to the viewer, wearing a simple, light-colored shirt. Their right hand rests on their knee, fingers relaxed in a common meditation mudra, symbolizing calmness and peace. The sky, a stunning blend of soft oranges and deep purples, gradually brightens, casting a warm glow over the lush, green landscape. To the left, the outlines of distant urban buildings can be seen against the horizon, adding a contrast between nature and city life. A river reflecting the sky's colors meanders through the scene, lending a serene, flowing dynamic to the landscape. Trees rise and fall gently across the terrain, their leaves rustling only faintly in the morning breeze. The person remains still and focused, embodying a moment of mindfulness and connection with nature. This visual captures a harmonious balance, evoking a sense of tranquility and introspection.",
+      "video_path": "City/mixkit-girl-meditating-in-yoga-pose-at-sunset-4803_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A serene landscape video captures a breathtaking panoramic view of a vast valley covered in a gentle mist. The undulating hills are lush with dense greenery, their rich foliage creating a vibrant border on the left side of the frame. The mist weaves through the landscape like a soft, ethereal blanket, lending a dream-like quality to the scene. In the distance, several mountain peaks emerge, their dark outlines contrasting against the pale blue sky. A few faint, wispy clouds drift lazily across the horizon, complementing the tranquil atmosphere. The sunlight filters through the haze, casting a warm glow and highlighting different textures of the flora. The overall mood is calm and contemplative, inviting the viewer to pause and appreciate nature's untouched beauty. The composition emphasizes depth and expansiveness, drawing attention to the harmony between earth and sky. This captivating scene embodies tranquility, offering a perfect backdrop for meditation or relaxation.",
+      "video_path": "forest/mixkit-flying-over-a-hill-with-a-view-of-the-surrounding-49743_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In this scene, a bearded individual is intently focused on their smartphone, with the sun setting in the background, casting a warm glow across the cityscape. The person, partially visible, is wearing a dark, buttoned shirt that contrasts with the golden hue of the sunset. Their hands are holding the smartphone delicately but purposefully, reflecting a sense of engagement and focus on the screen. The sunlight creates a striking lens flare effect, enhancing the dramatic atmosphere of the moment as it glimmers off the phone\u2019s surface. The surrounding environment hints at an elevated vantage point, providing a panoramic view of the urban landscape below.",
+      "video_path": "City/mixkit-guy-texting-at-sunset-265_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In an expansive, industrial space defined by towering columns and high ceilings, a solitary figure takes center stage. The person, dressed in dark, fitted clothing, assumes a powerful, dynamic stance with one leg bent forward and both arms outstretched in a horizontal arc. Framing this pose are intense flames that engulf their arms, creating a striking visual contrast against the muted tones of the room. The fire forms a brilliant halo of orange and yellow, casting flickering shadows on the weathered walls and worn, tiled floor. This interplay between light and dark showcases the dancer's poise and agility, as they maintain balance amidst the intense heat. Windows line the background, their panes dimly illuminated by the daylight filtering in, adding depth and perspective to the scene. The entire performance evokes a sense of raw energy and elemental mastery, as the figure continues to manipulate the fire in a seamless, mesmerizing display.",
+      "video_path": "fire/mixkit-expert-juggler-doing-tricks-with-a-stick-with-fire-43663_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A man is playing the violin, focused intently on his music. His fingers gracefully dance along the strings, flawlessly executing each note. He holds the violin close to his chin with a sense of familiarity and expertise. The rich, warm tones of the violin reflect in the soft lighting of the room. He wears a dark shirt, and a subtle necklace rests against his chest, adding a personal touch to his attire. The bow moves smoothly across the strings, producing a melody that seems to fill the space with emotion. His expression is one of concentration and passion, immersing himself fully in the performance. The background is softly blurred, bringing the violin's intricate craftsmanship and his precise movements into sharp focus. This serene and intimate moment captures the essence of his musical artistry.",
+      "video_path": "Music/mixkit-fiddler-playing-a-song-639_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In the dimly lit parking garage, two figures engage in an impromptu game of soccer. The first person, wearing a light grey shirt and black pants with three white stripes, skillfully maneuvers the ball with precise footwork. The ground is slick with patches of water, reflecting the vibrant neon lights above. A second figure, clad in dark clothing, stands poised in the background, ready to intercept. The space is defined by stark yellow lines and orange safety bollards, adding structure to the chaotic energy of the scene. The soccer ball glides smoothly across the wet floor, kicking up droplets as it passes. Despite the muted colors of the environment, the players' movements are dynamic and full of life. Their shadowy silhouettes dance with the reflecting light, creating a mesmerizing visual interplay. The atmosphere is charged with focus and camaraderie, encapsulating the essence of a late-night urban soccer experience.",
+      "video_path": "Sport/mixkit-player-making-skillful-play-in-a-street-soccer-game-43504_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A lone climber is seen scaling a towering vertical rock face, demonstrating remarkable strength and focus. Dressed in a light-colored shirt and jeans, the climber grips the stone tightly, navigating the rough textures and crevices with precision. The sheer cliff is massive, exhibiting a range of natural hues from light tan to deep gray, accentuating the climber's figure against the vast rocky backdrop. Surrounding the cliff, scattered greenery and rugged terrain provide a sense of wilderness and isolation. The scene portrays a daring ascension requiring concentration and skill, capturing the essence of human endeavor against nature's formidable beauty.",
+      "video_path": "Sport/mixkit-skilled-mountaineer-climbing-a-gigantic-mountain-41083_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In this serene landscape, a lush meadow stretches across the foreground, dotted with vibrant yellow wildflowers swaying gently in the breeze. A towering tree stands majestically on the right side, its branches reaching wide under the bright blue sky filled with fluffy white clouds. On the left, dense trees form a natural corridor leading to the horizon, suggesting a sense of journey and possibility. The richness of the green grass contrasts beautifully with the golden hue of the distant fields, creating a harmonious palette of nature\u2019s colors. The play of light and shadow adds depth and dimension, evoking a tranquil, inviting atmosphere. It's a scene where nature\u2019s beauty simply commands attention, offering a perfect escape into tranquility.",
+      "video_path": "sky/mixkit-countryside-meadow-4075_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A solitary boat glides across the expansive, tranquil expanse of a serene lake. The vessel leaves a gentle wake behind, creating delicate ripples across the mirror-like surface. The water appears a rich shade of teal, seamlessly blending with the sky at the horizon. Silhouettes of distant trees are faintly visible, creating a picturesque backdrop that enhances the solitary journey of the boat. The sky is a calm gradient, shifting from soft oranges near the shore to the pale blues above. In the distance, a few slender poles emerge from the water, remnants of an old structure or natural formation. The mood of the scene is one of peace and solitude, with the boat journeying steadily through the quiet landscape. There is a sense of endless possibilities as the boat moves toward the unseen beyond the frame. The simplicity and stillness of the scene invite contemplation and reflection, encapsulating a perfect moment of quietude on the water.",
+      "video_path": "mountain/mixkit-motorboat-on-a-large-lake-with-turquoise-blue-waters-4996_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In a cozy, dimly lit caf\u00e9, a woman sits alone at a rustic wooden table, fully engrossed in her reading. Her dark, wavy hair frames her face as she leans forward over an open book, suggesting deep focus and contemplation. The caf\u00e9\u2019s ambiance is warm, with hanging pendant lights casting a soft glow over the wooden shelves lined with jars and coffee paraphernalia in the background. A small cup of coffee rests just within her reach, alongside a glass dome encasing a solitary pastry, adding a touch of tranquility to the scene. Her casual attire, a denim jacket over a simple shirt, complements the laid-back, comfortable setting of the caf\u00e9. The contrast between her concentrated expression and the bustling, yet subdued caf\u00e9 atmosphere creates a harmonious, serene visual. The overall composition captures a quiet moment of introspection amidst the gentle hum of caf\u00e9 life.",
+      "video_path": "Woman/mixkit-woman-drinking-coffee-in-a-cafe-223_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In a vast, deserted landscape under the night sky, a solitary figure stands at a small music setup, illuminated by strategically placed lights. The person is engrossed in playing a keyboard, with various electronic equipment surrounding them, casting soft glows of orange and blue hues across the scene. To the left, a large circular light adds a dramatic focal point, highlighting the intense contrast between the darkness and the lit performance area. This setup, with its minimalistic design and strategic lighting, creates a captivating and easily recognizable scene that merges the serene, expansive backdrop with an intimate, focused music performance.",
+      "video_path": "Music/mixkit-talented-dj-playing-in-a-lonely-desert-42414_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In a bustling urban scene, cars zoom past a weathered building, their blurred motion a testament to the city\u2019s lively pace. The building, with its faded yellow and brown facade, boasts graffiti that speaks of both art and decay, framing the scene with an air of urban grit. A solitary figure stands slightly to the side, clad casually in a gray top and mustard trousers, gazing into the street, seemingly detached from the surrounding flurry. The motion of the traffic creates a dynamic contrast against the static backdrop, emphasizing the relentless movement of the city. As the video progresses, a bright yellow taxi appears, slowing down as it approaches the figure, adding a pop of color to the desaturated hues of the environment. The interaction suggests a routine, a possibly daily exchange between the driver and the pedestrian, hinting at the rhythms of city life. Overhead, a soft, overcast sky casts a diffused light, lending the scene a subdued, timeless quality. Small elements, like the vertical pole cutting through the frame and the distant chatter of urban sounds, complete this vivid tableau of urban existence.",
+      "video_path": "Car/mixkit-morning-in-the-street-time-lapse-1648_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "A young woman sits on a curb in a tranquil park, basking in the golden hue of the setting sun. Beside her, a collie dog rests calmly, its fur illuminated by the warm sunlight, creating a serene glow. The woman's hand gently strokes the dog's back, highlighting the bond and affection between them. Tall trees surround the pair, casting elongated shadows on the leaf-laden ground, adding to the peaceful and intimate ambiance of the scene.",
+      "video_path": "Pets/mixkit-a-woman-pets-a-dog-in-a-park-1562_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In the video, a grand, majestic elephant stands in an open, sunlit field, its massive form dominating the scene. The elephant's skin is a tapestry of earthy tones, with rough, textured wrinkles that add character to its already imposing presence. Its trunk, a powerful and flexible appendage, moves gently, swaying as the elephant possibly enjoys the warmth of the day. The background is a blur of greenery, suggesting a lively environment filled with trees and shrubs that provide a natural habitat. Light plays on the elephant's skin, highlighting patches of dust and dirt that give it an authentic wilderness look. The scene captures the tranquility and majesty of this gentle giant in its natural surroundings.",
+      "video_path": "Zoo/mixkit-wet-elephant-in-the-savanna-3663_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    },
+    {
+      "caption": "In the video, a fluffy dog with brown patches is intently engaged with a bright red toy shaped like a fire hydrant, which has a yellow and orange rope attached. The dog's body is relaxed as it lies on a plain white background, concentrating on nudging and playfully biting the toy. Its ears perk up slightly with curiosity, and its eyes are fixated on the toy, suggesting a scene of focused playfulness. The neutral tones of the dog's fur contrast starkly against the vivid red of the toy, creating a visually striking moment.",
+      "video_path": "Pets/mixkit-a-cute-border-collie-dog-play-with-a-fire-street-50662_clip_1.mp4",
+      "num_inference_steps":  3,
+      "height": 448,
+      "width": 832,
+      "num_frames": 61
+    }
+  ]
+}
