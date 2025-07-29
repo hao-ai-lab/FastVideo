@@ -69,7 +69,7 @@ def run_worker():
         "--dit_precision", "fp32",
         "--max_grad_norm", "1.0",
         "--generator_update_interval", "5",
-        "--dmd_denoising_steps", "'1000,757,522'",
+        "--dmd_denoising_steps", "1000,757,522",
         "--min_timestep_ratio", "0.02",
         "--max_timestep_ratio", "0.98",
         "--real_score_guidance_scale", "3.5",
