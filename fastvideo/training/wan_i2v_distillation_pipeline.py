@@ -15,7 +15,7 @@ from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
-from fastvideo.pipelines.wan.wan_i2v_dmd_pipeline import (
+from fastvideo.pipelines.basic.wan.wan_i2v_dmd_pipeline import (
     WanImageToVideoDmdPipeline)
 from fastvideo.training.distillation_pipeline import DistillationPipeline
 from fastvideo.utils import is_vsa_available, shallow_asdict
