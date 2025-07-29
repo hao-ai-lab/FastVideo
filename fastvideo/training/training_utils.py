@@ -516,14 +516,12 @@ def load_distillation_checkpoint(generator_transformer,
     return step
 
 
-def normalize_dit_input(model_type, latents, args=None) -> torch.Tensor:
+def normalize_dit_input(model_type, latents, vae) -> torch.Tensor:
     if model_type == "hunyuan_hf" or model_type == "hunyuan":
         return latents * 0.476986
     elif model_type == "wan":
-        from fastvideo.configs.models.vaes.wanvae import WanVAEConfig
-        vae_config = WanVAEConfig()
-        latents_mean = torch.tensor(vae_config.arch_config.latents_mean)
-        latents_std = 1.0 / torch.tensor(vae_config.arch_config.latents_std)
+        latents_mean = torch.tensor(vae.latents_mean)
+        latents_std = 1.0 / torch.tensor(vae.latents_std)
 
         latents_mean = latents_mean.view(1, -1, 1, 1,
                                          1).to(device=latents.device)

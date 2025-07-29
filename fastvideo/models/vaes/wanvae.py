@@ -726,6 +726,7 @@ class WanEncoder3d(nn.Module):
             x = self.conv_out(x)
         return x
 
+# adapted from: https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/autoencoders/autoencoder_kl_wan.py
 class WanResidualUpBlock(nn.Module):
     """
     A block that handles upsampling for the WanVAE decoder.
@@ -791,7 +792,8 @@ class WanResidualUpBlock(nn.Module):
         Returns:
             torch.Tensor: Output tensor
         """
-        x_copy = x.clone()
+        if self.avg_shortcut is not None:
+            x_copy = x.clone()
 
         for resnet in self.resnets:
             x = resnet(x)

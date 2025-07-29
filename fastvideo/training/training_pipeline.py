@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import dataclasses
 import math
 import os
 import time
@@ -162,8 +163,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         if self.global_rank == 0:
             project = training_args.tracker_project_name or "fastvideo"
+            wandb_config = dataclasses.asdict(training_args)
             wandb.init(project=project,
-                       config=training_args,
+                       config=wandb_config,
                        name=training_args.wandb_run_name)
 
     @abstractmethod
@@ -207,8 +209,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
     def _normalize_dit_input(self,
                              training_batch: TrainingBatch) -> TrainingBatch:
         # TODO(will): support other models
-        training_batch.latents = normalize_dit_input('wan',
-                                                     training_batch.latents)
+        training_batch.latents = normalize_dit_input(
+            'wan', training_batch.latents,
+            self.validation_pipeline.get_module("vae"))
         return training_batch
 
     def _prepare_dit_inputs(self,

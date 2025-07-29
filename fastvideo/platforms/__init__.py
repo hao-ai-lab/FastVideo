@@ -43,6 +43,8 @@ def cuda_platform_plugin() -> str | None:
 
         if cuda_is_jetson():
             is_cuda = True
+    if is_cuda:
+        logger.info("CUDA is available")
 
     return "fastvideo.platforms.cuda.CudaPlatform" if is_cuda else None
 
@@ -56,8 +58,6 @@ def mps_platform_plugin() -> str | None:
         if torch.backends.mps.is_available():
             is_mps = True
             logger.info("MPS (Metal Performance Shaders) is available")
-        else:
-            logger.info("MPS is not available")
     except Exception as e:
         logger.info("MPS detection failed: %s", e)
 
