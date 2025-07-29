@@ -235,8 +235,8 @@ class ComposedPipelineBase(ABC):
         model_index.pop("_class_name")
         model_index.pop("_diffusers_version")
         # @TODO(Wei): Temporary hack
-        model_index.pop("boundary_ratio")
-        model_index.pop("expand_timesteps")
+        model_index.pop("boundary_ratio", None)
+        model_index.pop("expand_timesteps", None)
 
         # some sanity checks
         assert len(

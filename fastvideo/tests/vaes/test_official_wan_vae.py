@@ -13,7 +13,10 @@ from fastvideo.models.loader.component_loader import VAELoader
 from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.utils import maybe_download_model
 
-from wan.modules.vae2_2 import Wan2_2_VAE
+try:
+    from wan.modules.vae2_2 import Wan2_2_VAE
+except ImportError:
+    Wan2_2_VAE = None
 
 logger = init_logger(__name__)
 
