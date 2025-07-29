@@ -105,3 +105,16 @@ class FastWanT2V480PConfig(WanT2V_1_3B_SamplingParam):
     height: int = 448
     width: int = 832
     fps: int = 16
+
+@dataclass
+class Wan2_2_TI2V_5B_SamplingParam(SamplingParam):
+    # Video parameters
+    height: int = 704
+    width: int = 1280
+    num_frames: int = 121
+    fps: int = 24
+
+    # Denoising stage
+    guidance_scale: float = 5.0
+    negative_prompt: str = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+    num_inference_steps: int = 50

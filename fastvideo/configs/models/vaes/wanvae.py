@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+from typing import Optional
 from dataclasses import dataclass, field
 
 import torch
@@ -9,6 +10,7 @@ from fastvideo.configs.models.vaes.base import VAEArchConfig, VAEConfig
 @dataclass
 class WanVAEArchConfig(VAEArchConfig):
     base_dim: int = 96
+    decoder_base_dim: Optional[int] = None
     z_dim: int = 16
     dim_mult: tuple[int, ...] = (1, 2, 4, 4)
     num_res_blocks: int = 2
@@ -51,14 +53,21 @@ class WanVAEArchConfig(VAEArchConfig):
         2.8251,
         1.9160,
     )
-    temporal_compression_ratio = 4
-    spatial_compression_ratio = 8
+    is_residual: bool = False
+    in_channels: int = 3
+    out_channels: int = 3
+    patch_size: Optional[int] = None
+    scale_factor_temporal: int = 4
+    scale_factor_spatial: int = 8
+    clip_output: bool = True
 
     def __post_init__(self):
         self.scaling_factor: torch.tensor = 1.0 / torch.tensor(
             self.latents_std).view(1, self.z_dim, 1, 1, 1)
         self.shift_factor: torch.tensor = torch.tensor(self.latents_mean).view(
             1, self.z_dim, 1, 1, 1)
+        self.temporal_compression_ratio = self.scale_factor_temporal
+        self.spatial_compression_ratio = self.scale_factor_spatial
 
 
 @dataclass
