@@ -2,12 +2,7 @@
 
 # Attention Kernel Used in FastVideo
 
-## Sliding Tile Attention (STA)
-We only support H100 for STA.
-```bash
-git submodule update --init --recursive
-python setup_sta.py install
-```
+
 
 ## Video Sparse Attention (VSA)
 We support H100 (via TK) and RTX 4090 (via triton) for VSA.
@@ -15,6 +10,7 @@ We support H100 (via TK) and RTX 4090 (via triton) for VSA.
 git submodule update --init --recursive
 python setup_vsa.py install
 ```
+
 
 If you encounter error during installation, try below:
 Install C++20 for ThunderKittens:
@@ -35,9 +31,17 @@ export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 ```
 
 
+## Sliding Tile Attention (STA)
+We only support H100 for STA.
+```bash
+git submodule update --init --recursive
+python setup_sta.py install
+```
 
-## Usage
-### STA
+
+
+
+###  Usage
 End-2-end inference with FastVideo:
 ```bash
 bash scripts/inference/v1_inference_wan_STA.sh
@@ -57,22 +61,19 @@ out = sliding_tile_attention(q, k, v, window_size, text_length)
 out = sliding_tile_attention(q, k, v, window_size, 0, False)
 ```
 
-### VSA
-We do not officially supoort end-2-end inference with VSA in FastVideo yet. Stay tuned.
 
-
-## Test
+### Test
 ```bash
 python tests/test_sta.py # test STA
 python tests/test_block_sparse.py # test VSA
 ```
-## Benchmark
+### Benchmark
 ```bash
 python benchmarks/bench_sta.py
 ```
 
 
-## How Does STA Work?
+### How Does STA Work?
 We give a demo for 2D STA with window size (6,6) operating on a (10, 10) image. 
 
 

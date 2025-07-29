@@ -228,10 +228,17 @@ class DenoisingStage(PipelineStage):
                             self.attn_metadata_builder = self.attn_metadata_builder_cls(
                             )
                             # TODO(will): clean this up
-                            attn_metadata = self.attn_metadata_builder.build(
-                                current_timestep=i,
-                                forward_batch=batch,
-                                fastvideo_args=fastvideo_args,
+                            attn_metadata = self.attn_metadata_builder.build(  # type: ignore
+                                current_timestep=i,  # type: ignore
+                                raw_latent_shape=batch.
+                                raw_latent_shape[2:5],  # type: ignore
+                                patch_size=fastvideo_args.
+                                pipeline_config.  # type: ignore
+                                dit_config.patch_size,  # type: ignore
+                                STA_param=batch.STA_param,  # type: ignore
+                                VSA_sparsity=fastvideo_args.
+                                VSA_sparsity,  # type: ignore
+                                device=get_local_torch_device(),
                             )
                             assert attn_metadata is not None, "attn_metadata cannot be None"
                         else:
@@ -719,11 +726,18 @@ class DmdDenoisingStage(DenoisingStage):
                             self.attn_metadata_builder = self.attn_metadata_builder_cls(
                             )
                             # TODO(will): clean this up
-                            attn_metadata = self.attn_metadata_builder.build(
-                                current_timestep=i,
-                                forward_batch=batch,
-                                fastvideo_args=fastvideo_args,
-                            )
+                            attn_metadata = self.attn_metadata_builder.build(  # type: ignore
+                                current_timestep=i,  # type: ignore
+                                raw_latent_shape=batch.
+                                raw_latent_shape[2:5],  # type: ignore
+                                patch_size=fastvideo_args.
+                                pipeline_config.  # type: ignore
+                                dit_config.patch_size,  # type: ignore
+                                STA_param=batch.STA_param,  # type: ignore
+                                VSA_sparsity=fastvideo_args.
+                                VSA_sparsity,  # type: ignore
+                                device=get_local_torch_device(),  # type: ignore
+                            )  # type: ignore
                             assert attn_metadata is not None, "attn_metadata cannot be None"
                         else:
                             attn_metadata = None

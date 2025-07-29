@@ -13,10 +13,8 @@ from fastvideo.attention.backends.abstract import (AttentionBackend,
                                                    AttentionMetadata,
                                                    AttentionMetadataBuilder)
 from fastvideo.distributed import get_sp_group
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import ForwardContext, get_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.utils import dict_to_3d_list
 
 logger = init_logger(__name__)
@@ -76,13 +74,13 @@ class SlidingTileAttentionMetadataBuilder(AttentionMetadataBuilder):
     def prepare(self):
         pass
 
-    def build(
+    def build(  # type: ignore
         self,
+        STA_param: list[list[Any]],
         current_timestep: int,
-        forward_batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
+        **kwargs: dict[str, Any],
     ) -> SlidingTileAttentionMetadata:
-        param = forward_batch.STA_param
+        param = STA_param
         if param is None:
             return SlidingTileAttentionMetadata(
                 current_timestep=current_timestep, STA_param=[])
@@ -130,12 +128,6 @@ class SlidingTileAttentionImpl(AttentionImpl):
         }
 
     def tile(self, x: torch.Tensor) -> torch.Tensor:
-        x = rearrange(x,
-                      "b (sp t h w) head d -> b (t sp h w) head d",
-                      sp=self.sp_size,
-                      t=self.dit_seq_shape_int[0] // self.sp_size,
-                      h=self.dit_seq_shape_int[1],
-                      w=self.dit_seq_shape_int[2])
         return rearrange(
             x,
             "b (n_t ts_t n_h ts_h n_w ts_w) h d -> b (n_t n_h n_w ts_t ts_h ts_w) h d",
@@ -156,12 +148,7 @@ class SlidingTileAttentionImpl(AttentionImpl):
             ts_t=self.STA_base_tile_size[0],
             ts_h=self.STA_base_tile_size[1],
             ts_w=self.STA_base_tile_size[2])
-        return rearrange(x,
-                         "b (t sp h w) head d -> b (sp t h w) head d",
-                         sp=self.sp_size,
-                         t=self.dit_seq_shape_int[0] // self.sp_size,
-                         h=self.dit_seq_shape_int[1],
-                         w=self.dit_seq_shape_int[2])
+        return x
 
     def preprocess_qkv(
         self,

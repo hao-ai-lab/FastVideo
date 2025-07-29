@@ -21,7 +21,7 @@ from tqdm.auto import tqdm
 
 import fastvideo.envs as envs
 from fastvideo.attention.backends.video_sparse_attn import (
-    VideoSparseAttentionMetadata)
+    VideoSparseAttentionMetadataBuilder)
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset import build_parquet_map_style_dataloader
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
@@ -260,15 +260,13 @@ class TrainingPipeline(LoRAPipeline, ABC):
         assert latents_shape is not None
         assert training_batch.timesteps is not None
         if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
-            dit_seq_shape = [
-                latents_shape[2] // patch_size[0],
-                latents_shape[3] // patch_size[1],
-                latents_shape[4] // patch_size[2]
-            ]
-            training_batch.attn_metadata = VideoSparseAttentionMetadata(
+            training_batch.attn_metadata = VideoSparseAttentionMetadataBuilder(  # type: ignore
+            ).build(  # type: ignore
+                raw_latent_shape=latents_shape[2:5],
                 current_timestep=training_batch.timesteps,
-                dit_seq_shape=dit_seq_shape,
-                VSA_sparsity=current_vsa_sparsity)
+                patch_size=patch_size,
+                VSA_sparsity=current_vsa_sparsity,
+                device=get_local_torch_device())
         else:
             training_batch.attn_metadata = None
 

@@ -120,38 +120,43 @@ class DistributedAutograd:
             ) == 4, f"input must be 4D tensor, got {input_.dim()} and shape {input_.shape}"
 
             if scatter_dim == 2 and gather_dim == 1:
-                bs, shard_seqlen, hc, hs = input_.shape
+                bs, shard_seqlen, hn, hd = input_.shape
                 seqlen = shard_seqlen * world_size
-                shard_hc = hc // world_size
+                shard_hn = hn // world_size
 
-                input_t = input_.reshape(bs, shard_seqlen, world_size, shard_hc,
-                                         hs).transpose(0, 2).contiguous()
-                output = torch.empty_like(input_t)
+                input_ = input_.transpose(
+                    0, 2).contiguous()  # hn, shard_seqlen, bs, hd
+                output = torch.empty_like(input_)
 
-                dist.all_to_all_single(output, input_t, group=group)
+                dist.all_to_all_single(output, input_,
+                                       group=group)  # hn, shard_seqlen, bs, hd
 
-                output = output.reshape(seqlen, bs, shard_hc,
-                                        hs).transpose(0, 1).contiguous()
-                output = output.reshape(bs, seqlen, shard_hc, hs)
+                output = torch.cat(output.split(shard_hn),
+                                   dim=1)  # sharded hn, seqlen, bs, hd
+
+                output = output.transpose(
+                    0, 2).contiguous()  # bs, seqlen, sharded_hn, hd
 
                 return output
             elif scatter_dim == 1 and gather_dim == 2:
-                bs, seqlen, shard_hc, hs = input_.shape
-                hc = shard_hc * world_size
+                bs, seqlen, shard_hn, hd = input_.shape
+                hn = shard_hn * world_size
                 shard_seqlen = seqlen // world_size
 
-                input_t = input_.reshape(bs, world_size, shard_seqlen, shard_hc,
-                                         hs)
-                input_t = input_t.transpose(0, 3).transpose(0, 1).contiguous()
-                input_t = input_t.reshape(world_size, shard_hc, shard_seqlen,
-                                          bs, hs)
+                input_ = input_.transpose(
+                    0, 2).contiguous()  # shard_hn, seqlen, bs, hd
 
-                output = torch.empty_like(input_t)
-                dist.all_to_all_single(output, input_t, group=group)
+                input_ = input_.reshape(shard_hn, world_size, shard_seqlen, bs,
+                                        hd).transpose(0, 1).reshape(
+                                            shard_hn * world_size, shard_seqlen,
+                                            bs, hd).contiguous()
 
-                output = output.reshape(hc, shard_seqlen, bs, hs)
-                output = output.transpose(0, 2).contiguous()
-                output = output.reshape(bs, shard_seqlen, hc, hs)
+                output = torch.empty_like(input_)
+
+                dist.all_to_all_single(output, input_, group=group)
+
+                output = output.transpose(
+                    0, 2).contiguous()  # bs, seqlen, sharded_hn, hd
 
                 return output
             else:

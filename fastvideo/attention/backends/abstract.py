@@ -6,8 +6,7 @@ from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar
 
 if TYPE_CHECKING:
-    from fastvideo.fastvideo_args import FastVideoArgs
-    from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+    pass
 
 import torch
 
@@ -87,10 +86,8 @@ class AttentionMetadataBuilder(ABC, Generic[T]):
     @abstractmethod
     def build(
         self,
-        current_timestep: int,
-        forward_batch: "ForwardBatch",
-        fastvideo_args: "FastVideoArgs",
-    ) -> T:
+        **kwargs: dict[str, Any],
+    ) -> AttentionMetadata:
         """Build attention metadata with on-device tensors."""
         raise NotImplementedError
 
