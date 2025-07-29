@@ -1,6 +1,6 @@
 #!/bin/bash
 
-num_gpus=1
+num_gpus=2
 export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
 export MODEL_BASE=FastVideo/FastWan2.1-T2V-1.3B-Diffusers
 # export MODEL_BASE=hunyuanvideo-community/HunyuanVideo
