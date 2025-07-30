@@ -319,10 +319,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
             loss = (torch.mean((model_pred.float() - target.float())**2) /
                     self.training_args.gradient_accumulation_steps)
             
-            # THIS IS IMPORTANT: DIVIDE LOSS BY SP SIZE
-            loss = loss / self.sp_world_size
 
-            loss.backward()
+            (loss / self.sp_world_size).backward()
             avg_loss = loss.detach().clone()
 
         # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
