@@ -288,10 +288,6 @@ class VideoGenerator:
         """ # type: ignore[attr-defined]
         logger.info(debug_str)
 
-        # Use prompt[:100] for video name
-        if sampling_param.output_video_name is None:
-            sampling_param.output_video_name = prompt[:100]
-
         # Prepare batch
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
@@ -300,6 +296,10 @@ class VideoGenerator:
             VSA_sparsity=fastvideo_args.VSA_sparsity,
             extra={},
         )
+
+        # Use prompt[:100] for video name
+        if batch.output_video_name is None:
+            batch.output_video_name = prompt[:100]
 
         # Run inference
         start_time = time.perf_counter()
