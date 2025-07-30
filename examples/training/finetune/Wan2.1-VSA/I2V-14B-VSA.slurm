@@ -85,7 +85,7 @@ validation_args=(
   --log_validation
   --validation_dataset_file $VALIDATION_DATASET_FILE
   --validation_steps 200
-  --validation_sampling_steps "50"
+  --validation_sampling_steps "40"
   --validation_guidance_scale "5.0"
 )
 
@@ -106,7 +106,7 @@ miscellaneous_args=(
   --training_cfg_rate 0.1
   --dit_precision "fp32"
   --ema_start_step 0
-  --flow_shift 5
+  --flow_shift 3
   --seed 1000
 )
 
