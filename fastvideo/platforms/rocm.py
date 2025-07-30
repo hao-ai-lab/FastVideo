@@ -10,8 +10,8 @@ import torch
 import fastvideo.envs as envs
 from fastvideo.logger import init_logger
 from fastvideo.platforms.interface import (AttentionBackendEnum,
-                                              DeviceCapability, Platform,
-                                              PlatformEnum)
+                                           DeviceCapability, Platform,
+                                           PlatformEnum)
 
 logger = init_logger(__name__)
 
@@ -70,29 +70,11 @@ class RocmPlatform(Platform):
         elif selected_backend in (AttentionBackendEnum.FLASH_ATTN, None):
             pass
 
-        elif selected_backend == AttentionBackendEnum.SLIDING_TILE_ATTN:
-            try:
-                from fastvideo.attention.backends.sliding_tile_attn import (  # noqa
-                    SlidingTileAttentionBackend)
-                logger.info("Using Sliding Tile Attention backend.")
-                return "fastvideo.attention.backends.sliding_tile_attn.SlidingTileAttentionBackend"
-            except ImportError as e:
-                logger.error(
-                    "Failed to import Sliding Tile Attention backend: %s", e)
-                raise ImportError(
-                    "Sliding Tile Attention backend is not installed. Fall back to Flash Attention."
-                ) from e
-
-        elif selected_backend == AttentionBackendEnum.SAGE_ATTN:
-            try:
-                from fastvideo.attention.backends.sage_attn import (  # noqa
-                    SageAttentionBackend)
-                logger.info("Using Sage Attention backend.")
-                return "fastvideo.attention.backends.sage_attn.SageAttentionBackend"
-            except ImportError:
-                logger.warning(
-                    "Sage Attention backend is not installed. Fall back to Flash Attention."
-                )
+        elif selected_backend in (AttentionBackendEnum.SLIDING_TILE_ATTN,
+                                  AttentionBackendEnum.SAGE_ATTN):
+            raise ValueError(
+                f"{selected_backend.name} is not supported on {cls.device_name}."
+            )
         elif selected_backend:
             raise ValueError(
                 f"Invalid attention backend for {cls.device_name}: {selected_backend}"
