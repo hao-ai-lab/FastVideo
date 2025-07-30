@@ -1,25 +1,67 @@
-(v0-distill)=
-# 🎯 Distill
-Our distillation recipe is based on [Phased Consistency Model](https://github.com/G-U-N/Phased-Consistency-Model). We did not find significant improvement using multi-phase distillation, so we keep the one phase setup similar to the original latent consistency model's recipe.
-We use the [MixKit](https://huggingface.co/datasets/LanguageBind/Open-Sora-Plan-v1.1.0/tree/main/all_mixkit) dataset for distillation. To avoid running the text encoder and VAE during training, we prprocess all data to generate text embeddings and VAE latents.
-Preprocessing instructions can be found [data_preprocess.md](#v0-data-preprocess). For convenience, we also provide preprocessed data that can be downloaded directly using the following command:
+# 🎯 Distillation
+
+Our distillation recipe is based on a new finetuning strategy - **Sparse-distill**, which jointly integrates **[DMD](https://arxiv.org/abs/2405.14867)** and **[VSA](https://arxiv.org/abs/2505.13389)** in a single training process. This approach combines the benefits of both distillation to shorten diffusion steps and sparse attention to reduce attention computations, enabling much faster video generation.
+
+## 📊 Model Overview
+
+We provide two distilled models:
+
+- **[FastWan2.1-T2V-1.3B-Diffusers](https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers)**: 3-step inference, up to **20 FPS** on H100 GPU
+- **[FastWan2.1-T2V-14B-480P-Diffusers](https://huggingface.co/FastVideo/FastWan2.1-T2V-14B-480P-Diffusers)**: 3-step inference, up to **50x speed up** at 480P, **70x speed up** at 720P for denosing loop
+
+Both models are trained on **61×448×832** resolution but support generating videos with **any resolution** (1.3B  model mainly support 480P, 14B model support 480P and 720P, quality may degrade for different resolutions).
+
+## 🗂️ Dataset
+
+We use the **FastVideo 480P Synthetic Wan dataset** ([FastVideo/Wan-Syn_77x448x832_600k](https://huggingface.co/datasets/FastVideo/Wan-Syn_77x448x832_600k)) for distillation, which contains 600k synthetic latents.
+
+### Download Dataset
 
 ```bash
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/HD-Mixkit-Finetune-Hunyuan --local_dir=data/HD-Mixkit-Finetune-Hunyuan --repo_type=dataset
+# Download the preprocessed dataset
+python scripts/huggingface/download_hf.py \
+    --repo_id "FastVideo/Wan-Syn_77x448x832_600k" \
+    --local_dir "FastVideo/Wan-Syn_77x448x832_600k" \
+    --repo_type "dataset"
 ```
+## 🚀 Training Scripts
 
-Next, download the original model weights with:
+### 1.3B Model Sparse-Distill
+
+For the 1.3B model, we use **4 nodes with 32 H200 GPUs** (8 GPUs per node):
 
 ```bash
-python scripts/huggingface/download_hf.py --repo_id=FastVideo/hunyuan --local_dir=data/hunyuan --repo_type=model # original hunyuan
-python scripts/huggingface/download_hf.py --repo_id=genmo/mochi-1-preview --local_dir=data/mochi --repo_type=model # original mochi
+# Multi-node training (8 nodes, 64 GPUs total)
+sbatch examples/distill/Wan2.1-T2V/Wan-Syn-Data-480P/distill_dmd_VSA_t2v_1.3B.slurm
 ```
 
-To launch the distillation process, use the following commands:
+**Key Configuration:**
+- Global batch size: 64
+- Gradient accumulation steps: 2
+- Learning rate: 1e-5
+- VSA attention sparsity: 0.8
+- Training steps: 4000 (~12 hours)
 
-```
-bash scripts/distill/distill_hunyuan.sh # for hunyuan
-bash scripts/distill/distill_mochi.sh # for mochi
+### 14B Model Sparse-Distill
+
+For the 14B model, we use **8 nodes with 64 H200 GPUs** (8 GPUs per node):
+
+```bash
+# Multi-node training (8 nodes, 64 GPUs total)
+sbatch examples/distill/Wan2.1-T2V/Wan-Syn-Data-480P/distill_dmd_VSA_t2v_14B.slurm
 ```
 
-We also provide an optional script for distillation with adversarial loss, located at `fastvideo/distill_adv.py`. Although we tried adversarial loss, we did not observe significant improvements.
+**Key Configuration:**
+- Global batch size: 64
+- Sequence parallel size: 4
+- Gradient accumulation steps: 4
+- Learning rate: 1e-5
+- VSA attention sparsity: 0.9
+- Training steps: 3000 (~52 hours)
+- HSDP shard dim: 8
+
+## ⚙️ Inference
+Set `MODEL_BASE` to your own model path and run:
+```bash
+bash scripts/inference/v1_inference_wan_dmd.sh
+```
