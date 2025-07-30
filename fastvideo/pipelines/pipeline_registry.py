@@ -19,6 +19,7 @@ logger = init_logger(__name__)
 # map pipeline name to folder name
 _PIPELINE_NAME_TO_ARCHITECTURE_NAME: dict[str, str] = {
     "WanPipeline": "wan",
+    "WanDMDPipeline": "wan",
     "WanImageToVideoPipeline": "wan",
     "StepVideoPipeline": "stepvideo",
     "HunyuanVideoPipeline": "hunyuan",

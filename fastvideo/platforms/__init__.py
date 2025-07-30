@@ -70,8 +70,27 @@ def cpu_platform_plugin() -> str | None:
     return "fastvideo.platforms.cpu.CpuPlatform"
 
 
+def rocm_platform_plugin() -> str | None:
+    is_rocm = False
+
+    try:
+        import amdsmi
+        amdsmi.amdsmi_init()
+        try:
+            if len(amdsmi.amdsmi_get_processor_handles()) > 0:
+                is_rocm = True
+                logger.info("ROCm platform is available")
+        finally:
+            amdsmi.amdsmi_shut_down()
+    except Exception as e:
+        logger.info("ROCm detection failed: %s", e)
+
+    return "fastvideo.platforms.rocm.RocmPlatform" if is_rocm else None
+
+
 builtin_platform_plugins = {
     'cuda': cuda_platform_plugin,
+    'rocm': rocm_platform_plugin,
     'mps': mps_platform_plugin,
     'cpu': cpu_platform_plugin,
 }
@@ -83,6 +102,11 @@ def resolve_current_platform_cls_qualname() -> str:
 
     # Try MPS first on macOS
     platform_cls_qualname = mps_platform_plugin()
+    if platform_cls_qualname is not None:
+        return platform_cls_qualname
+
+    # Fall back to ROCm
+    platform_cls_qualname = rocm_platform_plugin()
     if platform_cls_qualname is not None:
         return platform_cls_qualname
 
