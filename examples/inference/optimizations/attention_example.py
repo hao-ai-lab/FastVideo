@@ -11,6 +11,10 @@ def main():
     gen = VideoGenerator.from_pretrained(
         model_path="Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         num_gpus=1,
+        dit_cpu_offload=False,
+        vae_cpu_offload=False,
+        text_encoder_cpu_offload=True,
+        pin_cpu_memory=False,
     )
     load_time = time.perf_counter() - start_time
     print(f"Model loading time: {load_time:.2f} seconds")

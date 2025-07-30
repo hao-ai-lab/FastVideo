@@ -10,6 +10,10 @@ fastvideo generate \
     --sp-size $num_gpus \
     --tp-size 1 \
     --num-gpus $num_gpus \
+    --dit-cpu-offload False \
+    --vae-cpu-offload False \
+    --text-encoder-cpu-offload True \
+    --pin-cpu-memory False \
     --height 448 \
     --width 832 \
     --num-frames 77 \

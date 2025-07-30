@@ -7,6 +7,10 @@ def main():
     generator = VideoGenerator.from_pretrained(
         "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         num_gpus=1,
+        dit_cpu_offload=False,
+        vae_cpu_offload=False,
+        text_encoder_cpu_offload=True,
+        pin_cpu_memory=False,
         lora_path="benjamin-paine/steamboat-willie-1.3b",
         lora_nickname="steamboat"
     )
