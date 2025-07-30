@@ -32,6 +32,8 @@ training_args=(
   --num_width 1280
   --num_frames 121
   --enable_gradient_checkpointing_type "full"
+  --training_state_checkpointing_steps=500
+  --weight_only_checkpointing_steps=500
 )
 
 # Parallel arguments
@@ -68,7 +70,6 @@ validation_args=(
 optimizer_args=(
   --learning_rate=1e-5
   --mixed_precision="bf16"
-  --checkpointing_steps=500
   --weight_decay 0.01
   --max_grad_norm 1.0
 )
