@@ -3,7 +3,7 @@ from fastvideo.configs.sample import SamplingParam
 
 def main():
     config = PipelineConfig.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
-    config.text_encoder_precisions = ["bf16"]
+    config.text_encoder_precisions = ["fp16"]
     
     generator = VideoGenerator.from_pretrained(
         "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
