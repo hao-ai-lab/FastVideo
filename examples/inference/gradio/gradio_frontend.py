@@ -114,10 +114,51 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
         width,
         num_inference_steps,
         randomize_seed=False,
+        input_image=None,
     ):
         # Check backend health first
         if not client.check_health():
             return None, f"Backend is not available. Please check if Ray Serve is running at {backend_url}", ""
+        
+        # Handle input image for I2V
+        image_path = None
+        if input_image is not None:
+            try:
+                # Save the uploaded image to a temporary file
+                import tempfile
+                temp_dir = "temp_images"
+                os.makedirs(temp_dir, exist_ok=True)
+                
+                # Generate a unique filename with appropriate extension
+                import uuid
+                # Determine the best format to preserve quality
+                if hasattr(input_image, 'format') and input_image.format:
+                    # Use original format if available
+                    ext = input_image.format.lower()
+                    if ext == 'jpeg':
+                        ext = 'jpg'
+                else:
+                    # Default to PNG for lossless quality
+                    ext = 'png'
+                
+                image_filename = f"input_image_{uuid.uuid4().hex[:8]}.{ext}"
+                image_path = os.path.abspath(os.path.join(temp_dir, image_filename))
+
+                # Save the image preserving original quality
+                if ext == 'png':
+                    # Use PNG for lossless compression
+                    input_image.save(image_path, "PNG", optimize=False)
+                elif ext == 'jpg':
+                    # Use high quality JPEG with minimal compression
+                    input_image.convert("RGB").save(image_path, "JPEG", quality=95, optimize=False)
+                else:
+                    # For other formats, save as PNG to preserve quality
+                    input_image.save(image_path, "PNG", optimize=False)
+                
+                print(f"Saved input image to: {image_path}")
+            except Exception as e:
+                print(f"Warning: Failed to save input image: {e}")
+                image_path = None
         
         # Prepare request data - always request frames for video creation
         request_data = {
@@ -131,11 +172,21 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             "width": width,
             "num_inference_steps": num_inference_steps,
             "randomize_seed": randomize_seed,
-            "return_frames": True  # Always request frames
+            "return_frames": True,  # Always request frames
+            "image_path": image_path,
+            "model_type": "i2v" if image_path else "t2v"  # Use I2V model if image is provided, T2V otherwise
         }
         
         # Send request to backend
         response = client.generate_video(request_data)
+        
+        # Clean up temporary image file after processing
+        if image_path and os.path.exists(image_path):
+            try:
+                os.remove(image_path)
+                print(f"Cleaned up temporary image: {image_path}")
+            except Exception as e:
+                print(f"Warning: Failed to clean up temporary image {image_path}: {e}")
         
         if response.get("success", False):
             output_path = response.get("output_path", "")
@@ -175,6 +226,13 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
         "A crowded rooftop bar buzzes with energy, the city skyline twinkling like a field of stars in the background. Strings of fairy lights hang above, casting a warm, golden glow over the scene. Groups of people gather around high tables, their laughter blending with the soft rhythm of live jazz. The aroma of freshly mixed cocktails and charred appetizers wafts through the air, mingling with the cool night breeze.",
     ]
     
+    # Example I2V prompts (for when users upload images)
+    i2v_examples = [
+        "The image comes to life with subtle movement, the scene gently animating while maintaining the original composition and mood.",
+        "The static image transforms into a dynamic scene with natural motion, preserving the original lighting and atmosphere.",
+        "The photograph animates with realistic movement, bringing the frozen moment to life while keeping the original artistic style.",
+    ]
+    
     # Create Gradio interface
     with gr.Blocks() as demo:
         gr.Markdown("# FastVideo Inference Demo (Ray Serve Backend)")
@@ -193,21 +251,55 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             else:
                 return "❌ Backend is not available"
         
-        with gr.Group():
-            with gr.Row():
-                prompt = gr.Text(
-                    label="Prompt",
-                    show_label=False,
-                    max_lines=1,
-                    placeholder="Enter your prompt",
-                    container=False,
-                )
-                run_button = gr.Button("Run", scale=0)
+        with gr.Tabs():
+            # Text-to-Video Tab
+            with gr.Tab("Text-to-Video"):
+                with gr.Group():
+                    with gr.Row():
+                        prompt = gr.Text(
+                            label="Prompt",
+                            show_label=False,
+                            max_lines=1,
+                            placeholder="Enter your prompt",
+                            container=False,
+                        )
+                        run_button = gr.Button("Run", scale=0)
+                    
+                    result = gr.Video(label="Result", show_label=False)
+                    error_output = gr.Text(label="Error", visible=False)
+                    frames_output = gr.Text(label="Frame Video Status", visible=False)
+                    download_file = gr.File(visible=False)
+                
+                gr.Examples(examples=examples, inputs=prompt)
             
-            result = gr.Video(label="Result", show_label=False)
-            error_output = gr.Text(label="Error", visible=False)
-            frames_output = gr.Text(label="Frame Video Status", visible=False)
+            # Image-to-Video Tab
+            with gr.Tab("Image-to-Video"):
+                with gr.Group():
+                    with gr.Row():
+                        i2v_prompt = gr.Text(
+                            label="Prompt",
+                            show_label=False,
+                            max_lines=1,
+                            placeholder="Describe how the image should animate",
+                            container=False,
+                        )
+                        i2v_run_button = gr.Button("Run", scale=0)
+                    
+                    input_image = gr.Image(
+                        label="Input Image",
+                        type="pil",
+                        show_label=True,
+                        container=True,
+                    )
+                    
+                    i2v_result = gr.Video(label="Result", show_label=False)
+                    i2v_error_output = gr.Text(label="Error", visible=False)
+                    i2v_frames_output = gr.Text(label="Frame Video Status", visible=False)
+                    i2v_download_file = gr.File(visible=False)
+                
+                gr.Examples(examples=i2v_examples, inputs=i2v_prompt)
         
+        # Shared advanced options
         with gr.Accordion("Advanced options", open=False):
             with gr.Group():
                 with gr.Row():
@@ -276,7 +368,10 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             outputs=negative_prompt,
         )
         
-        def handle_generation(*args):
+        def handle_t2v_generation(*args):
+            # For T2V, we pass None as input_image
+            args = list(args)
+            args.append(None)  # Add None for input_image
             result_path, seed_or_error, frames_status = generate_video(*args)
             
             if result_path and os.path.exists(result_path):
@@ -286,25 +381,61 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                         result_path, 
                         seed_or_error, 
                         gr.update(visible=False),  # error_output
-                        gr.update(visible=True, value=frames_status)  # frames_output
+                        gr.update(visible=True, value=frames_status),  # frames_output
+                        gr.update(visible=True, value=result_path)  # download_file
                     )
                 else:
                     return (
                         result_path, 
                         seed_or_error, 
                         gr.update(visible=False),  # error_output
-                        gr.update(visible=False)  # frames_output
+                        gr.update(visible=False),  # frames_output
+                        gr.update(visible=True, value=result_path)  # download_file
                     )
             else:
                 return (
                     None, 
                     seed_or_error, 
                     gr.update(visible=True, value=seed_or_error),  # error_output
-                    gr.update(visible=False)  # frames_output
+                    gr.update(visible=False),  # frames_output
+                    gr.update(visible=False)  # download_file
                 )
         
+        def handle_i2v_generation(*args):
+            # For I2V, we need to reorder args to match generate_video signature
+            # args should be: [i2v_prompt, negative_prompt, use_negative_prompt, seed, guidance_scale, num_frames, height, width, num_inference_steps, randomize_seed, input_image]
+            result_path, seed_or_error, frames_status = generate_video(*args)
+            
+            if result_path and os.path.exists(result_path):
+                # Show frame status if available
+                if frames_status:
+                    return (
+                        result_path, 
+                        seed_or_error, 
+                        gr.update(visible=False),  # i2v_error_output
+                        gr.update(visible=True, value=frames_status),  # i2v_frames_output
+                        gr.update(visible=True, value=result_path)  # i2v_download_file
+                    )
+                else:
+                    return (
+                        result_path, 
+                        seed_or_error, 
+                        gr.update(visible=False),  # i2v_error_output
+                        gr.update(visible=False),  # i2v_frames_output
+                        gr.update(visible=True, value=result_path)  # i2v_download_file
+                    )
+            else:
+                return (
+                    None, 
+                    seed_or_error, 
+                    gr.update(visible=True, value=seed_or_error),  # i2v_error_output
+                    gr.update(visible=False),  # i2v_frames_output
+                    gr.update(visible=False)  # i2v_download_file
+                )
+        
+        # T2V event handler
         run_button.click(
-            fn=handle_generation,
+            fn=handle_t2v_generation,
             inputs=[
                 prompt,
                 negative_prompt,
@@ -317,7 +448,27 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                 num_inference_steps,
                 randomize_seed,
             ],
-            outputs=[result, seed_output, error_output, frames_output],
+            outputs=[result, seed_output, error_output, frames_output, download_file],
+            concurrency_limit=20,
+        )
+        
+        # I2V event handler
+        i2v_run_button.click(
+            fn=handle_i2v_generation,
+            inputs=[
+                i2v_prompt,
+                negative_prompt,
+                use_negative_prompt,
+                seed,
+                guidance_scale,
+                num_frames,
+                height,
+                width,
+                num_inference_steps,
+                randomize_seed,
+                input_image,
+            ],
+            outputs=[i2v_result, seed_output, i2v_error_output, i2v_frames_output, i2v_download_file],
             concurrency_limit=20,
         )
         
@@ -333,10 +484,14 @@ def main():
                         type=str,
                         default="http://localhost:8000",
                         help="URL of the Ray Serve backend")
-    parser.add_argument("--model_path",
+    parser.add_argument("--t2v_model_path",
                         type=str,
                         default="FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
-                        help="Path to the model (for default parameters)")
+                        help="Path to the T2V model (for default parameters)")
+    parser.add_argument("--i2v_model_path",
+                        type=str,
+                        default="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
+                        help="Path to the I2V model (for default parameters)")
     parser.add_argument("--host",
                         type=str,
                         default="0.0.0.0",
@@ -348,11 +503,11 @@ def main():
     
     args = parser.parse_args()
     
-    # Load default parameters from the model
+    # Load default parameters from the models
     # try:
-    #     default_params = SamplingParam.from_pretrained(args.model_path)
+    #     default_params = SamplingParam.from_pretrained(args.t2v_model_path)
     # except Exception as e:
-    #     print(f"Warning: Could not load default parameters from {args.model_path}: {e}")
+    #     print(f"Warning: Could not load default parameters from {args.t2v_model_path}: {e}")
     #     print("Using fallback default parameters...")
     #     # Create fallback default parameters
     default_params = SamplingParam()
@@ -368,11 +523,13 @@ def main():
     
     print(f"Starting Gradio frontend at http://{args.host}:{args.port}")
     print(f"Backend URL: {args.backend_url}")
+    print(f"T2V Model: {args.t2v_model_path}")
+    print(f"I2V Model: {args.i2v_model_path}")
     
     demo.queue(max_size=20).launch(
         server_name=args.host,
         server_port=args.port,
-        allowed_paths=[os.path.abspath("outputs")]
+        allowed_paths=[os.path.abspath("outputs"), os.path.abspath("temp_images")]
     )
 
 

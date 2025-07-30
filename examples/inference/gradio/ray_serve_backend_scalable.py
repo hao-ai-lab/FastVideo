@@ -100,71 +100,70 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @serve.deployment(
-    num_replicas=1,
-    # ray_actor_options={"num_cpus": 10, "num_gpus": 1, "runtime_env": {"conda": "fv", "working_dir": "/mnt/fast-disks/nfs/hao_lab/FastVideo"}},
-    ray_actor_options={"num_cpus": 10, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
+    num_replicas=3,  # Set to 3 for cluster 0
+    ray_actor_options={
+        "num_cpus": 10, 
+        "num_gpus": 1, 
+        "runtime_env": {"conda": "fv"},
+    },
 )
 @serve.ingress(app)
-class FastVideoAPI:
-    def __init__(self, t2v_model_path: str, i2v_model_path: str, output_path: str):
+class FastVideoMultiGPUAPI:
+    def __init__(self, t2v_model_path: str, i2v_model_path: str, output_path: str, gpu_id: int = 0):
         self.t2v_model_path = t2v_model_path
         self.i2v_model_path = i2v_model_path
         self.output_path = output_path
+        self.gpu_id = gpu_id
         
         # Initialize the video generators
-        self.t2v_generator = None # Initialize to None
-        self.i2v_generator = None # Initialize to None
-        self.t2v_default_params = None # Initialize to None
-        self.i2v_default_params = None # Initialize to None
+        self.t2v_generator = None
+        self.i2v_generator = None
+        self.t2v_default_params = None
+        self.i2v_default_params = None
         
         # Ensure output directory exists
         os.makedirs(output_path, exist_ok=True)
         time.sleep(10)
-        self._initialize_models() # Ensure models are initialized
+        self._initialize_models()
     
     def _initialize_models(self):
         # Set VSA environment variable
         os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
         os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
         
-        # Import only when needed - use direct imports to avoid module-level execution
+        # Import only when needed
         from fastvideo.entrypoints.video_generator import VideoGenerator
         from fastvideo.configs.sample.base import SamplingParam
         
         # Initialize T2V model
-        # if self.t2v_generator is None:
-        if False:
-            print(f"Initializing T2V model: {self.t2v_model_path}")
+        if False:  # Disabled for now
+            print(f"Initializing T2V model on GPU {self.gpu_id}: {self.t2v_model_path}")
             self.t2v_generator = VideoGenerator.from_pretrained(
                 model_path=self.t2v_model_path, 
                 num_gpus=1,
                 use_fsdp_inference=True,
-                # Adjust these offload parameters if you have < 32GB of VRAM
                 text_encoder_cpu_offload=False,
                 dit_cpu_offload=False,
                 vae_cpu_offload=False,
                 VSA_sparsity=0.8,
-                # master_port=port,
             )
             self.t2v_default_params = SamplingParam.from_pretrained(self.t2v_model_path)
-            print("✅ T2V model initialized successfully")
+            print(f"✅ T2V model initialized successfully on GPU {self.gpu_id}")
         
         # Initialize I2V model
         if self.i2v_generator is None:
-            print(f"Initializing I2V model: {self.i2v_model_path}")
+            print(f"Initializing I2V model on GPU {self.gpu_id}: {self.i2v_model_path}")
             self.i2v_generator = VideoGenerator.from_pretrained(
                 model_path=self.i2v_model_path, 
                 num_gpus=1,
                 use_fsdp_inference=True,
-                # Adjust these offload parameters if you have < 32GB of VRAM
                 text_encoder_cpu_offload=False,
                 dit_cpu_offload=False,
                 vae_cpu_offload=False,
                 VSA_sparsity=0.8,
-                # master_port=port,
             )
             self.i2v_default_params = SamplingParam.from_pretrained(self.i2v_model_path)
-            print("✅ I2V model initialized successfully")
+            print(f"✅ I2V model initialized successfully on GPU {self.gpu_id}")
     
     @app.post("/generate_video", response_model=VideoGenerationResponse)
     @limiter.limit("2/minute")  # Allow 2 requests per minute per IP
@@ -174,60 +173,41 @@ class FastVideoAPI:
             if video_request.model_type.lower() == "i2v":
                 generator = self.i2v_generator
                 params = deepcopy(self.i2v_default_params)
-                print(f"Using I2V model for generation")
+                print(f"Using I2V model for generation on GPU {self.gpu_id}")
             else:
                 generator = self.t2v_generator
                 params = deepcopy(self.t2v_default_params)
-                print(f"Using T2V model for generation")
+                print(f"Using T2V model for generation on GPU {self.gpu_id}")
             
             # Update parameters with request values
             params.prompt = video_request.prompt
-            # Only override negative prompt if user explicitly opts in
-            # if video_request.use_negative_prompt:
-            #     params.negative_prompt = video_request.negative_prompt
-
-            # params.seed = video_request.seed
-            # params.guidance_scale = video_request.guidance_scale
-            # params.num_frames = video_request.num_frames
-            # params.height = video_request.height
-            # params.width = video_request.width
-            # params.num_inference_steps = video_request.num_inference_steps
             
             # Handle seed randomization
             if video_request.randomize_seed:
                 params.seed = torch.randint(0, 1000000, (1,)).item()
             
-            # Ensure negative_prompt is a non-None string; FastVideo validation disallows None
+            # Ensure negative_prompt is a non-None string
             if params.negative_prompt is None:
-                params.negative_prompt = ""  # empty string satisfies validator
+                params.negative_prompt = ""
             
             # Set up output path and video saving
             params.save_video = True
             params.output_path = self.output_path
-            # params.return_frames = False  # avoid keeping frames in memory
             
             # Create a clean filename from the prompt
             safe_prompt = video_request.prompt[:100].replace(' ', '_').replace('/', '_').replace('\\', '_')
-            # Store desired video name inside the SamplingParam to avoid unknown kwarg errors
             setattr(params, "output_video_name", safe_prompt)
             
             # Handle image_path for I2V
             if video_request.image_path:
                 params.image_path = video_request.image_path
             
-            # Generate the video with proper output path and filename
+            # Generate the video
             result = generator.generate_video(
                 prompt=video_request.prompt,
                 sampling_param=params,
-                save_video=True,  # Match the params.save_video setting
+                save_video=True,
             )
-            
-            # The actual output path where the video was saved
-            # output_path = os.path.join(self.output_path, f"{safe_prompt}.mp4")
-            
-            # Verify the file exists
-            # if not os.path.exists(output_path):
-            #     raise FileNotFoundError(f"Video was not saved to expected location: {output_path}")
             
             frames = result.get("frames", [])
             
@@ -265,36 +245,44 @@ class FastVideoAPI:
     @app.get("/health")
     @limiter.limit("10/minute")  # Allow 10 health checks per minute per IP
     async def health_check(self, request: Request):
-        return {"status": "healthy"}
+        return {"status": "healthy", "gpu_id": self.gpu_id}
 
 
-def start_ray_serve(
+def start_ray_serve_multi_gpu(
     t2v_model_path: str = "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
     i2v_model_path: str = "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
     output_path: str = "outputs",
     host: str = "0.0.0.0",
-    port: int = 8000
+    port: int = 8000,
+    num_gpus: int = 8,
+    cluster_id: int = 0
 ):
-    """Start the Ray Serve backend"""
+    """Start the Ray Serve backend with multiple GPU replicas"""
     # Initialize Ray
     if not ray.is_initialized():
         ray.init()
     
-    # Deploy the API
-    api = FastVideoAPI.bind(t2v_model_path, i2v_model_path, output_path)
-    serve.run(api, route_prefix="/", name="fast_video")  # detach
+    # Use unique application name based on cluster_id
+    app_name = f"fast_video_cluster_{cluster_id}"
     
-    print(f"Ray Serve backend started at http://{host}:{port}")
+    # Deploy the API
+    api = FastVideoMultiGPUAPI.bind(t2v_model_path, i2v_model_path, output_path)
+    serve.run(api, route_prefix=f"/cluster_{cluster_id}", name=app_name)
+    
+    print(f"Ray Serve multi-GPU backend started at http://{host}:{port}")
     print(f"T2V Model: {t2v_model_path}")
     print(f"I2V Model: {i2v_model_path}")
-    print(f"Health check: http://{host}:{port}/health")
-    print(f"Video generation endpoint: http://{host}:{port}/generate_video")
+    print(f"Number of GPU replicas: {num_gpus}")
+    print(f"Cluster ID: {cluster_id}")
+    print(f"Application name: {app_name}")
+    print(f"Health check: http://{host}:{port}/cluster_{cluster_id}/health")
+    print(f"Video generation endpoint: http://{host}:{port}/cluster_{cluster_id}/generate_video")
 
 
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="FastVideo Ray Serve Backend")
+    parser = argparse.ArgumentParser(description="FastVideo Ray Serve Multi-GPU Backend")
     parser.add_argument("--t2v_model_path",
                         type=str,
                         default="FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
@@ -315,22 +303,32 @@ if __name__ == "__main__":
                         type=int,
                         default=8000,
                         help="Port to bind to")
+    parser.add_argument("--num_gpus",
+                        type=int,
+                        default=8,
+                        help="Number of GPU replicas")
+    parser.add_argument("--cluster_id",
+                        type=int,
+                        default=0,
+                        help="Cluster ID for unique naming")
     
     args = parser.parse_args()
     
-    start_ray_serve(
+    start_ray_serve_multi_gpu(
         t2v_model_path=args.t2v_model_path,
         i2v_model_path=args.i2v_model_path,
         output_path=args.output_path,
         host=args.host,
         port=args.port,
+        num_gpus=args.num_gpus,
+        cluster_id=args.cluster_id,
     )
 
-    # ---- keep the process alive ---------------------------------
+    # Keep the process alive
     import signal, sys, time
-    signal.signal(signal.SIGINT,  lambda *_: sys.exit(0))   # Ctrl-C
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))   # docker stop etc.
+    signal.signal(signal.SIGINT,  lambda *_: sys.exit(0))
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
-    print("✅ FastVideo backend is running. Press Ctrl-C to stop.")
+    print("✅ FastVideo multi-GPU backend is running. Press Ctrl-C to stop.")
     while True:
-        time.sleep(3600) 
+        time.sleep(3600)
