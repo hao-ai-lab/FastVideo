@@ -40,7 +40,7 @@ python tests/test_vsa.py
 # (For H100) test speed
 python benchmarks/bench_vsa_hopper.py
 ```
-bench_vsa_hopper.py should print somthing like this:
+bench_vsa_hopper.py should print something like this:
 ```bash
 Using topk=76 kv blocks per q block (out of 768 total kv blocks)
 

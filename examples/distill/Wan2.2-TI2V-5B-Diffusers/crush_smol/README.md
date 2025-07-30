@@ -1,4 +1,4 @@
-# Wan2.1-T2V-1.3B Distill Example
+# Wan2.2-5B Distill Example
 These are end-to-end example scripts for distilling Wan2.2 TI2V 5B model DMD+VSA methods.
 
 ### 0. Make sure you have installed VSA
