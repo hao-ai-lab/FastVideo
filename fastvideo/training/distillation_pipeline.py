@@ -394,7 +394,6 @@ class DistillationPipeline(TrainingPipeline):
         training_batch.raw_latent_shape = training_batch.latents.shape
         training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
         self.video_latent_shape = training_batch.latents.shape
-        
 
         if self.sp_world_size > 1:
             training_batch.latents = rearrange(
