@@ -1,0 +1,31 @@
+{
+  "data": [
+    {
+      "caption": "A large metal cylinder is seen pressing down on a pile of Oreo cookies, flattening them as if they were under a hydraulic press.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 50,
+      "height": 704,
+      "width": 1280,
+      "num_frames": 121
+    },
+    {
+      "caption": "A large metal cylinder is seen compressing colorful clay into a compact shape, demonstrating the power of a hydraulic press.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 50,
+      "height": 704,
+      "width": 1280,
+      "num_frames": 121
+    },
+    {
+      "caption": "A large metal cylinder is seen pressing down on a pile of colorful candies, flattening them as if they were under a hydraulic press. The candies are crushed and broken into small pieces, creating a mess on the table.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 50,
+      "height": 704,
+      "width": 1280,
+      "num_frames": 121
+    }
+  ]
+}

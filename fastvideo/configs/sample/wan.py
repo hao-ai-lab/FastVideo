@@ -105,3 +105,33 @@ class FastWanT2V480PConfig(WanT2V_1_3B_SamplingParam):
     height: int = 448
     width: int = 832
     fps: int = 16
+
+
+# =============================================
+# ============= Wan2.2 TI2V Models =============
+# =============================================
+@dataclass
+class Wan2_2_Base_SamplingParam(SamplingParam):
+    """Sampling parameters for Wan2.2 TI2V 5B model."""
+    negative_prompt: str | None = "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+
+
+@dataclass
+class Wan2_2_TI2V_5B_SamplingParam(Wan2_2_Base_SamplingParam):
+    """Sampling parameters for Wan2.2 TI2V 5B model."""
+    height: int = 704
+    width: int = 1280
+    num_frames: int = 121
+    fps: int = 24
+    guidance_scale: float = 5.0
+    num_inference_steps: int = 50
+
+
+@dataclass
+class Wan2_2_T2V_A14B_SamplingParam(Wan2_2_Base_SamplingParam):
+    pass
+
+
+@dataclass
+class Wan2_2_I2V_A14B_SamplingParam(Wan2_2_Base_SamplingParam):
+    pass

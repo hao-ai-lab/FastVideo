@@ -234,6 +234,9 @@ class ComposedPipelineBase(ABC):
         # remove keys that are not pipeline modules
         model_index.pop("_class_name")
         model_index.pop("_diffusers_version")
+        # @TODO(Wei): Temporary hack
+        model_index.pop("boundary_ratio", None)
+        model_index.pop("expand_timesteps", None)
 
         # some sanity checks
         assert len(
@@ -255,6 +258,8 @@ class ComposedPipelineBase(ABC):
         modules = {}
         for module_name, (transformers_or_diffusers,
                           architecture) in model_index.items():
+            if transformers_or_diffusers is None:
+                continue
             if module_name not in required_modules:
                 logger.info("Skipping module %s", module_name)
                 continue

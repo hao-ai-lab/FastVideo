@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import dataclasses
 import math
 import os
 import time
@@ -162,8 +163,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         if self.global_rank == 0:
             project = training_args.tracker_project_name or "fastvideo"
+            wandb_config = dataclasses.asdict(training_args)
             wandb.init(project=project,
-                       config=training_args,
+                       config=wandb_config,
                        name=training_args.wandb_run_name)
 
     @abstractmethod
@@ -207,8 +209,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
     def _normalize_dit_input(self,
                              training_batch: TrainingBatch) -> TrainingBatch:
         # TODO(will): support other models
-        training_batch.latents = normalize_dit_input('wan',
-                                                     training_batch.latents)
+        training_batch.latents = normalize_dit_input(
+            'wan', training_batch.latents,
+            self.validation_pipeline.get_module("vae"))
         return training_batch
 
     def _prepare_dit_inputs(self,
@@ -406,7 +409,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
     def train(self) -> None:
         assert self.seed is not None, "seed must be set"
-        set_random_seed(self.seed)
+        set_random_seed(self.seed + self.global_rank)
         logger.info('rank: %s: start training',
                     self.global_rank,
                     local_main_process_only=False)
@@ -435,7 +438,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
-        self._log_validation(self.transformer, self.training_args, 0)
+        self._log_validation(self.transformer, self.training_args,
+                             self.init_steps)
 
         # Train!
         progress_bar = tqdm(

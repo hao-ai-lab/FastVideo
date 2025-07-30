@@ -105,6 +105,10 @@ case "$TEST_TYPE" in
         log "Running LoRA tests..."
         MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_inference_lora_tests"
         ;;
+    "distillation_dmd")
+        log "Running distillation DMD tests..."
+        MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_distill_dmd_tests"
+        ;;
     *)
         log "Error: Unknown test type: $TEST_TYPE"
         exit 1

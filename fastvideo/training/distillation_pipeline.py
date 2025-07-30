@@ -36,8 +36,9 @@ from fastvideo.training.activation_checkpoint import (
     apply_activation_checkpointing)
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
-    clip_grad_norm_while_handling_failing_dtensor_cases, load_checkpoint,
-    pred_noise_to_pred_video, save_checkpoint, shift_timestep)
+    clip_grad_norm_while_handling_failing_dtensor_cases,
+    load_distillation_checkpoint, pred_noise_to_pred_video,
+    save_distillation_checkpoint, shift_timestep)
 from fastvideo.utils import is_vsa_available, set_random_seed
 
 import wandb  # isort: skip
@@ -482,19 +483,17 @@ class DistillationPipeline(TrainingPipeline):
         training_batch.total_loss = training_batch.generator_loss + training_batch.fake_score_loss
         return training_batch
 
-    def _resume_from_checkpoint(self) -> None:  #TODO(yongqi)
+    def _resume_from_checkpoint(self) -> None:
         """Resume training from checkpoint with distillation models."""
 
         logger.info("Loading distillation checkpoint from %s",
                     self.training_args.resume_from_checkpoint)
 
-        resumed_step = load_checkpoint(
-            self.transformer, self.global_rank,
+        resumed_step = load_distillation_checkpoint(
+            self.transformer, self.fake_score_transformer, self.global_rank,
             self.training_args.resume_from_checkpoint, self.optimizer,
-            self.train_dataloader, self.lr_scheduler,
-            self.noise_random_generator)
-
-        # TODO: Add checkpoint loading for critic and teacher models
+            self.fake_score_optimizer, self.train_dataloader, self.lr_scheduler,
+            self.fake_score_lr_scheduler, self.noise_random_generator)
 
         if resumed_step > 0:
             self.init_steps = resumed_step
@@ -680,24 +679,29 @@ class DistillationPipeline(TrainingPipeline):
         else:
             set_random_seed(seed + self.global_rank)
 
-        self.noise_random_generator = torch.Generator(
-            device="cpu").manual_seed(seed)
+        # Set random seeds for deterministic training
+        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
+            self.seed)
         self.noise_gen_cuda = torch.Generator(device="cuda").manual_seed(
             self.seed)
         self.validation_random_generator = torch.Generator(
-            device="cpu").manual_seed(seed)
-
+            device="cpu").manual_seed(self.seed)
         logger.info("Initialized random seeds with seed: %s", seed)
 
+        # Resume from checkpoint if specified (this will restore random states)
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
+            logger.info("Resumed from checkpoint, random states restored")
+        else:
+            logger.info("Starting training from scratch")
 
         self.train_loader_iter = iter(self.train_dataloader)
 
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
-        self._log_validation(self.transformer, self.training_args, 0)
+        self._log_validation(self.transformer, self.training_args,
+                             self.init_steps)
 
         progress_bar = tqdm(
             range(0, self.training_args.max_train_steps),
@@ -765,30 +769,51 @@ class DistillationPipeline(TrainingPipeline):
                     log_data["VSA_train_sparsity"] = current_vsa_sparsity
                 wandb.log(log_data, step=step)
 
-            if step % self.training_args.checkpointing_steps == 0 and step > 0:
-                print("rank", self.global_rank, "save checkpoint at step", step)
-                save_checkpoint(
-                    self.transformer,
-                    self.global_rank,  #TODO(yongqi)
-                    self.training_args.output_dir,
-                    step,
-                    self.optimizer,
-                    self.train_dataloader,
-                    self.lr_scheduler,
-                    self.noise_random_generator)
+            # Save training state checkpoint (for resuming training)
+            if (self.training_args.training_state_checkpointing_steps > 0
+                    and step %
+                    self.training_args.training_state_checkpointing_steps == 0):
+                print("rank", self.global_rank,
+                      "save training state checkpoint at step", step)
+                save_distillation_checkpoint(
+                    self.transformer, self.fake_score_transformer,
+                    self.global_rank, self.training_args.output_dir, step,
+                    self.optimizer, self.fake_score_optimizer,
+                    self.train_dataloader, self.lr_scheduler,
+                    self.fake_score_lr_scheduler, self.noise_random_generator)
+
                 if self.transformer:
                     self.transformer.train()
                 self.sp_group.barrier()
+
+            # Save weight-only checkpoint
+            if (self.training_args.weight_only_checkpointing_steps > 0
+                    and step %
+                    self.training_args.weight_only_checkpointing_steps == 0):
+                print("rank", self.global_rank,
+                      "save weight-only checkpoint at step", step)
+                save_distillation_checkpoint(self.transformer,
+                                             self.fake_score_transformer,
+                                             self.global_rank,
+                                             self.training_args.output_dir,
+                                             f"{step}_weight_only",
+                                             only_save_generator_weight=True)
 
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 self._log_validation(self.transformer, self.training_args, step)
 
         wandb.finish()
-        save_checkpoint(self.transformer, self.global_rank,
-                        self.training_args.output_dir,
-                        self.training_args.max_train_steps, self.optimizer,
-                        self.train_dataloader, self.lr_scheduler,
-                        self.noise_random_generator)
+
+        # Save final training state checkpoint
+        print("rank", self.global_rank,
+              "save final training state checkpoint at step",
+              self.training_args.max_train_steps)
+        save_distillation_checkpoint(
+            self.transformer, self.fake_score_transformer, self.global_rank,
+            self.training_args.output_dir, self.training_args.max_train_steps,
+            self.optimizer, self.fake_score_optimizer, self.train_dataloader,
+            self.lr_scheduler, self.fake_score_lr_scheduler,
+            self.noise_random_generator)
 
         if get_sp_group():
             cleanup_dist_env_and_memory()

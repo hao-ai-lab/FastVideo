@@ -1,46 +1,21 @@
 #!/bin/bash
-#SBATCH --job-name=t2v
-#SBATCH --partition=main
-#SBATCH --nodes=8
-#SBATCH --ntasks=8
-#SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:8
-#SBATCH --cpus-per-task=128
-#SBATCH --mem=1440G
-#SBATCH --output=dmd_t2v_output/t2v_%j.out
-#SBATCH --error=dmd_t2v_output/t2v_%j.err
-#SBATCH --exclusive
-set -e -x
-
-# Environment Setup
-source ~/conda/miniconda/bin/activate
-conda activate your_env
 
 # Basic Info
 export WANDB_MODE="online"
 export NCCL_P2P_DISABLE=1
 export TORCH_NCCL_ENABLE_MONITORING=0
-# different cache dir for different processes
-export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
 export MASTER_PORT=29500
-export NODE_RANK=$SLURM_PROCID
-nodes=( $(scontrol show hostnames $SLURM_JOB_NODELIST) )
-export MASTER_ADDR=${nodes[0]}
-export CUDA_VISIBLE_DEVICES=$SLURM_LOCALID
 export TOKENIZERS_PARALLELISM=false
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-echo "MASTER_ADDR: $MASTER_ADDR"
-echo "NODE_RANK: $NODE_RANK"
-
 # Configs
-NUM_GPUS=8
-MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-DATA_DIR=your_data_dir
-VALIDATION_DATASET_FILE=your_validation_dataset_file
+NUM_GPUS=1
+MODEL_PATH="Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+DATA_DIR="data/crush-smol_processed_ti2v/combined_parquet_dataset/"
+VALIDATION_DATASET_FILE="examples/distill/Wan2.2-TI2V-5B-Diffusers/crush_smol/validation.json"
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
@@ -48,23 +23,23 @@ VALIDATION_DATASET_FILE=your_validation_dataset_file
 training_args=(
   --tracker_project_name wan_t2v_distill_dmd_VSA
   --output_dir="checkpoints/wan_t2v_finetune"
-  --max_train_steps 4000
-  --train_batch_size 1
+  --max_train_steps=4000
+  --train_batch_size=1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
-  --num_latent_t 21
-  --num_height 480
-  --num_width 832
-  --num_frames 81
+  --gradient_accumulation_steps=1
+  --num_latent_t 31
+  --num_height 704
+  --num_width 1280
+  --num_frames 121
   --enable_gradient_checkpointing_type "full"
 )
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 64
+  --num_gpus 1
   --sp_size 1
   --tp_size 1
-  --hsdp_replicate_dim 64
+  --hsdp_replicate_dim 1
   --hsdp_shard_dim 1
 )
 
@@ -91,10 +66,9 @@ validation_args=(
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 1e-5
-  --mixed_precision "bf16"
-  --training_state_checkpointing_steps 500
-  --weight_only_checkpointing_steps 500
+  --learning_rate=1e-5
+  --mixed_precision="bf16"
+  --checkpointing_steps=500
   --weight_decay 0.01
   --max_grad_norm 1.0
 )
@@ -121,12 +95,9 @@ dmd_args=(
   --VSA_sparsity 0.8
 )
 
-srun torchrun \
---nnodes $SLURM_JOB_NUM_NODES \
+torchrun \
+--nnodes 1 \
 --nproc_per_node $NUM_GPUS \
---node_rank $SLURM_PROCID \
---rdzv_backend=c10d \
---rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
     fastvideo/training/wan_distillation_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \

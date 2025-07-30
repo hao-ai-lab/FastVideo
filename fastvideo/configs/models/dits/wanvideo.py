@@ -89,6 +89,7 @@ class WanVideoArchConfig(DiTArchConfig):
     image_dim: int | None = None
     added_kv_proj_dim: int | None = None
     rope_max_seq_len: int = 1024
+    pos_embed_seq_len: int | None = None
     exclude_lora_layers: list[str] = field(default_factory=lambda: ["embedder"])
 
     def __post_init__(self):

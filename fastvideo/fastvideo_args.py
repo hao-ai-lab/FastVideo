@@ -615,7 +615,7 @@ class TrainingArgs(FastVideoArgs):
     output_dir: str = ""
     checkpoints_total_limit: int = 0
     checkpointing_steps: int = 0
-    resume_from_checkpoint: bool = False
+    resume_from_checkpoint: str = ""  # specify the checkpoint folder to resume from
 
     # optimizer & scheduler
     num_train_epochs: int = 0
@@ -670,6 +670,8 @@ class TrainingArgs(FastVideoArgs):
     min_timestep_ratio: float = 0.2
     max_timestep_ratio: float = 0.98
     real_score_guidance_scale: float = 3.5
+    training_state_checkpointing_steps: int = 0  # for resuming training
+    weight_only_checkpointing_steps: int = 0  # for inference
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -829,6 +831,15 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--checkpointing-steps",
                             type=int,
                             help="Steps between checkpoints")
+        parser.add_argument(
+            "--training-state-checkpointing-steps",
+            type=int,
+            help=
+            "Steps between training state checkpoints (for resuming training)")
+        parser.add_argument(
+            "--weight-only-checkpointing-steps",
+            type=int,
+            help="Steps between weight-only checkpoints (for inference)")
         parser.add_argument("--resume-from-checkpoint",
                             type=str,
                             help="Path to checkpoint to resume from")
