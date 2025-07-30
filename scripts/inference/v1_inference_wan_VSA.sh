@@ -22,7 +22,7 @@ fastvideo generate \
     --guidance-scale 5.0 \
     --flow-shift 5.0 \
     --VSA-sparsity 0.9 \
-    --prompt "A beautiful woman in a red dress walking down a street" \
+    --prompt-txt assets/prompt.txt \
     --negative-prompt "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards" \
     --seed 1024 \
-    --output-path outputs_Wan-VSA-14B
+    --output-path outputs_Wan-VSA-14B/
