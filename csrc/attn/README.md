@@ -5,7 +5,7 @@
 
 
 ## Video Sparse Attention (VSA)
-We support H100 (via TK) and RTX 4090 (via triton) for VSA.
+We support H100 (via TK) and any other GPU (via triton) for VSA.
 ```bash
 git submodule update --init --recursive
 python setup_vsa.py install
