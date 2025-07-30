@@ -14,11 +14,13 @@ python setup_vsa.py install
 
 ### Download the synthetic dataset:
 
-`examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/download_dataset.sh`
-
+```bash
+bash examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/download_dataset.sh
+```
 ### Slurm script to train the model
-
-`examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/T2V-14B-VSA.slurm`
-
-`examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/I2V-14B-VSA.slurm`
-
+```bash
+sbatch examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/T2V-14B-VSA.slurm
+```
+```bash
+sbatch examples/training/finetune/Wan2.1-VSA/Wan-Syn-Data/I2V-14B-VSA.slurm
+```
