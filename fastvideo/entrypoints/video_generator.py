@@ -9,6 +9,7 @@ diffusion models.
 import math
 import os
 import time
+from copy import deepcopy
 from typing import Any
 
 import imageio
@@ -202,6 +203,8 @@ class VideoGenerator:
         if sampling_param is None:
             sampling_param = SamplingParam.from_pretrained(
                 fastvideo_args.model_path)
+        else:
+            sampling_param = deepcopy(sampling_param)
 
         kwargs["prompt"] = prompt
         sampling_param.update(kwargs)
