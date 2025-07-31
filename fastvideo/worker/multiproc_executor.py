@@ -40,7 +40,8 @@ class MultiprocExecutor(Executor):
             logger.info("Using provided master port: %s", self.master_port)
         else:
             # Auto-find available port
-            for port in range(29503, 65535):
+            import random
+            for port in range(29503 + random.randint(0, 10000), 65535):
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     if s.connect_ex(('localhost', port)) != 0:
                         self.master_port = port
