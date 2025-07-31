@@ -30,7 +30,7 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VSamplingParam,
     "FastVideo/FastWan2.1-T2V-1.3B-Diffusers":
     Wan2_1_Fun_1_3B_InP_SamplingParam,
-    "FastVideo/FastWan2.1-T2V-14B-480P-Diffusers":
+    "FastVideo/FastWan2.1-T2V-14B-Diffusers":
     Wan2_1_Fun_1_3B_InP_SamplingParam,
     "Wan-AI/Wan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_SamplingParam,
     # "Wan-AI/Wan2.2-T2V-A14B-Diffusers":
