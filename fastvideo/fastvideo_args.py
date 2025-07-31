@@ -670,7 +670,6 @@ class TrainingArgs(FastVideoArgs):
     min_timestep_ratio: float = 0.2
     max_timestep_ratio: float = 0.98
     real_score_guidance_scale: float = 3.5
-    fake_score_learning_rate: float = 0.0  # separate learning rate for fake_score_transformer, if 0.0, use learning_rate
     training_state_checkpointing_steps: int = 0  # for resuming training
     weight_only_checkpointing_steps: int = 0  # for inference
 
@@ -999,10 +998,6 @@ class TrainingArgs(FastVideoArgs):
                             type=float,
                             default=TrainingArgs.real_score_guidance_scale,
                             help="Teacher guidance scale")
-        parser.add_argument("--fake-score-learning-rate",
-                            type=float,
-                            default=TrainingArgs.fake_score_learning_rate,
-                            help="Learning rate for fake score transformer")
 
         return parser
 
