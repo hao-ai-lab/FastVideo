@@ -172,7 +172,7 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             "width": width,
             "num_inference_steps": num_inference_steps,
             "randomize_seed": randomize_seed,
-            "return_frames": True,  # Always request frames
+            "return_frames": False,  # Always request frames
             "image_path": image_path,
             "model_type": "i2v" if image_path else "t2v"  # Use I2V model if image is provided, T2V otherwise
         }
@@ -202,8 +202,8 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                 try:
                     # Get the output directory from the video path
                     output_dir = os.path.dirname(output_path) if output_path else "outputs"
-                    frames_status, video_path = decode_and_save_video_from_frames(frames_b64, output_dir, prompt)
-                    print(f"Frames: {frames_status}")
+                    # frames_status, video_path = decode_and_save_video_from_frames(frames_b64, output_dir, prompt)
+                    # print(f"Frames: {frames_status}")
                 except Exception as e:
                     frames_status = f"Failed to save frames video: {str(e)}"
                     print(f"Frame extraction error: {e}")
@@ -211,10 +211,10 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                 frames_status = "No frames returned from backend"
             
             # Check if the video file exists
-            if os.path.exists(video_path):
-                return video_path, used_seed, frames_status
+            if os.path.exists(output_path):
+                return output_path, used_seed, frames_status
             else:
-                return None, f"Video generated but file not found at {video_path} {frames_status}", frames_status
+                return None, f"Video generated but file not found at {output_path} {frames_status}", frames_status
         else:
             error_msg = response.get("error_message", "Unknown error occurred")
             return None, f"Generation failed: {error_msg}", ""

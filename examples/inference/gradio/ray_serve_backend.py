@@ -208,6 +208,8 @@ class FastVideoAPI:
             
             # Create a clean filename from the prompt
             safe_prompt = video_request.prompt[:100].replace(' ', '_').replace('/', '_').replace('\\', '_')
+            params.output_path = self.output_path + "/" + safe_prompt + ".mp4"
+
             # Store desired video name inside the SamplingParam to avoid unknown kwarg errors
             setattr(params, "output_video_name", safe_prompt)
             
@@ -241,7 +243,7 @@ class FastVideoAPI:
                     encoded_frames = None
             
             response = VideoGenerationResponse(
-                output_path="",
+                output_path=self.output_path,
                 frames=encoded_frames,
                 seed=params.seed,
                 success=True

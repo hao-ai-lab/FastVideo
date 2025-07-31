@@ -187,6 +187,7 @@ def main():
     print(f"📺 Frontend will be available at: http://{args.frontend_host}:{args.frontend_port}")
     print(f"🔧 Backend API will be available at: {backend_url}")
     print("\nPress Ctrl+C to stop both services...")
+    # return
     
     # Signal handler for graceful shutdown
     def signal_handler(signum, frame):
