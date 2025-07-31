@@ -82,6 +82,7 @@ class WanTimeTextImageEmbedding(nn.Module):
         encoder_hidden_states: torch.Tensor,
         encoder_hidden_states_image: torch.Tensor | None = None,
     ):
+        logger.info(f"WTF timestep shape: {timestep.shape}")
         temb = self.time_embedder(timestep)
         timestep_proj = self.time_modulation(temb)
 
