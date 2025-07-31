@@ -107,9 +107,15 @@ class DistillationPipeline(TrainingPipeline):
         fake_score_params = list(
             filter(lambda p: p.requires_grad,
                    self.fake_score_transformer.parameters()))
+        
+        # Use separate learning rate for fake_score_transformer if specified
+        fake_score_lr = training_args.fake_score_learning_rate
+        if fake_score_lr == 0.0:
+            fake_score_lr = training_args.learning_rate
+            
         self.fake_score_optimizer = torch.optim.AdamW(
             fake_score_params,
-            lr=training_args.learning_rate,
+            lr=fake_score_lr,
             betas=(0.9, 0.999),
             weight_decay=training_args.weight_decay,
             eps=1e-8,
