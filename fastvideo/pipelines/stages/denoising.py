@@ -4,6 +4,7 @@ Denoising stage for diffusion pipelines.
 """
 
 import inspect
+import math
 import weakref
 from collections.abc import Iterable
 from typing import Any
@@ -30,7 +31,7 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.utils import dict_to_3d_list
+from fastvideo.utils import dict_to_3d_list, masks_like
 
 try:
     from fastvideo.attention.backends.sliding_tile_attn import (
@@ -61,11 +62,13 @@ class DenoisingStage(PipelineStage):
                  transformer,
                  scheduler,
                  pipeline=None,
-                 transformer_2=None) -> None:
+                 transformer_2=None,
+                 vae=None) -> None:
         super().__init__()
         self.transformer = transformer
         self.transformer_2 = transformer_2
         self.scheduler = scheduler
+        self.vae = vae
         self.pipeline = weakref.ref(pipeline) if pipeline else None
         attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads
         self.attn_backend = get_attn_backend(
@@ -194,6 +197,44 @@ class DenoisingStage(PipelineStage):
             boundary_timestep = fastvideo_args.boundary_ratio * self.scheduler.num_train_timesteps
         else:
             boundary_timestep = None
+        latent_model_input = latents.to(target_dtype)
+        assert latent_model_input.shape[0] == 1, "only support batch size 1"
+
+        if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
+            # TI2V directly replaces the first frame of the latent with
+            # the image latent instead of appending along the channel dim
+            assert batch.image_latent is None, "TI2V task should not have image latents"
+            assert self.vae is not None, "VAE is not provided for TI2V task"
+            z = self.vae.encode(batch.pil_image).mean.float()
+            if (hasattr(self.vae, "shift_factor")
+                    and self.vae.shift_factor is not None):
+                if isinstance(self.vae.shift_factor, torch.Tensor):
+                    z -= self.vae.shift_factor.to(z.device, z.dtype)
+                else:
+                    z -= self.vae.shift_factor
+
+            if isinstance(self.vae.scaling_factor, torch.Tensor):
+                z = z * self.vae.scaling_factor.to(z.device, z.dtype)
+            else:
+                z = z * self.vae.scaling_factor
+
+            latent_model_input = latent_model_input.squeeze(0)
+            _, mask2 = masks_like([latent_model_input], zero=True)
+
+            latent_model_input = (1. -
+                                  mask2[0]) * z + mask2[0] * latent_model_input
+            # latent_model_input = latent_model_input.unsqueeze(0)
+            latent_model_input = latent_model_input.to(get_local_torch_device())
+            latents = latent_model_input
+            F = batch.num_frames
+            temporal_scale = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_temporal
+            spatial_scale = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
+            patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
+            seq_len = ((F - 1) // temporal_scale +
+                       1) * (batch.height // spatial_scale) * (
+                           batch.width // spatial_scale) // (patch_size[1] *
+                                                             patch_size[2])
+            seq_len = int(math.ceil(seq_len / sp_world_size)) * sp_world_size
 
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
@@ -218,19 +259,32 @@ class DenoisingStage(PipelineStage):
                         self.transformer.to('cpu')
                     current_model = self.transformer_2
                     current_guidance_scale = batch.guidance_scale_2
+                assert current_model is not None, "current_model is None"
 
                 # Expand latents for I2V
                 latent_model_input = latents.to(target_dtype)
                 if batch.image_latent is not None:
+                    assert not fastvideo_args.pipeline_config.ti2v_task, "image latents should not be provided for TI2V task"
                     latent_model_input = torch.cat(
                         [latent_model_input, batch.image_latent],
                         dim=1).to(target_dtype)
+                if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
+                    timestep = torch.stack([t]).to(get_local_torch_device())
+                    temp_ts = (mask2[0][0][:, ::2, ::2] * timestep).flatten()
+                    temp_ts = torch.cat([
+                        temp_ts,
+                        temp_ts.new_ones(seq_len - temp_ts.size(0)) * timestep
+                    ])
+                    timestep = temp_ts.unsqueeze(0)
+                    t_expand = timestep.repeat(latent_model_input.shape[0], 1)
+                else:
+                    t_expand = t.repeat(latent_model_input.shape[0])
+
                 assert torch.isnan(latent_model_input).sum() == 0
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)
 
                 # Prepare inputs for transformer
-                t_expand = t.repeat(latent_model_input.shape[0])
                 guidance_expand = (
                     torch.tensor(
                         [fastvideo_args.pipeline_config.embedded_cfg_scale] *
@@ -330,6 +384,11 @@ class DenoisingStage(PipelineStage):
                                                   latents,
                                                   **extra_step_kwargs,
                                                   return_dict=False)[0]
+                    if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
+                        latents = latents.squeeze(0)
+                        latents = (1. - mask2[0]) * z + mask2[0] * latents
+                        # latents = latents.unsqueeze(0)
+
                 # Update progress bar
                 if i == len(timesteps) - 1 or (
                     (i + 1) > num_warmup_steps and

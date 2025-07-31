@@ -7,11 +7,13 @@ from collections.abc import Callable
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
-from fastvideo.configs.pipelines.wan import (FastWan2_1_T2V_480P_Config,
-                                             FastWan2_2_TI2V_5B_Config,
+# isort: off
+from fastvideo.configs.pipelines.wan import (
+    FastWan2_1_T2V_480P_Config, FastWan2_2_TI2V_5B_Config,
                                              SelfForcingWanT2V480PConfig,
-                                             WanI2V480PConfig, WanI2V720PConfig,
-                                             WanT2V480PConfig, WanT2V720PConfig)
+    Wan2_2_I2V_A14B_Config, Wan2_2_T2V_A14B_Config, Wan2_2_TI2V_5B_Config,
+    WanI2V480PConfig, WanI2V720PConfig, WanT2V480PConfig, WanT2V720PConfig)
+# isort: on
 from fastvideo.logger import init_logger
 from fastvideo.utils import (maybe_download_model_index,
                              verify_model_config_and_directory)
@@ -32,10 +34,10 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "FastVideo/FastWan2.2-TI2V-5B-Diffusers": FastWan2_2_TI2V_5B_Config,
     "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VConfig,
     "FastVideo/Wan2.1-VSA-T2V-14B-720P-Diffusers": WanT2V720PConfig,
-    "Wan-AI/Wan2.2-TI2V-5B-Diffusers": WanT2V720PConfig,
-    "Wan-AI/Wan2.2-T2V-A14B-Diffusers": WanT2V480PConfig,
-    "Wan-AI/Wan2.2-I2V-A14B-Diffusers": WanI2V480PConfig,
     "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers": SelfForcingWanT2V480PConfig,
+    "Wan-AI/Wan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_Config,
+    "Wan-AI/Wan2.2-T2V-A14B-Diffusers": Wan2_2_T2V_A14B_Config,
+    "Wan-AI/Wan2.2-I2V-A14B-Diffusers": Wan2_2_I2V_A14B_Config,
     # Add other specific weight variants
 }
 
