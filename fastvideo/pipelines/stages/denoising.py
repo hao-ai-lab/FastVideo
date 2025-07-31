@@ -12,7 +12,7 @@ from typing import Any
 import torch
 from einops import rearrange
 from tqdm.auto import tqdm
-
+import time
 from fastvideo.attention import get_attn_backend
 from fastvideo.configs.pipelines.base import STA_Mode
 from fastvideo.distributed import (get_local_torch_device, get_sp_parallel_rank,
@@ -88,6 +88,11 @@ class DenoisingStage(PipelineStage):
         Returns:
             The batch with denoised latents.
         """
+        # Start timing for the entire DenoisingStage
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        stage_start_time = time.time()
+        
         pipeline = self.pipeline() if self.pipeline else None
         if not fastvideo_args.model_loaded["transformer"]:
             loader = TransformerLoader()
@@ -601,6 +606,11 @@ class DmdDenoisingStage(DenoisingStage):
         Returns:
             The batch with denoised latents.
         """
+        # Start timing for the entire DmdDenoisingStage
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        dmd_stage_start_time = time.time()
+        
         # Setup precision and autocast settings
         # TODO(will): make the precision configurable for inference
         # target_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
@@ -681,7 +691,13 @@ class DmdDenoisingStage(DenoisingStage):
                 image_latent = image_latent[:, :, rank_in_sp_group, :, :, :]
                 batch.image_latent = image_latent
 
-        # Run denoising loop
+
+        
+        # Synchronize CUDA before starting timer
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        denoise_start_time = time.time()
+        
         with self.progress_bar(total=len(timesteps)) as progress_bar:
             for i, t in enumerate(timesteps):
                 # Skip if interrupted
@@ -715,9 +731,7 @@ class DmdDenoisingStage(DenoisingStage):
                 with torch.autocast(device_type="cuda",
                                     dtype=target_dtype,
                                     enabled=autocast_enabled):
-                    if (st_attn_available
-                            and self.attn_backend == SlidingTileAttentionBackend
-                        ) or (vsa_available and self.attn_backend
+                    if (vsa_available and self.attn_backend
                               == VideoSparseAttentionBackend):
                         self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
                         )
@@ -798,6 +812,20 @@ class DmdDenoisingStage(DenoisingStage):
         if sp_group:
             latents = sequence_model_parallel_all_gather(latents, dim=1)
         latents = latents.permute(0, 2, 1, 3, 4)
+        
+        # Calculate total denoising time
+        # Synchronize CUDA before ending timer
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        denoise_end_time = time.time()
+        total_denoise_time = denoise_end_time - denoise_start_time
+        print(f"Total denoising time: {total_denoise_time:.2f} seconds")
+        
+        # Calculate total stage time
+        dmd_stage_end_time = time.time()
+        total_dmd_stage_time = dmd_stage_end_time - dmd_stage_start_time
+        print(f"Total DmdDenoisingStage time: {total_dmd_stage_time:.2f} seconds")
+        
         # Update batch with final latents
         batch.latents = latents
 
