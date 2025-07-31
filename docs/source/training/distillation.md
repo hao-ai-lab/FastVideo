@@ -24,6 +24,7 @@ python scripts/huggingface/download_hf.py \
     --local_dir "FastVideo/Wan-Syn_77x448x832_600k" \
     --repo_type "dataset"
 ```
+
 ## 🚀 Training Scripts
 
 ### 1.3B Model Sparse-Distill
@@ -62,6 +63,7 @@ sbatch examples/distill/Wan2.1-T2V/Wan-Syn-Data-480P/distill_dmd_VSA_t2v_14B.slu
 
 ## ⚙️ Inference
 Set `MODEL_BASE` to your own model path and run:
+
 ```bash
 bash scripts/inference/v1_inference_wan_dmd.sh
 ```

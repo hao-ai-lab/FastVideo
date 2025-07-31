@@ -83,7 +83,6 @@ class LatentPreparationStage(PipelineStage):
             width // fastvideo_args.pipeline_config.vae_config.arch_config.
             spatial_compression_ratio,
         )
-
         # Validate generator if it's a list
         if isinstance(generator, list) and len(generator) != batch_size:
             raise ValueError(
