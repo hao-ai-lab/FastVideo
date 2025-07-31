@@ -118,7 +118,7 @@ def main():
     # Model and output settings
     parser.add_argument("--t2v_model_path",
                         type=str,
-                        default="Wan-AI/Wan2.2-TI2V-5B-Diffusers",
+                        default="Wan-AI/Wan2.2-TI2V-5BDiffusers",
                         help="Path to the T2V model")
     parser.add_argument("--i2v_model_path",
                         type=str,

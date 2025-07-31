@@ -125,7 +125,7 @@ class FastVideoAPI:
     def _initialize_models(self):
         # Set VSA environment variable
         os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
-        os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
+        # os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
         
         # Import only when needed - use direct imports to avoid module-level execution
         from fastvideo.entrypoints.video_generator import VideoGenerator
@@ -208,7 +208,6 @@ class FastVideoAPI:
             
             # Create a clean filename from the prompt
             safe_prompt = video_request.prompt[:100].replace(' ', '_').replace('/', '_').replace('\\', '_')
-            params.output_path = self.output_path + "/" + safe_prompt + ".mp4"
 
             # Store desired video name inside the SamplingParam to avoid unknown kwarg errors
             setattr(params, "output_video_name", safe_prompt)
@@ -225,11 +224,11 @@ class FastVideoAPI:
             )
             
             # The actual output path where the video was saved
-            # output_path = os.path.join(self.output_path, f"{safe_prompt}.mp4")
+            output_path = os.path.join(self.output_path, f"{safe_prompt}.mp4")
             
             # Verify the file exists
-            # if not os.path.exists(output_path):
-            #     raise FileNotFoundError(f"Video was not saved to expected location: {output_path}")
+            if not os.path.exists(output_path):
+                raise FileNotFoundError(f"Video was not saved to expected location: {output_path}")
             
             frames = result.get("frames", [])
             
@@ -243,7 +242,7 @@ class FastVideoAPI:
                     encoded_frames = None
             
             response = VideoGenerationResponse(
-                output_path=self.output_path,
+                output_path=output_path,
                 frames=encoded_frames,
                 seed=params.seed,
                 success=True

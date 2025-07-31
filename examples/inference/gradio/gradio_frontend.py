@@ -198,17 +198,17 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             
             # Handle frame extraction and video creation
             frames_status = ""
-            if frames_b64:
-                try:
+            # if frames_b64:
+            #     try:
                     # Get the output directory from the video path
-                    output_dir = os.path.dirname(output_path) if output_path else "outputs"
+                    # output_dir = os.path.dirname(output_path) if output_path else "outputs"
                     # frames_status, video_path = decode_and_save_video_from_frames(frames_b64, output_dir, prompt)
                     # print(f"Frames: {frames_status}")
-                except Exception as e:
-                    frames_status = f"Failed to save frames video: {str(e)}"
-                    print(f"Frame extraction error: {e}")
-            else:
-                frames_status = "No frames returned from backend"
+            #     except Exception as e:
+            #         frames_status = f"Failed to save frames video: {str(e)}"
+            #         print(f"Frame extraction error: {e}")
+            # else:
+            #     frames_status = "No frames returned from backend"
             
             # Check if the video file exists
             if os.path.exists(output_path):
