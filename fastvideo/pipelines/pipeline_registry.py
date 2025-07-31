@@ -65,7 +65,7 @@ class _PipelineRegistry:
         arch = _PIPELINE_NAME_TO_ARCHITECTURE_NAME[pipeline_name_in_config]
         return set(self.pipelines[pipeline_type.value][arch].keys())
 
-    def _load_preprocessing_pipeline_cls(
+    def _load_preprocess_pipeline_cls(
             self, workload_type: WorkloadType,
             arch: str) -> type[ComposedPipelineBase] | None:
         if workload_type == WorkloadType.I2V:
@@ -90,7 +90,7 @@ class _PipelineRegistry:
             return None
 
         if pipeline_type == PipelineType.PREPROCESS:
-            return self._load_preprocessing_pipeline_cls(workload_type, arch)
+            return self._load_preprocess_pipeline_cls(workload_type, arch)
         elif pipeline_type == PipelineType.BASIC:
             return self.pipelines[
                 pipeline_type.value][arch][pipeline_name_in_config]
@@ -131,7 +131,7 @@ def import_pipeline_classes(
     Import pipeline classes based on the pipeline type and workload type.
     
     Args:
-        pipeline_types: The pipeline types to load (basic, preprocessing, training). 
+        pipeline_types: The pipeline types to load (basic, preprocess, training). 
                       If None, loads all types.
     
     Returns:
