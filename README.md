@@ -130,9 +130,17 @@ We learned and reused code from the following projects:
 We thank MBZUAI and [Anyscale](https://www.anyscale.com/) for their support throughout this project.
 
 ## Citation
-If you use FastVideo for your research, please cite our paper:
+If you use FastVideo for your research, please cite our work:
 
 ```bibtex
+@software{fastvideo2024,
+  title        = {FastVideo: A Unified Framework for Accelerated Video Generation},
+  author       = {The FastVideo Team},
+  url          = {https://github.com/hao-ai-lab/FastVideo},
+  month        = apr,
+  year         = {2024},
+}
+
 @misc{zhang2025vsafastervideodiffusion,
       title={VSA: Faster Video Diffusion with Trainable Sparse Attention}, 
       author={Peiyuan Zhang and Haofeng Huang and Yongqi Chen and Will Lin and Zhengzhong Liu and Ion Stoica and Eric Xing and Hao Zhang},

@@ -130,12 +130,13 @@ def benchmark_block_sparse_attention(q, k, v, q2k_block_sparse_index, q2k_block_
     
     # Forward pass
     # Warm-up run
-    o, l_vec = block_sparse_fwd(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num)
+    variable_block_sizes = torch.ones(q2k_block_sparse_index.shape[2], device=q.device).int() * BLOCK_M
+    o, l_vec = block_sparse_fwd(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, variable_block_sizes)
     torch.cuda.synchronize()
     
     # Benchmark forward
     fwd_time = do_bench(
-        lambda: block_sparse_fwd(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num),
+        lambda: block_sparse_fwd(q, k, v, q2k_block_sparse_index, q2k_block_sparse_num, variable_block_sizes),
         warmup=5,
         rep=20,
         quantiles=None
@@ -149,12 +150,12 @@ def benchmark_block_sparse_attention(q, k, v, q2k_block_sparse_index, q2k_block_
     
     # Warm-up runs
     for _ in range(5):
-        block_sparse_bwd(q, k, v, o, l_vec, grad_output, k2q_block_sparse_index, k2q_block_sparse_num)
+        block_sparse_bwd(q, k, v, o, l_vec, grad_output, k2q_block_sparse_index, k2q_block_sparse_num, variable_block_sizes)
     torch.cuda.synchronize()
     
     # Benchmark backward
     bwd_time = do_bench(
-        lambda: block_sparse_bwd(q, k, v, o, l_vec, grad_output, k2q_block_sparse_index, k2q_block_sparse_num),
+        lambda: block_sparse_bwd(q, k, v, o, l_vec, grad_output, k2q_block_sparse_index, k2q_block_sparse_num, variable_block_sizes),
         warmup=5,
         rep=20,
         quantiles=None

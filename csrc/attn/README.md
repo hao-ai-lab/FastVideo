@@ -5,6 +5,8 @@
 
 
 ## Video Sparse Attention (VSA)
+
+### Installation
 We support H100 (via TK) and any other GPU (via triton) for VSA.
 ```bash
 git submodule update --init --recursive
@@ -28,6 +30,23 @@ sudo apt install clang-11
 export CUDA_HOME=/usr/local/cuda-12.4
 export PATH=${CUDA_HOME}/bin:${PATH} 
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
+```
+
+### Verify if you have successfully installed
+
+```bash
+# test numerical
+python tests/test_vsa.py
+# (For H100) test speed
+python benchmarks/bench_vsa_hopper.py
+```
+bench_vsa_hopper.py should print something like this:
+```bash
+Using topk=76 kv blocks per q block (out of 768 total kv blocks)
+
+=== BLOCK SPARSE ATTENTION BENCHMARK ===
+Block Sparse Forward  - TFLOPS: 5622.26
+Block Sparse Backward - TFLOPS: 3865.68
 ```
 
 
