@@ -486,11 +486,11 @@ def main():
                         help="URL of the Ray Serve backend")
     parser.add_argument("--t2v_model_path",
                         type=str,
-                        default="FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
+                        default="Wan-AI/Wan2.2-TI2V-5B-Diffusers",
                         help="Path to the T2V model (for default parameters)")
     parser.add_argument("--i2v_model_path",
                         type=str,
-                        default="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
+                        default="Wan-AI/Wan2.2-TI2V-5B-Diffusers",
                         help="Path to the I2V model (for default parameters)")
     parser.add_argument("--host",
                         type=str,

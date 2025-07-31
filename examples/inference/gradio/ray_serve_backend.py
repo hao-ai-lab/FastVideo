@@ -100,7 +100,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @serve.deployment(
-    num_replicas=1,
+    num_replicas=8,
     # ray_actor_options={"num_cpus": 10, "num_gpus": 1, "runtime_env": {"conda": "fv", "working_dir": "/mnt/fast-disks/nfs/hao_lab/FastVideo"}},
     ray_actor_options={"num_cpus": 10, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
 )
@@ -132,8 +132,7 @@ class FastVideoAPI:
         from fastvideo.configs.sample.base import SamplingParam
         
         # Initialize T2V model
-        # if self.t2v_generator is None:
-        if False:
+        if self.t2v_generator is None:
             print(f"Initializing T2V model: {self.t2v_model_path}")
             self.t2v_generator = VideoGenerator.from_pretrained(
                 model_path=self.t2v_model_path, 
@@ -150,7 +149,8 @@ class FastVideoAPI:
             print("✅ T2V model initialized successfully")
         
         # Initialize I2V model
-        if self.i2v_generator is None:
+        # if self.i2v_generator is None:
+        if False:
             print(f"Initializing I2V model: {self.i2v_model_path}")
             self.i2v_generator = VideoGenerator.from_pretrained(
                 model_path=self.i2v_model_path, 
@@ -269,8 +269,8 @@ class FastVideoAPI:
 
 
 def start_ray_serve(
-    t2v_model_path: str = "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
-    i2v_model_path: str = "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
+    t2v_model_path: str = "Wan-AI/Wan2.2-TI2V-5B-Diffusers",
+    i2v_model_path: str = "Wan-AI/Wan2.2-TI2V-5B-Diffusers",
     output_path: str = "outputs",
     host: str = "0.0.0.0",
     port: int = 8000
@@ -297,11 +297,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="FastVideo Ray Serve Backend")
     parser.add_argument("--t2v_model_path",
                         type=str,
-                        default="FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
+                        default="Wan-AI/Wan2.2-TI2V-5B-Diffusers",
                         help="Path to the T2V model")
     parser.add_argument("--i2v_model_path",
                         type=str,
-                        default="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
+                        default="Wan-AI/Wan2.2-TI2V-5B-Diffusers",
                         help="Path to the I2V model")
     parser.add_argument("--output_path",
                         type=str,
