@@ -10,7 +10,6 @@ from collections.abc import Iterable
 from typing import Any
 
 import torch
-import torchvision.transforms.functional as TF
 from einops import rearrange
 from tqdm.auto import tqdm
 
@@ -31,8 +30,7 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.utils import dict_to_3d_list, masks_like, best_output_size
-from PIL import Image
+from fastvideo.utils import dict_to_3d_list, masks_like
 
 try:
     from fastvideo.attention.backends.sliding_tile_attn import (
@@ -200,12 +198,11 @@ class DenoisingStage(PipelineStage):
             logger.info(f"z shape: {z.shape}")
             logger.info(f"latent_model_input shape: {latent_model_input.shape}")
             latent_model_input = latent_model_input.squeeze(0)
-            mask1, mask2 = masks_like([latent_model_input],
-                                        zero=True)
+            mask1, mask2 = masks_like([latent_model_input], zero=True)
             # logger.info(f"mask1 shape: {mask1.shape}")
             # logger.info(f"mask2 shape: {mask2.shape}")
-            latent_model_input = (
-                1. - mask2[0]) * z + mask2[0] * latent_model_input
+            latent_model_input = (1. -
+                                  mask2[0]) * z + mask2[0] * latent_model_input
             # latent_model_input = latent_model_input.unsqueeze(0)
             latent_model_input = latent_model_input.to(get_local_torch_device())
             latents = latent_model_input
@@ -213,9 +210,10 @@ class DenoisingStage(PipelineStage):
             temporal_scale = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_temporal
             spatial_scale = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
             patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
-            seq_len = ((F - 1) // temporal_scale + 1) * (
-                batch.height // spatial_scale) * (batch.width // spatial_scale) // (
-                    patch_size[1] * patch_size[2])
+            seq_len = ((F - 1) // temporal_scale +
+                       1) * (batch.height // spatial_scale) * (
+                           batch.width // spatial_scale) // (patch_size[1] *
+                                                             patch_size[2])
             import math
             seq_len = int(math.ceil(seq_len / sp_world_size)) * sp_world_size
         logger.info("latents shape: %s", latents.shape)
@@ -239,11 +237,14 @@ class DenoisingStage(PipelineStage):
                 if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
                     logger.info(f"before ti2v timestep: {t}")
                     timestep = [t]
-                    timestep = torch.stack(timestep).to(get_local_torch_device())
+                    timestep = torch.stack(timestep).to(
+                        get_local_torch_device())
 
                     logger.info(f"mask2 shape: {mask2[0].shape}")
                     logger.info(f"mask[0][0] shape: {mask2[0][0].shape}")
-                    logger.info(f"mask[0][0][:, ::2, ::2] shape: {mask2[0][0][:, ::2, ::2].shape}")
+                    logger.info(
+                        f"mask[0][0][:, ::2, ::2] shape: {mask2[0][0][:, ::2, ::2].shape}"
+                    )
                     temp_ts = (mask2[0][0][:, ::2, ::2] * timestep).flatten()
                     logger.info(f"temp_ts: {temp_ts}")
                     logger.info(f"temp_ts shape: {temp_ts.shape}")
@@ -257,8 +258,8 @@ class DenoisingStage(PipelineStage):
                     t = timestep
                 # else:
                 t_expand = t.repeat(latent_model_input.shape[0])
-                logger.info(f"t_expand shape: {t_expand.shape}")
-                logger.info(f"t_expand: {t_expand}")
+                # logger.info(f"t_expand shape: {t_expand.shape}")
+                # logger.info(f"t_expand: {t_expand}")
 
                 assert torch.isnan(latent_model_input).sum() == 0
                 latent_model_input = self.scheduler.scale_model_input(

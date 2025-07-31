@@ -167,7 +167,7 @@ class FastVideoAPI:
             print("✅ I2V model initialized successfully")
     
     @app.post("/generate_video", response_model=VideoGenerationResponse)
-    @limiter.limit("2/minute")  # Allow 2 requests per minute per IP
+    @limiter.limit("50/minute")  # Allow 2 requests per minute per IP
     async def generate_video(self, request: Request, video_request: VideoGenerationRequest) -> VideoGenerationResponse:
         try:
             # Select the appropriate model and parameters based on model_type
@@ -183,15 +183,15 @@ class FastVideoAPI:
             # Update parameters with request values
             params.prompt = video_request.prompt
             # Only override negative prompt if user explicitly opts in
-            # if video_request.use_negative_prompt:
-            #     params.negative_prompt = video_request.negative_prompt
+            if video_request.use_negative_prompt:
+                params.negative_prompt = video_request.negative_prompt
 
-            # params.seed = video_request.seed
-            # params.guidance_scale = video_request.guidance_scale
-            # params.num_frames = video_request.num_frames
-            # params.height = video_request.height
-            # params.width = video_request.width
-            # params.num_inference_steps = video_request.num_inference_steps
+            params.seed = video_request.seed
+            params.guidance_scale = video_request.guidance_scale
+            params.num_frames = video_request.num_frames
+            params.height = video_request.height
+            params.width = video_request.width
+            params.num_inference_steps = video_request.num_inference_steps
             
             # Handle seed randomization
             if video_request.randomize_seed:
@@ -297,7 +297,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="FastVideo Ray Serve Backend")
     parser.add_argument("--t2v_model_path",
                         type=str,
-                        default="Wan-AI/Wan2.2-TI2V-5B-Diffusers",
+                        default="FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
                         help="Path to the T2V model")
     parser.add_argument("--i2v_model_path",
                         type=str,

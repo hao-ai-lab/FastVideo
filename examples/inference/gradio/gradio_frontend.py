@@ -486,7 +486,7 @@ def main():
                         help="URL of the Ray Serve backend")
     parser.add_argument("--t2v_model_path",
                         type=str,
-                        default="Wan-AI/Wan2.2-TI2V-5B-Diffusers",
+                        default="FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
                         help="Path to the T2V model (for default parameters)")
     parser.add_argument("--i2v_model_path",
                         type=str,
@@ -505,18 +505,18 @@ def main():
     
     # Load default parameters from the models
     # try:
-    #     default_params = SamplingParam.from_pretrained(args.t2v_model_path)
+    default_params = SamplingParam.from_pretrained(args.t2v_model_path)
     # except Exception as e:
     #     print(f"Warning: Could not load default parameters from {args.t2v_model_path}: {e}")
     #     print("Using fallback default parameters...")
     #     # Create fallback default parameters
-    default_params = SamplingParam()
-    default_params.height = 448
-    default_params.width = 832
-    default_params.num_frames = 21
-    default_params.guidance_scale = 7.5
-    default_params.num_inference_steps = 20
-    default_params.seed = 1024
+    # default_params = SamplingParam()
+    # default_params.height = 448
+    # default_params.width = 832
+    # default_params.num_frames = 21
+    # default_params.guidance_scale = 7.5
+    # default_params.num_inference_steps = 20
+    # default_params.seed = 1024
     
     # Create and launch the interface
     demo = create_gradio_interface(args.backend_url, default_params)
