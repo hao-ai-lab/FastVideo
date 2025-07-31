@@ -44,10 +44,7 @@ def update_config_from_args(config: Any, args_dict: dict[str, Any]) -> None:
     """
     for key, value in args_dict.items():
         if hasattr(config, key) and value is not None:
-            if key == "text_encoder_precisions" and isinstance(value, list):
-                setattr(config, key, tuple(value))
-            else:
-                setattr(config, key, value)
+            setattr(config, key, value)
 
 
 class VideoGenerator:
@@ -88,8 +85,8 @@ class VideoGenerator:
                     "default": 2
                 }),
                 "vae_config": ("VAE_CONFIG", ),
-                "vae_precision": (["fp16", "bf16"], {
-                    "default": "fp16"
+                "vae_precision": (["fp16", "bf16", "fp32"], {
+                    "default": "fp32"
                 }),
                 "vae_tiling": ([True, False], {
                     "default": True
@@ -98,15 +95,18 @@ class VideoGenerator:
                     "default": False
                 }),
                 "text_encoder_config": ("TEXT_ENCODER_CONFIG", ),
-                "text_encoder_precision": (["fp16", "bf16"], {
-                    "default": "fp16"
+                "text_encoder_precisions": (["fp16", "bf16", "fp32"], {
+                    "default": "fp32"
                 }),
                 "dit_config": ("DIT_CONFIG", ),
-                "precision": (["fp16", "bf16"], {
-                    "default": "fp16"
+                "precision": (["fp16", "bf16", "fp32"], {
+                    "default": "bf16"
                 }),
                 "dit_cpu_offload": ([True, False], {
                     "default": False
+                }),
+                "image_encoder_precision": (["fp16", "bf16", "fp32"], {
+                    "default": "fp32"
                 }),
             }
         }
@@ -198,8 +198,9 @@ class VideoGenerator:
         vae_precision,
         vae_tiling,
         vae_sp,
-        text_encoder_precision,
+        text_encoder_precisions,
         precision,
+        image_encoder_precision,
         inference_args=None,
         vae_config=None,
         text_encoder_config=None,
@@ -216,7 +217,7 @@ class VideoGenerator:
 
         # Load pipeline config from model path
         pipeline_config = PipelineConfig.from_pretrained(model_path)
-        print('pipeline_config', pipeline_config)
+        print('Default Pipeline Config:', pipeline_config)
 
         # Update configs with provided config dictionaries
         if dit_config is not None:
@@ -241,14 +242,19 @@ class VideoGenerator:
             raw_pipeline_args['vae_tiling'] = vae_tiling
         if vae_sp is not None:
             raw_pipeline_args['vae_sp'] = vae_sp
-        if text_encoder_precision is not None:
-            raw_pipeline_args['text_encoder_precision'] = text_encoder_precision
+        if text_encoder_precisions is not None:
+            raw_pipeline_args['text_encoder_precisions'] = tuple([text_encoder_precisions])
+        if image_encoder_precision is not None:
+            raw_pipeline_args['image_encoder_precision'] = image_encoder_precision
 
         # Filter out any value explicitly set to -99999 (auto values)
-        pipeline_args = {
-            k: v
-            for k, v in raw_pipeline_args.items() if str(int(v)) != str(-99999)
-        }
+        pipeline_args = {}
+        for k, v in raw_pipeline_args.items():
+            try:
+                if str(int(v)) != str(-99999):
+                    pipeline_args[k] = v
+            except (ValueError, TypeError):
+                pipeline_args[k] = v
 
         update_config_from_args(pipeline_config, pipeline_args)
 
@@ -269,14 +275,14 @@ class VideoGenerator:
         }
 
         if self.generator is None:
-            print('generation_args', generation_args)
-            print('pipeline_config', pipeline_config)
+            print('Generation Args:', generation_args)
+            print('Updated Pipeline Config:', pipeline_config)
             self.generator = FastVideoGenerator.from_pretrained(
                 model_path=model_path,
                 **generation_args,
                 pipeline_config=pipeline_config)
 
-        print('inference_args', inference_args)
+        print('Inference Args:', inference_args)
 
         # Start a thread to run the generation
         self._generation_thread = threading.Thread(target=self._run_generation,
