@@ -765,6 +765,7 @@ class DistillationPipeline(TrainingPipeline):
                     "train_total_loss": total_loss,
                     "train_fake_score_loss": fake_score_loss,
                     "learning_rate": self.lr_scheduler.get_last_lr()[0],
+                    "fake_score_learning_rate": self.fake_score_lr_scheduler.get_last_lr()[0],
                     "step_time": step_time,
                     "avg_step_time": avg_step_time,
                     "grad_norm": grad_norm,
