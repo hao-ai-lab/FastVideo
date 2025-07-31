@@ -607,6 +607,7 @@ class TrainingArgs(FastVideoArgs):
     validation_guidance_scale: str = ""
     validation_steps: float = 0.0
     log_validation: bool = False
+    log_visualization: bool = True
     tracker_project_name: str = ""
     wandb_run_name: str = ""
     seed: int | None = None
@@ -809,6 +810,9 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--log-validation",
                             action=StoreBoolean,
                             help="Whether to log validation results")
+        parser.add_argument("--log-visualization",
+                            action=StoreBoolean,
+                            help="Whether to log visualization results")
         parser.add_argument("--tracker-project-name",
                             type=str,
                             help="Project name for tracking")
