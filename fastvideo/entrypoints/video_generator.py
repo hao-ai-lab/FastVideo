@@ -278,6 +278,7 @@ class VideoGenerator:
                        width: {target_width}
                 video_length: {sampling_param.num_frames}
                       prompt: {prompt}
+                      image_path: {sampling_param.image_path}
                   neg_prompt: {sampling_param.negative_prompt}
                         seed: {sampling_param.seed}
                  infer_steps: {sampling_param.num_inference_steps}

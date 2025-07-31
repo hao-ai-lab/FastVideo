@@ -10,6 +10,7 @@ from collections.abc import Iterable
 from typing import Any
 
 import torch
+import torchvision.transforms.functional as TF
 from einops import rearrange
 from tqdm.auto import tqdm
 
@@ -30,7 +31,8 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.utils import dict_to_3d_list, masks_like
+from fastvideo.utils import dict_to_3d_list, masks_like, best_output_size
+from PIL import Image
 
 try:
     from fastvideo.attention.backends.sliding_tile_attn import (
@@ -57,10 +59,11 @@ class DenoisingStage(PipelineStage):
     the initial noise into the final output.
     """
 
-    def __init__(self, transformer, scheduler, pipeline=None) -> None:
+    def __init__(self, transformer, scheduler, vae=None, pipeline=None) -> None:
         super().__init__()
         self.transformer = transformer
         self.scheduler = scheduler
+        self.vae = vae
         self.pipeline = weakref.ref(pipeline) if pipeline else None
         attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads
         self.attn_backend = get_attn_backend(
@@ -184,8 +187,43 @@ class DenoisingStage(PipelineStage):
             assert neg_prompt_embeds is not None
             assert torch.isnan(neg_prompt_embeds[0]).sum() == 0
 
+        latent_model_input = latents.to(target_dtype)
+        assert latent_model_input.shape[0] == 1, "only support batch size 1"
+
+        if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
+            logger.info("===========Using TI2V task===========")
+            # TI2V directly replaces the first frame of the latent with
+            # the image latent instead of appending along the channel dim
+            assert batch.image_latent is None, "TI2V task should not have image latents"
+            assert self.vae is not None, "VAE is not provided for TI2V task"
+            z = self.vae.encode(batch.pil_image).mean.float()
+            logger.info(f"z shape: {z.shape}")
+            logger.info(f"latent_model_input shape: {latent_model_input.shape}")
+            latent_model_input = latent_model_input.squeeze(0)
+            mask1, mask2 = masks_like([latent_model_input],
+                                        zero=True)
+            # logger.info(f"mask1 shape: {mask1.shape}")
+            # logger.info(f"mask2 shape: {mask2.shape}")
+            latent_model_input = (
+                1. - mask2[0]) * z + mask2[0] * latent_model_input
+            # latent_model_input = latent_model_input.unsqueeze(0)
+            latent_model_input = latent_model_input.to(get_local_torch_device())
+            latents = latent_model_input
+            F = batch.num_frames
+            temporal_scale = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_temporal
+            spatial_scale = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
+            patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
+            seq_len = ((F - 1) // temporal_scale + 1) * (
+                batch.height // spatial_scale) * (batch.width // spatial_scale) // (
+                    patch_size[1] * patch_size[2])
+            import math
+            seq_len = int(math.ceil(seq_len / sp_world_size)) * sp_world_size
+        logger.info("latents shape: %s", latents.shape)
+
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
+            # logger.info(f"seq_len: {seq_len}")
+            logger.info(f"init timesteps: {timesteps}")
             for i, t in enumerate(timesteps):
                 # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:
@@ -198,22 +236,35 @@ class DenoisingStage(PipelineStage):
                     latent_model_input = torch.cat(
                         [latent_model_input, batch.image_latent],
                         dim=1).to(target_dtype)
-                elif fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
-                    # TI2V directly replaces the first frame of the latent with
-                    # the image latent instead of appending along the channel dim
-                    assert batch.image_latent is None, "TI2V task should not have image latents"
-                    z = self.get_module("vae").encode([batch.pil_image])
-                    mask1, mask2 = masks_like([latent_model_input],
-                                              zero=True,
-                                              generator=batch.generator)
-                    latent_model_input = (
-                        1. - mask2[0]) * z[0] + mask2[0] * latent_model_input
+                if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
+                    logger.info(f"before ti2v timestep: {t}")
+                    timestep = [t]
+                    timestep = torch.stack(timestep).to(get_local_torch_device())
+
+                    logger.info(f"mask2 shape: {mask2[0].shape}")
+                    logger.info(f"mask[0][0] shape: {mask2[0][0].shape}")
+                    logger.info(f"mask[0][0][:, ::2, ::2] shape: {mask2[0][0][:, ::2, ::2].shape}")
+                    temp_ts = (mask2[0][0][:, ::2, ::2] * timestep).flatten()
+                    logger.info(f"temp_ts: {temp_ts}")
+                    logger.info(f"temp_ts shape: {temp_ts.shape}")
+                    temp_ts = torch.cat([
+                        temp_ts,
+                        temp_ts.new_ones(seq_len - temp_ts.size(0)) * timestep
+                    ])
+                    # timestep = temp_ts.unsqueeze(0)
+                    timestep = temp_ts
+                    logger.info(f"after ti2v timestep: {timestep}")
+                    t = timestep
+                # else:
+                t_expand = t.repeat(latent_model_input.shape[0])
+                logger.info(f"t_expand shape: {t_expand.shape}")
+                logger.info(f"t_expand: {t_expand}")
+
                 assert torch.isnan(latent_model_input).sum() == 0
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)
 
                 # Prepare inputs for transformer
-                t_expand = t.repeat(latent_model_input.shape[0])
                 guidance_expand = (
                     torch.tensor(
                         [fastvideo_args.pipeline_config.embedded_cfg_scale] *
@@ -314,6 +365,10 @@ class DenoisingStage(PipelineStage):
                                                   latents,
                                                   **extra_step_kwargs,
                                                   return_dict=False)[0]
+                    if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
+                        latents = latents.squeeze(0)
+                        latents = (1. - mask2[0]) * z + mask2[0] * latents
+                        # latents = latents.unsqueeze(0)
 
                 # Update progress bar
                 if i == len(timesteps) - 1 or (
