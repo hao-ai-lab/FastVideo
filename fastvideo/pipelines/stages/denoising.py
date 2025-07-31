@@ -5,7 +5,6 @@ Denoising stage for diffusion pipelines.
 
 import gc
 import inspect
-import time
 import weakref
 from collections.abc import Iterable
 from typing import Any
@@ -89,8 +88,6 @@ class DenoisingStage(PipelineStage):
         Returns:
             The batch with denoised latents.
         """
-        total_start_time = time.time()
-
         pipeline = self.pipeline() if self.pipeline else None
         if not fastvideo_args.model_loaded["transformer"]:
             loader = TransformerLoader()
@@ -604,8 +601,6 @@ class DmdDenoisingStage(DenoisingStage):
         Returns:
             The batch with denoised latents.
         """
-        total_start_time = time.time()
-        
         # Setup precision and autocast settings
         # TODO(will): make the precision configurable for inference
         # target_dtype = PRECISION_TO_TYPE[fastvideo_args.precision]
@@ -685,6 +680,7 @@ class DmdDenoisingStage(DenoisingStage):
 
                 image_latent = image_latent[:, :, rank_in_sp_group, :, :, :]
                 batch.image_latent = image_latent
+
         # Run denoising loop
         with self.progress_bar(total=len(timesteps)) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -802,11 +798,5 @@ class DmdDenoisingStage(DenoisingStage):
         latents = latents.permute(0, 2, 1, 3, 4)
         # Update batch with final latents
         batch.latents = latents
-
-        # Print total timing summary
-        total_time = time.time() - total_start_time
-        print("\n=== TOTAL DENOISING STAGE TIME ===")
-        print(f"Total stage time: {total_time:.3f}s")
-        print("===================================\n")
 
         return batch
