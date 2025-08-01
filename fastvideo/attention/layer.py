@@ -13,6 +13,7 @@ from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
 
 
+@torch.compiler.disable
 class DistributedAttention(nn.Module):
     """Distributed attention layer.
     """
@@ -136,6 +137,7 @@ class DistributedAttention_VSA(DistributedAttention):
     """Distributed attention layer with VSA support.
     """
 
+    @torch.compiler.disable
     def forward(
         self,
         q: torch.Tensor,

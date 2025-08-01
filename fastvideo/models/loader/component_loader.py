@@ -459,24 +459,8 @@ class TransformerLoader(ComponentLoader):
             output_dtype=None,
             training_mode=fastvideo_args.training_mode)
         if fastvideo_args.enable_torch_compile:
-            logger.info("Torch Compile enabled for DiT")
-            for n, m in reversed(list(model.named_modules())):
-                if any([
-                        compile_condition(n, m)
-                        for compile_condition in model._compile_conditions
-                ]):
-                    parts = n.split(".")
-                    parent = model
-                    attr = parts[-1]
-                    for part in parts[:-1]:
-                        if part.isdigit():
-                            parent = parent[int(part)]
-                        else:
-                            parent = getattr(parent, part)
-                    if attr.isdigit():
-                        parent[int(attr)] = torch.compile(m)
-                    else:
-                        setattr(parent, attr, torch.compile(m))
+            model = torch.compile(model)
+
 
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)

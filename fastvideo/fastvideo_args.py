@@ -378,7 +378,15 @@ class FastVideoArgs:
             default=FastVideoArgs.enable_stage_verification,
             help="Enable input/output verification for pipeline stages",
         )
-
+        parser.add_argument(
+            "--enable-torch-compile",
+            action=StoreBoolean,
+            default=FastVideoArgs.enable_torch_compile,
+            help=
+            "Use torch.compile to speed up DiT (for both inference and training)."
+            +
+            "However, will likely cause precision drifts. See (https://github.com/pytorch/pytorch/issues/145213)",
+        )
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)
 
@@ -496,12 +504,6 @@ class FastVideoArgs:
 
         if self.num_gpus < max(self.tp_size, self.sp_size):
             self.num_gpus = max(self.tp_size, self.sp_size)
-
-        if self.enable_torch_compile and self.num_gpus > 1:
-            logger.warning(
-                "Currently torch compile does not work with multi-gpu. Setting enable_torch_compile to False"
-            )
-            self.enable_torch_compile = False
 
         if self.pipeline_config is None:
             raise ValueError("pipeline_config is not set in FastVideoArgs")
