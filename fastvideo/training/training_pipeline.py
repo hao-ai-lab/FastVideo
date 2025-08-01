@@ -209,9 +209,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
     def _normalize_dit_input(self,
                              training_batch: TrainingBatch) -> TrainingBatch:
         # TODO(will): support other models
-        training_batch.latents = normalize_dit_input(
-            'wan', training_batch.latents,
-            self.validation_pipeline.get_module("vae"))
+        training_batch.latents = normalize_dit_input('wan',
+                                                     training_batch.latents,
+                                                     self.get_module("vae"))
         return training_batch
 
     def _prepare_dit_inputs(self,
