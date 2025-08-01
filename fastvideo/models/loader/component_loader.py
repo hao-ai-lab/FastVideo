@@ -459,7 +459,7 @@ class TransformerLoader(ComponentLoader):
             output_dtype=None,
             training_mode=fastvideo_args.training_mode)
         if fastvideo_args.enable_torch_compile:
-            model = torch.compile(model, dynamic=True)
+            model = torch.compile(model)
 
 
         total_params = sum(p.numel() for p in model.parameters())
