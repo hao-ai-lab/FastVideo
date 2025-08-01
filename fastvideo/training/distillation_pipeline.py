@@ -118,8 +118,8 @@ class DistillationPipeline(TrainingPipeline):
         self.fake_score_lr_scheduler = get_scheduler(
             training_args.lr_scheduler,
             optimizer=self.fake_score_optimizer,
-            num_warmup_steps=training_args.lr_warmup_steps * self.world_size,
-            num_training_steps=training_args.max_train_steps * self.world_size,
+            num_warmup_steps=training_args.lr_warmup_steps,
+            num_training_steps=training_args.max_train_steps,
             num_cycles=training_args.lr_num_cycles,
             power=training_args.lr_power,
             last_epoch=self.init_steps - 1,
@@ -447,7 +447,6 @@ class DistillationPipeline(TrainingPipeline):
                 total_dmd_loss += dmd_loss.detach().item()
             self._clip_model_grad_norm_(batch_stu, self.transformer)
             self.optimizer.step()
-            self.lr_scheduler.step()
             self.optimizer.zero_grad(set_to_none=True)
             avg_dmd_loss = torch.tensor(total_dmd_loss /
                                         gradient_accumulation_steps,
@@ -472,6 +471,7 @@ class DistillationPipeline(TrainingPipeline):
         self._clip_model_grad_norm_(batch_critic, self.fake_score_transformer)
         self.fake_score_optimizer.step()
         self.fake_score_lr_scheduler.step()
+        self.lr_scheduler.step()
         self.fake_score_optimizer.zero_grad(set_to_none=True)
         avg_fake_score_loss = torch.tensor(total_fake_score_loss /
                                            gradient_accumulation_steps,

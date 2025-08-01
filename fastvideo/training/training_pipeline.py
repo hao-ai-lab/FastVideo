@@ -130,8 +130,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
         self.lr_scheduler = get_scheduler(
             training_args.lr_scheduler,
             optimizer=self.optimizer,
-            num_warmup_steps=training_args.lr_warmup_steps * self.world_size,
-            num_training_steps=training_args.max_train_steps * self.world_size,
+            num_warmup_steps=training_args.lr_warmup_steps,
+            num_training_steps=training_args.max_train_steps,
             num_cycles=training_args.lr_num_cycles,
             power=training_args.lr_power,
             last_epoch=self.init_steps - 1,

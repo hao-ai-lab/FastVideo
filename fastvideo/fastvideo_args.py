@@ -672,6 +672,7 @@ class TrainingArgs(FastVideoArgs):
     real_score_guidance_scale: float = 3.5
     training_state_checkpointing_steps: int = 0  # for resuming training
     weight_only_checkpointing_steps: int = 0  # for inference
+    log_visualization: bool = False
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -998,6 +999,9 @@ class TrainingArgs(FastVideoArgs):
                             type=float,
                             default=TrainingArgs.real_score_guidance_scale,
                             help="Teacher guidance scale")
+        parser.add_argument("--log-visualization",
+                            action=StoreBoolean,
+                            help="Whether to log visualization")
 
         return parser
 
