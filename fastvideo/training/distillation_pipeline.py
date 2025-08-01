@@ -124,8 +124,8 @@ class DistillationPipeline(TrainingPipeline):
         self.fake_score_lr_scheduler = get_scheduler(
             training_args.lr_scheduler,
             optimizer=self.fake_score_optimizer,
-            num_warmup_steps=training_args.lr_warmup_steps * self.world_size,
-            num_training_steps=training_args.max_train_steps * self.world_size,
+            num_warmup_steps=training_args.lr_warmup_steps,
+            num_training_steps=training_args.max_train_steps,
             num_cycles=training_args.lr_num_cycles,
             power=training_args.lr_power,
             last_epoch=self.init_steps - 1,
@@ -479,7 +479,6 @@ class DistillationPipeline(TrainingPipeline):
                 total_dmd_loss += dmd_loss.detach().item()
             self._clip_model_grad_norm_(batch_gen, self.transformer)
             self.optimizer.step()
-            self.lr_scheduler.step()
             self.optimizer.zero_grad(set_to_none=True)
             avg_dmd_loss = torch.tensor(total_dmd_loss /
                                         gradient_accumulation_steps,
@@ -506,6 +505,7 @@ class DistillationPipeline(TrainingPipeline):
         self._clip_model_grad_norm_(batch_fake, self.fake_score_transformer)
         self.fake_score_optimizer.step()
         self.fake_score_lr_scheduler.step()
+        self.lr_scheduler.step()
         self.fake_score_optimizer.zero_grad(set_to_none=True)
         avg_fake_score_loss = torch.tensor(total_fake_score_loss /
                                            gradient_accumulation_steps,
@@ -708,11 +708,9 @@ class DistillationPipeline(TrainingPipeline):
         torch.cuda.empty_cache()
         dmd_latents_vis_dict = training_batch.dmd_latent_vis_dict
         fake_score_latents_vis_dict = training_batch.fake_score_latent_vis_dict
-        fake_score_log_keys = [
-            'training_batch_fakerscore_fwd_clean_latent', 'generator_pred_video'
-        ]
+        fake_score_log_keys = ['generator_pred_video']
         dmd_log_keys = [
-            'training_batch_dmd_fwd_clean_latent', 'generator_pred_video',
+            'generator_pred_video',
             'real_score_pred_video', 'faker_score_pred_video'
         ]
 
@@ -748,36 +746,36 @@ class DistillationPipeline(TrainingPipeline):
             torch.cuda.empty_cache()
 
         # Process DMD training data if available - use decode_stage instead of self.vae.decode
-        if 'generator_pred_video' in dmd_latents_vis_dict:
-            for latent_key in dmd_log_keys:
-                latents = dmd_latents_vis_dict[latent_key]
-                latents = latents.permute(0, 2, 1, 3, 4)
-                # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
-                if isinstance(self.vae.scaling_factor, torch.Tensor):
-                    latents = latents / self.vae.scaling_factor.to(
-                        latents.device, latents.dtype)
-                else:
-                    latents = latents / self.vae.scaling_factor
+        # if 'generator_pred_video' in dmd_latents_vis_dict:
+        #     for latent_key in dmd_log_keys:
+        #         latents = dmd_latents_vis_dict[latent_key]
+        #         latents = latents.permute(0, 2, 1, 3, 4)
+        #         # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
+        #         if isinstance(self.vae.scaling_factor, torch.Tensor):
+        #             latents = latents / self.vae.scaling_factor.to(
+        #                 latents.device, latents.dtype)
+        #         else:
+        #             latents = latents / self.vae.scaling_factor
 
-                # Apply shifting if needed
-                if (hasattr(self.vae, "shift_factor")
-                        and self.vae.shift_factor is not None):
-                    if isinstance(self.vae.shift_factor, torch.Tensor):
-                        latents += self.vae.shift_factor.to(
-                            latents.device, latents.dtype)
-                    else:
-                        latents += self.vae.shift_factor
-                with torch.autocast("cuda", dtype=torch.bfloat16):
-                    video = self.vae.decode(latents)
-                video = (video / 2 + 0.5).clamp(0, 1)
-                video = video.cpu().float()
-                video = video.permute(0, 2, 1, 3, 4)
-                video = (video * 255).numpy().astype(np.uint8)
-                wandb_loss_dict[latent_key] = wandb.Video(
-                    video, fps=24, format="mp4")  # change to 16 for Wan2.1
-                # Clean up references
-                del video, latents
-                torch.cuda.empty_cache()
+        #         # Apply shifting if needed
+        #         if (hasattr(self.vae, "shift_factor")
+        #                 and self.vae.shift_factor is not None):
+        #             if isinstance(self.vae.shift_factor, torch.Tensor):
+        #                 latents += self.vae.shift_factor.to(
+        #                     latents.device, latents.dtype)
+        #             else:
+        #                 latents += self.vae.shift_factor
+        #         with torch.autocast("cuda", dtype=torch.bfloat16):
+        #             video = self.vae.decode(latents)
+        #         video = (video / 2 + 0.5).clamp(0, 1)
+        #         video = video.cpu().float()
+        #         video = video.permute(0, 2, 1, 3, 4)
+        #         video = (video * 255).numpy().astype(np.uint8)
+        #         wandb_loss_dict[latent_key] = wandb.Video(
+        #             video, fps=24, format="mp4")  # change to 16 for Wan2.1
+        #         # Clean up references
+        #         del video, latents
+        #         torch.cuda.empty_cache()
 
         # Log to wandb
         if self.global_rank == 0:
