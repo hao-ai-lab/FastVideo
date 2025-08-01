@@ -13,7 +13,6 @@ from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
 
 
-@torch.compiler.disable
 class DistributedAttention(nn.Module):
     """Distributed attention layer.
     """
@@ -56,6 +55,7 @@ class DistributedAttention(nn.Module):
         self.backend = backend_name_to_enum(attn_backend.get_name())
         self.dtype = dtype
 
+    @torch.compiler.disable
     def forward(
         self,
         q: torch.Tensor,

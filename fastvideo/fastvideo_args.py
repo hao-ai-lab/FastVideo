@@ -383,7 +383,7 @@ class FastVideoArgs:
             action=StoreBoolean,
             default=FastVideoArgs.enable_torch_compile,
             help=
-            "Use torch.compile to speed up DiT (for both inference and training)."
+            "Use torch.compile to speed up DiT (available for both inference and training)."
             +
             "However, will likely cause precision drifts. See (https://github.com/pytorch/pytorch/issues/145213)",
         )
