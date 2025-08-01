@@ -97,6 +97,10 @@ class ComposedPipelineBase(ABC):
                 self.initialize_validation_pipeline(self.training_args)
 
         self.initialize_pipeline(self.fastvideo_args)
+        if self.fastvideo_args.enable_torch_compile:
+            self.modules["transformer"] = torch.compile(
+                self.modules["transformer"])
+            logger.info("Torch Compile enabled for DiT")
 
         if not self.fastvideo_args.training_mode:
             logger.info("Creating pipeline stages...")

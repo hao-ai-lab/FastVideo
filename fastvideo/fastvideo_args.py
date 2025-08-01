@@ -382,9 +382,7 @@ class FastVideoArgs:
             "--enable-torch-compile",
             action=StoreBoolean,
             default=FastVideoArgs.enable_torch_compile,
-            help=
-            "Use torch.compile to speed up DiT (available for both inference and training)."
-            +
+            help="Use torch.compile to speed up DiT inference." +
             "However, will likely cause precision drifts. See (https://github.com/pytorch/pytorch/issues/145213)",
         )
         # Add pipeline configuration arguments
