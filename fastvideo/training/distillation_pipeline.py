@@ -229,6 +229,53 @@ class DistillationPipeline(TrainingPipeline):
 
         return pred_video
 
+    def _generator_multi_step_simulation_forward(self, training_batch: TrainingBatch) -> torch.Tensor:
+        """Forward pass through student transformer matching inference procedure."""
+        
+        latents = training_batch.latents
+        dtype = latents.dtype
+        
+        # Step 1: Randomly sample a target timestep index from denoising_step_list
+        index = torch.randint(0,
+                              len(self.denoising_step_list), [1],
+                              device=self.device,
+                              dtype=torch.long)
+        target_timestep = self.denoising_step_list[index]
+        training_batch.dmd_latent_vis_dict["generator_timestep"] = target_timestep
+
+        
+        # Step 2: Simulate the multi-step inference process up to the target timestep
+        # Start from pure noise like in inference
+        noise = torch.randn(self.video_latent_shape, 
+                            device=self.device, 
+                            dtype=dtype)
+        if self.sp_world_size > 1:
+            noise = rearrange(noise,
+                              "b (n t) c h w -> b n t c h w",
+                              n=self.sp_world_size).contiguous()
+            noise = noise[:, self.rank_in_sp_group, :, :, :, :]
+        
+        current_latents = noise
+
+        target_index = index.item()
+        if target_index > 0:
+            for step_idx in range(target_index):
+                current_timestep = self.denoising_step_list[step_idx]
+                logger.info(f"target_timestep: {target_timestep}, current_timestep: {current_timestep}")
+                training_batch = self._build_distill_input_kwargs(
+                    current_latents, current_timestep, training_batch.conditional_dict,
+                    training_batch)
+                pred_noise = self.transformer(**training_batch.input_kwargs).permute(
+                    0, 2, 1, 3, 4)
+
+                pred_video = pred_noise_to_pred_video(
+                    pred_noise=pred_noise.flatten(0, 1),
+                    noise_input_latent=training_batch.noise_latents.flatten(0, 1),
+                    timestep=current_timestep,
+                    scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
+
+        return pred_video
+        
     def _dmd_forward(self, generator_pred_video: torch.Tensor,
                      training_batch: TrainingBatch) -> torch.Tensor:
         """Compute DMD (Diffusion Model Distillation) loss."""
@@ -333,7 +380,10 @@ class DistillationPipeline(TrainingPipeline):
         with torch.no_grad(), set_forward_context(
                 current_timestep=training_batch.timesteps,
                 attn_metadata=training_batch.attn_metadata_vsa):
-            generator_pred_video = self._generator_forward(training_batch)
+            if self.training_args.simulate_student_forward:
+                generator_pred_video = self._generator_multi_step_simulation_forward(training_batch)
+            else:
+                generator_pred_video = self._generator_forward(training_batch)
 
         fake_score_timestep = torch.randint(0,
                                             self.num_train_timestep, [1],
@@ -464,7 +514,10 @@ class DistillationPipeline(TrainingPipeline):
                 with set_forward_context(
                         current_timestep=batch_gen.timesteps,
                         attn_metadata=batch_gen.attn_metadata_vsa):
-                    generator_pred_video = self._generator_forward(batch_gen)
+                    if self.training_args.simulate_student_forward:
+                        generator_pred_video = self._generator_multi_step_simulation_forward(batch_gen)
+                    else:
+                        generator_pred_video = self._generator_forward(batch_gen)
 
                 with set_forward_context(current_timestep=batch_gen.timesteps,
                                          attn_metadata=batch_gen.attn_metadata):
