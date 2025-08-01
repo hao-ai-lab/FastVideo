@@ -198,6 +198,7 @@ class DistillationPipeline(TrainingPipeline):
                               device=self.device,
                               dtype=torch.long)
         timestep = self.denoising_step_list[index]
+        training_batch.dmd_latent_vis_dict["generator_timestep"] = timestep
 
         noise = torch.randn(self.video_latent_shape,
                             device=self.device,
@@ -264,7 +265,7 @@ class DistillationPipeline(TrainingPipeline):
             fake_score_pred_noise = self.fake_score_transformer(
                 **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
-            pred_fake_video = pred_noise_to_pred_video(
+            faker_score_pred_video = pred_noise_to_pred_video(
                 pred_noise=fake_score_pred_noise.flatten(0, 1),
                 noise_input_latent=training_batch.noise_latents.flatten(0, 1),
                 timestep=timestep,
@@ -303,13 +304,26 @@ class DistillationPipeline(TrainingPipeline):
                 pred_real_video_cond -
                 pred_real_video_uncond) * self.real_score_guidance_scale
 
-            grad = (pred_fake_video - real_score_pred_video) / torch.abs(
+            grad = (faker_score_pred_video - real_score_pred_video) / torch.abs(
                 generator_pred_video - real_score_pred_video).mean()
             grad = torch.nan_to_num(grad)
 
         dmd_loss = 0.5 * F.mse_loss(
             generator_pred_video.float(),
             (generator_pred_video.float() - grad.float()).detach())
+
+        training_batch.dmd_latent_vis_dict.update({
+            "training_batch_dmd_fwd_clean_latent":
+            training_batch.latents,
+            "generator_pred_video":
+            generator_pred_video,
+            "real_score_pred_video":
+            real_score_pred_video,
+            "faker_score_pred_video":
+            faker_score_pred_video,
+            "dmd_timestep":
+            timestep,
+        })
 
         return dmd_loss
 
@@ -359,9 +373,16 @@ class DistillationPipeline(TrainingPipeline):
                 **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
         target = fake_score_noise - generator_pred_video
-        denoising_loss = torch.mean((fake_score_pred_noise - target)**2)
+        flow_matching_loss = torch.mean((fake_score_pred_noise - target)**2)
 
-        return training_batch, denoising_loss
+        training_batch.fake_score_latent_vis_dict = {
+            "training_batch_fakerscore_fwd_clean_latent":
+            training_batch.latents,
+            "generator_pred_video": generator_pred_video,
+            "fake_score_timestep": fake_score_timestep,
+        }
+
+        return training_batch, flow_matching_loss
 
     def _clip_model_grad_norm_(self, training_batch: TrainingBatch,
                                transformer) -> TrainingBatch:
@@ -394,6 +415,9 @@ class DistillationPipeline(TrainingPipeline):
             "encoder_hidden_states": self.negative_prompt_embeds,
             "encoder_attention_mask": self.negative_prompt_attention_mask,
         }
+
+        training_batch.dmd_latent_vis_dict = {}
+        training_batch.fake_score_latent_vis_dict = {}
 
         training_batch.conditional_dict = conditional_dict
         training_batch.unconditional_dict = unconditional_dict
@@ -431,27 +455,29 @@ class DistillationPipeline(TrainingPipeline):
 
         self.optimizer.zero_grad()
         total_dmd_loss = 0.0
+        dmd_latent_vis_dict = {}
+        fake_score_latent_vis_dict = {}
         if (self.current_trainstep % self.generator_update_interval == 0):
             for batch in batches:
-                batch_stu = copy.deepcopy(batch)
+                batch_gen = copy.deepcopy(batch)
 
                 with set_forward_context(
-                        current_timestep=batch_stu.timesteps,
-                        attn_metadata=batch_stu.attn_metadata_vsa):
-                    generator_pred_video = self._generator_forward(batch_stu)
+                        current_timestep=batch_gen.timesteps,
+                        attn_metadata=batch_gen.attn_metadata_vsa):
+                    generator_pred_video = self._generator_forward(batch_gen)
 
-                with set_forward_context(current_timestep=batch_stu.timesteps,
-                                         attn_metadata=batch_stu.attn_metadata):
+                with set_forward_context(current_timestep=batch_gen.timesteps,
+                                         attn_metadata=batch_gen.attn_metadata):
                     dmd_loss = self._dmd_forward(
                         generator_pred_video=generator_pred_video,
-                        training_batch=batch_stu)
+                        training_batch=batch_gen)
 
                 with set_forward_context(
-                        current_timestep=batch_stu.timesteps,
-                        attn_metadata=batch_stu.attn_metadata_vsa):
+                        current_timestep=batch_gen.timesteps,
+                        attn_metadata=batch_gen.attn_metadata_vsa):
                     (dmd_loss / gradient_accumulation_steps).backward()
                 total_dmd_loss += dmd_loss.detach().item()
-            self._clip_model_grad_norm_(batch_stu, self.transformer)
+            self._clip_model_grad_norm_(batch_gen, self.transformer)
             self.optimizer.step()
             self.lr_scheduler.step()
             self.optimizer.zero_grad(set_to_none=True)
@@ -462,20 +488,22 @@ class DistillationPipeline(TrainingPipeline):
             world_group.all_reduce(avg_dmd_loss,
                                    op=torch.distributed.ReduceOp.AVG)
             training_batch.generator_loss = avg_dmd_loss.item()
+            dmd_latent_vis_dict = batch_gen.dmd_latent_vis_dict
         else:
             training_batch.generator_loss = 0.0
 
         self.fake_score_optimizer.zero_grad()
         total_fake_score_loss = 0.0
         for batch in batches:
-            batch_critic = copy.deepcopy(batch)
-            batch_critic, fake_score_loss = self.faker_score_forward(
-                batch_critic)
-            with set_forward_context(current_timestep=batch_critic.timesteps,
-                                     attn_metadata=batch_critic.attn_metadata):
+            batch_fake = copy.deepcopy(batch)
+            batch_fake, fake_score_loss = self.faker_score_forward(batch_fake)
+            with set_forward_context(current_timestep=batch_fake.timesteps,
+                                     attn_metadata=batch_fake.attn_metadata):
                 (fake_score_loss / gradient_accumulation_steps).backward()
             total_fake_score_loss += fake_score_loss.detach().item()
-        self._clip_model_grad_norm_(batch_critic, self.fake_score_transformer)
+            fake_score_latent_vis_dict.update(
+                batch_fake.fake_score_latent_vis_dict)
+        self._clip_model_grad_norm_(batch_fake, self.fake_score_transformer)
         self.fake_score_optimizer.step()
         self.fake_score_lr_scheduler.step()
         self.fake_score_optimizer.zero_grad(set_to_none=True)
@@ -486,6 +514,8 @@ class DistillationPipeline(TrainingPipeline):
         world_group.all_reduce(avg_fake_score_loss,
                                op=torch.distributed.ReduceOp.AVG)
         training_batch.fake_score_loss = avg_fake_score_loss.item()
+        training_batch.dmd_latent_vis_dict = dmd_latent_vis_dict
+        training_batch.fake_score_latent_vis_dict = batch_fake.fake_score_latent_vis_dict
 
         training_batch.total_loss = training_batch.generator_loss + training_batch.fake_score_loss
         return training_batch
@@ -671,6 +701,88 @@ class DistillationPipeline(TrainingPipeline):
         gc.collect()
         torch.cuda.empty_cache()
 
+    def visualize_intermediate_latents(self, training_batch: TrainingBatch,
+                                       training_args: TrainingArgs, step: int):
+        """Add visualization data to wandb logging and save frames to disk."""
+        wandb_loss_dict = {}
+        torch.cuda.empty_cache()
+        dmd_latents_vis_dict = training_batch.dmd_latent_vis_dict
+        fake_score_latents_vis_dict = training_batch.fake_score_latent_vis_dict
+        fake_score_log_keys = [
+            'training_batch_fakerscore_fwd_clean_latent', 'generator_pred_video'
+        ]
+        dmd_log_keys = [
+            'training_batch_dmd_fwd_clean_latent', 'generator_pred_video',
+            'real_score_pred_video', 'faker_score_pred_video'
+        ]
+
+        for latent_key in fake_score_log_keys:
+            latents = fake_score_latents_vis_dict[latent_key]  # bs, t,c, h, w
+            latents = latents.permute(0, 2, 1, 3, 4)
+            # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
+
+            if isinstance(self.vae.scaling_factor, torch.Tensor):
+                latents = latents / self.vae.scaling_factor.to(
+                    latents.device, latents.dtype)
+            else:
+                latents = latents / self.vae.scaling_factor
+
+            # Apply shifting if needed
+            if (hasattr(self.vae, "shift_factor")
+                    and self.vae.shift_factor is not None):
+                if isinstance(self.vae.shift_factor, torch.Tensor):
+                    latents += self.vae.shift_factor.to(latents.device,
+                                                        latents.dtype)
+                else:
+                    latents += self.vae.shift_factor
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                video = self.vae.decode(latents)
+            video = (video / 2 + 0.5).clamp(0, 1)
+            video = video.cpu().float()
+            video = video.permute(0, 2, 1, 3, 4)
+            video = (video * 255).numpy().astype(np.uint8)
+            wandb_loss_dict[latent_key] = wandb.Video(
+                video, fps=24, format="mp4")  # change to 16 for Wan2.1
+            # Clean up references
+            del video, latents
+            torch.cuda.empty_cache()
+
+        # Process DMD training data if available - use decode_stage instead of self.vae.decode
+        if 'generator_pred_video' in dmd_latents_vis_dict:
+            for latent_key in dmd_log_keys:
+                latents = dmd_latents_vis_dict[latent_key]
+                latents = latents.permute(0, 2, 1, 3, 4)
+                # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
+                if isinstance(self.vae.scaling_factor, torch.Tensor):
+                    latents = latents / self.vae.scaling_factor.to(
+                        latents.device, latents.dtype)
+                else:
+                    latents = latents / self.vae.scaling_factor
+
+                # Apply shifting if needed
+                if (hasattr(self.vae, "shift_factor")
+                        and self.vae.shift_factor is not None):
+                    if isinstance(self.vae.shift_factor, torch.Tensor):
+                        latents += self.vae.shift_factor.to(
+                            latents.device, latents.dtype)
+                    else:
+                        latents += self.vae.shift_factor
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    video = self.vae.decode(latents)
+                video = (video / 2 + 0.5).clamp(0, 1)
+                video = video.cpu().float()
+                video = video.permute(0, 2, 1, 3, 4)
+                video = (video * 255).numpy().astype(np.uint8)
+                wandb_loss_dict[latent_key] = wandb.Video(
+                    video, fps=24, format="mp4")  # change to 16 for Wan2.1
+                # Clean up references
+                del video, latents
+                torch.cuda.empty_cache()
+
+        # Log to wandb
+        if self.global_rank == 0:
+            wandb.log(wandb_loss_dict, step=step)
+
     def train(self) -> None:
         """Main training loop with distillation-specific logging."""
         assert self.training_args.seed is not None, "seed must be set"
@@ -775,6 +887,25 @@ class DistillationPipeline(TrainingPipeline):
                     log_data["train_generator_loss"] = generator_loss
                 if use_vsa:
                     log_data["VSA_train_sparsity"] = current_vsa_sparsity
+
+                if training_batch.dmd_latent_vis_dict:
+                    dmd_additional_logs = {
+                        "generator_timestep":
+                        training_batch.
+                        dmd_latent_vis_dict["generator_timestep"].item(),
+                        "dmd_timestep":
+                        training_batch.dmd_latent_vis_dict["dmd_timestep"].item(
+                        ),
+                    }
+                    log_data.update(dmd_additional_logs)
+
+                faker_score_additional_logs = {
+                    "fake_score_timestep":
+                    training_batch.
+                    fake_score_latent_vis_dict["fake_score_timestep"].item(),
+                }
+                log_data.update(faker_score_additional_logs)
+
                 wandb.log(log_data, step=step)
 
             # Save training state checkpoint (for resuming training)
@@ -808,6 +939,10 @@ class DistillationPipeline(TrainingPipeline):
                                              only_save_generator_weight=True)
 
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
+                if self.training_args.log_visualization:
+                    self.visualize_intermediate_latents(training_batch,
+                                                        self.training_args,
+                                                        step)
                 self._log_validation(self.transformer, self.training_args, step)
 
         wandb.finish()
