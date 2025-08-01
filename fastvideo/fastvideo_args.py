@@ -308,8 +308,9 @@ class FastVideoArgs:
         parser.add_argument(
             "--enable-torch-compile",
             action=StoreBoolean,
-            help=
-            "Use torch.compile for speeding up STA inference without teacache",
+            default=FastVideoArgs.enable_torch_compile,
+            help="Use torch.compile to speed up DiT inference." +
+            "However, will likely cause precision drifts. See (https://github.com/pytorch/pytorch/issues/145213)",
         )
 
         parser.add_argument(
@@ -377,13 +378,6 @@ class FastVideoArgs:
             action=StoreBoolean,
             default=FastVideoArgs.enable_stage_verification,
             help="Enable input/output verification for pipeline stages",
-        )
-        parser.add_argument(
-            "--enable-torch-compile",
-            action=StoreBoolean,
-            default=FastVideoArgs.enable_torch_compile,
-            help="Use torch.compile to speed up DiT inference." +
-            "However, will likely cause precision drifts. See (https://github.com/pytorch/pytorch/issues/145213)",
         )
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)
