@@ -14,7 +14,7 @@ def main():
         # FastVideo will automatically handle distributed setup
         num_gpus=1,
         use_fsdp_inference=True,
-        dit_cpu_offload=False,
+        dit_cpu_offload=True,
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True, # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
