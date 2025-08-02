@@ -316,7 +316,7 @@ def create_nested_structures(
             if len(path_parts) >= 2:
                 model = path_parts[0]  # e.g., "Wan2.1-T2V"
                 dataset = path_parts[1]  # e.g., "Wan-Syn-Data-480P"
-                method = "distill"  # Default method for distillation
+                method = "DMD"  # Default method for distillation
 
                 # Initialize nested structure
                 if example.category not in nested_structures:
