@@ -15,6 +15,8 @@ import numpy as np
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+import imageio
+from ray.serve.handle import DeploymentHandle
 
 
 class VideoGenerationRequest(BaseModel):
@@ -31,14 +33,41 @@ class VideoGenerationRequest(BaseModel):
     return_frames: bool = False  # Whether to return base64 encoded frames
     image_path: Optional[str] = None  # Path to input image for I2V
     model_type: str = "t2v"  # "t2v" or "i2v" to specify which model to use
+    model_path: Optional[str] = None  # Specific model path to use
 
 
 class VideoGenerationResponse(BaseModel):
-    output_path: str
+    video_data: Optional[str] = None  # Base64 encoded video data
     seed: int
     success: bool
     error_message: Optional[str] = None
     frames: Optional[List[str]] = None  # Base64 encoded frames
+    generation_time: Optional[float] = None
+    # Detailed timing information
+    model_load_time: Optional[float] = None
+    inference_time: Optional[float] = None
+    encoding_time: Optional[float] = None
+    total_time: Optional[float] = None
+
+
+def encode_video_to_base64(frames: List[np.ndarray], fps: int = 24) -> str:
+    """Convert numpy frames to base64-encoded MP4 video"""
+    if not frames:
+        return ""
+    
+    try:
+        # Save frames to bytes buffer as MP4
+        buffer = io.BytesIO()
+        imageio.mimsave(buffer, frames, fps=fps, format="mp4")
+        buffer.seek(0)
+        
+        # Encode to base64
+        video_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+        return f"data:video/mp4;base64,{video_base64}"
+        
+    except Exception as e:
+        print(f"Warning: Failed to encode video: {e}")
+        return ""
 
 
 def encode_frames_to_base64(frames: List[np.ndarray]) -> List[str]:
@@ -90,6 +119,311 @@ def encode_frames_to_base64(frames: List[np.ndarray]) -> List[str]:
     return encoded_frames
 
 
+# ---------------------------------------------------------------------------
+# Model-Specific Deployments (one per model type)
+# These deployments each load a single model and expose a `generate_video`   
+# method that can be invoked via a DeploymentHandle. Each deployment can be
+# scaled independently by configuring `num_replicas` when binding.
+# ---------------------------------------------------------------------------
+
+
+@serve.deployment(  # T2V 1.3B model deployment
+    ray_actor_options={"num_cpus": 10, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
+)
+class T2VModelDeployment:
+    """Serve deployment wrapping the 1.3 B text-to-video model."""
+
+    def __init__(self, t2v_model_path: str, output_path: str = "outputs"):
+        self.model_path = t2v_model_path
+        self.output_path = output_path
+
+        # Ensure output directory exists
+        os.makedirs(self.output_path, exist_ok=True)
+
+        # Delay helps avoid GPU contention when many replicas start at once
+        time.sleep(10)
+
+        # Ensure correct attention backend for FastVideo
+        os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
+
+        # Lazy import to keep the deployment import-safe on head node
+        from fastvideo.entrypoints.video_generator import VideoGenerator
+        from fastvideo.configs.sample.base import SamplingParam
+
+        print(f"Initializing T2V model: {self.model_path}")
+        self.generator = VideoGenerator.from_pretrained(
+            model_path=self.model_path,
+            num_gpus=1,
+            use_fsdp_inference=True,
+            text_encoder_cpu_offload=False,
+            dit_cpu_offload=False,
+            vae_cpu_offload=False,
+            VSA_sparsity=0.8,
+        )
+        self.default_params = SamplingParam.from_pretrained(self.model_path)
+        print("✅ T2V model initialized successfully")
+
+    def generate_video(self, video_request: "VideoGenerationRequest") -> "VideoGenerationResponse":
+        """Generate a video for the given request and return an encoded response."""
+        import time
+        
+        total_start_time = time.time()
+        
+        # Deep-copy default sampling params and override with request values
+        params = deepcopy(self.default_params)
+        params.prompt = video_request.prompt
+        if video_request.use_negative_prompt:
+            params.negative_prompt = video_request.negative_prompt
+
+        params.seed = video_request.seed if not video_request.randomize_seed else torch.randint(0, 1_000_000, (1,)).item()
+        params.guidance_scale = video_request.guidance_scale
+        params.num_frames = video_request.num_frames
+        params.height = video_request.height
+        params.width = video_request.width
+        params.num_inference_steps = video_request.num_inference_steps
+
+        # Do not write to disk when called via API
+        params.save_video = False
+        params.return_frames = True
+
+        # Track inference time
+        inference_start_time = time.time()
+        
+        # Generate video frames
+        result = self.generator.generate_video(
+            prompt=video_request.prompt,
+            sampling_param=params,
+            save_video=False,
+            return_frames=True,
+        )
+        
+        inference_end_time = time.time()
+        inference_time = inference_end_time - inference_start_time
+
+        frames = result if isinstance(result, list) else result.get("frames", [])
+        generation_time = result.get("generation_time", 0.0) if isinstance(result, dict) else 0.0
+
+        # Track encoding time
+        encoding_start_time = time.time()
+        
+        # Encode outputs
+        video_data = encode_video_to_base64(frames, fps=24)
+        encoded_frames = encode_frames_to_base64(frames) if video_request.return_frames and frames else None
+        
+        encoding_end_time = time.time()
+        encoding_time = encoding_end_time - encoding_start_time
+        
+        total_end_time = time.time()
+        total_time = total_end_time - total_start_time
+
+        return VideoGenerationResponse(
+            video_data=video_data,
+            frames=encoded_frames,
+            seed=params.seed,
+            success=True,
+            generation_time=generation_time,
+            inference_time=inference_time,
+            encoding_time=encoding_time,
+            total_time=total_time,
+        )
+
+
+@serve.deployment(  # I2V 14B model deployment
+    ray_actor_options={"num_cpus": 10, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
+)
+class I2VModelDeployment:
+    """Serve deployment wrapping the 14 B image-to-video model."""
+
+    def __init__(self, i2v_model_path: str, output_path: str = "outputs"):
+        self.model_path = i2v_model_path
+        self.output_path = output_path
+
+        os.makedirs(self.output_path, exist_ok=True)
+        time.sleep(10)
+
+        os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
+
+        from fastvideo.entrypoints.video_generator import VideoGenerator
+        from fastvideo.configs.sample.base import SamplingParam
+
+        print(f"Initializing I2V model: {self.model_path}")
+        self.generator = VideoGenerator.from_pretrained(
+            model_path=self.model_path,
+            num_gpus=1,
+            use_fsdp_inference=True,
+            text_encoder_cpu_offload=False,
+            dit_cpu_offload=False,
+            vae_cpu_offload=False,
+            VSA_sparsity=0.8,
+        )
+        self.default_params = SamplingParam.from_pretrained(self.model_path)
+        print("✅ I2V model initialized successfully")
+
+    def generate_video(self, video_request: "VideoGenerationRequest") -> "VideoGenerationResponse":
+        import time
+        
+        total_start_time = time.time()
+        
+        params = deepcopy(self.default_params)
+
+        params.prompt = video_request.prompt
+        if video_request.use_negative_prompt:
+            params.negative_prompt = video_request.negative_prompt
+
+        params.seed = video_request.seed if not video_request.randomize_seed else torch.randint(0, 1_000_000, (1,)).item()
+        params.guidance_scale = video_request.guidance_scale
+        params.num_frames = video_request.num_frames
+        params.height = video_request.height
+        params.width = video_request.width
+        params.num_inference_steps = video_request.num_inference_steps
+
+        if video_request.image_path:
+            params.image_path = video_request.image_path
+
+        params.save_video = False
+        params.return_frames = True
+
+        # Track inference time
+        inference_start_time = time.time()
+        
+        result = self.generator.generate_video(
+            prompt=video_request.prompt,
+            sampling_param=params,
+            save_video=False,
+            return_frames=True,
+        )
+        
+        inference_end_time = time.time()
+        inference_time = inference_end_time - inference_start_time
+
+        frames = result if isinstance(result, list) else result.get("frames", [])
+        generation_time = result.get("generation_time", 0.0) if isinstance(result, dict) else 0.0
+
+        # Track encoding time
+        encoding_start_time = time.time()
+        
+        video_data = encode_video_to_base64(frames, fps=24)
+        encoded_frames = encode_frames_to_base64(frames) if video_request.return_frames and frames else None
+        
+        encoding_end_time = time.time()
+        encoding_time = encoding_end_time - encoding_start_time
+        
+        total_end_time = time.time()
+        total_time = total_end_time - total_start_time
+
+        return VideoGenerationResponse(
+            video_data=video_data,
+            frames=encoded_frames,
+            seed=params.seed,
+            success=True,
+            generation_time=generation_time,
+            inference_time=inference_time,
+            encoding_time=encoding_time,
+            total_time=total_time,
+        )
+
+
+@serve.deployment(  # T2V 14B model deployment with optimized settings
+    ray_actor_options={"num_cpus": 16, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
+)
+class T2V14BModelDeployment:
+    """Serve deployment wrapping the 14B text-to-video model with optimized settings."""
+
+    def __init__(self, t2v_14b_model_path: str, output_path: str = "outputs"):
+        self.model_path = t2v_14b_model_path
+        self.output_path = output_path
+
+        # Ensure output directory exists
+        os.makedirs(self.output_path, exist_ok=True)
+
+        # Delay helps avoid GPU contention when many replicas start at once
+        time.sleep(10)
+
+        # Ensure correct attention backend for FastVideo
+        os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
+
+        # Lazy import to keep the deployment import-safe on head node
+        from fastvideo.entrypoints.video_generator import VideoGenerator
+        from fastvideo.configs.sample.base import SamplingParam
+
+        print(f"Initializing T2V 14B model: {self.model_path}")
+        self.generator = VideoGenerator.from_pretrained(
+            model_path=self.model_path,
+            num_gpus=1,
+            use_fsdp_inference=True,
+            text_encoder_cpu_offload=True,  # Enable CPU offload for 14B model
+            dit_cpu_offload=True,           # Enable CPU offload for 14B model
+            vae_cpu_offload=False,
+            VSA_sparsity=0.9,               # Higher sparsity for 14B model
+        )
+        self.default_params = SamplingParam.from_pretrained(self.model_path)
+        print("✅ T2V 14B model initialized successfully")
+
+    def generate_video(self, video_request: "VideoGenerationRequest") -> "VideoGenerationResponse":
+        """Generate a video for the given request and return an encoded response."""
+        import time
+        
+        total_start_time = time.time()
+        
+        # Deep-copy default sampling params and override with request values
+        params = deepcopy(self.default_params)
+        params.prompt = video_request.prompt
+        if video_request.use_negative_prompt:
+            params.negative_prompt = video_request.negative_prompt
+
+        params.seed = video_request.seed if not video_request.randomize_seed else torch.randint(0, 1_000_000, (1,)).item()
+        params.guidance_scale = video_request.guidance_scale
+        params.num_frames = video_request.num_frames
+        params.height = video_request.height
+        params.width = video_request.width
+        params.num_inference_steps = video_request.num_inference_steps
+
+        # Do not write to disk when called via API
+        params.save_video = False
+        params.return_frames = True
+
+        # Track inference time
+        inference_start_time = time.time()
+        
+        # Generate video frames
+        result = self.generator.generate_video(
+            prompt=video_request.prompt,
+            sampling_param=params,
+            save_video=False,
+            return_frames=True,
+        )
+        
+        inference_end_time = time.time()
+        inference_time = inference_end_time - inference_start_time
+
+        frames = result if isinstance(result, list) else result.get("frames", [])
+        generation_time = result.get("generation_time", 0.0) if isinstance(result, dict) else 0.0
+
+        # Track encoding time
+        encoding_start_time = time.time()
+        
+        # Encode outputs
+        video_data = encode_video_to_base64(frames, fps=24)
+        encoded_frames = encode_frames_to_base64(frames) if video_request.return_frames and frames else None
+        
+        encoding_end_time = time.time()
+        encoding_time = encoding_end_time - encoding_start_time
+        
+        total_end_time = time.time()
+        total_time = total_end_time - total_start_time
+
+        return VideoGenerationResponse(
+            video_data=video_data,
+            frames=encoded_frames,
+            seed=params.seed,
+            success=True,
+            generation_time=generation_time,
+            inference_time=inference_time,
+            encoding_time=encoding_time,
+            total_time=total_time,
+        )
+
+
 # Create FastAPI app with rate limiting
 app = FastAPI()
 
@@ -99,168 +433,43 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
-@serve.deployment(
-    num_replicas=8,
-    # ray_actor_options={"num_cpus": 10, "num_gpus": 1, "runtime_env": {"conda": "fv", "working_dir": "/mnt/fast-disks/nfs/hao_lab/FastVideo"}},
-    ray_actor_options={"num_cpus": 10, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
-)
+@serve.deployment(ray_actor_options={"num_cpus": 2})
 @serve.ingress(app)
 class FastVideoAPI:
-    def __init__(self, t2v_model_path: str, i2v_model_path: str, output_path: str):
-        self.t2v_model_path = t2v_model_path
-        self.i2v_model_path = i2v_model_path
-        self.output_path = output_path
-        
-        # Initialize the video generators
-        self.t2v_generator = None # Initialize to None
-        self.i2v_generator = None # Initialize to None
-        self.t2v_default_params = None # Initialize to None
-        self.i2v_default_params = None # Initialize to None
-        
-        # Ensure output directory exists
-        os.makedirs(output_path, exist_ok=True)
-        time.sleep(10)
-        self._initialize_models() # Ensure models are initialized
-    
-    def _initialize_models(self):
-        # Set VSA environment variable
-        os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
-        # os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
-        
-        # Import only when needed - use direct imports to avoid module-level execution
-        from fastvideo.entrypoints.video_generator import VideoGenerator
-        from fastvideo.configs.sample.base import SamplingParam
-        
-        # Initialize T2V model
-        if self.t2v_generator is None:
-            print(f"Initializing T2V model: {self.t2v_model_path}")
-            self.t2v_generator = VideoGenerator.from_pretrained(
-                model_path=self.t2v_model_path, 
-                num_gpus=1,
-                use_fsdp_inference=True,
-                # Adjust these offload parameters if you have < 32GB of VRAM
-                text_encoder_cpu_offload=False,
-                dit_cpu_offload=False,
-                vae_cpu_offload=False,
-                VSA_sparsity=0.8,
-                # master_port=port,
-            )
-            self.t2v_default_params = SamplingParam.from_pretrained(self.t2v_model_path)
-            print("✅ T2V model initialized successfully")
-        
-        # Initialize I2V model
-        # if self.i2v_generator is None:
-        if False:
-            print(f"Initializing I2V model: {self.i2v_model_path}")
-            self.i2v_generator = VideoGenerator.from_pretrained(
-                model_path=self.i2v_model_path, 
-                num_gpus=1,
-                use_fsdp_inference=True,
-                # Adjust these offload parameters if you have < 32GB of VRAM
-                text_encoder_cpu_offload=False,
-                dit_cpu_offload=False,
-                vae_cpu_offload=False,
-                VSA_sparsity=0.8,
-                # master_port=port,
-            )
-            self.i2v_default_params = SamplingParam.from_pretrained(self.i2v_model_path)
-            print("✅ I2V model initialized successfully")
+    """Ingress deployment that routes requests to either the T2V or I2V model deployment."""
+
+    def __init__(self, t2v_deployment: DeploymentHandle, t2v_14b_deployment: DeploymentHandle, i2v_deployment: DeploymentHandle):
+        self.t2v_handle = t2v_deployment
+        self.t2v_14b_handle = t2v_14b_deployment
+        self.i2v_handle = i2v_deployment
     
     @app.post("/generate_video", response_model=VideoGenerationResponse)
-    @limiter.limit("50/minute")  # Allow 2 requests per minute per IP
+    @limiter.limit("50/minute")  # Allow 50 requests per minute per IP
     async def generate_video(self, request: Request, video_request: VideoGenerationRequest) -> VideoGenerationResponse:
+        """Route the request to the appropriate model deployment based on `model_type` and `model_path`."""
         try:
-            # Select the appropriate model and parameters based on model_type
             if video_request.model_type.lower() == "i2v":
-                generator = self.i2v_generator
-                params = deepcopy(self.i2v_default_params)
-                print(f"Using I2V model for generation")
+                response_ref = self.i2v_handle.generate_video.remote(video_request)
+            elif video_request.model_type.lower() == "t2v":
+                # Route T2V requests based on model path
+                if video_request.model_path and "14b" in video_request.model_path.lower():
+                    response_ref = self.t2v_14b_handle.generate_video.remote(video_request)
+                else:
+                    # Default to 1.3B model
+                    response_ref = self.t2v_handle.generate_video.remote(video_request)
             else:
-                generator = self.t2v_generator
-                params = deepcopy(self.t2v_default_params)
-                print(f"Using T2V model for generation")
-            
-            # Update parameters with request values
-            params.prompt = video_request.prompt
-            # Only override negative prompt if user explicitly opts in
-            if video_request.use_negative_prompt:
-                params.negative_prompt = video_request.negative_prompt
+                # Default to 1.3B T2V model
+                response_ref = self.t2v_handle.generate_video.remote(video_request)
 
-            params.seed = video_request.seed
-            params.guidance_scale = video_request.guidance_scale
-            params.num_frames = video_request.num_frames
-            params.height = video_request.height
-            params.width = video_request.width
-            params.num_inference_steps = video_request.num_inference_steps
-            
-            # Handle seed randomization
-            if video_request.randomize_seed:
-                params.seed = torch.randint(0, 1000000, (1,)).item()
-            
-            # Ensure negative_prompt is a non-None string; FastVideo validation disallows None
-            if params.negative_prompt is None:
-                params.negative_prompt = ""  # empty string satisfies validator
-            
-            # Set up output path and video saving
-            params.save_video = True
-            params.output_path = self.output_path
-            # params.return_frames = False  # avoid keeping frames in memory
-            
-            # Create a clean filename from the prompt
-            safe_prompt = video_request.prompt[:100].replace(' ', '_').replace('/', '_').replace('\\', '_')
+            # Await the remote response and return it directly
+            return await response_ref
 
-            # Store desired video name inside the SamplingParam to avoid unknown kwarg errors
-            setattr(params, "output_video_name", safe_prompt)
-            
-            # Handle image_path for I2V
-            if video_request.image_path:
-                params.image_path = video_request.image_path
-            
-            # Generate the video with proper output path and filename
-            result = generator.generate_video(
-                prompt=video_request.prompt,
-                sampling_param=params,
-                save_video=True,  # Match the params.save_video setting
-            )
-            
-            # The actual output path where the video was saved
-            output_path = os.path.join(self.output_path, f"{safe_prompt}.mp4")
-            
-            # Verify the file exists
-            if not os.path.exists(output_path):
-                raise FileNotFoundError(f"Video was not saved to expected location: {output_path}")
-            
-            frames = result.get("frames", [])
-            
-            # Encode frames to base64 for web transmission only if requested
-            encoded_frames = None
-            if video_request.return_frames and frames:
-                try:
-                    encoded_frames = encode_frames_to_base64(frames)
-                except Exception as e:
-                    print(f"Warning: Failed to encode frames: {e}")
-                    encoded_frames = None
-            
-            response = VideoGenerationResponse(
-                output_path=output_path,
-                frames=encoded_frames,
-                seed=params.seed,
-                success=True
-            )
-            
-            # Memory cleanup to avoid OOM in repeated generations
-            import gc
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
-            return response
         except Exception as e:
             return VideoGenerationResponse(
-                output_path="",
+                video_data=None,
                 seed=video_request.seed,
                 success=False,
-                error_message=str(e)
+                error_message=str(e),
             )
     
     @app.get("/health")
@@ -270,24 +479,36 @@ class FastVideoAPI:
 
 
 def start_ray_serve(
-    t2v_model_path: str = "Wan-AI/Wan2.2-TI2V-5B-Diffusers",
-    i2v_model_path: str = "Wan-AI/Wan2.2-TI2V-5B-Diffusers",
+    *,
+    t2v_model_path: str = "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
+    t2v_14b_model_path: str = "FastVideo/FastWan2.1-T2V-14B-Diffusers",
+    i2v_model_path: str = "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
     output_path: str = "outputs",
     host: str = "0.0.0.0",
-    port: int = 8000
+    port: int = 8000,
+    t2v_replicas: int = 4,
+    t2v_14b_replicas: int = 4,  # Reduced replicas for 14B model due to higher resource requirements
+    i2v_replicas: int = 4,
 ):
-    """Start the Ray Serve backend"""
-    # Initialize Ray
+    """Start Ray Serve with independently scalable deployments for each model."""
+
     if not ray.is_initialized():
         ray.init()
-    
-    # Deploy the API
-    api = FastVideoAPI.bind(t2v_model_path, i2v_model_path, output_path)
-    serve.run(api, route_prefix="/", name="fast_video")  # detach
-    
+
+    # Bind model deployments with configurable replica counts
+    t2v_dep = T2VModelDeployment.options(num_replicas=t2v_replicas).bind(t2v_model_path, output_path)
+    t2v_14b_dep = T2V14BModelDeployment.options(num_replicas=t2v_14b_replicas).bind(t2v_14b_model_path, output_path)
+    i2v_dep = I2VModelDeployment.options(num_replicas=i2v_replicas).bind(i2v_model_path, output_path)
+
+    # Ingress
+    api = FastVideoAPI.bind(t2v_dep, t2v_14b_dep, i2v_dep)
+
+    serve.run(api, route_prefix="/", name="fast_video")
+
     print(f"Ray Serve backend started at http://{host}:{port}")
-    print(f"T2V Model: {t2v_model_path}")
-    print(f"I2V Model: {i2v_model_path}")
+    print(f"T2V 1.3B Model: {t2v_model_path} | Replicas: {t2v_replicas}")
+    print(f"T2V 14B Model: {t2v_14b_model_path} | Replicas: {t2v_14b_replicas}")
+    print(f"I2V Model: {i2v_model_path} | Replicas: {i2v_replicas}")
     print(f"Health check: http://{host}:{port}/health")
     print(f"Video generation endpoint: http://{host}:{port}/generate_video")
 
@@ -300,9 +521,13 @@ if __name__ == "__main__":
                         type=str,
                         default="FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
                         help="Path to the T2V model")
+    parser.add_argument("--t2v_14b_model_path",
+                        type=str,
+                        default="FastVideo/FastWan2.1-T2V-14B-Diffusers",
+                        help="Path to the T2V 14B model")
     parser.add_argument("--i2v_model_path",
                         type=str,
-                        default="Wan-AI/Wan2.2-TI2V-5B-Diffusers",
+                        default="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
                         help="Path to the I2V model")
     parser.add_argument("--output_path",
                         type=str,
@@ -316,15 +541,31 @@ if __name__ == "__main__":
                         type=int,
                         default=8000,
                         help="Port to bind to")
+    parser.add_argument("--t2v_replicas",
+                        type=int,
+                        default=4,
+                        help="Number of replicas for the T2V model deployment")
+    parser.add_argument("--t2v_14b_replicas",
+                        type=int,
+                        default=4,  # Reduced default for 14B model due to higher resource requirements
+                        help="Number of replicas for the T2V 14B model deployment")
+    parser.add_argument("--i2v_replicas",
+                        type=int,
+                        default=4,
+                        help="Number of replicas for the I2V model deployment")
     
     args = parser.parse_args()
     
     start_ray_serve(
         t2v_model_path=args.t2v_model_path,
+        t2v_14b_model_path=args.t2v_14b_model_path,
         i2v_model_path=args.i2v_model_path,
         output_path=args.output_path,
         host=args.host,
         port=args.port,
+        t2v_replicas=args.t2v_replicas,
+        t2v_14b_replicas=args.t2v_14b_replicas,
+        i2v_replicas=args.i2v_replicas,
     )
 
     # ---- keep the process alive ---------------------------------

@@ -2,13 +2,17 @@ from fastvideo import VideoGenerator
 
 from fastvideo.configs.sample import SamplingParam
 
+import os
+
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
+
 OUTPUT_PATH = "video_samples"
 def main():
     # FastVideo will automatically use the optimal default arguments for the
     # model.
     # If a local path is provided, FastVideo will make a best effort
     # attempt to identify the optimal arguments.
-    model_name = "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+    model_name = "FastVideo/FastWan2.1-T2V-14B-Diffusers"
     generator = VideoGenerator.from_pretrained(
         model_name,
         # FastVideo will automatically handle distributed setup

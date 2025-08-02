@@ -46,6 +46,7 @@ def start_backend(args):
     cmd = [
         sys.executable, str(backend_script),
         "--t2v_model_path", args.t2v_model_path,
+        "--t2v_14b_model_path", args.t2v_14b_model_path,
         "--i2v_model_path", args.i2v_model_path,
         "--output_path", args.output_path,
         "--host", args.backend_host,
@@ -84,6 +85,7 @@ def start_frontend(args):
         sys.executable, str(frontend_script),
         "--backend_url", backend_url,
         "--t2v_model_path", args.t2v_model_path,
+        "--t2v_14b_model_path", args.t2v_14b_model_path,
         "--i2v_model_path", args.i2v_model_path,
         "--host", args.frontend_host,
         "--port", str(args.frontend_port)
@@ -118,11 +120,15 @@ def main():
     # Model and output settings
     parser.add_argument("--t2v_model_path",
                         type=str,
-                        default="Wan-AI/Wan2.2-TI2V-5BDiffusers",
+                        default="FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
                         help="Path to the T2V model")
+    parser.add_argument("--t2v_14b_model_path",
+                        type=str,
+                        default="FastVideo/FastWan2.1-T2V-14B-Diffusers",
+                        help="Path to the T2V 14B model")
     parser.add_argument("--i2v_model_path",
                         type=str,
-                        default="Wan-AI/Wan2.2-TI2V-5B-Diffusers",
+                        default="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
                         help="Path to the I2V model")
     parser.add_argument("--output_path",
                         type=str,
@@ -146,7 +152,7 @@ def main():
                         help="Frontend host to bind to")
     parser.add_argument("--frontend_port",
                         type=int,
-                        default=7860,
+                        default=7861,
                         help="Frontend port to bind to")
     
     # Other settings
@@ -161,7 +167,8 @@ def main():
     
     print("🎬 FastVideo Ray Serve App")
     print("=" * 50)
-    print(f"T2V Model: {args.t2v_model_path}")
+    print(f"T2V 1.3B Model: {args.t2v_model_path}")
+    print(f"T2V 14B Model: {args.t2v_14b_model_path}")
     print(f"I2V Model: {args.i2v_model_path}")
     print(f"Output: {args.output_path}")
     print(f"Backend: http://{args.backend_host}:{args.backend_port}")
