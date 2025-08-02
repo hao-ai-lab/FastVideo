@@ -245,7 +245,9 @@ class DenoisingStage(PipelineStage):
                     logger.info(
                         f"mask[0][0][:, ::2, ::2] shape: {mask2[0][0][:, ::2, ::2].shape}"
                     )
-                    temp_ts = (mask2[0][0][:, ::2, ::2] * timestep).flatten()
+                    temp_ts = (mask2[0][0][:, ::2, ::2] * timestep)
+                    logger.info(f"temp_ts shape before flatten: {temp_ts.shape}")
+                    temp_ts = temp_ts.flatten()
                     logger.info(f"temp_ts: {temp_ts}")
                     logger.info(f"temp_ts shape: {temp_ts.shape}")
                     temp_ts = torch.cat([
@@ -320,6 +322,8 @@ class DenoisingStage(PipelineStage):
                             # fastvideo_args=fastvideo_args
                     ):
                         # Run transformer
+                        cuda_memory_before = torch.cuda.memory_allocated()
+                        logger.info(f"cuda memory before transformer: {cuda_memory_before / 1024 / 1024 / 1024} GB")
                         noise_pred = self.transformer(
                             latent_model_input,
                             prompt_embeds,
