@@ -117,6 +117,7 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
         self.sigmas = sigmas
         self.timesteps = sigmas * num_train_timesteps
+        self.num_train_timesteps = num_train_timesteps
 
         self.model_outputs = [None] * solver_order
         self.timestep_list: list[Any | None] = [None] * solver_order
@@ -131,6 +132,8 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
             "cpu")  # to avoid too much CPU/GPU communication
         self.sigma_min = self.sigmas[-1].item()
         self.sigma_max = self.sigmas[0].item()
+
+        BaseScheduler.__init__(self)
 
     @property
     def step_index(self):

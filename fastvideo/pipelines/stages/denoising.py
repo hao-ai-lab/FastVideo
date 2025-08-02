@@ -57,9 +57,10 @@ class DenoisingStage(PipelineStage):
     the initial noise into the final output.
     """
 
-    def __init__(self, transformer, scheduler, pipeline=None) -> None:
+    def __init__(self, transformer, scheduler, pipeline=None, transformer_2=None) -> None:
         super().__init__()
         self.transformer = transformer
+        self.transformer_2 = transformer_2
         self.scheduler = scheduler
         self.pipeline = weakref.ref(pipeline) if pipeline else None
         attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads
@@ -184,12 +185,32 @@ class DenoisingStage(PipelineStage):
             assert neg_prompt_embeds is not None
             assert torch.isnan(neg_prompt_embeds[0]).sum() == 0
 
+        # (Wan2.2) Calculate timestep to switch from high noise expert to low noise expert
+        if fastvideo_args.boundary_ratio is not None:
+            boundary_timestep = fastvideo_args.boundary_ratio * self.scheduler.num_train_timesteps
+        else:
+            boundary_timestep = None
+
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:
                     continue
+
+                if boundary_timestep is None or t >= boundary_timestep:
+                    if fastvideo_args.dit_cpu_offload:
+                        if next(self.transformer_2.parameters()).device.type == 'cuda':
+                            self.transformer_2.to('cpu')
+                    current_model = self.transformer
+                    current_guidance_scale = batch.guidance_scale
+                else:
+                    # low-noise stage in wan2.2
+                    if fastvideo_args.dit_cpu_offload:
+                        if next(self.transformer.parameters()).device.type == 'cuda':
+                            self.transformer.to('cpu')
+                    current_model = self.transformer_2
+                    current_guidance_scale = batch.guidance_scale_2
 
                 # Expand latents for I2V
                 latent_model_input = latents.to(target_dtype)
@@ -257,7 +278,7 @@ class DenoisingStage(PipelineStage):
                             # fastvideo_args=fastvideo_args
                     ):
                         # Run transformer
-                        noise_pred = self.transformer(
+                        noise_pred = current_model(
                             latent_model_input,
                             prompt_embeds,
                             t_expand,
@@ -276,7 +297,7 @@ class DenoisingStage(PipelineStage):
                                 # fastvideo_args=fastvideo_args
                         ):
                             # Run transformer
-                            noise_pred_uncond = self.transformer(
+                            noise_pred_uncond = current_model(
                                 latent_model_input,
                                 neg_prompt_embeds,
                                 t_expand,
@@ -285,7 +306,7 @@ class DenoisingStage(PipelineStage):
                                 **neg_cond_kwargs,
                             )
                         noise_pred_text = noise_pred
-                        noise_pred = noise_pred_uncond + batch.guidance_scale * (
+                        noise_pred = noise_pred_uncond + current_guidance_scale * (
                             noise_pred_text - noise_pred_uncond)
 
                         # Apply guidance rescale if needed

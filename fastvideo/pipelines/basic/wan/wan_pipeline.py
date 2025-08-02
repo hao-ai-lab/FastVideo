@@ -61,6 +61,7 @@ class WanPipeline(LoRAPipeline, ComposedPipelineBase):
         self.add_stage(stage_name="denoising_stage",
                        stage=DenoisingStage(
                            transformer=self.get_module("transformer"),
+                           transformer_2=self.get_module("transformer_2", None),
                            scheduler=self.get_module("scheduler"),
                            pipeline=self))
 
