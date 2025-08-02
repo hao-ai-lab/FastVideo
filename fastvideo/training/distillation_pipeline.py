@@ -185,8 +185,7 @@ class DistillationPipeline(TrainingPipeline):
             "timestep": timestep,
             "return_dict": False,
         }
-        training_batch.noise_latents = noise_input
-        # After setting noise_latents, it's guaranteed to be not None
+
         return training_batch
 
     def _generator_forward(self, training_batch: TrainingBatch) -> torch.Tensor:
@@ -217,13 +216,11 @@ class DistillationPipeline(TrainingPipeline):
         training_batch = self._build_distill_input_kwargs(
             noisy_latent, timestep, training_batch.conditional_dict,
             training_batch)
-
         pred_noise = self.transformer(**training_batch.input_kwargs).permute(
             0, 2, 1, 3, 4)
-
         pred_video = pred_noise_to_pred_video(
             pred_noise=pred_noise.flatten(0, 1),
-            noise_input_latent=training_batch.noise_latents.flatten(0, 1),
+            noise_input_latent=noisy_latent.flatten(0, 1),
             timestep=timestep,
             scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
 
@@ -231,49 +228,72 @@ class DistillationPipeline(TrainingPipeline):
 
     def _generator_multi_step_simulation_forward(self, training_batch: TrainingBatch) -> torch.Tensor:
         """Forward pass through student transformer matching inference procedure."""
-        
         latents = training_batch.latents
         dtype = latents.dtype
         
         # Step 1: Randomly sample a target timestep index from denoising_step_list
-        index = torch.randint(0,
-                              len(self.denoising_step_list), [1],
-                              device=self.device,
-                              dtype=torch.long)
-        target_timestep = self.denoising_step_list[index]
-        training_batch.dmd_latent_vis_dict["generator_timestep"] = target_timestep
-
+        target_timestep_idx = torch.randint(0, len(self.denoising_step_list), [1], device=self.device, dtype=torch.long)
+        target_timestep = self.denoising_step_list[target_timestep_idx]
         
         # Step 2: Simulate the multi-step inference process up to the target timestep
         # Start from pure noise like in inference
-        noise = torch.randn(self.video_latent_shape, 
-                            device=self.device, 
-                            dtype=dtype)
+        current_noise_latents = torch.randn(self.video_latent_shape, device=self.device, dtype=dtype)
         if self.sp_world_size > 1:
-            noise = rearrange(noise,
-                              "b (n t) c h w -> b n t c h w",
-                              n=self.sp_world_size).contiguous()
-            noise = noise[:, self.rank_in_sp_group, :, :, :, :]
+            current_noise_latents = rearrange(current_noise_latents,
+                                        "b (n t) c h w -> b n t c h w",
+                                        n=self.sp_world_size).contiguous()
+            current_noise_latents = current_noise_latents[:, self.rank_in_sp_group, :, :, :, :]
         
-        current_latents = noise
-
-        target_index = index.item()
-        if target_index > 0:
-            for step_idx in range(target_index):
-                current_timestep = self.denoising_step_list[step_idx]
-                logger.info(f"target_timestep: {target_timestep}, current_timestep: {current_timestep}")
-                training_batch = self._build_distill_input_kwargs(
-                    current_latents, current_timestep, training_batch.conditional_dict,
-                    training_batch)
-                pred_noise = self.transformer(**training_batch.input_kwargs).permute(
-                    0, 2, 1, 3, 4)
-
-                pred_video = pred_noise_to_pred_video(
-                    pred_noise=pred_noise.flatten(0, 1),
-                    noise_input_latent=training_batch.noise_latents.flatten(0, 1),
-                    timestep=current_timestep,
-                    scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
-
+        # Only run intermediate steps if target_timestep_idx > 0
+        max_target_idx = len(self.denoising_step_list) - 1
+        if max_target_idx > 0:
+            # Run student model for all steps before the target timestep
+            with torch.no_grad():
+                for step_idx in range(max_target_idx):
+                    current_timestep = self.denoising_step_list[step_idx]
+                    current_timestep_tensor = current_timestep * torch.ones(1, device=self.device, dtype=torch.long)
+                    # Run student model to get flow prediction
+                    training_batch_temp = self._build_distill_input_kwargs(
+                        current_noise_latents, current_timestep_tensor, training_batch.conditional_dict, training_batch)
+                    pred_flow = self.transformer(**training_batch_temp.input_kwargs).permute(0, 2, 1, 3, 4)
+                    pred_clean = pred_noise_to_pred_video(
+                        pred_noise=pred_flow.flatten(0, 1),
+                        noise_input_latent=current_noise_latents.flatten(0, 1),
+                        timestep=current_timestep_tensor,
+                        scheduler=self.noise_scheduler
+                    ).unflatten(0, pred_flow.shape[:2])
+                    
+                    # Add noise for the next timestep
+                    next_timestep = self.denoising_step_list[step_idx + 1]
+                    next_timestep_tensor = next_timestep * torch.ones(1, device=self.device, dtype=torch.long)
+                    noise = torch.randn(self.video_latent_shape,
+                                device=self.device,
+                                dtype=pred_clean.dtype)
+                    if self.sp_world_size > 1:
+                        noise = rearrange(noise,
+                                        "b (n t) c h w -> b n t c h w",
+                                        n=self.sp_world_size).contiguous()
+                        noise = noise[:, self.rank_in_sp_group, :, :, :, :]
+                    current_noise_latents = self.noise_scheduler.add_noise(
+                        pred_clean.flatten(0, 1),
+                        noise.flatten(0, 1),
+                        next_timestep_tensor
+                    ).unflatten(0, pred_clean.shape[:2])
+        
+        # Step 3: Use the simulated noisy input for the final training step
+        # For timestep index 0, this is pure noise
+        # For timestep index k > 0, this is the result after k denoising steps + noise at target level
+        noisy_input = current_noise_latents
+        
+        # Step 4: Final student prediction (this is what we train on)
+        training_batch = self._build_distill_input_kwargs(noisy_input, target_timestep, training_batch.conditional_dict, training_batch)
+        pred_noise = self.transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
+        pred_video = pred_noise_to_pred_video(
+            pred_noise=pred_noise.flatten(0, 1),
+            noise_input_latent=noisy_input.flatten(0, 1),
+            timestep=target_timestep,
+            scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
+        training_batch.dmd_latent_vis_dict["generator_timestep"] = target_timestep.float().detach()
         return pred_video
         
     def _dmd_forward(self, generator_pred_video: torch.Tensor,
@@ -314,7 +334,7 @@ class DistillationPipeline(TrainingPipeline):
 
             faker_score_pred_video = pred_noise_to_pred_video(
                 pred_noise=fake_score_pred_noise.flatten(0, 1),
-                noise_input_latent=training_batch.noise_latents.flatten(0, 1),
+                noise_input_latent=noisy_latent.flatten(0, 1),
                 timestep=timestep,
                 scheduler=self.noise_scheduler).unflatten(
                     0, fake_score_pred_noise.shape[:2])
@@ -328,7 +348,7 @@ class DistillationPipeline(TrainingPipeline):
 
             pred_real_video_cond = pred_noise_to_pred_video(
                 pred_noise=real_score_pred_noise_cond.flatten(0, 1),
-                noise_input_latent=training_batch.noise_latents.flatten(0, 1),
+                noise_input_latent=noisy_latent.flatten(0, 1),
                 timestep=timestep,
                 scheduler=self.noise_scheduler).unflatten(
                     0, real_score_pred_noise_cond.shape[:2])
@@ -342,7 +362,7 @@ class DistillationPipeline(TrainingPipeline):
 
             pred_real_video_uncond = pred_noise_to_pred_video(
                 pred_noise=real_score_pred_noise_uncond.flatten(0, 1),
-                noise_input_latent=training_batch.noise_latents.flatten(0, 1),
+                noise_input_latent=noisy_latent.flatten(0, 1),
                 timestep=timestep,
                 scheduler=self.noise_scheduler).unflatten(
                     0, real_score_pred_noise_uncond.shape[:2])
@@ -762,73 +782,70 @@ class DistillationPipeline(TrainingPipeline):
         dmd_latents_vis_dict = training_batch.dmd_latent_vis_dict
         fake_score_latents_vis_dict = training_batch.fake_score_latent_vis_dict
         fake_score_log_keys = ['generator_pred_video']
-        dmd_log_keys = [
-            'generator_pred_video',
-            'real_score_pred_video', 'faker_score_pred_video'
-        ]
+        dmd_log_keys = ['faker_score_pred_video']
 
-        for latent_key in fake_score_log_keys:
-            latents = fake_score_latents_vis_dict[latent_key]  # bs, t,c, h, w
-            latents = latents.permute(0, 2, 1, 3, 4)
-            # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
+        # for latent_key in fake_score_log_keys:
+        #     latents = fake_score_latents_vis_dict[latent_key]  # bs, t,c, h, w
+        #     latents = latents.permute(0, 2, 1, 3, 4)
+        #     # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
 
-            if isinstance(self.vae.scaling_factor, torch.Tensor):
-                latents = latents / self.vae.scaling_factor.to(
-                    latents.device, latents.dtype)
-            else:
-                latents = latents / self.vae.scaling_factor
+        #     if isinstance(self.vae.scaling_factor, torch.Tensor):
+        #         latents = latents / self.vae.scaling_factor.to(
+        #             latents.device, latents.dtype)
+        #     else:
+        #         latents = latents / self.vae.scaling_factor
 
-            # Apply shifting if needed
-            if (hasattr(self.vae, "shift_factor")
-                    and self.vae.shift_factor is not None):
-                if isinstance(self.vae.shift_factor, torch.Tensor):
-                    latents += self.vae.shift_factor.to(latents.device,
-                                                        latents.dtype)
-                else:
-                    latents += self.vae.shift_factor
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                video = self.vae.decode(latents)
-            video = (video / 2 + 0.5).clamp(0, 1)
-            video = video.cpu().float()
-            video = video.permute(0, 2, 1, 3, 4)
-            video = (video * 255).numpy().astype(np.uint8)
-            wandb_loss_dict[latent_key] = wandb.Video(
-                video, fps=24, format="mp4")  # change to 16 for Wan2.1
-            # Clean up references
-            del video, latents
-            torch.cuda.empty_cache()
+        #     # Apply shifting if needed
+        #     if (hasattr(self.vae, "shift_factor")
+        #             and self.vae.shift_factor is not None):
+        #         if isinstance(self.vae.shift_factor, torch.Tensor):
+        #             latents += self.vae.shift_factor.to(latents.device,
+        #                                                 latents.dtype)
+        #         else:
+        #             latents += self.vae.shift_factor
+        #     with torch.autocast("cuda", dtype=torch.bfloat16):
+        #         video = self.vae.decode(latents)
+        #     video = (video / 2 + 0.5).clamp(0, 1)
+        #     video = video.cpu().float()
+        #     video = video.permute(0, 2, 1, 3, 4)
+        #     video = (video * 255).numpy().astype(np.uint8)
+        #     wandb_loss_dict[latent_key] = wandb.Video(
+        #         video, fps=24, format="mp4")  # change to 16 for Wan2.1
+        #     # Clean up references
+        #     del video, latents
+        #     torch.cuda.empty_cache()
 
         # Process DMD training data if available - use decode_stage instead of self.vae.decode
-        # if 'generator_pred_video' in dmd_latents_vis_dict:
-        #     for latent_key in dmd_log_keys:
-        #         latents = dmd_latents_vis_dict[latent_key]
-        #         latents = latents.permute(0, 2, 1, 3, 4)
-        #         # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
-        #         if isinstance(self.vae.scaling_factor, torch.Tensor):
-        #             latents = latents / self.vae.scaling_factor.to(
-        #                 latents.device, latents.dtype)
-        #         else:
-        #             latents = latents / self.vae.scaling_factor
+        if 'generator_pred_video' in dmd_latents_vis_dict:
+            for latent_key in dmd_log_keys:
+                latents = dmd_latents_vis_dict[latent_key]
+                latents = latents.permute(0, 2, 1, 3, 4)
+                # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
+                if isinstance(self.vae.scaling_factor, torch.Tensor):
+                    latents = latents / self.vae.scaling_factor.to(
+                        latents.device, latents.dtype)
+                else:
+                    latents = latents / self.vae.scaling_factor
 
-        #         # Apply shifting if needed
-        #         if (hasattr(self.vae, "shift_factor")
-        #                 and self.vae.shift_factor is not None):
-        #             if isinstance(self.vae.shift_factor, torch.Tensor):
-        #                 latents += self.vae.shift_factor.to(
-        #                     latents.device, latents.dtype)
-        #             else:
-        #                 latents += self.vae.shift_factor
-        #         with torch.autocast("cuda", dtype=torch.bfloat16):
-        #             video = self.vae.decode(latents)
-        #         video = (video / 2 + 0.5).clamp(0, 1)
-        #         video = video.cpu().float()
-        #         video = video.permute(0, 2, 1, 3, 4)
-        #         video = (video * 255).numpy().astype(np.uint8)
-        #         wandb_loss_dict[latent_key] = wandb.Video(
-        #             video, fps=24, format="mp4")  # change to 16 for Wan2.1
-        #         # Clean up references
-        #         del video, latents
-        #         torch.cuda.empty_cache()
+                # Apply shifting if needed
+                if (hasattr(self.vae, "shift_factor")
+                        and self.vae.shift_factor is not None):
+                    if isinstance(self.vae.shift_factor, torch.Tensor):
+                        latents += self.vae.shift_factor.to(
+                            latents.device, latents.dtype)
+                    else:
+                        latents += self.vae.shift_factor
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    video = self.vae.decode(latents)
+                video = (video / 2 + 0.5).clamp(0, 1)
+                video = video.cpu().float()
+                video = video.permute(0, 2, 1, 3, 4)
+                video = (video * 255).numpy().astype(np.uint8)
+                wandb_loss_dict[latent_key] = wandb.Video(
+                    video, fps=24, format="mp4")  # change to 16 for Wan2.1
+                # Clean up references
+                del video, latents
+                torch.cuda.empty_cache()
 
         # Log to wandb
         if self.global_rank == 0:
