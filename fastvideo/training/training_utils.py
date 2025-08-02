@@ -1070,9 +1070,11 @@ def get_cosine_schedule_with_min_lr(
         if current_step < num_warmup_steps:
             return float(current_step) / float(max(1, num_warmup_steps))
         progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
-        # Cosine decay from 1.0 to min_lr_ratio
-        cosine_decay = 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress))
-        return max(min_lr_ratio, cosine_decay)
+        # Cosine decay from 1.0 to min_lr_ratio over num_cycles periods
+        # Use the same formula as standard cosine but scale the output to [min_lr_ratio, 1.0]
+        cosine_value = 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress))
+        # Scale from [0, 1] to [min_lr_ratio, 1.0]
+        return min_lr_ratio + (1.0 - min_lr_ratio) * cosine_value
 
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
@@ -1258,7 +1260,6 @@ def get_scheduler(
             num_warmup_steps=num_warmup_steps,
             num_training_steps=num_training_steps,
             min_lr_ratio=min_lr_ratio,
-            num_cycles=num_cycles,
             last_epoch=last_epoch,
         )
 
