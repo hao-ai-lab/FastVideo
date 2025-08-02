@@ -7,7 +7,7 @@ export TOKENIZERS_PARALLELISM=false
 
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
-VALIDATION_DATASET_FILE="examples/training/finetune/wan_t2v_1_3b/crush_smol/validation.json"
+VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 NUM_GPUS=4
 # export CUDA_VISIBLE_DEVICES=4,5
 
