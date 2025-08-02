@@ -635,6 +635,7 @@ class TrainingArgs(FastVideoArgs):
     num_euler_timesteps: int = 0
     lr_num_cycles: int = 0
     lr_power: float = 0.0
+    min_lr_ratio: float = 0.5  # minimum learning rate ratio for cosine_with_min_lr scheduler
     not_apply_cfg_solver: bool = False
     distill_cfg: float = 0.0
     scheduler_type: str = ""
@@ -665,6 +666,7 @@ class TrainingArgs(FastVideoArgs):
     max_timestep_ratio: float = 0.98
     real_score_guidance_scale: float = 3.5
     fake_score_learning_rate: float = 0.0  # separate learning rate for fake_score_transformer, if 0.0, use learning_rate
+    fake_score_lr_scheduler: str = "constant"  # separate lr scheduler for fake_score_transformer, if not set, use lr_scheduler
     training_state_checkpointing_steps: int = 0  # for resuming training
     weight_only_checkpointing_steps: int = 0  # for inference
     log_visualization: bool = False
@@ -931,6 +933,10 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--lr-power",
                             type=float,
                             help="Learning rate power")
+        parser.add_argument("--min-lr-ratio",
+                            type=float,
+                            default=TrainingArgs.min_lr_ratio,
+                            help="Minimum learning rate ratio for cosine_with_min_lr scheduler")
         parser.add_argument("--not-apply-cfg-solver",
                             action=StoreBoolean,
                             help="Whether to not apply CFG solver")
@@ -1000,6 +1006,10 @@ class TrainingArgs(FastVideoArgs):
                             type=float,
                             default=TrainingArgs.fake_score_learning_rate,
                             help="Learning rate for fake score transformer")
+        parser.add_argument("--fake-score-lr-scheduler",
+                            type=str,
+                            default=TrainingArgs.fake_score_lr_scheduler,
+                            help="Learning rate scheduler for fake score transformer")
         parser.add_argument("--log-visualization",
                             action=StoreBoolean,
                             help="Whether to log visualization")

@@ -13,7 +13,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torchvision
-from diffusers.optimization import get_scheduler
+from fastvideo.training.training_utils import get_scheduler
 from einops import rearrange
 from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -122,12 +122,13 @@ class DistillationPipeline(TrainingPipeline):
         )
 
         self.fake_score_lr_scheduler = get_scheduler(
-            training_args.lr_scheduler,
+            training_args.fake_score_lr_scheduler,
             optimizer=self.fake_score_optimizer,
             num_warmup_steps=training_args.lr_warmup_steps,
             num_training_steps=training_args.max_train_steps,
             num_cycles=training_args.lr_num_cycles,
             power=training_args.lr_power,
+            min_lr_ratio=training_args.min_lr_ratio,
             last_epoch=self.init_steps - 1,
         )
 
