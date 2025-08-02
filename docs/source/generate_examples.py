@@ -310,30 +310,29 @@ def create_nested_structures(
                         model=model,
                         dataset=dataset,
                         example=example)
-        
-        elif example.category == "distillation":
+
+        elif example.category == "distillation" and len(path_parts) >= 2:
             # For distillation examples like Wan2.1-T2V/Wan-Syn-Data-480P
-            if len(path_parts) >= 2:
-                model = path_parts[0]  # e.g., "Wan2.1-T2V"
-                dataset = path_parts[1]  # e.g., "Wan-Syn-Data-480P"
-                method = "DMD"  # Default method for distillation
+            model = path_parts[0]  # e.g., "Wan2.1-T2V"
+            dataset = path_parts[1]  # e.g., "Wan-Syn-Data-480P"
+            method = "DMD"  # Default method for distillation
 
-                # Initialize nested structure
-                if example.category not in nested_structures:
-                    nested_structures[example.category] = {}
-                if method not in nested_structures[example.category]:
-                    nested_structures[example.category][method] = {}
-                if model not in nested_structures[example.category][method]:
-                    nested_structures[example.category][method][model] = {}
+            # Initialize nested structure
+            if example.category not in nested_structures:
+                nested_structures[example.category] = {}
+            if method not in nested_structures[example.category]:
+                nested_structures[example.category][method] = {}
+            if model not in nested_structures[example.category][method]:
+                nested_structures[example.category][method][model] = {}
 
-                # Store the nested structure
-                nested_structures[
-                    example.category][method][model][dataset] = NestedStructure(
-                        category=example.category,
-                        method=method,
-                        model=model,
-                        dataset=dataset,
-                        example=example)
+            # Store the nested structure
+            nested_structures[
+                example.category][method][model][dataset] = NestedStructure(
+                    category=example.category,
+                    method=method,
+                    model=model,
+                    dataset=dataset,
+                    example=example)
 
     return nested_structures
 

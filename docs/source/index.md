@@ -88,7 +88,7 @@ training/data_preprocess
 
 distillation/examples/examples_distillation_index
 distillation/data_preprocess
-distillation/dmd 
+distillation/dmd
 :::
 
 % What is STA Kernel?
