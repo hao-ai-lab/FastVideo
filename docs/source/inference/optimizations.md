@@ -19,6 +19,7 @@ This page describes the various options for speeding up generation times in Fast
 - Torch SDPA: `FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA`
 - Flash Attention 2 and 3: `FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN`
 - Sliding Tile Attention: `FASTVIDEO_ATTENTION_BACKEND=SLIDING_TILE_ATTN`
+- Video Sparse Attention: `FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN`
 - Sage Attention: `FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN`
 
 ### Configuring Backends
@@ -73,6 +74,17 @@ pip install st_attn==0.0.4
 ```
 
 Please see [this page](#sta-installation) for more installation instructions.
+
+(optimizations-vsa)=
+### Video Sparse Attention
+**`VIDEO_SPARSE_ATTN`**
+
+```bash
+git submodule update --init --recursive
+python setup_vsa.py install
+```
+
+Please see [this page](#vsa-installation) for more installation instructions.
 
 (optimizations-sage)=
 ### Sage Attention

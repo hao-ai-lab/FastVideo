@@ -715,10 +715,8 @@ class DmdDenoisingStage(DenoisingStage):
                 with torch.autocast(device_type="cuda",
                                     dtype=target_dtype,
                                     enabled=autocast_enabled):
-                    if (st_attn_available
-                            and self.attn_backend == SlidingTileAttentionBackend
-                        ) or (vsa_available and self.attn_backend
-                              == VideoSparseAttentionBackend):
+                    if (vsa_available and self.attn_backend
+                            == VideoSparseAttentionBackend):
                         self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
                         )
 

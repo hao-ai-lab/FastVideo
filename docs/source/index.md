@@ -33,6 +33,7 @@ With FastVideo's optimizations, you can achieve more than 3x inference improveme
 FastVideo has the following features:
 - State-of-the-art performance optimizations for inference
   - [Sliding Tile Attention](https://arxiv.org/pdf/2502.04507)
+  - [Video Sparse Attention](https://arxiv.org/pdf/2505.13389)
   - [TeaCache](https://arxiv.org/pdf/2411.19108)
   - [Sage Attention](https://arxiv.org/abs/2410.02367)
 - Cutting edge models
@@ -78,18 +79,16 @@ inference/add_pipeline
 
 training/examples/examples_training_index
 training/data_preprocess
-training/distillation
 <!-- training/finetune -->
 :::
 
-<!-- :::{toctree}
+:::{toctree}
 :caption: Distillation
 :maxdepth: 1
 
 distillation/examples/examples_distillation_index
 distillation/data_preprocess
-distillation/dmd -->
-<!-- training/finetune -->
+distillation/dmd
 :::
 
 % What is STA Kernel?
@@ -100,6 +99,16 @@ distillation/dmd -->
 
 sliding_tile_attention/installation
 sliding_tile_attention/demo
+:::
+
+% What is VSA Kernel?
+
+:::{toctree}
+:caption: Video Sparse Attention
+:maxdepth: 1
+
+video_sparse_attention/installation
+video_sparse_attention/demo
 :::
 
 :::{toctree}

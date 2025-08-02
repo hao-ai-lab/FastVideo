@@ -29,13 +29,13 @@ export CUDA_HOME=/usr/local/cuda-12.4
 export PATH=${CUDA_HOME}/bin:${PATH} 
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 git submodule update --init --recursive
-python setup.py install
+python setup_sta.py install
 ```
 
 # 🧪 Test
 
 ```bash
-python test/test_sta.py
+python csrc/attn/tests/test_sta.py
 ```
 
 # 📋 Usage
