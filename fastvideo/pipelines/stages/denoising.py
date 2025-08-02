@@ -253,6 +253,7 @@ class DenoisingStage(PipelineStage):
                         self.transformer.to('cpu')
                     current_model = self.transformer_2
                     current_guidance_scale = batch.guidance_scale_2
+                assert current_model is not None, "current_model is None"
 
                 # Expand latents for I2V
                 latent_model_input = latents.to(target_dtype)
@@ -272,7 +273,9 @@ class DenoisingStage(PipelineStage):
                     logger.info(
                         f"mask[0][0][:, ::2, ::2] shape: {mask2[0][0][:, ::2, ::2].shape}"
                     )
-                    temp_ts = (mask2[0][0][:, ::2, ::2] * timestep).flatten()
+                    temp_ts = (mask2[0][0][:, ::2, ::2] * timestep)
+                    logger.info(f"temp_ts shape before flatten: {temp_ts.shape}")
+                    temp_ts = temp_ts.flatten()
                     logger.info(f"temp_ts: {temp_ts}")
                     logger.info(f"temp_ts shape: {temp_ts.shape}")
                     temp_ts = torch.cat([

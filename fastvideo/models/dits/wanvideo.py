@@ -303,6 +303,8 @@ class WanTransformerBlock(nn.Module):
         temb: torch.Tensor,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
     ) -> torch.Tensor:
+        cuda_memory_before = torch.cuda.memory_allocated()
+        logger.info(f"cuda memory 6: {cuda_memory_before / 1024 / 1024 / 1024} GB")
         if hidden_states.dim() == 4:
             hidden_states = hidden_states.squeeze(1)
         bs, seq_length, _ = hidden_states.shape
@@ -312,10 +314,15 @@ class WanTransformerBlock(nn.Module):
         shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
             6, dim=1)
         assert shift_msa.dtype == torch.float32
+        cuda_memory_before = torch.cuda.memory_allocated()
+        logger.info(f"cuda memory 7: {cuda_memory_before / 1024 / 1024 / 1024} GB")
 
         # 1. Self-attention
+        logger.info(f"hidden_states shape: {hidden_states.shape}")
         norm_hidden_states = (self.norm1(hidden_states.float()) *
                               (1 + scale_msa) + shift_msa).to(orig_dtype)
+        cuda_memory_before = torch.cuda.memory_allocated()
+        logger.info(f"cuda memory 8: {cuda_memory_before / 1024 / 1024 / 1024} GB")
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)
@@ -603,6 +610,8 @@ class WanTransformer3DModel(CachableDiT):
                 **kwargs) -> torch.Tensor:
         forward_batch = get_forward_context().forward_batch
         enable_teacache = forward_batch is not None and forward_batch.enable_teacache
+        cuda_memory_before = torch.cuda.memory_allocated()
+        logger.info(f"cuda memory 1: {cuda_memory_before / 1024 / 1024 / 1024} GB")
 
         orig_dtype = hidden_states.dtype
         if not isinstance(encoder_hidden_states, torch.Tensor):
@@ -638,9 +647,15 @@ class WanTransformer3DModel(CachableDiT):
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
+        cuda_memory_before = torch.cuda.memory_allocated()
+        logger.info(f"cuda memory 2: {cuda_memory_before / 1024 / 1024 / 1024} GB")
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
             timestep, encoder_hidden_states, encoder_hidden_states_image)
+        cuda_memory_before = torch.cuda.memory_allocated()
+        logger.info(f"cuda memory 3: {cuda_memory_before / 1024 / 1024 / 1024} GB")
         timestep_proj = timestep_proj.unflatten(1, (6, -1))
+        cuda_memory_before = torch.cuda.memory_allocated()
+        logger.info(f"cuda memory 4: {cuda_memory_before / 1024 / 1024 / 1024} GB")
 
         if encoder_hidden_states_image is not None:
             encoder_hidden_states = torch.concat(
@@ -671,6 +686,8 @@ class WanTransformer3DModel(CachableDiT):
                         timestep_proj, freqs_cis)
             else:
                 for block in self.blocks:
+                    cuda_memory_before = torch.cuda.memory_allocated()
+                    logger.info(f"cuda memory 5: {cuda_memory_before / 1024 / 1024 / 1024} GB")
                     hidden_states = block(hidden_states, encoder_hidden_states,
                                           timestep_proj, freqs_cis)
 
