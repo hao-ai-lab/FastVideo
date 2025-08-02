@@ -308,8 +308,9 @@ class FastVideoArgs:
         parser.add_argument(
             "--enable-torch-compile",
             action=StoreBoolean,
-            help=
-            "Use torch.compile for speeding up STA inference without teacache",
+            default=FastVideoArgs.enable_torch_compile,
+            help="Use torch.compile to speed up DiT inference." +
+            "However, will likely cause precision drifts. See (https://github.com/pytorch/pytorch/issues/145213)",
         )
 
         parser.add_argument(
@@ -378,7 +379,6 @@ class FastVideoArgs:
             default=FastVideoArgs.enable_stage_verification,
             help="Enable input/output verification for pipeline stages",
         )
-
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)
 
@@ -496,12 +496,6 @@ class FastVideoArgs:
 
         if self.num_gpus < max(self.tp_size, self.sp_size):
             self.num_gpus = max(self.tp_size, self.sp_size)
-
-        if self.enable_torch_compile and self.num_gpus > 1:
-            logger.warning(
-                "Currently torch compile does not work with multi-gpu. Setting enable_torch_compile to False"
-            )
-            self.enable_torch_compile = False
 
         if self.pipeline_config is None:
             raise ValueError("pipeline_config is not set in FastVideoArgs")
@@ -672,6 +666,7 @@ class TrainingArgs(FastVideoArgs):
     real_score_guidance_scale: float = 3.5
     training_state_checkpointing_steps: int = 0  # for resuming training
     weight_only_checkpointing_steps: int = 0  # for inference
+    log_visualization: bool = False
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -998,6 +993,9 @@ class TrainingArgs(FastVideoArgs):
                             type=float,
                             default=TrainingArgs.real_score_guidance_scale,
                             help="Teacher guidance scale")
+        parser.add_argument("--log-visualization",
+                            action=StoreBoolean,
+                            help="Whether to log visualization")
 
         return parser
 

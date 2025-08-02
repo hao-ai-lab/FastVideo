@@ -130,8 +130,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
         self.lr_scheduler = get_scheduler(
             training_args.lr_scheduler,
             optimizer=self.optimizer,
-            num_warmup_steps=training_args.lr_warmup_steps * self.world_size,
-            num_training_steps=training_args.max_train_steps * self.world_size,
+            num_warmup_steps=training_args.lr_warmup_steps,
+            num_training_steps=training_args.max_train_steps,
             num_cycles=training_args.lr_num_cycles,
             power=training_args.lr_power,
             last_epoch=self.init_steps - 1,
@@ -209,9 +209,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
     def _normalize_dit_input(self,
                              training_batch: TrainingBatch) -> TrainingBatch:
         # TODO(will): support other models
-        training_batch.latents = normalize_dit_input(
-            'wan', training_batch.latents,
-            self.validation_pipeline.get_module("vae"))
+        training_batch.latents = normalize_dit_input('wan',
+                                                     training_batch.latents,
+                                                     self.get_module("vae"))
         return training_batch
 
     def _prepare_dit_inputs(self,

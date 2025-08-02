@@ -83,7 +83,7 @@ def rocm_platform_plugin() -> str | None:
         finally:
             amdsmi.amdsmi_shut_down()
     except Exception as e:
-        logger.info("ROCm detection failed: %s", e)
+        logger.info("ROCm platform is unavailable: %s", e)
 
     return "fastvideo.platforms.rocm.RocmPlatform" if is_rocm else None
 

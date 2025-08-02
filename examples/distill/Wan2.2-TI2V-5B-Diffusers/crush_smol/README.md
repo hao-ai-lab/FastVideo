@@ -1,16 +1,12 @@
-# Wan2.1-T2V-1.3B Crush-Smol Example
-These are e2e example scripts for finetuning Wan2.1 T2V 1.3B on the crush-smol dataset.
+# Wan2.2-5B Distill Example
+These are end-to-end example scripts for distilling Wan2.2 TI2V 5B model DMD+VSA methods.
 
-## Execute the following commands from `FastVideo/` to run training:
+### 0. Make sure you have installed VSA
 
-### Download crush-smol dataset:
+```bash
+cd csrc/attn
+git submodule update --init --recursive
+python setup_vsa.py install
+```
 
-`bash examples/training/finetune/wan_t2v_1_3b/crush_smol/download_dataset.sh`
-
-### Preprocess the videos and captions into latents:
-
-`bash examples/training/finetune/wan_t2v_1_3b/crush_smol/preprocess_wan_data_t2v.sh`
-
-### Edit the following file and run finetuning:
-
-`bash examples/training/finetune/wan_t2v_1_3b/crush_smol/finetune_t2v.sh`
+### TODO
