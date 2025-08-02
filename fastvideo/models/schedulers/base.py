@@ -8,10 +8,11 @@ import torch
 class BaseScheduler(ABC):
     timesteps: torch.Tensor
     order: int
+    num_train_timesteps: int
 
     def __init__(self, *args, **kwargs) -> None:
         # Check if subclass has defined all required properties
-        required_attributes = ['timesteps', 'order']
+        required_attributes = ['timesteps', 'order', 'num_train_timesteps']
 
         for attr in required_attributes:
             if not hasattr(self, attr):

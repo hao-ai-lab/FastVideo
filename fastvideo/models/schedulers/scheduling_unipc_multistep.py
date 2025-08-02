@@ -273,6 +273,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         self.num_inference_steps = None
         timesteps = np.linspace(0, num_train_timesteps - 1, num_train_timesteps, dtype=np.float32)[::-1].copy()
         self.timesteps = torch.from_numpy(timesteps)
+        self.num_train_timesteps = num_train_timesteps
         self.model_outputs = [None] * solver_order
         self.timestep_list = [None] * solver_order
         self.lower_order_nums = 0
