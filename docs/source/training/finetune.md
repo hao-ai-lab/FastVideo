@@ -7,7 +7,7 @@ Ensure your data is prepared and preprocessed in the format specified in [data_p
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/Mochi-Black-Myth --local_dir=data/Mochi-Black-Myth --repo_type=dataset
 ```
 
-Download the original model weights as specified in [Distill Section](#v0-distill):
+Download the original model weights as specified in the [Distillation Section](../distillation/dmd.md):
 
 Then you can run the finetune with:
 

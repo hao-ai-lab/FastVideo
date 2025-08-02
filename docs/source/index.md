@@ -79,18 +79,16 @@ inference/add_pipeline
 
 training/examples/examples_training_index
 training/data_preprocess
-training/distillation
 <!-- training/finetune -->
 :::
 
-<!-- :::{toctree}
+:::{toctree}
 :caption: Distillation
 :maxdepth: 1
 
 distillation/examples/examples_distillation_index
 distillation/data_preprocess
-distillation/dmd -->
-<!-- training/finetune -->
+distillation/dmd 
 :::
 
 % What is STA Kernel?
