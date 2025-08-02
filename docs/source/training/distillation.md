@@ -7,7 +7,7 @@ Our distillation recipe is based on a new finetuning strategy - **Sparse-distill
 We provide two distilled models:
 
 - **[FastWan2.1-T2V-1.3B-Diffusers](https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers)**: 3-step inference, up to **20 FPS** on H100 GPU
-- **[FastWan2.1-T2V-14B-480P-Diffusers](https://huggingface.co/FastVideo/FastWan2.1-T2V-14B-480P-Diffusers)**: 3-step inference, up to **50x speed up** at 480P, **70x speed up** at 720P for denosing loop
+- **[FastWan2.1-T2V-14B-480P-Diffusers](https://huggingface.co/FastVideo/FastWan2.1-T2V-14B-480P-Diffusers)**: 3-step inference, up to **50x speed up** at 480P, **70x speed up** at 720P for denoising loop
 
 Both models are trained on **61×448×832** resolution but support generating videos with **any resolution** (1.3B  model mainly support 480P, 14B model support 480P and 720P, quality may degrade for different resolutions).
 
