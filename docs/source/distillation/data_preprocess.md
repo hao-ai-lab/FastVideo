@@ -41,11 +41,3 @@ bash scripts/preprocess/v1_preprocess_wan_data_t2v
 # For Wan2.2 TI2V  
 bash examples/distill/Wan2.2-TI2V-5B-Diffusers/crush_smol/preprocess_wan_data_ti2v_5b.sh
 ```
-
-## Key Differences for Distillation
-
-1. **Dataset Size**: Distillation typically requires larger datasets (600k+ samples) compared to fine-tuning
-2. **Resolution**: Distillation datasets are usually at specific resolutions (e.g., 480P for Wan2.1)
-3. **Quality**: Distillation datasets focus on high-quality synthetic data for better knowledge transfer
-
-For detailed preprocessing steps and custom dataset creation, see [Training Data Preprocess](../training/data_preprocess.md).
