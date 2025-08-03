@@ -34,9 +34,12 @@ class RayServeClient:
         start_time = time.time()
         
         try:
+            headers = {"Content-Type": "application/json"}
+            
             response = self.session.post(
                 f"{self.backend_url}/generate_video",
                 json=request_data,
+                headers=headers,
                 timeout=300  # 5 minutes timeout
             )
             
@@ -56,16 +59,7 @@ class RayServeClient:
         except requests.exceptions.RequestException as e:
             return {"success": False, "error_message": f"Request failed: {str(e)}"}
     
-    def get_gallery(self) -> dict:
-        """Get user's video gallery"""
-        try:
-            response = self.session.get(f"{self.backend_url}/gallery", timeout=10)
-            if response.status_code == 200:
-                return response.json()
-            else:
-                return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
-        except requests.exceptions.RequestException as e:
-            return {"success": False, "error": f"Request failed: {str(e)}"}
+
 
 
 def save_video_from_base64(video_data: str, output_dir: str, prompt: str) -> str:
@@ -118,6 +112,7 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
         input_image=None,
         model_selection="FastVideo/FastWan2.1-T2V-1.3B-Diffusers (Text-to-Video)",
         progress=None,
+        request: gr.Request = None,
     ):
         # Check backend health first
         if not client.check_health():
@@ -239,22 +234,22 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             <div style="margin: 20px 0;">
                 <h3 style="text-align: center; margin-bottom: 15px;">⏱️ Timing Breakdown</h3>
                 <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 15px;">
-                    <div style="background: #f0f0f0; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #ddd;">
+                    <div class="timing-card">
                         <div style="font-size: 24px;">🧠</div>
                         <div style="font-weight: bold; margin: 5px 0;">Model Inference</div>
                         <div style="font-size: 18px; color: #2563eb;">{inference_time:.2f}s</div>
                     </div>
-                    <div style="background: #f0f0f0; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #ddd;">
+                    <div class="timing-card">
                         <div style="font-size: 24px;">🎬</div>
                         <div style="font-weight: bold; margin: 5px 0;">Video Encoding</div>
                         <div style="font-size: 18px; color: #dc2626;">{encoding_time:.2f}s</div>
                     </div>
-                    <div style="background: #f0f0f0; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #ddd;">
+                    <div class="timing-card">
                         <div style="font-size: 24px;">🌐</div>
                         <div style="font-weight: bold; margin: 5px 0;">Network Transfer</div>
                         <div style="font-size: 18px; color: #059669;">{network_time:.2f}s</div>
                     </div>
-                    <div style="background: #e0f2fe; padding: 15px; border-radius: 8px; text-align: center; border: 2px solid #0277bd;">
+                    <div class="timing-card timing-card-highlight">
                         <div style="font-size: 24px;">📊</div>
                         <div style="font-weight: bold; margin: 5px 0;">Total Processing</div>
                         <div style="font-size: 20px; font-weight: bold; color: #0277bd;">{total_time:.2f}s</div>
@@ -271,7 +266,7 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             for stage_name, stage_time in zip(stage_names, stage_execution_times):
                 if stage_name.strip() and stage_time > 0:  # Only show non-empty stages with valid times
                     timing_details += f"""
-                        <div style="background: #f8f9fa; padding: 10px; border-radius: 6px; text-align: center; border: 1px solid #e9ecef;">
+                        <div class="stage-card">
                             <div style="font-weight: bold; font-size: 14px; margin-bottom: 5px;">{stage_name.strip()}</div>
                             <div style="font-size: 16px; color: #7c3aed; font-weight: bold;">{stage_time:.2f}s</div>
                         </div>
@@ -286,7 +281,7 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             if inference_time > 0:
                 fps = num_frames / inference_time
                 timing_details += f"""
-                <div style="text-align: center; background: #f8f9fa; padding: 10px; border-radius: 6px; border: 1px solid #e9ecef; margin-top: 15px;">
+                <div class="performance-card" style="margin-top: 15px;">
                     <span style="font-weight: bold;">Generation Speed: </span>
                     <span style="font-size: 18px; color: #6366f1; font-weight: bold;">{fps:.1f} frames/second</span>
                 </div>
@@ -320,28 +315,66 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             return None, f"Generation failed: {error_msg}", ""
     
     # Example prompts
-    examples = [
-        # "A vintage train snakes through the mountains, its plume of white steam rising dramatically against the jagged peaks. The cars glint in the late afternoon sun, their deep crimson and gold accents lending a touch of elegance. The tracks carve a precarious path along the cliffside, revealing glimpses of a roaring river far below. Inside, passengers peer out the large windows, their faces lit with awe as the landscape unfolds.",
-        "A crowded rooftop bar buzzes with energy, the city skyline twinkling like a field of stars in the background. Strings of fairy lights hang above, casting a warm, golden glow over the scene. Groups of people gather around high tables, their laughter blending with the soft rhythm of live jazz. The aroma of freshly mixed cocktails and charred appetizers wafts through the air, mingling with the cool night breeze.",
-    ]
+    examples = []
+    example_labels = []
     
-    example_labels = [
-        # "Hand wrapping dough with plastic",
-        # "Vintage train through mountains",
-        "Crowded rooftop bar at night"
-    ]
-
-    with open("example_prompts.txt", "r") as f:
-        for line in f:
-            example_labels.append(line.strip()[:100])
-            examples.append(line.strip())
+    def contains_chinese(text):
+        """Check if text contains Chinese characters"""
+        for char in text:
+            if '\u4e00' <= char <= '\u9fff':  # CJK Unified Ideographs (Chinese characters)
+                return True
+        return False
+    
+    # Load prompts from all text files in the prompts directory
+    prompts_dir = "prompts"
+    if os.path.exists(prompts_dir):
+        for filename in os.listdir(prompts_dir):
+            if filename.endswith('.txt'):
+                filepath = os.path.join(prompts_dir, filename)
+                try:
+                    with open(filepath, "r", encoding='utf-8') as f:
+                        for line_num, line in enumerate(f, 1):
+                            line = line.strip()
+                            if line and not contains_chinese(line):  # Skip empty lines and lines with Chinese text
+                                # Create a label from the first 100 characters
+                                label = line[:100] + "..." if len(line) > 100 else line
+                                example_labels.append(label)
+                                examples.append(line)
+                except Exception as e:
+                    print(f"Warning: Could not read {filepath}: {e}")
+    
+    # Fallback to example_prompts.txt if prompts directory is empty or doesn't exist
+    if not examples:
+        try:
+            with open("example_prompts.txt", "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        example_labels.append(line[:100])
+                        examples.append(line)
+        except Exception as e:
+            print(f"Warning: Could not read example_prompts.txt: {e}")
+            # Add a default example if all else fails
+            examples = ["A crowded rooftop bar buzzes with energy, the city skyline twinkling like a field of stars in the background. Strings of fairy lights hang above, casting a warm, golden glow over the scene. Groups of people gather around high tables, their laughter blending with the soft rhythm of live jazz. The aroma of freshly mixed cocktails and charred appetizers wafts through the air, mingling with the cool night breeze."]
+            example_labels = ["Crowded rooftop bar at night"]
+    
+    # Create a custom theme with blue styling to match the logo
+    theme = gr.themes.Base().set(
+        button_primary_background_fill="#2563eb",  # Blue color
+        button_primary_background_fill_hover="#1d4ed8",  # Darker blue on hover
+        button_primary_text_color="white",
+        slider_color="#2563eb",  # Blue slider
+        checkbox_background_color_selected="#2563eb",  # Blue checkbox when selected
+    )
     
     # Create Gradio interface
-    with gr.Blocks() as demo:
-        gr.Image("assets/logo.jpg", show_label=False, container=False, height=100)
+    with gr.Blocks(title="FastWan", theme=theme) as demo:
+        
+        # Logo using Gradio's Image component
+        gr.Image("fastvideo-logos/main/png/full.png", show_label=False, container=False, height=100)
         gr.HTML("""
         <div style="text-align: center; margin-bottom: 10px;">
-            <p style="font-size: 18px;"> ⚡️ Make Video Generation Go Blurrrrrrr ⚡️ </p>
+            <p style="font-size: 18px;"> Make Video Generation Go Blurrrrrrr </p>
             <p style="font-size: 18px;"> Twitter | <a href="https://github.com/hao-ai-lab/FastVideo/tree/main" target="_blank">Code</a> | Blog | <a href="https://hao-ai-lab.github.io/FastVideo/" target="_blank">Docs</a>  </p>
         </div>
         """)
@@ -402,14 +435,15 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                     placeholder="Enter your prompt",
                     container=False,
                     lines=3,
+                    autofocus=True,
                 )
             with gr.Column(scale=1, min_width=120, elem_classes="center-button"):
                 run_button = gr.Button("Run", variant="primary", size="lg")
         
         # Two-column layout: Advanced options on left, Video on right
-        with gr.Row(equal_height=True):
+        with gr.Row(equal_height=True, elem_classes="main-content-row"):
             # Left column - Advanced options
-            with gr.Column(scale=1):
+            with gr.Column(scale=1, elem_classes="advanced-options-column"):
                 gr.HTML("<h3>Advanced Options</h3>")
                 with gr.Group():
                     with gr.Row():
@@ -465,13 +499,13 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                     seed_output = gr.Number(label="Used Seed")
             
             # Right column - Video result
-            with gr.Column(scale=1):
+            with gr.Column(scale=1, elem_classes="video-column"):
                 # Add spacing to align with advanced options
-                gr.HTML("<div style='height: 1.4em;'></div>")
+                gr.HTML("<h3 style='visibility: hidden;'>Placeholder</h3>")
                 result = gr.Video(
                     label="Generated Video", 
                     show_label=True,
-                    height=400,  # Restore original height
+                    height=392,  # Restore original height
                     width=600,   # Limit video width
                     container=True
                 )
@@ -509,14 +543,101 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
         }
         
         /* Ensure equal height columns */
-        .gr-row {
-            align-items: stretch !important;
+        .main-content-row {
+            display: flex !important;
+            align-items: flex-start !important;
+            min-height: 500px !important;
         }
         
-        .gr-column {
+        .advanced-options-column,
+        .video-column {
             display: flex !important;
             flex-direction: column !important;
-            height: 100% !important;
+            flex: 1 !important;
+            min-height: 500px !important;
+        }
+        
+        /* Force equal heights regardless of content */
+        .advanced-options-column > *:last-child,
+        .video-column > *:last-child {
+            flex-grow: 1 !important;
+        }
+        
+        /* Responsive alignment for split screen */
+        @media (max-width: 1400px) {
+            .main-content-row {
+                min-height: 600px !important;
+            }
+            
+            .advanced-options-column,
+            .video-column {
+                min-height: 600px !important;
+            }
+        }
+        
+        @media (max-width: 1200px) {
+            .main-content-row {
+                flex-direction: column !important;
+                align-items: stretch !important;
+            }
+            
+            .advanced-options-column,
+            .video-column {
+                min-height: auto !important;
+                width: 100% !important;
+            }
+        }
+        
+        /* Theme-agnostic timing cards */
+        .timing-card {
+            background: var(--background-fill-secondary) !important;
+            border: 1px solid var(--border-color-primary) !important;
+            color: var(--body-text-color) !important;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .timing-card-highlight {
+            background: var(--background-fill-primary) !important;
+            border: 2px solid var(--color-accent) !important;
+        }
+        
+        .stage-card {
+            background: var(--background-fill-secondary) !important;
+            border: 1px solid var(--border-color-primary) !important;
+            color: var(--body-text-color) !important;
+            padding: 10px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        
+        .performance-card {
+            background: var(--background-fill-secondary) !important;
+            border: 1px solid var(--border-color-primary) !important;
+            color: var(--body-text-color) !important;
+            padding: 10px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        
+        /* Dark mode support */
+        .dark .timing-card {
+            background: var(--background-fill-secondary) !important;
+            border-color: var(--border-color-primary) !important;
+            color: var(--body-text-color) !important;
+        }
+        
+        .dark .timing-card-highlight {
+            background: var(--background-fill-primary) !important;
+            border-color: var(--color-accent) !important;
+        }
+        
+        .dark .stage-card,
+        .dark .performance-card {
+            background: var(--background-fill-secondary) !important;
+            border-color: var(--border-color-primary) !important;
+            color: var(--body-text-color) !important;
         }
         </style>
         """)
@@ -532,69 +653,7 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                 frames_output = gr.Text(label="Generation Status", visible=False)
                 timing_display = gr.Markdown(label="Timing Breakdown", visible=False)
         
-        # Gallery section
-        with gr.Accordion("Your Video Gallery", open=False):
-            gallery_refresh_btn = gr.Button("🔄 Refresh Gallery", size="sm")
-            gallery_display = gr.HTML("Click 'Refresh Gallery' to see your generated videos")
-            
-            def refresh_gallery():
-                try:
-                    print("Refreshing gallery...")
-                    gallery_data = client.get_gallery()
-                    print(f"Gallery response: {gallery_data}")
-                    
-                    if gallery_data.get("success") and gallery_data.get("videos"):
-                        videos = gallery_data["videos"]
-                        video_count = len(videos)
-                        print(f"Found {video_count} videos for this user")
-                        
-                        if video_count == 0:
-                            return "<p style='text-align: center; color: #666;'>No videos found in your personal gallery yet. Generate some videos to see them here!</p>"
-                        
-                        html_content = f"<h4>Your Personal Gallery ({video_count} videos)</h4>"
-                        html_content += "<div style='display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;'>"
-                        
-                        for video in videos:
-                            # Create a simple video player for each video
-                            # Convert absolute path to relative path for Gradio file serving
-                            relative_path = os.path.relpath(video['filepath'], start='.')
-                            file_size_mb = video['size'] / (1024 * 1024)
-                            
-                            video_html = f"""
-                            <div style='border: 1px solid #ddd; border-radius: 8px; padding: 10px; background: #f9f9f9;'>
-                                <video controls style='width: 100%; height: 200px; object-fit: cover;'>
-                                    <source src="file/{relative_path}" type="video/mp4">
-                                    Your browser does not support the video tag.
-                                </video>
-                                <div style='margin-top: 10px;'>
-                                    <p style='font-size: 12px; color: #666; margin: 5px 0;'>
-                                        <strong>Prompt:</strong> {video['prompt']}
-                                    </p>
-                                    <p style='font-size: 10px; color: #999; margin: 5px 0;'>
-                                        Generated: {time.strftime('%Y-%m-%d %H:%M', time.localtime(video['timestamp']))} | Size: {file_size_mb:.1f} MB
-                                    </p>
-                                    <p style='font-size: 10px; color: #999; margin: 5px 0;'>
-                                        File: {video['filename']}
-                                    </p>
-                                </div>
-                            </div>
-                            """
-                            html_content += video_html
-                        
-                        html_content += "</div>"
-                        return html_content
-                    else:
-                        error_msg = gallery_data.get("error", "Unknown error")
-                        print(f"Gallery request failed: {error_msg}")
-                        return f"<p style='text-align: center; color: #666;'>No videos found in your personal gallery yet. Generate some videos to see them here!<br/><small>({error_msg})</small></p>"
-                except Exception as e:
-                    print(f"Exception in refresh_gallery: {str(e)}")
-                    return f"<p style='text-align: center; color: #red;'>Error loading gallery: {str(e)}</p>"
-            
-            gallery_refresh_btn.click(
-                fn=refresh_gallery,
-                outputs=gallery_display
-            )
+
         
         # Function to update prompt when example is selected
         def on_example_select(example_label):
@@ -635,7 +694,7 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
         #     outputs=[input_image, prompt],
         # )
         
-        def handle_generation(*args, progress=None):
+        def handle_generation(*args, progress=None, request: gr.Request = None):
             # Extract model selection and input image from args - I2V functionality commented out
             model_selection, prompt, negative_prompt, use_negative_prompt, seed, guidance_scale, num_frames, height, width, randomize_seed = args
             
@@ -649,7 +708,7 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             # Call the generate_video function with progress tracking
             result_path, seed_or_error, timing_details = generate_video(
                 prompt, negative_prompt, use_negative_prompt, seed, guidance_scale, 
-                num_frames, height, width, randomize_seed, None, model_selection, progress
+                num_frames, height, width, randomize_seed, None, model_selection, progress, request
             )
             
             if result_path and os.path.exists(result_path):
@@ -751,7 +810,8 @@ def main():
     demo.queue(max_size=20).launch(
         server_name=args.host,
         server_port=args.port,
-        allowed_paths=[os.path.abspath("outputs"), os.path.abspath("temp_images")]
+        favicon_path="fastvideo-logos/main/png/icon-simple.png",
+        allowed_paths=[os.path.abspath("outputs"), os.path.abspath("temp_images"), os.path.abspath("fastvideo-logos")]
     )
 
 
