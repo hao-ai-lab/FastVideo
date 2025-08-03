@@ -3,7 +3,7 @@ import json
 import math
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from enum import Enum
 from typing import Any
 
@@ -960,13 +960,14 @@ def get_piecewise_constant_schedule(optimizer: Optimizer,
         rules_dict[steps] = value
     last_lr_multiple = float(rule_list[-1])
 
-    def create_rules_function(rules_dict, last_lr_multiple):
+    def create_rules_function(
+            rules_dict: dict,
+            last_lr_multiple: float) -> Callable[[int], float]:
 
         def rule_func(steps: int) -> float:
-            sorted_steps = sorted(rules_dict.keys())
-            for i, sorted_step in enumerate(sorted_steps):
-                if steps < sorted_step:
-                    return rules_dict[sorted_steps[i]]
+            for step_threshold, lr_multiple in sorted(rules_dict.items()):
+                if steps < step_threshold:
+                    return lr_multiple
             return last_lr_multiple
 
         return rule_func
@@ -1189,7 +1190,10 @@ def get_polynomial_decay_schedule_with_warmup(
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
 
-TYPE_TO_SCHEDULER_FUNCTION = {
+# Type alias for scheduler functions
+SchedulerFunction = Callable[..., LambdaLR]
+
+TYPE_TO_SCHEDULER_FUNCTION: dict[SchedulerType, SchedulerFunction] = {
     SchedulerType.LINEAR: get_linear_schedule_with_warmup,
     SchedulerType.COSINE: get_cosine_schedule_with_warmup,
     SchedulerType.COSINE_WITH_RESTARTS:
