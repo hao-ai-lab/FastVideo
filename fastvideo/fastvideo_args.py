@@ -670,7 +670,7 @@ class TrainingArgs(FastVideoArgs):
     training_state_checkpointing_steps: int = 0  # for resuming training
     weight_only_checkpointing_steps: int = 0  # for inference
     log_visualization: bool = False
-    # simulate student forward to match inference 
+    # simulate student forward to match inference
     simulate_student_forward: bool = False
 
     @classmethod
@@ -933,10 +933,11 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--lr-power",
                             type=float,
                             help="Learning rate power")
-        parser.add_argument("--min-lr-ratio",
-                            type=float,
-                            default=TrainingArgs.min_lr_ratio,
-                            help="Minimum learning rate ratio for cosine_with_min_lr scheduler")
+        parser.add_argument(
+            "--min-lr-ratio",
+            type=float,
+            default=TrainingArgs.min_lr_ratio,
+            help="Minimum learning rate ratio for cosine_with_min_lr scheduler")
         parser.add_argument("--not-apply-cfg-solver",
                             action=StoreBoolean,
                             help="Whether to not apply CFG solver")
@@ -1006,16 +1007,18 @@ class TrainingArgs(FastVideoArgs):
                             type=float,
                             default=TrainingArgs.fake_score_learning_rate,
                             help="Learning rate for fake score transformer")
-        parser.add_argument("--fake-score-lr-scheduler",
-                            type=str,
-                            default=TrainingArgs.fake_score_lr_scheduler,
-                            help="Learning rate scheduler for fake score transformer")
+        parser.add_argument(
+            "--fake-score-lr-scheduler",
+            type=str,
+            default=TrainingArgs.fake_score_lr_scheduler,
+            help="Learning rate scheduler for fake score transformer")
         parser.add_argument("--log-visualization",
                             action=StoreBoolean,
                             help="Whether to log visualization")
-        parser.add_argument("--simulate-student-forward",
-                            action=StoreBoolean,
-                            help="Whether to simulate student forward to match inference")
+        parser.add_argument(
+            "--simulate-student-forward",
+            action=StoreBoolean,
+            help="Whether to simulate student forward to match inference")
 
         return parser
 
