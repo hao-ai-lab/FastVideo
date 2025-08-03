@@ -41,15 +41,14 @@ class VideoGenerationResponse(BaseModel):
     seed: int
     success: bool
     error_message: Optional[str] = None
-    frames: Optional[List[str]] = None  # Base64 encoded frames
     generation_time: Optional[float] = None
     # Detailed timing information
     model_load_time: Optional[float] = None
     inference_time: Optional[float] = None
     encoding_time: Optional[float] = None
     total_time: Optional[float] = None
-    stage_names: Optional[str] = None
-    stage_execution_times: Optional[str] = None
+    stage_names: Optional[List[str]] = None
+    stage_execution_times: Optional[List[float]] = None
 
 
 def encode_video_to_base64(frames: List[np.ndarray], fps: int = 24) -> str:
@@ -70,55 +69,6 @@ def encode_video_to_base64(frames: List[np.ndarray], fps: int = 24) -> str:
     except Exception as e:
         print(f"Warning: Failed to encode video: {e}")
         return ""
-
-
-def encode_frames_to_base64(frames: List[np.ndarray]) -> List[str]:
-    """Convert numpy frames (0-255) to base64-encoded PNG images"""
-    if not frames:
-        return []
-    
-    encoded_frames = []
-    
-    for i, frame in enumerate(frames):
-        try:
-            # Ensure frame is numpy array
-            if not isinstance(frame, np.ndarray):
-                print(f"Warning: Frame {i} is not a numpy array, skipping")
-                continue
-                
-            # Ensure frame is uint8
-            if frame.dtype != np.uint8:
-                # Clip values to 0-255 range and convert to uint8
-                frame = np.clip(frame, 0, 255).astype(np.uint8)
-            
-            # Convert numpy array to PIL Image
-            if len(frame.shape) == 3 and frame.shape[2] == 3:
-                # RGB image
-                pil_image = Image.fromarray(frame, mode='RGB')
-            elif len(frame.shape) == 3 and frame.shape[2] == 4:
-                # RGBA image
-                pil_image = Image.fromarray(frame, mode='RGBA')
-            elif len(frame.shape) == 2:
-                # Grayscale image
-                pil_image = Image.fromarray(frame, mode='L')
-            else:
-                print(f"Warning: Frame {i} has unsupported shape {frame.shape}, skipping")
-                continue
-            
-            # Save to bytes buffer as PNG
-            buffer = io.BytesIO()
-            pil_image.save(buffer, format='PNG')
-            buffer.seek(0)
-            
-            # Encode to base64
-            img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-            encoded_frames.append(f"data:image/png;base64,{img_base64}")
-            
-        except Exception as e:
-            print(f"Warning: Failed to encode frame {i}: {e}")
-            continue
-    
-    return encoded_frames
 
 
 def save_video_by_ip(video_data: str, output_path: str, prompt: str, user_ip: str) -> tuple[str, str]:
@@ -250,7 +200,7 @@ class T2VModelDeployment:
 
         # Do not write to disk when called via API
         params.save_video = False
-        params.return_frames = True
+        params.return_frames = False
 
         # Track inference time
         inference_start_time = time.time()
@@ -260,7 +210,7 @@ class T2VModelDeployment:
             prompt=video_request.prompt,
             sampling_param=params,
             save_video=False,
-            return_frames=True,
+            return_frames=False,
         )
         
         inference_end_time = time.time()
@@ -269,18 +219,20 @@ class T2VModelDeployment:
         frames = result if isinstance(result, list) else result.get("frames", [])
         generation_time = result.get("generation_time", 0.0) if isinstance(result, dict) else 0.0
 
-        # stage_names = result.get("stage_names", None) 
-        # stage_execution_times = result.get("stage_execution_times", None)
 
-        # stage_names = ",".join(stage_names)
-        # stage_execution_times = ",".join([str(time) for time in stage_execution_times])
+        logging_info = result.get("logging_info", None)
+        if logging_info:
+            stage_names = logging_info.get_execution_order()
+            stage_execution_times = [logging_info.get_stage_info(stage_name).get("execution_time", 0.0) for stage_name in stage_names]
+        else:
+            stage_names = []
+            stage_execution_times = []
 
         # Track encoding time
         encoding_start_time = time.time()
         
         # Encode outputs
         video_data = encode_video_to_base64(frames, fps=24)
-        encoded_frames = encode_frames_to_base64(frames) if frames else None
         
         encoding_end_time = time.time()
         encoding_time = encoding_end_time - encoding_start_time
@@ -290,15 +242,14 @@ class T2VModelDeployment:
 
         return VideoGenerationResponse(
             video_data=video_data,
-            frames=encoded_frames,
             seed=params.seed,
             success=True,
             generation_time=generation_time,
             inference_time=inference_time,
             encoding_time=encoding_time,
             total_time=total_time,
-            # stage_names=None,
-            # stage_execution_times=None,
+            stage_names=stage_names,
+            stage_execution_times=stage_execution_times,
         )
 
 
@@ -474,18 +425,19 @@ class T2V14BModelDeployment:
 
         frames = result if isinstance(result, list) else result.get("frames", [])
         generation_time = result.get("generation_time", 0.0) if isinstance(result, dict) else 0.0
-        stage_names = result.get("stage_names", "")
-        stage_execution_times = result.get("stage_execution_times", "")
-
-        # stage_names = ",".join(stage_names)
-        # stage_execution_times = ",".join([str(time) for time in stage_execution_times])
+        logging_info = result.get("logging_info", None)
+        if logging_info:
+            stage_names = logging_info.get_execution_order()
+            stage_execution_times = [logging_info.get_stage_info(stage_name).get("execution_time", 0.0) for stage_name in stage_names]
+        else:
+            stage_names = []
+            stage_execution_times = []
 
         # Track encoding time
         encoding_start_time = time.time()
         
         # Encode outputs
         video_data = encode_video_to_base64(frames, fps=24)
-        encoded_frames = encode_frames_to_base64(frames) if frames else None
         
         encoding_end_time = time.time()
         encoding_time = encoding_end_time - encoding_start_time
@@ -495,15 +447,14 @@ class T2V14BModelDeployment:
 
         return VideoGenerationResponse(
             video_data=video_data,
-            frames=encoded_frames,
             seed=params.seed,
             success=True,
             generation_time=generation_time,
             inference_time=inference_time,
             encoding_time=encoding_time,
             total_time=total_time,
-            # stage_names=None,
-            # stage_execution_times=None,
+            stage_names=stage_names,
+            stage_execution_times=stage_execution_times,
         )
 
 

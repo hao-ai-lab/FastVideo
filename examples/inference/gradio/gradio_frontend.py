@@ -99,53 +99,6 @@ def save_video_from_base64(video_data: str, output_dir: str, prompt: str) -> str
         return f"Failed to save video: {str(e)}", ""
 
 
-def decode_and_save_video_from_frames(frames_b64: list, output_dir: str, prompt: str, fps: int = 24) -> str:
-    """Decode base64 frames and save them as a video file"""
-    if not frames_b64:
-        return "No frames to save"
-    
-    # Create safe filename from prompt
-    safe_prompt = prompt[:50].replace(' ', '_').replace('/', '_').replace('\\', '_')
-    video_filename = f"{safe_prompt}_frames.mp4"
-    video_path = os.path.join(output_dir, video_filename)
-    
-    try:
-        # Decode frames from base64
-        decoded_frames = []
-        
-        for i, frame_b64 in enumerate(frames_b64):
-            try:
-                # Remove the data URL prefix if present
-                if frame_b64.startswith('data:image/'):
-                    frame_b64 = frame_b64.split(',')[1]
-                
-                # Decode base64 to bytes
-                frame_bytes = base64.b64decode(frame_b64)
-                
-                # Create PIL Image from bytes
-                image = Image.open(io.BytesIO(frame_bytes))
-                
-                # Convert PIL Image to numpy array (same format as video_generator.py)
-                frame_array = np.array(image)
-                decoded_frames.append(frame_array)
-                
-            except Exception as e:
-                print(f"Warning: Failed to decode frame {i}: {e}")
-                continue
-        
-        if not decoded_frames:
-            return "Failed to decode any frames", ""
-        
-        # Save as video using imageio (same as video_generator.py)
-        os.makedirs(output_dir, exist_ok=True)
-        imageio.mimsave(video_path, decoded_frames, fps=fps, format="mp4")
-        
-        return f"Saved {len(decoded_frames)} frames as video: {video_path}", video_path
-        
-    except Exception as e:
-        return f"Failed to save video: {str(e)}", ""
-
-
 def create_gradio_interface(backend_url: str, default_params: SamplingParam):
     """Create the Gradio interface"""
     
@@ -270,16 +223,16 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             encoding_time = response.get("encoding_time", 0.0)
             total_time = response.get("total_time", 0.0)
             network_time = response.get("network_time", 0.0)
-            # stage_names = response.get("stage_names", "").split(",")
-            # stage_execution_times = [float(time) for time in response.get("stage_execution_times", "").split(",")]
+            stage_names = response.get("stage_names", [])
+            stage_execution_times = response.get("stage_execution_times", [])
             
             print(f"Used seed: {used_seed}")
             print(f"Inference time: {inference_time:.2f}s")
             print(f"Encoding time: {encoding_time:.2f}s")
             print(f"Network transfer: {network_time:.2f}s")
             print(f"Total time: {total_time:.2f}s")
-            # print(f"Stage names: {stage_names}")
-            # print(f"Stage execution times: {stage_execution_times}")
+            print(f"Stage names: {stage_names}")
+            print(f"Stage execution times: {stage_execution_times}")
             
             # Create detailed timing message with separate boxes
             timing_details = f"""
@@ -314,28 +267,26 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px;">
             """
             
-            # # Add individual stage timing cards
-            # for stage_name, stage_time in zip(stage_names, stage_execution_times):
-            #     if stage_name.strip() and stage_time > 0:  # Only show non-empty stages with valid times
-            #         timing_details += f"""
-            #             <div style="background: #f8f9fa; padding: 10px; border-radius: 6px; text-align: center; border: 1px solid #e9ecef;">
-            #                 <div style="font-weight: bold; font-size: 14px; margin-bottom: 5px;">{stage_name.strip()}</div>
-            #                 <div style="font-size: 16px; color: #7c3aed; font-weight: bold;">{stage_time:.2f}s</div>
-            #             </div>
-            #         """
+            # Add individual stage timing cards
+            for stage_name, stage_time in zip(stage_names, stage_execution_times):
+                if stage_name.strip() and stage_time > 0:  # Only show non-empty stages with valid times
+                    timing_details += f"""
+                        <div style="background: #f8f9fa; padding: 10px; border-radius: 6px; text-align: center; border: 1px solid #e9ecef;">
+                            <div style="font-weight: bold; font-size: 14px; margin-bottom: 5px;">{stage_name.strip()}</div>
+                            <div style="font-size: 16px; color: #7c3aed; font-weight: bold;">{stage_time:.2f}s</div>
+                        </div>
+                    """
             
-            # timing_details += """
-            #         </div>
-            #     </div>
-            # """
-            
-            timing_details += "</div>"
+            timing_details += """
+                    </div>
+                </div>
+            """
             
             # Add performance insights
             if inference_time > 0:
                 fps = num_frames / inference_time
                 timing_details += f"""
-                <div style="text-align: center; background: #f8f9fa; padding: 10px; border-radius: 6px; border: 1px solid #e9ecef;">
+                <div style="text-align: center; background: #f8f9fa; padding: 10px; border-radius: 6px; border: 1px solid #e9ecef; margin-top: 15px;">
                     <span style="font-weight: bold;">Generation Speed: </span>
                     <span style="font-size: 18px; color: #6366f1; font-weight: bold;">{fps:.1f} frames/second</span>
                 </div>

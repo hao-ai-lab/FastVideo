@@ -141,18 +141,10 @@ class Worker:
                     fastvideo_args = recv_rpc['kwargs']['fastvideo_args']
                     output_batch = self.execute_forward(forward_batch,
                                                         fastvideo_args)
-                    stage_names = []
-                    stage_execution_times = []
                     logging_info = None
                     if envs.FASTVIDEO_STAGE_LOGGING:
                         logging_info = output_batch.logging_info
-                        if logging_info:
-                            stage_names = logging_info.get_execution_order()
-                            stage_execution_times = [logging_info.get_stage_info(stage_name).get("execution_time", 0.0) for stage_name in stage_names]
-                    stage_names = ",".join(stage_names)
-                    stage_execution_times = ",".join([str(time) for time in stage_execution_times])
-                    # self.pipe.send({"output_batch": output_batch.output.cpu(), "stage_names": stage_names, "stage_execution_times": stage_execution_times})
-                    self.pipe.send({"output_batch": output_batch.output.cpu()})
+                    self.pipe.send({"output_batch": output_batch.output.cpu(), "logging_info": logging_info})
                 elif method_name == 'set_lora_adapter':
                     lora_nickname = recv_rpc['kwargs']['lora_nickname']
                     lora_path = recv_rpc['kwargs']['lora_path']

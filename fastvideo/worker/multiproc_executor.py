@@ -84,22 +84,19 @@ class MultiprocExecutor(Executor):
                                         })
         output = responses[0]["output_batch"]
 
+        logging_info = None
         if envs.FASTVIDEO_STAGE_LOGGING:
-            # stage_names = responses[0]["stage_names"]
-            # stage_execution_times = responses[0]["stage_execution_times"]
-            stage_names = ""
-            stage_execution_times = ""
+            logging_info = responses[0]["logging_info"]
         else:
-            stage_names = ""
-            stage_execution_times = ""
+            logging_info = None
 
-        # result_batch = ForwardBatch(
-        #     data_type=forward_batch.data_type,
-        #     output=output,
-        #     # logging_info=logging_info
-        # )
+        result_batch = ForwardBatch(
+            data_type=forward_batch.data_type,
+            output=output,
+            logging_info=logging_info
+        )
 
-        return output, stage_names, stage_execution_times
+        return result_batch
 
     def set_lora_adapter(self,
                          lora_nickname: str,
