@@ -308,7 +308,8 @@ class VideoGenerator:
         # Run inference
         start_time = time.perf_counter()
         output_batch = self.executor.execute_forward(batch, fastvideo_args)
-        samples = output_batch
+        samples = output_batch.output
+        logging_info = output_batch.logging_info
 
         gen_time = time.perf_counter() - start_time
         logger.info("Generated successfully in %.2f seconds", gen_time)
@@ -341,7 +342,8 @@ class VideoGenerator:
                 "frames": frames,
                 "prompts": prompt,
                 "size": (target_height, target_width, batch.num_frames),
-                "generation_time": gen_time
+                "generation_time": gen_time,
+                "logging_info": logging_info,
             }
 
     def set_lora_adapter(self,

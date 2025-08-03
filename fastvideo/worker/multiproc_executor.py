@@ -15,6 +15,7 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.worker.executor import Executor
 from fastvideo.worker.gpu_worker import run_worker_process
+import fastvideo.envs as envs
 
 logger = init_logger(__name__)
 
@@ -81,7 +82,19 @@ class MultiprocExecutor(Executor):
                                             "forward_batch": forward_batch,
                                             "fastvideo_args": fastvideo_args
                                         })
-        return cast(ForwardBatch, responses[0]["output_batch"])
+        output = responses[0]["output_batch"]
+
+        if envs.FASTVIDEO_STAGE_LOGGING:
+            logging_info = responses[0]["logging_info"]
+        else:
+            logging_info = None
+
+        result_batch = ForwardBatch(
+            output=output,
+            logging_info=logging_info
+        )
+
+        return result_batch
 
     def set_lora_adapter(self,
                          lora_nickname: str,

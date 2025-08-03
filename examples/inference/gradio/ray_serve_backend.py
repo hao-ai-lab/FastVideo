@@ -48,6 +48,8 @@ class VideoGenerationResponse(BaseModel):
     inference_time: Optional[float] = None
     encoding_time: Optional[float] = None
     total_time: Optional[float] = None
+    stage_names: Optional[List[str]] = None
+    stage_execution_times: Optional[List[float]] = None
 
 
 def encode_video_to_base64(frames: List[np.ndarray], fps: int = 24) -> str:
@@ -264,6 +266,13 @@ class T2VModelDeployment:
 
         frames = result if isinstance(result, list) else result.get("frames", [])
         generation_time = result.get("generation_time", 0.0) if isinstance(result, dict) else 0.0
+        logging_info = result.get("logging_info", None)
+
+        stage_names = []
+        stage_execution_times = []
+        if logging_info:
+            stage_names = logging_info.get_execution_order()
+            stage_execution_times = [logging_info.get_stage_info(stage_name).get("execution_time", 0.0) for stage_name in stage_names]
 
         # Track encoding time
         encoding_start_time = time.time()
@@ -287,6 +296,8 @@ class T2VModelDeployment:
             inference_time=inference_time,
             encoding_time=encoding_time,
             total_time=total_time,
+            stage_names=stage_names,
+            stage_execution_times=stage_execution_times,
         )
 
 
@@ -460,6 +471,13 @@ class T2V14BModelDeployment:
 
         frames = result if isinstance(result, list) else result.get("frames", [])
         generation_time = result.get("generation_time", 0.0) if isinstance(result, dict) else 0.0
+        logging_info = result.get("logging_info", None)
+
+        stage_names = []
+        stage_execution_times = []
+        if logging_info:
+            stage_names = logging_info.get_execution_order()
+            stage_execution_times = [logging_info.get_stage_info(stage_name).get("execution_time", 0.0) for stage_name in stage_names]
 
         # Track encoding time
         encoding_start_time = time.time()
@@ -483,6 +501,8 @@ class T2V14BModelDeployment:
             inference_time=inference_time,
             encoding_time=encoding_time,
             total_time=total_time,
+            stage_names=stage_names,
+            stage_execution_times=stage_execution_times,
         )
 
 

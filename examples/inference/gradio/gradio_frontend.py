@@ -270,12 +270,16 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             encoding_time = response.get("encoding_time", 0.0)
             total_time = response.get("total_time", 0.0)
             network_time = response.get("network_time", 0.0)
+            stage_names = response.get("stage_names", [])
+            stage_execution_times = response.get("stage_execution_times", [])
             
             print(f"Used seed: {used_seed}")
             print(f"Inference time: {inference_time:.2f}s")
             print(f"Encoding time: {encoding_time:.2f}s")
             print(f"Network transfer: {network_time:.2f}s")
             print(f"Total time: {total_time:.2f}s")
+            print(f"Stage names: {stage_names}")
+            print(f"Stage execution times: {stage_execution_times}")
             
             # Create detailed timing message with separate boxes
             timing_details = f"""
