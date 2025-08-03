@@ -11,59 +11,61 @@ import torch
 import imageio
 from PIL import Image
 import numpy as np
+import time
 
 from fastvideo.configs.sample.base import SamplingParam
 
 
 class RayServeClient:
     def __init__(self, backend_url: str):
-        self.backend_url = backend_url.rstrip('/')
-        self.generate_endpoint = f"{self.backend_url}/generate_video"
-        self.health_endpoint = f"{self.backend_url}/health"
-
-        # Default request timeout in seconds. Increase if generation may run longer.
-        self.request_timeout_s = int(os.getenv("FASTVIDEO_GENERATION_TIMEOUT", "900"))  # 15 minutes default
+        self.backend_url = backend_url
+        self.session = requests.Session()
     
     def check_health(self) -> bool:
         """Check if the backend is healthy"""
         try:
-            response = requests.get(self.health_endpoint, timeout=5)
+            response = self.session.get(f"{self.backend_url}/health", timeout=5)
             return response.status_code == 200
-        except Exception:
+        except requests.exceptions.RequestException:
             return False
     
-
-    
     def generate_video(self, request_data: dict) -> dict:
-        """Send video generation request to the backend"""
-        import time
-        
-        request_start_time = time.time()
+        """Generate video using the backend API"""
+        start_time = time.time()
         
         try:
-            response = requests.post(
-                self.generate_endpoint,
+            response = self.session.post(
+                f"{self.backend_url}/generate_video",
                 json=request_data,
-                timeout=self.request_timeout_s,
+                timeout=300  # 5 minutes timeout
             )
-            response.raise_for_status()
             
-            request_end_time = time.time()
-            network_time = request_end_time - request_start_time
+            end_time = time.time()
+            round_trip_time = end_time - start_time
             
-            response_data = response.json()
-            response_data["network_time"] = network_time
-            
-            return response_data
-            
+            if response.status_code == 200:
+                result = response.json()
+                # Calculate network time by subtracting backend total time
+                backend_total = result.get("total_time", 0)
+                network_time = round_trip_time - backend_total
+                result["network_time"] = network_time
+                return result
+            else:
+                return {"success": False, "error_message": f"HTTP {response.status_code}: {response.text}"}
+                
         except requests.exceptions.RequestException as e:
-            return {
-                "success": False,
-                "error_message": f"Backend request failed: {str(e)}",
-                "video_data": None,
-                "seed": request_data.get("seed", 42),
-                "network_time": time.time() - request_start_time
-            }
+            return {"success": False, "error_message": f"Request failed: {str(e)}"}
+    
+    def get_gallery(self) -> dict:
+        """Get user's video gallery"""
+        try:
+            response = self.session.get(f"{self.backend_url}/gallery", timeout=10)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+        except requests.exceptions.RequestException as e:
+            return {"success": False, "error": f"Request failed: {str(e)}"}
 
 
 def save_video_from_base64(video_data: str, output_dir: str, prompt: str) -> str:
@@ -159,7 +161,6 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
         num_frames,
         height,
         width,
-        num_inference_steps,
         randomize_seed=False,
         input_image=None,
         model_selection="FastVideo/FastWan2.1-T2V-1.3B-Diffusers (Text-to-Video)",
@@ -169,54 +170,59 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
         if not client.check_health():
             return None, f"Backend is not available. Please check if Ray Serve is running at {backend_url}", ""
         
+        # Validate video dimensions
+        max_pixels = 720 * 1280
+        if height * width > max_pixels:
+            return None, f"Video dimensions too large. Maximum allowed: 720x1280 pixels. Current: {height}x{width} = {height*width} pixels", ""
+        
         # Update progress
         if progress:
             progress(0.1, desc="Checking backend health...")
         
-        # Determine if this is I2V based on model selection
-        is_i2v = "I2V" in model_selection or "Image-to-Video" in model_selection
+        # Determine if this is I2V based on model selection - I2V functionality commented out
+        # is_i2v = "I2V" in model_selection or "Image-to-Video" in model_selection
         
-        # Handle input image for I2V
-        image_path = None
-        if is_i2v and input_image is not None:
-            if progress:
-                progress(0.2, desc="Processing input image...")
-            try:
-                # Save the uploaded image to a temporary file
-                import tempfile
-                temp_dir = "temp_images"
-                os.makedirs(temp_dir, exist_ok=True)
-                
-                # Generate a unique filename with appropriate extension
-                import uuid
-                # Determine the best format to preserve quality
-                if hasattr(input_image, 'format') and input_image.format:
-                    # Use original format if available
-                    ext = input_image.format.lower()
-                    if ext == 'jpeg':
-                        ext = 'jpg'
-                else:
-                    # Default to PNG for lossless quality
-                    ext = 'png'
-                
-                image_filename = f"input_image_{uuid.uuid4().hex[:8]}.{ext}"
-                image_path = os.path.abspath(os.path.join(temp_dir, image_filename))
-
-                # Save the image preserving original quality
-                if ext == 'png':
-                    # Use PNG for lossless compression
-                    input_image.save(image_path, "PNG", optimize=False)
-                elif ext == 'jpg':
-                    # Use high quality JPEG with minimal compression
-                    input_image.convert("RGB").save(image_path, "JPEG", quality=95, optimize=False)
-                else:
-                    # For other formats, save as PNG to preserve quality
-                    input_image.save(image_path, "PNG", optimize=False)
-                
-                print(f"Saved input image to: {image_path}")
-            except Exception as e:
-                print(f"Warning: Failed to save input image: {e}")
-                image_path = None
+        # Handle input image for I2V - I2V functionality commented out
+        # image_path = None
+        # if is_i2v and input_image is not None:
+        #     if progress:
+        #         progress(0.2, desc="Processing input image...")
+        #     try:
+        #         # Save the uploaded image to a temporary file
+        #         import tempfile
+        #         temp_dir = "temp_images"
+        #         os.makedirs(temp_dir, exist_ok=True)
+        #         
+        #         # Generate a unique filename with appropriate extension
+        #         import uuid
+        #         # Determine the best format to preserve quality
+        #         if hasattr(input_image, 'format') and input_image.format:
+        #             # Use original format if available
+        #             ext = input_image.format.lower()
+        #             if ext == 'jpeg':
+        #                 ext = 'jpg'
+        #         else:
+        #             # Default to PNG for lossless quality
+        #             ext = 'png'
+        #         
+        #         image_filename = f"input_image_{uuid.uuid4().hex[:8]}.{ext}"
+        #         image_path = os.path.abspath(os.path.join(temp_dir, image_filename))
+        # 
+        #         # Save the image preserving original quality
+        #         if ext == 'png':
+        #             # Use PNG for lossless compression
+        #             input_image.save(image_path, "PNG", optimize=False)
+        #         elif ext == 'jpg':
+        #             # Use high quality JPEG with minimal compression
+        #             input_image.convert("RGB").save(image_path, "JPEG", quality=95, optimize=False)
+        #         else:
+        #             # For other formats, save as PNG to preserve quality
+        #             input_image.save(image_path, "PNG", optimize=False)
+        #         
+        #         print(f"Saved input image to: {image_path}")
+        #     except Exception as e:
+        #         print(f"Warning: Failed to save input image: {e}")
+        #         image_path = None
         
         # Prepare request data
         if progress:
@@ -231,11 +237,11 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             "num_frames": num_frames,
             "height": height,
             "width": width,
-            "num_inference_steps": num_inference_steps,
+            "num_inference_steps": 20,  # Use default value
             "randomize_seed": randomize_seed,
             "return_frames": False,  # We'll get video data directly
-            "image_path": image_path,
-            "model_type": "i2v" if is_i2v else "t2v",  # Use model type selection
+            "image_path": None, # For T2V, we pass None as input_image
+            "model_type": "i2v" if "I2V" in model_selection or "Image-to-Video" in model_selection else "t2v",  # Use model type selection
             "model_path": model_selection.split(" (")[0] if model_selection else None  # Extract model path from selection
         }
         
@@ -249,12 +255,12 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             progress(0.8, desc="Processing response...")
         
         # Clean up temporary image file after processing
-        if image_path and os.path.exists(image_path):
-            try:
-                os.remove(image_path)
-                print(f"Cleaned up temporary image: {image_path}")
-            except Exception as e:
-                print(f"Warning: Failed to clean up temporary image {image_path}: {e}")
+        # if image_path and os.path.exists(image_path):
+        #     try:
+        #         os.remove(image_path)
+        #         print(f"Cleaned up temporary image: {image_path}")
+        #     except Exception as e:
+        #         print(f"Warning: Failed to clean up temporary image {image_path}: {e}")
         
         if response.get("success", False):
             video_data = response.get("video_data", "")
@@ -271,21 +277,44 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             print(f"Network transfer: {network_time:.2f}s")
             print(f"Total time: {total_time:.2f}s")
             
-            # Create detailed timing message
-            timing_details = f"⏱️ **Timing Breakdown**\n\n"
-            timing_details += f"| Phase | Time |\n"
-            timing_details += f"|-------|------|\n"
-            timing_details += f"| 🧠 Model Inference | {inference_time:.2f}s |\n"
-            timing_details += f"| 🎬 Video Encoding | {encoding_time:.2f}s |\n"
-            timing_details += f"| 🌐 Network Transfer | {network_time:.2f}s |\n"
-            timing_details += f"| **📊 Total Processing** | **{total_time:.2f}s** |\n\n"
+            # Create detailed timing message with separate boxes
+            timing_details = f"""
+            <div style="margin: 20px 0;">
+                <h3 style="text-align: center; margin-bottom: 15px;">⏱️ Timing Breakdown</h3>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 15px;">
+                    <div style="background: #f0f0f0; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #ddd;">
+                        <div style="font-size: 24px;">🧠</div>
+                        <div style="font-weight: bold; margin: 5px 0;">Model Inference</div>
+                        <div style="font-size: 18px; color: #2563eb;">{inference_time:.2f}s</div>
+                    </div>
+                    <div style="background: #f0f0f0; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #ddd;">
+                        <div style="font-size: 24px;">🎬</div>
+                        <div style="font-weight: bold; margin: 5px 0;">Video Encoding</div>
+                        <div style="font-size: 18px; color: #dc2626;">{encoding_time:.2f}s</div>
+                    </div>
+                    <div style="background: #f0f0f0; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #ddd;">
+                        <div style="font-size: 24px;">🌐</div>
+                        <div style="font-weight: bold; margin: 5px 0;">Network Transfer</div>
+                        <div style="font-size: 18px; color: #059669;">{network_time:.2f}s</div>
+                    </div>
+                    <div style="background: #e0f2fe; padding: 15px; border-radius: 8px; text-align: center; border: 2px solid #0277bd;">
+                        <div style="font-size: 24px;">📊</div>
+                        <div style="font-weight: bold; margin: 5px 0;">Total Processing</div>
+                        <div style="font-size: 20px; font-weight: bold; color: #0277bd;">{total_time:.2f}s</div>
+                    </div>
+                </div>"""
             
             # Add performance insights
             if inference_time > 0:
                 fps = num_frames / inference_time
-                timing_details += f"**Performance Metrics:**\n"
-                timing_details += f"• Generation Speed: {fps:.1f} frames/second\n"
-                timing_details += f"• Model Efficiency: {inference_time/total_time*100:.1f}% of total time\n"
+                timing_details += f"""
+                <div style="text-align: center; background: #f8f9fa; padding: 10px; border-radius: 6px; border: 1px solid #e9ecef;">
+                    <span style="font-weight: bold;">Generation Speed: </span>
+                    <span style="font-size: 18px; color: #6366f1; font-weight: bold;">{fps:.1f} frames/second</span>
+                </div>
+                """
+            
+            timing_details += "</div>"
             
             # Save video data to file for Gradio to display
             if video_data:
@@ -314,29 +343,47 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
     
     # Example prompts
     examples = [
-        "A hand enters the frame, pulling a sheet of plastic wrap over three balls of dough placed on a wooden surface. The plastic wrap is stretched to cover the dough more securely. The hand adjusts the wrap, ensuring that it is tight and smooth over the dough. The scene focuses on the hand's movements as it secures the edges of the plastic wrap. No new objects appear, and the camera remains stationary, focusing on the action of covering the dough.",
-        "A vintage train snakes through the mountains, its plume of white steam rising dramatically against the jagged peaks. The cars glint in the late afternoon sun, their deep crimson and gold accents lending a touch of elegance. The tracks carve a precarious path along the cliffside, revealing glimpses of a roaring river far below. Inside, passengers peer out the large windows, their faces lit with awe as the landscape unfolds.",
+        # "A vintage train snakes through the mountains, its plume of white steam rising dramatically against the jagged peaks. The cars glint in the late afternoon sun, their deep crimson and gold accents lending a touch of elegance. The tracks carve a precarious path along the cliffside, revealing glimpses of a roaring river far below. Inside, passengers peer out the large windows, their faces lit with awe as the landscape unfolds.",
         "A crowded rooftop bar buzzes with energy, the city skyline twinkling like a field of stars in the background. Strings of fairy lights hang above, casting a warm, golden glow over the scene. Groups of people gather around high tables, their laughter blending with the soft rhythm of live jazz. The aroma of freshly mixed cocktails and charred appetizers wafts through the air, mingling with the cool night breeze.",
     ]
     
     example_labels = [
-        "Hand wrapping dough with plastic",
-        "Vintage train through mountains", 
+        # "Hand wrapping dough with plastic",
+        # "Vintage train through mountains",
         "Crowded rooftop bar at night"
     ]
-    
 
+    with open("example_prompts.txt", "r") as f:
+        for line in f:
+            example_labels.append(line.strip()[:100])
+            examples.append(line.strip())
     
     # Create Gradio interface
     with gr.Blocks() as demo:
-        gr.Markdown("# FastVideo Inference Demo (Ray Serve Backend)")
+        gr.Image("assets/logo.jpg", show_label=False, container=False, height=100)
+        gr.HTML("""
+        <div style="text-align: center; margin-bottom: 10px;">
+            <p style="font-size: 18px;"> ⚡️ Make Video Generation Go Blurrrrrrr ⚡️ </p>
+            <p style="font-size: 18px;"> Twitter | <a href="https://github.com/hao-ai-lab/FastVideo/tree/main" target="_blank">Code</a> | Blog | <a href="https://hao-ai-lab.github.io/FastVideo/" target="_blank">Docs</a>  </p>
+        </div>
+        """)
+        
+        # What is FastVideo accordion
+        with gr.Accordion("🎥 What Is FastVideo?", open=False):
+            gr.HTML("""
+            <div style="padding: 20px; line-height: 1.6;">
+                <p style="font-size: 16px; margin-bottom: 15px;">
+                    It features a clean, consistent API that works across popular video models, making it easier for developers to author new models and incorporate system- or kernel-level optimizations. With FastVideo's optimizations, you can achieve more than 3x inference improvement compared to other systems.
+                </p>
+            </div>
+            """)
         
         # Backend status indicator
-        status_text = gr.Text(
-            label="Backend Status",
-            value="Checking backend status...",
-            interactive=False
-        )
+        # status_text = gr.Text(
+        #     label="Backend Status",
+        #     value="Checking backend status...",
+        #     interactive=False
+        # )
         
         def update_status():
             if client.check_health():
@@ -350,47 +397,13 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                 choices=[
                     "FastVideo/FastWan2.1-T2V-1.3B-Diffusers (Text-to-Video)",
                     "FastVideo/FastWan2.1-T2V-14B-Diffusers (Text-to-Video)",
-                    "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers (Image-to-Video)"
+                    # "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers (Image-to-Video)"  # I2V functionality commented out
                 ],
                 value="FastVideo/FastWan2.1-T2V-1.3B-Diffusers (Text-to-Video)",
                 label="Select Model",
                 interactive=True
             )
-        
-        # Main interface
-        with gr.Group():
-            with gr.Row():
-                prompt = gr.Text(
-                    label="Prompt",
-                    show_label=False,
-                    max_lines=3,
-                    placeholder="Enter your prompt",
-                    container=False,
-                    lines=3,
-                    scale=4,
-                )
-                run_button = gr.Button("Run", scale=1)
-            
-            # Input image (only visible for I2V models)
-            input_image = gr.Image(
-                label="Input Image (required for Image-to-Video models)",
-                type="pil",
-                show_label=True,
-                container=True,
-                visible=False,
-            )
-            
-            # Results
-            result = gr.Video(label="Result", show_label=False)
-            error_output = gr.Text(label="Error", visible=False)
-            frames_output = gr.Text(label="Generation Status", visible=False)
-            timing_display = gr.Markdown(label="Timing Breakdown", visible=False)
-            download_file = gr.File(visible=False)
-            
-            # Progress tracking
-            progress_bar = gr.Progress()
-            status_updates = gr.Text(label="Status Updates", visible=False)
-        
+
         # Examples dropdown
         with gr.Row():
             example_dropdown = gr.Dropdown(
@@ -399,6 +412,210 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                 value=None,
                 interactive=True,
                 allow_custom_value=False
+            )
+        
+        # Main interface
+        with gr.Row():
+            with gr.Column(scale=6):
+                prompt = gr.Text(
+                    label="Prompt",
+                    show_label=False,
+                    max_lines=3,
+                    placeholder="Enter your prompt",
+                    container=False,
+                    lines=3,
+                )
+            with gr.Column(scale=1, min_width=120, elem_classes="center-button"):
+                run_button = gr.Button("Run", variant="primary", size="lg")
+        
+        # Two-column layout: Advanced options on left, Video on right
+        with gr.Row(equal_height=True):
+            # Left column - Advanced options
+            with gr.Column(scale=1):
+                gr.HTML("<h3>Advanced Options</h3>")
+                with gr.Group():
+                    with gr.Row():
+                        height = gr.Slider(
+                            label="Height",
+                            minimum=256,
+                            maximum=1280,
+                            step=32,
+                            value=448,
+                        )
+                        width = gr.Slider(
+                            label="Width",
+                            minimum=256,
+                            maximum=1280,
+                            step=32,
+                            value=832
+                        )
+                    
+                    with gr.Row():
+                        num_frames = gr.Slider(
+                            label="Number of Frames",
+                            minimum=16,
+                            maximum=121,
+                            step=16,
+                            value=61,
+                        )
+                        guidance_scale = gr.Slider(
+                            label="Guidance Scale",
+                            minimum=1,
+                            maximum=12,
+                            value=3.0,
+                        )
+                    
+                    with gr.Row():
+                        use_negative_prompt = gr.Checkbox(
+                            label="Use negative prompt", value=False)
+                        negative_prompt = gr.Text(
+                            label="Negative prompt",
+                            max_lines=3,
+                            lines=3,
+                            placeholder="Enter a negative prompt",
+                            visible=False,
+                        )
+
+                    seed = gr.Slider(
+                        label="Seed",
+                        minimum=0,
+                        maximum=1000000,
+                        step=1,
+                        value=1024
+                    )
+                    randomize_seed = gr.Checkbox(label="Randomize seed", value=False)
+                    seed_output = gr.Number(label="Used Seed")
+            
+            # Right column - Video result
+            with gr.Column(scale=1):
+                # Add spacing to align with advanced options
+                gr.HTML("<div style='height: 1.4em;'></div>")
+                result = gr.Video(
+                    label="Generated Video", 
+                    show_label=True,
+                    height=400,  # Restore original height
+                    width=600,   # Limit video width
+                    container=True
+                )
+        
+        # Add CSS to position the button and constrain width
+        gr.HTML("""
+        <style>
+        .center-button {
+            display: flex !important;
+            justify-content: center !important;
+            height: 100% !important;
+            padding-top: 1.4em !important;
+        }
+        
+        /* Constrain overall width */
+        .gradio-container {
+            max-width: 1200px !important;
+            margin: 0 auto !important;
+        }
+        
+        .main {
+            max-width: 1200px !important;
+            margin: 0 auto !important;
+        }
+        
+        /* Constrain individual components */
+        .gr-form, .gr-box, .gr-group {
+            max-width: 1200px !important;
+        }
+        
+        /* Make video component smaller */
+        .gr-video {
+            max-width: 500px !important;
+            margin: 0 auto !important;
+        }
+        
+        /* Ensure equal height columns */
+        .gr-row {
+            align-items: stretch !important;
+        }
+        
+        .gr-column {
+            display: flex !important;
+            flex-direction: column !important;
+            height: 100% !important;
+        }
+        </style>
+        """)
+        
+        # Progress tracking
+        progress_bar = gr.Progress()
+        status_updates = gr.Text(label="Status Updates", visible=False)
+        
+        # Centered status and timing information
+        with gr.Row():
+            with gr.Column():
+                error_output = gr.Text(label="Error", visible=False)
+                frames_output = gr.Text(label="Generation Status", visible=False)
+                timing_display = gr.Markdown(label="Timing Breakdown", visible=False)
+        
+        # Gallery section
+        with gr.Accordion("Your Video Gallery", open=False):
+            gallery_refresh_btn = gr.Button("🔄 Refresh Gallery", size="sm")
+            gallery_display = gr.HTML("Click 'Refresh Gallery' to see your generated videos")
+            
+            def refresh_gallery():
+                try:
+                    print("Refreshing gallery...")
+                    gallery_data = client.get_gallery()
+                    print(f"Gallery response: {gallery_data}")
+                    
+                    if gallery_data.get("success") and gallery_data.get("videos"):
+                        videos = gallery_data["videos"]
+                        video_count = len(videos)
+                        print(f"Found {video_count} videos for this user")
+                        
+                        if video_count == 0:
+                            return "<p style='text-align: center; color: #666;'>No videos found in your personal gallery yet. Generate some videos to see them here!</p>"
+                        
+                        html_content = f"<h4>Your Personal Gallery ({video_count} videos)</h4>"
+                        html_content += "<div style='display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;'>"
+                        
+                        for video in videos:
+                            # Create a simple video player for each video
+                            # Convert absolute path to relative path for Gradio file serving
+                            relative_path = os.path.relpath(video['filepath'], start='.')
+                            file_size_mb = video['size'] / (1024 * 1024)
+                            
+                            video_html = f"""
+                            <div style='border: 1px solid #ddd; border-radius: 8px; padding: 10px; background: #f9f9f9;'>
+                                <video controls style='width: 100%; height: 200px; object-fit: cover;'>
+                                    <source src="file/{relative_path}" type="video/mp4">
+                                    Your browser does not support the video tag.
+                                </video>
+                                <div style='margin-top: 10px;'>
+                                    <p style='font-size: 12px; color: #666; margin: 5px 0;'>
+                                        <strong>Prompt:</strong> {video['prompt']}
+                                    </p>
+                                    <p style='font-size: 10px; color: #999; margin: 5px 0;'>
+                                        Generated: {time.strftime('%Y-%m-%d %H:%M', time.localtime(video['timestamp']))} | Size: {file_size_mb:.1f} MB
+                                    </p>
+                                    <p style='font-size: 10px; color: #999; margin: 5px 0;'>
+                                        File: {video['filename']}
+                                    </p>
+                                </div>
+                            </div>
+                            """
+                            html_content += video_html
+                        
+                        html_content += "</div>"
+                        return html_content
+                    else:
+                        error_msg = gallery_data.get("error", "Unknown error")
+                        print(f"Gallery request failed: {error_msg}")
+                        return f"<p style='text-align: center; color: #666;'>No videos found in your personal gallery yet. Generate some videos to see them here!<br/><small>({error_msg})</small></p>"
+                except Exception as e:
+                    print(f"Exception in refresh_gallery: {str(e)}")
+                    return f"<p style='text-align: center; color: #red;'>Error loading gallery: {str(e)}</p>"
+            
+            gallery_refresh_btn.click(
+                fn=refresh_gallery,
+                outputs=gallery_display
             )
         
         # Function to update prompt when example is selected
@@ -414,66 +631,12 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             outputs=prompt,
         )
         
-        # Shared advanced options
-        with gr.Accordion("Advanced options", open=False):
-            with gr.Group():
-                with gr.Row():
-                    height = gr.Slider(
-                        label="Height",
-                        minimum=256,
-                        maximum=1024,
-                        step=32,
-                        value=448,
-                    )
-                    width = gr.Slider(
-                        label="Width",
-                        minimum=256,
-                        maximum=1024,
-                        step=32,
-                        value=832
-                    )
-                
-                with gr.Row():
-                    num_frames = gr.Slider(
-                        label="Number of Frames",
-                        minimum=16,
-                        maximum=160,
-                        step=16,
-                        value=61,
-                    )
-                    guidance_scale = gr.Slider(
-                        label="Guidance Scale",
-                        minimum=1,
-                        maximum=12,
-                        value=3.0,
-                    )
-                    num_inference_steps = gr.Slider(
-                        label="Inference Steps",
-                        minimum=3,
-                        maximum=100,
-                        value=3,
-                    )
-                
-                with gr.Row():
-                    use_negative_prompt = gr.Checkbox(
-                        label="Use negative prompt", value=False)
-                    negative_prompt = gr.Text(
-                        label="Negative prompt",
-                        max_lines=3,
-                        lines=3,
-                        placeholder="Enter a negative prompt",
-                        visible=False,
-                    )
-
-                seed = gr.Slider(
-                    label="Seed",
-                    minimum=0,
-                    maximum=1000000,
-                    step=1,
-                    value=1024
-                )
-                randomize_seed = gr.Checkbox(label="Randomize seed", value=False)
-                seed_output = gr.Number(label="Used Seed")
+        # Disclaimer text
+        gr.HTML("""
+        <div style="text-align: center; margin-top: 20px;">
+            <p style="font-size: 16px;">The compute for this demo is generously provided by <a href="https://www.gmicloud.ai/" target="_blank">GMI Cloud</a>. Note that this demo is meant to showcase FastWan2.1's quality and that under a large number of requests, generation speed may be affected.</p>
+        </div>
+        """)
         
         # Event handlers
         use_negative_prompt.change(
@@ -482,33 +645,33 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             outputs=negative_prompt,
         )
         
-        # Model selection change handler
-        def on_model_selection_change(model_selection):
-            is_i2v = "I2V" in model_selection or "Image-to-Video" in model_selection
-            prompt_placeholder = "Describe how the image should animate" if is_i2v else "Enter your prompt"
-            return gr.update(visible=is_i2v), gr.update(placeholder=prompt_placeholder)
-        
-        model_selection.change(
-            fn=on_model_selection_change,
-            inputs=model_selection,
-            outputs=[input_image, prompt],
-        )
+        # Model selection change handler - I2V functionality commented out
+        # def on_model_selection_change(model_selection):
+        #     is_i2v = "I2V" in model_selection or "Image-to-Video" in model_selection
+        #     prompt_placeholder = "Describe how the image should animate" if is_i2v else "Enter your prompt"
+        #     return gr.update(visible=is_i2v), gr.update(placeholder=prompt_placeholder)
+        # 
+        # model_selection.change(
+        #     fn=on_model_selection_change,
+        #     inputs=model_selection,
+        #     outputs=[input_image, prompt],
+        # )
         
         def handle_generation(*args, progress=None):
-            # Extract model selection and input image from args
-            model_selection, prompt, negative_prompt, use_negative_prompt, seed, guidance_scale, num_frames, height, width, num_inference_steps, randomize_seed, input_image = args
+            # Extract model selection and input image from args - I2V functionality commented out
+            model_selection, prompt, negative_prompt, use_negative_prompt, seed, guidance_scale, num_frames, height, width, randomize_seed = args
             
-            # Determine if this is I2V based on model selection
-            is_i2v = "I2V" in model_selection or "Image-to-Video" in model_selection
+            # Determine if this is I2V based on model selection - I2V functionality commented out
+            # is_i2v = "I2V" in model_selection or "Image-to-Video" in model_selection
             
-            # For T2V, we pass None as input_image
-            if not is_i2v:
-                input_image = None
+            # For T2V, we pass None as input_image - I2V functionality commented out
+            # if not is_i2v:
+            #     input_image = None
             
             # Call the generate_video function with progress tracking
             result_path, seed_or_error, timing_details = generate_video(
                 prompt, negative_prompt, use_negative_prompt, seed, guidance_scale, 
-                num_frames, height, width, num_inference_steps, randomize_seed, input_image, model_selection, progress
+                num_frames, height, width, randomize_seed, None, model_selection, progress
             )
             
             if result_path and os.path.exists(result_path):
@@ -518,7 +681,6 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                     gr.update(visible=False),  # error_output
                     gr.update(visible=True, value="Generation completed successfully!"),  # frames_output
                     gr.update(visible=True, value=timing_details),  # timing_display
-                    gr.update(visible=True, value=result_path),  # download_file
                 )
             else:
                 return (
@@ -527,7 +689,6 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                     gr.update(visible=True, value=seed_or_error),  # error_output
                     gr.update(visible=False),  # frames_output
                     gr.update(visible=False),  # timing_display
-                    gr.update(visible=False),  # download_file
                 )
         
         # Unified event handler
@@ -543,16 +704,15 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                 num_frames,
                 height,
                 width,
-                num_inference_steps,
                 randomize_seed,
-                input_image,
+                # input_image, # Removed input_image from inputs
             ],
-            outputs=[result, seed_output, error_output, frames_output, timing_display, download_file],
+            outputs=[result, seed_output, error_output, frames_output, timing_display],
             concurrency_limit=20,
         )
         
         # Update status periodically
-        demo.load(update_status, outputs=status_text)
+        # demo.load(update_status, outputs=status_text)
     
     return demo
 
@@ -571,10 +731,10 @@ def main():
                         type=str,
                         default="FastVideo/FastWan2.1-T2V-14B-Diffusers",
                         help="Path to the T2V 14B model (for default parameters)")
-    parser.add_argument("--i2v_model_path",
-                        type=str,
-                        default="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
-                        help="Path to the I2V model (for default parameters)")
+    # parser.add_argument("--i2v_model_path",  # I2V functionality commented out
+    #                     type=str,
+    #                     default="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
+    #                     help="Path to the I2V model (for default parameters)")
     parser.add_argument("--host",
                         type=str,
                         default="0.0.0.0",
@@ -608,7 +768,7 @@ def main():
     print(f"Backend URL: {args.backend_url}")
     print(f"T2V 1.3B Model: {args.t2v_model_path}")
     print(f"T2V 14B Model: {args.t2v_14b_model_path}")
-    print(f"I2V Model: {args.i2v_model_path}")
+    # print(f"I2V Model: {args.i2v_model_path}") # I2V functionality commented out
     
     demo.queue(max_size=20).launch(
         server_name=args.host,
