@@ -27,7 +27,7 @@ def main():
     )
 
     sampling_param = SamplingParam.from_pretrained(model_name)
-    sampling_param.image_path = "test.jpg"
+    # sampling_param.image_path = "test.jpg"
     # sampling_param.num_inference_steps = 0
     # Generate videos with the same simple API, regardless of GPU count
     i2v_prompt = "An astronaut hatching from an egg, on the surface of the moon, the darkness and depth of space realised in the background. High quality, ultrarealistic detail and breath-taking movie-like camera shot."
@@ -38,7 +38,13 @@ def main():
     #     "wide with interest. The playful yet serene atmosphere is complemented by soft "
     #     "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
     # )
-    video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, sampling_param=sampling_param)
+    results = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, sampling_param=sampling_param)
+    stage_names = results["stage_names"]
+    stage_execution_times = results["stage_execution_times"]
+    # print(logging_info)
+    print(stage_names)
+    print(stage_execution_times)
+
     # video = generator.generate_video(prompt, sampling_param=sampling_param, output_path="wan_t2v_videos/")
     return
 

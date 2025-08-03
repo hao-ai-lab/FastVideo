@@ -48,8 +48,8 @@ class VideoGenerationResponse(BaseModel):
     inference_time: Optional[float] = None
     encoding_time: Optional[float] = None
     total_time: Optional[float] = None
-    stage_names: Optional[List[str]] = None
-    stage_execution_times: Optional[List[float]] = None
+    stage_names: Optional[str] = None
+    stage_execution_times: Optional[str] = None
 
 
 def encode_video_to_base64(frames: List[np.ndarray], fps: int = 24) -> str:
@@ -209,6 +209,7 @@ class T2VModelDeployment:
 
         # Ensure correct attention backend for FastVideo
         os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
+        os.environ["FASTVIDEO_STAGE_LOGGING"] = "1"
 
         # Lazy import to keep the deployment import-safe on head node
         from fastvideo.entrypoints.video_generator import VideoGenerator
@@ -223,6 +224,7 @@ class T2VModelDeployment:
             dit_cpu_offload=False,
             vae_cpu_offload=False,
             VSA_sparsity=0.8,
+            enable_stage_verification=False,
         )
         self.default_params = SamplingParam.from_pretrained(self.model_path)
         print("✅ T2V model initialized successfully")
@@ -266,20 +268,19 @@ class T2VModelDeployment:
 
         frames = result if isinstance(result, list) else result.get("frames", [])
         generation_time = result.get("generation_time", 0.0) if isinstance(result, dict) else 0.0
-        logging_info = result.get("logging_info", None)
 
-        stage_names = []
-        stage_execution_times = []
-        if logging_info:
-            stage_names = logging_info.get_execution_order()
-            stage_execution_times = [logging_info.get_stage_info(stage_name).get("execution_time", 0.0) for stage_name in stage_names]
+        # stage_names = result.get("stage_names", None) 
+        # stage_execution_times = result.get("stage_execution_times", None)
+
+        # stage_names = ",".join(stage_names)
+        # stage_execution_times = ",".join([str(time) for time in stage_execution_times])
 
         # Track encoding time
         encoding_start_time = time.time()
         
         # Encode outputs
         video_data = encode_video_to_base64(frames, fps=24)
-        encoded_frames = encode_frames_to_base64(frames) if video_request.return_frames and frames else None
+        encoded_frames = encode_frames_to_base64(frames) if frames else None
         
         encoding_end_time = time.time()
         encoding_time = encoding_end_time - encoding_start_time
@@ -296,8 +297,8 @@ class T2VModelDeployment:
             inference_time=inference_time,
             encoding_time=encoding_time,
             total_time=total_time,
-            stage_names=stage_names,
-            stage_execution_times=stage_execution_times,
+            # stage_names=None,
+            # stage_execution_times=None,
         )
 
 
@@ -414,6 +415,7 @@ class T2V14BModelDeployment:
 
         # Ensure correct attention backend for FastVideo
         os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
+        os.environ["FASTVIDEO_STAGE_LOGGING"] = "1"
 
         # Lazy import to keep the deployment import-safe on head node
         from fastvideo.entrypoints.video_generator import VideoGenerator
@@ -428,6 +430,7 @@ class T2V14BModelDeployment:
             dit_cpu_offload=True,           # Enable CPU offload for 14B model
             vae_cpu_offload=False,
             VSA_sparsity=0.9,               # Higher sparsity for 14B model
+            enable_stage_verification=False,
         )
         self.default_params = SamplingParam.from_pretrained(self.model_path)
         print("✅ T2V 14B model initialized successfully")
@@ -453,7 +456,7 @@ class T2V14BModelDeployment:
 
         # Do not write to disk when called via API
         params.save_video = False
-        params.return_frames = True
+        params.return_frames = False
 
         # Track inference time
         inference_start_time = time.time()
@@ -463,7 +466,7 @@ class T2V14BModelDeployment:
             prompt=video_request.prompt,
             sampling_param=params,
             save_video=False,
-            return_frames=True,
+            return_frames=False,
         )
         
         inference_end_time = time.time()
@@ -471,20 +474,18 @@ class T2V14BModelDeployment:
 
         frames = result if isinstance(result, list) else result.get("frames", [])
         generation_time = result.get("generation_time", 0.0) if isinstance(result, dict) else 0.0
-        logging_info = result.get("logging_info", None)
+        stage_names = result.get("stage_names", "")
+        stage_execution_times = result.get("stage_execution_times", "")
 
-        stage_names = []
-        stage_execution_times = []
-        if logging_info:
-            stage_names = logging_info.get_execution_order()
-            stage_execution_times = [logging_info.get_stage_info(stage_name).get("execution_time", 0.0) for stage_name in stage_names]
+        # stage_names = ",".join(stage_names)
+        # stage_execution_times = ",".join([str(time) for time in stage_execution_times])
 
         # Track encoding time
         encoding_start_time = time.time()
         
         # Encode outputs
         video_data = encode_video_to_base64(frames, fps=24)
-        encoded_frames = encode_frames_to_base64(frames) if video_request.return_frames and frames else None
+        encoded_frames = encode_frames_to_base64(frames) if frames else None
         
         encoding_end_time = time.time()
         encoding_time = encoding_end_time - encoding_start_time
@@ -501,8 +502,8 @@ class T2V14BModelDeployment:
             inference_time=inference_time,
             encoding_time=encoding_time,
             total_time=total_time,
-            stage_names=stage_names,
-            stage_execution_times=stage_execution_times,
+            # stage_names=None,
+            # stage_execution_times=None,
         )
 
 

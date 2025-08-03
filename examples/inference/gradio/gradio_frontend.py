@@ -270,16 +270,16 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             encoding_time = response.get("encoding_time", 0.0)
             total_time = response.get("total_time", 0.0)
             network_time = response.get("network_time", 0.0)
-            stage_names = response.get("stage_names", [])
-            stage_execution_times = response.get("stage_execution_times", [])
+            # stage_names = response.get("stage_names", "").split(",")
+            # stage_execution_times = [float(time) for time in response.get("stage_execution_times", "").split(",")]
             
             print(f"Used seed: {used_seed}")
             print(f"Inference time: {inference_time:.2f}s")
             print(f"Encoding time: {encoding_time:.2f}s")
             print(f"Network transfer: {network_time:.2f}s")
             print(f"Total time: {total_time:.2f}s")
-            print(f"Stage names: {stage_names}")
-            print(f"Stage execution times: {stage_execution_times}")
+            # print(f"Stage names: {stage_names}")
+            # print(f"Stage execution times: {stage_execution_times}")
             
             # Create detailed timing message with separate boxes
             timing_details = f"""
@@ -307,6 +307,29 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                         <div style="font-size: 20px; font-weight: bold; color: #0277bd;">{total_time:.2f}s</div>
                     </div>
                 </div>"""
+            
+            timing_details += f"""
+                <div style="margin-top: 15px;">
+                    <h4 style="text-align: center; margin-bottom: 10px;">🔄 Processing Stages</h4>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px;">
+            """
+            
+            # # Add individual stage timing cards
+            # for stage_name, stage_time in zip(stage_names, stage_execution_times):
+            #     if stage_name.strip() and stage_time > 0:  # Only show non-empty stages with valid times
+            #         timing_details += f"""
+            #             <div style="background: #f8f9fa; padding: 10px; border-radius: 6px; text-align: center; border: 1px solid #e9ecef;">
+            #                 <div style="font-weight: bold; font-size: 14px; margin-bottom: 5px;">{stage_name.strip()}</div>
+            #                 <div style="font-size: 16px; color: #7c3aed; font-weight: bold;">{stage_time:.2f}s</div>
+            #             </div>
+            #         """
+            
+            # timing_details += """
+            #         </div>
+            #     </div>
+            # """
+            
+            timing_details += "</div>"
             
             # Add performance insights
             if inference_time > 0:
