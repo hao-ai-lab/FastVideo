@@ -31,7 +31,9 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "FastVideo/FastWan2.2-TI2V-5B-Diffusers": FastWan2_2_TI2V_5B_Config,
     "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VConfig,
     "FastVideo/Wan2.1-VSA-T2V-14B-720P-Diffusers": WanT2V720PConfig,
-    "Wan-AI/Wan2.2-TI2V-5B-Diffusers": WanT2V720PConfig
+    "Wan-AI/Wan2.2-TI2V-5B-Diffusers": WanT2V720PConfig,
+    "Wan-AI/Wan2.2-T2V-A14B-Diffusers": WanT2V480PConfig,
+    "Wan-AI/Wan2.2-I2V-A14B-Diffusers": WanI2V480PConfig,
     # Add other specific weight variants
 }
 

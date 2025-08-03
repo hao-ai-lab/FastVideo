@@ -132,7 +132,11 @@ class Wan2_2_T2V_A14B_SamplingParam(Wan2_2_Base_SamplingParam):
     guidance_scale: float = 4.0
     guidance_scale_2: float = 3.0
     num_inference_steps: int = 40
+    fps: int = 16
 
 @dataclass
 class Wan2_2_I2V_A14B_SamplingParam(Wan2_2_Base_SamplingParam):
-    pass
+    guidance_scale: float = 3.5
+    guidance_scale_2: float = 3.5
+    num_inference_steps: int = 40
+    fps: int = 16
