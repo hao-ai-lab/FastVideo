@@ -199,7 +199,7 @@ class DenoisingStage(PipelineStage):
                     continue
 
                 if boundary_timestep is None or t >= boundary_timestep:
-                    if fastvideo_args.dit_cpu_offload:
+                    if fastvideo_args.dit_cpu_offload and self.transformer_2 is not None:
                         if next(self.transformer_2.parameters()).device.type == 'cuda':
                             self.transformer_2.to('cpu')
                     current_model = self.transformer

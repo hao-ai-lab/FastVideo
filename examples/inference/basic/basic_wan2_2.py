@@ -1,5 +1,4 @@
 from fastvideo import VideoGenerator
-import torch
 
 # from fastvideo.configs.sample import SamplingParam
 
@@ -31,7 +30,7 @@ def main():
         "wide with interest. The playful yet serene atmosphere is complemented by soft "
         "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
     )
-    video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, height=720, width=1280, num_frames=81)
+    _ = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, height=720, width=1280, num_frames=81)
     # video = generator.generate_video(prompt, sampling_param=sampling_param, output_path="wan_t2v_videos/")
 
     # Generate another video with a different prompt, without reloading the
@@ -42,7 +41,7 @@ def main():
         "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
         "embodying the raw energy of the wild. Low angle, steady tracking shot, "
         "cinematic.")
-    video2 = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=True, height=720, width=1280, num_frames=81)
+    _ = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=True, height=720, width=1280, num_frames=81)
 
 
 if __name__ == "__main__":
