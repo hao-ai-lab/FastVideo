@@ -14,7 +14,7 @@ set -e -x
 
 # Environment Setup
 source ~/conda/miniconda/bin/activate
-conda activate fv-pub-yq
+conda activate your_env
 
 # Basic Info
 export WANDB_MODE="online"
@@ -31,7 +31,7 @@ export TOKENIZERS_PARALLELISM=false
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
-export WANDB_API_KEY='73190d8c0de18a14eb3444e222f9432d247d1e30'
+export WANDB_API_KEY='your_api_key'
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 echo "MASTER_ADDR: $MASTER_ADDR"
