@@ -102,21 +102,18 @@ For a more detailed guide, please see our [inference quick start](https://hao-ai
 
 ## Distillation and Finetuning
 - [Distillation Guide](https://hao-ai-lab.github.io/FastVideo/distillation/dmd.html)
-- [Finetuning Guide](https://hao-ai-lab.github.io/FastVideo/training/finetune.html)
+<!-- - [Finetuning Guide](https://hao-ai-lab.github.io/FastVideo/training/finetune.html) -->
 
 ## 📑 Development Plan
 
 <!-- - More distillation methods -->
   <!-- - [ ] Add Distribution Matching Distillation -->
-- More models support
-  <!-- - [ ] Add CogvideoX model -->
-  - [x] Add StepVideo to V1
-- Optimization features
-  - [x] Teacache in V1
-  - [x] SageAttention in V1
-- Code updates
-  - [x] V1 Configuration API
-  - [ ] Support Training in V1
+- More FastWan Models Coming Soon!
+  - [ ] Add FastWan2.1-T2V-14B
+  - [ ] Add FastWan2.2-T2V-14B
+  - [ ] Add FastWan2.2-I2V-14B
+<!-- - Optimization features
+- Code updates -->
   <!-- - [ ] fp8 support -->
   <!-- - [ ] faster load model and save model support -->
 
