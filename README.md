@@ -15,7 +15,7 @@ FastVideo is an inference and post-training framework for diffusion models. It f
 </div>
 
 ## NEWS
-- ```2025/08/04```: Release [FastWan](https://hao-ai-lab.github.io/FastVideo/distillation/dmd.html) models and[Sparse-Distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/).
+- ```2025/08/04```: Release [FastWan](https://hao-ai-lab.github.io/FastVideo/distillation/dmd.html) models and [Sparse-Distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/).
 - ```2025/06/14```: Release finetuning and inference code for [VSA](https://arxiv.org/pdf/2505.13389)
 - ```2025/04/24```: [FastVideo V1](https://hao-ai-lab.github.io/blogs/fastvideo/) is released!
 - ```2025/02/18```: Release the inference code for [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
@@ -102,21 +102,18 @@ For a more detailed guide, please see our [inference quick start](https://hao-ai
 
 ## Distillation and Finetuning
 - [Distillation Guide](https://hao-ai-lab.github.io/FastVideo/distillation/dmd.html)
-- [Finetuning Guide](https://hao-ai-lab.github.io/FastVideo/training/finetune.html)
+<!-- - [Finetuning Guide](https://hao-ai-lab.github.io/FastVideo/training/finetune.html) -->
 
 ## 📑 Development Plan
 
 <!-- - More distillation methods -->
   <!-- - [ ] Add Distribution Matching Distillation -->
-- More models support
-  <!-- - [ ] Add CogvideoX model -->
-  - [x] Add StepVideo to V1
-- Optimization features
-  - [x] Teacache in V1
-  - [x] SageAttention in V1
-- Code updates
-  - [x] V1 Configuration API
-  - [ ] Support Training in V1
+- More FastWan Models Coming Soon!
+  - [ ] Add FastWan2.1-T2V-14B
+  - [ ] Add FastWan2.2-T2V-14B
+  - [ ] Add FastWan2.2-I2V-14B
+<!-- - Optimization features
+- Code updates -->
   <!-- - [ ] fp8 support -->
   <!-- - [ ] faster load model and save model support -->
 
