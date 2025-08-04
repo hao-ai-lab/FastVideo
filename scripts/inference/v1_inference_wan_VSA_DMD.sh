@@ -11,9 +11,9 @@ fastvideo generate \
     --sp-size $num_gpus \
     --tp-size 1 \
     --num-gpus $num_gpus \
-    --height 448 \
+    --height 480 \
     --width 832 \
-    --num-frames 61 \
+    --num-frames 81 \
     --num-inference-steps 3 \
     --dit-cpu-offload False \
     --vae-cpu-offload False \
@@ -42,7 +42,7 @@ fastvideo generate \
     --tp-size 1 \
     --num-gpus $num_gpus \
     --height 480 \
-    --width 848 \
+    --width 832 \
     --num-frames 81 \
     --num-inference-steps 3 \
     --fps 16 \
