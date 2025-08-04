@@ -11,6 +11,13 @@ We provide two distilled models:
 
 Both models are trained on **61×448×832** resolution but support generating videos with **any resolution** (1.3B  model mainly support 480P, 14B model support 480P and 720P, quality may degrade for different resolutions).
 
+## ⚙️ Inference
+First install [VSA](https://hao-ai-lab.github.io/FastVideo/video_sparse_attention/installation.html). Set `MODEL_BASE` to your own model path and run:
+
+```bash
+bash scripts/inference/v1_inference_wan_dmd.sh
+```
+
 ## 🗂️ Dataset
 
 We use the **FastVideo 480P Synthetic Wan dataset** ([FastVideo/Wan-Syn_77x448x832_600k](https://huggingface.co/datasets/FastVideo/Wan-Syn_77x448x832_600k)) for distillation, which contains 600k synthetic latents.
@@ -60,10 +67,3 @@ sbatch examples/distill/Wan2.1-T2V/Wan-Syn-Data-480P/distill_dmd_VSA_t2v_14B.slu
 - VSA attention sparsity: 0.9
 - Training steps: 3000 (~52 hours)
 - HSDP shard dim: 8
-
-## ⚙️ Inference
-Set `MODEL_BASE` to your own model path and run:
-
-```bash
-bash scripts/inference/v1_inference_wan_dmd.sh
-```

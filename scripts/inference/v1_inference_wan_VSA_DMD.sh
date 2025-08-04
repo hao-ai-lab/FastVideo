@@ -25,7 +25,8 @@ fastvideo generate \
     --seed 1024 \
     --output-path outputs_video_dmd_1.3B/ \
     --VSA-sparsity 0.8 \
-    --dmd-denoising-steps "1000,757,522"
+    --dmd-denoising-steps "1000,757,522" \
+    --enable_torch_compile 
 
 
 
@@ -50,7 +51,8 @@ fastvideo generate \
     --seed 1024 \
     --output-path outputs_video_dmd_14B/ \
     --VSA-sparsity 0.9 \
-    --dmd-denoising-steps "1000,757,522"
+    --dmd-denoising-steps "1000,757,522" \
+    --enable_torch_compile 
 
 
 
@@ -75,4 +77,5 @@ fastvideo generate \
     --seed 1024 \
     --output-path outputs_video_dmd_14B_720P/ \
     --VSA-sparsity 0.9 \
-    --dmd-denoising-steps "1000,757,522"
+    --dmd-denoising-steps "1000,757,522" \
+    --enable_torch_compile 
