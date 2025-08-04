@@ -2,12 +2,12 @@
 <img src=assets/logo.png width="30%"/>
 </div>
 
-**FastVideo is a unified framework for accelerated video generation.**
+**FastVideo is a unified post-training and inference framework for accelerated video generation.**
 
-FastVideo is an inference and post-training framework for diffusion models. It features an end-to-end unified pipeline for accelerating diffusion models, starting from data preprocessing to model training, finetuning, distillation, and inference. FastVideo is designed to be modular and extensible, allowing users to easily add new optimizations and techniques. Whether it is training-free optimizations or post-training optimizations, FastVideo has you covered.
+FastVideo features an end-to-end unified pipeline for accelerating diffusion models, starting from data preprocessing to model training, finetuning, distillation, and inference. FastVideo is designed to be modular and extensible, allowing users to easily add new optimizations and techniques. Whether it is training-free optimizations or post-training optimizations, FastVideo has you covered.
 
 <p align="center">
-    | <a href="https://hao-ai-lab.github.io/FastVideo"><b>Documentation</b></a> | <a href="https://hao-ai-lab.github.io/FastVideo/inference/inference_quick_start.html"><b> Quick Start</b></a> | 🤗 <a href="https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers"  target="_blank"><b>FastWan2.1</b></a>  | 🤗 <a href="Wan-AI/Wan2.2-TI2V-5B-Diffusers" target="_blank"><b>FastWan2.2</b></a> | 🟣💬 <a href="https://join.slack.com/t/fastvideo/shared_invite/zt-38u6p1jqe-yDI1QJOCEnbtkLoaI5bjZQ" target="_blank"> <b>Slack</b> </a> |
+    | <a href="https://hao-ai-lab.github.io/FastVideo"><b>Documentation</b></a> | <a href="https://hao-ai-lab.github.io/FastVideo/inference/inference_quick_start.html"><b> Quick Start</b></a> | 🤗 <a href="https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers"  target="_blank"><b>FastWan2.1</b></a>  | 🤗 <a href="https://huggingface.co/FastVideo/FastWan2.2-TI2V-5B-Diffusers" target="_blank"><b>FastWan2.2</b></a> | 🟣💬 <a href="https://join.slack.com/t/fastvideo/shared_invite/zt-38u6p1jqe-yDI1QJOCEnbtkLoaI5bjZQ" target="_blank"> <b>Slack</b> </a> |
 </p>
 
 <div align="center">
@@ -15,7 +15,7 @@ FastVideo is an inference and post-training framework for diffusion models. It f
 </div>
 
 ## NEWS
-- ```2025/08/04```: Release [FastWan](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/), achieving 15x end-to-end speedup for video generation with sparse distillation.
+- ```2025/08/04```: Release [FastWan](https://hao-ai-lab.github.io/FastVideo/distillation/dmd.html) models and [Sparse-Distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/).
 - ```2025/06/14```: Release finetuning and inference code for [VSA](https://arxiv.org/pdf/2505.13389)
 - ```2025/04/24```: [FastVideo V1](https://hao-ai-lab.github.io/blogs/fastvideo/) is released!
 - ```2025/02/18```: Release the inference code for [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
@@ -23,15 +23,19 @@ FastVideo is an inference and post-training framework for diffusion models. It f
 ## Key Features
 
 FastVideo has the following features:
+- End-to-end post-training support:
+  - [Sparse distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/) for Wan2.1 and Wan2.2 to achineve >50x denoising speedup
+  - Data preprocessing pipeline for video data
+  - Support full finetuning and LoRA finetuning for state-of-the-art open video DiTs
+  - Scalable training with FSDP2, sequence parallelism, and selective activation checkpointing, with near linear scaling to 64 GPUs
 - State-of-the-art performance optimizations for inference
+  - [Video Sparse Attention](https://arxiv.org/pdf/2505.13389)
   - [Sliding Tile Attention](https://arxiv.org/pdf/2502.04507)
   - [TeaCache](https://arxiv.org/pdf/2411.19108)
   - [Sage Attention](https://arxiv.org/abs/2410.02367)
-- E2E post-training support
-  - Data preprocessing pipeline for video data.
-  - [Sparse distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/) for Wan2.1 and Wan2.2 using [Video Sparse Attention](https://arxiv.org/pdf/2505.13389) and [Distribution Matching Distillation](https://tianweiy.github.io/dmd2/)
-  - Support full finetuning and LoRA finetuning for state-of-the-art open video DiTs.
-  - Scalable training with FSDP2, sequence parallelism, and selective activation checkpointing, with near linear scaling to 64 GPUs.
+- Diverse hardware and OS support
+  - Support H100, A100, 4090
+  - Support Linux, Windows, MacOS
 
 ## Getting Started
 We recommend using an environment manager such as `Conda` to create a clean environment:
@@ -68,7 +72,7 @@ from fastvideo import VideoGenerator
 def main():
     # Create a video generator with a pre-trained model
     generator = VideoGenerator.from_pretrained(
-        "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
         num_gpus=1,  # Adjust based on your hardware
     )
 
@@ -102,23 +106,21 @@ For a more detailed guide, please see our [inference quick start](https://hao-ai
 
 ## Distillation and Finetuning
 - [Distillation Guide](https://hao-ai-lab.github.io/FastVideo/distillation/dmd.html)
-- [Finetuning Guide](https://hao-ai-lab.github.io/FastVideo/training/finetune.html)
+<!-- - [Finetuning Guide](https://hao-ai-lab.github.io/FastVideo/training/finetune.html) -->
 
 ## 📑 Development Plan
-
 <!-- - More distillation methods -->
   <!-- - [ ] Add Distribution Matching Distillation -->
-- More models support
-  <!-- - [ ] Add CogvideoX model -->
-  - [x] Add StepVideo to V1
-- Optimization features
-  - [x] Teacache in V1
-  - [x] SageAttention in V1
-- Code updates
-  - [x] V1 Configuration API
-  - [ ] Support Training in V1
+More FastWan Models Coming Soon!
+- [ ] Add FastWan2.1-T2V-14B
+- [ ] Add FastWan2.2-T2V-14B
+- [ ] Add FastWan2.2-I2V-14B
+<!-- - Optimization features
+- Code updates -->
   <!-- - [ ] fp8 support -->
   <!-- - [ ] faster load model and save model support -->
+
+See details in [development roadmap](https://github.com/hao-ai-lab/FastVideo/issues/468).
 
 ## 🤝 Contributing
 
@@ -135,10 +137,10 @@ We learned and reused code from the following projects:
 - [vLLM](https://github.com/vllm-project/vllm)
 - [SGLang](https://github.com/sgl-project/sglang)
 
-We thank MBZUAI and [Anyscale](https://www.anyscale.com/) for their support throughout this project.
+We thank [MBZUAI](https://ifm.mbzuai.ac.ae/), [Anyscale](https://www.anyscale.com/), and [GMI Cloud](https://www.gmicloud.ai/) for their support throughout this project.
 
 ## Citation
-If you use FastVideo for your research, please cite our work:
+If you find FastVideo useful, please considering citing our work:
 
 ```bibtex
 @software{fastvideo2024,
@@ -149,22 +151,17 @@ If you use FastVideo for your research, please cite our work:
   year         = {2024},
 }
 
-@misc{zhang2025vsafastervideodiffusion,
-      title={VSA: Faster Video Diffusion with Trainable Sparse Attention}, 
-      author={Peiyuan Zhang and Haofeng Huang and Yongqi Chen and Will Lin and Zhengzhong Liu and Ion Stoica and Eric Xing and Hao Zhang},
-      year={2025},
-      eprint={2505.13389},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2505.13389}, 
+@article{zhang2025vsa,
+  title={VSA: Faster Video Diffusion with Trainable Sparse Attention},
+  author={Zhang, Peiyuan and Huang, Haofeng and Chen, Yongqi and Lin, Will and Liu, Zhengzhong and Stoica, Ion and Xing, Eric and Zhang, Hao},
+  journal={arXiv preprint arXiv:2505.13389},
+  year={2025}
 }
-@misc{zhang2025fastvideogenerationsliding,
-      title={Fast Video Generation with Sliding Tile Attention},
-      author={Peiyuan Zhang and Yongqi Chen and Runlong Su and Hangliang Ding and Ion Stoica and Zhenghong Liu and Hao Zhang},
-      year={2025},
-      eprint={2502.04507},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2502.04507},
+
+@article{zhang2025fast,
+  title={Fast video generation with sliding tile attention},
+  author={Zhang, Peiyuan and Chen, Yongqi and Su, Runlong and Ding, Hangliang and Stoica, Ion and Liu, Zhengzhong and Zhang, Hao},
+  journal={arXiv preprint arXiv:2502.04507},
+  year={2025}
 }
 ```
