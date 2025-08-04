@@ -98,7 +98,7 @@ class WanI2V720PConfig(WanI2V480PConfig):
 
 
 @dataclass
-class FastWanT2V480PConfig(WanT2V480PConfig):
+class FastWan2_1_T2V_480P_Config(WanT2V480PConfig):
     """Base configuration for FastWan T2V 1.3B 480P pipeline architecture with DMD"""
 
     # WanConfig-specific parameters with defaults
@@ -111,3 +111,30 @@ class FastWanT2V480PConfig(WanT2V480PConfig):
     def __post_init__(self) -> None:
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
+
+
+@dataclass
+class Wan2_2_TI2V_5B_Config(WanT2V480PConfig):
+    flow_shift: int = 5
+    ti2v_task: bool = True
+
+    def __post_init__(self) -> None:
+        self.vae_config.load_encoder = True
+        self.vae_config.load_decoder = True
+
+
+@dataclass
+class FastWan2_2_TI2V_5B_Config(Wan2_2_TI2V_5B_Config):
+    flow_shift: int = 5
+    dmd_denoising_steps: list[int] | None = field(
+        default_factory=lambda: [1000, 757, 522])
+
+
+@dataclass
+class Wan2_2_T2V_A14B_Config(WanT2V480PConfig):
+    pass
+
+
+@dataclass
+class Wan2_2_I2V_A14B_Config(WanT2V480PConfig):
+    pass
