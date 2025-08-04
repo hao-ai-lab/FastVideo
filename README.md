@@ -145,23 +145,16 @@ If you use FastVideo for your research, please cite our work:
   month        = apr,
   year         = {2024},
 }
-
-@misc{zhang2025vsafastervideodiffusion,
-      title={VSA: Faster Video Diffusion with Trainable Sparse Attention}, 
-      author={Peiyuan Zhang and Haofeng Huang and Yongqi Chen and Will Lin and Zhengzhong Liu and Ion Stoica and Eric Xing and Hao Zhang},
-      year={2025},
-      eprint={2505.13389},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2505.13389}, 
+@article{zhang2025vsa,
+  title={VSA: Faster Video Diffusion with Trainable Sparse Attention},
+  author={Zhang, Peiyuan and Huang, Haofeng and Chen, Yongqi and Lin, Will and Liu, Zhengzhong and Stoica, Ion and Xing, Eric and Zhang, Hao},
+  journal={arXiv preprint arXiv:2505.13389},
+  year={2025}
 }
-@misc{zhang2025fastvideogenerationsliding,
-      title={Fast Video Generation with Sliding Tile Attention},
-      author={Peiyuan Zhang and Yongqi Chen and Runlong Su and Hangliang Ding and Ion Stoica and Zhenghong Liu and Hao Zhang},
-      year={2025},
-      eprint={2502.04507},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2502.04507},
+@article{zhang2025fast,
+  title={Fast video generation with sliding tile attention},
+  author={Zhang, Peiyuan and Chen, Yongqi and Su, Runlong and Ding, Hangliang and Stoica, Ion and Liu, Zhengzhong and Zhang, Hao},
+  journal={arXiv preprint arXiv:2502.04507},
+  year={2025}
 }
 ```
