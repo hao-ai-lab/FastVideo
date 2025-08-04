@@ -115,9 +115,6 @@ class FastWan2_1_T2V_480P_Config(WanT2V480PConfig):
 
 @dataclass
 class Wan2_2_TI2V_5B_Config(WanT2V480PConfig):
-    """Base configuration for FastWan T2V 1.3B 480P pipeline architecture with DMD"""
-
-    # Denoising stage
     flow_shift: int = 5
     ti2v_task: bool = True
 
@@ -128,9 +125,6 @@ class Wan2_2_TI2V_5B_Config(WanT2V480PConfig):
 
 @dataclass
 class FastWan2_2_TI2V_5B_Config(Wan2_2_TI2V_5B_Config):
-    """Base configuration for FastWan T2V 1.3B 720P pipeline architecture with DMD"""
-
-    # Denoising stage
     flow_shift: int = 5
     dmd_denoising_steps: list[int] | None = field(
         default_factory=lambda: [1000, 757, 522])
