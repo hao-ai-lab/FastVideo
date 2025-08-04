@@ -308,8 +308,9 @@ class FastVideoArgs:
         parser.add_argument(
             "--enable-torch-compile",
             action=StoreBoolean,
-            help=
-            "Use torch.compile for speeding up STA inference without teacache",
+            default=FastVideoArgs.enable_torch_compile,
+            help="Use torch.compile to speed up DiT inference." +
+            "However, will likely cause precision drifts. See (https://github.com/pytorch/pytorch/issues/145213)",
         )
 
         parser.add_argument(
@@ -378,7 +379,6 @@ class FastVideoArgs:
             default=FastVideoArgs.enable_stage_verification,
             help="Enable input/output verification for pipeline stages",
         )
-
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)
 
@@ -496,12 +496,6 @@ class FastVideoArgs:
 
         if self.num_gpus < max(self.tp_size, self.sp_size):
             self.num_gpus = max(self.tp_size, self.sp_size)
-
-        if self.enable_torch_compile and self.num_gpus > 1:
-            logger.warning(
-                "Currently torch compile does not work with multi-gpu. Setting enable_torch_compile to False"
-            )
-            self.enable_torch_compile = False
 
         if self.pipeline_config is None:
             raise ValueError("pipeline_config is not set in FastVideoArgs")
@@ -641,6 +635,7 @@ class TrainingArgs(FastVideoArgs):
     num_euler_timesteps: int = 0
     lr_num_cycles: int = 0
     lr_power: float = 0.0
+    min_lr_ratio: float = 0.5  # minimum learning rate ratio for cosine_with_min_lr scheduler
     not_apply_cfg_solver: bool = False
     distill_cfg: float = 0.0
     scheduler_type: str = ""
@@ -670,9 +665,13 @@ class TrainingArgs(FastVideoArgs):
     min_timestep_ratio: float = 0.2
     max_timestep_ratio: float = 0.98
     real_score_guidance_scale: float = 3.5
+    fake_score_learning_rate: float = 0.0  # separate learning rate for fake_score_transformer, if 0.0, use learning_rate
+    fake_score_lr_scheduler: str = "constant"  # separate lr scheduler for fake_score_transformer, if not set, use lr_scheduler
     training_state_checkpointing_steps: int = 0  # for resuming training
     weight_only_checkpointing_steps: int = 0  # for inference
     log_visualization: bool = False
+    # simulate generator forward to match inference
+    simulate_generator_forward: bool = False
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -934,6 +933,11 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--lr-power",
                             type=float,
                             help="Learning rate power")
+        parser.add_argument(
+            "--min-lr-ratio",
+            type=float,
+            default=TrainingArgs.min_lr_ratio,
+            help="Minimum learning rate ratio for cosine_with_min_lr scheduler")
         parser.add_argument("--not-apply-cfg-solver",
                             action=StoreBoolean,
                             help="Whether to not apply CFG solver")
@@ -999,9 +1003,22 @@ class TrainingArgs(FastVideoArgs):
                             type=float,
                             default=TrainingArgs.real_score_guidance_scale,
                             help="Teacher guidance scale")
+        parser.add_argument("--fake-score-learning-rate",
+                            type=float,
+                            default=TrainingArgs.fake_score_learning_rate,
+                            help="Learning rate for fake score transformer")
+        parser.add_argument(
+            "--fake-score-lr-scheduler",
+            type=str,
+            default=TrainingArgs.fake_score_lr_scheduler,
+            help="Learning rate scheduler for fake score transformer")
         parser.add_argument("--log-visualization",
                             action=StoreBoolean,
                             help="Whether to log visualization")
+        parser.add_argument(
+            "--simulate-generator-forward",
+            action=StoreBoolean,
+            help="Whether to simulate generator forward to match inference")
 
         return parser
 

@@ -42,6 +42,7 @@ docs/_build/
 docs/source/getting_started/examples/
 docs/source/inference/examples/
 docs/source/training/examples/
+docs/source/distillation/examples/
 
 # VSCode
 .vscode/

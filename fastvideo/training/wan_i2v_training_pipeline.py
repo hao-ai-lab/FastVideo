@@ -27,7 +27,7 @@ class WanI2VTrainingPipeline(TrainingPipeline):
     """
     A training pipeline for Wan.
     """
-    _required_config_modules = ["scheduler", "transformer"]
+    _required_config_modules = ["scheduler", "transformer", "vae"]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         self.modules["scheduler"] = FlowUniPCMultistepScheduler(

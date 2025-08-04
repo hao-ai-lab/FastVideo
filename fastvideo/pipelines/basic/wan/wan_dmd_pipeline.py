@@ -33,7 +33,7 @@ class WanDMDPipeline(LoRAPipeline, ComposedPipelineBase):
     ]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        # We use UniPCMScheduler from Wan2.1 official repo, not the one in diffusers.
+
         self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
             shift=fastvideo_args.pipeline_config.flow_shift)
 

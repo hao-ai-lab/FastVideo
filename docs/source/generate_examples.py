@@ -287,11 +287,35 @@ def create_nested_structures(
         relative_path = example.path.relative_to(category_dir)
         path_parts = relative_path.parts
 
-        # For nested examples like finetune/wan_i2v_14b_480p/crush_smol
-        if len(path_parts) >= 3:
-            method = path_parts[0]  # e.g., "finetune"
-            model = path_parts[1]  # e.g., "wan_i2v_14b_480p"
-            dataset = path_parts[2]  # e.g., "crush_smol"
+        if example.category == "training":
+            # For training examples like finetune/wan_i2v_14b_480p/crush_smol
+            if len(path_parts) >= 3:
+                method = path_parts[0]  # e.g., "finetune"
+                model = path_parts[1]  # e.g., "wan_i2v_14b_480p"
+                dataset = path_parts[2]  # e.g., "crush_smol"
+
+                # Initialize nested structure
+                if example.category not in nested_structures:
+                    nested_structures[example.category] = {}
+                if method not in nested_structures[example.category]:
+                    nested_structures[example.category][method] = {}
+                if model not in nested_structures[example.category][method]:
+                    nested_structures[example.category][method][model] = {}
+
+                # Store the nested structure
+                nested_structures[
+                    example.category][method][model][dataset] = NestedStructure(
+                        category=example.category,
+                        method=method,
+                        model=model,
+                        dataset=dataset,
+                        example=example)
+
+        elif example.category == "distillation" and len(path_parts) >= 2:
+            # For distillation examples like Wan2.1-T2V/Wan-Syn-Data-480P
+            model = path_parts[0]  # e.g., "Wan2.1-T2V"
+            dataset = path_parts[1]  # e.g., "Wan-Syn-Data-480P"
+            method = "DMD"  # Default method for distillation
 
             # Initialize nested structure
             if example.category not in nested_structures:

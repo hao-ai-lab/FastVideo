@@ -95,7 +95,7 @@ For a more detailed guide, please see our [inference quick start](https://hao-ai
 - [Contribution Guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation.html)
 
 ## Distillation and Finetuning
-- [Distillation Guide](https://hao-ai-lab.github.io/FastVideo/training/distillation.html)
+- [Distillation Guide](https://hao-ai-lab.github.io/FastVideo/distillation/dmd.html)
 - [Finetuning Guide](https://hao-ai-lab.github.io/FastVideo/training/finetune.html)
 
 ## 📑 Development Plan
