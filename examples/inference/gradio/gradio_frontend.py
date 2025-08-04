@@ -19,11 +19,11 @@ from fastvideo.configs.sample.base import SamplingParam
 # Map clean model names to full paths
 MODEL_PATH_MAPPING = {
     "FastWan2.1-T2V-1.3B": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
-    "FastWan2.1-T2V-14B": "FastVideo/FastWan2.1-T2V-14B-Diffusers",
+    # "FastWan2.1-T2V-14B": "FastVideo/FastWan2.1-T2V-14B-Diffusers",
     "FastWan2.2-TI2V-5B": "FastVideo/FastWan2.2-TI2V-5B-Diffusers",
-    "Wan2.1-T2V-1.3B": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-    "Wan2.1-T2V-14B": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
-    "Wan2.2-TI2V-5B": "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+    # "Wan2.1-T2V-1.3B": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    # "Wan2.1-T2V-14B": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+    # "Wan2.2-TI2V-5B": "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
 }
 
 
@@ -383,6 +383,9 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         model_path = model_selection_value.split(" (")[0] if model_selection_value else None
         if model_path and model_path in default_params:
             params = default_params[model_path]
+            if "1.3b" in model_path.lower():
+                params.num_frames = 61
+            
             return {
                 'height': params.height,
                 'width': params.width,
@@ -412,7 +415,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         gr.HTML("""
         <div style="text-align: center; margin-bottom: 10px;">
             <p style="font-size: 18px;"> Make Video Generation Go Blurrrrrrr </p>
-            <p style="font-size: 18px;"> Twitter | <a href="https://github.com/hao-ai-lab/FastVideo/tree/main" target="_blank">Code</a> | Blog | <a href="https://hao-ai-lab.github.io/FastVideo/" target="_blank">Docs</a>  </p>
+            <p style="font-size: 18px;"> Twitter | <a href="https://github.com/hao-ai-lab/FastVideo/tree/main" target="_blank">Code</a> | <a href="https://hao-ai-lab.github.io/blogs/fastvideo_post_training/" target="_blank">Blog</a> | <a href="https://hao-ai-lab.github.io/FastVideo/" target="_blank">Docs</a>  </p>
         </div>
         """)
         
@@ -421,7 +424,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             gr.HTML("""
             <div style="padding: 20px; line-height: 1.6;">
                 <p style="font-size: 16px; margin-bottom: 15px;">
-                    It features a clean, consistent API that works across popular video models, making it easier for developers to author new models and incorporate system- or kernel-level optimizations. With FastVideo's optimizations, you can achieve more than 3x inference improvement compared to other systems.
+                    FastVideo is an inference and post-training framework for diffusion models. It features an end-to-end unified pipeline for accelerating diffusion models, starting from data preprocessing to model training, finetuning, distillation, and inference. FastVideo is designed to be modular and extensible, allowing users to easily add new optimizations and techniques. Whether it is training-free optimizations or post-training optimizations, FastVideo has you covered.
                 </p>
             </div>
             """)
@@ -445,8 +448,8 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                 choices=[
                     "FastWan2.1-T2V-1.3B",
                     "FastWan2.2-TI2V-5B",
-                    "Wan2.1-T2V-1.3B",
-                    "Wan2.2-TI2V-5B",
+                    # "Wan2.1-T2V-1.3B",
+                    # "Wan2.2-TI2V-5B",
                     # "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers (Image-to-Video)"  # I2V functionality commented out
                 ],
                 value="FastWan2.1-T2V-1.3B",
@@ -492,57 +495,57 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             with gr.Column(scale=1, elem_classes="advanced-options-column"):
                 with gr.Group():
                     gr.HTML("<div style='margin: 0 0 15px 0; text-align: center; font-size: 16px;'>Advanced Options</div>")
-                with gr.Row():
-                    height = gr.Slider(
-                        label="Height",
-                        minimum=256,
-                        maximum=1280,
-                        step=32,
-                        value=initial_values['height'],
-                    )
-                    width = gr.Slider(
-                        label="Width",
-                        minimum=256,
-                        maximum=1280,
-                        step=32,
-                        value=initial_values['width']
-                    )
-                
-                with gr.Row():
-                    num_frames = gr.Slider(
-                        label="Number of Frames",
-                        minimum=16,
-                        maximum=121,
-                        step=16,
-                        value=initial_values['num_frames'],
-                    )
-                    guidance_scale = gr.Slider(
-                        label="Guidance Scale",
-                        minimum=1,
-                        maximum=12,
-                        value=initial_values['guidance_scale'],
-                    )
-                
-                with gr.Row():
-                    use_negative_prompt = gr.Checkbox(
-                        label="Use negative prompt", value=False)
-                    negative_prompt = gr.Text(
-                        label="Negative prompt",
-                        max_lines=3,
-                        lines=3,
-                        placeholder="Enter a negative prompt",
-                        visible=False,
-                    )
+                    with gr.Row():
+                        height = gr.Slider(
+                            label="Height",
+                            minimum=256,
+                            maximum=1280,
+                            step=32,
+                            value=initial_values['height'],
+                        )
+                        width = gr.Slider(
+                            label="Width",
+                            minimum=256,
+                            maximum=1280,
+                            step=32,
+                            value=initial_values['width']
+                        )
+                    
+                    with gr.Row():
+                        num_frames = gr.Slider(
+                            label="Number of Frames",
+                            minimum=16,
+                            maximum=121,
+                            step=16,
+                            value=initial_values['num_frames'],
+                        )
+                        guidance_scale = gr.Slider(
+                            label="Guidance Scale",
+                            minimum=1,
+                            maximum=12,
+                            value=initial_values['guidance_scale'],
+                        )
+                    
+                    with gr.Row():
+                        use_negative_prompt = gr.Checkbox(
+                            label="Use negative prompt", value=False)
+                        negative_prompt = gr.Text(
+                            label="Negative prompt",
+                            max_lines=3,
+                            lines=3,
+                            placeholder="Enter a negative prompt",
+                            visible=False,
+                        )
 
-                seed = gr.Slider(
-                    label="Seed",
-                    minimum=0,
-                    maximum=1000000,
-                    step=1,
-                    value=initial_values['seed'],
-                )
-                randomize_seed = gr.Checkbox(label="Randomize seed", value=False)
-                seed_output = gr.Number(label="Used Seed")
+                    seed = gr.Slider(
+                        label="Seed",
+                        minimum=0,
+                        maximum=1000000,
+                        step=1,
+                        value=initial_values['seed'],
+                    )
+                    randomize_seed = gr.Checkbox(label="Randomize seed", value=False)
+                    seed_output = gr.Number(label="Used Seed")
         
             # Right column - Video result
             with gr.Column(scale=1, elem_classes="video-column"):
@@ -706,7 +709,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         # Disclaimer text
         gr.HTML("""
         <div style="text-align: center; margin-top: 10px; margin-bottom: 15px;">
-            <p style="font-size: 16px; margin: 0;">The compute for this demo is generously provided by <a href="https://www.gmicloud.ai/" target="_blank">GMI Cloud</a>. Note that this demo is meant to showcase FastWan2.1's quality and that under a large number of requests, generation speed may be affected.</p>
+            <p style="font-size: 16px; margin: 0;">The compute for this demo is generously provided by <a href="https://www.gmicloud.ai/" target="_blank">GMI Cloud</a>. Note that this demo is meant to showcase FastWan's quality and that under a large number of requests, generation speed may be affected.</p>
         </div>
         """)
         
@@ -874,7 +877,7 @@ def main():
     # print(f"I2V Model: {args.i2v_model_path}") # I2V functionality commented out
     
     # Use FastAPI to serve custom HTML with proper Open Graph metadata
-    from fastapi import FastAPI
+    from fastapi import FastAPI, Request
     from fastapi.responses import HTMLResponse, FileResponse
     import uvicorn
     import os
@@ -883,39 +886,62 @@ def main():
     
     @app.get("/logo.png")
     async def get_logo():
-        return FileResponse("fastvideo-logos/main/png/full.png", media_type="image/png")
+        from fastapi import Response
+        return FileResponse(
+            "fastvideo-logos/main/png/full.png", 
+            media_type="image/png",
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "Access-Control-Allow-Origin": "*"
+            }
+        )
     
     @app.get("/", response_class=HTMLResponse)
-    def index():
-        return """
+    def index(request: Request):
+        # Get the current host for dynamic URLs
+        base_url = str(request.base_url).rstrip('/')
+        return f"""
         <!DOCTYPE html>
         <html lang="en">
         <head>
             <meta charset="UTF-8" />
             <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-            <meta property="og:title" content="FastWan" />
-            <meta property="og:description" content="Make video generation go blurrrrrrr" />
-                         <meta property="og:image" content="https://fastwan.fastvideo.org/logo.png" />
-             <meta property="og:url" content="https://fastwan.fastvideo.org/" />
-             <meta property="og:type" content="website" />
-             <meta name="twitter:card" content="summary_large_image" />
-             <meta name="twitter:title" content="FastWan" />
-             <meta name="twitter:description" content="Make video generation go blurrrrrrr" />
-             <meta name="twitter:image" content="https://fastwan.fastvideo.org/logo.png" />
+            
+            <!-- Primary Meta Tags -->
             <title>FastWan</title>
+            <meta name="title" content="FastWan">
+            <meta name="description" content="Make video generation go blurrrrrrr">
+            <meta name="keywords" content="FastVideo, video generation, AI, machine learning, FastWan">
+            
+            <!-- Open Graph / Facebook -->
+            <meta property="og:type" content="website">
+            <meta property="og:url" content="{base_url}/">
+            <meta property="og:title" content="FastWan">
+            <meta property="og:description" content="Make video generation go blurrrrrrr">
+            <meta property="og:image" content="{base_url}/logo.png">
+            <meta property="og:image:width" content="1200">
+            <meta property="og:image:height" content="630">
+            <meta property="og:site_name" content="FastWan">
+            
+            <!-- Twitter -->
+            <meta property="twitter:card" content="summary_large_image">
+            <meta property="twitter:url" content="{base_url}/">
+            <meta property="twitter:title" content="FastWan">
+            <meta property="twitter:description" content="Make video generation go blurrrrrrr">
+            <meta property="twitter:image" content="{base_url}/logo.png">
             <link rel="icon" type="image/png" href="/gradio/file/fastvideo-logos/main/png/icon-simple.png">
             <style>
-                body, html {
+                body, html {{
                     margin: 0;
                     padding: 0;
                     height: 100%;
                     overflow: hidden;
-                }
-                iframe {
+                }}
+                iframe {{
                     width: 100%;
                     height: 100vh;
                     border: none;
-                }
+                }}
             </style>
         </head>
         <body>

@@ -18,14 +18,10 @@ from slowapi.errors import RateLimitExceeded
 import imageio
 from ray.serve.handle import DeploymentHandle
 
-NUM_GPUS = 8
+NUM_GPUS = 16
 SUPPORTED_MODELS = [
     "FastVideo/FastWan2.1-T2V-1.3B-Diffusers", 
-    "FastVideo/FastWan2.1-T2V-14B-Diffusers",
     "FastVideo/FastWan2.2-TI2V-5B-Diffusers",
-    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-    "Wan-AI/Wan2.1-T2V-14B-Diffusers",
-    "Wan-AI/Wan2.2-TI2V-5B-Diffusers",
 ]
 
 
@@ -109,10 +105,10 @@ class T2VModelDeployment:
         # time.sleep(5)
 
         # Ensure correct attention backend for FastVideo
-        if "FastVideo" in self.model_path:
-            os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
-        else:
+        if "5b" in self.model_path.lower():
             os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
+        else:
+            os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
         os.environ["FASTVIDEO_STAGE_LOGGING"] = "1"
 
         # Lazy import to keep the deployment import-safe on head node
