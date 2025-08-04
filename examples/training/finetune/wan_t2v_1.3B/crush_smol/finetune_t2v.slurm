@@ -100,7 +100,6 @@ optimizer_args=(
 # Miscellaneous arguments
 miscellaneous_args=(
   --inference_mode False
-  --allow_tf32
   --checkpoints_total_limit 3
   --training_cfg_rate 0.1
   --multi_phased_distill_schedule "4000-1"
