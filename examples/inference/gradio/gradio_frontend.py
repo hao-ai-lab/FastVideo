@@ -176,6 +176,13 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         if progress:
             progress(0.3, desc="Preparing request...")
         
+        # Map clean model names to full paths
+        model_path_mapping = {
+            "FastWan2.1-T2V-1.3B": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
+            "FastWan2.1-T2V-14B": "FastVideo/FastWan2.1-T2V-14B-Diffusers",
+            "FastWan2.2-TI2V-5B": "FastVideo/FastWan2.2-TI2V-5B-Diffusers"
+        }
+        
         request_data = {
             "prompt": prompt,
             "negative_prompt": negative_prompt,
@@ -190,7 +197,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             "return_frames": False,  # We'll get video data directly
             "image_path": None, # For T2V, we pass None as input_image
             # "model_type": "i2v" if "I2V" in model_selection or "Image-to-Video" in model_selection else "t2v",  # Use model type selection
-            "model_type": model_selection.split(' ')[0],
+            "model_type": model_path_mapping[model_selection],
             "model_path": model_selection.split(" (")[0] if model_selection else None  # Extract model path from selection
         }
         
@@ -230,53 +237,53 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             print(f"Stage names: {stage_names}")
             print(f"Stage execution times: {stage_execution_times}")
             
-            # Create detailed timing message with separate boxes
+            # Create detailed timing message with all cards in a single row
             timing_details = f"""
-            <div style="margin: 20px 0;">
-                <h3 style="text-align: center; margin-bottom: 15px;">⏱️ Timing Breakdown</h3>
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 15px;">
-                    <div class="timing-card">
-                        <div style="font-size: 24px;">🧠</div>
-                        <div style="font-weight: bold; margin: 5px 0;">Model Inference</div>
-                        <div style="font-size: 18px; color: #2563eb;">{inference_time:.2f}s</div>
-                    </div>
-                    <div class="timing-card">
-                        <div style="font-size: 24px;">🎬</div>
-                        <div style="font-weight: bold; margin: 5px 0;">Video Encoding</div>
-                        <div style="font-size: 18px; color: #dc2626;">{encoding_time:.2f}s</div>
-                    </div>
-                    <div class="timing-card">
-                        <div style="font-size: 24px;">🌐</div>
-                        <div style="font-weight: bold; margin: 5px 0;">Network Transfer</div>
-                        <div style="font-size: 18px; color: #059669;">{network_time:.2f}s</div>
-                    </div>
+            <div style="margin: 10px 0;">
+                <h3 style="text-align: center; margin-bottom: 10px;">⏱️ Timing Breakdown</h3>
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px;">
                     <div class="timing-card timing-card-highlight">
-                        <div style="font-size: 24px;">📊</div>
-                        <div style="font-weight: bold; margin: 5px 0;">Total Processing</div>
-                        <div style="font-size: 20px; font-weight: bold; color: #0277bd;">{total_time:.2f}s</div>
+                        <div style="font-size: 20px;">🧠</div>
+                        <div style="font-weight: bold; margin: 3px 0; font-size: 14px;">Model Inference</div>
+                        <div style="font-size: 16px; color: #2563eb; font-weight: bold;">{inference_time:.2f}s</div>
+                    </div>
+                    <div class="timing-card">
+                        <div style="font-size: 20px;">🎬</div>
+                        <div style="font-weight: bold; margin: 3px 0; font-size: 14px;">Video Encoding</div>
+                        <div style="font-size: 16px; color: #dc2626;">{encoding_time:.2f}s</div>
+                    </div>
+                    <div class="timing-card">
+                        <div style="font-size: 20px;">🌐</div>
+                        <div style="font-weight: bold; margin: 3px 0; font-size: 14px;">Network Transfer</div>
+                        <div style="font-size: 16px; color: #059669;">{network_time:.2f}s</div>
+                    </div>
+                    <div class="timing-card">
+                        <div style="font-size: 20px;">📊</div>
+                        <div style="font-weight: bold; margin: 3px 0; font-size: 14px;">Total Processing</div>
+                        <div style="font-size: 18px; color: #0277bd;">{total_time:.2f}s</div>
                     </div>
                 </div>"""
             
-            timing_details += f"""
-                <div style="margin-top: 15px;">
-                    <h4 style="text-align: center; margin-bottom: 10px;">🔄 Processing Stages</h4>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px;">
-            """
-            
-            # Add individual stage timing cards
-            for stage_name, stage_time in zip(stage_names, stage_execution_times):
-                if stage_name.strip() and stage_time > 0:  # Only show non-empty stages with valid times
-                    timing_details += f"""
-                        <div class="stage-card">
-                            <div style="font-weight: bold; font-size: 14px; margin-bottom: 5px;">{stage_name.strip()}</div>
-                            <div style="font-size: 16px; color: #7c3aed; font-weight: bold;">{stage_time:.2f}s</div>
-                        </div>
-                    """
-            
-            timing_details += """
-                    </div>
-                </div>
-            """
+            # timing_details += f"""
+            #     <div style="margin-top: 15px;">
+            #         <h4 style="text-align: center; margin-bottom: 10px;">🔄 Processing Stages</h4>
+            #         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px;">
+            # """
+            # 
+            # # Add individual stage timing cards
+            # for stage_name, stage_time in zip(stage_names, stage_execution_times):
+            #     if stage_name.strip() and stage_time > 0:  # Only show non-empty stages with valid times
+            #         timing_details += f"""
+            #             <div class="stage-card">
+            #                 <div style="font-weight: bold; font-size: 14px; margin-bottom: 5px;">{stage_name.strip()}</div>
+            #                 <div style="font-size: 16px; color: #7c3aed; font-weight: bold;">{stage_time:.2f}s</div>
+            #             </div>
+            #         """
+            # 
+            # timing_details += """
+            #         </div>
+            #     </div>
+            # """
             
             # Add performance insights
             if inference_time > 0:
@@ -398,7 +405,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
     with gr.Blocks(title="FastWan", theme=theme) as demo:
         
         # Logo using Gradio's Image component
-        gr.Image("fastvideo-logos/main/png/full.png", show_label=False, container=False, height=100)
+        gr.Image("fastvideo-logos/main/png/full.png", show_label=False, container=False, height=80)
         gr.HTML("""
         <div style="text-align: center; margin-bottom: 10px;">
             <p style="font-size: 18px;"> Make Video Generation Go Blurrrrrrr </p>
@@ -433,13 +440,12 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         with gr.Row():
             model_selection = gr.Dropdown(
                 choices=[
-                    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers (Text-to-Video)",
-                    "FastVideo/FastWan2.1-T2V-14B-Diffusers (Text-to-Video)",
-                    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers (Text-to-Video)",
-                    "Wan-AI/Wan2.1-T2V-14B-480P-Diffusers (Text-to-Video)",
+                    "FastWan2.1-T2V-1.3B",
+                    "FastWan2.1-T2V-14B",
+                    "FastWan2.2-TI2V-5B",
                     # "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers (Image-to-Video)"  # I2V functionality commented out
                 ],
-                value="FastVideo/FastWan2.1-T2V-1.3B-Diffusers (Text-to-Video)",
+                value="FastWan2.1-T2V-1.3B",
                 label="Select Model",
                 interactive=True
             )
@@ -461,7 +467,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                     label="Prompt",
                     show_label=False,
                     max_lines=3,
-                    placeholder="Enter your prompt",
+                    placeholder="Describe your scene...",
                     container=False,
                     lines=3,
                     autofocus=True,
@@ -469,12 +475,19 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             with gr.Column(scale=1, min_width=120, elem_classes="center-button"):
                 run_button = gr.Button("Run", variant="primary", size="lg")
         
+        # Status and timing information
+        with gr.Row():
+            with gr.Column():
+                error_output = gr.Text(label="Error", visible=False)
+                # frames_output = gr.Text(label="Generation Status", visible=False)
+                timing_display = gr.Markdown(label="Timing Breakdown", visible=False)
+
         # Two-column layout: Advanced options on left, Video on right
         with gr.Row(equal_height=True, elem_classes="main-content-row"):
             # Left column - Advanced options
             with gr.Column(scale=1, elem_classes="advanced-options-column"):
-                gr.HTML("<h3>Advanced Options</h3>")
                 with gr.Group():
+                    gr.HTML("<div style='margin: 0 0 15px 0; text-align: center; font-size: 16px;'>Advanced Options</div>")
                     with gr.Row():
                         height = gr.Slider(
                             label="Height",
@@ -526,15 +539,13 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                     )
                     randomize_seed = gr.Checkbox(label="Randomize seed", value=False)
                     seed_output = gr.Number(label="Used Seed")
-            
+        
             # Right column - Video result
             with gr.Column(scale=1, elem_classes="video-column"):
-                # Add spacing to align with advanced options
-                gr.HTML("<h3 style='visibility: hidden;'>Placeholder</h3>")
                 result = gr.Video(
                     label="Generated Video", 
                     show_label=True,
-                    height=392,  # Restore original height
+                    height=436,  # Adjusted height for better vertical alignment
                     width=600,   # Limit video width
                     container=True
                 )
@@ -583,13 +594,13 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             display: flex !important;
             flex-direction: column !important;
             flex: 1 !important;
-            min-height: 500px !important;
+            min-height: 400px !important;
         }
         
         /* Force equal heights regardless of content */
         .advanced-options-column > *:last-child,
         .video-column > *:last-child {
-            flex-grow: 1 !important;
+            flex-grow: 0 !important;
         }
         
         /* Responsive alignment for split screen */
@@ -622,9 +633,13 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             background: var(--background-fill-secondary) !important;
             border: 1px solid var(--border-color-primary) !important;
             color: var(--body-text-color) !important;
-            padding: 15px;
+            padding: 10px;
             border-radius: 8px;
             text-align: center;
+            min-height: 80px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         }
         
         .timing-card-highlight {
@@ -671,19 +686,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         </style>
         """)
         
-        # Progress tracking
-        progress_bar = gr.Progress()
-        status_updates = gr.Text(label="Status Updates", visible=False)
-        
-        # Centered status and timing information
-        with gr.Row():
-            with gr.Column():
-                error_output = gr.Text(label="Error", visible=False)
-                frames_output = gr.Text(label="Generation Status", visible=False)
-                timing_display = gr.Markdown(label="Timing Breakdown", visible=False)
-        
-
-        
         # Function to update prompt when example is selected
         def on_example_select(example_label):
             if example_label and example_label in example_labels:
@@ -699,8 +701,8 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         
         # Disclaimer text
         gr.HTML("""
-        <div style="text-align: center; margin-top: 20px;">
-            <p style="font-size: 16px;">The compute for this demo is generously provided by <a href="https://www.gmicloud.ai/" target="_blank">GMI Cloud</a>. Note that this demo is meant to showcase FastWan2.1's quality and that under a large number of requests, generation speed may be affected.</p>
+        <div style="text-align: center; margin-top: 10px; margin-bottom: 15px;">
+            <p style="font-size: 16px; margin: 0;">The compute for this demo is generously provided by <a href="https://www.gmicloud.ai/" target="_blank">GMI Cloud</a>. Note that this demo is meant to showcase FastWan2.1's quality and that under a large number of requests, generation speed may be affected.</p>
         </div>
         """)
         
@@ -774,7 +776,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                     result_path, 
                     seed_or_error, 
                     gr.update(visible=False),  # error_output
-                    gr.update(visible=True, value="Generation completed successfully!"),  # frames_output
+                    # gr.update(visible=True, value="Generation completed successfully!"),  # frames_output
                     gr.update(visible=True, value=timing_details),  # timing_display
                 )
             else:
@@ -782,7 +784,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                     None, 
                     seed_or_error, 
                     gr.update(visible=True, value=seed_or_error),  # error_output
-                    gr.update(visible=False),  # frames_output
+                    # gr.update(visible=False),  # frames_output
                     gr.update(visible=False),  # timing_display
                 )
         
@@ -802,7 +804,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                 randomize_seed,
                 # input_image, # Removed input_image from inputs
             ],
-            outputs=[result, seed_output, error_output, frames_output, timing_display],
+            outputs=[result, seed_output, error_output, timing_display],
             concurrency_limit=20,
         )
         
