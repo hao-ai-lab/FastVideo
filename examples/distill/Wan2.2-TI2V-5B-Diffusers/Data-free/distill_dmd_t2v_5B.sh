@@ -124,7 +124,7 @@ dmd_args=(
   --max_timestep_ratio 0.98
   --generator_update_interval 5
   --real_score_guidance_scale 3
-  --simulate_student_forward 
+  --simulate_generator_forward 
   --log_visualization # disable if oom
 )
 

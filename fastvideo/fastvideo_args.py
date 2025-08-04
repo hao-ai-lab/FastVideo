@@ -670,8 +670,8 @@ class TrainingArgs(FastVideoArgs):
     training_state_checkpointing_steps: int = 0  # for resuming training
     weight_only_checkpointing_steps: int = 0  # for inference
     log_visualization: bool = False
-    # simulate student forward to match inference
-    simulate_student_forward: bool = False
+    # simulate generator forward to match inference
+    simulate_generator_forward: bool = False
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -1016,9 +1016,9 @@ class TrainingArgs(FastVideoArgs):
                             action=StoreBoolean,
                             help="Whether to log visualization")
         parser.add_argument(
-            "--simulate-student-forward",
+            "--simulate-generator-forward",
             action=StoreBoolean,
-            help="Whether to simulate student forward to match inference")
+            help="Whether to simulate generator forward to match inference")
 
         return parser
 

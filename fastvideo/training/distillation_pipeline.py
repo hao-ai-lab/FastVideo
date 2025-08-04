@@ -415,7 +415,7 @@ class DistillationPipeline(TrainingPipeline):
         with torch.no_grad(), set_forward_context(
                 current_timestep=training_batch.timesteps,
                 attn_metadata=training_batch.attn_metadata_vsa):
-            if self.training_args.simulate_student_forward:
+            if self.training_args.simulate_generator_forward:
                 generator_pred_video = self._generator_multi_step_simulation_forward(
                     training_batch)
             else:
@@ -550,7 +550,7 @@ class DistillationPipeline(TrainingPipeline):
                 with set_forward_context(
                         current_timestep=batch_gen.timesteps,
                         attn_metadata=batch_gen.attn_metadata_vsa):
-                    if self.training_args.simulate_student_forward:
+                    if self.training_args.simulate_generator_forward:
                         generator_pred_video = self._generator_multi_step_simulation_forward(
                             batch_gen)
                     else:
