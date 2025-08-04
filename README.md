@@ -11,7 +11,7 @@ FastVideo is an inference and post-training framework for diffusion models. It f
 </p>
 
 <div align="center">
-<img src=assets/speed.gif width="90%"/>
+<img src=assets/fastwan.png width="90%"/>
 </div>
 
 ## NEWS
@@ -46,6 +46,17 @@ pip install fastvideo
 ```
 
 Please see our [docs](https://hao-ai-lab.github.io/FastVideo/getting_started/installation.html) for more detailed installation instructions.
+
+## Sparse Distillation
+For our sparse distillation techniques, please see our [distillation docs](https://hao-ai-lab.github.io/FastVideo/distillation/dmd.html) and check out our [blog](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/).
+
+See below for recipes and datasets:
+
+|                                            Model                                              |                                               Sparse Distillation                                                 |                                                  Dataset                                                  |
+|:-------------------------------------------------------------------------------------------:  |:---------------------------------------------------------------------------------------------------------------:  |:--------------------------------------------------------------------------------------------------------: |
+| [FastWan2.1-T2V-1.3B](https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers)         |    [Recipe](https://github.com/hao-ai-lab/FastVideo/tree/main/examples/distill/Wan2.1-T2V/Wan-Syn-Data-480P)      | [FastVideo Synthetic Wan2.1 480P](https://huggingface.co/datasets/FastVideo/Wan-Syn_77x448x832_600k)      |
+| [FastWan2.1-T2V-14B-Preview](https://huggingface.co/FastVideo/FastWan2.1-T2V-14B-Diffusers)   |                                                   Coming soon!                                                    |   [FastVideo Synthetic Wan2.1 720P](https://huggingface.co/datasets/FastVideo/Wan-Syn_77x768x1280_250k)   |
+| [FastWan2.2-TI2V-5B](https://huggingface.co/FastVideo/FastWan2.2-TI2V-5B-Diffusers)           | [Recipe](https://github.com/hao-ai-lab/FastVideo/tree/main/examples/distill/Wan2.2-TI2V-5B-Diffusers/Data-free)   | [FastVideo Synthetic Wan2.2 720P](https://huggingface.co/datasets/FastVideo/Wan2.2-Syn-121x704x1280_32k)  |
 
 ## Inference
 ### Generating Your First Video
@@ -83,18 +94,6 @@ python example.py
 ```
 
 For a more detailed guide, please see our [inference quick start](https://hao-ai-lab.github.io/FastVideo/inference/inference_quick_start.html).
-
-### Sparse Distillation
-
-For our sparse distillation techniques, please see our [distillation docs](https://hao-ai-lab.github.io/FastVideo/distillation/dmd.html) and check out our [blog](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/).
-
-See below for recipes and datasets:
-
-|                                            Model                                              |                                               Sparse Distillation                                                 |                                                  Dataset                                                  |
-|:-------------------------------------------------------------------------------------------:  |:---------------------------------------------------------------------------------------------------------------:  |:--------------------------------------------------------------------------------------------------------: |
-| [FastWan2.1-T2V-1.3B](https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers)         |    [Recipe](https://github.com/hao-ai-lab/FastVideo/tree/main/examples/distill/Wan2.1-T2V/Wan-Syn-Data-480P)      | [FastVideo Synthetic Wan2.1 480P](https://huggingface.co/datasets/FastVideo/Wan-Syn_77x448x832_600k)      |
-| [FastWan2.1-T2V-14B-Preview](https://huggingface.co/FastVideo/FastWan2.1-T2V-14B-Diffusers)   |                                                   Coming soon!                                                    |   [FastVideo Synthetic Wan2.1 720P](https://huggingface.co/datasets/FastVideo/Wan-Syn_77x768x1280_250k)   |
-| [FastWan2.2-TI2V-5B](https://huggingface.co/FastVideo/FastWan2.2-TI2V-5B-Diffusers)           | [Recipe](https://github.com/hao-ai-lab/FastVideo/tree/main/examples/distill/Wan2.2-TI2V-5B-Diffusers/Data-free)   | [FastVideo Synthetic Wan2.2 720P](https://huggingface.co/datasets/FastVideo/Wan2.2-Syn-121x704x1280_32k)  |
 
 ### Other docs:
 
