@@ -20,7 +20,10 @@ from fastvideo.configs.sample.base import SamplingParam
 MODEL_PATH_MAPPING = {
     "FastWan2.1-T2V-1.3B": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
     "FastWan2.1-T2V-14B": "FastVideo/FastWan2.1-T2V-14B-Diffusers",
-    "FastWan2.2-TI2V-5B": "FastVideo/FastWan2.2-TI2V-5B-Diffusers"
+    "FastWan2.2-TI2V-5B": "FastVideo/FastWan2.2-TI2V-5B-Diffusers",
+    "Wan2.1-T2V-1.3B": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    "Wan2.1-T2V-14B": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+    "Wan2.2-TI2V-5B": "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
 }
 
 
@@ -441,8 +444,9 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             model_selection = gr.Dropdown(
                 choices=[
                     "FastWan2.1-T2V-1.3B",
-                    "FastWan2.1-T2V-14B",
                     "FastWan2.2-TI2V-5B",
+                    "Wan2.1-T2V-1.3B",
+                    "Wan2.2-TI2V-5B",
                     # "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers (Image-to-Video)"  # I2V functionality commented out
                 ],
                 value="FastWan2.1-T2V-1.3B",

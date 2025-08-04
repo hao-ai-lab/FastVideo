@@ -106,7 +106,7 @@ class T2VModelDeployment:
         os.makedirs(self.output_path, exist_ok=True)
 
         # Delay helps avoid GPU contention when many replicas start at once
-        time.sleep(5)
+        # time.sleep(5)
 
         # Ensure correct attention backend for FastVideo
         if "FastVideo" in self.model_path:
