@@ -60,4 +60,28 @@ For the 14B model, we use **8 nodes with 64 H200 GPUs** (8 GPUs per node):
 sbatch examples/distill/Wan2.1-T2V/Wan-Syn-Data-480P/distill_dmd_VSA_t2v_14B.slurm
 ```
 
-**Key Configur
+**Key Configuration:**
+- Global batch size: 64
+- Sequence parallel size: 4
+- Gradient accumulation steps: 4
+- Learning rate: 1e-5
+- VSA attention sparsity: 0.9
+- Training steps: 3000 (~52 hours)
+- HSDP shard dim: 8
+
+### Wan2.2 5B Model Sparse-Distill
+
+For the 5B model, we use **8 nodes with 64 H200 GPUs** (8 GPUs per node):
+
+```bash
+# Multi-node training (8 nodes, 64 GPUs total)
+sbatch examples/distill/Wan2.2-TI2V-5B-Diffusers/Data-free/distill_dmd_t2v_5B.sh 
+```
+
+**Key Configuration:**
+- Global batch size: 64
+- Sequence parallel size: 1
+- Gradient accumulation steps: 1
+- Learning rate: 2e-5
+- Training steps: 3000 (~12 hours)
+- HSDP shard dim: 1
