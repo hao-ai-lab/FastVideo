@@ -488,57 +488,57 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             with gr.Column(scale=1, elem_classes="advanced-options-column"):
                 with gr.Group():
                     gr.HTML("<div style='margin: 0 0 15px 0; text-align: center; font-size: 16px;'>Advanced Options</div>")
-                    with gr.Row():
-                        height = gr.Slider(
-                            label="Height",
-                            minimum=256,
-                            maximum=1280,
-                            step=32,
-                            value=initial_values['height'],
-                        )
-                        width = gr.Slider(
-                            label="Width",
-                            minimum=256,
-                            maximum=1280,
-                            step=32,
-                            value=initial_values['width']
-                        )
-                    
-                    with gr.Row():
-                        num_frames = gr.Slider(
-                            label="Number of Frames",
-                            minimum=16,
-                            maximum=121,
-                            step=16,
-                            value=initial_values['num_frames'],
-                        )
-                        guidance_scale = gr.Slider(
-                            label="Guidance Scale",
-                            minimum=1,
-                            maximum=12,
-                            value=initial_values['guidance_scale'],
-                        )
-                    
-                    with gr.Row():
-                        use_negative_prompt = gr.Checkbox(
-                            label="Use negative prompt", value=False)
-                        negative_prompt = gr.Text(
-                            label="Negative prompt",
-                            max_lines=3,
-                            lines=3,
-                            placeholder="Enter a negative prompt",
-                            visible=False,
-                        )
-
-                    seed = gr.Slider(
-                        label="Seed",
-                        minimum=0,
-                        maximum=1000000,
-                        step=1,
-                        value=initial_values['seed'],
+                with gr.Row():
+                    height = gr.Slider(
+                        label="Height",
+                        minimum=256,
+                        maximum=1280,
+                        step=32,
+                        value=initial_values['height'],
                     )
-                    randomize_seed = gr.Checkbox(label="Randomize seed", value=False)
-                    seed_output = gr.Number(label="Used Seed")
+                    width = gr.Slider(
+                        label="Width",
+                        minimum=256,
+                        maximum=1280,
+                        step=32,
+                        value=initial_values['width']
+                    )
+                
+                with gr.Row():
+                    num_frames = gr.Slider(
+                        label="Number of Frames",
+                        minimum=16,
+                        maximum=121,
+                        step=16,
+                        value=initial_values['num_frames'],
+                    )
+                    guidance_scale = gr.Slider(
+                        label="Guidance Scale",
+                        minimum=1,
+                        maximum=12,
+                        value=initial_values['guidance_scale'],
+                    )
+                
+                with gr.Row():
+                    use_negative_prompt = gr.Checkbox(
+                        label="Use negative prompt", value=False)
+                    negative_prompt = gr.Text(
+                        label="Negative prompt",
+                        max_lines=3,
+                        lines=3,
+                        placeholder="Enter a negative prompt",
+                        visible=False,
+                    )
+
+                seed = gr.Slider(
+                    label="Seed",
+                    minimum=0,
+                    maximum=1000000,
+                    step=1,
+                    value=initial_values['seed'],
+                )
+                randomize_seed = gr.Checkbox(label="Randomize seed", value=False)
+                seed_output = gr.Number(label="Used Seed")
         
             # Right column - Video result
             with gr.Column(scale=1, elem_classes="video-column"):
@@ -869,12 +869,67 @@ def main():
     # print(f"T2V Model Replicas: {args.t2v_model_replicas}")
     # print(f"I2V Model: {args.i2v_model_path}") # I2V functionality commented out
     
-    demo.queue(max_size=20).launch(
-        server_name=args.host,
-        server_port=args.port,
-        favicon_path="fastvideo-logos/main/png/icon-simple.png",
+    # Use FastAPI to serve custom HTML with proper Open Graph metadata
+    from fastapi import FastAPI
+    from fastapi.responses import HTMLResponse, FileResponse
+    import uvicorn
+    import os
+    
+    app = FastAPI()
+    
+    @app.get("/logo.png")
+    async def get_logo():
+        return FileResponse("fastvideo-logos/main/png/full.png", media_type="image/png")
+    
+    @app.get("/", response_class=HTMLResponse)
+    def index():
+        return """
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+            <meta property="og:title" content="FastWan" />
+            <meta property="og:description" content="Make video generation go blurrrrrrr" />
+                         <meta property="og:image" content="https://fastwan.fastvideo.org/logo.png" />
+             <meta property="og:url" content="https://fastwan.fastvideo.org/" />
+             <meta property="og:type" content="website" />
+             <meta name="twitter:card" content="summary_large_image" />
+             <meta name="twitter:title" content="FastWan" />
+             <meta name="twitter:description" content="Make video generation go blurrrrrrr" />
+             <meta name="twitter:image" content="https://fastwan.fastvideo.org/logo.png" />
+            <title>FastWan</title>
+            <link rel="icon" type="image/png" href="/gradio/file/fastvideo-logos/main/png/icon-simple.png">
+            <style>
+                body, html {
+                    margin: 0;
+                    padding: 0;
+                    height: 100%;
+                    overflow: hidden;
+                }
+                iframe {
+                    width: 100%;
+                    height: 100vh;
+                    border: none;
+                }
+            </style>
+        </head>
+        <body>
+            <iframe src="/gradio" width="100%" height="100%" style="border: none;"></iframe>
+        </body>
+        </html>
+        """
+    
+    # Mount Gradio app under /gradio
+    app = gr.mount_gradio_app(
+        app, 
+        demo, 
+        path="/gradio",
         allowed_paths=[os.path.abspath("outputs"), os.path.abspath("temp_images"), os.path.abspath("fastvideo-logos")]
     )
+    
+    # Run the FastAPI server
+    uvicorn.run(app, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
