@@ -336,25 +336,22 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                 return True
         return False
     
-    # Load prompts from all text files in the prompts directory
-    prompts_dir = "prompts"
-    if os.path.exists(prompts_dir):
-        for filename in os.listdir(prompts_dir):
-            if filename.endswith('.txt'):
-                filepath = os.path.join(prompts_dir, filename)
-                try:
-                    with open(filepath, "r", encoding='utf-8') as f:
-                        for line_num, line in enumerate(f, 1):
-                            line = line.strip()
-                            if line and not contains_chinese(line):  # Skip empty lines and lines with Chinese text
-                                # Create a label from the first 100 characters
-                                label = line[:100] + "..." if len(line) > 100 else line
-                                example_labels.append(label)
-                                examples.append(line)
-                except Exception as e:
-                    print(f"Warning: Could not read {filepath}: {e}")
+    # Load prompts from prompts/prompts_final.txt
+    prompts_file = "prompts/prompts_final.txt"
+    if os.path.exists(prompts_file):
+        try:
+            with open(prompts_file, "r", encoding='utf-8') as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    if line and not contains_chinese(line):  # Skip empty lines and lines with Chinese text
+                        # Create a label from the first 100 characters
+                        label = line[:100] + "..." if len(line) > 100 else line
+                        example_labels.append(label)
+                        examples.append(line)
+        except Exception as e:
+            print(f"Warning: Could not read {prompts_file}: {e}")
     
-    # Fallback to example_prompts.txt if prompts directory is empty or doesn't exist
+    # Fallback to example_prompts.txt if prompts_final.txt doesn't exist or is empty
     if not examples:
         try:
             with open("example_prompts.txt", "r") as f:
