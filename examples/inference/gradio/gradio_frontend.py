@@ -176,6 +176,12 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
         if progress:
             progress(0.3, desc="Preparing request...")
         
+        # Map clean model names to full paths
+        model_path_mapping = {
+            "FastWan2.1-T2V-1.3B": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
+            "FastWan2.1-T2V-14B": "FastVideo/FastWan2.1-T2V-14B-Diffusers"
+        }
+        
         request_data = {
             "prompt": prompt,
             "negative_prompt": negative_prompt,
@@ -189,8 +195,8 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             "randomize_seed": randomize_seed,
             "return_frames": False,  # We'll get video data directly
             "image_path": None, # For T2V, we pass None as input_image
-            "model_type": "i2v" if "I2V" in model_selection or "Image-to-Video" in model_selection else "t2v",  # Use model type selection
-            "model_path": model_selection.split(" (")[0] if model_selection else None  # Extract model path from selection
+            "model_type": "t2v",  # All current models are T2V
+            "model_path": model_path_mapping.get(model_selection, "FastVideo/FastWan2.1-T2V-1.3B-Diffusers")  # Map to full path
         }
         
         # Send request to backend
@@ -406,11 +412,11 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
         with gr.Row():
             model_selection = gr.Dropdown(
                 choices=[
-                    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers (Text-to-Video)",
-                    "FastVideo/FastWan2.1-T2V-14B-Diffusers (Text-to-Video)",
+                    "FastWan2.1-T2V-1.3B",
+                    "FastWan2.1-T2V-14B",
                     # "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers (Image-to-Video)"  # I2V functionality commented out
                 ],
-                value="FastVideo/FastWan2.1-T2V-1.3B-Diffusers (Text-to-Video)",
+                value="FastWan2.1-T2V-1.3B",
                 label="Select Model",
                 interactive=True
             )
@@ -666,8 +672,8 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
         
         # Disclaimer text
         gr.HTML("""
-        <div style="text-align: center; margin-top: 20px;">
-            <p style="font-size: 16px;">The compute for this demo is generously provided by <a href="https://www.gmicloud.ai/" target="_blank">GMI Cloud</a>. Note that this demo is meant to showcase FastWan2.1's quality and that under a large number of requests, generation speed may be affected.</p>
+        <div style="text-align: center; margin-top: 10px; margin-bottom: 15px;">
+            <p style="font-size: 16px; margin: 0;">The compute for this demo is generously provided by <a href="https://www.gmicloud.ai/" target="_blank">GMI Cloud</a>. Note that this demo is meant to showcase FastWan2.1's quality and that under a large number of requests, generation speed may be affected.</p>
         </div>
         """)
         
