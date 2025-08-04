@@ -622,7 +622,6 @@ class TrainingArgs(FastVideoArgs):
     max_grad_norm: float = 0.0
     enable_gradient_checkpointing_type: str | None = None
     selective_checkpointing: float = 0.0
-    allow_tf32: bool = False
     mixed_precision: str = ""
     train_sp_batch_size: int = 0
     fsdp_sharding_startegy: str = ""
@@ -883,9 +882,6 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--selective-checkpointing",
                             type=float,
                             help="Selective checkpointing threshold")
-        parser.add_argument("--allow-tf32",
-                            action=StoreBoolean,
-                            help="Whether to allow TF32")
         parser.add_argument("--mixed-precision",
                             type=str,
                             help="Mixed precision training type")

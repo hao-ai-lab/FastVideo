@@ -55,7 +55,6 @@ def run_worker():
         "--validation_sampling_steps", "8",
         "--log_validation",
         "--checkpoints_total_limit", "3",
-        "--allow_tf32",
         "--ema_start_step", "0",
         "--training_cfg_rate", "0.0",
         "--output_dir", "data/wan_finetune_test",
