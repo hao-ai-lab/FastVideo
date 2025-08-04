@@ -424,6 +424,10 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+# Import Prometheus metrics (but don't instantiate at module level)
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+import time
+
 
 @serve.deployment(ray_actor_options={"num_cpus": 2})
 @serve.ingress(app)
@@ -434,11 +438,19 @@ class FastVideoAPI:
         self.t2v_deployments = t2v_deployments
         # self.t2v_14b_handle = t2v_14b_deployment
         # self.i2v_handle = i2v_deployment  # I2V functionality commented out
+        
+        # Initialize Prometheus metrics inside the deployment
+        self.request_count = Counter('fastvideo_requests_total', 'Total FastVideo requests', ['model_type', 'status'])
+        self.request_duration = Histogram('fastvideo_request_duration_seconds', 'FastVideo request duration', ['model_type'])
+        self.video_generation_time = Histogram('fastvideo_video_generation_seconds', 'Video generation time', ['model_type'])
     
     @app.post("/generate_video", response_model=VideoGenerationResponse)
     @limiter.limit("50/minute")  # Allow 50 requests per minute per IP
     async def generate_video(self, request: Request, video_request: VideoGenerationRequest) -> VideoGenerationResponse:
         """Route the request to the appropriate model deployment based on `model_type` and `model_path`."""
+        start_time = time.time()
+        model_type = video_request.model_path.split('/')[-1] if video_request.model_path else "unknown"
+        
         try:
             # assert video_request.model_type in self.t2v_deployments, f"Model {video_request.model_type} not found"
             if video_request.model_type not in self.t2v_deployments:
@@ -460,9 +472,19 @@ class FastVideoAPI:
             # Await the remote response
             response = await response_ref
             
+            # Record success metrics
+            self.request_count.labels(model_type=model_type, status="success").inc()
+            self.request_duration.labels(model_type=model_type).observe(time.time() - start_time)
+            if hasattr(response, 'generation_time_seconds') and response.generation_time_seconds:
+                self.video_generation_time.labels(model_type=model_type).observe(response.generation_time_seconds)
+            
             return response
 
         except Exception as e:
+            # Record error metrics
+            self.request_count.labels(model_type=model_type, status="error").inc()
+            self.request_duration.labels(model_type=model_type).observe(time.time() - start_time)
+            
             return VideoGenerationResponse(
                 video_data=None,
                 seed=video_request.seed,
@@ -475,8 +497,11 @@ class FastVideoAPI:
     async def health_check(self, request: Request):
         return {"status": "healthy"}
     
-
-
+    @app.get("/metrics")
+    async def metrics(self):
+        """Expose Prometheus metrics"""
+        from fastapi import Response
+        return Response(generate_latest(), media_type="text/plain")
 
 def start_ray_serve(
     *,
