@@ -15,6 +15,14 @@ import time
 
 from fastvideo.configs.sample.base import SamplingParam
 
+        
+# Map clean model names to full paths
+MODEL_PATH_MAPPING = {
+    "FastWan2.1-T2V-1.3B": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
+    "FastWan2.1-T2V-14B": "FastVideo/FastWan2.1-T2V-14B-Diffusers",
+    "FastWan2.2-TI2V-5B": "FastVideo/FastWan2.2-TI2V-5B-Diffusers"
+}
+
 
 class RayServeClient:
     def __init__(self, backend_url: str):
@@ -176,12 +184,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         if progress:
             progress(0.3, desc="Preparing request...")
         
-        # Map clean model names to full paths
-        model_path_mapping = {
-            "FastWan2.1-T2V-1.3B": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
-            "FastWan2.1-T2V-14B": "FastVideo/FastWan2.1-T2V-14B-Diffusers"
-        }
-        
         request_data = {
             "prompt": prompt,
             "negative_prompt": negative_prompt,
@@ -195,14 +197,8 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             "randomize_seed": randomize_seed,
             "return_frames": False,  # We'll get video data directly
             "image_path": None, # For T2V, we pass None as input_image
-<<<<<<< HEAD
-            # "model_type": "i2v" if "I2V" in model_selection or "Image-to-Video" in model_selection else "t2v",  # Use model type selection
-            "model_type": model_selection.split(' ')[0],
-            "model_path": model_selection.split(" (")[0] if model_selection else None  # Extract model path from selection
-=======
-            "model_type": "t2v",  # All current models are T2V
-            "model_path": model_path_mapping.get(model_selection, "FastVideo/FastWan2.1-T2V-1.3B-Diffusers")  # Map to full path
->>>>>>> 1f96c535 (update)
+            "model_type": MODEL_PATH_MAPPING[model_selection],
+            "model_path": MODEL_PATH_MAPPING.get(model_selection, "FastVideo/FastWan2.1-T2V-1.3B-Diffusers")  # Map to full path
         }
         
         # Send request to backend
@@ -444,15 +440,9 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         with gr.Row():
             model_selection = gr.Dropdown(
                 choices=[
-<<<<<<< HEAD
-                    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers (Text-to-Video)",
-                    "FastVideo/FastWan2.1-T2V-14B-Diffusers (Text-to-Video)",
-                    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers (Text-to-Video)",
-                    "Wan-AI/Wan2.1-T2V-14B-480P-Diffusers (Text-to-Video)",
-=======
                     "FastWan2.1-T2V-1.3B",
                     "FastWan2.1-T2V-14B",
->>>>>>> 1f96c535 (update)
+                    "FastWan2.2-TI2V-5B",
                     # "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers (Image-to-Video)"  # I2V functionality commented out
                 ],
                 value="FastWan2.1-T2V-1.3B",
@@ -738,10 +728,10 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         def on_model_selection_change(selected_model):
             """Update advanced options based on selected model's default parameters"""
             if not selected_model:
-                return {}, {}, {}, {}, {}  # Return empty updates if no model selected
+                selected_model = "FastWan2.1-T2V-1.3B"
             
             # Extract model path from selection (remove the description part)
-            model_path = selected_model.split(" ")[0] if selected_model else None
+            model_path = MODEL_PATH_MAPPING[selected_model]
             
             if model_path and model_path in default_params:
                 params = default_params[model_path]
