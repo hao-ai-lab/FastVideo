@@ -45,8 +45,8 @@ def start_backend(args):
     
     cmd = [
         sys.executable, str(backend_script),
-        "--t2v_model_path", args.t2v_model_path,
-        "--t2v_14b_model_path", args.t2v_14b_model_path,
+        "--t2v_model_paths", args.t2v_model_paths,
+        "--t2v_model_replicas", args.t2v_model_replicas,
         # "--i2v_model_path", args.i2v_model_path,  # I2V functionality commented out
         "--output_path", args.output_path,
         "--host", args.backend_host,
@@ -84,8 +84,8 @@ def start_frontend(args):
     cmd = [
         sys.executable, str(frontend_script),
         "--backend_url", backend_url,
-        "--t2v_model_path", args.t2v_model_path,
-        "--t2v_14b_model_path", args.t2v_14b_model_path,
+        "--t2v_model_paths", args.t2v_model_paths,
+        # "--t2v_model_replicas", args.t2v_model_replicas,
         # "--i2v_model_path", args.i2v_model_path,  # I2V functionality commented out
         "--host", args.frontend_host,
         "--port", str(args.frontend_port)
@@ -118,14 +118,18 @@ def main():
     parser = argparse.ArgumentParser(description="FastVideo Ray Serve App")
     
     # Model and output settings
-    parser.add_argument("--t2v_model_path",
+    parser.add_argument("--t2v_model_paths",
                         type=str,
-                        default="FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
-                        help="Path to the T2V model")
-    parser.add_argument("--t2v_14b_model_path",
+                        default="FastVideo/FastWan2.1-T2V-1.3B-Diffusers,FastVideo/FastWan2.1-T2V-14B-Diffusers",
+                        help="Comma separated list of paths to the T2V model(s)")
+    parser.add_argument("--t2v_model_replicas",
                         type=str,
-                        default="FastVideo/FastWan2.1-T2V-14B-Diffusers",
-                        help="Path to the T2V 14B model")
+                        default="4,4",
+                        help="Comma separated list of number of replicas for the T2V model(s)")
+    # parser.add_argument("--t2v_14b_model_path",
+    #                     type=str,
+    #                     default="FastVideo/FastWan2.1-T2V-14B-Diffusers",
+    #                     help="Path to the T2V 14B model")
     # parser.add_argument("--i2v_model_path",  # I2V functionality commented out
     #                     type=str,
     #                     default="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
@@ -167,8 +171,8 @@ def main():
     
     print("🎬 FastVideo Ray Serve App")
     print("=" * 50)
-    print(f"T2V 1.3B Model: {args.t2v_model_path}")
-    print(f"T2V 14B Model: {args.t2v_14b_model_path}")
+    print(f"T2V Models: {args.t2v_model_paths}")
+    print(f"T2V Model Replicas: {args.t2v_model_replicas}")
     # print(f"I2V Model: {args.i2v_model_path}")  # I2V functionality commented out
     print(f"Output: {args.output_path}")
     print(f"Backend: http://{args.backend_host}:{args.backend_port}")

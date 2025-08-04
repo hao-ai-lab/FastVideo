@@ -93,7 +93,7 @@ def save_video_from_base64(video_data: str, output_dir: str, prompt: str) -> str
         return f"Failed to save video: {str(e)}", ""
 
 
-def create_gradio_interface(backend_url: str, default_params: SamplingParam):
+def create_gradio_interface(backend_url: str, default_params: dict[str, SamplingParam]):
     """Create the Gradio interface"""
     
     # Initialize the Ray Serve client
@@ -185,11 +185,12 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
             "num_frames": num_frames,
             "height": height,
             "width": width,
-            "num_inference_steps": 20,  # Use default value
+            # "num_inference_steps": 20,  # Use default value
             "randomize_seed": randomize_seed,
             "return_frames": False,  # We'll get video data directly
             "image_path": None, # For T2V, we pass None as input_image
-            "model_type": "i2v" if "I2V" in model_selection or "Image-to-Video" in model_selection else "t2v",  # Use model type selection
+            # "model_type": "i2v" if "I2V" in model_selection or "Image-to-Video" in model_selection else "t2v",  # Use model type selection
+            "model_type": model_selection.split(' ')[0],
             "model_path": model_selection.split(" (")[0] if model_selection else None  # Extract model path from selection
         }
         
@@ -367,6 +368,32 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
         checkbox_background_color_selected="#2563eb",  # Blue checkbox when selected
     )
     
+    def get_default_values_for_model(model_selection_value):
+        """Get default parameter values for the specified model"""
+        model_path = model_selection_value.split(" (")[0] if model_selection_value else None
+        if model_path and model_path in default_params:
+            params = default_params[model_path]
+            return {
+                'height': params.height,
+                'width': params.width,
+                'num_frames': params.num_frames,
+                'guidance_scale': params.guidance_scale,
+                'seed': params.seed,
+            }
+        else:
+            # Fallback defaults if model not found
+            return {
+                'height': 448,
+                'width': 832,
+                'num_frames': 61,
+                'guidance_scale': 3.0,
+                'seed': 1024,
+            }
+    
+    # Get initial values for the default model
+    default_model = "FastVideo/FastWan2.1-T2V-1.3B-Diffusers (Text-to-Video)"
+    initial_values = get_default_values_for_model(default_model)
+    
     # Create Gradio interface
     with gr.Blocks(title="FastWan", theme=theme) as demo:
         
@@ -408,6 +435,8 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                 choices=[
                     "FastVideo/FastWan2.1-T2V-1.3B-Diffusers (Text-to-Video)",
                     "FastVideo/FastWan2.1-T2V-14B-Diffusers (Text-to-Video)",
+                    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers (Text-to-Video)",
+                    "Wan-AI/Wan2.1-T2V-14B-480P-Diffusers (Text-to-Video)",
                     # "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers (Image-to-Video)"  # I2V functionality commented out
                 ],
                 value="FastVideo/FastWan2.1-T2V-1.3B-Diffusers (Text-to-Video)",
@@ -452,14 +481,14 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                             minimum=256,
                             maximum=1280,
                             step=32,
-                            value=448,
+                            value=initial_values['height'],
                         )
                         width = gr.Slider(
                             label="Width",
                             minimum=256,
                             maximum=1280,
                             step=32,
-                            value=832
+                            value=initial_values['width']
                         )
                     
                     with gr.Row():
@@ -468,13 +497,13 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                             minimum=16,
                             maximum=121,
                             step=16,
-                            value=61,
+                            value=initial_values['num_frames'],
                         )
                         guidance_scale = gr.Slider(
                             label="Guidance Scale",
                             minimum=1,
                             maximum=12,
-                            value=3.0,
+                            value=initial_values['guidance_scale'],
                         )
                     
                     with gr.Row():
@@ -493,7 +522,7 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
                         minimum=0,
                         maximum=1000000,
                         step=1,
-                        value=1024
+                        value=initial_values['seed'],
                     )
                     randomize_seed = gr.Checkbox(label="Randomize seed", value=False)
                     seed_output = gr.Number(label="Used Seed")
@@ -694,6 +723,35 @@ def create_gradio_interface(backend_url: str, default_params: SamplingParam):
         #     outputs=[input_image, prompt],
         # )
         
+        def on_model_selection_change(selected_model):
+            """Update advanced options based on selected model's default parameters"""
+            if not selected_model:
+                return {}, {}, {}, {}, {}  # Return empty updates if no model selected
+            
+            # Extract model path from selection (remove the description part)
+            model_path = selected_model.split(" ")[0] if selected_model else None
+            
+            if model_path and model_path in default_params:
+                params = default_params[model_path]
+                
+                # Update each component with the model's default values
+                return (
+                    gr.update(value=params.height),  # height
+                    gr.update(value=params.width),   # width  
+                    gr.update(value=params.num_frames),  # num_frames
+                    gr.update(value=params.guidance_scale),  # guidance_scale
+                    gr.update(value=params.seed),  # seed
+                )
+            else:
+                # If model not found in default_params, return current values (no change)
+                return {}, {}, {}, {}, {}
+        
+        model_selection.change(
+            fn=on_model_selection_change,
+            inputs=model_selection,
+            outputs=[height, width, num_frames, guidance_scale, seed],
+        )
+        
         def handle_generation(*args, progress=None, request: gr.Request = None):
             # Extract model selection and input image from args - I2V functionality commented out
             model_selection, prompt, negative_prompt, use_negative_prompt, seed, guidance_scale, num_frames, height, width, randomize_seed = args
@@ -760,14 +818,13 @@ def main():
                         type=str,
                         default="http://localhost:8000",
                         help="URL of the Ray Serve backend")
-    parser.add_argument("--t2v_model_path",
+    parser.add_argument("--t2v_model_paths",
                         type=str,
-                        default="FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
-                        help="Path to the T2V model (for default parameters)")
-    parser.add_argument("--t2v_14b_model_path",
-                        type=str,
-                        default="FastVideo/FastWan2.1-T2V-14B-Diffusers",
-                        help="Path to the T2V 14B model (for default parameters)")
+                        default="FastVideo/FastWan2.1-T2V-1.3B-Diffusers,FastVideo/FastWan2.1-T2V-14B-Diffusers",
+                        help="Comma separated list of paths to the T2V model(s)")
+    # parser.add_argument("--t2v_model_replicas", type=int,
+    #                     default="4,4",
+    #                     help="Comma separated list of number of replicas for the T2V model(s)")
     # parser.add_argument("--i2v_model_path",  # I2V functionality commented out
     #                     type=str,
     #                     default="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
@@ -785,7 +842,10 @@ def main():
     
     # Load default parameters from the models
     # try:
-    default_params = SamplingParam.from_pretrained(args.t2v_model_path)
+    default_params = {}
+    model_paths = args.t2v_model_paths.split(",")
+    for model_path in model_paths:
+        default_params[model_path] = SamplingParam.from_pretrained(model_path)
     # except Exception as e:
     #     print(f"Warning: Could not load default parameters from {args.t2v_model_path}: {e}")
     #     print("Using fallback default parameters...")
@@ -803,8 +863,8 @@ def main():
     
     print(f"Starting Gradio frontend at http://{args.host}:{args.port}")
     print(f"Backend URL: {args.backend_url}")
-    print(f"T2V 1.3B Model: {args.t2v_model_path}")
-    print(f"T2V 14B Model: {args.t2v_14b_model_path}")
+    print(f"T2V Models: {args.t2v_model_paths}")
+    # print(f"T2V Model Replicas: {args.t2v_model_replicas}")
     # print(f"I2V Model: {args.i2v_model_path}") # I2V functionality commented out
     
     demo.queue(max_size=20).launch(

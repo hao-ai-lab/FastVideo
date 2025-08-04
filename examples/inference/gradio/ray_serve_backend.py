@@ -18,6 +18,14 @@ from slowapi.errors import RateLimitExceeded
 import imageio
 from ray.serve.handle import DeploymentHandle
 
+NUM_GPUS = 8
+SUPPORTED_MODELS = [
+    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers", 
+    "FastVideo/FastWan2.1-T2V-14B-Diffusers",
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+]
+
 
 class VideoGenerationRequest(BaseModel):
     prompt: str
@@ -28,7 +36,7 @@ class VideoGenerationRequest(BaseModel):
     num_frames: int = 21
     height: int = 448
     width: int = 832
-    num_inference_steps: int = 20
+    # num_inference_steps: int = 20
     randomize_seed: bool = False
     return_frames: bool = False  # Whether to return base64 encoded frames
     image_path: Optional[str] = None  # Path to input image for I2V
@@ -96,10 +104,13 @@ class T2VModelDeployment:
         os.makedirs(self.output_path, exist_ok=True)
 
         # Delay helps avoid GPU contention when many replicas start at once
-        time.sleep(10)
+        time.sleep(5)
 
         # Ensure correct attention backend for FastVideo
-        os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
+        if "FastVideo" in self.model_path:
+            os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
+        else:
+            os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
         os.environ["FASTVIDEO_STAGE_LOGGING"] = "1"
 
         # Lazy import to keep the deployment import-safe on head node
@@ -139,7 +150,7 @@ class T2VModelDeployment:
         params.num_frames = video_request.num_frames
         params.height = video_request.height
         params.width = video_request.width
-        params.num_inference_steps = video_request.num_inference_steps
+        # params.num_inference_steps = video_request.num_inference_steps
 
         # Do not write to disk when called via API
         params.save_video = False
@@ -175,7 +186,7 @@ class T2VModelDeployment:
         encoding_start_time = time.time()
         
         # Encode outputs
-        video_data = encode_video_to_base64(frames, fps=24)
+        video_data = encode_video_to_base64(frames, fps=16)
         
         encoding_end_time = time.time()
         encoding_time = encoding_end_time - encoding_start_time
@@ -348,7 +359,7 @@ class T2V14BModelDeployment:
         params.num_frames = video_request.num_frames
         params.height = video_request.height
         params.width = video_request.width
-        params.num_inference_steps = video_request.num_inference_steps
+        # params.num_inference_steps = video_request.num_inference_steps
 
         # Do not write to disk when called via API
         params.save_video = False
@@ -382,7 +393,7 @@ class T2V14BModelDeployment:
         encoding_start_time = time.time()
         
         # Encode outputs
-        video_data = encode_video_to_base64(frames, fps=24)
+        video_data = encode_video_to_base64(frames, fps=16)
         
         encoding_end_time = time.time()
         encoding_time = encoding_end_time - encoding_start_time
@@ -417,9 +428,9 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 class FastVideoAPI:
     """Ingress deployment that routes requests to either the T2V or I2V model deployment."""
 
-    def __init__(self, t2v_deployment: DeploymentHandle, t2v_14b_deployment: DeploymentHandle):  # Removed i2v_deployment
-        self.t2v_handle = t2v_deployment
-        self.t2v_14b_handle = t2v_14b_deployment
+    def __init__(self, t2v_deployments: Dict[str, DeploymentHandle]):  # Removed i2v_deployment
+        self.t2v_deployments = t2v_deployments
+        # self.t2v_14b_handle = t2v_14b_deployment
         # self.i2v_handle = i2v_deployment  # I2V functionality commented out
     
     @app.post("/generate_video", response_model=VideoGenerationResponse)
@@ -427,18 +438,22 @@ class FastVideoAPI:
     async def generate_video(self, request: Request, video_request: VideoGenerationRequest) -> VideoGenerationResponse:
         """Route the request to the appropriate model deployment based on `model_type` and `model_path`."""
         try:
+            # assert video_request.model_type in self.t2v_deployments, f"Model {video_request.model_type} not found"
+            if video_request.model_type not in self.t2v_deployments:
+                raise ValueError(f"Model {video_request.model_type} not found")
+            response_ref = self.t2v_deployments[video_request.model_type].generate_video.remote(video_request)
             # if video_request.model_type.lower() == "i2v":  # I2V functionality commented out
             #     response_ref = self.i2v_handle.generate_video.remote(video_request)
-            if video_request.model_type.lower() == "t2v":
-                # Route T2V requests based on model path
-                if video_request.model_path and "14b" in video_request.model_path.lower():
-                    response_ref = self.t2v_14b_handle.generate_video.remote(video_request)
-                else:
-                    # Default to 1.3B model
-                    response_ref = self.t2v_handle.generate_video.remote(video_request)
-            else:
-                # Default to 1.3B T2V model
-                response_ref = self.t2v_handle.generate_video.remote(video_request)
+            # if video_request.model_type.lower() == "t2v":
+            #     # Route T2V requests based on model path
+            #     if video_request.model_path and "14b" in video_request.model_path.lower():
+            #         response_ref = self.t2v_14b_handle.generate_video.remote(video_request)
+            #     else:
+            #         # Default to 1.3B model
+            #         response_ref = self.t2v_handle.generate_video.remote(video_request)
+            # else:
+            #     # Default to 1.3B T2V model
+            #     response_ref = self.t2v_handle.generate_video.remote(video_request)
 
             # Await the remote response
             response = await response_ref
@@ -463,14 +478,15 @@ class FastVideoAPI:
 
 def start_ray_serve(
     *,
-    t2v_model_path: str = "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
-    t2v_14b_model_path: str = "FastVideo/FastWan2.1-T2V-14B-Diffusers",
+    t2v_model_paths: str,
+    t2v_model_replicas: str,
+    # t2v_14b_model_path: str = "FastVideo/FastWan2.1-T2V-14B-Diffusers",
     # i2v_model_path: str = "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",  # I2V functionality commented out
     output_path: str = "outputs",
     host: str = "0.0.0.0",
     port: int = 8000,
-    t2v_replicas: int = 4,
-    t2v_14b_replicas: int = 4,  # Reduced replicas for 14B model due to higher resource requirements
+    # t2v_replicas: int = 4,
+    # t2v_14b_replicas: int = 4,  # Reduced replicas for 14B model due to higher resource requirements
     # i2v_replicas: int = 4,  # I2V functionality commented out
 ):
     """Start Ray Serve with independently scalable deployments for each model."""
@@ -479,18 +495,21 @@ def start_ray_serve(
         ray.init()
 
     # Bind model deployments with configurable replica counts
-    t2v_dep = T2VModelDeployment.options(num_replicas=t2v_replicas).bind(t2v_model_path, output_path)
-    t2v_14b_dep = T2V14BModelDeployment.options(num_replicas=t2v_14b_replicas).bind(t2v_14b_model_path, output_path)
+    t2v_deps = {}
+    for model_path, replicas in zip(t2v_model_paths.split(","), t2v_model_replicas.split(",")):
+        t2v_dep = T2VModelDeployment.options(num_replicas=int(replicas)).bind(model_path, output_path)
+        t2v_deps[model_path] = t2v_dep
     # i2v_dep = I2VModelDeployment.options(num_replicas=i2v_replicas).bind(i2v_model_path, output_path)  # I2V functionality commented out
 
     # Ingress
-    api = FastVideoAPI.bind(t2v_dep, t2v_14b_dep)  # Removed i2v_dep
+    api = FastVideoAPI.bind(t2v_deps)  # Removed i2v_dep
 
     serve.run(api, route_prefix="/", name="fast_video")
 
     print(f"Ray Serve backend started at http://{host}:{port}")
-    print(f"T2V 1.3B Model: {t2v_model_path} | Replicas: {t2v_replicas}")
-    print(f"T2V 14B Model: {t2v_14b_model_path} | Replicas: {t2v_14b_replicas}")
+    for model_path, replicas in zip(t2v_model_paths.split(","), t2v_model_replicas.split(",")):
+        print(f"T2V Model: {model_path} | Replicas: {replicas}")
+    # print(f"T2V 14B Model: {t2v_14b_model_path} | Replicas: {t2v_14b_replicas}")
     # print(f"I2V Model: {i2v_model_path} | Replicas: {i2v_replicas}")  # I2V functionality commented out
     print(f"Health check: http://{host}:{port}/health")
     print(f"Video generation endpoint: http://{host}:{port}/generate_video")
@@ -500,14 +519,18 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="FastVideo Ray Serve Backend")
-    parser.add_argument("--t2v_model_path",
+    parser.add_argument("--t2v_model_paths",
                         type=str,
-                        default="FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
-                        help="Path to the T2V model")
-    parser.add_argument("--t2v_14b_model_path",
+                        default="FastVideo/FastWan2.1-T2V-1.3B-Diffusers,FastVideo/FastWan2.1-T2V-14B-Diffusers",
+                        help="Comma separated list of paths to the T2V model(s)")
+    parser.add_argument("--t2v_model_replicas",
                         type=str,
-                        default="FastVideo/FastWan2.1-T2V-14B-Diffusers",
-                        help="Path to the T2V 14B model")
+                        default="4,4",
+                        help="Comma separated list of number of replicas for the T2V model(s)")
+    # parser.add_argument("--t2v_14b_model_path",
+    #                     type=str,
+    #                     default="FastVideo/FastWan2.1-T2V-14B-Diffusers",
+    #                     help="Path to the T2V 14B model")
     # parser.add_argument("--i2v_model_path",  # I2V functionality commented out
     #                     type=str,
     #                     default="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
@@ -524,30 +547,40 @@ if __name__ == "__main__":
                         type=int,
                         default=8000,
                         help="Port to bind to")
-    parser.add_argument("--t2v_replicas",
-                        type=int,
-                        default=4,
-                        help="Number of replicas for the T2V model deployment")
-    parser.add_argument("--t2v_14b_replicas",
-                        type=int,
-                        default=4,  # Reduced default for 14B model due to higher resource requirements
-                        help="Number of replicas for the T2V 14B model deployment")
+    # parser.add_argument("--t2v_replicas",
+    #                     type=int,
+    #                     default=4,
+    #                     help="Number of replicas for the T2V model deployment")
+    # parser.add_argument("--t2v_14b_replicas",
+    #                     type=int,
+    #                     default=4,  # Reduced default for 14B model due to higher resource requirements
+    #                     help="Number of replicas for the T2V 14B model deployment")
     # parser.add_argument("--i2v_replicas",  # I2V functionality commented out
     #                     type=int,
     #                     default=4,  # Reduced default for 14B model due to higher resource requirements
     #                     help="Number of replicas for the I2V model deployment")
     
     args = parser.parse_args()
+
+    split_models = args.t2v_model_paths.split(",")
+    split_replicas = [int(replica) for replica in args.t2v_model_replicas.split(",")]
+    assert len(split_models) == len(split_replicas), "Number of models and replicas must match"
+    assert sum(split_replicas) <= NUM_GPUS, "Total number of replicas must be less than or equal to 16"
+    for model, replicas in zip(split_models, split_replicas):
+        assert model in SUPPORTED_MODELS, f"Model {model} not supported"
+        assert replicas > 0, f"Replicas must be greater than 0"
+
     
     start_ray_serve(
-        t2v_model_path=args.t2v_model_path,
-        t2v_14b_model_path=args.t2v_14b_model_path,
+        t2v_model_paths=args.t2v_model_paths,
+        t2v_model_replicas=args.t2v_model_replicas,
+        # t2v_14b_model_path=args.t2v_14b_model_path,
         # i2v_model_path=args.i2v_model_path,  # I2V functionality commented out
         output_path=args.output_path,
         host=args.host,
         port=args.port,
-        t2v_replicas=args.t2v_replicas,
-        t2v_14b_replicas=args.t2v_14b_replicas,
+        # t2v_replicas=args.t2v_replicas,
+        # t2v_14b_replicas=args.t2v_14b_replicas,
         # i2v_replicas=args.i2v_replicas,  # I2V functionality commented out
     )
 
