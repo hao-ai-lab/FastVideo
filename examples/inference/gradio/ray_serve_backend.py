@@ -22,8 +22,10 @@ NUM_GPUS = 8
 SUPPORTED_MODELS = [
     "FastVideo/FastWan2.1-T2V-1.3B-Diffusers", 
     "FastVideo/FastWan2.1-T2V-14B-Diffusers",
+    "FastVideo/FastWan2.2-TI2V-5B-Diffusers",
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
     "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+    "Wan-AI/Wan2.2-TI2V-5B-Diffusers",
 ]
 
 
