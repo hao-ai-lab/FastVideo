@@ -439,8 +439,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
-        self._log_validation(self.transformer, self.training_args,
-                             self.init_steps)
+
+        self._log_validation(self.transformer, self.training_args, self.init_steps)
 
         # Train!
         progress_bar = tqdm(
@@ -702,3 +702,4 @@ class TrainingPipeline(LoRAPipeline, ABC):
         # Re-enable gradients for training
         training_args.inference_mode = False
         transformer.train()
+        torch.cuda.empty_cache()
