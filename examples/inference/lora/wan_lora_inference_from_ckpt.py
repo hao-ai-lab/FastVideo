@@ -21,7 +21,7 @@ def main():
         "height": 480,
         "width": 832,
         "num_frames": 77,
-        "guidance_scale": 5.0,
+        "guidance_scale": 1.0,
         "num_inference_steps": 50,
         "seed": 42,
     }
@@ -34,7 +34,7 @@ def main():
         save_video=True,
         **kwargs
     )    
-    prompt = "A colorful puzzle ball is being crushed by a large metal cylinder, which flattens the objects as if they were under a hydraulic press."
+    prompt = "A large metal cylinder is seen compressing colorful clay into a compact shape, demonstrating the power of a hydraulic press."
     video = generator.generate_video(
         prompt,
         output_path=OUTPUT_PATH,
