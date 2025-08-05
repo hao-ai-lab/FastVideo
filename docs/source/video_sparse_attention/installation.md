@@ -61,6 +61,7 @@ output = video_sparse_attn(q, k, v, variable_block_sizes, topk, block_size, comp
 ``` 
 
 # 🚀Inference
+
 ```bash
 bash scripts/inference/v1_inference_wan_VSA.sh
 ```
