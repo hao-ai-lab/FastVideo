@@ -5,6 +5,9 @@ import base64
 import io
 from copy import deepcopy
 from typing import Dict, Any, Optional, List
+import json
+from datetime import datetime
+import threading
 
 import ray
 from ray import serve
@@ -21,8 +24,61 @@ from ray.serve.handle import DeploymentHandle
 NUM_GPUS = 16
 SUPPORTED_MODELS = [
     "FastVideo/FastWan2.1-T2V-1.3B-Diffusers", 
-    "FastVideo/FastWan2.2-TI2V-5B-Diffusers",
+    "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
 ]
+
+
+class PromptLogger:
+    """Thread-safe prompt logging utility"""
+    
+    def __init__(self, log_file: str = "user_prompts.jsonl"):
+        self.log_file = log_file
+        self.lock = threading.Lock()
+        
+        # Ensure the directory exists
+        log_dir = os.path.dirname(os.path.abspath(log_file))
+        if log_dir:  # Only create directory if there's actually a directory path
+            os.makedirs(log_dir, exist_ok=True)
+        
+        print(f"PromptLogger initialized with log file: {os.path.abspath(log_file)}")
+    
+    def log_prompt(self, prompt: str, model_type: str, success: bool, 
+                   negative_prompt: Optional[str] = None, 
+                   generation_time: Optional[float] = None,
+                   user_ip: Optional[str] = None):
+        """Log a prompt with metadata"""
+        log_entry = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "model_type": model_type,
+            "success": success,
+            "generation_time": generation_time,
+            "user_ip": user_ip
+        }
+        
+        print(f"Logging prompt: {prompt[:50]}... to {self.log_file}")
+        
+        with self.lock:
+            try:
+                # Ensure the directory exists before writing
+                log_dir = os.path.dirname(os.path.abspath(self.log_file))
+                if log_dir:
+                    os.makedirs(log_dir, exist_ok=True)
+                
+                with open(self.log_file, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+                    f.flush()  # Force write to disk
+                print(f"Successfully logged prompt to {os.path.abspath(self.log_file)}")
+            except Exception as e:
+                print(f"Error: Failed to log prompt to {self.log_file}: {e}")
+                print(f"Current working directory: {os.getcwd()}")
+                print(f"Attempted log file path: {os.path.abspath(self.log_file)}")
+                import traceback
+                traceback.print_exc()
+
+
+# prompt_logger will be initialized inside the deployment class to avoid serialization issues
 
 
 class VideoGenerationRequest(BaseModel):
@@ -89,7 +145,7 @@ def encode_video_to_base64(frames: List[np.ndarray], fps: int = 24) -> str:
 
 
 @serve.deployment(  # T2V 1.3B model deployment
-    ray_actor_options={"num_cpus": 10, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
+    ray_actor_options={"num_cpus": 2, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
 )
 class T2VModelDeployment:
     """Serve deployment wrapping the 1.3 B text-to-video model."""
@@ -105,7 +161,7 @@ class T2VModelDeployment:
         # time.sleep(5)
 
         # Ensure correct attention backend for FastVideo
-        if "5b" in self.model_path.lower():
+        if "fullattn" in self.model_path.lower():
             os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
         else:
             os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
@@ -425,7 +481,7 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 import time
 
 
-@serve.deployment(ray_actor_options={"num_cpus": 2})
+@serve.deployment(num_replicas=50, ray_actor_options={"num_cpus": 2})
 @serve.ingress(app)
 class FastVideoAPI:
     """Ingress deployment that routes requests to either the T2V or I2V model deployment."""
@@ -439,13 +495,29 @@ class FastVideoAPI:
         self.request_count = Counter('fastvideo_requests_total', 'Total FastVideo requests', ['model_type', 'status'])
         self.request_duration = Histogram('fastvideo_request_duration_seconds', 'FastVideo request duration', ['model_type'])
         self.video_generation_time = Histogram('fastvideo_video_generation_seconds', 'Video generation time', ['model_type'])
+        
+        # Initialize prompt logger inside the deployment to avoid serialization issues
+        # Use absolute path to ensure we know where the file is created
+        log_file_path = os.path.join(os.getcwd(), "logs", "user_prompts.jsonl")
+        
+        # Hacky fix: Create the file upfront to ensure it exists
+        log_dir = os.path.dirname(log_file_path)
+        os.makedirs(log_dir, exist_ok=True)
+        
+        # Touch the file to ensure it exists
+        with open(log_file_path, "a") as f:
+            pass  # Just create/ensure file exists
+        
+        print(f"Created log file at: {log_file_path}")
+        self.prompt_logger = PromptLogger(log_file_path)
     
     @app.post("/generate_video", response_model=VideoGenerationResponse)
-    @limiter.limit("50/minute")  # Allow 50 requests per minute per IP
+    @limiter.limit("10/minute")  # Allow 50 requests per minute per IP
     async def generate_video(self, request: Request, video_request: VideoGenerationRequest) -> VideoGenerationResponse:
         """Route the request to the appropriate model deployment based on `model_type` and `model_path`."""
         start_time = time.time()
         model_type = video_request.model_path.split('/')[-1] if video_request.model_path else "unknown"
+        user_ip = get_remote_address(request)
         
         try:
             # assert video_request.model_type in self.t2v_deployments, f"Model {video_request.model_type} not found"
@@ -468,6 +540,16 @@ class FastVideoAPI:
             # Await the remote response
             response = await response_ref
             
+            # Log the prompt (success case)
+            self.prompt_logger.log_prompt(
+                prompt=video_request.prompt,
+                model_type=video_request.model_type,
+                success=response.success,
+                negative_prompt=video_request.negative_prompt if video_request.use_negative_prompt else None,
+                generation_time=response.total_time,
+                user_ip=user_ip
+            )
+            
             # Record success metrics
             self.request_count.labels(model_type=model_type, status="success").inc()
             self.request_duration.labels(model_type=model_type).observe(time.time() - start_time)
@@ -477,6 +559,16 @@ class FastVideoAPI:
             return response
 
         except Exception as e:
+            # Log the prompt (error case)
+            self.prompt_logger.log_prompt(
+                prompt=video_request.prompt,
+                model_type=video_request.model_type,
+                success=False,
+                negative_prompt=video_request.negative_prompt if video_request.use_negative_prompt else None,
+                generation_time=None,
+                user_ip=user_ip
+            )
+            
             # Record error metrics
             self.request_count.labels(model_type=model_type, status="error").inc()
             self.request_duration.labels(model_type=model_type).observe(time.time() - start_time)
@@ -486,6 +578,10 @@ class FastVideoAPI:
                 seed=video_request.seed,
                 success=False,
                 error_message=str(e),
+                generation_time=0,
+                inference_time=0,
+                encoding_time=0,
+                total_time=0,
             )
     
     @app.get("/health")

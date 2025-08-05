@@ -20,7 +20,7 @@ from fastvideo.configs.sample.base import SamplingParam
 MODEL_PATH_MAPPING = {
     "FastWan2.1-T2V-1.3B": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
     # "FastWan2.1-T2V-14B": "FastVideo/FastWan2.1-T2V-14B-Diffusers",
-    "FastWan2.2-TI2V-5B": "FastVideo/FastWan2.2-TI2V-5B-Diffusers",
+    "FastWan2.2-TI2V-5B-FullAttn": "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
     # "Wan2.1-T2V-1.3B": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
     # "Wan2.1-T2V-14B": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
     # "Wan2.2-TI2V-5B": "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
@@ -231,6 +231,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             network_time = response.get("network_time", 0.0)
             stage_names = response.get("stage_names", [])
             stage_execution_times = response.get("stage_execution_times", [])
+            dit_denoising_time = f"{stage_execution_times[5]:.2f}s"
             
             print(f"Used seed: {used_seed}")
             print(f"Inference time: {inference_time:.2f}s")
@@ -244,11 +245,16 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             timing_details = f"""
             <div style="margin: 10px 0;">
                 <h3 style="text-align: center; margin-bottom: 10px;">⏱️ Timing Breakdown</h3>
-                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px;">
+                <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 10px;">
                     <div class="timing-card timing-card-highlight">
+                        <div style="font-size: 20px;">🚀</div>
+                        <div style="font-weight: bold; margin: 3px 0; font-size: 14px;">DiT Denoising</div>
+                        <div style="font-size: 16px; color: #ffa200; font-weight: bold;">{dit_denoising_time}</div>
+                    </div>
+                    <div class="timing-card">
                         <div style="font-size: 20px;">🧠</div>
-                        <div style="font-weight: bold; margin: 3px 0; font-size: 14px;">Model Inference</div>
-                        <div style="font-size: 16px; color: #2563eb; font-weight: bold;">{inference_time:.2f}s</div>
+                        <div style="font-weight: bold; margin: 3px 0; font-size: 14px;">E2E (w. vae/text encoder)</div>
+                        <div style="font-size: 16px; color: #2563eb;">{inference_time:.2f}s</div>
                     </div>
                     <div class="timing-card">
                         <div style="font-size: 20px;">🎬</div>
@@ -380,8 +386,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         model_path = model_selection_value.split(" (")[0] if model_selection_value else None
         if model_path and model_path in default_params:
             params = default_params[model_path]
-            if "1.3b" in model_path.lower():
-                params.num_frames = 61
             
             return {
                 'height': params.height,
@@ -412,7 +416,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         gr.HTML("""
         <div style="text-align: center; margin-bottom: 10px;">
             <p style="font-size: 18px;"> Make Video Generation Go Blurrrrrrr </p>
-            <p style="font-size: 18px;"> Twitter | <a href="https://github.com/hao-ai-lab/FastVideo/tree/main" target="_blank">Code</a> | <a href="https://hao-ai-lab.github.io/blogs/fastvideo_post_training/" target="_blank">Blog</a> | <a href="https://hao-ai-lab.github.io/FastVideo/" target="_blank">Docs</a>  </p>
+            <p style="font-size: 18px;"> <a href="https://github.com/hao-ai-lab/FastVideo/tree/main" target="_blank">Code</a> | <a href="https://hao-ai-lab.github.io/blogs/fastvideo_post_training/" target="_blank">Blog</a> | <a href="https://hao-ai-lab.github.io/FastVideo/" target="_blank">Docs</a>  </p>
         </div>
         """)
         
@@ -444,7 +448,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             model_selection = gr.Dropdown(
                 choices=[
                     "FastWan2.1-T2V-1.3B",
-                    "FastWan2.2-TI2V-5B",
+                    "FastWan2.2-TI2V-5B-FullAttn",
                     # "Wan2.1-T2V-1.3B",
                     # "Wan2.2-TI2V-5B",
                     # "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers (Image-to-Video)"  # I2V functionality commented out
@@ -493,28 +497,25 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                 with gr.Group():
                     gr.HTML("<div style='margin: 0 0 15px 0; text-align: center; font-size: 16px;'>Advanced Options</div>")
                     with gr.Row():
-                        height = gr.Slider(
+                        height = gr.Number(
                             label="Height",
-                            minimum=256,
-                            maximum=1280,
-                            step=32,
                             value=initial_values['height'],
+                            interactive=False,
+                            container=True
                         )
-                        width = gr.Slider(
+                        width = gr.Number(
                             label="Width",
-                            minimum=256,
-                            maximum=1280,
-                            step=32,
-                            value=initial_values['width']
+                            value=initial_values['width'],
+                            interactive=False,
+                            container=True
                         )
                     
                     with gr.Row():
-                        num_frames = gr.Slider(
+                        num_frames = gr.Number(
                             label="Number of Frames",
-                            minimum=16,
-                            maximum=121,
-                            step=16,
                             value=initial_values['num_frames'],
+                            interactive=False,
+                            container=True
                         )
                         guidance_scale = gr.Slider(
                             label="Guidance Scale",
@@ -549,9 +550,10 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                 result = gr.Video(
                     label="Generated Video", 
                     show_label=True,
-                    height=436,  # Adjusted height for better vertical alignment
+                    height=466,  # Match approximate height of advanced options
                     width=600,   # Limit video width
-                    container=True
+                    container=True,
+                    elem_classes="video-component"
                 )
         
         # Add CSS to position the button and constrain width
@@ -586,11 +588,12 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             margin: 0 auto !important;
         }
         
-        /* Ensure equal height columns */
+        /* Ensure equal height columns and proper vertical alignment */
         .main-content-row {
             display: flex !important;
             align-items: flex-start !important;
             min-height: 500px !important;
+            gap: 20px !important;
         }
         
         .advanced-options-column,
@@ -599,6 +602,31 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             flex-direction: column !important;
             flex: 1 !important;
             min-height: 400px !important;
+            align-items: stretch !important;
+        }
+        
+        /* Ensure video component aligns to top of its container */
+        .video-column > * {
+            margin-top: 0 !important;
+        }
+        
+        /* Make sure the video container starts at the same level as advanced options */
+        .video-column .gr-video,
+        .video-component {
+            margin-top: 0 !important;
+            padding-top: 0 !important;
+        }
+        
+        /* Align video component label with advanced options header */
+        .video-column .gr-video .gr-form {
+            margin-top: 0 !important;
+        }
+        
+        /* Ensure the advanced options group and video component start at same vertical position */
+        .advanced-options-column .gr-group,
+        .video-column .gr-video {
+            margin-top: 0 !important;
+            vertical-align: top !important;
         }
         
         /* Force equal heights regardless of content */
@@ -669,6 +697,16 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             text-align: center;
         }
         
+        /* Style for display-only number inputs */
+        .gr-number input[readonly] {
+            background-color: var(--background-fill-secondary) !important;
+            border: 1px solid var(--border-color-primary) !important;
+            color: var(--body-text-color-subdued) !important;
+            cursor: default !important;
+            text-align: center !important;
+            font-weight: 500 !important;
+        }
+        
         /* Dark mode support */
         .dark .timing-card {
             background: var(--background-fill-secondary) !important;
@@ -686,6 +724,12 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             background: var(--background-fill-secondary) !important;
             border-color: var(--border-color-primary) !important;
             color: var(--body-text-color) !important;
+        }
+        
+        .dark .gr-number input[readonly] {
+            background-color: var(--background-fill-secondary) !important;
+            border-color: var(--border-color-primary) !important;
+            color: var(--body-text-color-subdued) !important;
         }
         </style>
         """)
@@ -706,7 +750,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         # Disclaimer text
         gr.HTML("""
         <div style="text-align: center; margin-top: 10px; margin-bottom: 15px;">
-            <p style="font-size: 16px; margin: 0;">The compute for this demo is generously provided by <a href="https://www.gmicloud.ai/" target="_blank">GMI Cloud</a>. Note that this demo is meant to showcase FastWan's quality and that under a large number of requests, generation speed may be affected.</p>
+            <p style="font-size: 16px; margin: 0;">The compute for this demo is generously provided by <a href="https://www.gmicloud.ai/" target="_blank">GMI Cloud</a>. Note that this demo is meant to showcase FastWan's quality and that under a large number of requests, generation speed may be affected. We are also rate-limiting users to 3 requests per minute.</p>
         </div>
         """)
         
@@ -742,11 +786,11 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                 
                 # Update each component with the model's default values
                 return (
-                    gr.update(value=params.height),  # height
-                    gr.update(value=params.width),   # width  
-                    gr.update(value=params.num_frames),  # num_frames
-                    gr.update(value=params.guidance_scale),  # guidance_scale
-                    gr.update(value=params.seed),  # seed
+                    gr.update(value=params.height),  # height (Number, display-only)
+                    gr.update(value=params.width),   # width (Number, display-only)
+                    gr.update(value=params.num_frames),  # num_frames (Number, display-only)
+                    gr.update(value=params.guidance_scale),  # guidance_scale (Slider, interactive)
+                    gr.update(value=params.seed),  # seed (Slider, interactive)
                 )
             else:
                 # If model not found in default_params, return current values (no change)
@@ -811,9 +855,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             outputs=[result, seed_output, error_output, timing_display],
             concurrency_limit=20,
         )
-        
-        # Update status periodically
-        # demo.load(update_status, outputs=status_text)
     
     return demo
 
@@ -847,22 +888,10 @@ def main():
     args = parser.parse_args()
     
     # Load default parameters from the models
-    # try:
     default_params = {}
     model_paths = args.t2v_model_paths.split(",")
     for model_path in model_paths:
         default_params[model_path] = SamplingParam.from_pretrained(model_path)
-    # except Exception as e:
-    #     print(f"Warning: Could not load default parameters from {args.t2v_model_path}: {e}")
-    #     print("Using fallback default parameters...")
-    #     # Create fallback default parameters
-    # default_params = SamplingParam()
-    # default_params.height = 448
-    # default_params.width = 832
-    # default_params.num_frames = 21
-    # default_params.guidance_scale = 7.5
-    # default_params.num_inference_steps = 20
-    # default_params.seed = 1024
     
     # Create and launch the interface
     demo = create_gradio_interface(args.backend_url, default_params)
@@ -892,6 +921,26 @@ def main():
                 "Access-Control-Allow-Origin": "*"
             }
         )
+    
+    @app.get("/favicon.ico")
+    async def get_favicon():
+        from fastapi import Response, HTTPException
+        import os
+        
+        favicon_path = "fastvideo-logos/main/png/icon-simple.png"
+        
+        if os.path.exists(favicon_path):
+            return FileResponse(
+                favicon_path, 
+                media_type="image/png",
+                headers={
+                    "Cache-Control": "public, max-age=3600",
+                    "Access-Control-Allow-Origin": "*"
+                }
+            )
+        else:
+            # Return a 404 if the favicon doesn't exist
+            raise HTTPException(status_code=404, detail="Favicon not found")
     
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
@@ -926,7 +975,9 @@ def main():
             <meta property="twitter:title" content="FastWan">
             <meta property="twitter:description" content="Make video generation go blurrrrrrr">
             <meta property="twitter:image" content="{base_url}/logo.png">
-            <link rel="icon" type="image/png" href="/gradio/file/fastvideo-logos/main/png/icon-simple.png">
+            <link rel="icon" type="image/png" sizes="32x32" href="/favicon.ico">
+            <link rel="icon" type="image/png" sizes="16x16" href="/favicon.ico">
+            <link rel="apple-touch-icon" href="/favicon.ico">
             <style>
                 body, html {{
                     margin: 0;
