@@ -9,7 +9,7 @@
 
 :::{raw} html
 <p style="text-align:center">
-<strong>FastVideo is An unified inference and post-training framework for accelerated video generation.
+<strong>FastVideo is a unified inference and post-training framework for accelerated video generation.
 </strong>
 </p>
 
