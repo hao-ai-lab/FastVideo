@@ -14,7 +14,7 @@ def main():
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=False,
-        lora_path="checkpoints/wan_t2v_finetune_lora/checkpoint-1250/transformer",
+        lora_path="checkpoints/wan_t2v_finetune_lora/checkpoint-1000/transformer",
         lora_nickname="crush_smol"
     )
     kwargs = {
@@ -34,6 +34,12 @@ def main():
         save_video=True,
         **kwargs
     )    
-
+    prompt = "A colorful puzzle ball is being crushed by a large metal cylinder, which flattens the objects as if they were under a hydraulic press."
+    video = generator.generate_video(
+        prompt,
+        output_path=OUTPUT_PATH,
+        save_video=True,
+        **kwargs
+    )
 if __name__ == "__main__":
     main()
