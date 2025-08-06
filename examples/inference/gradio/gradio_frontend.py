@@ -138,51 +138,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         if progress:
             progress(0.1, desc="Checking backend health...")
         
-        # Determine if this is I2V based on model selection - I2V functionality commented out
-        # is_i2v = "I2V" in model_selection or "Image-to-Video" in model_selection
-        
-        # Handle input image for I2V - I2V functionality commented out
-        # image_path = None
-        # if is_i2v and input_image is not None:
-        #     if progress:
-        #         progress(0.2, desc="Processing input image...")
-        #     try:
-        #         # Save the uploaded image to a temporary file
-        #         import tempfile
-        #         temp_dir = "temp_images"
-        #         os.makedirs(temp_dir, exist_ok=True)
-        #         
-        #         # Generate a unique filename with appropriate extension
-        #         import uuid
-        #         # Determine the best format to preserve quality
-        #         if hasattr(input_image, 'format') and input_image.format:
-        #             # Use original format if available
-        #             ext = input_image.format.lower()
-        #             if ext == 'jpeg':
-        #                 ext = 'jpg'
-        #         else:
-        #             # Default to PNG for lossless quality
-        #             ext = 'png'
-        #         
-        #         image_filename = f"input_image_{uuid.uuid4().hex[:8]}.{ext}"
-        #         image_path = os.path.abspath(os.path.join(temp_dir, image_filename))
-        # 
-        #         # Save the image preserving original quality
-        #         if ext == 'png':
-        #             # Use PNG for lossless compression
-        #             input_image.save(image_path, "PNG", optimize=False)
-        #         elif ext == 'jpg':
-        #             # Use high quality JPEG with minimal compression
-        #             input_image.convert("RGB").save(image_path, "JPEG", quality=95, optimize=False)
-        #         else:
-        #             # For other formats, save as PNG to preserve quality
-        #             input_image.save(image_path, "PNG", optimize=False)
-        #         
-        #         print(f"Saved input image to: {image_path}")
-        #     except Exception as e:
-        #         print(f"Warning: Failed to save input image: {e}")
-        #         image_path = None
-        
         # Prepare request data
         if progress:
             progress(0.3, desc="Preparing request...")
@@ -200,7 +155,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             "randomize_seed": randomize_seed,
             "return_frames": False,  # We'll get video data directly
             "image_path": None, # For T2V, we pass None as input_image
-            "model_type": MODEL_PATH_MAPPING[model_selection],
             "model_path": MODEL_PATH_MAPPING.get(model_selection, "FastVideo/FastWan2.1-T2V-1.3B-Diffusers")  # Map to full path
         }
         
@@ -212,14 +166,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         
         if progress:
             progress(0.8, desc="Processing response...")
-        
-        # Clean up temporary image file after processing
-        # if image_path and os.path.exists(image_path):
-        #     try:
-        #         os.remove(image_path)
-        #         print(f"Cleaned up temporary image: {image_path}")
-        #     except Exception as e:
-        #         print(f"Warning: Failed to clean up temporary image {image_path}: {e}")
         
         if response.get("success", False):
             video_data = response.get("video_data", "")
@@ -273,27 +219,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                     </div>
                 </div>"""
             
-            # timing_details += f"""
-            #     <div style="margin-top: 15px;">
-            #         <h4 style="text-align: center; margin-bottom: 10px;">🔄 Processing Stages</h4>
-            #         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px;">
-            # """
-            # 
-            # # Add individual stage timing cards
-            # for stage_name, stage_time in zip(stage_names, stage_execution_times):
-            #     if stage_name.strip() and stage_time > 0:  # Only show non-empty stages with valid times
-            #         timing_details += f"""
-            #             <div class="stage-card">
-            #                 <div style="font-weight: bold; font-size: 14px; margin-bottom: 5px;">{stage_name.strip()}</div>
-            #                 <div style="font-size: 16px; color: #7c3aed; font-weight: bold;">{stage_time:.2f}s</div>
-            #             </div>
-            #         """
-            # 
-            # timing_details += """
-            #         </div>
-            #     </div>
-            # """
-            
             # Add performance insights
             if inference_time > 0:
                 fps = num_frames / inference_time
@@ -338,7 +263,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
     def contains_chinese(text):
         """Check if text contains Chinese characters"""
         for char in text:
-            if '\u4e00' <= char <= '\u9fff':  # CJK Unified Ideographs (Chinese characters)
+            if '\u4e00' <= char <= '\u9fff':
                 return True
         return False
     
@@ -430,18 +355,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             </div>
             """)
         
-        # Backend status indicator
-        # status_text = gr.Text(
-        #     label="Backend Status",
-        #     value="Checking backend status...",
-        #     interactive=False
-        # )
-        
-        def update_status():
-            if client.check_health():
-                return "✅ Backend is healthy and ready"
-            else:
-                return "❌ Backend is not available"
         
         # Model selection dropdown
         with gr.Row():
@@ -449,8 +362,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                 choices=[
                     "FastWan2.1-T2V-1.3B",
                     "FastWan2.2-TI2V-5B-FullAttn",
-                    # "Wan2.1-T2V-1.3B",
-                    # "Wan2.2-TI2V-5B",
                     # "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers (Image-to-Video)"  # I2V functionality commented out
                 ],
                 value="FastWan2.1-T2V-1.3B",
@@ -487,7 +398,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         with gr.Row():
             with gr.Column():
                 error_output = gr.Text(label="Error", visible=False)
-                # frames_output = gr.Text(label="Generation Status", visible=False)
                 timing_display = gr.Markdown(label="Timing Breakdown", visible=False)
 
         # Two-column layout: Advanced options on left, Video on right
@@ -761,18 +671,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             outputs=negative_prompt,
         )
         
-        # Model selection change handler - I2V functionality commented out
-        # def on_model_selection_change(model_selection):
-        #     is_i2v = "I2V" in model_selection or "Image-to-Video" in model_selection
-        #     prompt_placeholder = "Describe how the image should animate" if is_i2v else "Enter your prompt"
-        #     return gr.update(visible=is_i2v), gr.update(placeholder=prompt_placeholder)
-        # 
-        # model_selection.change(
-        #     fn=on_model_selection_change,
-        #     inputs=model_selection,
-        #     outputs=[input_image, prompt],
-        # )
-        
+        # Model selection change handler
         def on_model_selection_change(selected_model):
             """Update advanced options based on selected model's default parameters"""
             if not selected_model:
@@ -803,15 +702,8 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         )
         
         def handle_generation(*args, progress=None, request: gr.Request = None):
-            # Extract model selection and input image from args - I2V functionality commented out
+            # Extract model selection and input image from args
             model_selection, prompt, negative_prompt, use_negative_prompt, seed, guidance_scale, num_frames, height, width, randomize_seed = args
-            
-            # Determine if this is I2V based on model selection - I2V functionality commented out
-            # is_i2v = "I2V" in model_selection or "Image-to-Video" in model_selection
-            
-            # For T2V, we pass None as input_image - I2V functionality commented out
-            # if not is_i2v:
-            #     input_image = None
             
             # Call the generate_video function with progress tracking
             result_path, seed_or_error, timing_details = generate_video(
@@ -824,7 +716,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                     result_path, 
                     seed_or_error, 
                     gr.update(visible=False),  # error_output
-                    # gr.update(visible=True, value="Generation completed successfully!"),  # frames_output
                     gr.update(visible=True, value=timing_details),  # timing_display
                 )
             else:
@@ -832,7 +723,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                     None, 
                     seed_or_error, 
                     gr.update(visible=True, value=seed_or_error),  # error_output
-                    # gr.update(visible=False),  # frames_output
                     gr.update(visible=False),  # timing_display
                 )
         
@@ -850,7 +740,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                 height,
                 width,
                 randomize_seed,
-                # input_image, # Removed input_image from inputs
             ],
             outputs=[result, seed_output, error_output, timing_display],
             concurrency_limit=20,
@@ -872,10 +761,6 @@ def main():
     # parser.add_argument("--t2v_model_replicas", type=int,
     #                     default="4,4",
     #                     help="Comma separated list of number of replicas for the T2V model(s)")
-    # parser.add_argument("--i2v_model_path",  # I2V functionality commented out
-    #                     type=str,
-    #                     default="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
-    #                     help="Path to the I2V model (for default parameters)")
     parser.add_argument("--host",
                         type=str,
                         default="0.0.0.0",
@@ -899,8 +784,6 @@ def main():
     print(f"Starting Gradio frontend at http://{args.host}:{args.port}")
     print(f"Backend URL: {args.backend_url}")
     print(f"T2V Models: {args.t2v_model_paths}")
-    # print(f"T2V Model Replicas: {args.t2v_model_replicas}")
-    # print(f"I2V Model: {args.i2v_model_path}") # I2V functionality commented out
     
     # Use FastAPI to serve custom HTML with proper Open Graph metadata
     from fastapi import FastAPI, Request
@@ -998,7 +881,6 @@ def main():
         </html>
         """
     
-    # Mount Gradio app under /gradio
     app = gr.mount_gradio_app(
         app, 
         demo, 

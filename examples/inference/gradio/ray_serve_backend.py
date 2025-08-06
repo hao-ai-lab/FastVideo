@@ -94,7 +94,6 @@ class VideoGenerationRequest(BaseModel):
     randomize_seed: bool = False
     return_frames: bool = False  # Whether to return base64 encoded frames
     image_path: Optional[str] = None  # Path to input image for I2V
-    model_type: str = "t2v"  # "t2v" or "i2v" to specify which model to use
     model_path: Optional[str] = None  # Specific model path to use
 
 
@@ -261,101 +260,6 @@ class T2VModelDeployment:
         )
 
 
-# @serve.deployment(  # I2V 14B model deployment - I2V functionality commented out
-#     ray_actor_options={"num_cpus": 10, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
-# )
-# class I2VModelDeployment:
-#     """Serve deployment wrapping the 14 B image-to-video model."""
-# 
-#     def __init__(self, i2v_model_path: str, output_path: str = "outputs"):
-#         self.model_path = i2v_model_path
-#         self.output_path = output_path
-# 
-#         os.makedirs(self.output_path, exist_ok=True)
-#         time.sleep(10)
-# 
-#         os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
-# 
-#         from fastvideo.entrypoints.video_generator import VideoGenerator
-#         from fastvideo.configs.sample.base import SamplingParam
-# 
-#         print(f"Initializing I2V model: {self.model_path}")
-#         self.generator = VideoGenerator.from_pretrained(
-#             model_path=self.model_path,
-#             num_gpus=1,
-#             use_fsdp_inference=True,
-#             text_encoder_cpu_offload=False,
-#             dit_cpu_offload=False,
-#             vae_cpu_offload=False,
-#             VSA_sparsity=0.8,
-#         )
-#         self.default_params = SamplingParam.from_pretrained(self.model_path)
-#         print("✅ I2V model initialized successfully")
-# 
-#     def generate_video(self, video_request: "VideoGenerationRequest") -> "VideoGenerationResponse":
-#         import time
-#         
-#         total_start_time = time.time()
-#         
-#         params = deepcopy(self.default_params)
-# 
-#         params.prompt = video_request.prompt
-#         if video_request.use_negative_prompt:
-#             params.negative_prompt = video_request.negative_prompt
-# 
-#         params.seed = video_request.seed if not video_request.randomize_seed else torch.randint(0, 1_000_000, (1,)).item()
-#         params.guidance_scale = video_request.guidance_scale
-#         params.num_frames = video_request.num_frames
-#         params.height = video_request.height
-#         params.width = video_request.width
-#         params.num_inference_steps = video_request.num_inference_steps
-# 
-#         if video_request.image_path:
-#             params.image_path = video_request.image_path
-# 
-#         params.save_video = False
-#         params.return_frames = True
-# 
-#         # Track inference time
-#         inference_start_time = time.time()
-#         
-#         result = self.generator.generate_video(
-#             prompt=video_request.prompt,
-#             sampling_param=params,
-#             save_video=False,
-#             return_frames=True,
-#         )
-#         
-#         inference_end_time = time.time()
-#         inference_time = inference_end_time - inference_start_time
-# 
-#         frames = result if isinstance(result, list) else result.get("frames", [])
-#         generation_time = result.get("generation_time", 0.0) if isinstance(result, dict) else 0.0
-# 
-#         # Track encoding time
-#         encoding_start_time = time.time()
-#         
-#         video_data = encode_video_to_base64(frames, fps=24)
-#         encoded_frames = encode_frames_to_base64(frames) if video_request.return_frames and frames else None
-#         
-#         encoding_end_time = time.time()
-#         encoding_time = encoding_end_time - encoding_start_time
-#         
-#         total_end_time = time.time()
-#         total_time = total_end_time - total_start_time
-# 
-#         return VideoGenerationResponse(
-#             video_data=video_data,
-#             frames=encoded_frames,
-#             seed=params.seed,
-#             success=True,
-#             generation_time=generation_time,
-#             inference_time=inference_time,
-#             encoding_time=encoding_time,
-#             total_time=total_time,
-#         )
-
-
 @serve.deployment(  # T2V 14B model deployment with optimized settings
     ray_actor_options={"num_cpus": 16, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
 )
@@ -514,16 +418,16 @@ class FastVideoAPI:
     @app.post("/generate_video", response_model=VideoGenerationResponse)
     @limiter.limit("10/minute")  # Allow 50 requests per minute per IP
     async def generate_video(self, request: Request, video_request: VideoGenerationRequest) -> VideoGenerationResponse:
-        """Route the request to the appropriate model deployment based on `model_type` and `model_path`."""
+        """Route the request to the appropriate model deployment based on `model_path`."""
         start_time = time.time()
-        model_type = video_request.model_path.split('/')[-1] if video_request.model_path else "unknown"
+        model_name = video_request.model_path.split('/')[-1] if video_request.model_path else "unknown"
         user_ip = get_remote_address(request)
         
         try:
-            # assert video_request.model_type in self.t2v_deployments, f"Model {video_request.model_type} not found"
-            if video_request.model_type not in self.t2v_deployments:
-                raise ValueError(f"Model {video_request.model_type} not found")
-            response_ref = self.t2v_deployments[video_request.model_type].generate_video.remote(video_request)
+            # assert video_request.model_path in self.t2v_deployments, f"Model {video_request.model_path} not found"
+            if video_request.model_path not in self.t2v_deployments:
+                raise ValueError(f"Model {video_request.model_path} not found")
+            response_ref = self.t2v_deployments[video_request.model_path].generate_video.remote(video_request)
             # if video_request.model_type.lower() == "i2v":  # I2V functionality commented out
             #     response_ref = self.i2v_handle.generate_video.remote(video_request)
             # if video_request.model_type.lower() == "t2v":
@@ -543,7 +447,7 @@ class FastVideoAPI:
             # Log the prompt (success case)
             self.prompt_logger.log_prompt(
                 prompt=video_request.prompt,
-                model_type=video_request.model_type,
+                model_type=video_request.model_path,
                 success=response.success,
                 negative_prompt=video_request.negative_prompt if video_request.use_negative_prompt else None,
                 generation_time=response.total_time,
@@ -551,10 +455,10 @@ class FastVideoAPI:
             )
             
             # Record success metrics
-            self.request_count.labels(model_type=model_type, status="success").inc()
-            self.request_duration.labels(model_type=model_type).observe(time.time() - start_time)
+            self.request_count.labels(model_type=model_name, status="success").inc()
+            self.request_duration.labels(model_type=model_name).observe(time.time() - start_time)
             if hasattr(response, 'generation_time_seconds') and response.generation_time_seconds:
-                self.video_generation_time.labels(model_type=model_type).observe(response.generation_time_seconds)
+                self.video_generation_time.labels(model_type=model_name).observe(response.generation_time_seconds)
             
             return response
 
@@ -562,7 +466,7 @@ class FastVideoAPI:
             # Log the prompt (error case)
             self.prompt_logger.log_prompt(
                 prompt=video_request.prompt,
-                model_type=video_request.model_type,
+                model_type=video_request.model_path,
                 success=False,
                 negative_prompt=video_request.negative_prompt if video_request.use_negative_prompt else None,
                 generation_time=None,
@@ -570,8 +474,8 @@ class FastVideoAPI:
             )
             
             # Record error metrics
-            self.request_count.labels(model_type=model_type, status="error").inc()
-            self.request_duration.labels(model_type=model_type).observe(time.time() - start_time)
+            self.request_count.labels(model_type=model_name, status="error").inc()
+            self.request_duration.labels(model_type=model_name).observe(time.time() - start_time)
             
             return VideoGenerationResponse(
                 video_data=None,
