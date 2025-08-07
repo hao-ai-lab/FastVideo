@@ -37,6 +37,7 @@ class ComposedPipelineBase(ABC):
 
     is_video_pipeline: bool = False  # To be overridden by video pipelines
     _required_config_modules: list[str] = []
+    _extra_config_module_map: dict[str, str] = {}
     training_args: TrainingArgs | None = None
     fastvideo_args: FastVideoArgs | TrainingArgs | None = None
     modules: dict[str, torch.nn.Module] = {}
@@ -239,11 +240,16 @@ class ComposedPipelineBase(ABC):
         model_index.pop("_class_name")
         model_index.pop("_diffusers_version")
         # @TODO(Wei): Temporary hack
-        if "boundary_ratio" in model_index and model_index["boundary_ratio"] is not None:
-            logger.info("MoE pipeline detected. Adding transformer_2 to self.required_config_modules...")
+        if "boundary_ratio" in model_index and model_index[
+                "boundary_ratio"] is not None:
+            logger.info(
+                "MoE pipeline detected. Adding transformer_2 to self.required_config_modules..."
+            )
             self.required_config_modules.append("transformer_2")
             if fastvideo_args.boundary_ratio is None:
-                logger.info("MoE pipeline detected. Setting boundary ratio to %s", model_index["boundary_ratio"])
+                logger.info(
+                    "MoE pipeline detected. Setting boundary ratio to %s",
+                    model_index["boundary_ratio"])
                 fastvideo_args.boundary_ratio = model_index["boundary_ratio"]
 
         model_index.pop("boundary_ratio", None)
@@ -255,12 +261,20 @@ class ComposedPipelineBase(ABC):
         ) > 1, "model_index.json must contain at least one pipeline module"
 
         for module_name in self.required_config_modules:
-            if module_name not in model_index:
+            if module_name not in model_index and module_name in self._extra_config_module_map:
+                extra_module_value = self._extra_config_module_map[module_name]
                 logger.warning(
-                    "model_index.json does not contain a %s module, adding %s to model_index",
-                    module_name, module_name)
-                if 'transformer' in module_name:
-                    model_index[module_name] = model_index['transformer']
+                    "model_index.json does not contain a %s module, but found {%s: %s} in _extra_config_module_map, adding to model_index.",
+                    module_name, module_name, extra_module_value)
+                if extra_module_value in model_index:
+                    logger.info("Using module %s for %s", extra_module_value,
+                                module_name)
+                    model_index[module_name] = model_index[extra_module_value]
+                    continue
+                else:
+                    raise ValueError(
+                        f"Required module key: {module_name} value: {model_index.get(module_name)} was not found in loaded modules {model_index.keys()}"
+                    )
 
         # all the component models used by the pipeline
         required_modules = self.required_config_modules
@@ -279,9 +293,15 @@ class ComposedPipelineBase(ABC):
                 logger.info("Using module %s already provided", module_name)
                 modules[module_name] = loaded_modules[module_name]
                 continue
-            
+
+            # we load the module from the extra config module map if it exists
+            if module_name in self._extra_config_module_map:
+                load_module_name = self._extra_config_module_map[module_name]
+            else:
+                load_module_name = module_name
+
             component_model_path = os.path.join(self.model_path,
-                                                module_name)
+                                                load_module_name)
             module = PipelineComponentLoader.load_module(
                 module_name=module_name,
                 component_model_path=component_model_path,
