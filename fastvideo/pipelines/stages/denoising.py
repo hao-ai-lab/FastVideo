@@ -800,8 +800,7 @@ class DmdDenoisingStage(DenoisingStage):
                         next_timestep = timesteps[i + 1] * torch.ones(
                             [1], dtype=torch.long, device=pred_video.device)
                         noise = torch.randn(video_raw_latent_shape,
-                                            device=self.device,
-                                            dtype=pred_video.dtype)
+                                            dtype=pred_video.dtype, generator=batch.generator[0]).to(get_local_torch_device())
                         if sp_group:
                             noise = rearrange(noise,
                                               "b (n t) c h w -> b n t c h w",
