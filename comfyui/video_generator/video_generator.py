@@ -242,7 +242,7 @@ class VideoGenerator:
             raw_pipeline_args['vae_tiling'] = vae_tiling
         if vae_sp is not None:
             raw_pipeline_args['vae_sp'] = vae_sp
-        if text_encoder_precisions is not None:
+        if text_encoder_precisions is not None and str(text_encoder_precisions) != str(-99999):
             raw_pipeline_args['text_encoder_precisions'] = tuple([text_encoder_precisions])
         if image_encoder_precision is not None:
             raw_pipeline_args['image_encoder_precision'] = image_encoder_precision
