@@ -74,6 +74,7 @@ After installation, the following nodes will be available in the ComfyUI interfa
 You may have noticed many arguments on the nodes have 'auto' as the default value. This is because FastVideo will automatically detect the best values for these parameters based on the model and the hardware. However, you can also manually configure these parameters to get the best performance for your specific use case. We plan on releasing more optimized workflow files for different models and hardware configurations in the future.
 
 You can see what some of the default configurations are by looking at the FastVideo repo:
+-[Wan-AI_Wan2.2-TI2V-5B-Diffusers]()
 - [Wan2.1-I2V-14B-480P-Diffusers](https://github.com/hao-ai-lab/FastVideo/blob/main/fastvideo/configs/wan_14B_i2v_480p_pipeline.json)
 - [FastHunyuan-diffusers](https://github.com/hao-ai-lab/FastVideo/blob/main/fastvideo/configs/fasthunyuan_t2v.json)
 
@@ -117,19 +118,27 @@ These parameters affect the model's distribution across GPUs and require a compl
 
 ## Example workflows
 
+### Text and Image to Video
+
+Wan-AI/Wan2.2-TI2V-5B-Diffusers
+
+![Wan-AI/Wan2.2-TI2V-5B-Diffusers](./assets/wanti2v-5B.png)
+
+- [Wan2.2-TI2V-5B-Diffusers](./examples/Wan-AI_Wan2.2-TI2V-5B-Diffusers.json)
+
 ### Text to Video
 
 FastVideo-FastHunyuan-diffusers
 
-![FastVideo-FastHunyuan-diffusers](./assets/fasthunyuan.png)
+![FastVideo/FastHunyuan-diffusers](./assets/fasthunyuan.png)
 
 - [FastHunyuan-diffusers.json](./examples/FastHunyuan-diffusers.json)
 
 ### Image to Video
 
-Wan2.1-I2V-14B-480P-Diffusers
+Wan-AI/Wan2.1-I2V-14B-480P-Diffusers
 
-![Wan2.1-I2V-14B-480P-Diffusers](./assets/wani2v.png)
+![Wan-AI/Wan2.1-I2V-14B-480P-Diffusers](./assets/wani2v.png)
 
 - [Wan2.1-I2V-14B-480P-Diffusers.json](./examples/Wan2.1-I2V-14B-480P-Diffusers.json)
 
