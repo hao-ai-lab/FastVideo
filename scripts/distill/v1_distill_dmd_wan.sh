@@ -43,7 +43,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --num_width 832 \
     --num_frames 77 \
     --flow_shift 8 \
-    --validation_guidance_scale "1.0" \
+    --validation_guidance_scale "6.0" \
     --master_weight_type "fp32" \
     --dit_precision "fp32" \
     --vae_precision "bf16" \

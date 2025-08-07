@@ -18,7 +18,7 @@ def main():
         "height": 480,
         "width": 832,
         "num_frames": 81,
-        "guidance_scale": 5.0,
+        "guidance_scale": 6.0,
         "num_inference_steps": 32,
         "seed": 42,
     }
