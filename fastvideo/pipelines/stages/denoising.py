@@ -57,7 +57,11 @@ class DenoisingStage(PipelineStage):
     the initial noise into the final output.
     """
 
-    def __init__(self, transformer, scheduler, pipeline=None, transformer_2=None) -> None:
+    def __init__(self,
+                 transformer,
+                 scheduler,
+                 pipeline=None,
+                 transformer_2=None) -> None:
         super().__init__()
         self.transformer = transformer
         self.transformer_2 = transformer_2
@@ -199,16 +203,19 @@ class DenoisingStage(PipelineStage):
                     continue
 
                 if boundary_timestep is None or t >= boundary_timestep:
-                    if fastvideo_args.dit_cpu_offload and self.transformer_2 is not None:
-                        if next(self.transformer_2.parameters()).device.type == 'cuda':
-                            self.transformer_2.to('cpu')
+                    if (fastvideo_args.dit_cpu_offload
+                            and self.transformer_2 is not None and next(
+                                self.transformer_2.parameters()).device.type
+                            == 'cuda'):
+                        self.transformer_2.to('cpu')
                     current_model = self.transformer
                     current_guidance_scale = batch.guidance_scale
                 else:
                     # low-noise stage in wan2.2
-                    if fastvideo_args.dit_cpu_offload:
-                        if next(self.transformer.parameters()).device.type == 'cuda':
-                            self.transformer.to('cpu')
+                    if fastvideo_args.dit_cpu_offload and next(
+                            self.transformer.parameters(
+                            )).device.type == 'cuda':
+                        self.transformer.to('cpu')
                     current_model = self.transformer_2
                     current_guidance_scale = batch.guidance_scale_2
 
