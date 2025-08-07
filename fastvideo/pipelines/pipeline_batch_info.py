@@ -192,7 +192,8 @@ class TrainingBatch:
     dmd_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     fake_score_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
 
+
 @dataclass
 class PreprocessBatch(ForwardBatch):
     video_loader: list[VideoDecoder] = field(default_factory=list)
-    name: list[str] = field(default_factory=list)
+    video_file_name: list[str] = field(default_factory=list)

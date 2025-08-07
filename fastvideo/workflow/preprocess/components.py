@@ -133,7 +133,7 @@ class VideoForwardBatchBuilder:
     def __call__(self, batch: list) -> PreprocessBatch:
         forward_batch = PreprocessBatch(
             video_loader=[item["video"] for item in batch],
-            name=[item["name"] for item in batch],
+            video_file_name=[item["name"] for item in batch],
             height=[item["resolution"]["height"] for item in batch],
             width=[item["resolution"]["width"] for item in batch],
             fps=[item["fps"] for item in batch],
@@ -268,7 +268,7 @@ class ParquetDatasetSaver:
         # Prepare batch data for Parquet dataset
         batch_data = []
 
-        for idx, video_name in enumerate(batch.name):
+        for idx, video_name in enumerate(batch.video_file_name):
             # Get the corresponding latent and info using video name
             vae_latent = batch.latents[idx].cpu().numpy()
             text_embedding = prompt_embeds[idx].cpu().numpy()
