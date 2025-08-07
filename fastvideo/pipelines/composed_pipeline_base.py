@@ -303,7 +303,7 @@ class ComposedPipelineBase(ABC):
             component_model_path = os.path.join(self.model_path,
                                                 load_module_name)
             module = PipelineComponentLoader.load_module(
-                module_name=module_name,
+                module_name=load_module_name,
                 component_model_path=component_model_path,
                 transformers_or_diffusers=transformers_or_diffusers,
                 fastvideo_args=fastvideo_args,
