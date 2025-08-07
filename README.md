@@ -64,12 +64,15 @@ See below for recipes and datasets:
 
 ## Inference
 ### Generating Your First Video
-Here's a minimal example to generate a video using the default settings. Create a file called `example.py` with the following code:
+Here's a minimal example to generate a video using the default settings. Make sure VSA kernels are [installed](https://hao-ai-lab.github.io/FastVideo/video_sparse_attention/installation.html). Create a file called `example.py` with the following code:
 
 ```python
+import os
 from fastvideo import VideoGenerator
 
 def main():
+    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
+
     # Create a video generator with a pre-trained model
     generator = VideoGenerator.from_pretrained(
         "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
