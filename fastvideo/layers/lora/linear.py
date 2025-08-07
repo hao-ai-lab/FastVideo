@@ -110,7 +110,6 @@ class BaseLayerWithLoRA(nn.Module):
         self.lora_path = lora_path
 
     @torch.no_grad()
-    # @torch.compile()
     def merge_lora_weights(self) -> None:
         if self.disable_lora:
             return

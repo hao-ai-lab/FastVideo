@@ -12,7 +12,6 @@ import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 from einops import rearrange
 from safetensors.torch import save_file
-from torch.distributed.tensor import DTensor
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 
@@ -151,22 +150,7 @@ def save_checkpoint(transformer,
                 local_main_process_only=False)
 
     begin_time = time.perf_counter()
-    if step > 1:
-        sd = transformer.state_dict()
     dcp.save(states, checkpoint_id=dcp_dir)
-    if step > 1:
-        dcp.load(states, checkpoint_id=dcp_dir)
-        sd_loaded = transformer.state_dict()
-        for key in sd:
-            if key in sd_loaded:
-                old = sd[key]
-                new = sd_loaded[key]
-                if isinstance(old, DTensor):
-                    old = old.to_local()
-                if isinstance(new, DTensor):
-                    new = new.to_local()
-                if not torch.allclose(old, new):
-                    torch.distributed.breakpoint()
     end_time = time.perf_counter()
 
     logger.info("rank: %s, distributed checkpoint saved in %.2f seconds",
