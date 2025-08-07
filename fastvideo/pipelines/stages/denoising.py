@@ -254,13 +254,12 @@ class DenoisingStage(PipelineStage):
                         temp_ts,
                         temp_ts.new_ones(seq_len - temp_ts.size(0)) * timestep
                     ])
-                    # timestep = temp_ts.unsqueeze(0)
-                    timestep = temp_ts
+                    timestep = temp_ts.unsqueeze(0)
                     logger.info(f"after ti2v timestep: {timestep}")
-                    t = timestep
-                # else:
-                t_expand = t.repeat(latent_model_input.shape[0])
-                # logger.info(f"t_expand shape: {t_expand.shape}")
+                    t_expand = timestep.repeat(latent_model_input.shape[0], 1)
+                else:
+                    t_expand = t.repeat(latent_model_input.shape[0])
+                logger.info(f"t_expand shape: {t_expand.shape}")
                 # logger.info(f"t_expand: {t_expand}")
 
                 assert torch.isnan(latent_model_input).sum() == 0
