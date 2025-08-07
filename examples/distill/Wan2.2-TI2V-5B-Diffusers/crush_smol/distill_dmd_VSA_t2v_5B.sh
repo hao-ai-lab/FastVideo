@@ -63,7 +63,7 @@ validation_args=(
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
   --validation_steps 200
   --validation_sampling_steps "3"
-  --validation_guidance_scale "1.0" # not used for dmd inference
+  --validation_guidance_scale "6.0" # not used for dmd inference
 )
 
 # Optimizer arguments
