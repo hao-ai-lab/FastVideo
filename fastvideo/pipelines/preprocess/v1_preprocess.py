@@ -23,7 +23,6 @@ def main(args) -> None:
     assert num_gpus == 1, "Only support 1 GPU"
     pipeline_config = PipelineConfig.from_pretrained(args.model_path)
     kwargs = {
-        "dit_cpu_offload": False,
         "vae_precision": "fp32",
         "vae_config": WanVAEConfig(load_encoder=True, load_decoder=False),
     }
@@ -31,6 +30,9 @@ def main(args) -> None:
     fastvideo_args = FastVideoArgs(
         model_path=args.model_path,
         num_gpus=get_world_size(),
+        dit_cpu_offload=False,
+        vae_cpu_offload=False,
+        text_encoder_cpu_offload=False,
         pipeline_config=pipeline_config,
     )
     PreprocessPipeline = PreprocessPipeline_I2V if args.preprocess_task == "i2v" else PreprocessPipeline_T2V

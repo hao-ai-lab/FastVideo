@@ -37,6 +37,7 @@ class ComposedPipelineBase(ABC):
 
     is_video_pipeline: bool = False  # To be overridden by video pipelines
     _required_config_modules: list[str] = []
+    _extra_config_module_map: dict[str, str] = {}
     training_args: TrainingArgs | None = None
     fastvideo_args: FastVideoArgs | TrainingArgs | None = None
     modules: dict[str, torch.nn.Module] = {}
@@ -97,6 +98,10 @@ class ComposedPipelineBase(ABC):
                 self.initialize_validation_pipeline(self.training_args)
 
         self.initialize_pipeline(self.fastvideo_args)
+        if self.fastvideo_args.enable_torch_compile:
+            self.modules["transformer"] = torch.compile(
+                self.modules["transformer"])
+            logger.info("Torch Compile enabled for DiT")
 
         if not self.fastvideo_args.training_mode:
             logger.info("Creating pipeline stages...")
@@ -144,9 +149,7 @@ class ComposedPipelineBase(ABC):
             # model is loaded with the correct precision. Subsequently we will
             # use FSDP2's MixedPrecisionPolicy to set the precision for the
             # fwd, bwd, and other operations' precision.
-            # fastvideo_args.precision = fastvideo_args.master_weight_type
             assert fastvideo_args.pipeline_config.dit_precision == 'fp32', 'only fp32 is supported for training'
-            # assert fastvideo_args.precision == 'fp32', 'only fp32 is supported for training'
 
         logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)
 
@@ -234,6 +237,21 @@ class ComposedPipelineBase(ABC):
         # remove keys that are not pipeline modules
         model_index.pop("_class_name")
         model_index.pop("_diffusers_version")
+        # @TODO(Wei): Temporary hack
+        if "boundary_ratio" in model_index and model_index[
+                "boundary_ratio"] is not None:
+            logger.info(
+                "MoE pipeline detected. Adding transformer_2 to self.required_config_modules..."
+            )
+            self.required_config_modules.append("transformer_2")
+            if fastvideo_args.boundary_ratio is None:
+                logger.info(
+                    "MoE pipeline detected. Setting boundary ratio to %s",
+                    model_index["boundary_ratio"])
+                fastvideo_args.boundary_ratio = model_index["boundary_ratio"]
+
+        model_index.pop("boundary_ratio", None)
+        model_index.pop("expand_timesteps", None)
 
         # some sanity checks
         assert len(
@@ -241,12 +259,20 @@ class ComposedPipelineBase(ABC):
         ) > 1, "model_index.json must contain at least one pipeline module"
 
         for module_name in self.required_config_modules:
-            if module_name not in model_index:
+            if module_name not in model_index and module_name in self._extra_config_module_map:
+                extra_module_value = self._extra_config_module_map[module_name]
                 logger.warning(
-                    "model_index.json does not contain a %s module, adding %s to model_index",
-                    module_name, module_name)
-                if 'transformer' in module_name:
-                    model_index[module_name] = model_index['transformer']
+                    "model_index.json does not contain a %s module, but found {%s: %s} in _extra_config_module_map, adding to model_index.",
+                    module_name, module_name, extra_module_value)
+                if extra_module_value in model_index:
+                    logger.info("Using module %s for %s", extra_module_value,
+                                module_name)
+                    model_index[module_name] = model_index[extra_module_value]
+                    continue
+                else:
+                    raise ValueError(
+                        f"Required module key: {module_name} value: {model_index.get(module_name)} was not found in loaded modules {model_index.keys()}"
+                    )
 
         # all the component models used by the pipeline
         required_modules = self.required_config_modules
@@ -255,6 +281,9 @@ class ComposedPipelineBase(ABC):
         modules = {}
         for module_name, (transformers_or_diffusers,
                           architecture) in model_index.items():
+            if transformers_or_diffusers is None:
+                self.required_config_modules.remove(module_name)
+                continue
             if module_name not in required_modules:
                 logger.info("Skipping module %s", module_name)
                 continue
@@ -262,14 +291,17 @@ class ComposedPipelineBase(ABC):
                 logger.info("Using module %s already provided", module_name)
                 modules[module_name] = loaded_modules[module_name]
                 continue
-            if 'transformer' in module_name:
-                loading_module_name = module_name.split("_")[-1]
+
+            # we load the module from the extra config module map if it exists
+            if module_name in self._extra_config_module_map:
+                load_module_name = self._extra_config_module_map[module_name]
             else:
-                loading_module_name = module_name
+                load_module_name = module_name
+
             component_model_path = os.path.join(self.model_path,
-                                                loading_module_name)
+                                                load_module_name)
             module = PipelineComponentLoader.load_module(
-                module_name=module_name,
+                module_name=load_module_name,
                 component_model_path=component_model_path,
                 transformers_or_diffusers=transformers_or_diffusers,
                 fastvideo_args=fastvideo_args,

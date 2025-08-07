@@ -72,8 +72,7 @@ class ComponentLoader(ABC):
         module_loaders = {
             "scheduler": (SchedulerLoader, "diffusers"),
             "transformer": (TransformerLoader, "diffusers"),
-            "real_score_transformer": (TransformerLoader, "diffusers"),
-            "fake_score_transformer": (TransformerLoader, "diffusers"),
+            "transformer_2": (TransformerLoader, "diffusers"),
             "vae": (VAELoader, "diffusers"),
             "text_encoder": (TextEncoderLoader, "transformers"),
             "text_encoder_2": (TextEncoderLoader, "transformers"),
@@ -452,31 +451,14 @@ class TransformerLoader(ComponentLoader):
             hsdp_replicate_dim=fastvideo_args.hsdp_replicate_dim,
             hsdp_shard_dim=fastvideo_args.hsdp_shard_dim,
             cpu_offload=fastvideo_args.dit_cpu_offload,
+            pin_cpu_memory=fastvideo_args.pin_cpu_memory,
             fsdp_inference=fastvideo_args.use_fsdp_inference,
             # TODO(will): make these configurable
             param_dtype=torch.bfloat16,
             reduce_dtype=torch.float32,
             output_dtype=None,
             training_mode=fastvideo_args.training_mode)
-        if fastvideo_args.enable_torch_compile:
-            logger.info("Torch Compile enabled for DiT")
-            for n, m in reversed(list(model.named_modules())):
-                if any([
-                        compile_condition(n, m)
-                        for compile_condition in model._compile_conditions
-                ]):
-                    parts = n.split(".")
-                    parent = model
-                    attr = parts[-1]
-                    for part in parts[:-1]:
-                        if part.isdigit():
-                            parent = parent[int(part)]
-                        else:
-                            parent = getattr(parent, part)
-                    if attr.isdigit():
-                        parent[int(attr)] = torch.compile(m)
-                    else:
-                        setattr(parent, attr, torch.compile(m))
+
 
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)

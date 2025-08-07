@@ -122,6 +122,7 @@ class LatentPreparationStage(PipelineStage):
         Returns:
             The batch with adjusted video length.
         """
+
         video_length = batch.num_frames
         use_temporal_scaling_frames = fastvideo_args.pipeline_config.vae_config.use_temporal_scaling_frames
         if use_temporal_scaling_frames:

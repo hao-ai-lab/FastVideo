@@ -116,7 +116,6 @@ def run_training():
         "--validation_sampling_steps", "50",
         "--log_validation",
         "--checkpoints_total_limit", "3",
-        "--allow_tf32",
         "--ema_start_step", "0",
         "--training_cfg_rate", "0.1",
         "--output_dir", LOCAL_OUTPUT_DIR,

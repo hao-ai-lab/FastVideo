@@ -7,8 +7,8 @@
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
-#SBATCH --output=dmd_t2v_output/t2v_%j.out
-#SBATCH --error=dmd_t2v_output/t2v_%j.err
+#SBATCH --output=dmd_Wan2.2/t2v_g2e5_f1e5_%j.out
+#SBATCH --error=dmd_Wan2.2/t2v_g2e5_f1e5_%j.err
 #SBATCH --exclusive
 set -e -x
 
@@ -31,6 +31,7 @@ export TOKENIZERS_PARALLELISM=false
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
+export WANDB_API_KEY=your_wandb_api_key
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 echo "MASTER_ADDR: $MASTER_ADDR"
@@ -38,34 +39,34 @@ echo "NODE_RANK: $NODE_RANK"
 
 # Configs
 NUM_GPUS=8
-MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"
+MODEL_PATH="Wan-AI/Wan2.2-TI2V-5B-Diffusers"
 DATA_DIR=your_data_dir
-VALIDATION_DATASET_FILE=your_validation_dataset_file
+VALIDATION_DIR=your_validation_path  #(example:validation_64.json)
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
-  --tracker_project_name wan_t2v_distill_dmd_VSA
-  --output_dir="checkpoints/wan_t2v_finetune"
-  --max_train_steps=4000
-  --train_batch_size=1
+  --tracker_project_name Wan_distillation
+  --output_dir "your_output_dir"
+  --max_train_steps 4000
+  --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps=1
-  --num_latent_t 16
-  --num_height 448
-  --num_width 832
-  --num_frames 61
+  --gradient_accumulation_steps 1
+  --num_latent_t 31
+  --num_height 704
+  --num_width 1280
+  --num_frames 121
   --enable_gradient_checkpointing_type "full"
 )
 
 # Parallel arguments
 parallel_args=(
   --num_gpus 64
-  --sp_size 4
+  --sp_size 1
   --tp_size 1
-  --hsdp_replicate_dim 8
-  --hsdp_shard_dim 8
+  --hsdp_replicate_dim 64
+  --hsdp_shard_dim 1
 )
 
 # Model arguments
@@ -83,7 +84,7 @@ dataset_args=(
 # Validation arguments
 validation_args=(
   --log_validation
-  --validation_dataset_file "$VALIDATION_DATASET_FILE"
+  --validation_dataset_file "$VALIDATION_DIR"
   --validation_steps 200
   --validation_sampling_steps "3"
   --validation_guidance_scale "1.0" # not used for dmd inference
@@ -91,9 +92,15 @@ validation_args=(
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate=1e-5
-  --mixed_precision="bf16"
-  --checkpointing_steps=500
+  --learning_rate 2e-5
+  --lr_scheduler "cosine_with_min_lr"
+  --min_lr_ratio 0.5
+  --lr_warmup_steps 100
+  --fake_score_learning_rate 1e-5
+  --fake_score_lr_scheduler "cosine_with_min_lr"
+  --mixed_precision "bf16"
+  --training_state_checkpointing_steps 500
+  --weight_only_checkpointing_steps 200
   --weight_decay 0.01
   --max_grad_norm 1.0
 )
@@ -101,12 +108,11 @@ optimizer_args=(
 # Miscellaneous arguments
 miscellaneous_args=(
   --inference_mode False
-  --allow_tf32
   --checkpoints_total_limit 3
   --training_cfg_rate 0.0
-  --dit_precision "bf16"
+  --dit_precision "fp32"
   --ema_start_step 0
-  --flow_shift 3
+  --flow_shift 5
   --seed 1000
 )
 
@@ -116,8 +122,10 @@ dmd_args=(
   --min_timestep_ratio 0.02
   --max_timestep_ratio 0.98
   --generator_update_interval 5
-  --real_score_guidance_scale 3.5
-  --VSA_sparsity 0.9
+  --real_score_guidance_scale 3
+  --simulate_generator_forward 
+  --log_visualization # disable if oom
+  --VSA_sparsity 0.8
 )
 
 srun torchrun \
@@ -126,7 +134,7 @@ srun torchrun \
 --node_rank $SLURM_PROCID \
 --rdzv_backend=c10d \
 --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
-    fastvideo/training/wan_training_pipeline.py \
+    fastvideo/training/wan_distillation_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

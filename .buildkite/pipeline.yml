@@ -94,7 +94,7 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "fastvideo/training/**distillation**/"
+                - "fastvideo/training/*distillation_pipeline.py"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:

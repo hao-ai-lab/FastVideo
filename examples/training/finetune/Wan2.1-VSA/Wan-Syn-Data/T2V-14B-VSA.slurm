@@ -7,8 +7,8 @@
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
-#SBATCH --output=dmd_t2v_output/t2v_%j.out
-#SBATCH --error=dmd_t2v_output/t2v_%j.err
+#SBATCH --output=VSA_t2v_output/t2v_%j.out
+#SBATCH --error=VSA_t2v_output/t2v_%j.err
 #SBATCH --exclusive
 set -e -x
 
@@ -38,7 +38,7 @@ echo "NODE_RANK: $NODE_RANK"
 
 # Configs
 NUM_GPUS=8
-MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"
 DATA_DIR=your_data_dir
 VALIDATION_DATASET_FILE=your_validation_dataset_file
 # export CUDA_VISIBLE_DEVICES=4,5
@@ -46,16 +46,16 @@ VALIDATION_DATASET_FILE=your_validation_dataset_file
 
 # Training arguments
 training_args=(
-  --tracker_project_name wan_t2v_distill_dmd_VSA
-  --output_dir="checkpoints/wan_t2v_finetune"
-  --max_train_steps=4000
-  --train_batch_size=1
+  --tracker_project_name wan_t2v_VSA
+  --output_dir "checkpoints/wan_t2v_finetune_VSA"
+  --max_train_steps 4000
+  --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps=1
-  --num_latent_t 16
-  --num_height 448
-  --num_width 832
-  --num_frames 61
+  --gradient_accumulation_steps 1
+  --num_latent_t 21
+  --num_height 720
+  --num_width 1280
+  --num_frames 81
   --enable_gradient_checkpointing_type "full"
 )
 
@@ -64,8 +64,8 @@ parallel_args=(
   --num_gpus 64
   --sp_size 1
   --tp_size 1
-  --hsdp_replicate_dim 64
-  --hsdp_shard_dim 1
+  --hsdp_replicate_dim 8
+  --hsdp_shard_dim 8
 )
 
 # Model arguments
@@ -83,17 +83,17 @@ dataset_args=(
 # Validation arguments
 validation_args=(
   --log_validation
-  --validation_dataset_file "$VALIDATION_DATASET_FILE"
+  --validation_dataset_file $VALIDATION_DATASET_FILE
   --validation_steps 200
-  --validation_sampling_steps "3"
-  --validation_guidance_scale "1.0" # not used for dmd inference
+  --validation_sampling_steps "50"
+  --validation_guidance_scale "5.0"
 )
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate=1e-5
-  --mixed_precision="bf16"
-  --checkpointing_steps=500
+  --learning_rate 1e-5
+  --mixed_precision "bf16"
+  --checkpointing_steps 1000
   --weight_decay 0.01
   --max_grad_norm 1.0
 )
@@ -101,23 +101,19 @@ optimizer_args=(
 # Miscellaneous arguments
 miscellaneous_args=(
   --inference_mode False
-  --allow_tf32
   --checkpoints_total_limit 3
-  --training_cfg_rate 0.0
-  --dit_precision "bf16"
+  --training_cfg_rate 0.1
+  --dit_precision "fp32"
   --ema_start_step 0
-  --flow_shift 8
+  --flow_shift 5
   --seed 1000
 )
 
-# DMD arguments
-dmd_args=(
-  --dmd_denoising_steps '1000,757,522'
-  --min_timestep_ratio 0.02
-  --max_timestep_ratio 0.98
-  --generator_update_interval 5
-  --real_score_guidance_scale 3.5
-  --VSA_sparsity 0.8
+# VSA arguments
+vsa_args=(
+  --VSA_decay_rate 0.03 \
+  --VSA_decay_interval_steps 30 \
+  --VSA_sparsity 0.9 \
 )
 
 srun torchrun \
@@ -134,4 +130,4 @@ srun torchrun \
     "${optimizer_args[@]}" \
     "${validation_args[@]}" \
     "${miscellaneous_args[@]}" \
-    "${dmd_args[@]}"
+    "${vsa_args[@]}"  

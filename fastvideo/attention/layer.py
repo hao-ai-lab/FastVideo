@@ -55,6 +55,7 @@ class DistributedAttention(nn.Module):
         self.backend = backend_name_to_enum(attn_backend.get_name())
         self.dtype = dtype
 
+    @torch.compiler.disable
     def forward(
         self,
         q: torch.Tensor,
@@ -142,6 +143,7 @@ class DistributedAttention_VSA(DistributedAttention):
     """Distributed attention layer with VSA support.
     """
 
+    @torch.compiler.disable
     def forward(
         self,
         q: torch.Tensor,

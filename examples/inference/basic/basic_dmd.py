@@ -16,7 +16,8 @@ def main():
         num_gpus=1,
         use_fsdp_inference=True,
         # Adjust these offload parameters if you have < 32GB of VRAM
-        text_encoder_cpu_offload=False,
+        text_encoder_cpu_offload=True,
+        pin_cpu_memory=False,
         dit_cpu_offload=False,
         vae_cpu_offload=False,
         VSA_sparsity=0.8,

@@ -7,7 +7,7 @@ export TOKENIZERS_PARALLELISM=false
 
 MODEL_PATH="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
 DATA_DIR="data/crush-smol_processed_i2v/combined_parquet_dataset/"
-VALIDATION_DATASET_FILE="examples/training/finetune/wan_i2v_14b_480p/crush_smol/validation.json"
+VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 NUM_GPUS=8
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
@@ -69,7 +69,6 @@ optimizer_args=(
 # Miscellaneous arguments
 miscellaneous_args=(
   --inference_mode False
-  --allow_tf32
   --checkpoints_total_limit 3
   --training_cfg_rate 0.1
   --multi_phased_distill_schedule "4000-1"

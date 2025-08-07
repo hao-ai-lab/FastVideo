@@ -89,13 +89,14 @@ class WanVideoArchConfig(DiTArchConfig):
     image_dim: int | None = None
     added_kv_proj_dim: int | None = None
     rope_max_seq_len: int = 1024
+    pos_embed_seq_len: int | None = None
     exclude_lora_layers: list[str] = field(default_factory=lambda: ["embedder"])
 
     def __post_init__(self):
         super().__post_init__()
         self.out_channels = self.out_channels or self.in_channels
         self.hidden_size = self.num_attention_heads * self.attention_head_dim
-        self.num_channels_latents = self.in_channels if self.added_kv_proj_dim is None else self.out_channels
+        self.num_channels_latents = self.out_channels
 
 
 @dataclass

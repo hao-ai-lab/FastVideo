@@ -56,6 +56,7 @@ class InputValidationStage(PipelineStage):
         Returns:
             The validated batch information.
         """
+
         self._generate_seeds(batch, fastvideo_args)
 
         # Ensure prompt is properly formatted

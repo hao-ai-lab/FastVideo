@@ -18,7 +18,7 @@ def main():
 
     # Create sampling parameters with reduced number of frames
     sampling_param = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
-    sampling_param.num_frames = 3  # Reduce from default 81 to 25 frames bc we have to use the SDPA attn backend for mps
+    sampling_param.num_frames = 25  # Reduce from default 81 to 25 frames bc we have to use the SDPA attn backend for mps
     sampling_param.height = 256
     sampling_param.width = 256
 

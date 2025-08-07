@@ -35,7 +35,6 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --validation_sampling_steps "3" \
     --log_validation \
     --checkpoints_total_limit 3 \
-    --allow_tf32 \
     --ema_start_step 0 \
     --training_cfg_rate 0.0 \
     --output_dir "outputs_dmd/wan_finetune" \

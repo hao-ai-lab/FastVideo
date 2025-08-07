@@ -1,21 +1,21 @@
 <div align="center">
-<img src=assets/logo.jpg width="30%"/>
+<img src=assets/logo.png width="30%"/>
 </div>
 
-**FastVideo is a unified framework for accelerated video generation.**
+**FastVideo is a unified post-training and inference framework for accelerated video generation.**
 
-It features a clean, consistent API that works across popular video models, making it easier for developers to author new models and incorporate system- or kernel-level optimizations.
-With FastVideo's optimizations, you can achieve more than 3x inference improvement compared to other systems.
+FastVideo features an end-to-end unified pipeline for accelerating diffusion models, starting from data preprocessing to model training, finetuning, distillation, and inference. FastVideo is designed to be modular and extensible, allowing users to easily add new optimizations and techniques. Whether it is training-free optimizations or post-training optimizations, FastVideo has you covered.
 
 <p align="center">
-    | <a href="https://hao-ai-lab.github.io/FastVideo"><b>Documentation</b></a> | <a href="https://hao-ai-lab.github.io/FastVideo/inference/inference_quick_start.html"><b> Quick Start</b></a> | 🤗 <a href="https://huggingface.co/FastVideo/FastHunyuan"  target="_blank"><b>FastHunyuan</b></a>  | 🤗 <a href="https://huggingface.co/FastVideo/FastMochi-diffusers" target="_blank"><b>FastMochi</b></a> | 🟣💬 <a href="https://join.slack.com/t/fastvideo/shared_invite/zt-38u6p1jqe-yDI1QJOCEnbtkLoaI5bjZQ" target="_blank"> <b>Slack</b> </a> |
+    | 🕹️ <a href="https://fastwan.fastvideo.org/"<b>Online Demo</b></a> | <a href="https://hao-ai-lab.github.io/FastVideo"><b>Documentation</b></a> | <a href="https://hao-ai-lab.github.io/FastVideo/inference/inference_quick_start.html"><b> Quick Start</b></a> | 🤗 <a href="https://huggingface.co/collections/FastVideo/fastwan-6886a305d9799c8cd1496408"  target="_blank"><b>FastWan</b></a>  | 🟣💬 <a href="https://join.slack.com/t/fastvideo/shared_invite/zt-38u6p1jqe-yDI1QJOCEnbtkLoaI5bjZQ" target="_blank"> <b>Slack</b> </a> |  🟣💬 <a href="https://ibb.co/qqPzbrw" target="_blank"> <b> WeChat </b> </a> |
 </p>
 
 <div align="center">
-<img src=assets/perf.png width="90%"/>
+<img src=assets/fastwan.png width="90%"/>
 </div>
 
 ## NEWS
+- ```2025/08/04```: Release [FastWan](https://hao-ai-lab.github.io/FastVideo/distillation/dmd.html) models and [Sparse-Distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/).
 - ```2025/06/14```: Release finetuning and inference code for [VSA](https://arxiv.org/pdf/2505.13389)
 - ```2025/04/24```: [FastVideo V1](https://hao-ai-lab.github.io/blogs/fastvideo/) is released!
 - ```2025/02/18```: Release the inference code for [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
@@ -23,20 +23,19 @@ With FastVideo's optimizations, you can achieve more than 3x inference improveme
 ## Key Features
 
 FastVideo has the following features:
+- End-to-end post-training support:
+  - [Sparse distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/) for Wan2.1 and Wan2.2 to achineve >50x denoising speedup
+  - Data preprocessing pipeline for video data
+  - Support full finetuning and LoRA finetuning for state-of-the-art open video DiTs
+  - Scalable training with FSDP2, sequence parallelism, and selective activation checkpointing, with near linear scaling to 64 GPUs
 - State-of-the-art performance optimizations for inference
+  - [Video Sparse Attention](https://arxiv.org/pdf/2505.13389)
   - [Sliding Tile Attention](https://arxiv.org/pdf/2502.04507)
   - [TeaCache](https://arxiv.org/pdf/2411.19108)
   - [Sage Attention](https://arxiv.org/abs/2410.02367)
-- Cutting edge models
-  - Wan2.1 T2V, I2V
-  - HunyuanVideo
-  - FastHunyuan: consistency distilled video diffusion models for 8x inference speedup.
-  - StepVideo T2V
-- Distillation support
-  - Recipes for video DiT, based on [PCM](https://github.com/G-U-N/Phased-Consistency-Model).
-  - Support distilling/finetuning/inferencing state-of-the-art open video DiTs: 1. Mochi 2. Hunyuan.
-- Scalable training with FSDP, sequence parallelism, and selective activation checkpointing, with near linear scaling to 64 GPUs.
-- Memory efficient finetuning with LoRA, precomputed latent, and precomputed text embeddings.
+- Diverse hardware and OS support
+  - Support H100, A100, 4090
+  - Support Linux, Windows, MacOS
 
 ## Getting Started
 We recommend using an environment manager such as `Conda` to create a clean environment:
@@ -52,17 +51,31 @@ pip install fastvideo
 
 Please see our [docs](https://hao-ai-lab.github.io/FastVideo/getting_started/installation.html) for more detailed installation instructions.
 
+## Sparse Distillation
+For our sparse distillation techniques, please see our [distillation docs](https://hao-ai-lab.github.io/FastVideo/distillation/dmd.html) and check out our [blog](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/).
+
+See below for recipes and datasets:
+
+|                                            Model                                              |                                               Sparse Distillation                                                 |                                                  Dataset                                                  |
+|:-------------------------------------------------------------------------------------------:  |:---------------------------------------------------------------------------------------------------------------:  |:--------------------------------------------------------------------------------------------------------: |
+| [FastWan2.1-T2V-1.3B](https://huggingface.co/FastVideo/FastWan2.1-T2V-1.3B-Diffusers)         |    [Recipe](https://github.com/hao-ai-lab/FastVideo/tree/main/examples/distill/Wan2.1-T2V/Wan-Syn-Data-480P)      | [FastVideo Synthetic Wan2.1 480P](https://huggingface.co/datasets/FastVideo/Wan-Syn_77x448x832_600k)      |
+| [FastWan2.1-T2V-14B-Preview](https://huggingface.co/FastVideo/FastWan2.1-T2V-14B-Diffusers)   |                                                   Coming soon!                                                    |   [FastVideo Synthetic Wan2.1 720P](https://huggingface.co/datasets/FastVideo/Wan-Syn_77x768x1280_250k)   |
+| [FastWan2.2-TI2V-5B](https://huggingface.co/FastVideo/FastWan2.2-TI2V-5B-Diffusers)           | [Recipe](https://github.com/hao-ai-lab/FastVideo/tree/main/examples/distill/Wan2.2-TI2V-5B-Diffusers/Data-free)   | [FastVideo Synthetic Wan2.2 720P](https://huggingface.co/datasets/FastVideo/Wan2.2-Syn-121x704x1280_32k)  |
+
 ## Inference
 ### Generating Your First Video
-Here's a minimal example to generate a video using the default settings. Create a file called `example.py` with the following code:
+Here's a minimal example to generate a video using the default settings. Make sure VSA kernels are [installed](https://hao-ai-lab.github.io/FastVideo/video_sparse_attention/installation.html). Create a file called `example.py` with the following code:
 
 ```python
+import os
 from fastvideo import VideoGenerator
 
 def main():
+    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
+
     # Create a video generator with a pre-trained model
     generator = VideoGenerator.from_pretrained(
-        "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
         num_gpus=1,  # Adjust based on your hardware
     )
 
@@ -95,24 +108,22 @@ For a more detailed guide, please see our [inference quick start](https://hao-ai
 - [Contribution Guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation.html)
 
 ## Distillation and Finetuning
-- [Distillation Guide](https://hao-ai-lab.github.io/FastVideo/training/distillation.html)
-- [Finetuning Guide](https://hao-ai-lab.github.io/FastVideo/training/finetune.html)
+- [Distillation Guide](https://hao-ai-lab.github.io/FastVideo/distillation/dmd.html)
+<!-- - [Finetuning Guide](https://hao-ai-lab.github.io/FastVideo/training/finetune.html) -->
 
 ## 📑 Development Plan
-
 <!-- - More distillation methods -->
   <!-- - [ ] Add Distribution Matching Distillation -->
-- More models support
-  <!-- - [ ] Add CogvideoX model -->
-  - [x] Add StepVideo to V1
-- Optimization features
-  - [x] Teacache in V1
-  - [x] SageAttention in V1
-- Code updates
-  - [x] V1 Configuration API
-  - [ ] Support Training in V1
+More FastWan Models Coming Soon!
+- [ ] Add FastWan2.1-T2V-14B
+- [ ] Add FastWan2.2-T2V-14B
+- [ ] Add FastWan2.2-I2V-14B
+<!-- - Optimization features
+- Code updates -->
   <!-- - [ ] fp8 support -->
   <!-- - [ ] faster load model and save model support -->
+
+See details in [development roadmap](https://github.com/hao-ai-lab/FastVideo/issues/468).
 
 ## 🤝 Contributing
 
@@ -120,44 +131,40 @@ We welcome all contributions. Please check out our guide [here](https://hao-ai-l
 
 ## Acknowledgement
 We learned and reused code from the following projects:
-- [PCM](https://github.com/G-U-N/Phased-Consistency-Model)
+- [Wan-Video](https://github.com/Wan-Video)
+- [ThunderKittens](https://github.com/HazyResearch/ThunderKittens)
+- [Triton](https://github.com/triton-lang/triton)
+- [DMD2](https://github.com/tianweiy/DMD2)
 - [diffusers](https://github.com/huggingface/diffusers)
-- [OpenSoraPlan](https://github.com/PKU-YuanGroup/Open-Sora-Plan)
 - [xDiT](https://github.com/xdit-project/xDiT)
 - [vLLM](https://github.com/vllm-project/vllm)
 - [SGLang](https://github.com/sgl-project/sglang)
 
-We thank MBZUAI and [Anyscale](https://www.anyscale.com/) for their support throughout this project.
+We thank [MBZUAI](https://ifm.mbzuai.ac.ae/), [Anyscale](https://www.anyscale.com/), and [GMI Cloud](https://www.gmicloud.ai/) for their support throughout this project.
 
 ## Citation
-If you use FastVideo for your research, please cite our paper:
+If you find FastVideo useful, please considering citing our work:
 
 ```bibtex
-@misc{zhang2025vsafastervideodiffusion,
-      title={VSA: Faster Video Diffusion with Trainable Sparse Attention}, 
-      author={Peiyuan Zhang and Haofeng Huang and Yongqi Chen and Will Lin and Zhengzhong Liu and Ion Stoica and Eric Xing and Hao Zhang},
-      year={2025},
-      eprint={2505.13389},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2505.13389}, 
+@software{fastvideo2024,
+  title        = {FastVideo: A Unified Framework for Accelerated Video Generation},
+  author       = {The FastVideo Team},
+  url          = {https://github.com/hao-ai-lab/FastVideo},
+  month        = apr,
+  year         = {2024},
 }
-@misc{zhang2025fastvideogenerationsliding,
-      title={Fast Video Generation with Sliding Tile Attention},
-      author={Peiyuan Zhang and Yongqi Chen and Runlong Su and Hangliang Ding and Ion Stoica and Zhenghong Liu and Hao Zhang},
-      year={2025},
-      eprint={2502.04507},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2502.04507},
+
+@article{zhang2025vsa,
+  title={VSA: Faster Video Diffusion with Trainable Sparse Attention},
+  author={Zhang, Peiyuan and Huang, Haofeng and Chen, Yongqi and Lin, Will and Liu, Zhengzhong and Stoica, Ion and Xing, Eric and Zhang, Hao},
+  journal={arXiv preprint arXiv:2505.13389},
+  year={2025}
 }
-@misc{ding2025efficientvditefficientvideodiffusion,
-      title={Efficient-vDiT: Efficient Video Diffusion Transformers With Attention Tile},
-      author={Hangliang Ding and Dacheng Li and Runlong Su and Peiyuan Zhang and Zhijie Deng and Ion Stoica and Hao Zhang},
-      year={2025},
-      eprint={2502.06155},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2502.06155},
+
+@article{zhang2025fast,
+  title={Fast video generation with sliding tile attention},
+  author={Zhang, Peiyuan and Chen, Yongqi and Su, Runlong and Ding, Hangliang and Stoica, Ion and Liu, Zhengzhong and Zhang, Hao},
+  journal={arXiv preprint arXiv:2502.04507},
+  year={2025}
 }
 ```
