@@ -81,9 +81,9 @@ class WanTimeTextImageEmbedding(nn.Module):
         timestep: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
         encoder_hidden_states_image: torch.Tensor | None = None,
+        timestep_seq_len: int | None = None,
     ):
-        logger.info(f"WTF timestep shape: {timestep.shape}")
-        temb = self.time_embedder(timestep)
+        temb = self.time_embedder(timestep, timestep_seq_len)
         timestep_proj = self.time_modulation(temb)
 
         encoder_hidden_states = self.text_embedder(encoder_hidden_states)
@@ -303,26 +303,34 @@ class WanTransformerBlock(nn.Module):
         temb: torch.Tensor,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
     ) -> torch.Tensor:
-        cuda_memory_before = torch.cuda.memory_allocated()
-        logger.info(f"cuda memory 6: {cuda_memory_before / 1024 / 1024 / 1024} GB")
         if hidden_states.dim() == 4:
             hidden_states = hidden_states.squeeze(1)
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
         # assert orig_dtype != torch.float32
-        e = self.scale_shift_table + temb.float()
-        shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
-            6, dim=1)
+
+        if temb.dim() == 4:
+            # temb: batch_size, seq_len, 6, inner_dim (wan2.2 ti2v)
+            shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
+                self.scale_shift_table.unsqueeze(0) + temb.float()
+            ).chunk(6, dim=2)
+            # batch_size, seq_len, 1, inner_dim
+            shift_msa = shift_msa.squeeze(2)
+            scale_msa = scale_msa.squeeze(2)
+            gate_msa = gate_msa.squeeze(2)
+            c_shift_msa = c_shift_msa.squeeze(2)
+            c_scale_msa = c_scale_msa.squeeze(2)
+            c_gate_msa = c_gate_msa.squeeze(2)
+        else:
+            # temb: batch_size, 6, inner_dim (wan2.1/wan2.2 14B)
+            e = self.scale_shift_table + temb.float()
+            shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
+                6, dim=1)
         assert shift_msa.dtype == torch.float32
-        cuda_memory_before = torch.cuda.memory_allocated()
-        logger.info(f"cuda memory 7: {cuda_memory_before / 1024 / 1024 / 1024} GB")
 
         # 1. Self-attention
-        logger.info(f"hidden_states shape: {hidden_states.shape}")
         norm_hidden_states = (self.norm1(hidden_states.float()) *
                               (1 + scale_msa) + shift_msa).to(orig_dtype)
-        cuda_memory_before = torch.cuda.memory_allocated()
-        logger.info(f"cuda memory 8: {cuda_memory_before / 1024 / 1024 / 1024} GB")
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)
@@ -610,8 +618,6 @@ class WanTransformer3DModel(CachableDiT):
                 **kwargs) -> torch.Tensor:
         forward_batch = get_forward_context().forward_batch
         enable_teacache = forward_batch is not None and forward_batch.enable_teacache
-        cuda_memory_before = torch.cuda.memory_allocated()
-        logger.info(f"cuda memory 1: {cuda_memory_before / 1024 / 1024 / 1024} GB")
 
         orig_dtype = hidden_states.dtype
         if not isinstance(encoder_hidden_states, torch.Tensor):
@@ -647,15 +653,21 @@ class WanTransformer3DModel(CachableDiT):
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
-        cuda_memory_before = torch.cuda.memory_allocated()
-        logger.info(f"cuda memory 2: {cuda_memory_before / 1024 / 1024 / 1024} GB")
+        # timestep shape: batch_size, or batch_size, seq_len (wan 2.2 ti2v)
+        if timestep.dim() == 2:
+            ts_seq_len = timestep.shape[1]
+            timestep = timestep.flatten()  # batch_size * seq_len
+        else:
+            ts_seq_len = None
+
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
-            timestep, encoder_hidden_states, encoder_hidden_states_image)
-        cuda_memory_before = torch.cuda.memory_allocated()
-        logger.info(f"cuda memory 3: {cuda_memory_before / 1024 / 1024 / 1024} GB")
-        timestep_proj = timestep_proj.unflatten(1, (6, -1))
-        cuda_memory_before = torch.cuda.memory_allocated()
-        logger.info(f"cuda memory 4: {cuda_memory_before / 1024 / 1024 / 1024} GB")
+            timestep, encoder_hidden_states, encoder_hidden_states_image, timestep_seq_len=ts_seq_len)
+        if ts_seq_len is not None:
+            # batch_size, seq_len, 6, inner_dim
+            timestep_proj = timestep_proj.unflatten(2, (6, -1))
+        else:
+            # batch_size, 6, inner_dim
+            timestep_proj = timestep_proj.unflatten(1, (6, -1))
 
         if encoder_hidden_states_image is not None:
             encoder_hidden_states = torch.concat(
@@ -686,8 +698,6 @@ class WanTransformer3DModel(CachableDiT):
                         timestep_proj, freqs_cis)
             else:
                 for block in self.blocks:
-                    cuda_memory_before = torch.cuda.memory_allocated()
-                    logger.info(f"cuda memory 5: {cuda_memory_before / 1024 / 1024 / 1024} GB")
                     hidden_states = block(hidden_states, encoder_hidden_states,
                                           timestep_proj, freqs_cis)
 
@@ -696,8 +706,15 @@ class WanTransformer3DModel(CachableDiT):
                 self.maybe_cache_states(hidden_states, original_hidden_states)
 
         # 5. Output norm, projection & unpatchify
-        shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2,
-                                                                          dim=1)
+        if temb.dim() == 3:
+            # batch_size, seq_len, inner_dim (wan 2.2 ti2v)
+            shift, scale = (self.scale_shift_table.unsqueeze(0) + temb.unsqueeze(2)).chunk(2, dim=2)
+            shift = shift.squeeze(2)
+            scale = scale.squeeze(2)
+        else:
+            # batch_size, inner_dim
+            shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2, dim=1)
+            
         hidden_states = self.norm_out(hidden_states, shift, scale)
         hidden_states = self.proj_out(hidden_states)
 
