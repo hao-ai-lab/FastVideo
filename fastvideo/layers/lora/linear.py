@@ -85,10 +85,8 @@ class BaseLayerWithLoRA(nn.Module):
                     self.lora_alpha / self.lora_rank  # type: ignore
                 )  # type: ignore
             out, output_bias = self.base_layer(x)
-            torch.distributed.breakpoint()
             return out + delta, output_bias
         else:
-            torch.distributed.breakpoint()
             out, output_bias = self.base_layer(x)
             return out.to(x), output_bias
 
