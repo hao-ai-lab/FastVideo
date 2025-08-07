@@ -672,11 +672,9 @@ class WanTransformer3DModel(CachableDiT):
                 for block in self.blocks:
                     hidden_states = block(hidden_states, encoder_hidden_states,
                                           timestep_proj, freqs_cis)
-
             # if teacache is enabled, we need to cache the original hidden states
             if enable_teacache:
                 self.maybe_cache_states(hidden_states, original_hidden_states)
-
         # 5. Output norm, projection & unpatchify
         shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2,
                                                                           dim=1)

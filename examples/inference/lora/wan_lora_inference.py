@@ -10,7 +10,7 @@ def main():
         dit_cpu_offload=False,
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
+        pin_cpu_memory=True, # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
         lora_path="benjamin-paine/steamboat-willie-1.3b",
         lora_nickname="steamboat"
     )

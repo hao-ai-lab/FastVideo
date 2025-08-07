@@ -85,8 +85,10 @@ class BaseLayerWithLoRA(nn.Module):
                     self.lora_alpha / self.lora_rank  # type: ignore
                 )  # type: ignore
             out, output_bias = self.base_layer(x)
+            torch.distributed.breakpoint()
             return out + delta, output_bias
         else:
+            torch.distributed.breakpoint()
             out, output_bias = self.base_layer(x)
             return out.to(x), output_bias
 
@@ -101,8 +103,9 @@ class BaseLayerWithLoRA(nn.Module):
                          B: torch.Tensor,
                          training_mode: bool = False,
                          lora_path: str | None = None) -> None:
-        self.lora_A = A  # share storage with weights in the pipeline
-        self.lora_B = B
+        self.lora_A = torch.nn.Parameter(
+            A)  # share storage with weights in the pipeline
+        self.lora_B = torch.nn.Parameter(B)
         self.disable_lora = False
         if not training_mode:
             self.merge_lora_weights()
