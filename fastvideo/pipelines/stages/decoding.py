@@ -3,7 +3,6 @@
 Decoding stage for diffusion pipelines.
 """
 
-import gc
 import weakref
 
 import torch
@@ -140,8 +139,6 @@ class DecodingStage(PipelineStage):
             del self.vae
             if pipeline is not None and "vae" in pipeline.modules:
                 del pipeline.modules["vae"]
-            gc.collect()
-            torch.mps.empty_cache()
             fastvideo_args.model_loaded["vae"] = False
 
         return batch

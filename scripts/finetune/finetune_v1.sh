@@ -31,7 +31,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --learning_rate=1e-5\
     --mixed_precision="bf16"\
     --checkpointing_steps=6000 \
-    --validation_steps 50\
+    --validation_steps 200\
     --validation_sampling_steps "2,4,8" \
     --log_validation \
     --checkpoints_total_limit 3\
@@ -42,7 +42,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS\
     --num_height 480 \
     --num_width 832 \
     --num_frames  81 \
-    --validation_guidance_scale "1.0" \
+    --validation_guidance_scale "6.0" \
     --num_euler_timesteps 50 \
     --multi_phased_distill_schedule "4000-1" \
     --weight_decay 0.01 \

@@ -52,16 +52,16 @@ dataset_args=(
 validation_args=(
   --log_validation 
   --validation_dataset_file $VALIDATION_DATASET_FILE
-  --validation_steps 50
+  --validation_steps 200
   --validation_sampling_steps "50" 
-  --validation_guidance_scale "1.0"
+  --validation_guidance_scale "6.0"
 )
 
 # Optimizer arguments
 optimizer_args=(
   --learning_rate 5e-5
   --mixed_precision "bf16"
-  --checkpointing_steps 500
+  --checkpointing_steps 400
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )

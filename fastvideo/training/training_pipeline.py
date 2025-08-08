@@ -703,4 +703,3 @@ class TrainingPipeline(LoRAPipeline, ABC):
         # Re-enable gradients for training
         training_args.inference_mode = False
         transformer.train()
-        torch.cuda.empty_cache()

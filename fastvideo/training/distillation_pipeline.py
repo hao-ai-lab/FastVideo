@@ -794,13 +794,11 @@ class DistillationPipeline(TrainingPipeline):
         # Re-enable gradients for training
         transformer.train()
         gc.collect()
-        torch.cuda.empty_cache()
 
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,
                                        training_args: TrainingArgs, step: int):
         """Add visualization data to wandb logging and save frames to disk."""
         wandb_loss_dict = {}
-        torch.cuda.empty_cache()
         dmd_latents_vis_dict = training_batch.dmd_latent_vis_dict
         fake_score_latents_vis_dict = training_batch.fake_score_latent_vis_dict
         fake_score_log_keys = ['generator_pred_video']
@@ -834,7 +832,6 @@ class DistillationPipeline(TrainingPipeline):
                 video, fps=24, format="mp4")  # change to 16 for Wan2.1
             # Clean up references
             del video, latents
-            torch.cuda.empty_cache()
 
         # Process DMD training data if available - use decode_stage instead of self.vae.decode
         if 'generator_pred_video' in dmd_latents_vis_dict:
@@ -866,7 +863,6 @@ class DistillationPipeline(TrainingPipeline):
                     video, fps=24, format="mp4")  # change to 16 for Wan2.1
                 # Clean up references
                 del video, latents
-                torch.cuda.empty_cache()
 
         # Log to wandb
         if self.global_rank == 0:

@@ -54,7 +54,7 @@ validation_args=(
   --validation_preprocessed_path "$VALIDATION_DIR"
   --validation_steps 100
   --validation_sampling_steps "40"
-  --validation_guidance_scale "1.0"
+  --validation_guidance_scale "6.0"
 )
 
 # Optimizer arguments
