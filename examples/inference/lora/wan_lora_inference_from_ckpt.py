@@ -14,7 +14,7 @@ def main():
         vae_cpu_offload=True,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True, # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument" 
-        lora_path="checkpoints/wan_t2v_finetune_lora/checkpoint-10/transformer",
+        lora_path="checkpoints/wan_t2v_finetune_lora/checkpoint-1000/transformer",
         lora_nickname="crush_smol"
     )
     kwargs = {

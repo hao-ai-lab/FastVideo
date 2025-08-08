@@ -41,8 +41,6 @@ class WanDistillationPipeline(DistillationPipeline):
         args_copy = deepcopy(training_args)
 
         args_copy.inference_mode = True
-        args_copy.dit_cpu_offload = True
-        args_copy.pipeline_config.vae_config.load_encoder = False
         validation_pipeline = WanDMDPipeline.from_pretrained(
             training_args.model_path,
             args=args_copy,  # type: ignore
@@ -50,7 +48,9 @@ class WanDistillationPipeline(DistillationPipeline):
             loaded_modules={"transformer": self.get_module("transformer")},
             tp_size=training_args.tp_size,
             sp_size=training_args.sp_size,
-            num_gpus=training_args.num_gpus)
+            num_gpus=training_args.num_gpus,
+            pin_cpu_memory=training_args.pin_cpu_memory,
+            dit_cpu_offload=True)
 
         self.validation_pipeline = validation_pipeline
 

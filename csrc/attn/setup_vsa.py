@@ -51,19 +51,16 @@ for k in kernels:
         source_files.append(sources[k]['source_files'][target])
     cpp_flags.append(f'-DTK_COMPILE_{k.replace(" ", "_").upper()}')
 
-ext_modules = []
-import torch
-major, minor = torch.cuda.get_device_capability(0)
-if major == 9 and minor == 0:# check if H100
-    ext_modules = [
-        CUDAExtension('vsa_cuda',
-            sources=source_files,
-            extra_compile_args={
-                'cxx': cpp_flags,
-                'nvcc': cuda_flags
-            },
-            libraries=['cuda'])
-    ]
+
+ext_modules = [
+    CUDAExtension('vsa_cuda',
+        sources=source_files,
+        extra_compile_args={
+            'cxx': cpp_flags,
+            'nvcc': cuda_flags
+        },
+        libraries=['cuda'])
+]
 
 
 

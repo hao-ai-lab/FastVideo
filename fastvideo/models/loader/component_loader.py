@@ -72,8 +72,7 @@ class ComponentLoader(ABC):
         module_loaders = {
             "scheduler": (SchedulerLoader, "diffusers"),
             "transformer": (TransformerLoader, "diffusers"),
-            "real_score_transformer": (TransformerLoader, "diffusers"),
-            "fake_score_transformer": (TransformerLoader, "diffusers"),
+            "transformer_2": (TransformerLoader, "diffusers"),
             "vae": (VAELoader, "diffusers"),
             "text_encoder": (TextEncoderLoader, "transformers"),
             "text_encoder_2": (TextEncoderLoader, "transformers"),
@@ -452,6 +451,7 @@ class TransformerLoader(ComponentLoader):
             hsdp_replicate_dim=fastvideo_args.hsdp_replicate_dim,
             hsdp_shard_dim=fastvideo_args.hsdp_shard_dim,
             cpu_offload=fastvideo_args.dit_cpu_offload,
+            pin_cpu_memory=fastvideo_args.pin_cpu_memory,
             fsdp_inference=fastvideo_args.use_fsdp_inference,
             # TODO(will): make these configurable
             param_dtype=torch.bfloat16,

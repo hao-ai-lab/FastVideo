@@ -134,6 +134,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             sigmas = shift * sigmas / (1 + (shift - 1) * sigmas)
 
         self.timesteps = sigmas * num_train_timesteps
+        self.num_train_timesteps = num_train_timesteps
 
         self._step_index: int | None = None
         self._begin_index: int | None = None
@@ -144,6 +145,8 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             "cpu")  # to avoid too much CPU/GPU communication
         self.sigma_min = self.sigmas[-1].item()
         self.sigma_max = self.sigmas[0].item()
+
+        BaseScheduler.__init__(self)
 
     @property
     def shift(self) -> float:

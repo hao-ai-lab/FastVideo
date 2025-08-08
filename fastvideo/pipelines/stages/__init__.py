@@ -12,7 +12,8 @@ from fastvideo.pipelines.stages.decoding import DecodingStage
 from fastvideo.pipelines.stages.denoising import (DenoisingStage,
                                                   DmdDenoisingStage)
 from fastvideo.pipelines.stages.encoding import EncodingStage
-from fastvideo.pipelines.stages.image_encoding import ImageEncodingStage
+from fastvideo.pipelines.stages.image_encoding import (ImageEncodingStage,
+                                                       ImageVAEEncodingStage)
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.latent_preparation import LatentPreparationStage
 from fastvideo.pipelines.stages.stepvideo_encoding import (
@@ -32,6 +33,7 @@ __all__ = [
     "EncodingStage",
     "DecodingStage",
     "ImageEncodingStage",
+    "ImageVAEEncodingStage",
     "TextEncodingStage",
     "StepvideoPromptEncodingStage",
 ]

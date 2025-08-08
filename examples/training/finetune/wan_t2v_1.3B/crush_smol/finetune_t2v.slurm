@@ -92,7 +92,7 @@ validation_args=(
 optimizer_args=(
   --learning_rate 5e-5
   --mixed_precision "bf16"
-  --checkpointing_steps 500
+  --checkpointing_steps 400
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )
