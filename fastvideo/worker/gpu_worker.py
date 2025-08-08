@@ -71,7 +71,6 @@ class Worker:
 
         # _check_if_gpu_supports_dtype(self.model_config.dtype)
         if current_platform.is_cuda_alike():
-            torch.cuda.empty_cache()
             self.init_gpu_memory = torch.cuda.mem_get_info()[0]
         else:
             # For MPS, we can't get memory info the same way

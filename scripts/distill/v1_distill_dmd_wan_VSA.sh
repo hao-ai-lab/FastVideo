@@ -31,7 +31,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --max_train_steps 30000 \
     --learning_rate 1e-5 \
     --mixed_precision "bf16" \
-    --checkpointing_steps 500 \
+    --checkpointing_steps 400 \
     --validation_steps 100 \
     --validation_sampling_steps "3" \
     --log_validation \
@@ -44,7 +44,7 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --num_width 832 \
     --num_frames 61 \
     --flow_shift 8 \
-    --validation_guidance_scale "1.0" \
+    --validation_guidance_scale "6.0" \
     --master_weight_type "fp32" \
     --dit_precision "fp32" \
     --vae_precision "bf16" \
