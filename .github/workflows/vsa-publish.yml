@@ -54,8 +54,17 @@ jobs:
           # manylinux docker image, but I haven't figured out how to install CUDA on manylinux.
           os: [ubuntu-22.04]
           python-version: ['3.10', '3.11', '3.12', '3.13']
-          torch-version: ['2.5.1', '2.6.0', '2.7.1']
-          cuda-version: ['12.4.1', '12.5.1', '12.6.3', '12.8.0']
+          # For version reference https://pytorch.org/get-started/previous-versions/
+          torch-cuda:
+            - torch-version: '2.5.1'
+              cuda-version: '12.4.1'
+              torch-cuda-short: 'cu124'
+            - torch-version: '2.6.0'
+              cuda-version: '12.6.3'
+              torch-cuda-short: 'cu126'
+            - torch-version: '2.7.1'
+              cuda-version: '12.8.0'
+              torch-cuda-short: 'cu128'
 
     steps:
       - name: Free up disk space
@@ -89,11 +98,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install CUDA ${{ matrix.cuda-version }}
+      - name: Install CUDA ${{ matrix.torch-cuda.cuda-version }}
         uses: Jimver/cuda-toolkit@v0.2.21
         id: cuda-toolkit
         with:
-          cuda: ${{ matrix.cuda-version }}
+          cuda: ${{ matrix.torch-cuda.cuda-version }}
           linux-local-args: '["--toolkit"]'
           method: 'network'
 
@@ -107,7 +116,7 @@ jobs:
           git config --global --add safe.directory /__w/FastVideo/FastVideo
 
           # Set CUDA environment variables
-          export CUDA_HOME=/usr/local/cuda-${{ matrix.cuda-version }}
+          export CUDA_HOME=/usr/local/cuda-${{ matrix.torch-cuda.cuda-version }}
           export PATH=${CUDA_HOME}/bin:${PATH}
           export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
           
@@ -117,7 +126,7 @@ jobs:
           clang-11 --version
           nvcc --version
 
-      - name: Install PyTorch ${{ matrix.torch-version }}+cu${{ matrix.cuda-version }}
+      - name: Install PyTorch ${{ matrix.torch-cuda.torch-version }}+cu${{ matrix.torch-cuda.cuda-version }}
         run: |
           pip install --upgrade pip
           # With python 3.13 and torch 2.5.1, unless we update typing-extensions, we get error
@@ -126,8 +135,7 @@ jobs:
           # We want to figure out the CUDA version to download pytorch
           # e.g. we can have system CUDA version being 11.7 but if torch==1.12 then we need to download the wheel from cu116
           # see https://github.com/pytorch/pytorch/blob/main/RELEASE.md#release-compatibility-matrix
-          export TORCH_CUDA_VERSION=124
-          pip install --no-cache-dir torch==${{ matrix.torch-version }} --index-url https://download.pytorch.org/whl/cu${TORCH_CUDA_VERSION}
+          pip install --no-cache-dir torch==${{ matrix.torch-cuda.torch-version }} --index-url https://download.pytorch.org/whl/${{matrix.torch-cuda.torch-cuda-short}}
           nvcc --version
           python --version
           python -c "import torch; print('PyTorch:', torch.__version__)"
@@ -152,8 +160,8 @@ jobs:
         run: |
           cd csrc/attn
 
-          CUDA_SHORT_VERSION=$(echo ${{ matrix.cuda-version }} | cut -d. -f1,2 | sed 's/\.//g')
-          TORCH_SHORT_VERSION=$(echo ${{ matrix.torch-version }} | cut -d. -f1,2)
+          CUDA_SHORT_VERSION=$(echo ${{ matrix.torch-cuda.cuda-version }} | cut -d. -f1,2 | sed 's/\.//g')
+          TORCH_SHORT_VERSION=$(echo ${{ matrix.torch-cuda.torch-version }} | cut -d. -f1,2)
           # Get the correct version format
           tmpname=cu${CUDA_SHORT_VERSION}torch${TORCH_SHORT_VERSION}
           wheel_name=$(ls dist/*whl | xargs -n 1 basename | sed "s/-/+$tmpname-/2")
