@@ -319,11 +319,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
             # make sure no implicit broadcasting happens
             assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
-            loss = (torch.mean((model_pred.float() - target.float())**2) /
-                    self.training_args.gradient_accumulation_steps)
+            
+            loss = torch.mean((model_pred.float() - target.float())**2)
+            loss /=  self.training_args.gradient_accumulation_steps
             
 
-            (loss / self.sp_world_size).backward()
             avg_loss = loss.detach().clone()
 
         # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
