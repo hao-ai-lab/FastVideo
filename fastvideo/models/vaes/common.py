@@ -8,7 +8,7 @@ from typing import Optional, cast
 import numpy as np
 import torch
 import torch.distributed as dist
-from diffusers.utils.torch_utils import randn_tensor
+from fastvideo.utils import randn_tensor
 
 from fastvideo.configs.models import VAEConfig
 from fastvideo.distributed import get_sp_parallel_rank, get_sp_world_size

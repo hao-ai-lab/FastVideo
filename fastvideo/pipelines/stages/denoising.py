@@ -14,10 +14,7 @@ from tqdm.auto import tqdm
 
 from fastvideo.attention import get_attn_backend
 from fastvideo.configs.pipelines.base import STA_Mode
-from fastvideo.distributed import (get_local_torch_device, get_sp_parallel_rank,
-                                   get_sp_world_size, get_world_group)
-from fastvideo.distributed.communication_op import (
-    sequence_model_parallel_all_gather)
+from fastvideo.distributed import (get_local_torch_device, get_world_group)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
@@ -30,6 +27,8 @@ from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import dict_to_3d_list
+from fastvideo.utils import randn_tensor
+
 
 try:
     from fastvideo.attention.backends.sliding_tile_attn import (
@@ -117,22 +116,7 @@ class DenoisingStage(PipelineStage):
         autocast_enabled = (target_dtype != torch.float32
                             ) and not fastvideo_args.disable_autocast
 
-        # Handle sequence parallelism if enabled
-        sp_world_size, rank_in_sp_group = get_sp_world_size(
-        ), get_sp_parallel_rank()
-        sp_group = sp_world_size > 1
-        if sp_group:
-            latents = rearrange(batch.latents,
-                                "b c (n t) h w -> b c n t h w",
-                                n=sp_world_size).contiguous()
-            latents = latents[:, :, rank_in_sp_group, :, :, :]
-            batch.latents = latents
-            if batch.image_latent is not None:
-                image_latent = rearrange(batch.image_latent,
-                                         "b c (n t) h w -> b c n t h w",
-                                         n=sp_world_size).contiguous()
-                image_latent = image_latent[:, :, rank_in_sp_group, :, :, :]
-                batch.image_latent = image_latent
+
         # Get timesteps and calculate warmup steps
         timesteps = batch.timesteps
         # TODO(will): remove this once we add input/output validation for stages
@@ -337,10 +321,6 @@ class DenoisingStage(PipelineStage):
                     (i + 1) % self.scheduler.order == 0
                         and progress_bar is not None):
                     progress_bar.update()
-
-        # Gather results if using sequence parallelism
-        if sp_group:
-            latents = sequence_model_parallel_all_gather(latents, dim=2)
 
         # Update batch with final latents
         batch.latents = latents
@@ -676,11 +656,7 @@ class DmdDenoisingStage(DenoisingStage):
         assert batch.latents is not None, "latents must be provided"
         latents = batch.latents
         # TODO(yongqi) hard code prepare latents
-        latents = torch.randn(
-            latents.permute(0, 2, 1, 3, 4).shape,
-            dtype=torch.bfloat16,
-            device="cuda",
-            generator=torch.Generator(device="cuda").manual_seed(42))
+        latents = latents.permute(0, 2, 1, 3, 4)
         video_raw_latent_shape = latents.shape
         prompt_embeds = batch.prompt_embeds
         assert torch.isnan(prompt_embeds[0]).sum() == 0
@@ -689,22 +665,6 @@ class DmdDenoisingStage(DenoisingStage):
             dtype=torch.long,
             device=get_local_torch_device())
 
-        # Handle sequence parallelism if enabled
-        sp_world_size, rank_in_sp_group = get_sp_world_size(
-        ), get_sp_parallel_rank()
-        sp_group = sp_world_size > 1
-        if sp_group:
-            latents = rearrange(latents,
-                                "b (n t) c h w -> b n t c h w",
-                                n=sp_world_size).contiguous()
-            latents = latents[:, rank_in_sp_group, :, :, :, :]
-            if batch.image_latent is not None:
-                image_latent = rearrange(batch.image_latent,
-                                         "b c (n t) h w -> b c n t h w",
-                                         n=sp_world_size).contiguous()
-
-                image_latent = image_latent[:, :, rank_in_sp_group, :, :, :]
-                batch.image_latent = image_latent
 
         # Run denoising loop
         with self.progress_bar(total=len(timesteps)) as progress_bar:
@@ -796,14 +756,11 @@ class DmdDenoisingStage(DenoisingStage):
                     if i < len(timesteps) - 1:
                         next_timestep = timesteps[i + 1] * torch.ones(
                             [1], dtype=torch.long, device=pred_video.device)
-                        noise = torch.randn(video_raw_latent_shape,
+                        noise = randn_tensor(video_raw_latent_shape,
                                             device=self.device,
-                                            dtype=pred_video.dtype)
-                        if sp_group:
-                            noise = rearrange(noise,
-                                              "b (n t) c h w -> b n t c h w",
-                                              n=sp_world_size).contiguous()
-                            noise = noise[:, rank_in_sp_group, :, :, :, :]
+                                            dtype=pred_video.dtype,
+                                            generator=batch.generator)
+                        
                         latents = self.scheduler.add_noise(
                             pred_video.flatten(0, 1), noise.flatten(0, 1),
                             next_timestep).unflatten(0, pred_video.shape[:2])
@@ -817,9 +774,6 @@ class DmdDenoisingStage(DenoisingStage):
                             and progress_bar is not None):
                         progress_bar.update()
 
-        # Gather results if using sequence parallelism
-        if sp_group:
-            latents = sequence_model_parallel_all_gather(latents, dim=1)
         latents = latents.permute(0, 2, 1, 3, 4)
         # Update batch with final latents
         batch.latents = latents
