@@ -322,6 +322,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
             
             loss = torch.mean((model_pred.float() - target.float())**2)
             loss /=  self.training_args.gradient_accumulation_steps
+            loss.backward()
             
 
             avg_loss = loss.detach().clone()
@@ -331,7 +332,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         world_group = get_world_group()
         world_group.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
         training_batch.total_loss += avg_loss.item()
-
         return training_batch
 
     def _clip_grad_norm(self, training_batch: TrainingBatch) -> TrainingBatch:
@@ -603,7 +603,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         validation_dataloader = DataLoader(validation_dataset,
                                            batch_size=None,
                                            num_workers=0)
-
+        return 
         transformer.eval()
 
         validation_steps = training_args.validation_sampling_steps.split(",")
