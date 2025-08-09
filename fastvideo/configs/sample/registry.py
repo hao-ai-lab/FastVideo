@@ -9,7 +9,6 @@ from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
 
 # isort: off
 from fastvideo.configs.sample.wan import (
-    FastWanT2V480PConfig,
     Wan2_2_I2V_A14B_SamplingParam,
     Wan2_2_T2V_A14B_SamplingParam,
     Wan2_2_TI2V_5B_SamplingParam,
@@ -17,6 +16,7 @@ from fastvideo.configs.sample.wan import (
     WanI2V_14B_720P_SamplingParam,
     WanT2V_1_3B_SamplingParam,
     WanT2V_14B_SamplingParam,
+    Wan2_1_Fun_1_3B_InP_SamplingParam,
 )
 # isort: on
 from fastvideo.logger import init_logger
@@ -37,8 +37,7 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VSamplingParam,
     "FastVideo/FastWan2.1-T2V-1.3B-Diffusers":
     Wan2_1_Fun_1_3B_InP_SamplingParam,
-    "FastVideo/FastWan2.1-T2V-14B-Diffusers":
-    Wan2_1_Fun_1_3B_InP_SamplingParam,
+    "FastVideo/FastWan2.1-T2V-14B-Diffusers": Wan2_1_Fun_1_3B_InP_SamplingParam,
     "Wan-AI/Wan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_SamplingParam,
     "FastVideo/FastWan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_SamplingParam,
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": Wan2_2_T2V_A14B_SamplingParam,
