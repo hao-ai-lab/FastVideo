@@ -101,15 +101,15 @@ class BaseLayerWithLoRA(nn.Module):
                          B: torch.Tensor,
                          training_mode: bool = False,
                          lora_path: str | None = None) -> None:
-        self.lora_A = A  # share storage with weights in the pipeline
-        self.lora_B = B
+        self.lora_A = torch.nn.Parameter(
+            A)  # share storage with weights in the pipeline
+        self.lora_B = torch.nn.Parameter(B)
         self.disable_lora = False
         if not training_mode:
             self.merge_lora_weights()
         self.lora_path = lora_path
 
     @torch.no_grad()
-    # @torch.compile()
     def merge_lora_weights(self) -> None:
         if self.disable_lora:
             return

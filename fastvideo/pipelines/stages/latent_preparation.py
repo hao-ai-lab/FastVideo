@@ -90,7 +90,6 @@ class LatentPreparationStage(PipelineStage):
                 f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
                 f" size of {batch_size}. Make sure the batch size matches the length of the generators."
             )
-
         # Generate or use provided latents
         if latents is None:
             latents = randn_tensor(shape,
@@ -103,7 +102,6 @@ class LatentPreparationStage(PipelineStage):
         # Scale the initial noise if needed
         if hasattr(self.scheduler, "init_noise_sigma"):
             latents = latents * self.scheduler.init_noise_sigma
-
         # Update batch with prepared latents
         batch.latents = latents
         batch.raw_latent_shape = latents.shape

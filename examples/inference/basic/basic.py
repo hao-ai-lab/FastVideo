@@ -16,8 +16,7 @@ def main():
         dit_cpu_offload=False,
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
-        # Set pin_cpu_memory to false if CPU RAM is limited and there're no frequent CPU-GPU transfer
-        pin_cpu_memory=False,
+        pin_cpu_memory=True, # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
         # image_encoder_cpu_offload=False,
     )
 
