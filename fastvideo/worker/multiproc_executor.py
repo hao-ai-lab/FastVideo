@@ -8,14 +8,14 @@ import socket
 import time
 from collections.abc import Callable
 from multiprocessing.process import BaseProcess
-from typing import Any, cast
+from typing import Any
 
+import fastvideo.envs as envs
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.worker.executor import Executor
 from fastvideo.worker.gpu_worker import run_worker_process
-import fastvideo.envs as envs
 
 logger = init_logger(__name__)
 
@@ -90,11 +90,9 @@ class MultiprocExecutor(Executor):
         else:
             logging_info = None
 
-        result_batch = ForwardBatch(
-            data_type=forward_batch.data_type,
-            output=output,
-            logging_info=logging_info
-        )
+        result_batch = ForwardBatch(data_type=forward_batch.data_type,
+                                    output=output,
+                                    logging_info=logging_info)
 
         return result_batch
 
