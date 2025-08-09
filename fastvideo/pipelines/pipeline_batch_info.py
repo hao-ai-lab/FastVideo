@@ -9,11 +9,13 @@ in a functional manner, reducing the need for explicit parameter passing.
 
 import pprint
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import PIL.Image
 import torch
-from torchcodec.decoders import VideoDecoder
+
+if TYPE_CHECKING:
+    from torchcodec.decoders import VideoDecoder
 
 from fastvideo.attention import AttentionMetadata
 from fastvideo.configs.sample.teacache import TeaCacheParams, WanTeaCacheParams
@@ -198,5 +200,5 @@ class TrainingBatch:
 
 @dataclass
 class PreprocessBatch(ForwardBatch):
-    video_loader: list[VideoDecoder] = field(default_factory=list)
+    video_loader: list["VideoDecoder"] = field(default_factory=list)
     video_file_name: list[str] = field(default_factory=list)
