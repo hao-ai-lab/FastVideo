@@ -52,7 +52,7 @@ def run_test(pytest_command: str):
     git clone {git_repo} /FastVideo &&
     cd /FastVideo &&
     {checkout_command} &&
-    uv pip install -e .[test] --index-strategy unsafe-best-match &&
+    uv pip install -e .[test] &&
     {pytest_command}
     """
     
@@ -100,7 +100,7 @@ def run_precision_tests_STA():
 
 @app.function(gpu="H100:1", image=image, timeout=900)
 def run_precision_tests_VSA():
-    run_test("python csrc/attn/tests/test_block_sparse.py")
+    run_test("python csrc/attn/tests/test_vsa.py")
 
 @app.function(gpu="L40S:1", image=image, timeout=3600)
 def run_inference_lora_tests():
