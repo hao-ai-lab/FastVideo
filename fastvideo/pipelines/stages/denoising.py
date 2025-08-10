@@ -197,6 +197,7 @@ class DenoisingStage(PipelineStage):
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
+                logger.info('timesteps: %s', timesteps)
                 # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:
                     continue
@@ -682,10 +683,19 @@ class DmdDenoisingStage(DenoisingStage):
         video_raw_latent_shape = latents.shape
         prompt_embeds = batch.prompt_embeds
         assert torch.isnan(prompt_embeds[0]).sum() == 0
-        timesteps = torch.tensor(
-            fastvideo_args.pipeline_config.dmd_denoising_steps,
-            dtype=torch.long,
-            device=get_local_torch_device())
+        timesteps_50 = [
+            999, 993, 986, 979, 971, 964, 956, 948, 940, 931, 922, 913, 904,
+            895, 885, 874, 864, 853, 841, 830, 818, 805, 792, 778, 764, 749,
+            734, 718, 702, 684, 666, 647, 627, 607, 585, 562, 538, 513, 486,
+            458, 428, 396, 363, 328, 290, 249, 206, 160, 111, 57
+        ]
+        timesteps = torch.tensor(timesteps_50,
+                                 dtype=torch.long,
+                                 device=get_local_torch_device())
+        # timesteps = torch.tensor(
+        #     fastvideo_args.pipeline_config.dmd_denoising_steps,
+        #     dtype=torch.long,
+        #     device=get_local_torch_device())
 
         # Handle sequence parallelism if enabled
         sp_world_size, rank_in_sp_group = get_sp_world_size(

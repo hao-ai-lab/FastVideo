@@ -802,7 +802,7 @@ class DistillationPipeline(TrainingPipeline):
         dmd_latents_vis_dict = training_batch.dmd_latent_vis_dict
         fake_score_latents_vis_dict = training_batch.fake_score_latent_vis_dict
         fake_score_log_keys = ['generator_pred_video']
-        dmd_log_keys = ['faker_score_pred_video']
+        dmd_log_keys = ['faker_score_pred_video', 'real_score_pred_video']
 
         for latent_key in fake_score_log_keys:
             latents = fake_score_latents_vis_dict[latent_key]
