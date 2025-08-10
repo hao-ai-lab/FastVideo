@@ -689,13 +689,13 @@ class DmdDenoisingStage(DenoisingStage):
             734, 718, 702, 684, 666, 647, 627, 607, 585, 562, 538, 513, 486,
             458, 428, 396, 363, 328, 290, 249, 206, 160, 111, 57
         ]
-        timesteps = torch.tensor(timesteps_50,
-                                 dtype=torch.long,
-                                 device=get_local_torch_device())
-        # timesteps = torch.tensor(
-        #     fastvideo_args.pipeline_config.dmd_denoising_steps,
-        #     dtype=torch.long,
-        #     device=get_local_torch_device())
+        # timesteps = torch.tensor(timesteps_50,
+        #                          dtype=torch.long,
+        #                          device=get_local_torch_device())
+        timesteps = torch.tensor(
+            fastvideo_args.pipeline_config.dmd_denoising_steps,
+            dtype=torch.long,
+            device=get_local_torch_device())
 
         # Handle sequence parallelism if enabled
         sp_world_size, rank_in_sp_group = get_sp_world_size(
