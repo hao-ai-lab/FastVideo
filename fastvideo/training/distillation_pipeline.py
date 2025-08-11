@@ -241,6 +241,7 @@ class DistillationPipeline(TrainingPipeline):
                                             len(self.denoising_step_list), [1],
                                             device=self.device,
                                             dtype=torch.long)
+        target_timestep_idx_int = target_timestep_idx.item()
         target_timestep = self.denoising_step_list[target_timestep_idx]
 
         # Step 2: Simulate the multi-step inference process up to the target timestep
@@ -257,11 +258,13 @@ class DistillationPipeline(TrainingPipeline):
                                                           rank_in_sp_group, :, :, :, :]
 
         # Only run intermediate steps if target_timestep_idx > 0
-        target_timestep_idx_int = target_timestep_idx.item()
-        if target_timestep_idx_int > 0:
+        max_target_idx = len(self.denoising_step_list) - 1
+        noise_latents = []
+        noise_latent_index = target_timestep_idx_int - 1
+        if max_target_idx > 0:
             # Run student model for all steps before the target timestep
             with torch.no_grad():
-                for step_idx in range(target_timestep_idx_int):
+                for step_idx in range(max_target_idx):
                     current_timestep = self.denoising_step_list[step_idx]
                     current_timestep_tensor = current_timestep * torch.ones(
                         1, device=self.device, dtype=torch.long)
@@ -294,11 +297,19 @@ class DistillationPipeline(TrainingPipeline):
                     current_noise_latents = self.noise_scheduler.add_noise(
                         pred_clean.flatten(0, 1), noise.flatten(0, 1),
                         next_timestep_tensor).unflatten(0, pred_clean.shape[:2])
+                    latent_copy = current_noise_latents.clone()
+                    noise_latents.append(latent_copy)
 
         # Step 3: Use the simulated noisy input for the final training step
         # For timestep index 0, this is pure noise
         # For timestep index k > 0, this is the result after k denoising steps + noise at target level
-        noisy_input = current_noise_latents
+        if noise_latent_index >= 0:
+            assert noise_latent_index < len(
+                self.denoising_step_list
+            ) - 1, "noise_latent_index is out of bounds"
+            noisy_input = noise_latents[noise_latent_index]
+        else:
+            noisy_input = current_noise_latents
 
         # Step 4: Final student prediction (this is what we train on)
         training_batch = self._build_distill_input_kwargs(
