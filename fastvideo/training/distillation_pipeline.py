@@ -257,11 +257,11 @@ class DistillationPipeline(TrainingPipeline):
                                                           rank_in_sp_group, :, :, :, :]
 
         # Only run intermediate steps if target_timestep_idx > 0
-        max_target_idx = len(self.denoising_step_list) - 1
-        if max_target_idx > 0:
+        target_timestep_idx_int = target_timestep_idx.item()
+        if target_timestep_idx_int > 0:
             # Run student model for all steps before the target timestep
             with torch.no_grad():
-                for step_idx in range(max_target_idx):
+                for step_idx in range(target_timestep_idx_int):
                     current_timestep = self.denoising_step_list[step_idx]
                     current_timestep_tensor = current_timestep * torch.ones(
                         1, device=self.device, dtype=torch.long)
