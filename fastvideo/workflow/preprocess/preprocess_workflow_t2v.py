@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from tqdm import tqdm
 
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 class PreprocessWorkflowT2V(PreprocessWorkflow):
     training_dataloader: "DataLoader"
-    validation_dataloader: "DataLoader"
+    validation_dataloader: Optional["DataLoader"]
     preprocess_pipeline: "ComposedPipelineBase"
     processed_dataset_saver: "ParquetDatasetSaver"
     video_forward_batch_builder: "VideoForwardBatchBuilder"
@@ -54,16 +54,17 @@ class PreprocessWorkflowT2V(PreprocessWorkflow):
         self.processed_dataset_saver.clean_up()
 
         # Validation dataset preprocessing
-        for batch in tqdm(self.validation_dataloader,
-                          desc="Preprocessing validation dataset",
-                          unit="batch"):
-            forward_batch = self.video_forward_batch_builder(batch)
+        if self.validation_dataloader is not None:
+            for batch in tqdm(self.validation_dataloader,
+                              desc="Preprocessing validation dataset",
+                              unit="batch"):
+                forward_batch = self.video_forward_batch_builder(batch)
 
-            forward_batch = self.preprocess_pipeline.forward(
-                forward_batch, self.fastvideo_args)
+                forward_batch = self.preprocess_pipeline.forward(
+                    forward_batch, self.fastvideo_args)
 
-            self.processed_dataset_saver.save_and_write_parquet_batch(
-                forward_batch, self.validation_dataset_output_dir)
-        self.processed_dataset_saver.flush_tables(
-            self.validation_dataset_output_dir)
-        self.processed_dataset_saver.clean_up()
+                self.processed_dataset_saver.save_and_write_parquet_batch(
+                    forward_batch, self.validation_dataset_output_dir)
+            self.processed_dataset_saver.flush_tables(
+                self.validation_dataset_output_dir)
+            self.processed_dataset_saver.clean_up()

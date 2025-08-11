@@ -6,10 +6,13 @@ from torch.utils.data import DataLoader
 
 from fastvideo.configs.configs import PreprocessConfig
 from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
+from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_registry import PipelineType
 from fastvideo.workflow.preprocess.components import (
     PreprocessingDataValidator, VideoForwardBatchBuilder)
 from fastvideo.workflow.workflow_base import WorkflowBase
+
+logger = init_logger(__name__)
 
 
 class PreprocessWorkflow(WorkflowBase):
@@ -49,16 +52,23 @@ class PreprocessWorkflow(WorkflowBase):
         )
         self.add_component("training_dataloader", training_dataloader)
 
-        # validation dataset
-        validation_dataset = load_dataset(preprocess_config.dataset_path,
-                                          split="validation")
-        validation_dataset = validation_dataset.filter(raw_data_validator)
-        validation_dataloader = DataLoader(
-            validation_dataset,
-            batch_size=preprocess_config.preprocess_video_batch_size,
-            num_workers=preprocess_config.dataloader_num_workers,
-            collate_fn=lambda x: x,
-        )
+        # try to load validation dataset if it exists
+        try:
+            validation_dataset = load_dataset(preprocess_config.dataset_path,
+                                              split="validation")
+            validation_dataset = validation_dataset.filter(raw_data_validator)
+            validation_dataloader = DataLoader(
+                validation_dataset,
+                batch_size=preprocess_config.preprocess_video_batch_size,
+                num_workers=preprocess_config.dataloader_num_workers,
+                collate_fn=lambda x: x,
+            )
+        except ValueError:
+            logger.warning(
+                "Validation dataset not found, skipping validation dataset preprocessing."
+            )
+            validation_dataloader = None
+
         self.add_component("validation_dataloader", validation_dataloader)
 
         # forward batch builder
