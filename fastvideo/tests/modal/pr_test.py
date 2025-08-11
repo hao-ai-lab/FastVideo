@@ -11,7 +11,7 @@ print(f"Using image: {image_tag}")
 image = (
     modal.Image.from_registry(image_tag, add_python="3.12")
     .run_commands("rm -rf /FastVideo")
-    .apt_install("cmake", "pkg-config", "build-essential", "curl", "libssl-dev")
+    .apt_install("cmake", "pkg-config", "build-essential", "curl", "libssl-dev", "ffmpeg")
     .run_commands("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable")
     .run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc")
     .env({
@@ -100,7 +100,7 @@ def run_precision_tests_STA():
 
 @app.function(gpu="H100:1", image=image, timeout=900)
 def run_precision_tests_VSA():
-    run_test("python csrc/attn/tests/test_block_sparse.py")
+    run_test("python csrc/attn/tests/test_vsa.py")
 
 @app.function(gpu="L40S:1", image=image, timeout=3600)
 def run_inference_lora_tests():

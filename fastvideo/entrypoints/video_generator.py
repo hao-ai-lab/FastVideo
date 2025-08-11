@@ -9,6 +9,7 @@ diffusion models.
 import math
 import os
 import time
+from copy import deepcopy
 from typing import Any
 
 import imageio
@@ -202,6 +203,8 @@ class VideoGenerator:
         if sampling_param is None:
             sampling_param = SamplingParam.from_pretrained(
                 fastvideo_args.model_path)
+        else:
+            sampling_param = deepcopy(sampling_param)
 
         kwargs["prompt"] = prompt
         sampling_param.update(kwargs)
@@ -275,6 +278,7 @@ class VideoGenerator:
                        width: {target_width}
                 video_length: {sampling_param.num_frames}
                       prompt: {prompt}
+                      image_path: {sampling_param.image_path}
                   neg_prompt: {sampling_param.negative_prompt}
                         seed: {sampling_param.seed}
                  infer_steps: {sampling_param.num_inference_steps}
@@ -304,7 +308,8 @@ class VideoGenerator:
         # Run inference
         start_time = time.perf_counter()
         output_batch = self.executor.execute_forward(batch, fastvideo_args)
-        samples = output_batch
+        samples = output_batch.output
+        logging_info = output_batch.logging_info
 
         gen_time = time.perf_counter() - start_time
         logger.info("Generated successfully in %.2f seconds", gen_time)
@@ -334,9 +339,11 @@ class VideoGenerator:
         else:
             return {
                 "samples": samples,
+                "frames": frames,
                 "prompts": prompt,
                 "size": (target_height, target_width, batch.num_frames),
-                "generation_time": gen_time
+                "generation_time": gen_time,
+                "logging_info": logging_info,
             }
 
     def set_lora_adapter(self,

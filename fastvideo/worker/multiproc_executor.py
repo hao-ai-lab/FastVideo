@@ -8,8 +8,9 @@ import socket
 import time
 from collections.abc import Callable
 from multiprocessing.process import BaseProcess
-from typing import Any, cast
+from typing import Any
 
+import fastvideo.envs as envs
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -40,7 +41,8 @@ class MultiprocExecutor(Executor):
             logger.info("Using provided master port: %s", self.master_port)
         else:
             # Auto-find available port
-            for port in range(29503, 65535):
+            import random
+            for port in range(29503 + random.randint(0, 10000), 65535):
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     if s.connect_ex(('localhost', port)) != 0:
                         self.master_port = port
@@ -80,7 +82,19 @@ class MultiprocExecutor(Executor):
                                             "forward_batch": forward_batch,
                                             "fastvideo_args": fastvideo_args
                                         })
-        return cast(ForwardBatch, responses[0]["output_batch"])
+        output = responses[0]["output_batch"]
+
+        logging_info = None
+        if envs.FASTVIDEO_STAGE_LOGGING:
+            logging_info = responses[0]["logging_info"]
+        else:
+            logging_info = None
+
+        result_batch = ForwardBatch(data_type=forward_batch.data_type,
+                                    output=output,
+                                    logging_info=logging_info)
+
+        return result_batch
 
     def set_lora_adapter(self,
                          lora_nickname: str,

@@ -59,3 +59,9 @@ from vsa import video_sparse_attn
 output = video_sparse_attn(q, k, v, variable_block_sizes, topk, block_size, compress_attn_weight)
 
 ``` 
+
+# 🚀Inference
+
+```bash
+bash scripts/inference/v1_inference_wan_VSA.sh
+```

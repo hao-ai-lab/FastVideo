@@ -159,7 +159,6 @@ def save_checkpoint(transformer,
                 local_main_process_only=False)
 
     cpu_state = gather_state_dict_on_cpu_rank0(transformer, device=None)
-
     if rank == 0:
         # Save model weights (consolidated)
         transformer_save_dir = os.path.join(save_dir, "transformer")

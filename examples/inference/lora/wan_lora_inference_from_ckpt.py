@@ -11,22 +11,22 @@ def main():
         "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         num_gpus=1,
         dit_cpu_offload=False,
-        vae_cpu_offload=False,
+        vae_cpu_offload=True,
         text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
-        lora_path="checkpoints/wan_t2v_finetune_lora/checkpoint-1250/transformer",
+        pin_cpu_memory=True, # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument" 
+        lora_path="checkpoints/wan_t2v_finetune_lora/checkpoint-1000/transformer",
         lora_nickname="crush_smol"
     )
     kwargs = {
         "height": 480,
         "width": 832,
         "num_frames": 77,
-        "guidance_scale": 5.0,
+        "guidance_scale": 6.0,
         "num_inference_steps": 50,
         "seed": 42,
     }
     # Generate video with LoRA style
-    prompt = "A large metal cylinder is seen pressing down on a pile of colorful candies, flattening them as if they were under a hydraulic press. The candies are crushed and broken into small pieces, creating a mess on the table."
+    prompt = "A large metal cylinder is seen pressing down on a pile of Oreo cookies, flattening them as if they were under a hydraulic press."
 
     video = generator.generate_video(
         prompt,
@@ -34,6 +34,12 @@ def main():
         save_video=True,
         **kwargs
     )    
-
+    prompt = "A large metal cylinder is seen compressing colorful clay into a compact shape, demonstrating the power of a hydraulic press."
+    video = generator.generate_video(
+        prompt,
+        output_path=OUTPUT_PATH,
+        save_video=True,
+        **kwargs
+    )
 if __name__ == "__main__":
     main()

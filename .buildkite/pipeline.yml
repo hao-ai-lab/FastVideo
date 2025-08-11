@@ -163,6 +163,7 @@ steps:
             - path:
                 - "csrc/attn/vsa/**"
                 - "csrc/attn/tk/**"
+                - "csrc/attn/tests/test_vsa.py"
                 - "csrc/attn/setup_vsa.py"
                 - "csrc/attn/config_vsa.py"
                 - "csrc/attn/vsa.cpp"

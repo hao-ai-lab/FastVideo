@@ -7,8 +7,7 @@ import torch
 from einops import rearrange
 
 from fastvideo.configs.sample import SamplingParam
-from fastvideo.dataset.dataloader.schema import (pyarrow_schema_i2v,
-                                                 pyarrow_schema_i2v_validation)
+from fastvideo.dataset.dataloader.schema import pyarrow_schema_i2v
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
@@ -48,7 +47,6 @@ class WanI2VDistillationPipeline(DistillationPipeline):
 
     def set_schemas(self):
         self.train_dataset_schema = pyarrow_schema_i2v
-        self.validation_dataset_schema = pyarrow_schema_i2v_validation
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing validation pipeline...")

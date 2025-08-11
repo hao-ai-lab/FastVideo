@@ -155,6 +155,8 @@ class PipelineStage(ABC):
                 execution_time = time.perf_counter() - start_time
                 logger.info("[%s] Execution completed in %s ms", stage_name,
                             execution_time * 1000)
+                batch.logging_info.add_stage_execution_time(
+                    stage_name, execution_time)
             except Exception as e:
                 execution_time = time.perf_counter() - start_time
                 logger.error("[%s] Error during execution after %s ms: %s",

@@ -9,4 +9,14 @@ git submodule update --init --recursive
 python setup_vsa.py install
 ```
 
-### TODO
+### 1. Download dataset:
+```bash
+bash examples/distill/Wan2.2-TI2V-5B-Diffusers/crush_smol/download_dataset.sh
+```
+
+### 2. Configure and run distillation:
+
+#### For DMD-only distillation:
+```bash
+bash examples/distill/Wan2.2-TI2V-5B-Diffusers/crush_smol/examples/distill/Wan2.2-TI2V-5B-Diffusers/crush_smol/
+```

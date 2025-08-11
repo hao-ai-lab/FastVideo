@@ -52,9 +52,9 @@ dataset_args=(
 validation_args=(
   --log_validation 
   --validation_dataset_file $VALIDATION_DATASET_FILE
-  --validation_steps 50
+  --validation_steps 200
   --validation_sampling_steps "50" 
-  --validation_guidance_scale "1.0"
+  --validation_guidance_scale "6.0"
 )
 
 # Optimizer arguments
@@ -77,6 +77,7 @@ miscellaneous_args=(
   --num_euler_timesteps 50
   --ema_start_step 0
   --enable_gradient_checkpointing_type "full"
+  # --resume_from_checkpoint "checkpoints/wan_t2v_finetune/checkpoint-2500"
 )
 
 torchrun \

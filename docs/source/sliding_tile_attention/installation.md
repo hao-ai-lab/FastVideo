@@ -53,3 +53,9 @@ out = sliding_tile_attention(q, k, v, window_size, text_length)
 out = sliding_tile_attention(q, k, v, window_size, 0, False)
 
 ```
+
+# 🚀Inference
+
+```bash
+bash scripts/inference/v1_inference_wan_STA.sh
+```

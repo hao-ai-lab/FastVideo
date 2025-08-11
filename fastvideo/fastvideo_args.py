@@ -158,6 +158,9 @@ class FastVideoArgs:
     # # DMD parameters
     # dmd_denoising_steps: List[int] | None = field(default=None)
 
+    # MoE parameters used by Wan2.2
+    boundary_ratio: float | None = None
+
     @property
     def training_mode(self) -> bool:
         return not self.inference_mode

@@ -86,8 +86,6 @@ def benchmark_attention(configurations):
         # print(f"Average TFLOPS: {tflops_bwd}")
         # print("=" * 60)
 
-        torch.cuda.empty_cache()
-
     return results
 
 
