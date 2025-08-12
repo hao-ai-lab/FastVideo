@@ -149,7 +149,7 @@ class VideoForwardBatchBuilder:
         return forward_batch
 
 
-def basic_record_creator(
+def t2v_record_creator(
         video_name: str,
         vae_latent: np.ndarray,
         text_embedding: np.ndarray,
@@ -230,7 +230,7 @@ class ParquetDatasetSaver:
         self.flush_frequency = flush_frequency
         self.samples_per_file = samples_per_file
         self.schema_fields = schema_fields
-        self.create_record = record_creator or basic_record_creator
+        self.create_record = record_creator or t2v_record_creator
         self.file_writer_fn: Callable[
             [tuple], int] = file_writer_fn or self._default_file_writer_fn
         self.all_tables: list[pa.Table] = []

@@ -25,6 +25,11 @@ _PIPELINE_NAME_TO_ARCHITECTURE_NAME: dict[str, str] = {
     "HunyuanVideoPipeline": "hunyuan",
 }
 
+_PREPROCESS_WORKLOAD_TYPE_TO_PIPELINE_NAME: dict[WorkloadType, str] = {
+    WorkloadType.I2V: "PreprocessPipelineI2V",
+    WorkloadType.T2V: "PreprocessPipelineT2V",
+}
+
 
 class PipelineType(str, Enum):
     """
@@ -68,12 +73,8 @@ class _PipelineRegistry:
     def _load_preprocess_pipeline_cls(
             self, workload_type: WorkloadType,
             arch: str) -> type[ComposedPipelineBase] | None:
-        if workload_type == WorkloadType.I2V:
-            pipeline_name = "I2VPreprocessPipeline"
-        elif workload_type == WorkloadType.T2V:
-            pipeline_name = "T2VPreprocessPipeline"
-        else:
-            raise ValueError(f"Invalid workload type: {workload_type.value}")
+        pipeline_name = _PREPROCESS_WORKLOAD_TYPE_TO_PIPELINE_NAME[
+            workload_type]
 
         return self.pipelines[
             PipelineType.PREPROCESS.value][arch][pipeline_name]

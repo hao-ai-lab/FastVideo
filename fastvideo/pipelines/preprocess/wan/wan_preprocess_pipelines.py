@@ -5,7 +5,7 @@ from fastvideo.pipelines.stages import (EncodingStage, ImageEncodingStage,
                                         TextEncodingStage)
 
 
-class I2VPreprocessPipeline(ComposedPipelineBase):
+class PreprocessPipelineI2V(ComposedPipelineBase):
     _required_config_modules = [
         "image_encoder", "image_processor", "text_encoder", "tokenizer", "vae"
     ]
@@ -25,7 +25,7 @@ class I2VPreprocessPipeline(ComposedPipelineBase):
                        stage=EncodingStage(vae=self.get_module("vae"), ))
 
 
-class T2VPreprocessPipeline(ComposedPipelineBase):
+class PreprocessPipelineT2V(ComposedPipelineBase):
     _required_config_modules = ["text_encoder", "tokenizer", "vae"]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
@@ -50,4 +50,4 @@ class T2VPreprocessPipeline(ComposedPipelineBase):
                        stage=EncodingStage(vae=self.get_module("vae"), ))
 
 
-EntryClass = [I2VPreprocessPipeline, T2VPreprocessPipeline]
+EntryClass = [PreprocessPipelineI2V, PreprocessPipelineT2V]
