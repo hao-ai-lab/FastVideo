@@ -578,6 +578,7 @@ void bwd_attend_ker(const __grid_constant__ bwd_globals<D> g) {
         if (threadIdx.x / 32 == 0) {
             coord<qg_tile> tile_idx = {blockIdx.z, blockIdx.y, store_qg_block_index, 0};
             tma::store_add_async(g.qg, qg_smem, tile_idx);
+            tma::store_async_wait();
         }
     }
 
@@ -634,13 +635,14 @@ void bwd_attend_ker(const __grid_constant__ bwd_globals<D> g) {
         if (threadIdx.x / 32 == 0) {
             coord<qg_tile> tile_idx = {blockIdx.z, blockIdx.y, store_qg_block_index, 0};
             tma::store_add_async(g.qg, qg_smem, tile_idx);
+            tma::store_async_wait();
         }
     }
 
     // store kq and vq
 
     // ! the following two line seems unnecessary.
-    tma::store_async_wait(); // ensure qg is finished
+    // tma::store_async_wait(); // ensure qg is finished
     __syncthreads();
 
     warpgroup::store(kg_smem[0], kg_reg);
