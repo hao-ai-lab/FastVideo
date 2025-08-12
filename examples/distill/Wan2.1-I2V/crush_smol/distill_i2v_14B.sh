@@ -6,7 +6,7 @@ export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 MODEL_PATH="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
-DATA_DIR="data/crush-smol_processed_wan21_i2v_14b/combined_parquet_dataset/"
+DATA_DIR="data/crush-smol_processed_wan21_i2v_14b_single/combined_parquet_dataset/"
 VALIDATION_DATASET_FILE="examples/distill/Wan2.1-I2V/crush_smol/validation.json"
 NUM_GPUS=8
 export WANDB_API_KEY='8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde'
@@ -17,7 +17,7 @@ export WANDB_API_KEY='8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde'
 training_args=(
   --tracker_project_name "wan_i2v_distill"
   --output_dir "checkpoints/wan_i2v_distill"
-  --wandb_run_name "wan21_i2v_14b_ode_3steps"
+  --wandb_run_name "no_back_wan21_i2v_14b_ode_3steps_8gpu"
   --max_train_steps 2000
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -56,7 +56,7 @@ validation_args=(
   # --log_visualization
   --log_visualization
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 50
+  --validation_steps 1
   --validation_sampling_steps "3"
   --validation_guidance_scale "1.0" # not used for dmd inference
 )

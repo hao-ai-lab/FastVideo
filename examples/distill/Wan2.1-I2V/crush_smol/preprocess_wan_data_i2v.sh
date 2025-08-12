@@ -4,7 +4,7 @@ GPU_NUM=1 # 2,4,8
 MODEL_PATH="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
 MODEL_TYPE="wan"
 DATA_MERGE_PATH="data/crush-smol/merge.txt"
-OUTPUT_DIR="data/crush-smol_processed_wan21_i2v_14b/"
+OUTPUT_DIR="data/crush-smol_processed_wan21_i2v_14b_single/"
 
 torchrun --nproc_per_node=$GPU_NUM \
     fastvideo/pipelines/preprocess/v1_preprocess.py \
@@ -18,7 +18,7 @@ torchrun --nproc_per_node=$GPU_NUM \
     --dataloader_num_workers 0 \
     --output_dir=$OUTPUT_DIR \
     --train_fps 16 \
-    --samples_per_file 8 \
+    --samples_per_file 8\
     --flush_frequency 8 \
     --video_length_tolerance_range 5 \
     --preprocess_task "i2v" 

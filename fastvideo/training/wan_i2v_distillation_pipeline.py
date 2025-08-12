@@ -181,10 +181,24 @@ class WanI2VDistillationPipeline(DistillationPipeline):
             text_dict: dict[str, torch.Tensor],
             training_batch: TrainingBatch) -> TrainingBatch:
         # Image Embeds for conditioning
-        image_embeds = training_batch.image_embeds
-        assert torch.isnan(image_embeds).sum() == 0
+        # image_embeds = training_batch.image_embeds
+        # assert torch.isnan(image_embeds).sum() == 0
+        # image_embeds = image_embeds.to(get_local_torch_device(),
+        #                                dtype=torch.bfloat16)
+        from fastvideo.models.vision_utils import load_video
+        image = load_video("examples/distill/Wan2.1-I2V/crush_smol/validation_dataset/1gGQy4nxyUo-Scene-016.mp4")[0]
+        image_processor = self.validation_pipeline.get_module("image_processor")
+        image_encoder = self.validation_pipeline.get_module("image_encoder")
+        image_inputs = image_processor(
+            images=image, return_tensors="pt").to(get_local_torch_device())
+        from fastvideo.forward_context import set_forward_context
+        with set_forward_context(current_timestep=0, attn_metadata=None):
+            outputs = image_encoder(**image_inputs)
+            image_embeds = outputs.last_hidden_state
         image_embeds = image_embeds.to(get_local_torch_device(),
                                        dtype=torch.bfloat16)
+        assert torch.isnan(image_embeds).sum() == 0
+        # self.validation_pipeline.
 
         noisy_model_input = torch.cat(
             [noise_input,
@@ -197,7 +211,7 @@ class WanI2VDistillationPipeline(DistillationPipeline):
             "encoder_hidden_states": text_dict["encoder_hidden_states"],
             "encoder_attention_mask": text_dict["encoder_attention_mask"],
             "timestep": timestep,
-            "encoder_hidden_states_image": image_embeds,
+            "encoder_hidden_states_image": image_embeds.permute(0, 2, 1, 3, 4),
             "return_dict": False,
         }
         training_batch.noise_latents = noise_input

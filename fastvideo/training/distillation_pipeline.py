@@ -237,10 +237,11 @@ class DistillationPipeline(TrainingPipeline):
         dtype = latents.dtype
 
         # Step 1: Randomly sample a target timestep index from denoising_step_list
-        target_timestep_idx = torch.randint(0,
-                                            len(self.denoising_step_list), [1],
-                                            device=self.device,
-                                            dtype=torch.long)
+        # target_timestep_idx = torch.randint(0,
+        #                                     len(self.denoising_step_list), [1],
+        #                                     device=self.device,
+        #                                     dtype=torch.long)
+        target_timestep_idx = torch.tensor([2], device=self.device, dtype=torch.long)
         target_timestep_idx_int = target_timestep_idx.item()
         target_timestep = self.denoising_step_list[target_timestep_idx]
 
@@ -272,8 +273,19 @@ class DistillationPipeline(TrainingPipeline):
                     training_batch_temp = self._build_distill_input_kwargs(
                         current_noise_latents, current_timestep_tensor,
                         training_batch.conditional_dict, training_batch)
+                    # pred_flow = self.transformer(
+                    #     **training_batch_temp.input_kwargs).permute(
+                    #         0, 2, 1, 3, 4)
+                    # t_expand = current_timestep_tensor.repeat(current_noise_latents.shape[0])
                     pred_flow = self.transformer(
-                        **training_batch_temp.input_kwargs).permute(
+                        training_batch_temp.input_kwargs["hidden_states"],
+                        training_batch_temp.input_kwargs["encoder_hidden_states"],
+                        current_timestep_tensor,
+                        encoder_hidden_states_image=training_batch_temp.input_kwargs["encoder_hidden_states_image"],
+                        guidance=None,
+                        # **training_batch.conditional_dict,
+                        # **training_batch.unconditional_dict,
+                        ).permute(
                             0, 2, 1, 3, 4)
                     pred_clean = pred_noise_to_pred_video(
                         pred_noise=pred_flow.flatten(0, 1),
