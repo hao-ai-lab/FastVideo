@@ -1,3 +1,4 @@
+import random
 from collections.abc import Callable
 from typing import cast
 
@@ -8,7 +9,7 @@ from torchvision import transforms
 
 from fastvideo.dataset.transform import (CenterCropResizeVideo,
                                          TemporalRandomCrop)
-from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
 from fastvideo.pipelines.pipeline_batch_info import (ForwardBatch,
                                                      PreprocessBatch)
 from fastvideo.pipelines.stages.base import PipelineStage
@@ -68,6 +69,35 @@ class VideoTransformStage(PipelineStage):
         video_pixel_values = rearrange(video_pixel_values,
                                        "b t c h w -> b c t h w")
         video_pixel_values = video_pixel_values.to(torch.uint8)
+
+        if fastvideo_args.workload_type == WorkloadType.I2V:
+            batch.pil_image = video_pixel_values[:, :, 0, :, :]
+
         video_pixel_values = video_pixel_values.float() / 255.0
         batch.latents = video_pixel_values
+        return cast(ForwardBatch, batch)
+
+
+class TextTransformStage(PipelineStage):
+    """
+    Process text data according to the cfg rate.
+    """
+
+    def __init__(self, cfg_uncondition_drop_rate: float, seed: int) -> None:
+        self.cfg_rate = cfg_uncondition_drop_rate
+        self.rng = random.Random(seed)
+
+    def forward(self, batch: ForwardBatch,
+                fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        batch = cast(PreprocessBatch, batch)
+
+        prompts = []
+        for prompt in batch.prompt:
+            if not isinstance(prompt, list):
+                prompt = [prompt]
+            prompt = self.rng.choice(prompt)
+            prompt = prompt if self.rng.random() > self.cfg_rate else ""
+            prompts.append(prompt)
+
+        batch.prompt = prompts
         return cast(ForwardBatch, batch)

@@ -138,11 +138,7 @@ class VideoForwardBatchBuilder:
             width=[item["resolution"]["width"] for item in batch],
             fps=[item["fps"] for item in batch],
             num_frames=[item["num_frames"] for item in batch],
-            prompt=[
-                item["caption"]
-                if isinstance(item["caption"], str) else item["caption"][0]
-                for item in batch
-            ],
+            prompt=[item["caption"] for item in batch],
             prompt_attention_mask=[],
             data_type="video",
         )

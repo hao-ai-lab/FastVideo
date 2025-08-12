@@ -35,6 +35,8 @@ class PreprocessConfig:
     # Model configuration
     training_cfg_rate: float = 0.0
 
+    seed: int = 42
+
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser,
                      prefix: str = "preprocess") -> FlexibleArgumentParser:
@@ -123,6 +125,10 @@ class PreprocessConfig:
                                      type=float,
                                      default=PreprocessConfig.training_cfg_rate,
                                      help="Training CFG rate")
+        preprocess_args.add_argument(f"--{prefix_with_dot}seed",
+                                     type=int,
+                                     default=PreprocessConfig.seed,
+                                     help="Seed for random number generator")
 
         return parser
 

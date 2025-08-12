@@ -77,7 +77,7 @@ class ForwardBatch:
     # Image inputs
     image_path: str | None = None
     image_embeds: list[torch.Tensor] = field(default_factory=list)
-    pil_image: PIL.Image.Image | None = None
+    pil_image: torch.Tensor | PIL.Image.Image | None = None
     preprocessed_image: torch.Tensor | None = None
 
     # Text inputs

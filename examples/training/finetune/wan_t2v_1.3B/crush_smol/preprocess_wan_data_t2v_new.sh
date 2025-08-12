@@ -7,13 +7,13 @@ DATASET_PATH="data/crush-smol-test/"
 OUTPUT_DIR="data/crush-smol_processed_t2v/"
 
 torchrun --nproc_per_node=$GPU_NUM \
-    fastvideo/pipelines/preprocess/v1_preprocessing_new.py \
+    -m fastvideo.pipelines.preprocess.v1_preprocessing_new \
     --model_path $MODEL_PATH \
     --mode preprocess \
     --workload_type t2v \
     --preprocess.dataset_path $DATASET_PATH \
     --preprocess.dataset_output_dir $OUTPUT_DIR \
-    --preprocess.preprocess_video_batch_size 4 \
+    --preprocess.preprocess_video_batch_size 2 \
     --preprocess.dataloader_num_workers 0 \
     --preprocess.max_height 480 \
     --preprocess.max_width 832 \
