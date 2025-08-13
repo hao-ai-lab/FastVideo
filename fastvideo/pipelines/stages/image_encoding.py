@@ -122,29 +122,37 @@ class ImageVAEEncodingStage(PipelineStage):
         """
         assert batch.pil_image is not None
         if fastvideo_args.mode == ExecutionMode.INFERENCE:
+            assert batch.pil_image is not None and isinstance(
+                batch.pil_image, PIL.Image.Image)
             assert batch.height is not None and isinstance(batch.height, int)
             assert batch.width is not None and isinstance(batch.width, int)
             assert batch.num_frames is not None and isinstance(
                 batch.num_frames, int)
+            height = batch.height
+            width = batch.width
             num_frames = batch.num_frames
         elif fastvideo_args.mode == ExecutionMode.PREPROCESS:
+            assert batch.pil_image is not None and isinstance(
+                batch.pil_image, torch.Tensor)
             assert batch.height is not None and isinstance(batch.height, list)
             assert batch.width is not None and isinstance(batch.width, list)
             assert batch.num_frames is not None and isinstance(
                 batch.num_frames, list)
             num_frames = batch.latents.shape[2]
+            height = batch.pil_image.shape[2]
+            width = batch.pil_image.shape[3]
 
         self.vae = self.vae.to(get_local_torch_device())
 
-        latent_height = batch.height // self.vae.spatial_compression_ratio
-        latent_width = batch.width // self.vae.spatial_compression_ratio
+        latent_height = height // self.vae.spatial_compression_ratio
+        latent_width = width // self.vae.spatial_compression_ratio
 
         image = batch.pil_image
         image = self.preprocess(
             image,
             vae_scale_factor=self.vae.spatial_compression_ratio,
-            height=batch.height,
-            width=batch.width).to(get_local_torch_device(), dtype=torch.float32)
+            height=height,
+            width=width).to(get_local_torch_device(), dtype=torch.float32)
 
         # (B, C, H, W) -> (B, C, 1, H, W)
         image = image.unsqueeze(2)
@@ -199,9 +207,9 @@ class ImageVAEEncodingStage(PipelineStage):
         if fastvideo_args.mode == ExecutionMode.PREPROCESS:
             batch.image_latent = latent_condition
         else:
-            mask_lat_size = torch.ones(1, 1, batch.num_frames, latent_height,
+            mask_lat_size = torch.ones(1, 1, num_frames, latent_height,
                                        latent_width)
-            mask_lat_size[:, :, list(range(1, batch.num_frames))] = 0
+            mask_lat_size[:, :, list(range(1, num_frames))] = 0
             first_frame_mask = mask_lat_size[:, :, 0:1]
             first_frame_mask = torch.repeat_interleave(
                 first_frame_mask,
