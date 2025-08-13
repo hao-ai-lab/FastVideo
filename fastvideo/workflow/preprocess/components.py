@@ -1,3 +1,4 @@
+import dataclasses
 import gc
 import multiprocessing
 import os
@@ -202,14 +203,15 @@ class ParquetDatasetSaver:
         # Prepare batch data for Parquet dataset
         batch_data: list[dict[str, Any]] = []
 
-        for key, value in batch.items():
+        for key in dataclasses.fields(batch):
+            value = getattr(batch, key.name)
             if isinstance(value, list):
                 for idx in range(len(value)):
                     if isinstance(value[idx], torch.Tensor):
-                        logger.info("Converting %s to numpy", key)
                         value[idx] = value[idx].cpu().numpy()
             elif isinstance(value, torch.Tensor):
                 value = value.cpu().numpy()
+                setattr(batch, key.name, value)
 
         # Create record for Parquet dataset
         records = self.create_records_from_batch(batch)

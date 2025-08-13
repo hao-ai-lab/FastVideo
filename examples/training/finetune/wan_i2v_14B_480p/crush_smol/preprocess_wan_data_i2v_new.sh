@@ -1,15 +1,15 @@
 #!/bin/bash
 
 GPU_NUM=1 # 2,4,8
-MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+MODEL_PATH="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
 DATASET_PATH="data/crush-smol-test/"
-OUTPUT_DIR="data/crush-smol_processed_t2v/"
+OUTPUT_DIR="data/crush-smol_processed_i2v/"
 
 torchrun --nproc_per_node=$GPU_NUM \
     -m fastvideo.pipelines.preprocess.v1_preprocessing_new \
     --model_path $MODEL_PATH \
     --mode preprocess \
-    --workload_type t2v \
+    --workload_type i2v \
     --preprocess.dataset_path $DATASET_PATH \
     --preprocess.dataset_output_dir $OUTPUT_DIR \
     --preprocess.preprocess_video_batch_size 2 \

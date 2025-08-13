@@ -68,7 +68,7 @@ def basic_t2v_record_creator(batch: PreprocessBatch) -> list[dict[str, Any]]:
     return records
 
 
-def i2v_record_creator(batch: PreprocessBatch) -> dict[str, Any]:
+def i2v_record_creator(batch: PreprocessBatch) -> list[dict[str, Any]]:
     """Create a record for the Parquet dataset with CLIP features."""
     records = basic_t2v_record_creator(batch)
 
@@ -124,4 +124,4 @@ def i2v_record_creator(batch: PreprocessBatch) -> dict[str, Any]:
                 "pil_image_dtype": "",
             })
 
-    return record
+    return records
