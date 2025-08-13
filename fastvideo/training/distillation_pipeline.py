@@ -919,7 +919,7 @@ class DistillationPipeline(TrainingPipeline):
         dmd_latents_vis_dict = training_batch.dmd_latent_vis_dict
         fake_score_latents_vis_dict = training_batch.fake_score_latent_vis_dict
         fake_score_log_keys = ['generator_pred_video']
-        dmd_log_keys = ['generator_pred_video', 'faker_score_pred_video', 'real_score_pred_video']
+        dmd_log_keys = ['faker_score_pred_video', 'real_score_pred_video']
 
         for latent_key in fake_score_log_keys:
             latents = fake_score_latents_vis_dict[latent_key]
@@ -976,7 +976,7 @@ class DistillationPipeline(TrainingPipeline):
                 video = video.cpu().float()
                 video = video.permute(0, 2, 1, 3, 4)
                 video = (video * 255).numpy().astype(np.uint8)
-                wandb_loss_dict[latent_key+'_dmd'] = wandb.Video(
+                wandb_loss_dict[latent_key] = wandb.Video(
                     video, fps=24, format="mp4")  # change to 16 for Wan2.1
                 # Clean up references
                 del video, latents
