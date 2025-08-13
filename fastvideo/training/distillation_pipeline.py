@@ -392,9 +392,23 @@ class DistillationPipeline(TrainingPipeline):
                 batch=manual_batch, fastvideo_args=self.training_args)
 
         if target_timestep_idx_int > 0:
-            noisy_input = batch.trajectory_latents[target_timestep_idx_int-1]
+            pred_clean = batch.trajectory_latents[target_timestep_idx_int-1]
+            noise = torch.randn(self.video_latent_shape,
+                                device=self.device,
+                                dtype=pred_clean.dtype)
+            if self.sp_world_size > 1:
+                noise = rearrange(noise,
+                                  "b (n t) c h w -> b n t c h w",
+                                  n=self.sp_world_size).contiguous()
+                noise = noise[:, self.rank_in_sp_group, :, :, :, :]
+            noisy_input = self.noise_scheduler.add_noise(
+                pred_clean.flatten(0, 1), noise.flatten(0, 1),
+                target_timestep).unflatten(0, pred_clean.shape[:2])
         else:
             noisy_input = current_noise_latents
+            # noise = torch.randn(self.video_latent_shape,
+            #                     device=self.device,
+            #                     dtype=pred_clean.dtype)
 
         # Step 4: Final student prediction (this is what we train on)
         training_batch = self._build_distill_input_kwargs(
