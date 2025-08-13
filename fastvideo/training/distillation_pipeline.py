@@ -237,13 +237,13 @@ class DistillationPipeline(TrainingPipeline):
         dtype = latents.dtype
 
         # Step 1: Randomly sample a target timestep index from denoising_step_list
-        # target_timestep_idx = torch.randint(0,
-        #                                     len(self.denoising_step_list), [1],
-        #                                     device=self.device,
-        #                                     dtype=torch.long)
-        target_timestep_idx = torch.tensor([2],
-                                           device=self.device,
-                                           dtype=torch.long)
+        target_timestep_idx = torch.randint(0,
+                                            len(self.denoising_step_list), [1],
+                                            device=self.device,
+                                            dtype=torch.long)
+        # target_timestep_idx = torch.tensor([2],
+        #                                    device=self.device,
+        #                                    dtype=torch.long)
         target_timestep_idx_int = target_timestep_idx.item()
         target_timestep = self.denoising_step_list[target_timestep_idx]
 
@@ -363,7 +363,7 @@ class DistillationPipeline(TrainingPipeline):
         current_noise_latents = torch.randn(self.video_latent_shape,
                                             device=self.device,
                                             dtype=dtype)
-        current_timestep = self.denoising_step_list[2]
+        current_timestep = self.denoising_step_list[0]
         current_timestep_tensor = current_timestep * torch.ones(
             1, device=self.device, dtype=torch.long)
         training_batch_temp = self._build_distill_input_kwargs(
@@ -387,11 +387,27 @@ class DistillationPipeline(TrainingPipeline):
             # eta=0.0,
             # VSA_sparsity=training_args.VSA_sparsity,
         )
-        batch = self.validation_pipeline.denoising_stage.forward(
-            batch=manual_batch, fastvideo_args=self.training_args)
+        with torch.no_grad():
+            batch = self.validation_pipeline.denoising_stage.forward(
+                batch=manual_batch, fastvideo_args=self.training_args)
 
-        latents = batch.trajectory_latents[target_timestep_idx_int]
-        latents = latents
+        if target_timestep_idx_int > 0:
+            noisy_input = batch.trajectory_latents[target_timestep_idx_int-1]
+        else:
+            noisy_input = current_noise_latents
+
+        # Step 4: Final student prediction (this is what we train on)
+        training_batch = self._build_distill_input_kwargs(
+            noisy_input, target_timestep, training_batch.conditional_dict,
+            training_batch)
+        pred_noise = self.transformer(**training_batch.input_kwargs).permute(
+            0, 2, 1, 3, 4)
+        pred_video = pred_noise_to_pred_video(
+            pred_noise=pred_noise.flatten(0, 1),
+            noise_input_latent=noisy_input.flatten(0, 1),
+            timestep=target_timestep,
+            scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
+
 
         training_batch.dmd_latent_vis_dict[
             "generator_timestep"] = target_timestep.float().detach()

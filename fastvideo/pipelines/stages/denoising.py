@@ -803,7 +803,7 @@ class DmdDenoisingStage(DenoisingStage):
                             0, pred_noise.shape[:2])
 
                     if batch.return_trajectory_latents:
-                        batch.trajectory_latents.append(pred_video)
+                        batch.trajectory_latents.append(pred_video.clone())
 
                     if i < len(timesteps) - 1:
                         next_timestep = timesteps[i + 1] * torch.ones(
