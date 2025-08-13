@@ -381,7 +381,8 @@ class DenoisingStage(PipelineStage):
 
     def progress_bar(self,
                      iterable: Iterable | None = None,
-                     total: int | None = None) -> tqdm:
+                     total: int | None = None,
+                     disable: bool = False) -> tqdm:
         """
         Create a progress bar for the denoising process.
         
@@ -394,7 +395,7 @@ class DenoisingStage(PipelineStage):
         """
         local_rank = get_world_group().local_rank
         if local_rank == 0:
-            return tqdm(iterable=iterable, total=total)
+            return tqdm(iterable=iterable, total=total, disable=disable)
         else:
             return tqdm(iterable=iterable, total=total, disable=True)
 
@@ -716,7 +717,9 @@ class DmdDenoisingStage(DenoisingStage):
                 batch.image_latent = image_latent
 
         # Run denoising loop
-        with self.progress_bar(total=len(timesteps)) as progress_bar:
+        with self.progress_bar(
+                total=len(timesteps),
+                disable=batch.return_trajectory_latents) as progress_bar:
             for i, t in enumerate(timesteps):
                 # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:
