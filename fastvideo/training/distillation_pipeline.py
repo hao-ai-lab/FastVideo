@@ -390,25 +390,21 @@ class DistillationPipeline(TrainingPipeline):
         with torch.no_grad():
             batch = self.validation_pipeline.denoising_stage.forward(
                 batch=manual_batch, fastvideo_args=self.training_args)
+            pred_clean = batch.trajectory_latents[target_timestep_idx_int-1]
+
+        
+        # return batch.trajectory_latents[target_timestep_idx_int]
 
         if target_timestep_idx_int > 0:
-            pred_clean = batch.trajectory_latents[target_timestep_idx_int-1]
+            # pred_clean = batch.trajectory_latents[target_timestep_idx_int-1]
             noise = torch.randn(self.video_latent_shape,
                                 device=self.device,
                                 dtype=pred_clean.dtype)
-            if self.sp_world_size > 1:
-                noise = rearrange(noise,
-                                  "b (n t) c h w -> b n t c h w",
-                                  n=self.sp_world_size).contiguous()
-                noise = noise[:, self.rank_in_sp_group, :, :, :, :]
             noisy_input = self.noise_scheduler.add_noise(
                 pred_clean.flatten(0, 1), noise.flatten(0, 1),
                 target_timestep).unflatten(0, pred_clean.shape[:2])
         else:
             noisy_input = current_noise_latents
-            # noise = torch.randn(self.video_latent_shape,
-            #                     device=self.device,
-            #                     dtype=pred_clean.dtype)
 
         # Step 4: Final student prediction (this is what we train on)
         training_batch = self._build_distill_input_kwargs(
@@ -923,7 +919,7 @@ class DistillationPipeline(TrainingPipeline):
         dmd_latents_vis_dict = training_batch.dmd_latent_vis_dict
         fake_score_latents_vis_dict = training_batch.fake_score_latent_vis_dict
         fake_score_log_keys = ['generator_pred_video']
-        dmd_log_keys = ['faker_score_pred_video', 'real_score_pred_video']
+        dmd_log_keys = ['generator_pred_video', 'faker_score_pred_video', 'real_score_pred_video']
 
         for latent_key in fake_score_log_keys:
             latents = fake_score_latents_vis_dict[latent_key]
@@ -980,7 +976,7 @@ class DistillationPipeline(TrainingPipeline):
                 video = video.cpu().float()
                 video = video.permute(0, 2, 1, 3, 4)
                 video = (video * 255).numpy().astype(np.uint8)
-                wandb_loss_dict[latent_key] = wandb.Video(
+                wandb_loss_dict[latent_key+'_dmd'] = wandb.Video(
                     video, fps=24, format="mp4")  # change to 16 for Wan2.1
                 # Clean up references
                 del video, latents
