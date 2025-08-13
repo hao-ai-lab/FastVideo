@@ -1,7 +1,5 @@
 from typing import Any
 
-import torch
-
 from fastvideo.pipelines.pipeline_batch_info import PreprocessBatch
 
 
@@ -72,17 +70,14 @@ def i2v_record_creator(batch: PreprocessBatch) -> list[dict[str, Any]]:
     """Create a record for the Parquet dataset with CLIP features."""
     records = basic_t2v_record_creator(batch)
 
-    if len(batch.image_embeds) == 1:
-        image_embeds = batch.image_embeds[0]
-    else:
-        image_embeds = batch.image_embeds
-
+    assert len(
+        batch.image_embeds) == 1, "image embedding should be a single tensor"
+    image_embeds = batch.image_embeds[0]
     image_latent = batch.image_latent
     pil_image = batch.pil_image
-    assert isinstance(pil_image, torch.Tensor)
 
     for idx, record in enumerate(records):
-        if image_embeds:
+        if image_embeds is not None:
             record.update({
                 "clip_feature_bytes": image_embeds[idx].tobytes(),
                 "clip_feature_shape": list(image_embeds[idx].shape),
@@ -95,7 +90,7 @@ def i2v_record_creator(batch: PreprocessBatch) -> list[dict[str, Any]]:
                 "clip_feature_dtype": "",
             })
 
-        if image_latent:
+        if image_latent is not None:
             record.update({
                 "first_frame_latent_bytes":
                 image_latent[idx].tobytes(),
@@ -111,7 +106,7 @@ def i2v_record_creator(batch: PreprocessBatch) -> list[dict[str, Any]]:
                 "first_frame_latent_dtype": "",
             })
 
-        if pil_image:
+        if pil_image is not None:
             record.update({
                 "pil_image_bytes": pil_image[idx].tobytes(),
                 "pil_image_shape": list(pil_image[idx].shape),

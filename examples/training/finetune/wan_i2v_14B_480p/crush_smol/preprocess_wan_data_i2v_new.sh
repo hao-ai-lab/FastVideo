@@ -2,6 +2,7 @@
 
 GPU_NUM=1 # 2,4,8
 MODEL_PATH="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
+# MODEL_PATH="/home/eigensystem/.cache/huggingface/hub/models--Wan-AI--Wan2.1-I2V-14B-480P-Diffusers/snapshots/b184e23a8a16b20f108f727c902e769e873ffc73/"
 DATASET_PATH="data/crush-smol-test/"
 OUTPUT_DIR="data/crush-smol_processed_i2v/"
 

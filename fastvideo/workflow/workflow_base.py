@@ -180,4 +180,7 @@ class WorkflowBase(ABC):
             from fastvideo.workflow.preprocess.preprocess_workflow import (
                 PreprocessWorkflow)
             return PreprocessWorkflow.get_workflow_cls(fastvideo_args)
-        return None
+        else:
+            raise ValueError(
+                f"Execution mode: {fastvideo_args.mode} is not supported in workflow."
+            )

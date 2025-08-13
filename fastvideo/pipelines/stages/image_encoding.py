@@ -184,10 +184,13 @@ class ImageVAEEncodingStage(PipelineStage):
                 video_condition = video_condition.to(vae_dtype)
             encoder_output = self.vae.encode(video_condition)
 
-        generator = batch.generator
-        if generator is None:
-            raise ValueError("Generator must be provided")
-        latent_condition = self.retrieve_latents(encoder_output, generator)
+        if fastvideo_args.mode == ExecutionMode.PREPROCESS:
+            latent_condition = encoder_output.mean
+        else:
+            generator = batch.generator
+            if generator is None:
+                raise ValueError("Generator must be provided")
+            latent_condition = self.retrieve_latents(encoder_output, generator)
 
         # Apply shifting if needed
         if (hasattr(self.vae, "shift_factor")
@@ -255,11 +258,10 @@ class ImageVAEEncodingStage(PipelineStage):
             resize_mode: str = "default",  # "default", "fill", "crop"
     ) -> torch.Tensor:
 
-        height, width = get_default_height_width(image, vae_scale_factor,
-                                                 height, width)
-        image = resize(image, height, width, resize_mode=resize_mode)
-
         if isinstance(image, PIL.Image.Image):
+            height, width = get_default_height_width(image, vae_scale_factor,
+                                                     height, width)
+            image = resize(image, height, width, resize_mode=resize_mode)
             image = pil_to_numpy(image)  # to np
             image = numpy_to_pt(image)  # to pt
 
@@ -275,12 +277,16 @@ class ImageVAEEncodingStage(PipelineStage):
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify encoding stage inputs."""
         result = VerificationResult()
-        # result.add_check("pil_image", batch.pil_image)
-        result.add_check("height", batch.height, V.positive_int)
-        result.add_check("width", batch.width, V.positive_int)
         result.add_check("generator", batch.generator,
                          V.generator_or_list_generators)
-        result.add_check("num_frames", batch.num_frames, V.positive_int)
+        if fastvideo_args.mode == ExecutionMode.PREPROCESS:
+            result.add_check("height", batch.height, V.list_not_empty)
+            result.add_check("width", batch.width, V.list_not_empty)
+            result.add_check("num_frames", batch.num_frames, V.list_not_empty)
+        else:
+            result.add_check("height", batch.height, V.positive_int)
+            result.add_check("width", batch.width, V.positive_int)
+            result.add_check("num_frames", batch.num_frames, V.positive_int)
         return result
 
     def verify_output(self, batch: ForwardBatch,

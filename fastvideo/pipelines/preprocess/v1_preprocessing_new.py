@@ -5,8 +5,7 @@ from fastvideo.distributed import (
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.utils import FlexibleArgumentParser
-from fastvideo.workflow.preprocess.preprocess_workflow_t2v import (
-    PreprocessWorkflowT2V)
+from fastvideo.workflow.workflow_base import WorkflowBase
 
 logger = init_logger(__name__)
 
@@ -15,7 +14,8 @@ def main(fastvideo_args: FastVideoArgs) -> None:
     maybe_init_distributed_environment_and_model_parallel(1, 1)
     num_gpus = int(os.environ["WORLD_SIZE"])
     assert num_gpus == 1, "Only support 1 GPU"
-    preprocess_workflow = PreprocessWorkflowT2V(fastvideo_args)
+    preprocess_workflow_cls = WorkflowBase.get_workflow_cls(fastvideo_args)
+    preprocess_workflow = preprocess_workflow_cls(fastvideo_args)
     preprocess_workflow.run()
 
 

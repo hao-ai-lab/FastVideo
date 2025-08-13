@@ -77,7 +77,8 @@ class PreprocessWorkflow(WorkflowBase):
         self.add_component("validation_dataloader", validation_dataloader)
 
         # forward batch builder
-        video_forward_batch_builder = VideoForwardBatchBuilder()
+        video_forward_batch_builder = VideoForwardBatchBuilder(
+            seed=self.fastvideo_args.preprocess_config.seed)
         self.add_component("video_forward_batch_builder",
                            video_forward_batch_builder)
 

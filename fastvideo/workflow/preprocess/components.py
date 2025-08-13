@@ -131,6 +131,9 @@ class PreprocessingDataValidator:
 
 class VideoForwardBatchBuilder:
 
+    def __init__(self, seed: int):
+        self.seed = seed
+
     def __call__(self, batch: list) -> PreprocessBatch:
         forward_batch = PreprocessBatch(
             video_loader=[item["video"] for item in batch],
@@ -142,6 +145,7 @@ class VideoForwardBatchBuilder:
             prompt=[item["caption"] for item in batch],
             prompt_attention_mask=[],
             data_type="video",
+            generator=torch.Generator("cpu").manual_seed(self.seed),
         )
         return forward_batch
 
