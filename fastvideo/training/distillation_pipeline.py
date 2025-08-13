@@ -241,7 +241,9 @@ class DistillationPipeline(TrainingPipeline):
         #                                     len(self.denoising_step_list), [1],
         #                                     device=self.device,
         #                                     dtype=torch.long)
-        target_timestep_idx = torch.tensor([2], device=self.device, dtype=torch.long)
+        target_timestep_idx = torch.tensor([2],
+                                           device=self.device,
+                                           dtype=torch.long)
         target_timestep_idx_int = target_timestep_idx.item()
         target_timestep = self.denoising_step_list[target_timestep_idx]
 
@@ -279,14 +281,15 @@ class DistillationPipeline(TrainingPipeline):
                     # t_expand = current_timestep_tensor.repeat(current_noise_latents.shape[0])
                     pred_flow = self.transformer(
                         training_batch_temp.input_kwargs["hidden_states"],
-                        training_batch_temp.input_kwargs["encoder_hidden_states"],
+                        training_batch_temp.
+                        input_kwargs["encoder_hidden_states"],
                         current_timestep_tensor,
-                        encoder_hidden_states_image=training_batch_temp.input_kwargs["encoder_hidden_states_image"],
+                        encoder_hidden_states_image=training_batch_temp.
+                        input_kwargs["encoder_hidden_states_image"],
                         guidance=None,
                         # **training_batch.conditional_dict,
                         # **training_batch.unconditional_dict,
-                        ).permute(
-                            0, 2, 1, 3, 4)
+                    ).permute(0, 2, 1, 3, 4)
                     pred_clean = pred_noise_to_pred_video(
                         pred_noise=pred_flow.flatten(0, 1),
                         noise_input_latent=current_noise_latents.flatten(0, 1),
@@ -337,6 +340,63 @@ class DistillationPipeline(TrainingPipeline):
         training_batch.dmd_latent_vis_dict[
             "generator_timestep"] = target_timestep.float().detach()
         return pred_video
+
+    def _generator_forward_with_validation_pipeline(
+            self, training_batch: TrainingBatch) -> torch.Tensor:
+        dtype = training_batch.latents.dtype
+
+        # Step 1: Randomly sample a target timestep index from denoising_step_list
+        target_timestep_idx = torch.randint(0,
+                                            len(self.denoising_step_list), [1],
+                                            device=self.device,
+                                            dtype=torch.long)
+        # target_timestep_idx = torch.tensor([2], device=self.device, dtype=torch.long)
+        target_timestep_idx_int = target_timestep_idx.item()
+        target_timestep = self.denoising_step_list[target_timestep_idx]
+        # self.training_args.pipeline_config.dmd_denoising_steps,
+        # from copy import deepcopy
+        # args = deepcopy(self.training_args)
+        # args.pipeline_config.dmd_denoising_steps = self.training_args.pipeline_config.dmd_denoising_steps[:target_timestep_idx_int]
+
+        # Step 2: Simulate the multi-step inference process up to the target timestep
+        # Start from pure noise like in inference
+        current_noise_latents = torch.randn(self.video_latent_shape,
+                                            device=self.device,
+                                            dtype=dtype)
+        current_timestep = self.denoising_step_list[2]
+        current_timestep_tensor = current_timestep * torch.ones(
+            1, device=self.device, dtype=torch.long)
+        training_batch_temp = self._build_distill_input_kwargs(
+            current_noise_latents, current_timestep_tensor,
+            training_batch.conditional_dict, training_batch)
+        manual_batch = ForwardBatch(
+            data_type="video",
+            # **shallow_asdict(self.training_args),
+            latents=current_noise_latents.permute(0, 2, 1, 3, 4),
+            generator=torch.Generator(device="cpu").manual_seed(self.seed),
+            image_embeds=[
+                training_batch_temp.input_kwargs["encoder_hidden_states_image"]
+            ],
+            prompt_embeds=[
+                training_batch_temp.input_kwargs["encoder_hidden_states"]
+            ],
+            image_latent=training_batch_temp.input_kwargs["image_latent"],
+            timesteps=current_timestep_tensor,
+            return_trajectory_latents=True,
+            # n_tokens=n_tokens,
+            # eta=0.0,
+            # VSA_sparsity=training_args.VSA_sparsity,
+        )
+        batch = self.validation_pipeline.denoising_stage.forward(
+            batch=manual_batch, fastvideo_args=self.training_args)
+
+        latents = batch.trajectory_latents[target_timestep_idx_int]
+        latents = latents
+
+        training_batch.dmd_latent_vis_dict[
+            "generator_timestep"] = target_timestep.float().detach()
+
+        return latents
 
     def _dmd_forward(self, generator_pred_video: torch.Tensor,
                      training_batch: TrainingBatch) -> torch.Tensor:
@@ -443,8 +503,12 @@ class DistillationPipeline(TrainingPipeline):
                 current_timestep=training_batch.timesteps,
                 attn_metadata=training_batch.attn_metadata_vsa):
             if self.training_args.simulate_generator_forward:
-                generator_pred_video = self._generator_multi_step_simulation_forward(
-                    training_batch)
+                if True:
+                    generator_pred_video = self._generator_forward_with_validation_pipeline(
+                        training_batch)
+                else:
+                    generator_pred_video = self._generator_multi_step_simulation_forward(
+                        training_batch)
             else:
                 generator_pred_video = self._generator_forward(training_batch)
 
@@ -578,8 +642,12 @@ class DistillationPipeline(TrainingPipeline):
                         current_timestep=batch_gen.timesteps,
                         attn_metadata=batch_gen.attn_metadata_vsa):
                     if self.training_args.simulate_generator_forward:
-                        generator_pred_video = self._generator_multi_step_simulation_forward(
-                            batch_gen)
+                        if True:
+                            generator_pred_video = self._generator_forward_with_validation_pipeline(
+                                batch_gen)
+                        else:
+                            generator_pred_video = self._generator_multi_step_simulation_forward(
+                                batch_gen)
                     else:
                         generator_pred_video = self._generator_forward(
                             batch_gen)

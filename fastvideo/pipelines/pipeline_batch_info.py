@@ -118,6 +118,8 @@ class ForwardBatch:
     # Misc
     save_video: bool = True
     return_frames: bool = False
+    return_trajectory_latents: bool = False
+    trajectory_latents: list[torch.Tensor] = field(default_factory=list)
 
     # TeaCache parameters
     enable_teacache: bool = False

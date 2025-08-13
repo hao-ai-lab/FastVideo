@@ -677,6 +677,7 @@ class DmdDenoisingStage(DenoisingStage):
         # TODO(yongqi) hard code prepare latents
         latents = torch.randn(
             latents.permute(0, 2, 1, 3, 4).shape,
+            # latents.shape,
             dtype=torch.bfloat16,
             device="cuda",
             generator=torch.Generator(device="cuda").manual_seed(42))
@@ -800,6 +801,9 @@ class DmdDenoisingStage(DenoisingStage):
                         timestep=t_expand,
                         scheduler=self.scheduler).unflatten(
                             0, pred_noise.shape[:2])
+
+                    if batch.return_trajectory_latents:
+                        batch.trajectory_latents.append(pred_video)
 
                     if i < len(timesteps) - 1:
                         next_timestep = timesteps[i + 1] * torch.ones(
