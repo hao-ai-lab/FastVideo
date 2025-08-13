@@ -412,7 +412,7 @@ class DistillationPipeline(TrainingPipeline):
         training_batch.dmd_latent_vis_dict[
             "generator_timestep"] = target_timestep.float().detach()
 
-        return latents
+        return pred_video
 
     def _dmd_forward(self, generator_pred_video: torch.Tensor,
                      training_batch: TrainingBatch) -> torch.Tensor:
