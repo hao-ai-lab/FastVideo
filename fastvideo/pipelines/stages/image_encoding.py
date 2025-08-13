@@ -196,7 +196,9 @@ class ImageVAEEncodingStage(PipelineStage):
         else:
             latent_condition = latent_condition * self.vae.scaling_factor
 
-        if fastvideo_args.mode == ExecutionMode.INFERENCE:
+        if fastvideo_args.mode == ExecutionMode.PREPROCESS:
+            batch.image_latent = latent_condition
+        else:
             mask_lat_size = torch.ones(1, 1, batch.num_frames, latent_height,
                                        latent_width)
             mask_lat_size[:, :, list(range(1, batch.num_frames))] = 0
@@ -215,8 +217,6 @@ class ImageVAEEncodingStage(PipelineStage):
 
             batch.image_latent = torch.concat([mask_lat_size, latent_condition],
                                               dim=1)
-        elif fastvideo_args.mode == ExecutionMode.PREPROCESS:
-            batch.image_latent = latent_condition
 
         # Offload models if needed
         if hasattr(self, 'maybe_free_model_hooks'):

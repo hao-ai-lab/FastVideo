@@ -145,67 +145,6 @@ class VideoForwardBatchBuilder:
         return forward_batch
 
 
-def t2v_record_creator(
-        video_name: str,
-        vae_latent: np.ndarray,
-        text_embedding: np.ndarray,
-        batch: PreprocessBatch,
-        idx: int,
-        extra_features: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Create a record for the Parquet dataset from PreprocessBatch."""
-    # For batch processing, we need to handle the case where some fields might be single values
-    # or lists depending on the batch size
-
-    # Get caption - handle both single string and list cases
-    caption = ""
-    if batch.prompt:
-        if isinstance(batch.prompt, list):
-            caption = batch.prompt[idx] if idx < len(
-                batch.prompt) else batch.prompt[0]
-        else:
-            caption = batch.prompt
-
-    # Get dimensions - these are typically single values in PreprocessBatch
-    assert isinstance(batch.width, list)
-    assert isinstance(batch.height, list)
-    assert isinstance(batch.fps, list)
-    assert isinstance(batch.num_frames, list)
-
-    width = batch.width[idx] if batch.width is not None else 0
-    height = batch.height[idx] if batch.height is not None else 0
-
-    # Get FPS - single value in PreprocessBatch
-    fps_val = float(batch.fps[idx]) if batch.fps is not None else 0.0
-
-    # For duration, we need to calculate it or use a default since it's not in PreprocessBatch
-    # duration = num_frames / fps if available
-    duration_val = 0.0
-    if batch.num_frames[idx] and batch.fps[idx] and batch.fps[idx] > 0:
-        duration_val = float(batch.num_frames[idx]) / float(batch.fps[idx])
-
-    record = {
-        "id": video_name,
-        "vae_latent_bytes": vae_latent.tobytes(),
-        "vae_latent_shape": list(vae_latent.shape),
-        "vae_latent_dtype": str(vae_latent.dtype),
-        "text_embedding_bytes": text_embedding.tobytes(),
-        "text_embedding_shape": list(text_embedding.shape),
-        "text_embedding_dtype": str(text_embedding.dtype),
-        "file_name": video_name,
-        "caption": caption,
-        "media_type": "video",
-        "width": int(width),
-        "height": int(height),
-        "num_frames": vae_latent.shape[1] if len(vae_latent.shape) > 1 else 0,
-        "duration_sec": duration_val,
-        "fps": fps_val,
-    }
-
-    if extra_features:
-        record.update(extra_features)
-    return record
-
-
 class ParquetDatasetSaver:
     """Component for saving and writing Parquet datasets"""
 
@@ -213,20 +152,20 @@ class ParquetDatasetSaver:
                  flush_frequency: int,
                  samples_per_file: int,
                  schema_fields: list[str],
-                 record_creator: Callable[..., dict[str, Any]] | None = None,
+                 record_creator: Callable[..., list[dict[str, Any]]],
                  file_writer_fn: Callable | None = None):
         """
         Initialize ParquetDatasetSaver
         
         Args:
-            schema_fields_provider: Function that returns schema fields list
+            schema_fields: schema fields list
             record_creator: Function for creating records
             file_writer_fn: Function for writing records to files, uses default implementation if None
         """
         self.flush_frequency = flush_frequency
         self.samples_per_file = samples_per_file
         self.schema_fields = schema_fields
-        self.create_record = record_creator or t2v_record_creator
+        self.create_records_from_batch = record_creator
         self.file_writer_fn: Callable[
             [tuple], int] = file_writer_fn or self._default_file_writer_fn
         self.all_tables: list[pa.Table] = []
@@ -253,39 +192,28 @@ class ParquetDatasetSaver:
         assert isinstance(batch.prompt_embeds, list)
         assert isinstance(batch.prompt_attention_mask, list)
 
-        prompt_embeds: list[torch.Tensor] = []
         # Process non-padded embeddings (if needed)
         if batch.prompt_attention_mask is not None:
-            prompt_embeds = self._process_non_padded_embeddings(
+            batch.prompt_embeds = self._process_non_padded_embeddings(
                 batch.prompt_embeds[0], batch.prompt_attention_mask[0])
         else:
             raise ValueError("prompt_attention_mask is None")
 
         # Prepare batch data for Parquet dataset
-        batch_data = []
+        batch_data: list[dict[str, Any]] = []
 
-        for idx, video_name in enumerate(batch.video_file_name):
-            # Get the corresponding latent and info using video name
-            vae_latent = batch.latents[idx].cpu().numpy()
-            text_embedding = prompt_embeds[idx].cpu().numpy()
+        for key, value in batch.items():
+            if isinstance(value, list):
+                for idx in range(len(value)):
+                    if isinstance(value[idx], torch.Tensor):
+                        logger.info("Converting %s to numpy", key)
+                        value[idx] = value[idx].cpu().numpy()
+            elif isinstance(value, torch.Tensor):
+                value = value.cpu().numpy()
 
-            # Get extra features for this sample if needed
-            sample_extra_features = {}
-            if extra_features:
-                for key, value in extra_features.items():
-                    if isinstance(value, torch.Tensor):
-                        sample_extra_features[key] = value[idx].cpu().numpy()
-                    else:
-                        sample_extra_features[key] = value[idx]
-
-            # Create record for Parquet dataset
-            record = self.create_record(video_name=video_name,
-                                        vae_latent=vae_latent,
-                                        text_embedding=text_embedding,
-                                        batch=batch,
-                                        idx=idx,
-                                        extra_features=sample_extra_features)
-            batch_data.append(record)
+        # Create record for Parquet dataset
+        records = self.create_records_from_batch(batch)
+        batch_data.extend(records)
 
         if batch_data:
             self.num_processed_samples += len(batch_data)

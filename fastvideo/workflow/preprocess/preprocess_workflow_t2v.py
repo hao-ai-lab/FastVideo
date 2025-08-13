@@ -2,7 +2,6 @@ from typing import TYPE_CHECKING, Optional
 
 from tqdm import tqdm
 
-from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
 from fastvideo.pipelines.pipeline_batch_info import PreprocessBatch
 from fastvideo.workflow.preprocess.components import ParquetDatasetSaver
 from fastvideo.workflow.preprocess.preprocess_workflow import PreprocessWorkflow
@@ -21,19 +20,6 @@ class PreprocessWorkflowT2V(PreprocessWorkflow):
     preprocess_pipeline: "ComposedPipelineBase"
     processed_dataset_saver: "ParquetDatasetSaver"
     video_forward_batch_builder: "VideoForwardBatchBuilder"
-
-    def register_components(self) -> None:
-        assert self.fastvideo_args.preprocess_config is not None
-        super().register_components()
-        self.add_component(
-            "processed_dataset_saver",
-            ParquetDatasetSaver(
-                flush_frequency=self.fastvideo_args.preprocess_config.
-                flush_frequency,
-                samples_per_file=self.fastvideo_args.preprocess_config.
-                samples_per_file,
-                schema_fields=[f.name for f in pyarrow_schema_t2v],
-            ))
 
     def run(self) -> None:
         # Training dataset preprocessing
