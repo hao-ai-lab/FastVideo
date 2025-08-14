@@ -138,9 +138,9 @@ class ImageVAEEncodingStage(PipelineStage):
             assert batch.width is not None and isinstance(batch.width, list)
             assert batch.num_frames is not None and isinstance(
                 batch.num_frames, list)
-            num_frames = batch.latents.shape[2]
-            height = batch.pil_image.shape[2]
-            width = batch.pil_image.shape[3]
+            num_frames = batch.num_frames[0]
+            height = batch.height[0]
+            width = batch.width[0]
 
         self.vae = self.vae.to(get_local_torch_device())
 
