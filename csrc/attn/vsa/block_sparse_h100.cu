@@ -568,7 +568,6 @@ void bwd_attend_ker(const __grid_constant__ bwd_globals<D> g) {
         __syncthreads(); // wait for sd_smem shared memory write
         warpgroup::mm_AtB(qg_reg, ds_smem_t[0], k_smem[0]); //delat dQ = dSK
         warpgroup::mma_commit_group();
-        tma::store_async_wait();
         warpgroup::mma_async_wait();
         // store qg to shared memory
         warpgroup::store(qg_smem, qg_reg);
@@ -625,7 +624,6 @@ void bwd_attend_ker(const __grid_constant__ bwd_globals<D> g) {
         __syncthreads(); // wait for sd_smem shared memory write
         warpgroup::mm_AtB(qg_reg, ds_smem_t[0], k_smem[0]); //delat dQ = dSK
         warpgroup::mma_commit_group();
-        tma::store_async_wait();
         warpgroup::mma_async_wait();
         // store qg to shared memory
         warpgroup::store(qg_smem, qg_reg);

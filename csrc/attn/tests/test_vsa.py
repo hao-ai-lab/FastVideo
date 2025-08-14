@@ -13,9 +13,9 @@ BLOCK_M = 64
 BLOCK_N = 64
 
 def pytorch_test(Q, K, V, block_sparse_mask, dO):
-    q_ = Q.clone().requires_grad_()
-    k_ = K.clone().requires_grad_()
-    v_ = V.clone().requires_grad_()
+    q_ = Q.clone().float().requires_grad_()
+    k_ = K.clone().float().requires_grad_()
+    v_ = V.clone().float().requires_grad_()
 
     QK = torch.matmul(q_, k_.transpose(-2, -1))
     QK /= (q_.size(-1) ** 0.5)
@@ -35,9 +35,9 @@ def pytorch_test(Q, K, V, block_sparse_mask, dO):
 
 
 def block_sparse_kernel_test(Q, K, V, block_sparse_mask, variable_block_sizes, non_pad_index, dO):
-    Q = Q.clone().requires_grad_()
-    K = K.clone().requires_grad_()
-    V = V.clone().requires_grad_()
+    Q = Q.detach().requires_grad_()
+    K = K.detach().requires_grad_()
+    V = V.detach().requires_grad_()
     
     q_padded = vsa_pad(Q, non_pad_index, variable_block_sizes.shape[0], BLOCK_M)
     k_padded = vsa_pad(K, non_pad_index, variable_block_sizes.shape[0], BLOCK_M)
@@ -60,11 +60,9 @@ def get_non_pad_index(
 
     return index_pad[index_mask]
 
-def generate_tensor(shape, mean, std, dtype, device):
+def generate_tensor(shape, dtype, device):
     tensor = torch.randn(shape, dtype=dtype, device=device)
-    magnitude = torch.norm(tensor, dim=-1, keepdim=True)
-    scaled_tensor = tensor * (torch.randn(magnitude.shape, dtype=dtype, device=device) * std + mean) / magnitude
-    return scaled_tensor.contiguous()
+    return tensor
 
 def generate_variable_block_sizes(num_blocks, min_size=32, max_size=64, device="cuda"):
     return torch.randint(min_size, max_size + 1, (num_blocks,), device=device, dtype=torch.int32)
@@ -75,7 +73,7 @@ def vsa_pad(x, non_pad_index, num_blocks, block_size):
     padded_x[:, :, non_pad_index, :] = x
     return padded_x
 
-def check_correctness(h, d, num_blocks, k, mean, std, num_iterations=20, error_mode='all'):
+def check_correctness(h, d, num_blocks, k,  num_iterations=20, error_mode='all'):
     results = {
         'gO': {'sum_diff': 0.0, 'sum_abs': 0.0, 'max_diff': 0.0},
         'gQ': {'sum_diff': 0.0, 'sum_abs': 0.0, 'max_diff': 0.0},
@@ -91,10 +89,10 @@ def check_correctness(h, d, num_blocks, k, mean, std, num_iterations=20, error_m
     block_mask = generate_block_sparse_mask_for_function(h, num_blocks, k, device)
     full_mask = create_full_mask_from_block_mask(block_mask, variable_block_sizes, device)
     for _ in range(num_iterations):
-        Q = generate_tensor((1, h, S, d), mean, std, torch.bfloat16, device)
-        K = generate_tensor((1, h, S, d), mean, std, torch.bfloat16, device)
-        V = generate_tensor((1, h, S, d), mean, std, torch.bfloat16, device)
-        dO = generate_tensor((1, h, S, d), mean, std, torch.bfloat16, device)
+        Q = generate_tensor((1, h, S, d),  torch.bfloat16, device)
+        K = generate_tensor((1, h, S, d), torch.bfloat16, device)
+        V = generate_tensor((1, h, S, d),  torch.bfloat16, device)
+        dO = generate_tensor((1, h, S, d), torch.bfloat16, device)
 
         # dO_padded = torch.zeros_like(dO_padded)
         # dO_padded[:, :, non_pad_index, :] = dO
@@ -107,7 +105,8 @@ def check_correctness(h, d, num_blocks, k, mean, std, num_iterations=20, error_m
                 abs_diff = torch.abs(diff)
                 results[name]['sum_diff'] += torch.sum(abs_diff).item()
                 results[name]['sum_abs'] += torch.sum(torch.abs(pt)).item()
-                results[name]['max_diff'] = max(results[name]['max_diff'], torch.max(abs_diff).item())
+                rel_max_diff = torch.max(abs_diff) / torch.mean(torch.abs(pt))
+                results[name]['max_diff'] = max(results[name]['max_diff'], rel_max_diff.item())
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
@@ -119,27 +118,27 @@ def check_correctness(h, d, num_blocks, k, mean, std, num_iterations=20, error_m
 
     return results
 
-def generate_error_graphs(h, d, mean, std, error_mode='all'):
+def generate_error_graphs(h, d, error_mode='all'):
     test_configs = [
         {"num_blocks": 16, "k": 2, "description": "Small sequence"},
         {"num_blocks": 32, "k": 4, "description": "Medium sequence"},
         {"num_blocks": 53, "k": 6, "description": "Large sequence"},
     ]
     
-    print(f"\nError Analysis for h={h}, d={d}, mean={mean}, std={std}, mode={error_mode}")
+    print(f"\nError Analysis for h={h}, d={d}, mode={error_mode}")
     print("=" * 150)
     print(f"{'Config':<20} {'Blocks':<8} {'K':<4} "
-          f"{'gQ Avg':<12} {'gQ Max':<12} "
-          f"{'gK Avg':<12} {'gK Max':<12} "
-          f"{'gV Avg':<12} {'gV Max':<12} "
-          f"{'gO Avg':<12} {'gO Max':<12}")
+          f"{'gQ Avg':<12} {'Rel gQ Max':<12} "
+          f"{'gK Avg':<12} {'Rel gK Max':<12} "
+          f"{'gV Avg':<12} {'Rel gV Max':<12} "
+          f"{'gO Avg':<12} {'Rel gO Max':<12}")
     print("-" * 150)
 
     for config in test_configs:
         num_blocks = config["num_blocks"]
         k = config["k"]
         description = config["description"]
-        results = check_correctness(h, d, num_blocks, k, mean, std, error_mode=error_mode)
+        results = check_correctness(h, d, num_blocks, k, error_mode=error_mode)
         print(f"{description:<20} {num_blocks:<8} {k:<4} "
               f"{results['gQ']['avg_diff']:<12.6e} {results['gQ']['max_diff']:<12.6e} "
               f"{results['gK']['avg_diff']:<12.6e} {results['gK']['max_diff']:<12.6e} "
@@ -150,10 +149,8 @@ def generate_error_graphs(h, d, mean, std, error_mode='all'):
 
 if __name__ == "__main__":
     h, d = 16, 128
-    mean = 0.0
-    std = 1
     print("Block Sparse Attention with Variable Block Sizes Analysis")
     print("=" * 60)
     for mode in ['backward']:
-        generate_error_graphs(h, d, mean, std, error_mode=mode)
+        generate_error_graphs(h, d, error_mode=mode)
     print("\nAnalysis completed for all modes.")
