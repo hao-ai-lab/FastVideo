@@ -674,6 +674,9 @@ class TrainingArgs(FastVideoArgs):
     log_visualization: bool = False
     # simulate generator forward to match inference
     simulate_generator_forward: bool = False
+    simulate_generator_forward_ratio: float = 1.0  # ratio of steps to simulate generator forward
+    regression_loss_weight: float = 0.0
+    use_regression_loss: bool = False
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -1018,6 +1021,18 @@ class TrainingArgs(FastVideoArgs):
             "--simulate-generator-forward",
             action=StoreBoolean,
             help="Whether to simulate generator forward to match inference")
+        parser.add_argument(
+            "--simulate-generator-forward-ratio",
+            type=float,
+            default=TrainingArgs.simulate_generator_forward_ratio,
+            help="Ratio of steps to simulate generator forward")
+        parser.add_argument("--regression-loss-weight",
+                            type=float,
+                            default=TrainingArgs.regression_loss_weight,
+                            help="Weight for regression loss")
+        parser.add_argument("--use-regression-loss",
+                            action=StoreBoolean,
+                            help="Whether to use regression loss")
 
         return parser
 

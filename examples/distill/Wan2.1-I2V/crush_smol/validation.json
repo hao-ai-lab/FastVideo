@@ -1,72 +1,9 @@
 {
   "data": [
     {
-      "caption": "A large metal cylinder is seen pressing down on a pile of Oreo cookies, flattening them as if they were under a hydraulic press.",
-      "image_path": null,
-      "video_path": "validation_dataset/yYcK4nANZz4-Scene-034.mp4",
-      "num_inference_steps": 40,
-      "height": 480,
-      "width": 832,
-      "num_frames": 77
-    },
-    {
-      "caption": "A large metal cylinder is seen compressing colorful clay into a compact shape, demonstrating the power of a hydraulic press.",
-      "image_path": null,
-      "video_path": "validation_dataset/yYcK4nANZz4-Scene-027.mp4",
-      "num_inference_steps": 40,
-      "height": 480,
-      "width": 832,
-      "num_frames": 77
-    },
-    {
-      "caption": "A large metal cylinder is seen pressing down on a pile of colorful candies, flattening them as if they were under a hydraulic press. The candies are crushed and broken into small pieces, creating a mess on the table.",
-      "image_path": null,
-      "video_path": "validation_dataset/yYcK4nANZz4-Scene-030.mp4",
-      "num_inference_steps": 40,
-      "height": 480,
-      "width": 832,
-      "num_frames": 77
-    },
-    {
       "caption": "A watermelon wearing a helmet is crushed by a hydraulic press, causing it to flatten and burst open.",
       "image_path": null,
       "video_path": "validation_dataset/1gGQy4nxyUo-Scene-016.mp4",
-      "num_inference_steps": 40,
-      "height": 480,
-      "width": 832,
-      "num_frames": 77
-    },
-    {
-      "caption": "The video shows a green and orange object being flattened as if it were under a hydraulic press, with the press moving down and compressing the object.",
-      "image_path": null,
-      "video_path": "validation_dataset/1gGQy4nxyUo-Scene-056.mp4",
-      "num_inference_steps": 40,
-      "height": 480,
-      "width": 832,
-      "num_frames": 77
-    },
-    {
-      "caption": "The video shows a cylindrical object with a cityscape image being flattened as if it were under a hydraulic press. The object is placed on a metal platform, and a large, striped cylinder presses down on it, causing it to collapse and release a liquid inside. The background features a green wall with a yellow and red warning sign.",
-      "image_path": null,
-      "video_path": "validation_dataset/1gGQy4nxyUo-Scene-059.mp4",
-      "num_inference_steps": 40,
-      "height": 480,
-      "width": 832,
-      "num_frames": 77
-    },
-    {
-      "caption": "The video shows a close-up of an orange being flattened as if it were under a hydraulic press, with the press moving down and compressing the fruit until it is completely flattened.",
-      "image_path": null,
-      "video_path": "validation_dataset/EJqsC21GSBY-Scene-059.mp4",
-      "num_inference_steps": 40,
-      "height": 480,
-      "width": 832,
-      "num_frames": 77
-    },
-    {
-      "caption": "A colorful puzzle ball is being crushed by a large metal cylinder, which flattens the objects as if they were under a hydraulic press.",
-      "image_path": null,
-      "video_path": "validation_dataset/GBSfpTcKegk-Scene-003.mp4",
       "num_inference_steps": 40,
       "height": 480,
       "width": 832,

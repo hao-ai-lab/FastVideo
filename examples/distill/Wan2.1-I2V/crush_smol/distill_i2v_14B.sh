@@ -6,7 +6,7 @@ export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 MODEL_PATH="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
-DATA_DIR="data/crush-smol_processed_wan21_i2v_14b/combined_parquet_dataset/"
+DATA_DIR="data/crush-smol_processed_wan21_i2v_14b_single/combined_parquet_dataset/"
 VALIDATION_DATASET_FILE="examples/distill/Wan2.1-I2V/crush_smol/validation.json"
 NUM_GPUS=8
 export WANDB_API_KEY='8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde'
@@ -17,12 +17,12 @@ export WANDB_API_KEY='8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde'
 training_args=(
   --tracker_project_name "wan_i2v_distill"
   --output_dir "checkpoints/wan_i2v_distill"
-  --wandb_run_name "no_back_wan21_i2v_14b_ode_3steps_8gpu"
-  --max_train_steps 2000
+  --wandb_run_name "wan21_g1e5_f5e6"
+  --max_train_steps 1500
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 8
+  --num_latent_t 16
   --num_height 480
   --num_width 832
   --num_frames 77
@@ -63,9 +63,11 @@ validation_args=(
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 4e-6
+  --learning_rate 1e-5
   --lr_scheduler "constant"
-  --fake_score_learning_rate 8e-7
+  # --min_lr_ratio 0.5
+  # --lr_warmup_steps 50
+  --fake_score_learning_rate 1e-5
   --fake_score_lr_scheduler "constant"
   --mixed_precision "bf16"
   --training_state_checkpointing_steps 2000
@@ -89,11 +91,13 @@ miscellaneous_args=(
 dmd_args=(
   --dmd_denoising_steps '1000,757,522'
   --min_timestep_ratio 0.02
-  --max_timestep_ratio 0.98
+  --max_timestep_ratio 0.96
   --generator_update_interval 5
   --simulate_generator_forward
-  --real_score_guidance_scale 3.5
+  --real_score_guidance_scale 5
   --VSA_sparsity 0.8
+  --regression_loss_weight 2.0
+  --use_regression_loss True
 )
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t

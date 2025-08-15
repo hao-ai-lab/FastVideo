@@ -228,7 +228,15 @@ class DistillationPipeline(TrainingPipeline):
             timestep=timestep,
             scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
 
+        regression_loss = F.mse_loss(pred_video, latents) * 3
+        pred_video = pred_video.type_as(noisy_latent)
+        training_batch.regression_loss = regression_loss
+        # regression_log_dict = {
+        #     "regression_loss": regression_Loss.detach(),
+        #     "regression_clean_latents": latents,
+        # }
         return pred_video
+        # return pred_video
 
     def _generator_multi_step_simulation_forward(
             self, training_batch: TrainingBatch) -> torch.Tensor:
@@ -275,21 +283,9 @@ class DistillationPipeline(TrainingPipeline):
                     training_batch_temp = self._build_distill_input_kwargs(
                         current_noise_latents, current_timestep_tensor,
                         training_batch.conditional_dict, training_batch)
-                    # pred_flow = self.transformer(
-                    #     **training_batch_temp.input_kwargs).permute(
-                    #         0, 2, 1, 3, 4)
-                    # t_expand = current_timestep_tensor.repeat(current_noise_latents.shape[0])
                     pred_flow = self.transformer(
-                        training_batch_temp.input_kwargs["hidden_states"],
-                        training_batch_temp.
-                        input_kwargs["encoder_hidden_states"],
-                        current_timestep_tensor,
-                        encoder_hidden_states_image=training_batch_temp.
-                        input_kwargs["encoder_hidden_states_image"],
-                        guidance=None,
-                        # **training_batch.conditional_dict,
-                        # **training_batch.unconditional_dict,
-                    ).permute(0, 2, 1, 3, 4)
+                        **training_batch_temp.input_kwargs).permute(
+                            0, 2, 1, 3, 4)
                     pred_clean = pred_noise_to_pred_video(
                         pred_noise=pred_flow.flatten(0, 1),
                         noise_input_latent=current_noise_latents.flatten(0, 1),
@@ -390,19 +386,14 @@ class DistillationPipeline(TrainingPipeline):
         with torch.no_grad():
             batch = self.validation_pipeline.denoising_stage.forward(
                 batch=manual_batch, fastvideo_args=self.training_args)
-            pred_clean = batch.trajectory_latents[target_timestep_idx_int-1]
+            noisy_latents = batch.trajectory_latents[target_timestep_idx_int -
+                                                     1]
 
-        
         # return batch.trajectory_latents[target_timestep_idx_int]
 
         if target_timestep_idx_int > 0:
             # pred_clean = batch.trajectory_latents[target_timestep_idx_int-1]
-            noise = torch.randn(self.video_latent_shape,
-                                device=self.device,
-                                dtype=pred_clean.dtype)
-            noisy_input = self.noise_scheduler.add_noise(
-                pred_clean.flatten(0, 1), noise.flatten(0, 1),
-                target_timestep).unflatten(0, pred_clean.shape[:2])
+            noisy_input = noisy_latents
         else:
             noisy_input = current_noise_latents
 
@@ -417,7 +408,6 @@ class DistillationPipeline(TrainingPipeline):
             noise_input_latent=noisy_input.flatten(0, 1),
             timestep=target_timestep,
             scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
-
 
         training_batch.dmd_latent_vis_dict[
             "generator_timestep"] = target_timestep.float().detach()
@@ -507,6 +497,9 @@ class DistillationPipeline(TrainingPipeline):
             generator_pred_video.float(),
             (generator_pred_video.float() - grad.float()).detach())
 
+        if self.training_args.regression_loss_weight is not None:
+            dmd_loss = dmd_loss + training_batch.regression_loss * self.training_args.regression_loss_weight
+
         training_batch.dmd_latent_vis_dict.update({
             "training_batch_dmd_fwd_clean_latent":
             training_batch.latents,
@@ -518,6 +511,8 @@ class DistillationPipeline(TrainingPipeline):
             faker_score_pred_video,
             "dmd_timestep":
             timestep,
+            "regression_loss":
+            training_batch.regression_loss,
         })
 
         return dmd_loss
@@ -529,7 +524,7 @@ class DistillationPipeline(TrainingPipeline):
                 current_timestep=training_batch.timesteps,
                 attn_metadata=training_batch.attn_metadata_vsa):
             if self.training_args.simulate_generator_forward:
-                if True:
+                if False:
                     generator_pred_video = self._generator_forward_with_validation_pipeline(
                         training_batch)
                 else:
@@ -668,7 +663,7 @@ class DistillationPipeline(TrainingPipeline):
                         current_timestep=batch_gen.timesteps,
                         attn_metadata=batch_gen.attn_metadata_vsa):
                     if self.training_args.simulate_generator_forward:
-                        if True:
+                        if False:
                             generator_pred_video = self._generator_forward_with_validation_pipeline(
                                 batch_gen)
                         else:
@@ -1105,6 +1100,8 @@ class DistillationPipeline(TrainingPipeline):
                         "dmd_timestep":
                         training_batch.dmd_latent_vis_dict["dmd_timestep"].item(
                         ),
+                        "regression_loss":
+                        training_batch.regression_loss,
                     }
                     log_data.update(dmd_additional_logs)
 

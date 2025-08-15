@@ -6,7 +6,7 @@ export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 MODEL_PATH="weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers"
-DATA_DIR="data/crush-smol_processed_i2v_1_3b_inp/combined_parquet_dataset/"
+DATA_DIR="data/crush-smol_processed_i2v_1_3b_inp_single/combined_parquet_dataset/"
 VALIDATION_DATASET_FILE="examples/distill/Wan2.1-Fun-1.3B-InP/crush_smol/validation.json"
 NUM_GPUS=8
 export WANDB_API_KEY='8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde'
@@ -57,7 +57,7 @@ validation_args=(
   --log_visualization
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
   --validation_steps 50
-  --validation_sampling_steps "3"
+  --validation_sampling_steps "4"
   --validation_guidance_scale "1.0" # not used for dmd inference
 )
 
@@ -87,12 +87,12 @@ miscellaneous_args=(
 )
 
 dmd_args=(
-  --dmd_denoising_steps '1000,757,522'
+  --dmd_denoising_steps '1000,750,500,250'
   --min_timestep_ratio 0.02
   --max_timestep_ratio 0.98
   --generator_update_interval 5
   --simulate_generator_forward
-  --real_score_guidance_scale 3.5
+  --real_score_guidance_scale 5
   --VSA_sparsity 0.8
 )
 

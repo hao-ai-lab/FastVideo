@@ -805,9 +805,6 @@ class DmdDenoisingStage(DenoisingStage):
                         scheduler=self.scheduler).unflatten(
                             0, pred_noise.shape[:2])
 
-                    if batch.return_trajectory_latents:
-                        batch.trajectory_latents.append(pred_video.clone())
-
                     if i < len(timesteps) - 1:
                         next_timestep = timesteps[i + 1] * torch.ones(
                             [1], dtype=torch.long, device=pred_video.device)
@@ -822,6 +819,10 @@ class DmdDenoisingStage(DenoisingStage):
                         latents = self.scheduler.add_noise(
                             pred_video.flatten(0, 1), noise.flatten(0, 1),
                             next_timestep).unflatten(0, pred_video.shape[:2])
+
+                        if batch.return_trajectory_latents:
+                            batch.trajectory_latents.append(latents.clone())
+
                     else:
                         latents = pred_video
 
