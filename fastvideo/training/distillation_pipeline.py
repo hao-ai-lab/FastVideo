@@ -230,7 +230,7 @@ class DistillationPipeline(TrainingPipeline):
 
         regression_loss = F.mse_loss(pred_video, latents)
         pred_video = pred_video.type_as(noisy_latent)
-        training_batch.regression_loss = regression_loss.detach()
+        training_batch.regression_loss = regression_loss
         # regression_log_dict = {
         #     "regression_loss": regression_Loss.detach(),
         #     "regression_clean_latents": latents,
