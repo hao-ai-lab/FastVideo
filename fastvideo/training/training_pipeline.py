@@ -39,8 +39,7 @@ from fastvideo.training.activation_checkpoint import (
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, get_scheduler, get_sigmas,
-    load_checkpoint, normalize_dit_input, save_checkpoint,
-    shard_latents_across_sp)
+    load_checkpoint, normalize_dit_input, save_checkpoint)
 from fastvideo.utils import is_vsa_available, set_random_seed, shallow_asdict
 
 import wandb  # isort: skip
@@ -321,10 +320,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
             # make sure no implicit broadcasting happens
             assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
-            loss = (torch.mean((model_pred.float() - target.float())**2) /
-                    self.training_args.gradient_accumulation_steps)
-
+            
+            loss = torch.mean((model_pred.float() - target.float())**2)
+            loss /=  self.training_args.gradient_accumulation_steps
             loss.backward()
+            
+
             avg_loss = loss.detach().clone()
 
         # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
@@ -332,7 +333,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         world_group = get_world_group()
         world_group.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
         training_batch.total_loss += avg_loss.item()
-
         return training_batch
 
     def _clip_grad_norm(self, training_batch: TrainingBatch) -> TrainingBatch:
@@ -368,17 +368,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
             training_batch = self._prepare_dit_inputs(training_batch)
 
             # Shard latents across sp groups
-            training_batch.latents = shard_latents_across_sp(
-                training_batch.latents,
-                num_latent_t=self.training_args.num_latent_t)
+            training_batch.latents = training_batch.latents[:, :, :self.training_args.num_latent_t]
             # shard noisy_model_input to match
-            training_batch.noisy_model_input = shard_latents_across_sp(
-                training_batch.noisy_model_input,
-                num_latent_t=self.training_args.num_latent_t)
+            training_batch.noisy_model_input = training_batch.noisy_model_input[:, :, :self.training_args.num_latent_t]
             # shard noise to match latents
-            training_batch.noise = shard_latents_across_sp(
-                training_batch.noise,
-                num_latent_t=self.training_args.num_latent_t)
+            training_batch.noise = training_batch.noise[:, :, :self.training_args.num_latent_t]
 
             training_batch = self._build_attention_metadata(training_batch)
             training_batch = self._build_input_kwargs(training_batch)
@@ -610,7 +604,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         validation_dataloader = DataLoader(validation_dataset,
                                            batch_size=None,
                                            num_workers=0)
-
+        return 
         transformer.eval()
 
         validation_steps = training_args.validation_sampling_steps.split(",")
