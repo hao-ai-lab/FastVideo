@@ -11,7 +11,7 @@ from copy import deepcopy
 
 MODEL_PATH_MAPPING = {
     "FastWan2.1-T2V-1.3B": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
-    "FastWan2.2-TI2V-5B-FullAttn": "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
+    # "FastWan2.2-TI2V-5B-FullAttn": "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
 }
 
 def create_timing_display(inference_time, total_time, stage_execution_times, num_frames):
@@ -82,7 +82,7 @@ def load_example_prompts():
             print(f"Warning: Could not read {filepath}: {e}")
         return prompts, labels
     
-    examples, example_labels = load_from_file("prompts/prompts_final.txt")
+    # examples, example_labels = load_from_file("prompts/prompts_final.txt")
     
     if not examples:
         examples = ["A crowded rooftop bar buzzes with energy, the city skyline twinkling like a field of stars in the background."]
@@ -189,7 +189,7 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
     initial_values = get_default_values("FastWan2.1-T2V-1.3B")
     
     with gr.Blocks(title="FastWan", theme=theme) as demo:
-        gr.Image("fastvideo-logos/main/svg/full.svg", show_label=False, container=False, height=80)
+        gr.Image("assets/full.svg", show_label=False, container=False, height=80)
 
         gr.HTML("""
         <div style="text-align: center; margin-bottom: 10px;">
@@ -535,7 +535,7 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
 
 
 def main():
-    parser = argparse.ArgumentParser(description="FastVideo Gradio Frontend")
+    parser = argparse.ArgumentParser(description="FastVideo Gradio Local Demo")
     parser.add_argument("--t2v_model_paths", type=str,
                         default="FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
                         help="Comma separated list of paths to the T2V model(s)")
@@ -565,7 +565,7 @@ def main():
     @app.get("/logo.png")
     def get_logo():
         return FileResponse(
-            "fastvideo-logos/main/svg/full.svg",
+            "assets/full.svg",
             media_type="image/svg+xml",
             headers={
                 "Cache-Control": "public, max-age=3600",
@@ -575,7 +575,7 @@ def main():
     
     @app.get("/favicon.ico")
     def get_favicon():
-        favicon_path = "fastvideo-logos/main/svg/icon-simple.svg"
+        favicon_path = "assets/icon-simple.svg"
         
         if os.path.exists(favicon_path):
             return FileResponse(
