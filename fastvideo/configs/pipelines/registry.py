@@ -11,6 +11,7 @@ from fastvideo.configs.pipelines.wan import (FastWan2_1_T2V_480P_Config,
                                              FastWan2_2_TI2V_5B_Config,
                                              WanI2V480PConfig, WanI2V720PConfig,
                                              WanT2V480PConfig, WanT2V720PConfig)
+from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.logger import init_logger
 from fastvideo.utils import (maybe_download_model_index,
                              verify_model_config_and_directory)
@@ -34,6 +35,7 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "Wan-AI/Wan2.2-TI2V-5B-Diffusers": WanT2V720PConfig,
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": WanT2V480PConfig,
     "Wan-AI/Wan2.2-I2V-A14B-Diffusers": WanI2V480PConfig,
+    "nvidia/Cosmos-Predict2-2B-Video2World": CosmosConfig,
     # Add other specific weight variants
 }
 
@@ -44,6 +46,7 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     "wanimagetovideo": lambda id: "wanimagetovideo" in id.lower(),
     "wandmdpipeline": lambda id: "wandmdpipeline" in id.lower(),
     "stepvideo": lambda id: "stepvideo" in id.lower(),
+    "cosmos": lambda id: "cosmos" in id.lower(),
     # Add other pipeline architecture detectors
 }
 

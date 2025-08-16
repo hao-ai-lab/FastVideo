@@ -25,7 +25,8 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "HunyuanVideoTransformer3DModel":
     ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
-    "StepVideoModel": ("dits", "stepvideo", "StepVideoModel")
+    "StepVideoModel": ("dits", "stepvideo", "StepVideoModel"),
+    "CosmosTransformer3DModel": ("dits", "cosmos", "CosmosTransformer3DModel")
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
@@ -37,6 +38,7 @@ _TEXT_ENCODER_MODELS = {
     "CLIPTextModel": ("encoders", "clip", "CLIPTextModel"),
     "LlamaModel": ("encoders", "llama", "LlamaModel"),
     "UMT5EncoderModel": ("encoders", "t5", "UMT5EncoderModel"),
+    "T5EncoderModel": ("encoders", "t5", "T5EncoderModel"),
     "STEP1TextEncoder": ("encoders", "stepllm", "STEP1TextEncoder"),
     "BertModel": ("encoders", "clip", "CLIPTextModel"),
 }

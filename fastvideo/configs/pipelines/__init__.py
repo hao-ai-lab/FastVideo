@@ -7,9 +7,11 @@ from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
 from fastvideo.configs.pipelines.wan import (WanI2V480PConfig, WanI2V720PConfig,
                                              WanT2V480PConfig, WanT2V720PConfig)
 
+from fastvideo.configs.pipelines.cosmos import CosmosConfig
+
 __all__ = [
     "HunyuanConfig", "FastHunyuanConfig", "PipelineConfig",
     "SlidingTileAttnConfig", "WanT2V480PConfig", "WanI2V480PConfig",
     "WanT2V720PConfig", "WanI2V720PConfig", "StepVideoT2VConfig",
-    "get_pipeline_config_cls_from_name"
+    "CosmosConfig", "get_pipeline_config_cls_from_name"
 ]
