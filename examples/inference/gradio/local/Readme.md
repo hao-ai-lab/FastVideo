@@ -27,7 +27,7 @@ This will start a web server at `http://0.0.0.0:7860` where you can access the i
 
 ## Model Initialization
 
-This demo initializes a `VideoGenerator` with the minimum required arguments for inference. Users can seamlessly adjust inference options between generations, including prompts, resolution, video length, or even the number of inference steps, *without ever needing to reload the model*.
+This demo initializes a `VideoGenerator` with the minimum required arguments for inference. Users can seamlessly adjust inference options between generations, including prompts, resolution, video length, *without ever needing to reload the model*.
 
 ## Video Generation
 
