@@ -32,6 +32,13 @@ class MultiprocExecutor(Executor):
         self.world_size = self.fastvideo_args.num_gpus
         self.shutting_down = False
 
+        # Initialize CUDA before setting up multiprocessing to ensure
+        # maybe_force_spawn() correctly detects CUDA and forces 'spawn' mode.
+        # This prevents "Cannot re-initialize CUDA in forked subprocess" errors.
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.init()
+
         set_multiproc_executor_envs()
 
         # Check if master_port is provided in fastvideo_args

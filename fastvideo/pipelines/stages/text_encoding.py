@@ -69,6 +69,13 @@ class TextEncodingStage(PipelineStage):
             encoder_index=all_indices,
             return_attention_mask=True,
         )
+
+        # Zero out embeddings beyond actual sequence length
+        for prompt_embeds, attention_mask in zip(prompt_embeds_list, prompt_masks_list):
+            lengths = attention_mask.sum(dim=1).cpu()
+            for i, length in enumerate(lengths):
+                prompt_embeds[i, length:] = 0
+
         for pe in prompt_embeds_list:
             batch.prompt_embeds.append(pe)
         if batch.prompt_attention_mask is not None:
@@ -84,6 +91,12 @@ class TextEncodingStage(PipelineStage):
                 encoder_index=all_indices,
                 return_attention_mask=True,
             )
+
+            for neg_embeds, neg_mask in zip(neg_embeds_list, neg_masks_list):
+                lengths = neg_mask.sum(dim=1).cpu()
+                for i, length in enumerate(lengths):
+                    neg_embeds[i, length:] = 0
+
             assert batch.negative_prompt_embeds is not None
             for ne in neg_embeds_list:
                 batch.negative_prompt_embeds.append(ne)
