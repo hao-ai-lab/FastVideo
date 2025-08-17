@@ -8,10 +8,10 @@ diffusion models.
 
 import math
 import os
+import re
 import time
 from copy import deepcopy
 from typing import Any
-import re
 
 import imageio
 import numpy as np
@@ -129,7 +129,8 @@ class VideoGenerator:
         """
         # Handle batch processing from text file
         if sampling_param is None:
-            sampling_param = SamplingParam.from_pretrained(self.fastvideo_args.model_path)
+            sampling_param = SamplingParam.from_pretrained(
+                self.fastvideo_args.model_path)
         sampling_param.update(kwargs)
 
         if self.fastvideo_args.prompt_txt is not None or sampling_param.prompt_path is not None:
@@ -154,10 +155,13 @@ class VideoGenerator:
                             len(prompts), batch_prompt[:100])
                 try:
                     # Generate video for this prompt using the same logic below
-                    output_path = self._prepare_output_path(sampling_param.output_path, batch_prompt)
-                    kwargs["output_path"]=output_path
+                    output_path = self._prepare_output_path(
+                        sampling_param.output_path, batch_prompt)
+                    kwargs["output_path"] = output_path
                     result = self._generate_single_video(
-                        prompt=batch_prompt, sampling_param=sampling_param, **kwargs)
+                        prompt=batch_prompt,
+                        sampling_param=sampling_param,
+                        **kwargs)
 
                     # Add prompt info to result
                     if isinstance(result, dict):
@@ -181,25 +185,31 @@ class VideoGenerator:
         # Single prompt generation (original behavior)
         if prompt is None:
             raise ValueError("Either prompt or prompt_txt must be provided")
-        output_path = self._prepare_output_path(sampling_param.output_path, prompt)
-        kwargs["output_path"]=output_path
+        output_path = self._prepare_output_path(sampling_param.output_path,
+                                                prompt)
+        kwargs["output_path"] = output_path
 
-        return self._generate_single_video(prompt=prompt, sampling_param=sampling_param, **kwargs)
+        return self._generate_single_video(prompt=prompt,
+                                           sampling_param=sampling_param,
+                                           **kwargs)
 
     def _prepare_output_path(
         self,
-        output_path: str, 
+        output_path: str,
         prompt: str,
     ) -> str:
         base_path, extension = os.path.splitext(output_path)
         if extension == ".mp4":
             output_dir = os.path.dirname(output_path)
-            video_name=re.sub(r'[\/:*?"<>|]', '', os.path.basename(output_path))
+            video_name = re.sub(r'[\/:*?"<>|]', '',
+                                os.path.basename(output_path))
             if video_name != os.path.basename(output_path):
-                print(f"The video name '{os.path.basename(output_path)}' contained invalid characters. It has been renamed to '{video_name}'")
+                print(
+                    f"The video name '{os.path.basename(output_path)}' contained invalid characters. It has been renamed to '{video_name}'"
+                )
         else:
             output_dir = output_path
-            video_name = re.sub(r'[\/:*?"<>|]', '', prompt[:100] + ".mp4") 
+            video_name = re.sub(r'[\/:*?"<>|]', '', prompt[:100] + ".mp4")
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
         new_output_path = os.path.join(output_dir, video_name)
@@ -228,9 +238,9 @@ class VideoGenerator:
                 f"`prompt` must be a string, but got {type(prompt)}")
         prompt = prompt.strip()
         sampling_param = deepcopy(sampling_param)
-        output_path=kwargs["output_path"]
+        output_path = kwargs["output_path"]
         kwargs["prompt"] = prompt
-        sampling_param.prompt=prompt
+        sampling_param.prompt = prompt
         # Process negative prompt
         if sampling_param.negative_prompt is not None:
             sampling_param.negative_prompt = sampling_param.negative_prompt.strip(
@@ -343,7 +353,6 @@ class VideoGenerator:
         if batch.save_video:
             imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
             logger.info("Saved video to %s", output_path)
-
 
         if batch.return_frames:
             return frames
