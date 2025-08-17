@@ -169,6 +169,15 @@ def test_t5_large_encoder():
     # Check number of parameters
     logger.info("Model1 has %s parameters", len(params1))
     logger.info("Model2 has %s parameters", len(params2))
+    
+    # # Print parameter names for comparison
+    # logger.info("Model1 parameters:")
+    # for name in sorted(params1.keys()):
+    #     logger.info("  %s: %s", name, params1[name].shape)
+    
+    # logger.info("Model2 parameters:")
+    # for name in sorted(params2.keys()):
+    #     logger.info("  %s: %s", name, params2[name].shape)
 
     weight_diffs = []
     # check if embed_tokens are the same
