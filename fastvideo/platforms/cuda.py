@@ -158,7 +158,8 @@ class CudaPlatformBase(Platform):
                     "Failed to import Video Sparse Attention backend: %s",
                     str(e))
                 raise ImportError(
-                    "The Video Sparse Attention backend is not installed.To install it, please follow the instructions at: https://hao-ai-lab.github.io/FastVideo/video_sparse_attention/installation.html ") from e
+                    "The Video Sparse Attention backend is not installed.To install it, please follow the instructions at: https://hao-ai-lab.github.io/FastVideo/video_sparse_attention/installation.html "
+                ) from e
 
         elif selected_backend == AttentionBackendEnum.TORCH_SDPA:
             logger.info("Using Torch SDPA backend.")
