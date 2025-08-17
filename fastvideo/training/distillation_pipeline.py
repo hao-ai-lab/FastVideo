@@ -66,6 +66,7 @@ class DistillationPipeline(TrainingPipeline):
     current_epoch: int = 0
     init_steps: int
     current_trainstep: int
+    num_generator_updates: int = 0
     video_latent_shape: tuple[int, ...]
     video_latent_shape_sp: tuple[int, ...]
 
@@ -497,7 +498,7 @@ class DistillationPipeline(TrainingPipeline):
             generator_pred_video.float(),
             (generator_pred_video.float() - grad.float()).detach())
 
-        if self.training_args.regression_loss_weight is not None:
+        if self.training_args.use_regression_loss:
             dmd_loss = dmd_loss + training_batch.regression_loss * self.training_args.regression_loss_weight
 
         training_batch.dmd_latent_vis_dict.update({
@@ -662,7 +663,8 @@ class DistillationPipeline(TrainingPipeline):
                 with set_forward_context(
                         current_timestep=batch_gen.timesteps,
                         attn_metadata=batch_gen.attn_metadata_vsa):
-                    if self.training_args.simulate_generator_forward:
+                    if self.training_args.simulate_generator_forward and self.num_generator_updates % self.training_args.simulate_forward_interval == 0:
+                        logger.info("using simulate_generator_forward, num_generator_updates: %s", self.num_generator_updates)
                         if False:
                             generator_pred_video = self._generator_forward_with_validation_pipeline(
                                 batch_gen)
@@ -684,6 +686,7 @@ class DistillationPipeline(TrainingPipeline):
                         attn_metadata=batch_gen.attn_metadata_vsa):
                     (dmd_loss / gradient_accumulation_steps).backward()
                 total_dmd_loss += dmd_loss.detach().item()
+            self.num_generator_updates += 1
             self._clip_model_grad_norm_(batch_gen, self.transformer)
             self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)

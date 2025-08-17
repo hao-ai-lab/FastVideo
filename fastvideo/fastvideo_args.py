@@ -674,7 +674,7 @@ class TrainingArgs(FastVideoArgs):
     log_visualization: bool = False
     # simulate generator forward to match inference
     simulate_generator_forward: bool = False
-    simulate_generator_forward_ratio: float = 1.0  # ratio of steps to simulate generator forward
+    simulate_forward_interval: int = 1 
     regression_loss_weight: float = 0.0
     use_regression_loss: bool = False
 
@@ -1022,9 +1022,9 @@ class TrainingArgs(FastVideoArgs):
             action=StoreBoolean,
             help="Whether to simulate generator forward to match inference")
         parser.add_argument(
-            "--simulate-generator-forward-ratio",
-            type=float,
-            default=TrainingArgs.simulate_generator_forward_ratio,
+            "--simulate-forward-interval",
+            type=int,
+            default=TrainingArgs.simulate_forward_interval,
             help="Ratio of steps to simulate generator forward")
         parser.add_argument("--regression-loss-weight",
                             type=float,
