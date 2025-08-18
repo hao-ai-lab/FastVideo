@@ -453,7 +453,8 @@ class DistillationPipeline(TrainingPipeline):
         logger.info(f"t_high: {t_high}, t_low: {t_low}")
 
         # Use student output as base for CM pairing (noisy inputs derived from student's prediction)
-        base_student = pred_video
+        # base_student = pred_video
+        base_student = training_batch.latents
         # Shared base noise for both timesteps
         base_noise = torch.randn(self.video_latent_shape, device=self.device, dtype=base_student.dtype)
         if self.sp_world_size > 1:
@@ -781,7 +782,7 @@ class DistillationPipeline(TrainingPipeline):
                         training_batch=batch_gen)
 
                     # Consistency loss (optional)
-                    cm_weight = getattr(self.training_args, "cm_loss_weight", 0.0)
+                    cm_weight = self.training_args.cm_loss_weight
                     if cm_weight > 0.0:
                         cm_loss = self._calculate_consistency_loss(
                             pred_video=generator_pred_video,

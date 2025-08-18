@@ -19,7 +19,7 @@ export WANDB_API_KEY='8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde'
 training_args=(
   --tracker_project_name "wan_i2v_distill"
   --output_dir "checkpoints/wan_i2v_distill"
-  --wandb_run_name "14b"
+  --wandb_run_name "14b_no_sim_cm2"
   --max_train_steps 1500
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -65,11 +65,11 @@ validation_args=(
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 8e-6
+  --learning_rate 6e-6
   --lr_scheduler "constant"
   # --min_lr_ratio 0.5
   # --lr_warmup_steps 50
-  --fake_score_learning_rate 8e-6
+  --fake_score_learning_rate 6e-6
   --fake_score_lr_scheduler "constant"
   --mixed_precision "bf16"
   --training_state_checkpointing_steps 2000
@@ -96,13 +96,13 @@ dmd_args=(
   --min_timestep_ratio 0.02
   --max_timestep_ratio 0.96
   --generator_update_interval 5
-  --simulate_generator_forward
-  --simulate_forward_interval 1
+  # --simulate_generator_forward
+  # --simulate_forward_interval 1
   --real_score_guidance_scale 5
   --VSA_sparsity 0.8
   --regression_loss_weight 7
   --use_regression_loss False
-  --cm_loss_weight 0.5
+  --cm_loss_weight 0.1
   --ema_decay 0.999
 )
 
