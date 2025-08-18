@@ -97,10 +97,11 @@ dmd_args=(
   --max_timestep_ratio 0.96
   --generator_update_interval 5
   --simulate_generator_forward
+  --simulate_forward_interval 1
   --real_score_guidance_scale 5
   --VSA_sparsity 0.8
   --regression_loss_weight 7
-  --use_regression_loss True
+  --use_regression_loss False
   --cm_loss_weight 0.5
   --ema_decay 0.999
 )

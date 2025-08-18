@@ -686,7 +686,7 @@ class TrainingArgs(FastVideoArgs):
     log_visualization: bool = False
     # simulate generator forward to match inference
     simulate_generator_forward: bool = False
-    simulate_forward_interval: int = 1 
+    simulate_forward_interval: int = 1
     regression_loss_weight: float = 0.0
     use_regression_loss: bool = False
     cm_loss_weight: float = 0.0
@@ -1035,11 +1035,10 @@ class TrainingArgs(FastVideoArgs):
             "--simulate-generator-forward",
             action=StoreBoolean,
             help="Whether to simulate generator forward to match inference")
-        parser.add_argument(
-            "--simulate-forward-interval",
-            type=int,
-            default=TrainingArgs.simulate_forward_interval,
-            help="Ratio of steps to simulate generator forward")
+        parser.add_argument("--simulate-forward-interval",
+                            type=int,
+                            default=TrainingArgs.simulate_forward_interval,
+                            help="Ratio of steps to simulate generator forward")
         parser.add_argument("--regression-loss-weight",
                             type=float,
                             default=TrainingArgs.regression_loss_weight,
@@ -1051,9 +1050,10 @@ class TrainingArgs(FastVideoArgs):
                             type=float,
                             default=TrainingArgs.cm_loss_weight,
                             help="Weight for consistency loss")
-        parser.add_argument("--cm-use-ema-teacher",
-                            action=StoreBoolean,
-                            help="Whether to use EMA teacher for consistency loss")
+        parser.add_argument(
+            "--cm-use-ema-teacher",
+            action=StoreBoolean,
+            help="Whether to use EMA teacher for consistency loss")
 
         return parser
 
