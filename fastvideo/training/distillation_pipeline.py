@@ -174,7 +174,7 @@ class DistillationPipeline(TrainingPipeline):
         self.use_cm_with_ema = getattr(self.training_args, "cm_use_ema_teacher", False)
         if self.use_cm_with_ema:
             # Use local_shard mode for teacher forward compatibility with FSDP2
-            self.ema_teacher = EMA_FSDP(self.transformer, decay=getattr(self.training_args, "ema_decay", 0.999), mode="local_shard")
+            self.ema_teacher = EMA_FSDP(self.transformer, decay=self.training_args.ema_decay, mode="local_shard")
         else:
             self.ema_teacher = None
 
@@ -473,25 +473,20 @@ class DistillationPipeline(TrainingPipeline):
 
         # Teacher: lower-noise branch y_low (EMA or stop-grad model)
         tb_low = self._build_distill_input_kwargs(noisy_low, t_low, training_batch.conditional_dict, training_batch)
-        if self.use_cm_with_ema and self.ema_teacher is not None:
-            with self.ema_teacher.apply_to_model(self.transformer):
-                with torch.no_grad():
-                    pred_noise_low_teacher = self.transformer(**tb_low.input_kwargs).permute(0, 2, 1, 3, 4)
-                    y_low = pred_noise_to_pred_video(
-                        pred_noise=pred_noise_low_teacher.flatten(0, 1),
-                        noise_input_latent=noisy_low.flatten(0, 1),
-                        timestep=t_low,
-                        scheduler=self.noise_scheduler,
-                    ).unflatten(0, pred_noise_low_teacher.shape[:2])
-        else:
-            with torch.no_grad():
-                pred_noise_low_teacher = self.transformer(**tb_low.input_kwargs).permute(0, 2, 1, 3, 4)
-                y_low = pred_noise_to_pred_video(
-                    pred_noise=pred_noise_low_teacher.flatten(0, 1),
-                    noise_input_latent=noisy_low.flatten(0, 1),
-                    timestep=t_low,
-                    scheduler=self.noise_scheduler,
-                ).unflatten(0, pred_noise_low_teacher.shape[:2])
+        # Safe fallback for FSDP2: avoid in-place EMA param swaps during training graphs
+        # Use stop-grad teacher from current weights, and temporarily set eval() to avoid buffer updates
+        was_training = self.transformer.training
+        self.transformer.eval()
+        with torch.no_grad():
+            pred_noise_low_teacher = self.transformer(**tb_low.input_kwargs).permute(0, 2, 1, 3, 4)
+            y_low = pred_noise_to_pred_video(
+                pred_noise=pred_noise_low_teacher.flatten(0, 1),
+                noise_input_latent=noisy_low.flatten(0, 1),
+                timestep=t_low,
+                scheduler=self.noise_scheduler,
+            ).unflatten(0, pred_noise_low_teacher.shape[:2])
+        if was_training:
+            self.transformer.train()
 
         # Student: prediction at higher noise y_high (current model, grad-enabled)
         tb_high = self._build_distill_input_kwargs(
@@ -760,6 +755,19 @@ class DistillationPipeline(TrainingPipeline):
             for batch in batches:
                 batch_gen = copy.deepcopy(batch)
 
+                # Consistency loss first (to avoid in-place param swaps after any grad-tracked forward)
+                cm_weight = self.training_args.cm_loss_weight
+                dmd_loss_extra = 0.0
+                if cm_weight > 0.0:
+                    with set_forward_context(current_timestep=batch_gen.timesteps,
+                                             attn_metadata=batch_gen.attn_metadata):
+                        cm_loss = self._calculate_consistency_loss(
+                            pred_video=None,  # unused
+                            training_batch=batch_gen,
+                        )
+                        dmd_loss_extra = cm_weight * cm_loss
+
+                # Generator forward and DMD loss after CM
                 with set_forward_context(
                         current_timestep=batch_gen.timesteps,
                         attn_metadata=batch_gen.attn_metadata_vsa):
@@ -780,15 +788,7 @@ class DistillationPipeline(TrainingPipeline):
                     dmd_loss = self._dmd_forward(
                         generator_pred_video=generator_pred_video,
                         training_batch=batch_gen)
-
-                    # Consistency loss (optional)
-                    cm_weight = self.training_args.cm_loss_weight
-                    if cm_weight > 0.0:
-                        cm_loss = self._calculate_consistency_loss(
-                            pred_video=generator_pred_video,
-                            training_batch=batch_gen,
-                        )
-                        dmd_loss = dmd_loss + cm_weight * cm_loss
+                    dmd_loss = dmd_loss + dmd_loss_extra
 
                 with set_forward_context(
                         current_timestep=batch_gen.timesteps,
@@ -799,7 +799,8 @@ class DistillationPipeline(TrainingPipeline):
             self._clip_model_grad_norm_(batch_gen, self.transformer)
             self.optimizer.step()
             # Update EMA teacher after generator parameter update
-            if getattr(self, "use_cm_with_ema", False) and getattr(self, "ema_teacher", None) is not None:
+            if self.use_cm_with_ema:
+                assert self.ema_teacher is not None
                 self.ema_teacher.update(self.transformer)
             self.optimizer.zero_grad(set_to_none=True)
             avg_dmd_loss = torch.tensor(total_dmd_loss /

@@ -1423,9 +1423,15 @@ class EMA_FSDP:
                         continue
                     # Save local shard
                     p_local = EMA_FSDP._to_local_tensor(p.detach())
+                    if p_local.numel() == 0:
+                        # Nothing to swap on this rank for this param
+                        continue
                     self.saved[name] = p_local.clone().to(device=p_local.device, dtype=p_local.dtype)
                     if name in self.ema.shadow:
                         ema_cpu = self.ema.shadow[name]
+                        if ema_cpu.numel() != p_local.numel():
+                            # Shard shape mismatch (e.g., empty shard here), skip
+                            continue
                         # Copy EMA shard into local param shard
                         p_local.copy_(ema_cpu.to(dtype=p_local.dtype, device=p_local.device))
             return self.module
@@ -1435,7 +1441,12 @@ class EMA_FSDP:
                 for name, p in self.module.named_parameters():
                     if name in self.saved:
                         p_local = EMA_FSDP._to_local_tensor(p.detach())
-                        p_local.copy_(self.saved[name])
+                        if p_local.numel() == 0:
+                            continue
+                        saved_local = self.saved[name]
+                        if saved_local.numel() != p_local.numel():
+                            continue
+                        p_local.copy_(saved_local)
             self.saved.clear()
             return False
 
