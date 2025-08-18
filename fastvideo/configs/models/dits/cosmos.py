@@ -13,7 +13,7 @@ class CosmosArchConfig(DiTArchConfig):
     _fsdp_shard_conditions: list = field(
         default_factory=lambda: [is_transformer_blocks])
 
-    _param_names_mapping: dict = field(
+    param_names_mapping: dict = field(
         default_factory=lambda: {
             r"^patch_embed\.(.*)$": r"patch_embed.\1",
             r"^time_embed\.time_proj\.(.*)$": r"time_embed.time_proj.\1",
@@ -51,7 +51,7 @@ class CosmosArchConfig(DiTArchConfig):
             r"^proj_out\.(.*)$": r"proj_out.\1",
         })
 
-    _lora_param_names_mapping: dict = field(
+    lora_param_names_mapping: dict = field(
         default_factory=lambda: {
             r"^transformer_blocks\.(\d+)\.attn1\.to_q\.(.*)$":
             r"transformer_blocks.\1.attn1.to_q.\2",
@@ -90,6 +90,9 @@ class CosmosArchConfig(DiTArchConfig):
     qk_norm: str = "rms_norm"
     eps: float = 1e-6
     exclude_lora_layers: list[str] = field(default_factory=lambda: ["embedder"])
+    
+    # Attention backend selection
+    attention_backend: str = "distributed"  # Options: "distributed", "torch"
 
     def __post_init__(self):
         super().__post_init__()

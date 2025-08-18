@@ -7,16 +7,16 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from fastvideo.v1.attention import DistributedAttention, LocalAttention
-from fastvideo.v1.configs.models.dits.cosmos import CosmosConfig
-from fastvideo.v1.forward_context import get_forward_context
-from fastvideo.v1.layers.layernorm import RMSNorm
-from fastvideo.v1.layers.linear import ReplicatedLinear
-from fastvideo.v1.layers.mlp import MLP
-from fastvideo.v1.layers.rotary_embedding import apply_rotary_emb
-from fastvideo.v1.layers.visual_embedding import Timesteps
-from fastvideo.v1.models.dits.base import BaseDiT
-from fastvideo.v1.platforms import AttentionBackendEnum
+from fastvideo.attention import DistributedAttention, LocalAttention
+from fastvideo.configs.models.dits.cosmos import CosmosVideoConfig
+from fastvideo.forward_context import get_forward_context
+from fastvideo.layers.layernorm import RMSNorm
+from fastvideo.layers.linear import ReplicatedLinear
+from fastvideo.layers.mlp import MLP
+from fastvideo.layers.rotary_embedding import apply_rotary_emb
+from fastvideo.layers.visual_embedding import Timesteps
+from fastvideo.models.dits.base import BaseDiT
+from fastvideo.platforms import AttentionBackendEnum
 
 
 class CosmosPatchEmbed(nn.Module):
@@ -170,7 +170,8 @@ class CosmosSelfAttention(nn.Module):
                  eps=1e-6,
                  supported_attention_backends: tuple[AttentionBackendEnum, ...]
                  | None = None,
-                 prefix: str = "") -> None:
+                 prefix: str = "",
+                 attention_backend: str = "distributed") -> None:
         assert dim % num_heads == 0
         super().__init__()
         self.dim = dim
@@ -178,26 +179,40 @@ class CosmosSelfAttention(nn.Module):
         self.head_dim = dim // num_heads
         self.qk_norm = qk_norm
         self.eps = eps
+        self.attention_backend = attention_backend
 
-        # layers
-        self.to_q = ReplicatedLinear(dim, dim, bias=False)
-        self.to_k = ReplicatedLinear(dim, dim, bias=False)
-        self.to_v = ReplicatedLinear(dim, dim, bias=False)
-        self.to_out = ReplicatedLinear(dim, dim, bias=False)
+        # layers - use standard PyTorch layers when using torch backend
+        if attention_backend == "torch":
+            self.to_q = nn.Linear(dim, dim, bias=False)
+            self.to_k = nn.Linear(dim, dim, bias=False)
+            self.to_v = nn.Linear(dim, dim, bias=False)
+            self.to_out = nn.Linear(dim, dim, bias=False)
+        else:
+            self.to_q = ReplicatedLinear(dim, dim, bias=False)
+            self.to_k = ReplicatedLinear(dim, dim, bias=False)
+            self.to_v = ReplicatedLinear(dim, dim, bias=False)
+            self.to_out = ReplicatedLinear(dim, dim, bias=False)
+            
         self.norm_q = RMSNorm(self.head_dim,
                               eps=eps) if qk_norm else nn.Identity()
         self.norm_k = RMSNorm(self.head_dim,
                               eps=eps) if qk_norm else nn.Identity()
 
-        # Attention mechanism
-        self.attn = DistributedAttention(
-            num_heads=num_heads,
-            head_size=self.head_dim,
-            dropout_rate=0,
-            softmax_scale=None,
-            causal=False,
-            supported_attention_backends=supported_attention_backends,
-            prefix=prefix)
+        # Attention mechanism - select backend
+        if attention_backend == "torch":
+            self.use_torch_attention = True
+        elif attention_backend == "distributed":
+            self.attn = DistributedAttention(
+                num_heads=num_heads,
+                head_size=self.head_dim,
+                dropout_rate=0,
+                softmax_scale=None,
+                causal=False,
+                supported_attention_backends=supported_attention_backends,
+                prefix=prefix)
+            self.use_torch_attention = False
+        else:
+            raise ValueError(f"Unsupported attention backend: {attention_backend}")
 
     def forward(self,
                 hidden_states: torch.Tensor,
@@ -209,9 +224,14 @@ class CosmosSelfAttention(nn.Module):
             encoder_hidden_states = hidden_states
 
         # Get QKV
-        query, _ = self.to_q(hidden_states)
-        key, _ = self.to_k(encoder_hidden_states)
-        value, _ = self.to_v(encoder_hidden_states)
+        if self.attention_backend == "torch":
+            query = self.to_q(hidden_states)
+            key = self.to_k(encoder_hidden_states)
+            value = self.to_v(encoder_hidden_states)
+        else:
+            query, _ = self.to_q(hidden_states)
+            key, _ = self.to_k(encoder_hidden_states)
+            value, _ = self.to_v(encoder_hidden_states)
 
         # Reshape for multi-head attention
         query = query.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
@@ -236,12 +256,21 @@ class CosmosSelfAttention(nn.Module):
                                    use_real_unbind_dim=-2)
 
         # Attention computation
-        attn_output, _ = self.attn(query, key, value)
-        # attn_output = attn_output.flatten(2)
+        if self.use_torch_attention:
+            # Use standard PyTorch scaled dot product attention
+            attn_output = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, attn_mask=attention_mask, dropout_p=0.0
+            )
+        else:
+            attn_output, _ = self.attn(query, key, value)
+            
         attn_output = attn_output.transpose(1, 2).flatten(2, 3).type_as(query)
 
         # Output projection
-        attn_output, _ = self.to_out(attn_output)
+        if self.attention_backend == "torch":
+            attn_output = self.to_out(attn_output)
+        else:
+            attn_output, _ = self.to_out(attn_output)
         return attn_output
 
 
@@ -255,7 +284,8 @@ class CosmosCrossAttention(nn.Module):
                  eps=1e-6,
                  supported_attention_backends: tuple[AttentionBackendEnum, ...]
                  | None = None,
-                 prefix: str = "") -> None:
+                 prefix: str = "",
+                 attention_backend: str = "distributed") -> None:
         assert dim % num_heads == 0
         super().__init__()
         self.dim = dim
@@ -264,25 +294,39 @@ class CosmosCrossAttention(nn.Module):
         self.head_dim = dim // num_heads
         self.qk_norm = qk_norm
         self.eps = eps
+        self.attention_backend = attention_backend
 
-        # layers
-        self.to_q = ReplicatedLinear(dim, dim, bias=False)
-        self.to_k = ReplicatedLinear(cross_attention_dim, dim, bias=False)
-        self.to_v = ReplicatedLinear(cross_attention_dim, dim, bias=False)
-        self.to_out = ReplicatedLinear(dim, dim, bias=False)
+        # layers - use standard PyTorch layers when using torch backend
+        if attention_backend == "torch":
+            self.to_q = nn.Linear(dim, dim, bias=False)
+            self.to_k = nn.Linear(cross_attention_dim, dim, bias=False)
+            self.to_v = nn.Linear(cross_attention_dim, dim, bias=False)
+            self.to_out = nn.Linear(dim, dim, bias=False)
+        else:
+            self.to_q = ReplicatedLinear(dim, dim, bias=False)
+            self.to_k = ReplicatedLinear(cross_attention_dim, dim, bias=False)
+            self.to_v = ReplicatedLinear(cross_attention_dim, dim, bias=False)
+            self.to_out = ReplicatedLinear(dim, dim, bias=False)
+            
         self.norm_q = RMSNorm(self.head_dim,
                               eps=eps) if qk_norm else nn.Identity()
         self.norm_k = RMSNorm(self.head_dim,
                               eps=eps) if qk_norm else nn.Identity()
 
-        # Attention mechanism
-        self.attn = LocalAttention(
-            num_heads=num_heads,
-            head_size=self.head_dim,
-            dropout_rate=0,
-            softmax_scale=None,
-            causal=False,
-            supported_attention_backends=supported_attention_backends)
+        # Attention mechanism - select backend
+        if attention_backend == "torch":
+            self.use_torch_attention = True
+        elif attention_backend == "distributed":
+            self.attn = LocalAttention(
+                num_heads=num_heads,
+                head_size=self.head_dim,
+                dropout_rate=0,
+                softmax_scale=None,
+                causal=False,
+                supported_attention_backends=supported_attention_backends)
+            self.use_torch_attention = False
+        else:
+            raise ValueError(f"Unsupported attention backend: {attention_backend}")
 
     def forward(self,
                 hidden_states: torch.Tensor,
@@ -290,14 +334,25 @@ class CosmosCrossAttention(nn.Module):
                 attention_mask: torch.Tensor | None = None) -> torch.Tensor:
 
         # Get QKV
-        query, _ = self.to_q(hidden_states)
-        key, _ = self.to_k(encoder_hidden_states)
-        value, _ = self.to_v(encoder_hidden_states)
+        if self.attention_backend == "torch":
+            query = self.to_q(hidden_states)
+            key = self.to_k(encoder_hidden_states)
+            value = self.to_v(encoder_hidden_states)
+        else:
+            query, _ = self.to_q(hidden_states)
+            key, _ = self.to_k(encoder_hidden_states)
+            value, _ = self.to_v(encoder_hidden_states)
 
         # Reshape for multi-head attention
-        query = query.unflatten(2, (self.num_heads, -1))
-        key = key.unflatten(2, (self.num_heads, -1))
-        value = value.unflatten(2, (self.num_heads, -1))
+        if self.use_torch_attention:
+            # Standard PyTorch attention expects [batch, num_heads, seq_len, head_dim]
+            query = query.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
+            key = key.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
+            value = value.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
+        else:
+            query = query.unflatten(2, (self.num_heads, -1))
+            key = key.unflatten(2, (self.num_heads, -1))
+            value = value.unflatten(2, (self.num_heads, -1))
 
         # Apply normalization
         if self.norm_q is not None:
@@ -306,11 +361,20 @@ class CosmosCrossAttention(nn.Module):
             key = self.norm_k.forward_native(key)
 
         # Attention computation
-        attn_output = self.attn(query, key, value)
-        attn_output = attn_output.flatten(2, 3).type_as(query)
+        if self.use_torch_attention:
+            attn_output = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, attn_mask=attention_mask, dropout_p=0.0
+            )
+            attn_output = attn_output.transpose(1, 2).flatten(2, 3).type_as(query)
+        else:
+            attn_output = self.attn(query, key, value)
+            attn_output = attn_output.flatten(2, 3).type_as(query)
 
         # Output projection
-        attn_output, _ = self.to_out(attn_output)
+        if self.attention_backend == "torch":
+            attn_output = self.to_out(attn_output)
+        else:
+            attn_output, _ = self.to_out(attn_output)
         return attn_output
 
 
@@ -328,6 +392,7 @@ class CosmosTransformerBlock(nn.Module):
         supported_attention_backends: tuple[AttentionBackendEnum, ...]
         | None = None,
         prefix: str = "",
+        attention_backend: str = "distributed",
     ) -> None:
         super().__init__()
 
@@ -340,7 +405,8 @@ class CosmosTransformerBlock(nn.Module):
             num_heads=num_attention_heads,
             qk_norm=(qk_norm == "rms_norm"),
             supported_attention_backends=supported_attention_backends,
-            prefix=f"{prefix}.attn1")
+            prefix=f"{prefix}.attn1",
+            attention_backend=attention_backend)
 
         self.norm2 = CosmosAdaLayerNormZero(in_features=hidden_size,
                                             hidden_features=adaln_lora_dim)
@@ -350,7 +416,8 @@ class CosmosTransformerBlock(nn.Module):
             num_heads=num_attention_heads,
             qk_norm=(qk_norm == "rms_norm"),
             supported_attention_backends=supported_attention_backends,
-            prefix=f"{prefix}.attn2")
+            prefix=f"{prefix}.attn2",
+            attention_backend=attention_backend)
 
         self.norm3 = CosmosAdaLayerNormZero(in_features=hidden_size,
                                             hidden_features=adaln_lora_dim)
@@ -529,13 +596,13 @@ class CosmosLearnablePositionalEmbed(nn.Module):
 
 
 class CosmosTransformer3DModel(BaseDiT):
-    _fsdp_shard_conditions = CosmosConfig()._fsdp_shard_conditions
-    _compile_conditions = CosmosConfig()._compile_conditions
-    _supported_attention_backends = CosmosConfig()._supported_attention_backends
-    _param_names_mapping = CosmosConfig()._param_names_mapping
-    _lora_param_names_mapping = CosmosConfig()._lora_param_names_mapping
+    _fsdp_shard_conditions = CosmosVideoConfig()._fsdp_shard_conditions
+    _compile_conditions = CosmosVideoConfig()._compile_conditions
+    _supported_attention_backends = CosmosVideoConfig()._supported_attention_backends
+    param_names_mapping = CosmosVideoConfig().param_names_mapping
+    lora_param_names_mapping = CosmosVideoConfig().lora_param_names_mapping
 
-    def __init__(self, config: CosmosConfig, hf_config: dict[str, Any]) -> None:
+    def __init__(self, config: CosmosVideoConfig, hf_config: dict[str, Any]) -> None:
         super().__init__(config=config, hf_config=hf_config)
 
         inner_dim = config.num_attention_heads * config.attention_head_dim
@@ -586,6 +653,7 @@ class CosmosTransformer3DModel(BaseDiT):
                 out_bias=False,
                 supported_attention_backends=self._supported_attention_backends,
                 prefix=f"{config.prefix}.transformer_blocks.{i}",
+                attention_backend=config.arch_config.attention_backend,
             ) for i in range(config.num_layers)
         ])
 
