@@ -161,6 +161,9 @@ class FastVideoArgs:
     # MoE parameters used by Wan2.2
     boundary_ratio: float | None = None
 
+    # scheduler parameters
+    warp_denoising_step: bool = False
+
     @property
     def training_mode(self) -> bool:
         return not self.inference_mode
@@ -382,6 +385,15 @@ class FastVideoArgs:
             default=FastVideoArgs.enable_stage_verification,
             help="Enable input/output verification for pipeline stages",
         )
+
+        # scheduler parameters
+        parser.add_argument(
+            "--warp-denoising-step",
+            action=StoreBoolean,
+            default=FastVideoArgs.warp_denoising_step,
+            help="Warp denoising step for scheduler",
+        )
+
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)
 
@@ -592,7 +604,7 @@ class TrainingArgs(FastVideoArgs):
     dit_model_name_or_path: str = ""
 
     # diffusion setting
-    ema_decay: float = 0.0
+    ema_decay: float = 0.999
     ema_start_step: int = 0
     training_cfg_rate: float = 0.0
     precondition_outputs: bool = False
@@ -677,6 +689,8 @@ class TrainingArgs(FastVideoArgs):
     simulate_forward_interval: int = 1 
     regression_loss_weight: float = 0.0
     use_regression_loss: bool = False
+    cm_loss_weight: float = 0.0
+    cm_use_ema_teacher: bool = False
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -1033,6 +1047,13 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--use-regression-loss",
                             action=StoreBoolean,
                             help="Whether to use regression loss")
+        parser.add_argument("--cm-loss-weight",
+                            type=float,
+                            default=TrainingArgs.cm_loss_weight,
+                            help="Weight for consistency loss")
+        parser.add_argument("--cm-use-ema-teacher",
+                            action=StoreBoolean,
+                            help="Whether to use EMA teacher for consistency loss")
 
         return parser
 

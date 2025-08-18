@@ -37,7 +37,7 @@ from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases, get_scheduler,
     load_distillation_checkpoint, pred_noise_to_pred_video,
-    save_distillation_checkpoint, shift_timestep)
+    save_distillation_checkpoint, shift_timestep, EMA_FSDP)
 from fastvideo.utils import is_vsa_available, set_random_seed
 
 import wandb  # isort: skip
@@ -144,10 +144,21 @@ class DistillationPipeline(TrainingPipeline):
             "Distillation pipeline initialized with generator_update_interval=%s",
             self.generator_update_interval)
 
-        self.denoising_step_list = torch.tensor(
-            self.training_args.pipeline_config.dmd_denoising_steps,
-            dtype=torch.long,
-            device=get_local_torch_device())
+        if self.training_args.warp_denoising_step:
+            # timesteps = self.noise_scheduler.timesteps.cpu()
+            timesteps = torch.cat((self.noise_scheduler.timesteps.cpu(), torch.tensor([0], dtype=torch.float32)))
+            self.denoising_step_list = torch.tensor(
+                self.training_args.pipeline_config.dmd_denoising_steps,
+                dtype=torch.long, 
+                device=torch.device("cpu"))
+            self.denoising_step_list = timesteps[1000 - self.denoising_step_list].to(get_local_torch_device())
+            logger.info("Warp denoising step is enabled, using %s denoising steps", self.denoising_step_list)
+        else:
+            self.denoising_step_list = torch.tensor(
+                self.training_args.pipeline_config.dmd_denoising_steps,
+                dtype=torch.long,
+                device=get_local_torch_device())
+            logger.info("Warp denoising step is disabled, using %s denoising steps", self.denoising_step_list)
         logger.info("Distillation generator model to %s denoising steps",
                     len(self.denoising_step_list))
         self.num_train_timestep = self.noise_scheduler.num_train_timesteps
@@ -158,6 +169,14 @@ class DistillationPipeline(TrainingPipeline):
                                 self.num_train_timestep)
 
         self.real_score_guidance_scale = self.training_args.real_score_guidance_scale
+
+        # Initialize EMA teacher for CM if enabled
+        self.use_cm_with_ema = getattr(self.training_args, "cm_use_ema_teacher", False)
+        if self.use_cm_with_ema:
+            # Use local_shard mode for teacher forward compatibility with FSDP2
+            self.ema_teacher = EMA_FSDP(self.transformer, decay=getattr(self.training_args, "ema_decay", 0.999), mode="local_shard")
+        else:
+            self.ema_teacher = None
 
     @abstractmethod
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
@@ -414,6 +433,86 @@ class DistillationPipeline(TrainingPipeline):
             "generator_timestep"] = target_timestep.float().detach()
 
         return pred_video
+    
+    def _calculate_consistency_loss(self, pred_video: torch.Tensor, training_batch: TrainingBatch) -> torch.Tensor:
+        """
+        Consistency loss (CM-like): two variants
+          - Without EMA: teacher = model at higher noise with stop-grad
+          - With EMA: teacher = EMA(model) at lower noise or higher noise depending on schedule (use higher noise as teacher)
+        """
+        # Need at least two steps to form a pair
+        if len(self.denoising_step_list) < 2:
+            return torch.tensor(0.0, device=self.device, dtype=pred_video.dtype)
+
+        # Choose a random index k in [1, N-1] so that (k-1, k) is valid
+        idx_high = torch.randint(1, len(self.denoising_step_list), [1], device=self.device).item()
+        t_high = self.denoising_step_list[idx_high]
+        t_low = self.denoising_step_list[idx_high - 1]
+        t_low = t_low * torch.ones(1, device=self.device, dtype=torch.long)
+        t_high = t_high * torch.ones(1, device=self.device, dtype=torch.long)
+        logger.info(f"t_high: {t_high}, t_low: {t_low}")
+
+        # Use student output as base for CM pairing (noisy inputs derived from student's prediction)
+        base_student = pred_video
+        # Shared base noise for both timesteps
+        base_noise = torch.randn(self.video_latent_shape, device=self.device, dtype=base_student.dtype)
+        if self.sp_world_size > 1:
+            base_noise = rearrange(base_noise,
+                                   "b (n t) c h w -> b n t c h w",
+                                   n=self.sp_world_size).contiguous()
+            base_noise = base_noise[:, self.rank_in_sp_group, :, :, :, :]
+
+        # Build noisy inputs for the selected timesteps using the same student base and same noise
+        noisy_high = self.noise_scheduler.add_noise(
+            base_student.flatten(0, 1), base_noise.flatten(0, 1), t_high
+        ).unflatten(0, (1, base_student.shape[1]))
+        noisy_low = self.noise_scheduler.add_noise(
+            base_student.flatten(0, 1), base_noise.flatten(0, 1), t_low
+        ).unflatten(0, (1, base_student.shape[1]))
+
+        # Teacher: lower-noise branch y_low (EMA or stop-grad model)
+        tb_low = self._build_distill_input_kwargs(noisy_low, t_low, training_batch.conditional_dict, training_batch)
+        if self.use_cm_with_ema and self.ema_teacher is not None:
+            with self.ema_teacher.apply_to_model(self.transformer):
+                with torch.no_grad():
+                    pred_noise_low_teacher = self.transformer(**tb_low.input_kwargs).permute(0, 2, 1, 3, 4)
+                    y_low = pred_noise_to_pred_video(
+                        pred_noise=pred_noise_low_teacher.flatten(0, 1),
+                        noise_input_latent=noisy_low.flatten(0, 1),
+                        timestep=t_low,
+                        scheduler=self.noise_scheduler,
+                    ).unflatten(0, pred_noise_low_teacher.shape[:2])
+        else:
+            with torch.no_grad():
+                pred_noise_low_teacher = self.transformer(**tb_low.input_kwargs).permute(0, 2, 1, 3, 4)
+                y_low = pred_noise_to_pred_video(
+                    pred_noise=pred_noise_low_teacher.flatten(0, 1),
+                    noise_input_latent=noisy_low.flatten(0, 1),
+                    timestep=t_low,
+                    scheduler=self.noise_scheduler,
+                ).unflatten(0, pred_noise_low_teacher.shape[:2])
+
+        # Student: prediction at higher noise y_high (current model, grad-enabled)
+        tb_high = self._build_distill_input_kwargs(
+            noisy_high, t_high, training_batch.conditional_dict, training_batch)
+        pred_noise_high_student = self.transformer(**tb_high.input_kwargs).permute(0, 2, 1, 3, 4)
+        y_high = pred_noise_to_pred_video(
+            pred_noise=pred_noise_high_student.flatten(0, 1),
+            noise_input_latent=noisy_high.flatten(0, 1),
+            timestep=t_high,
+            scheduler=self.noise_scheduler,
+        ).unflatten(0, pred_noise_high_student.shape[:2])
+
+        # Match student y_high to teacher y_low
+        cm_loss = F.mse_loss(y_high, y_low.detach())
+
+        # Optionally record for logging
+        training_batch.dmd_latent_vis_dict.update({
+            "cm_timestep_high": t_high,
+            "cm_timestep_low": t_low,
+        })
+
+        return cm_loss
 
     def _dmd_forward(self, generator_pred_video: torch.Tensor,
                      training_batch: TrainingBatch) -> torch.Tensor:
@@ -681,6 +780,15 @@ class DistillationPipeline(TrainingPipeline):
                         generator_pred_video=generator_pred_video,
                         training_batch=batch_gen)
 
+                    # Consistency loss (optional)
+                    cm_weight = getattr(self.training_args, "cm_loss_weight", 0.0)
+                    if cm_weight > 0.0:
+                        cm_loss = self._calculate_consistency_loss(
+                            pred_video=generator_pred_video,
+                            training_batch=batch_gen,
+                        )
+                        dmd_loss = dmd_loss + cm_weight * cm_loss
+
                 with set_forward_context(
                         current_timestep=batch_gen.timesteps,
                         attn_metadata=batch_gen.attn_metadata_vsa):
@@ -689,6 +797,9 @@ class DistillationPipeline(TrainingPipeline):
             self.num_generator_updates += 1
             self._clip_model_grad_norm_(batch_gen, self.transformer)
             self.optimizer.step()
+            # Update EMA teacher after generator parameter update
+            if getattr(self, "use_cm_with_ema", False) and getattr(self, "ema_teacher", None) is not None:
+                self.ema_teacher.update(self.transformer)
             self.optimizer.zero_grad(set_to_none=True)
             avg_dmd_loss = torch.tensor(total_dmd_loss /
                                         gradient_accumulation_steps,
