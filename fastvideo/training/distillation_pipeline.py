@@ -252,9 +252,18 @@ class DistillationPipeline(TrainingPipeline):
         # regression_loss = F.mse_loss(pred_video, latents)
         
         # LPIPS loss
-        pred_video = rearrange(pred_video, "b n c h w -> (b n) c h w")
-        latents = rearrange(latents, "b n c h w -> (b n) c h w")
-        regression_loss = LPIPSimilarity(pred_video, latents)
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            with torch.no_grad():  
+                pred_video_frames = self.vae.decode(pred_video)
+                latents_frames = self.vae.decode(latents)
+        
+        pred_video_frames = (pred_video_frames / 2 + 0.5).clamp(0, 1)
+        latents_frames = (latents_frames / 2 + 0.5).clamp(0, 1)
+        
+        pred_video_frames = rearrange(pred_video_frames, "b n c h w -> (b n) c h w")
+        latents_frames = rearrange(latents_frames, "b n c h w -> (b n) c h w")
+        
+        regression_loss = LPIPSimilarity(pred_video_frames, latents_frames)
         pred_video = pred_video.type_as(noisy_latent)
         training_batch.regression_loss = regression_loss
         # regression_log_dict = {
@@ -362,10 +371,24 @@ class DistillationPipeline(TrainingPipeline):
             scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
         
         regression_loss = F.mse_loss(pred_video, latents)
-        # LPIPS loss
-        pred_video = rearrange(pred_video, "b n c h w -> (b n) c h w")
-        latents = rearrange(latents, "b n c h w -> (b n) c h w")
-        regression_loss = LPIPSimilarity(pred_video, latents)
+        # LPIPS loss - decode latents to actual frames first
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            with torch.no_grad():  # Prevent gradients through VAE
+                # Decode pred_video latents to RGB frames
+                pred_video_frames = self.vae.decode(pred_video)
+                # Decode ground truth latents to RGB frames  
+                latents_frames = self.vae.decode(latents)
+        
+        # Normalize to [0, 1] range (same as in visualization code)
+        pred_video_frames = (pred_video_frames / 2 + 0.5).clamp(0, 1)
+        latents_frames = (latents_frames / 2 + 0.5).clamp(0, 1)
+        
+        # Apply shape transformations for LPIPS
+        pred_video_frames = rearrange(pred_video_frames, "b n c h w -> (b n) c h w")
+        latents_frames = rearrange(latents_frames, "b n c h w -> (b n) c h w")
+        
+        # Now compute LPIPS loss on actual RGB frames
+        regression_loss = LPIPSimilarity(pred_video_frames, latents_frames)
         training_batch.regression_loss = regression_loss
         training_batch.dmd_latent_vis_dict[
             "generator_timestep"] = target_timestep.float().detach()
