@@ -178,6 +178,7 @@ class DistillationPipeline(TrainingPipeline):
             self.ema_teacher = EMA_FSDP(self.transformer, decay=self.training_args.ema_decay, mode="local_shard")
         else:
             self.ema_teacher = None
+        self.lpips = LPIPSimilarity().to(self.device)
 
     @abstractmethod
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
@@ -388,7 +389,7 @@ class DistillationPipeline(TrainingPipeline):
         latents_frames = rearrange(latents_frames, "b n c h w -> (b n) c h w")
         
         # Now compute LPIPS loss on actual RGB frames
-        regression_loss = LPIPSimilarity(pred_video_frames, latents_frames)
+        regression_loss = self.lpips(pred_video_frames, latents_frames)
         training_batch.regression_loss = regression_loss
         training_batch.dmd_latent_vis_dict[
             "generator_timestep"] = target_timestep.float().detach()
