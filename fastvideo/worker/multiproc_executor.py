@@ -109,6 +109,18 @@ class MultiprocExecutor(Executor):
                 raise RuntimeError(
                     f"Worker {i} failed to set LoRA adapter to {lora_path}")
 
+    def unmerge_lora_weights(self) -> None:
+        responses = self.collective_rpc("unmerge_lora_weights", kwargs={})
+        for i, response in enumerate(responses):
+            if response["status"] != "lora_adapter_unmerged":
+                raise RuntimeError(f"Worker {i} failed to unmerge LoRA weights")
+
+    def merge_lora_weights(self) -> None:
+        responses = self.collective_rpc("merge_lora_weights", kwargs={})
+        for i, response in enumerate(responses):
+            if response["status"] != "lora_adapter_merged":
+                raise RuntimeError(f"Worker {i} failed to merge LoRA weights")
+
     def collective_rpc(self,
                        method: str | Callable,
                        timeout: float | None = None,

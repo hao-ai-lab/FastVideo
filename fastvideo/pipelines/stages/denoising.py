@@ -323,6 +323,7 @@ class DenoisingStage(PipelineStage):
                                 noise_pred_text,
                                 guidance_rescale=batch.guidance_rescale,
                             )
+                    torch.distributed.breakpoint()
                     # Compute the previous noisy sample
                     latents = self.scheduler.step(noise_pred,
                                                   t,

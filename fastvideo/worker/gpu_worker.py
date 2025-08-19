@@ -18,7 +18,7 @@ from fastvideo.distributed import (
 from fastvideo.distributed.parallel_state import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.pipelines import ForwardBatch, build_pipeline
+from fastvideo.pipelines import ForwardBatch, LoRAPipeline, build_pipeline
 from fastvideo.platforms import current_platform
 from fastvideo.utils import (get_exception_traceback,
                              kill_itself_when_parent_died)
@@ -117,6 +117,14 @@ class Worker:
                     local_main_process_only=False)
         return {"status": "shutdown_complete"}
 
+    def unmerge_lora_weights(self) -> None:
+        if isinstance(self.pipeline, LoRAPipeline):
+            self.pipeline.unmerge_lora_weights()
+
+    def merge_lora_weights(self) -> None:
+        if isinstance(self.pipeline, LoRAPipeline):
+            self.pipeline.merge_lora_weights()
+
     def event_loop(self) -> None:
         """Event loop for the worker."""
         logger.info("Worker %d starting event loop...",
@@ -154,6 +162,14 @@ class Worker:
                     logger.info("Worker %d set LoRA adapter %s with path %s",
                                 self.rank, lora_nickname, lora_path)
                     self.pipe.send({"status": "lora_adapter_set"})
+                elif method_name == 'unmerge_lora_weights':
+                    self.unmerge_lora_weights()
+                    logger.info("Worker %d unmerged LoRA weights", self.rank)
+                    self.pipe.send({"status": "lora_adapter_unmerged"})
+                elif method_name == 'merge_lora_weights':
+                    self.merge_lora_weights()
+                    logger.info("Worker %d merged LoRA weights", self.rank)
+                    self.pipe.send({"status": "lora_adapter_merged"})
                 else:
                     # Handle other methods dynamically if needed
                     args = recv_rpc.get('args', ())
