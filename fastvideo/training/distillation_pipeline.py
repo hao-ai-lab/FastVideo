@@ -277,16 +277,17 @@ class DistillationPipeline(TrainingPipeline):
 
         # Step 2: Simulate the multi-step inference process up to the target timestep
         # Start from pure noise like in inference
-        current_noise_latents = torch.randn(self.video_latent_shape,
+        noise_latent = torch.randn(self.video_latent_shape,
                                             device=self.device,
                                             dtype=dtype)
         if self.sp_world_size > 1:
-            current_noise_latents = rearrange(
-                current_noise_latents,
+            noise_latents = rearrange(
+                noise_latent,
                 "b (n t) c h w -> b n t c h w",
                 n=self.sp_world_size).contiguous()
-            current_noise_latents = current_noise_latents[:, self.
+            noise_latent = noise_latent[:, self.
                                                           rank_in_sp_group, :, :, :, :]
+        current_noise_latents = noise_latent.clone()
 
         # Only run intermediate steps if target_timestep_idx > 0
         max_target_idx = len(self.denoising_step_list) - 1
@@ -340,7 +341,7 @@ class DistillationPipeline(TrainingPipeline):
             ) - 1, "noise_latent_index is out of bounds"
             noisy_input = noise_latents[noise_latent_index]
         else:
-            noisy_input = current_noise_latents
+            noisy_input = noise_latent
 
         # Step 4: Final student prediction (this is what we train on)
         training_batch = self._build_distill_input_kwargs(
@@ -353,87 +354,14 @@ class DistillationPipeline(TrainingPipeline):
             noise_input_latent=noisy_input.flatten(0, 1),
             timestep=target_timestep,
             scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
-        training_batch.dmd_latent_vis_dict[
-            "generator_timestep"] = target_timestep.float().detach()
-        return pred_video
-
-    def _generator_forward_with_validation_pipeline(
-            self, training_batch: TrainingBatch) -> torch.Tensor:
-        dtype = training_batch.latents.dtype
-
-        # Step 1: Randomly sample a target timestep index from denoising_step_list
-        target_timestep_idx = torch.randint(0,
-                                            len(self.denoising_step_list), [1],
-                                            device=self.device,
-                                            dtype=torch.long)
-        # target_timestep_idx = torch.tensor([2], device=self.device, dtype=torch.long)
-        target_timestep_idx_int = target_timestep_idx.item()
-        target_timestep = self.denoising_step_list[target_timestep_idx]
-        # self.training_args.pipeline_config.dmd_denoising_steps,
-        # from copy import deepcopy
-        # args = deepcopy(self.training_args)
-        # args.pipeline_config.dmd_denoising_steps = self.training_args.pipeline_config.dmd_denoising_steps[:target_timestep_idx_int]
-
-        # Step 2: Simulate the multi-step inference process up to the target timestep
-        # Start from pure noise like in inference
-        current_noise_latents = torch.randn(self.video_latent_shape,
-                                            device=self.device,
-                                            dtype=dtype)
-        current_timestep = self.denoising_step_list[0]
-        current_timestep_tensor = current_timestep * torch.ones(
-            1, device=self.device, dtype=torch.long)
-        training_batch_temp = self._build_distill_input_kwargs(
-            current_noise_latents, current_timestep_tensor,
-            training_batch.conditional_dict, training_batch)
-        manual_batch = ForwardBatch(
-            data_type="video",
-            # **shallow_asdict(self.training_args),
-            latents=current_noise_latents.permute(0, 2, 1, 3, 4),
-            generator=torch.Generator(device="cpu").manual_seed(self.seed),
-            image_embeds=[
-                training_batch_temp.input_kwargs["encoder_hidden_states_image"]
-            ],
-            prompt_embeds=[
-                training_batch_temp.input_kwargs["encoder_hidden_states"]
-            ],
-            image_latent=training_batch_temp.input_kwargs["image_latent"],
-            timesteps=current_timestep_tensor,
-            return_trajectory_latents=True,
-            # n_tokens=n_tokens,
-            # eta=0.0,
-            # VSA_sparsity=training_args.VSA_sparsity,
-        )
-        with torch.no_grad():
-            batch = self.validation_pipeline.denoising_stage.forward(
-                batch=manual_batch, fastvideo_args=self.training_args)
-            noisy_latents = batch.trajectory_latents[target_timestep_idx_int -
-                                                     1]
-
-        # return batch.trajectory_latents[target_timestep_idx_int]
-
-        if target_timestep_idx_int > 0:
-            # pred_clean = batch.trajectory_latents[target_timestep_idx_int-1]
-            noisy_input = noisy_latents
-        else:
-            noisy_input = current_noise_latents
-
-        # Step 4: Final student prediction (this is what we train on)
-        training_batch = self._build_distill_input_kwargs(
-            noisy_input, target_timestep, training_batch.conditional_dict,
-            training_batch)
-        pred_noise = self.transformer(**training_batch.input_kwargs).permute(
-            0, 2, 1, 3, 4)
-        pred_video = pred_noise_to_pred_video(
-            pred_noise=pred_noise.flatten(0, 1),
-            noise_input_latent=noisy_input.flatten(0, 1),
-            timestep=target_timestep,
-            scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
-
+        
+        regression_loss = F.mse_loss(pred_video, latents)
+        training_batch.regression_loss = regression_loss
         training_batch.dmd_latent_vis_dict[
             "generator_timestep"] = target_timestep.float().detach()
 
         return pred_video
-    
+
     def _calculate_consistency_loss(self, pred_video: torch.Tensor, training_batch: TrainingBatch) -> torch.Tensor:
         """
         Consistency loss (CM-like): two variants
@@ -453,8 +381,8 @@ class DistillationPipeline(TrainingPipeline):
         logger.info(f"t_high: {t_high}, t_low: {t_low}")
 
         # Use student output as base for CM pairing (noisy inputs derived from student's prediction)
-        # base_student = pred_video
-        base_student = training_batch.latents
+        base_student = pred_video
+        # base_student = training_batch.latents
         # Shared base noise for both timesteps
         base_noise = torch.randn(self.video_latent_shape, device=self.device, dtype=base_student.dtype)
         if self.sp_world_size > 1:
@@ -501,6 +429,7 @@ class DistillationPipeline(TrainingPipeline):
 
         # Match student y_high to teacher y_low
         cm_loss = F.mse_loss(y_high, y_low.detach())
+        logger.info(f"cm_loss: {cm_loss.item()}")
 
         # Optionally record for logging
         training_batch.dmd_latent_vis_dict.update({
@@ -755,17 +684,6 @@ class DistillationPipeline(TrainingPipeline):
             for batch in batches:
                 batch_gen = copy.deepcopy(batch)
 
-                # Consistency loss first (to avoid in-place param swaps after any grad-tracked forward)
-                cm_weight = self.training_args.cm_loss_weight
-                dmd_loss_extra = 0.0
-                if cm_weight > 0.0:
-                    with set_forward_context(current_timestep=batch_gen.timesteps,
-                                             attn_metadata=batch_gen.attn_metadata):
-                        cm_loss = self._calculate_consistency_loss(
-                            pred_video=None,  # unused
-                            training_batch=batch_gen,
-                        )
-                        dmd_loss_extra = cm_weight * cm_loss
 
                 # Generator forward and DMD loss after CM
                 with set_forward_context(
@@ -783,11 +701,24 @@ class DistillationPipeline(TrainingPipeline):
                         generator_pred_video = self._generator_forward(
                             batch_gen)
 
+                # Consistency loss first (to avoid in-place param swaps after any grad-tracked forward)
+                cm_weight = self.training_args.cm_loss_weight
+                dmd_loss_extra = 0.0
+                if cm_weight > 0.0:
+                    with set_forward_context(current_timestep=batch_gen.timesteps,
+                                             attn_metadata=batch_gen.attn_metadata):
+                        cm_loss = self._calculate_consistency_loss(
+                            pred_video=generator_pred_video,
+                            training_batch=batch_gen,
+                        )
+                        dmd_loss_extra = cm_weight * cm_loss
+
                 with set_forward_context(current_timestep=batch_gen.timesteps,
                                          attn_metadata=batch_gen.attn_metadata):
                     dmd_loss = self._dmd_forward(
                         generator_pred_video=generator_pred_video,
                         training_batch=batch_gen)
+                    logger.info(f"dmd_loss: {dmd_loss.item()}")
                     dmd_loss = dmd_loss + dmd_loss_extra
 
                 with set_forward_context(

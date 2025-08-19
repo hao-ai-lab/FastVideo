@@ -69,7 +69,7 @@ optimizer_args=(
   --lr_scheduler "constant"
   # --min_lr_ratio 0.5
   # --lr_warmup_steps 50
-  --fake_score_learning_rate 4e-6
+  --fake_score_learning_rate 7e-7
   --fake_score_lr_scheduler "constant"
   --mixed_precision "bf16"
   --training_state_checkpointing_steps 2000
@@ -96,15 +96,15 @@ dmd_args=(
   --min_timestep_ratio 0.02
   --max_timestep_ratio 0.96
   --generator_update_interval 5
-  # --simulate_generator_forward
-  # --simulate_forward_interval 1
+  --simulate_generator_forward
+  --simulate_forward_interval 1
   --real_score_guidance_scale 5
   --VSA_sparsity 0.8
-  --regression_loss_weight 7
-  --use_regression_loss False
-  --cm_loss_weight 0.5
-  --ema_decay 0.999
-  --cm_use_ema_teacher
+  --regression_loss_weight 0.01
+  --use_regression_loss True
+  --cm_loss_weight 0
+  # --ema_decay 0.999
+  # --cm_use_ema_teacher
 )
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
