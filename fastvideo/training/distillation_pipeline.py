@@ -41,6 +41,7 @@ from fastvideo.training.training_utils import (
 from fastvideo.utils import is_vsa_available, set_random_seed
 
 import wandb  # isort: skip
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity as LPIPSimilarity
 
 vsa_available = is_vsa_available()
 
@@ -248,7 +249,12 @@ class DistillationPipeline(TrainingPipeline):
             timestep=timestep,
             scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
 
-        regression_loss = F.mse_loss(pred_video, latents)
+        # regression_loss = F.mse_loss(pred_video, latents)
+        
+        # LPIPS loss
+        pred_video = rearrange(pred_video, "b n c h w -> (b n) c h w")
+        latents = rearrange(latents, "b n c h w -> (b n) c h w")
+        regression_loss = LPIPSimilarity(pred_video, latents)
         pred_video = pred_video.type_as(noisy_latent)
         training_batch.regression_loss = regression_loss
         # regression_log_dict = {
@@ -356,6 +362,10 @@ class DistillationPipeline(TrainingPipeline):
             scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
         
         regression_loss = F.mse_loss(pred_video, latents)
+        # LPIPS loss
+        pred_video = rearrange(pred_video, "b n c h w -> (b n) c h w")
+        latents = rearrange(latents, "b n c h w -> (b n) c h w")
+        regression_loss = LPIPSimilarity(pred_video, latents)
         training_batch.regression_loss = regression_loss
         training_batch.dmd_latent_vis_dict[
             "generator_timestep"] = target_timestep.float().detach()
