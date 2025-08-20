@@ -16,6 +16,8 @@ import torchvision
 from einops import rearrange
 from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
+from torchmetrics.image.lpip import (
+    LearnedPerceptualImagePatchSimilarity as LPIPSimilarity)
 from tqdm.auto import tqdm
 
 import fastvideo.envs as envs
@@ -35,13 +37,12 @@ from fastvideo.training.activation_checkpoint import (
     apply_activation_checkpointing)
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
-    clip_grad_norm_while_handling_failing_dtensor_cases, get_scheduler,
-    load_distillation_checkpoint, pred_noise_to_pred_video,
-    save_distillation_checkpoint, shift_timestep, EMA_FSDP)
+    EMA_FSDP, clip_grad_norm_while_handling_failing_dtensor_cases,
+    get_scheduler, load_distillation_checkpoint, pred_noise_to_pred_video,
+    save_distillation_checkpoint, shift_timestep)
 from fastvideo.utils import is_vsa_available, set_random_seed
 
 import wandb  # isort: skip
-from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity as LPIPSimilarity
 
 vsa_available = is_vsa_available()
 
@@ -147,19 +148,26 @@ class DistillationPipeline(TrainingPipeline):
 
         if self.training_args.warp_denoising_step:
             # timesteps = self.noise_scheduler.timesteps.cpu()
-            timesteps = torch.cat((self.noise_scheduler.timesteps.cpu(), torch.tensor([0], dtype=torch.float32)))
+            timesteps = torch.cat((self.noise_scheduler.timesteps.cpu(),
+                                   torch.tensor([0], dtype=torch.float32)))
             self.denoising_step_list = torch.tensor(
                 self.training_args.pipeline_config.dmd_denoising_steps,
-                dtype=torch.long, 
+                dtype=torch.long,
                 device=torch.device("cpu"))
-            self.denoising_step_list = timesteps[1000 - self.denoising_step_list].to(get_local_torch_device())
-            logger.info("Warp denoising step is enabled, using %s denoising steps", self.denoising_step_list)
+            self.denoising_step_list = timesteps[1000 -
+                                                 self.denoising_step_list].to(
+                                                     get_local_torch_device())
+            logger.info(
+                "Warp denoising step is enabled, using %s denoising steps",
+                self.denoising_step_list)
         else:
             self.denoising_step_list = torch.tensor(
                 self.training_args.pipeline_config.dmd_denoising_steps,
                 dtype=torch.long,
                 device=get_local_torch_device())
-            logger.info("Warp denoising step is disabled, using %s denoising steps", self.denoising_step_list)
+            logger.info(
+                "Warp denoising step is disabled, using %s denoising steps",
+                self.denoising_step_list)
         logger.info("Distillation generator model to %s denoising steps",
                     len(self.denoising_step_list))
         self.num_train_timestep = self.noise_scheduler.num_train_timesteps
@@ -172,13 +180,68 @@ class DistillationPipeline(TrainingPipeline):
         self.real_score_guidance_scale = self.training_args.real_score_guidance_scale
 
         # Initialize EMA teacher for CM if enabled
-        self.use_cm_with_ema = getattr(self.training_args, "cm_use_ema_teacher", False)
+        self.use_cm_with_ema = getattr(self.training_args, "cm_use_ema_teacher",
+                                       False)
         if self.use_cm_with_ema:
             # Use local_shard mode for teacher forward compatibility with FSDP2
-            self.ema_teacher = EMA_FSDP(self.transformer, decay=self.training_args.ema_decay, mode="local_shard")
+            self.ema_teacher = EMA_FSDP(self.transformer,
+                                        decay=self.training_args.ema_decay,
+                                        mode="local_shard")
         else:
             self.ema_teacher = None
         self.lpips = LPIPSimilarity().to(self.device)
+
+    def _compute_lpips_loss(self, pred_video: torch.Tensor,
+                            latents: torch.Tensor) -> torch.Tensor:
+        """
+        Helper method to compute LPIPS loss between predicted video and ground truth latents.
+        This method handles VAE scaling, shifting, decoding, and frame processing consistently.
+        """
+        print("Computing LPIPS loss...")
+        with torch.autocast("cuda", dtype=torch.bfloat16), torch.no_grad():
+            # Apply VAE scaling factor and shift factor before decoding (same as visualize_intermediate_latents)
+            pred_video = pred_video.permute(0, 2, 1, 3, 4)
+            latents = latents.permute(0, 2, 1, 3, 4)
+            if isinstance(self.vae.scaling_factor, torch.Tensor):
+                pred_video_scaled = pred_video / self.vae.scaling_factor.to(
+                    pred_video.device, pred_video.dtype)
+                latents_scaled = latents / self.vae.scaling_factor.to(
+                    latents.device, latents.dtype)
+            else:
+                pred_video_scaled = pred_video / self.vae.scaling_factor
+                latents_scaled = latents / self.vae.scaling_factor
+
+            # Apply shifting if needed
+            if (hasattr(self.vae, "shift_factor")
+                    and self.vae.shift_factor is not None):
+                if isinstance(self.vae.shift_factor, torch.Tensor):
+                    pred_video_scaled += self.vae.shift_factor.to(
+                        pred_video.device, pred_video.dtype)
+                    latents_scaled += self.vae.shift_factor.to(
+                        latents.device, latents.dtype)
+                else:
+                    pred_video_scaled += self.vae.shift_factor
+                    latents_scaled += self.vae.shift_factor
+
+            # Permute from [batch, channels, frames, height, width] to [batch, frames, channels, height, width] for VAE decode
+            # pred_video_scaled = pred_video_scaled.permute(0, 2, 1, 3, 4)
+            # latents_scaled = latents_scaled.permute(0, 2, 1, 3, 4)
+
+            # print(f"pred_video_scaled shape after permute: {pred_video_scaled.shape}")
+            # print(f"latents_scaled shape after permute: {latents_scaled.shape}")
+            pred_video_frames = self.vae.decode(pred_video_scaled)
+            latents_frames = self.vae.decode(latents_scaled)
+
+        # VAE output is already in [-1, 1] range, keep it for LPIPS
+        # Just permute back to [B, T, C, H, W] format for frame processing
+        pred_video_frames = pred_video_frames.permute(0, 2, 1, 3, 4)
+        latents_frames = latents_frames.permute(0, 2, 1, 3, 4)
+
+        pred_video_frames = rearrange(pred_video_frames,
+                                      "b n c h w -> (b n) c h w")
+        latents_frames = rearrange(latents_frames, "b n c h w -> (b n) c h w")
+
+        return self.lpips(pred_video_frames, latents_frames)
 
     @abstractmethod
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
@@ -251,20 +314,9 @@ class DistillationPipeline(TrainingPipeline):
             scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
 
         # regression_loss = F.mse_loss(pred_video, latents)
-        
+
         # LPIPS loss
-        with torch.autocast("cuda", dtype=torch.bfloat16):
-            with torch.no_grad():  
-                pred_video_frames = self.vae.decode(pred_video)
-                latents_frames = self.vae.decode(latents)
-        
-        pred_video_frames = (pred_video_frames / 2 + 0.5).clamp(0, 1)
-        latents_frames = (latents_frames / 2 + 0.5).clamp(0, 1)
-        
-        pred_video_frames = rearrange(pred_video_frames, "b n c h w -> (b n) c h w")
-        latents_frames = rearrange(latents_frames, "b n c h w -> (b n) c h w")
-        
-        regression_loss = LPIPSimilarity(pred_video_frames, latents_frames)
+        regression_loss = self._compute_lpips_loss(pred_video, latents)
         pred_video = pred_video.type_as(noisy_latent)
         training_batch.regression_loss = regression_loss
         # regression_log_dict = {
@@ -294,15 +346,13 @@ class DistillationPipeline(TrainingPipeline):
         # Step 2: Simulate the multi-step inference process up to the target timestep
         # Start from pure noise like in inference
         noise_latent = torch.randn(self.video_latent_shape,
-                                            device=self.device,
-                                            dtype=dtype)
+                                   device=self.device,
+                                   dtype=dtype)
         if self.sp_world_size > 1:
-            noise_latents = rearrange(
-                noise_latent,
-                "b (n t) c h w -> b n t c h w",
-                n=self.sp_world_size).contiguous()
-            noise_latent = noise_latent[:, self.
-                                                          rank_in_sp_group, :, :, :, :]
+            noise_latents = rearrange(noise_latent,
+                                      "b (n t) c h w -> b n t c h w",
+                                      n=self.sp_world_size).contiguous()
+            noise_latent = noise_latent[:, self.rank_in_sp_group, :, :, :, :]
         current_noise_latents = noise_latent.clone()
 
         # Only run intermediate steps if target_timestep_idx > 0
@@ -370,33 +420,19 @@ class DistillationPipeline(TrainingPipeline):
             noise_input_latent=noisy_input.flatten(0, 1),
             timestep=target_timestep,
             scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
-        
+
         regression_loss = F.mse_loss(pred_video, latents)
         # LPIPS loss - decode latents to actual frames first
-        with torch.autocast("cuda", dtype=torch.bfloat16):
-            with torch.no_grad():  # Prevent gradients through VAE
-                # Decode pred_video latents to RGB frames
-                pred_video_frames = self.vae.decode(pred_video)
-                # Decode ground truth latents to RGB frames  
-                latents_frames = self.vae.decode(latents)
-        
-        # Normalize to [0, 1] range (same as in visualization code)
-        pred_video_frames = (pred_video_frames / 2 + 0.5).clamp(0, 1)
-        latents_frames = (latents_frames / 2 + 0.5).clamp(0, 1)
-        
-        # Apply shape transformations for LPIPS
-        pred_video_frames = rearrange(pred_video_frames, "b n c h w -> (b n) c h w")
-        latents_frames = rearrange(latents_frames, "b n c h w -> (b n) c h w")
-        
-        # Now compute LPIPS loss on actual RGB frames
-        regression_loss = self.lpips(pred_video_frames, latents_frames)
+        regression_loss = self._compute_lpips_loss(pred_video, latents)
         training_batch.regression_loss = regression_loss
         training_batch.dmd_latent_vis_dict[
             "generator_timestep"] = target_timestep.float().detach()
 
         return pred_video
 
-    def _calculate_consistency_loss(self, pred_video: torch.Tensor, training_batch: TrainingBatch) -> torch.Tensor:
+    def _calculate_consistency_loss(
+            self, pred_video: torch.Tensor,
+            training_batch: TrainingBatch) -> torch.Tensor:
         """
         Consistency loss (CM-like): two variants
           - Without EMA: teacher = model at higher noise with stop-grad
@@ -407,18 +443,22 @@ class DistillationPipeline(TrainingPipeline):
             return torch.tensor(0.0, device=self.device, dtype=pred_video.dtype)
 
         # Choose a random index k in [1, N-1] so that (k-1, k) is valid
-        idx_high = torch.randint(1, len(self.denoising_step_list), [1], device=self.device).item()
+        idx_high = torch.randint(1,
+                                 len(self.denoising_step_list), [1],
+                                 device=self.device).item()
         t_high = self.denoising_step_list[idx_high]
         t_low = self.denoising_step_list[idx_high - 1]
         t_low = t_low * torch.ones(1, device=self.device, dtype=torch.long)
         t_high = t_high * torch.ones(1, device=self.device, dtype=torch.long)
-        logger.info(f"t_high: {t_high}, t_low: {t_low}")
+        logger.info("t_high: %s, t_low: %s", t_high, t_low)
 
         # Use student output as base for CM pairing (noisy inputs derived from student's prediction)
         base_student = pred_video
         # base_student = training_batch.latents
         # Shared base noise for both timesteps
-        base_noise = torch.randn(self.video_latent_shape, device=self.device, dtype=base_student.dtype)
+        base_noise = torch.randn(self.video_latent_shape,
+                                 device=self.device,
+                                 dtype=base_student.dtype)
         if self.sp_world_size > 1:
             base_noise = rearrange(base_noise,
                                    "b (n t) c h w -> b n t c h w",
@@ -427,20 +467,22 @@ class DistillationPipeline(TrainingPipeline):
 
         # Build noisy inputs for the selected timesteps using the same student base and same noise
         noisy_high = self.noise_scheduler.add_noise(
-            base_student.flatten(0, 1), base_noise.flatten(0, 1), t_high
-        ).unflatten(0, (1, base_student.shape[1]))
+            base_student.flatten(0, 1), base_noise.flatten(0, 1),
+            t_high).unflatten(0, (1, base_student.shape[1]))
         noisy_low = self.noise_scheduler.add_noise(
-            base_student.flatten(0, 1), base_noise.flatten(0, 1), t_low
-        ).unflatten(0, (1, base_student.shape[1]))
+            base_student.flatten(0, 1), base_noise.flatten(0, 1),
+            t_low).unflatten(0, (1, base_student.shape[1]))
 
         # Teacher: lower-noise branch y_low (EMA or stop-grad model)
-        tb_low = self._build_distill_input_kwargs(noisy_low, t_low, training_batch.conditional_dict, training_batch)
+        tb_low = self._build_distill_input_kwargs(
+            noisy_low, t_low, training_batch.conditional_dict, training_batch)
         # Safe fallback for FSDP2: avoid in-place EMA param swaps during training graphs
         # Use stop-grad teacher from current weights, and temporarily set eval() to avoid buffer updates
         was_training = self.transformer.training
         self.transformer.eval()
         with torch.no_grad():
-            pred_noise_low_teacher = self.transformer(**tb_low.input_kwargs).permute(0, 2, 1, 3, 4)
+            pred_noise_low_teacher = self.transformer(
+                **tb_low.input_kwargs).permute(0, 2, 1, 3, 4)
             y_low = pred_noise_to_pred_video(
                 pred_noise=pred_noise_low_teacher.flatten(0, 1),
                 noise_input_latent=noisy_low.flatten(0, 1),
@@ -453,7 +495,8 @@ class DistillationPipeline(TrainingPipeline):
         # Student: prediction at higher noise y_high (current model, grad-enabled)
         tb_high = self._build_distill_input_kwargs(
             noisy_high, t_high, training_batch.conditional_dict, training_batch)
-        pred_noise_high_student = self.transformer(**tb_high.input_kwargs).permute(0, 2, 1, 3, 4)
+        pred_noise_high_student = self.transformer(
+            **tb_high.input_kwargs).permute(0, 2, 1, 3, 4)
         y_high = pred_noise_to_pred_video(
             pred_noise=pred_noise_high_student.flatten(0, 1),
             noise_input_latent=noisy_high.flatten(0, 1),
@@ -463,7 +506,7 @@ class DistillationPipeline(TrainingPipeline):
 
         # Match student y_high to teacher y_low
         cm_loss = F.mse_loss(y_high, y_low.detach())
-        logger.info(f"cm_loss: {cm_loss.item()}")
+        logger.info("cm_loss: %s", cm_loss.item())
 
         # Optionally record for logging
         training_batch.dmd_latent_vis_dict.update({
@@ -718,13 +761,14 @@ class DistillationPipeline(TrainingPipeline):
             for batch in batches:
                 batch_gen = copy.deepcopy(batch)
 
-
                 # Generator forward and DMD loss after CM
                 with set_forward_context(
                         current_timestep=batch_gen.timesteps,
                         attn_metadata=batch_gen.attn_metadata_vsa):
                     if self.training_args.simulate_generator_forward and self.num_generator_updates % self.training_args.simulate_forward_interval == 0:
-                        logger.info("using simulate_generator_forward, num_generator_updates: %s", self.num_generator_updates)
+                        logger.info(
+                            "using simulate_generator_forward, num_generator_updates: %s",
+                            self.num_generator_updates)
                         if False:
                             generator_pred_video = self._generator_forward_with_validation_pipeline(
                                 batch_gen)
@@ -739,8 +783,9 @@ class DistillationPipeline(TrainingPipeline):
                 cm_weight = self.training_args.cm_loss_weight
                 dmd_loss_extra = 0.0
                 if cm_weight > 0.0:
-                    with set_forward_context(current_timestep=batch_gen.timesteps,
-                                             attn_metadata=batch_gen.attn_metadata):
+                    with set_forward_context(
+                            current_timestep=batch_gen.timesteps,
+                            attn_metadata=batch_gen.attn_metadata):
                         cm_loss = self._calculate_consistency_loss(
                             pred_video=generator_pred_video,
                             training_batch=batch_gen,
@@ -752,7 +797,7 @@ class DistillationPipeline(TrainingPipeline):
                     dmd_loss = self._dmd_forward(
                         generator_pred_video=generator_pred_video,
                         training_batch=batch_gen)
-                    logger.info(f"dmd_loss: {dmd_loss.item()}")
+                    logger.info("dmd_loss: %s", dmd_loss.item())
                     dmd_loss = dmd_loss + dmd_loss_extra
 
                 with set_forward_context(
@@ -1141,11 +1186,20 @@ class DistillationPipeline(TrainingPipeline):
             avg_step_time = sum(step_times) / len(step_times)
 
             progress_bar.set_postfix({
-                "total_loss": f"{total_loss:.4f}",
-                "generator_loss": f"{generator_loss:.4f}",
-                "fake_score_loss": f"{fake_score_loss:.4f}",
-                "step_time": f"{step_time:.2f}s",
-                "grad_norm": grad_norm,
+                "total_loss":
+                f"{total_loss:.4f}",
+                "generator_loss":
+                f"{generator_loss:.4f}",
+                "fake_score_loss":
+                f"{fake_score_loss:.4f}",
+                "lpips_loss":
+                f"{training_batch.regression_loss:.4f}"
+                if hasattr(training_batch, 'regression_loss')
+                and training_batch.regression_loss is not None else "N/A",
+                "step_time":
+                f"{step_time:.2f}s",
+                "grad_norm":
+                grad_norm,
             })
             progress_bar.update(1)
 
