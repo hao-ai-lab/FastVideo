@@ -1,15 +1,15 @@
 ### ADD TO THIS TO REGISTER NEW KERNELS
 sources = {
-    'block_sparse': {
+    'st_attn': {
         'source_files': {
-            'h100': 'vsa/block_sparse_h100.cu'
+            'h100': 'st_attn_h100.cu'  # define these source files for each GPU target desired.
         }
     }
 }
 
 ### WHICH KERNELS DO WE WANT TO BUILD?
 # (oftentimes during development work you don't need to redefine them all.)
-kernels = ['block_sparse']
+kernels = ['st_attn']
 
 ### WHICH GPU TARGET DO WE WANT TO BUILD FOR?
 target = 'h100'

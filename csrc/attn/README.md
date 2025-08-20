@@ -25,9 +25,9 @@ sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave 
 sudo apt update
 sudo apt install clang-11
 ```
-(If you use CUDA12.4)
+(If you use CUDA12.8)
 ```bash
-export CUDA_HOME=/usr/local/cuda-12.4
+export CUDA_HOME=/usr/local/cuda-12.8
 export PATH=${CUDA_HOME}/bin:${PATH} 
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 ```

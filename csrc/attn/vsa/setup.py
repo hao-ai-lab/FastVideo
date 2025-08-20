@@ -12,10 +12,10 @@ PACKAGE_NAME = "vsa"
 VERSION = "0.0.1"
 AUTHOR = "Hao AI Lab"
 DESCRIPTION = "Video Sparse Attention Kernel Used in FastVideo"
-URL = "https://github.com/hao-ai-lab/FastVideo/tree/main/csrc/attn"
+URL = "https://github.com/hao-ai-lab/FastVideo/tree/main/csrc/attn/vsa"
 
 # Set environment variables
-tk_root = os.getenv('THUNDERKITTENS_ROOT', os.path.abspath(os.path.join(os.getcwd(), 'tk/')))
+tk_root = os.getenv('THUNDERKITTENS_ROOT', os.path.abspath(os.path.join(os.getcwd(), '../tk/')))
 python_include = subprocess.check_output(['python', '-c',
                                           "import sysconfig; print(sysconfig.get_path('include'))"]).decode().strip()
 torch_include = subprocess.check_output([
