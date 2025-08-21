@@ -82,7 +82,7 @@ def load_example_prompts():
             print(f"Warning: Could not read {filepath}: {e}")
         return prompts, labels
     
-    # examples, example_labels = load_from_file("prompts/prompts_final.txt")
+    examples, example_labels = load_from_file("/FastVideo/examples/inference/gradio/local/prompts_final.txt")
     
     if not examples:
         examples = ["A crowded rooftop bar buzzes with energy, the city skyline twinkling like a field of stars in the background."]
@@ -129,7 +129,7 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
             output_dir = "outputs/"
             os.makedirs(output_dir, exist_ok=True)
             start_time = time.time()
-            result = generator.generate_video(prompt=prompt, sampling_param=params, save_video=False, return_frames=False)
+            result = generator.generate_video(prompt=prompt, sampling_param=params, save_video=True, return_frames=False)
             inference_time = time.time() - start_time
             logging_info = result.get("logging_info", None)
             if logging_info:
