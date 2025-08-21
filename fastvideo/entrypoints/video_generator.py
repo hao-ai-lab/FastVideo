@@ -135,7 +135,6 @@ class VideoGenerator:
 
         if self.fastvideo_args.prompt_txt is not None or sampling_param.prompt_path is not None:
             prompt_txt_path = sampling_param.prompt_path or self.fastvideo_args.prompt_txt
-
             if not os.path.exists(prompt_txt_path):
                 raise FileNotFoundError(
                     f"Prompt text file not found: {prompt_txt_path}")
@@ -188,7 +187,6 @@ class VideoGenerator:
         output_path = self._prepare_output_path(sampling_param.output_path,
                                                 prompt)
         kwargs["output_path"] = output_path
-
         return self._generate_single_video(prompt=prompt,
                                            sampling_param=sampling_param,
                                            **kwargs)
@@ -239,7 +237,6 @@ class VideoGenerator:
         prompt = prompt.strip()
         sampling_param = deepcopy(sampling_param)
         output_path = kwargs["output_path"]
-        kwargs["prompt"] = prompt
         sampling_param.prompt = prompt
         # Process negative prompt
         if sampling_param.negative_prompt is not None:
