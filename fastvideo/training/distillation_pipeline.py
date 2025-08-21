@@ -256,6 +256,7 @@ class DistillationPipeline(TrainingPipeline):
                 n=self.sp_world_size).contiguous()
             current_noise_latents = current_noise_latents[:, self.
                                                           rank_in_sp_group, :, :, :, :]
+        current_noise_latents_copy = current_noise_latents.clone()
 
         # Only run intermediate steps if target_timestep_idx > 0
         max_target_idx = len(self.denoising_step_list) - 1
@@ -309,7 +310,7 @@ class DistillationPipeline(TrainingPipeline):
             ) - 1, "noise_latent_index is out of bounds"
             noisy_input = noise_latents[noise_latent_index]
         else:
-            noisy_input = current_noise_latents
+            noisy_input = current_noise_latents_copy
 
         # Step 4: Final student prediction (this is what we train on)
         training_batch = self._build_distill_input_kwargs(
