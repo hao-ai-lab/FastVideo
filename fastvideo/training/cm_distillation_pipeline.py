@@ -38,8 +38,8 @@ from fastvideo.training.activation_checkpoint import (
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
     EMA_FSDP, clip_grad_norm_while_handling_failing_dtensor_cases,
-    get_scheduler, load_distillation_checkpoint, pred_noise_to_pred_video,
-    save_distillation_checkpoint, shift_timestep)
+    get_scheduler, load_checkpoint, pred_noise_to_pred_video, save_checkpoint,
+    shift_timestep)
 from fastvideo.utils import is_vsa_available, set_random_seed
 
 import wandb  # isort: skip
@@ -49,19 +49,14 @@ vsa_available = is_vsa_available()
 logger = init_logger(__name__)
 
 
-class DistillationPipeline(TrainingPipeline):
+class CMDistillationPipeline(TrainingPipeline):
     """
     A distillation pipeline for training a 3 step model.
     Inherits from TrainingPipeline to reuse training infrastructure.
     """
     _required_config_modules = [
-        "scheduler", "transformer", "vae", "real_score_transformer",
-        "fake_score_transformer"
+        "scheduler", "transformer", "vae"
     ]
-    _extra_config_module_map = {
-        "real_score_transformer": "transformer",
-        "fake_score_transformer": "transformer"
-    }
     validation_pipeline: ComposedPipelineBase
     train_dataloader: StatefulDataLoader
     train_loader_iter: Iterator[dict[str, Any]]
@@ -89,62 +84,6 @@ class DistillationPipeline(TrainingPipeline):
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
             shift=self.timestep_shift)
-
-        # self.transformer is the generator model
-        self.real_score_transformer = self.get_module("real_score_transformer")
-        self.fake_score_transformer = self.get_module("fake_score_transformer")
-
-        self.real_score_transformer.requires_grad_(False)
-        self.real_score_transformer.eval()
-        self.fake_score_transformer.requires_grad_(True)
-        self.fake_score_transformer.train()
-
-        if training_args.enable_gradient_checkpointing_type is not None:
-            self.fake_score_transformer = apply_activation_checkpointing(
-                self.fake_score_transformer,
-                checkpointing_type=training_args.
-                enable_gradient_checkpointing_type)
-            self.real_score_transformer = apply_activation_checkpointing(
-                self.real_score_transformer,
-                checkpointing_type=training_args.
-                enable_gradient_checkpointing_type)
-
-        # Initialize optimizers
-        fake_score_params = list(
-            filter(lambda p: p.requires_grad,
-                   self.fake_score_transformer.parameters()))
-
-        # Use separate learning rate for fake_score_transformer if specified
-        fake_score_lr = training_args.fake_score_learning_rate
-        if fake_score_lr == 0.0:
-            fake_score_lr = training_args.learning_rate
-
-        self.fake_score_optimizer = torch.optim.AdamW(
-            fake_score_params,
-            lr=fake_score_lr,
-            betas=(0.9, 0.999),
-            weight_decay=training_args.weight_decay,
-            eps=1e-8,
-        )
-
-        self.fake_score_lr_scheduler = get_scheduler(
-            training_args.fake_score_lr_scheduler,
-            optimizer=self.fake_score_optimizer,
-            num_warmup_steps=training_args.lr_warmup_steps,
-            num_training_steps=training_args.max_train_steps,
-            num_cycles=training_args.lr_num_cycles,
-            power=training_args.lr_power,
-            min_lr_ratio=training_args.min_lr_ratio,
-            last_epoch=self.init_steps - 1,
-        )
-
-        logger.info(
-            "Distillation optimizers initialized: generator and fake_score")
-
-        self.generator_update_interval = self.training_args.generator_update_interval
-        logger.info(
-            "Distillation pipeline initialized with generator_update_interval=%s",
-            self.generator_update_interval)
 
         if self.training_args.warp_denoising_step:
             # timesteps = self.noise_scheduler.timesteps.cpu()
@@ -177,7 +116,7 @@ class DistillationPipeline(TrainingPipeline):
         self.max_timestep = int(self.training_args.max_timestep_ratio *
                                 self.num_train_timestep)
 
-        self.real_score_guidance_scale = self.training_args.real_score_guidance_scale
+        # self.real_score_guidance_scale = self.training_args.real_score_guidance_scale
 
         # Initialize EMA teacher for CM if enabled
         self.use_cm_with_ema = getattr(self.training_args, "cm_use_ema_teacher",
@@ -254,8 +193,6 @@ class DistillationPipeline(TrainingPipeline):
         """Prepare training environment for distillation."""
         self.transformer.requires_grad_(True)
         self.transformer.train()
-        self.fake_score_transformer.requires_grad_(True)
-        self.fake_score_transformer.train()
 
         return training_batch
 
@@ -278,7 +215,11 @@ class DistillationPipeline(TrainingPipeline):
         return training_batch
 
     def _generator_forward(self, training_batch: TrainingBatch) -> torch.Tensor:
-
+        """
+        Forward pass through student transformer for a single randomly sampled
+        denoising step; returns predicted clean video latents and records
+        auxiliary info/losses on training_batch.
+        """
         latents = training_batch.latents
         dtype = latents.dtype
         index = torch.randint(0,
@@ -288,146 +229,33 @@ class DistillationPipeline(TrainingPipeline):
         timestep = self.denoising_step_list[index]
         training_batch.dmd_latent_vis_dict["generator_timestep"] = timestep
 
-        noise = torch.randn(self.video_latent_shape,
-                            device=self.device,
-                            dtype=dtype)
+        noise = torch.randn(self.video_latent_shape, device=self.device, dtype=dtype)
         if self.sp_world_size > 1:
-            noise = rearrange(noise,
-                              "b (n t) c h w -> b n t c h w",
-                              n=self.sp_world_size).contiguous()
+            noise = rearrange(noise, "b (n t) c h w -> b n t c h w", n=self.sp_world_size).contiguous()
             noise = noise[:, self.rank_in_sp_group, :, :, :, :]
+
         noisy_latent = self.noise_scheduler.add_noise(latents.flatten(0, 1),
                                                       noise.flatten(0, 1),
                                                       timestep).unflatten(
-                                                          0,
-                                                          (1, latents.shape[1]))
+                                                          0, (1, latents.shape[1]))
 
-        training_batch = self._build_distill_input_kwargs(
-            noisy_latent, timestep, training_batch.conditional_dict,
-            training_batch)
-        pred_noise = self.transformer(**training_batch.input_kwargs).permute(
-            0, 2, 1, 3, 4)
+        training_batch = self._build_distill_input_kwargs(noisy_latent, timestep,
+                                                          training_batch.conditional_dict,
+                                                          training_batch)
+        pred_noise = self.transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
         pred_video = pred_noise_to_pred_video(
             pred_noise=pred_noise.flatten(0, 1),
             noise_input_latent=noisy_latent.flatten(0, 1),
             timestep=timestep,
-            scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
+            scheduler=self.noise_scheduler,
+        ).unflatten(0, pred_noise.shape[:2])
 
-        # regression_loss = F.mse_loss(pred_video, latents)
-
-        # LPIPS loss
-        regression_loss = self._compute_lpips_loss(pred_video, latents)
-        pred_video = pred_video.type_as(noisy_latent)
-        training_batch.regression_loss = regression_loss
-        # regression_log_dict = {
-        #     "regression_loss": regression_Loss.detach(),
-        #     "regression_clean_latents": latents,
-        # }
-        return pred_video
-        # return pred_video
-
-    def _generator_multi_step_simulation_forward(
-            self, training_batch: TrainingBatch) -> torch.Tensor:
-        """Forward pass through student transformer matching inference procedure."""
-        latents = training_batch.latents
-        dtype = latents.dtype
-
-        # Step 1: Randomly sample a target timestep index from denoising_step_list
-        target_timestep_idx = torch.randint(0,
-                                            len(self.denoising_step_list), [1],
-                                            device=self.device,
-                                            dtype=torch.long)
-        # target_timestep_idx = torch.tensor([2],
-        #                                    device=self.device,
-        #                                    dtype=torch.long)
-        target_timestep_idx_int = target_timestep_idx.item()
-        target_timestep = self.denoising_step_list[target_timestep_idx]
-
-        # Step 2: Simulate the multi-step inference process up to the target timestep
-        # Start from pure noise like in inference
-        noise_latent = torch.randn(self.video_latent_shape,
-                                   device=self.device,
-                                   dtype=dtype)
-        if self.sp_world_size > 1:
-            noise_latents = rearrange(noise_latent,
-                                      "b (n t) c h w -> b n t c h w",
-                                      n=self.sp_world_size).contiguous()
-            noise_latent = noise_latent[:, self.rank_in_sp_group, :, :, :, :]
-        current_noise_latents = noise_latent.clone()
-
-        # Only run intermediate steps if target_timestep_idx > 0
-        max_target_idx = len(self.denoising_step_list) - 1
-        noise_latents = []
-        noise_latent_index = target_timestep_idx_int - 1
-        if max_target_idx > 0:
-            # Run student model for all steps before the target timestep
-            with torch.no_grad():
-                for step_idx in range(max_target_idx):
-                    current_timestep = self.denoising_step_list[step_idx]
-                    current_timestep_tensor = current_timestep * torch.ones(
-                        1, device=self.device, dtype=torch.long)
-                    # Run student model to get flow prediction
-                    training_batch_temp = self._build_distill_input_kwargs(
-                        current_noise_latents, current_timestep_tensor,
-                        training_batch.conditional_dict, training_batch)
-                    pred_flow = self.transformer(
-                        **training_batch_temp.input_kwargs).permute(
-                            0, 2, 1, 3, 4)
-                    pred_clean = pred_noise_to_pred_video(
-                        pred_noise=pred_flow.flatten(0, 1),
-                        noise_input_latent=current_noise_latents.flatten(0, 1),
-                        timestep=current_timestep_tensor,
-                        scheduler=self.noise_scheduler).unflatten(
-                            0, pred_flow.shape[:2])
-
-                    # Add noise for the next timestep
-                    next_timestep = self.denoising_step_list[step_idx + 1]
-                    next_timestep_tensor = next_timestep * torch.ones(
-                        1, device=self.device, dtype=torch.long)
-                    noise = torch.randn(self.video_latent_shape,
-                                        device=self.device,
-                                        dtype=pred_clean.dtype)
-                    if self.sp_world_size > 1:
-                        noise = rearrange(noise,
-                                          "b (n t) c h w -> b n t c h w",
-                                          n=self.sp_world_size).contiguous()
-                        noise = noise[:, self.rank_in_sp_group, :, :, :, :]
-                    current_noise_latents = self.noise_scheduler.add_noise(
-                        pred_clean.flatten(0, 1), noise.flatten(0, 1),
-                        next_timestep_tensor).unflatten(0, pred_clean.shape[:2])
-                    latent_copy = current_noise_latents.clone()
-                    noise_latents.append(latent_copy)
-
-        # Step 3: Use the simulated noisy input for the final training step
-        # For timestep index 0, this is pure noise
-        # For timestep index k > 0, this is the result after k denoising steps + noise at target level
-        if noise_latent_index >= 0:
-            assert noise_latent_index < len(
-                self.denoising_step_list
-            ) - 1, "noise_latent_index is out of bounds"
-            noisy_input = noise_latents[noise_latent_index]
-        else:
-            noisy_input = noise_latent
-
-        # Step 4: Final student prediction (this is what we train on)
-        training_batch = self._build_distill_input_kwargs(
-            noisy_input, target_timestep, training_batch.conditional_dict,
-            training_batch)
-        pred_noise = self.transformer(**training_batch.input_kwargs).permute(
-            0, 2, 1, 3, 4)
-        pred_video = pred_noise_to_pred_video(
-            pred_noise=pred_noise.flatten(0, 1),
-            noise_input_latent=noisy_input.flatten(0, 1),
-            timestep=target_timestep,
-            scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
-
-        regression_loss = F.mse_loss(pred_video, latents)
-        # LPIPS loss - decode latents to actual frames first
-        regression_loss = self._compute_lpips_loss(pred_video, latents)
-        training_batch.regression_loss = regression_loss
-        training_batch.dmd_latent_vis_dict[
-            "generator_timestep"] = target_timestep.float().detach()
-
+        # Compute regression loss (LPIPS) for optional auxiliary loss/logging
+        # regression_loss = self._compute_lpips_loss(pred_video, latents)
+        # training_batch.regression_loss = regression_loss
+        training_batch.dmd_latent_vis_dict.update({
+            "generator_pred_video": pred_video.detach().clone(),
+        })
         return pred_video
 
     def _calculate_consistency_loss(
@@ -452,49 +280,46 @@ class DistillationPipeline(TrainingPipeline):
         t_high = t_high * torch.ones(1, device=self.device, dtype=torch.long)
         logger.info("t_high: %s, t_low: %s", t_high, t_low)
 
-        # Use student output as base for CM pairing (noisy inputs derived from student's prediction)
+        # Use student output as base; construct noisy sample at higher timestep
         base_student = pred_video
-        # base_student = training_batch.latents
-        # Shared base noise for both timesteps
-        base_noise = torch.randn(self.video_latent_shape,
-                                 device=self.device,
-                                 dtype=base_student.dtype)
+        base_noise = torch.randn(self.video_latent_shape, device=self.device, dtype=base_student.dtype)
         if self.sp_world_size > 1:
-            base_noise = rearrange(base_noise,
-                                   "b (n t) c h w -> b n t c h w",
-                                   n=self.sp_world_size).contiguous()
+            base_noise = rearrange(base_noise, "b (n t) c h w -> b n t c h w", n=self.sp_world_size).contiguous()
             base_noise = base_noise[:, self.rank_in_sp_group, :, :, :, :]
 
-        # Build noisy inputs for the selected timesteps using the same student base and same noise
-        noisy_high = self.noise_scheduler.add_noise(
-            base_student.flatten(0, 1), base_noise.flatten(0, 1),
-            t_high).unflatten(0, (1, base_student.shape[1]))
+        noisy_high = self.noise_scheduler.add_noise(base_student.flatten(0, 1),
+                                                    base_noise.flatten(0, 1),
+                                                    t_high).unflatten(0, (1, base_student.shape[1]))
 
-        # Teacher ODE step: t_high → t_low and teacher target at t_low
+        # Compute ODE-adjacent lower-t sample via a single Euler step using teacher output at t_high
+        # Temporarily switch to eval and no-grad for teacher forward(s)
         was_training = self.transformer.training
         self.transformer.eval()
         with torch.no_grad():
-            tb_high_teacher = self._build_distill_input_kwargs(
-                noisy_high, t_high, training_batch.conditional_dict, training_batch)
-            pred_flow_high_teacher = self.transformer(
-                **tb_high_teacher.input_kwargs).permute(0, 2, 1, 3, 4)
+            tb_high_teacher = self._build_distill_input_kwargs(noisy_high, t_high,
+                                                               training_batch.conditional_dict, training_batch)
+            pred_flow_high_teacher = self.transformer(**tb_high_teacher.input_kwargs).permute(0, 2, 1, 3, 4)
 
-            sample_flat = noisy_high.flatten(0, 1).float()
-            flow_flat = pred_flow_high_teacher.flatten(0, 1).float()
+            # Prepare flat tensors for scheduler stepping
+            sample_flat = noisy_high.flatten(0, 1).to(dtype=torch.float32)
+            flow_flat = pred_flow_high_teacher.flatten(0, 1).to(dtype=torch.float32)
 
+            # Reset step index so stepping starts at the provided timestep
             prev_step_index = getattr(self.noise_scheduler, "_step_index", None)
             self.noise_scheduler._step_index = None
-            stepped = self.noise_scheduler.step(
-                model_output=flow_flat, timestep=t_high, sample=sample_flat,
-                return_dict=True)
+            stepped = self.noise_scheduler.step(model_output=flow_flat,
+                                                timestep=t_high,
+                                                sample=sample_flat,
+                                                return_dict=True)
+            # Restore step index state
             self.noise_scheduler._step_index = prev_step_index
 
             noisy_low_ode = stepped.prev_sample.unflatten(0, (1, noisy_high.shape[1])).to(noisy_high.dtype)
 
-            tb_low_teacher = self._build_distill_input_kwargs(
-                noisy_low_ode, t_low, training_batch.conditional_dict, training_batch)
-            pred_noise_low_teacher = self.transformer(
-                **tb_low_teacher.input_kwargs).permute(0, 2, 1, 3, 4)
+            # Teacher target at lower t (clean latent)
+            tb_low_teacher = self._build_distill_input_kwargs(noisy_low_ode, t_low,
+                                                              training_batch.conditional_dict, training_batch)
+            pred_noise_low_teacher = self.transformer(**tb_low_teacher.input_kwargs).permute(0, 2, 1, 3, 4)
             y_low_teacher = pred_noise_to_pred_video(
                 pred_noise=pred_noise_low_teacher.flatten(0, 1),
                 noise_input_latent=noisy_low_ode.flatten(0, 1),
@@ -505,10 +330,9 @@ class DistillationPipeline(TrainingPipeline):
             self.transformer.train()
 
         # Student prediction at lower t on the ODE-stepped sample
-        tb_low_student = self._build_distill_input_kwargs(
-            noisy_low_ode, t_low, training_batch.conditional_dict, training_batch)
-        pred_noise_low_student = self.transformer(
-            **tb_low_student.input_kwargs).permute(0, 2, 1, 3, 4)
+        tb_low_student = self._build_distill_input_kwargs(noisy_low_ode, t_low,
+                                                          training_batch.conditional_dict, training_batch)
+        pred_noise_low_student = self.transformer(**tb_low_student.input_kwargs).permute(0, 2, 1, 3, 4)
         y_low_student = pred_noise_to_pred_video(
             pred_noise=pred_noise_low_student.flatten(0, 1),
             noise_input_latent=noisy_low_ode.flatten(0, 1),
@@ -518,6 +342,7 @@ class DistillationPipeline(TrainingPipeline):
 
         cm_loss_weight = self.training_args.cm_loss_weight
         weighing_fn = getattr(self.training_args, "cm_weighing_function", "constant")
+
         if weighing_fn == "constant":
             cm_weighing_function = lambda x: cm_loss_weight
         elif weighing_fn == "sigma_sqrt":
@@ -525,6 +350,7 @@ class DistillationPipeline(TrainingPipeline):
         else:
             raise ValueError(f"Invalid cm_weighing_function: {weighing_fn}")
 
+        # Match student at lower t to teacher at lower t (adjacent PF ODE point)
         cm_loss = F.mse_loss(y_low_student, y_low_teacher.detach())
         cm_loss = cm_loss * cm_weighing_function(t_low)
 
@@ -535,174 +361,6 @@ class DistillationPipeline(TrainingPipeline):
         })
 
         return cm_loss
-
-    def _dmd_forward(self, generator_pred_video: torch.Tensor,
-                     training_batch: TrainingBatch) -> torch.Tensor:
-        """Compute DMD (Diffusion Model Distillation) loss."""
-        with torch.no_grad():
-            timestep = torch.randint(0,
-                                     self.num_train_timestep, [1],
-                                     device=self.device,
-                                     dtype=torch.long)
-
-            timestep = shift_timestep(
-                timestep,
-                self.timestep_shift,  # type: ignore
-                self.num_train_timestep)
-
-            timestep = timestep.clamp(self.min_timestep, self.max_timestep)
-
-            noise = torch.randn(self.video_latent_shape,
-                                device=self.device,
-                                dtype=generator_pred_video.dtype)
-            if self.sp_world_size > 1:
-                noise = rearrange(noise,
-                                  "b (n t) c h w -> b n t c h w",
-                                  n=self.sp_world_size).contiguous()
-                noise = noise[:, self.rank_in_sp_group, :, :, :, :]
-
-            noisy_latent = self.noise_scheduler.add_noise(
-                generator_pred_video.flatten(0, 1), noise.flatten(0, 1),
-                timestep).unflatten(0, (1, generator_pred_video.shape[1]))
-
-            # fake_score_transformer forward
-            training_batch = self._build_distill_input_kwargs(
-                noisy_latent, timestep, training_batch.conditional_dict,
-                training_batch)
-            fake_score_pred_noise = self.fake_score_transformer(
-                **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
-
-            faker_score_pred_video = pred_noise_to_pred_video(
-                pred_noise=fake_score_pred_noise.flatten(0, 1),
-                noise_input_latent=noisy_latent.flatten(0, 1),
-                timestep=timestep,
-                scheduler=self.noise_scheduler).unflatten(
-                    0, fake_score_pred_noise.shape[:2])
-
-            # real_score_transformer cond forward
-            training_batch = self._build_distill_input_kwargs(
-                noisy_latent, timestep, training_batch.conditional_dict,
-                training_batch)
-            real_score_pred_noise_cond = self.real_score_transformer(
-                **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
-
-            pred_real_video_cond = pred_noise_to_pred_video(
-                pred_noise=real_score_pred_noise_cond.flatten(0, 1),
-                noise_input_latent=noisy_latent.flatten(0, 1),
-                timestep=timestep,
-                scheduler=self.noise_scheduler).unflatten(
-                    0, real_score_pred_noise_cond.shape[:2])
-
-            # real_score_transformer uncond forward
-            training_batch = self._build_distill_input_kwargs(
-                noisy_latent, timestep, training_batch.unconditional_dict,
-                training_batch)
-            real_score_pred_noise_uncond = self.real_score_transformer(
-                **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
-
-            pred_real_video_uncond = pred_noise_to_pred_video(
-                pred_noise=real_score_pred_noise_uncond.flatten(0, 1),
-                noise_input_latent=noisy_latent.flatten(0, 1),
-                timestep=timestep,
-                scheduler=self.noise_scheduler).unflatten(
-                    0, real_score_pred_noise_uncond.shape[:2])
-
-            real_score_pred_video = pred_real_video_cond + (
-                pred_real_video_cond -
-                pred_real_video_uncond) * self.real_score_guidance_scale
-
-            grad = (faker_score_pred_video - real_score_pred_video) / torch.abs(
-                generator_pred_video - real_score_pred_video).mean()
-            grad = torch.nan_to_num(grad)
-
-        dmd_loss = 0.5 * F.mse_loss(
-            generator_pred_video.float(),
-            (generator_pred_video.float() - grad.float()).detach())
-
-        if self.training_args.use_regression_loss:
-            dmd_loss = dmd_loss + training_batch.regression_loss * self.training_args.regression_loss_weight
-
-        training_batch.dmd_latent_vis_dict.update({
-            "training_batch_dmd_fwd_clean_latent":
-            training_batch.latents,
-            "generator_pred_video":
-            generator_pred_video,
-            "real_score_pred_video":
-            real_score_pred_video,
-            "faker_score_pred_video":
-            faker_score_pred_video,
-            "dmd_timestep":
-            timestep,
-            "regression_loss":
-            training_batch.regression_loss,
-        })
-
-        return dmd_loss
-
-    def faker_score_forward(
-            self, training_batch: TrainingBatch
-    ) -> tuple[TrainingBatch, torch.Tensor]:
-        with torch.no_grad(), set_forward_context(
-                current_timestep=training_batch.timesteps,
-                attn_metadata=training_batch.attn_metadata_vsa):
-            if self.training_args.simulate_generator_forward:
-                if False:
-                    generator_pred_video = self._generator_forward_with_validation_pipeline(
-                        training_batch)
-                else:
-                    generator_pred_video = self._generator_multi_step_simulation_forward(
-                        training_batch)
-            else:
-                generator_pred_video = self._generator_forward(training_batch)
-
-        fake_score_timestep = torch.randint(0,
-                                            self.num_train_timestep, [1],
-                                            device=self.device,
-                                            dtype=torch.long)
-
-        fake_score_timestep = shift_timestep(
-            fake_score_timestep,
-            self.timestep_shift,  # type: ignore
-            self.num_train_timestep)
-
-        fake_score_timestep = fake_score_timestep.clamp(self.min_timestep,
-                                                        self.max_timestep)
-
-        fake_score_noise = torch.randn(self.video_latent_shape,
-                                       device=self.device,
-                                       dtype=generator_pred_video.dtype)
-        if self.sp_world_size > 1:
-            fake_score_noise = rearrange(fake_score_noise,
-                                         "b (n t) c h w -> b n t c h w",
-                                         n=self.sp_world_size).contiguous()
-            fake_score_noise = fake_score_noise[:, self.
-                                                rank_in_sp_group, :, :, :, :]
-
-        noisy_generator_pred_video = self.noise_scheduler.add_noise(
-            generator_pred_video.flatten(0, 1), fake_score_noise.flatten(0, 1),
-            fake_score_timestep).unflatten(0,
-                                           (1, generator_pred_video.shape[1]))
-
-        with set_forward_context(current_timestep=training_batch.timesteps,
-                                 attn_metadata=training_batch.attn_metadata):
-            training_batch = self._build_distill_input_kwargs(
-                noisy_generator_pred_video, fake_score_timestep,
-                training_batch.conditional_dict, training_batch)
-
-            fake_score_pred_noise = self.fake_score_transformer(
-                **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
-
-        target = fake_score_noise - generator_pred_video
-        flow_matching_loss = torch.mean((fake_score_pred_noise - target)**2)
-
-        training_batch.fake_score_latent_vis_dict = {
-            "training_batch_fakerscore_fwd_clean_latent":
-            training_batch.latents,
-            "generator_pred_video": generator_pred_video,
-            "fake_score_timestep": fake_score_timestep,
-        }
-
-        return training_batch, flow_matching_loss
 
     def _clip_model_grad_norm_(self, training_batch: TrainingBatch,
                                transformer) -> TrainingBatch:
@@ -758,9 +416,8 @@ class DistillationPipeline(TrainingPipeline):
         return training_batch
 
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
-        gradient_accumulation_steps = getattr(self.training_args,
-                                              'gradient_accumulation_steps', 1)
-        batches = []
+        gradient_accumulation_steps = getattr(self.training_args, 'gradient_accumulation_steps', 1)
+        batches: list[TrainingBatch] = []
         # Collect N batches for gradient accumulation
         for _ in range(gradient_accumulation_steps):
             batch = self._prepare_distillation(training_batch)
@@ -774,116 +431,64 @@ class DistillationPipeline(TrainingPipeline):
             batches.append(batch)
 
         self.optimizer.zero_grad()
-        total_dmd_loss = 0.0
-        dmd_latent_vis_dict = {}
-        fake_score_latent_vis_dict = {}
-        if (self.current_trainstep % self.generator_update_interval == 0):
-            for batch in batches:
-                batch_gen = copy.deepcopy(batch)
+        total_loss_value = 0.0
+        dmd_latent_vis_dict: dict[str, torch.Tensor] = {}
+        batch_gen = None
 
-                # Generator forward and DMD loss after CM
-                with set_forward_context(
-                        current_timestep=batch_gen.timesteps,
-                        attn_metadata=batch_gen.attn_metadata_vsa):
-                    if self.training_args.simulate_generator_forward and self.num_generator_updates % self.training_args.simulate_forward_interval == 0:
-                        logger.info(
-                            "using simulate_generator_forward, num_generator_updates: %s",
-                            self.num_generator_updates)
-                        if False:
-                            generator_pred_video = self._generator_forward_with_validation_pipeline(
-                                batch_gen)
-                        else:
-                            generator_pred_video = self._generator_multi_step_simulation_forward(
-                                batch_gen)
-                    else:
-                        generator_pred_video = self._generator_forward(
-                            batch_gen)
-
-                # Consistency loss first (to avoid in-place param swaps after any grad-tracked forward)
-                cm_weight = self.training_args.cm_loss_weight
-                dmd_loss_extra = 0.0
-                if cm_weight > 0.0:
-                    with set_forward_context(
-                            current_timestep=batch_gen.timesteps,
-                            attn_metadata=batch_gen.attn_metadata):
-                        cm_loss = self._calculate_consistency_loss(
-                            pred_video=generator_pred_video,
-                            training_batch=batch_gen,
-                        )
-                        dmd_loss_extra = cm_loss
-
-                with set_forward_context(current_timestep=batch_gen.timesteps,
-                                         attn_metadata=batch_gen.attn_metadata):
-                    dmd_loss = self._dmd_forward(
-                        generator_pred_video=generator_pred_video,
-                        training_batch=batch_gen)
-                    logger.info("dmd_loss: %s", dmd_loss.item())
-                    dmd_loss = dmd_loss + dmd_loss_extra
-
-                with set_forward_context(
-                        current_timestep=batch_gen.timesteps,
-                        attn_metadata=batch_gen.attn_metadata_vsa):
-                    (dmd_loss / gradient_accumulation_steps).backward()
-                total_dmd_loss += dmd_loss.detach().item()
-            self.num_generator_updates += 1
-            self._clip_model_grad_norm_(batch_gen, self.transformer)
-            self.optimizer.step()
-            # Update EMA teacher after generator parameter update
-            if self.use_cm_with_ema:
-                assert self.ema_teacher is not None
-                self.ema_teacher.update(self.transformer)
-            self.optimizer.zero_grad(set_to_none=True)
-            avg_dmd_loss = torch.tensor(total_dmd_loss /
-                                        gradient_accumulation_steps,
-                                        device=self.device)
-            world_group = get_world_group()
-            world_group.all_reduce(avg_dmd_loss,
-                                   op=torch.distributed.ReduceOp.AVG)
-            training_batch.generator_loss = avg_dmd_loss.item()
-            dmd_latent_vis_dict = batch_gen.dmd_latent_vis_dict
-        else:
-            training_batch.generator_loss = 0.0
-
-        self.fake_score_optimizer.zero_grad()
-        total_fake_score_loss = 0.0
         for batch in batches:
-            batch_fake = copy.deepcopy(batch)
-            batch_fake, fake_score_loss = self.faker_score_forward(batch_fake)
-            with set_forward_context(current_timestep=batch_fake.timesteps,
-                                     attn_metadata=batch_fake.attn_metadata):
-                (fake_score_loss / gradient_accumulation_steps).backward()
-            total_fake_score_loss += fake_score_loss.detach().item()
-            fake_score_latent_vis_dict.update(
-                batch_fake.fake_score_latent_vis_dict)
-        self._clip_model_grad_norm_(batch_fake, self.fake_score_transformer)
-        self.fake_score_optimizer.step()
-        self.fake_score_lr_scheduler.step()
-        self.lr_scheduler.step()
-        self.fake_score_optimizer.zero_grad(set_to_none=True)
-        avg_fake_score_loss = torch.tensor(total_fake_score_loss /
-                                           gradient_accumulation_steps,
-                                           device=self.device)
-        world_group = get_world_group()
-        world_group.all_reduce(avg_fake_score_loss,
-                               op=torch.distributed.ReduceOp.AVG)
-        training_batch.fake_score_loss = avg_fake_score_loss.item()
-        training_batch.dmd_latent_vis_dict = dmd_latent_vis_dict
-        training_batch.fake_score_latent_vis_dict = batch_fake.fake_score_latent_vis_dict
+            batch_gen = copy.deepcopy(batch)
+            # Forward student once to obtain a clean prediction to anchor CM pair
+            with set_forward_context(current_timestep=batch_gen.timesteps,
+                                     attn_metadata=batch_gen.attn_metadata_vsa):
+                generator_pred_video = self._generator_forward(batch_gen)
 
-        training_batch.total_loss = training_batch.generator_loss + training_batch.fake_score_loss
+            # Consistency loss
+            with set_forward_context(current_timestep=batch_gen.timesteps,
+                                     attn_metadata=batch_gen.attn_metadata):
+                cm_loss = self._calculate_consistency_loss(
+                    pred_video=generator_pred_video, training_batch=batch_gen)
+
+                # Optional auxiliary regression loss
+                if getattr(self.training_args, "use_regression_loss", False):
+                    cm_loss = cm_loss + batch_gen.regression_loss * self.training_args.regression_loss_weight
+
+            with set_forward_context(current_timestep=batch_gen.timesteps,
+                                     attn_metadata=batch_gen.attn_metadata_vsa):
+                (cm_loss / gradient_accumulation_steps).backward()
+            total_loss_value += cm_loss.detach().item()
+            dmd_latent_vis_dict.update(batch_gen.dmd_latent_vis_dict)
+
+        # Clip and step
+        assert batch_gen is not None
+        self._clip_model_grad_norm_(batch_gen, self.transformer)
+        self.optimizer.step()
+        self.lr_scheduler.step()
+
+        # Update EMA teacher after parameter update
+        if self.use_cm_with_ema:
+            assert self.ema_teacher is not None
+            self.ema_teacher.update(self.transformer)
+
+        self.optimizer.zero_grad(set_to_none=True)
+        avg_loss = torch.tensor(total_loss_value / max(1, gradient_accumulation_steps), device=self.device)
+        world_group = get_world_group()
+        world_group.all_reduce(avg_loss, op=torch.distributed.ReduceOp.AVG)
+
+        training_batch.total_loss = avg_loss.item()
+        training_batch.dmd_latent_vis_dict = dmd_latent_vis_dict
+        training_batch.grad_norm = getattr(training_batch, "grad_norm", 0.0)
         return training_batch
 
     def _resume_from_checkpoint(self) -> None:
-        """Resume training from checkpoint with distillation models."""
+        """Resume training from checkpoint for the generator model only."""
 
-        logger.info("Loading distillation checkpoint from %s",
+        logger.info("Loading checkpoint from %s",
                     self.training_args.resume_from_checkpoint)
 
-        resumed_step = load_distillation_checkpoint(
-            self.transformer, self.fake_score_transformer, self.global_rank,
-            self.training_args.resume_from_checkpoint, self.optimizer,
-            self.fake_score_optimizer, self.train_dataloader, self.lr_scheduler,
-            self.fake_score_lr_scheduler, self.noise_random_generator)
+        resumed_step = load_checkpoint(self.transformer, self.global_rank,
+                                       self.training_args.resume_from_checkpoint,
+                                       self.optimizer, self.train_dataloader,
+                                       self.lr_scheduler, self.noise_random_generator)
 
         if resumed_step > 0:
             self.init_steps = resumed_step
@@ -899,20 +504,9 @@ class DistillationPipeline(TrainingPipeline):
 
         # Then add distillation-specific information
         logger.info("Distillation-specific settings:")
-        logger.info("  Generator update ratio: %s",
-                    self.generator_update_interval)
         assert isinstance(self.training_args, TrainingArgs)
         logger.info("  Max gradient norm: %s", self.training_args.max_grad_norm)
 
-        logger.info(
-            "  Real score transformer parameters: %s B",
-            sum(p.numel()
-                for p in self.real_score_transformer.parameters()) / 1e9)
-
-        logger.info(
-            "  Fake score transformer parameters: %s B",
-            sum(p.numel()
-                for p in self.fake_score_transformer.parameters()) / 1e9)
 
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
@@ -1058,12 +652,10 @@ class DistillationPipeline(TrainingPipeline):
         """Add visualization data to wandb logging and save frames to disk."""
         wandb_loss_dict = {}
         dmd_latents_vis_dict = training_batch.dmd_latent_vis_dict
-        fake_score_latents_vis_dict = training_batch.fake_score_latent_vis_dict
-        fake_score_log_keys = ['generator_pred_video']
-        dmd_log_keys = ['faker_score_pred_video', 'real_score_pred_video']
 
-        for latent_key in fake_score_log_keys:
-            latents = fake_score_latents_vis_dict[latent_key]
+        # Only log generator output for CM pipeline
+        if 'generator_pred_video' in dmd_latents_vis_dict:
+            latents = dmd_latents_vis_dict['generator_pred_video']
             latents = latents.permute(0, 2, 1, 3, 4)
 
             if isinstance(self.vae.scaling_factor, torch.Tensor):
@@ -1086,41 +678,10 @@ class DistillationPipeline(TrainingPipeline):
             video = video.cpu().float()
             video = video.permute(0, 2, 1, 3, 4)
             video = (video * 255).numpy().astype(np.uint8)
-            wandb_loss_dict[latent_key] = wandb.Video(
-                video, fps=24, format="mp4")  # change to 16 for Wan2.1
+            wandb_loss_dict['generator_pred_video'] = wandb.Video(
+                video, fps=24, format="mp4")
             # Clean up references
             del video, latents
-
-        # Process DMD training data if available - use decode_stage instead of self.vae.decode
-        if 'generator_pred_video' in dmd_latents_vis_dict:
-            for latent_key in dmd_log_keys:
-                latents = dmd_latents_vis_dict[latent_key]
-                latents = latents.permute(0, 2, 1, 3, 4)
-                # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
-                if isinstance(self.vae.scaling_factor, torch.Tensor):
-                    latents = latents / self.vae.scaling_factor.to(
-                        latents.device, latents.dtype)
-                else:
-                    latents = latents / self.vae.scaling_factor
-
-                # Apply shifting if needed
-                if (hasattr(self.vae, "shift_factor")
-                        and self.vae.shift_factor is not None):
-                    if isinstance(self.vae.shift_factor, torch.Tensor):
-                        latents += self.vae.shift_factor.to(
-                            latents.device, latents.dtype)
-                    else:
-                        latents += self.vae.shift_factor
-                with torch.autocast("cuda", dtype=torch.bfloat16):
-                    video = self.vae.decode(latents)
-                video = (video / 2 + 0.5).clamp(0, 1)
-                video = video.cpu().float()
-                video = video.permute(0, 2, 1, 3, 4)
-                video = (video * 255).numpy().astype(np.uint8)
-                wandb_loss_dict[latent_key] = wandb.Video(
-                    video, fps=24, format="mp4")  # change to 16 for Wan2.1
-                # Clean up references
-                del video, latents
 
         # Log to wandb
         if self.global_rank == 0:
@@ -1197,8 +758,6 @@ class DistillationPipeline(TrainingPipeline):
                 training_batch = self.train_one_step(training_batch)
 
             total_loss = training_batch.total_loss
-            generator_loss = training_batch.generator_loss
-            fake_score_loss = training_batch.fake_score_loss
             grad_norm = training_batch.grad_norm
 
             step_time = time.perf_counter() - start_time
@@ -1208,10 +767,6 @@ class DistillationPipeline(TrainingPipeline):
             progress_bar.set_postfix({
                 "total_loss":
                 f"{total_loss:.4f}",
-                "generator_loss":
-                f"{generator_loss:.4f}",
-                "fake_score_loss":
-                f"{fake_score_loss:.4f}",
                 "lpips_loss":
                 f"{training_batch.regression_loss:.4f}"
                 if hasattr(training_batch, 'regression_loss')
@@ -1226,78 +781,47 @@ class DistillationPipeline(TrainingPipeline):
             if self.global_rank == 0:
                 # Prepare logging data
                 log_data = {
-                    "train_total_loss":
-                    total_loss,
-                    "train_fake_score_loss":
-                    fake_score_loss,
-                    "learning_rate":
-                    self.lr_scheduler.get_last_lr()[0],
-                    "fake_score_learning_rate":
-                    self.fake_score_lr_scheduler.get_last_lr()[0],
-                    "step_time":
-                    step_time,
-                    "avg_step_time":
-                    avg_step_time,
-                    "grad_norm":
-                    grad_norm,
+                    "train_total_loss": total_loss,
+                    "learning_rate": self.lr_scheduler.get_last_lr()[0],
+                    "step_time": step_time,
+                    "avg_step_time": avg_step_time,
+                    "grad_norm": grad_norm,
                 }
-                # Only log generator loss when generator is actually trained
-                if (step % self.generator_update_interval == 0):
-                    log_data["train_generator_loss"] = generator_loss
                 if use_vsa:
                     log_data["VSA_train_sparsity"] = current_vsa_sparsity
 
                 if training_batch.dmd_latent_vis_dict:
                     dmd_additional_logs = {
-                        "generator_timestep":
-                        training_batch.
-                        dmd_latent_vis_dict["generator_timestep"].item(),
-                        "dmd_timestep":
-                        training_batch.dmd_latent_vis_dict["dmd_timestep"].item(
-                        ),
-                        "regression_loss":
-                        training_batch.regression_loss,
+                        "generator_timestep": training_batch.dmd_latent_vis_dict["generator_timestep"].item(),
+                        "regression_loss": training_batch.regression_loss,
                     }
                     log_data.update(dmd_additional_logs)
-
-                faker_score_additional_logs = {
-                    "fake_score_timestep":
-                    training_batch.
-                    fake_score_latent_vis_dict["fake_score_timestep"].item(),
-                }
-                log_data.update(faker_score_additional_logs)
 
                 wandb.log(log_data, step=step)
 
             # Save training state checkpoint (for resuming training)
             if (self.training_args.training_state_checkpointing_steps > 0
-                    and step %
-                    self.training_args.training_state_checkpointing_steps == 0):
+                    and step % self.training_args.training_state_checkpointing_steps == 0):
                 print("rank", self.global_rank,
                       "save training state checkpoint at step", step)
-                save_distillation_checkpoint(
-                    self.transformer, self.fake_score_transformer,
-                    self.global_rank, self.training_args.output_dir, step,
-                    self.optimizer, self.fake_score_optimizer,
-                    self.train_dataloader, self.lr_scheduler,
-                    self.fake_score_lr_scheduler, self.noise_random_generator)
+                save_checkpoint(self.transformer, self.global_rank,
+                                self.training_args.output_dir, step,
+                                self.optimizer, self.train_dataloader,
+                                self.lr_scheduler, self.noise_random_generator)
 
                 if self.transformer:
                     self.transformer.train()
                 self.sp_group.barrier()
 
-            # Save weight-only checkpoint
+            # Save weight-only checkpoint (export consolidated generator weights)
             if (self.training_args.weight_only_checkpointing_steps > 0
-                    and step %
-                    self.training_args.weight_only_checkpointing_steps == 0):
+                    and step % self.training_args.weight_only_checkpointing_steps == 0):
                 print("rank", self.global_rank,
                       "save weight-only checkpoint at step", step)
-                save_distillation_checkpoint(self.transformer,
-                                             self.fake_score_transformer,
-                                             self.global_rank,
-                                             self.training_args.output_dir,
-                                             f"{step}_weight_only",
-                                             only_save_generator_weight=True)
+                save_checkpoint(self.transformer, self.global_rank,
+                                self.training_args.output_dir,
+                                f"{step}", self.optimizer, self.train_dataloader,
+                                self.lr_scheduler, self.noise_random_generator)
 
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 if self.training_args.log_visualization:
@@ -1312,12 +836,11 @@ class DistillationPipeline(TrainingPipeline):
         print("rank", self.global_rank,
               "save final training state checkpoint at step",
               self.training_args.max_train_steps)
-        save_distillation_checkpoint(
-            self.transformer, self.fake_score_transformer, self.global_rank,
-            self.training_args.output_dir, self.training_args.max_train_steps,
-            self.optimizer, self.fake_score_optimizer, self.train_dataloader,
-            self.lr_scheduler, self.fake_score_lr_scheduler,
-            self.noise_random_generator)
+        save_checkpoint(self.transformer, self.global_rank,
+                        self.training_args.output_dir,
+                        self.training_args.max_train_steps, self.optimizer,
+                        self.train_dataloader, self.lr_scheduler,
+                        self.noise_random_generator)
 
         if get_sp_group():
             cleanup_dist_env_and_memory()

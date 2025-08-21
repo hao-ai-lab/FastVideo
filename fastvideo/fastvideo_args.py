@@ -604,8 +604,6 @@ class TrainingArgs(FastVideoArgs):
     dit_model_name_or_path: str = ""
 
     # diffusion setting
-    ema_decay: float = 0.999
-    ema_start_step: int = 0
     training_cfg_rate: float = 0.0
     precondition_outputs: bool = False
 
@@ -689,8 +687,13 @@ class TrainingArgs(FastVideoArgs):
     simulate_forward_interval: int = 1
     regression_loss_weight: float = 0.0
     use_regression_loss: bool = False
+
+    # consistency model parameters
     cm_loss_weight: float = 0.0
     cm_use_ema_teacher: bool = False
+    ema_decay: float = 0.999
+    ema_start_step: int = 0
+    cm_weighing_function: str = "constant"
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -793,14 +796,6 @@ class TrainingArgs(FastVideoArgs):
                             help="Directory to cache models")
 
         # Diffusion settings
-        parser.add_argument("--ema-decay",
-                            type=float,
-                            default=0.999,
-                            help="EMA decay rate")
-        parser.add_argument("--ema-start-step",
-                            type=int,
-                            default=0,
-                            help="Step to start EMA")
         parser.add_argument("--training-cfg-rate",
                             type=float,
                             help="Classifier-free guidance scale")
@@ -1046,6 +1041,16 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--use-regression-loss",
                             action=StoreBoolean,
                             help="Whether to use regression loss")
+
+        # Consistency model arguments
+        parser.add_argument("--ema-decay",
+                            type=float,
+                            default=0.999,
+                            help="EMA decay rate")
+        parser.add_argument("--ema-start-step",
+                            type=int,
+                            default=0,
+                            help="Step to start EMA")
         parser.add_argument("--cm-loss-weight",
                             type=float,
                             default=TrainingArgs.cm_loss_weight,
@@ -1054,6 +1059,11 @@ class TrainingArgs(FastVideoArgs):
             "--cm-use-ema-teacher",
             action=StoreBoolean,
             help="Whether to use EMA teacher for consistency loss")
+        parser.add_argument("--cm-weighing-function",
+                            type=str,
+                            choices=["constant", "sigma_sqrt"],
+                            default=TrainingArgs.cm_weighing_function,
+                            help="Weighting function for consistency loss")
 
         return parser
 

@@ -1,11 +1,11 @@
 #!/bin/bash
 
 GPU_NUM=1 # 2,4,8
-MODEL_PATH="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
+MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"
 MODEL_TYPE="wan"
 # DATA_MERGE_PATH="data/single/merge.txt"
 DATA_MERGE_PATH="data/crush-smol/merge.txt"
-OUTPUT_DIR="data/crush-smol_processed_wan21_i2v_14b/"
+OUTPUT_DIR="data/crush-smol_processed_wan21_t2v_14b/"
 # OUTPUT_DIR="data/single_processed_i2v_14b/"
 
 torchrun --nproc_per_node=$GPU_NUM \
@@ -23,4 +23,4 @@ torchrun --nproc_per_node=$GPU_NUM \
     --samples_per_file 8\
     --flush_frequency 8 \
     --video_length_tolerance_range 5 \
-    --preprocess_task "i2v" 
+    --preprocess_task "t2v" 

@@ -5,9 +5,9 @@ export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-MODEL_PATH="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
+MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"
 # MODEL_PATH="weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers"
-DATA_DIR="data/crush-smol_processed_wan21_i2v_14b/combined_parquet_dataset/"
+DATA_DIR="data/crush-smol_processed_wan21_t2v_14b/combined_parquet_dataset/"
 # DATA_DIR="data/crush-smol_processed_i2v_1_3b_inp/combined_parquet_dataset/"
 VALIDATION_DATASET_FILE="examples/distill/Wan2.1-I2V/crush_smol/validation_orig.json"
 NUM_GPUS=8
@@ -19,7 +19,7 @@ export WANDB_API_KEY='8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde'
 training_args=(
   --tracker_project_name "wan_i2v_distill"
   --output_dir "checkpoints/wan_i2v_distill"
-  --wandb_run_name "14b_i2v_cm"
+  --wandb_run_name "cm_t2v"
   --max_train_steps 1500
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -69,8 +69,6 @@ optimizer_args=(
   --lr_scheduler "constant"
   # --min_lr_ratio 0.5
   # --lr_warmup_steps 50
-  --fake_score_learning_rate 7e-7
-  --fake_score_lr_scheduler "constant"
   --mixed_precision "bf16"
   --training_state_checkpointing_steps 2000
   --weight_only_checkpointing_steps 2000
@@ -95,23 +93,21 @@ dmd_args=(
   --warp_denoising_step True
   --min_timestep_ratio 0.02
   --max_timestep_ratio 0.96
-  --generator_update_interval 5
-  --simulate_generator_forward
-  --simulate_forward_interval 1
   --real_score_guidance_scale 5
   --VSA_sparsity 0.8
   --regression_loss_weight 0.01
   --use_regression_loss False
   --cm_loss_weight 1
   --ema_decay 0.999
-  --cm_use_ema_teacher
+  --cm_weighing_function "constant"
+  # --cm_use_ema_teacher
 )
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
-    fastvideo/training/wan_i2v_distillation_pipeline.py \
+    fastvideo/training/wan_cm_distillation_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \
