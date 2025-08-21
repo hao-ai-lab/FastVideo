@@ -1,7 +1,6 @@
 import os
 from typing import cast
 
-from datasets import load_dataset
 from torch.utils.data import DataLoader
 
 from fastvideo.configs.configs import PreprocessConfig
@@ -11,7 +10,8 @@ from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_registry import PipelineType
 from fastvideo.workflow.preprocess.components import (
-    ParquetDatasetSaver, PreprocessingDataValidator, VideoForwardBatchBuilder)
+    ParquetDatasetSaver, PreprocessingDataValidator, VideoForwardBatchBuilder,
+    build_dataset)
 from fastvideo.workflow.preprocess.record_schema import (
     basic_t2v_record_creator, i2v_record_creator)
 from fastvideo.workflow.workflow_base import WorkflowBase
@@ -43,8 +43,7 @@ class PreprocessWorkflow(WorkflowBase):
         self.add_component("raw_data_validator", raw_data_validator)
 
         # training dataset
-        training_dataset = load_dataset(preprocess_config.dataset_path,
-                                        split="train")
+        training_dataset = build_dataset(preprocess_config, split="train")
         # set load_from_cache_file to False to check filter stats
         training_dataset = training_dataset.filter(raw_data_validator)
         # we do not use collate_fn here because we use iterable-style Dataset
@@ -59,8 +58,8 @@ class PreprocessWorkflow(WorkflowBase):
 
         # try to load validation dataset if it exists
         try:
-            validation_dataset = load_dataset(preprocess_config.dataset_path,
-                                              split="validation")
+            validation_dataset = build_dataset(preprocess_config,
+                                               split="validation")
             validation_dataset = validation_dataset.filter(raw_data_validator)
             validation_dataloader = DataLoader(
                 validation_dataset,

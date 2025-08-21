@@ -2,7 +2,7 @@
 
 GPU_NUM=1 # 2,4,8
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-DATASET_PATH="data/crush-smol-test/"
+DATASET_PATH="data/crush-smol/"
 OUTPUT_DIR="data/crush-smol_processed_t2v/"
 
 torchrun --nproc_per_node=$GPU_NUM \
@@ -10,6 +10,7 @@ torchrun --nproc_per_node=$GPU_NUM \
     --model_path $MODEL_PATH \
     --mode preprocess \
     --workload_type t2v \
+    --preprocess.dataset_type merged \
     --preprocess.dataset_path $DATASET_PATH \
     --preprocess.dataset_output_dir $OUTPUT_DIR \
     --preprocess.preprocess_video_batch_size 2 \
