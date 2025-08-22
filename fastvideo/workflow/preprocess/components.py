@@ -14,7 +14,10 @@ import torch
 from datasets import Dataset, Video, load_dataset
 
 from fastvideo.configs.configs import DatasetType, PreprocessConfig
+<<<<<<< HEAD
 from fastvideo.distributed.parallel_state import get_world_rank, get_world_size
+=======
+>>>>>>> 15df36ab ([Feat][Preprocess] support merged dataset (#752))
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import PreprocessBatch
 
@@ -402,6 +405,7 @@ class ParquetDatasetSaver:
         return written_count
 
 
+<<<<<<< HEAD
 def build_dataset(preprocess_config: PreprocessConfig, split: str,
                   validator: Callable[[dict[str, Any]], bool]) -> Dataset:
     if preprocess_config.dataset_type == DatasetType.HF:
@@ -409,6 +413,11 @@ def build_dataset(preprocess_config: PreprocessConfig, split: str,
         dataset = dataset.filter(validator)
         dataset = dataset.shard(num_shards=get_world_size(),
                                 index=get_world_rank())
+=======
+def build_dataset(preprocess_config: PreprocessConfig, split: str) -> Dataset:
+    if preprocess_config.dataset_type == DatasetType.HF:
+        dataset = load_dataset(preprocess_config.dataset_path, split=split)
+>>>>>>> 15df36ab ([Feat][Preprocess] support merged dataset (#752))
     elif preprocess_config.dataset_type == DatasetType.MERGED:
         metadata_json_path = os.path.join(preprocess_config.dataset_path,
                                           "videos2caption.json")
@@ -422,11 +431,14 @@ def build_dataset(preprocess_config: PreprocessConfig, split: str,
             dataset = dataset.rename_column("cap", "caption")
         if "path" in column_names:
             dataset = dataset.rename_column("path", "name")
+<<<<<<< HEAD
 
         dataset = dataset.filter(validator)
         dataset = dataset.shard(num_shards=get_world_size(),
                                 index=get_world_rank())
 
+=======
+>>>>>>> 15df36ab ([Feat][Preprocess] support merged dataset (#752))
         # add video column
         def add_video_column(item: dict[str, Any]) -> dict[str, Any]:
             item["video"] = os.path.join(video_folder, item["name"])

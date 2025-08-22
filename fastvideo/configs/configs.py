@@ -32,6 +32,29 @@ class DatasetType(str, Enum):
         return [dataset_type.value for dataset_type in cls]
 
 
+class DatasetType(str, Enum):
+    """
+    Enumeration for different dataset types.
+    """
+    HF = "hf"
+    MERGED = "merged"
+
+    @classmethod
+    def from_string(cls, value: str) -> "DatasetType":
+        """Convert string to DatasetType enum."""
+        try:
+            return cls(value.lower())
+        except ValueError:
+            raise ValueError(
+                f"Invalid dataset type: {value}. Must be one of: {', '.join([m.value for m in cls])}"
+            ) from None
+
+    @classmethod
+    def choices(cls) -> list[str]:
+        """Get all available choices as strings for argparse."""
+        return [dataset_type.value for dataset_type in cls]
+
+
 @dataclasses.dataclass
 class PreprocessConfig:
     """Configuration for preprocessing operations."""
