@@ -20,7 +20,7 @@ class DatasetType(str, Enum):
             return cls(value.lower())
         except ValueError:
             raise ValueError(
-                f"Invalid workload type: {value}. Must be one of: {', '.join([m.value for m in cls])}"
+                f"Invalid dataset type: {value}. Must be one of: {', '.join([m.value for m in cls])}"
             ) from None
 
     @classmethod

@@ -408,7 +408,7 @@ def build_dataset(preprocess_config: PreprocessConfig, split: str) -> Dataset:
         video_folder = os.path.join(preprocess_config.dataset_path, "videos")
         dataset = load_dataset("json",
                                data_files=metadata_json_path,
-                               split="train")
+                               split=split)
         column_names = dataset.column_names
         # rename columns to match the schema
         if "cap" in column_names:
