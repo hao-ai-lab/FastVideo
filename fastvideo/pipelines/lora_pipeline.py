@@ -17,7 +17,6 @@ from fastvideo.layers.lora.linear import (BaseLayerWithLoRA, get_lora_layer,
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.utils import get_param_names_mapping
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.training.distillation_pipeline import DistillationPipeline
 from fastvideo.utils import maybe_download_lora
 
 logger = init_logger(__name__)
@@ -90,6 +89,8 @@ class LoRAPipeline(ComposedPipelineBase):
             return
 
         self.modules["transformer"].requires_grad_(False)
+        if "fake_score_transformer" in self.modules:
+            self.modules["fake_score_transformer"].requires_grad_(False)
         device_mesh = init_device_mesh("cuda", (dist.get_world_size(), 1),
                                        mesh_dim_names=["fake", "replicate"])
         for name, layer in (self.lora_layers | self.lora_layers_critic).items():
@@ -133,7 +134,7 @@ class LoRAPipeline(ComposedPipelineBase):
                 converted_count += 1
         logger.info("Converted %d layers to LoRA layers", converted_count)
 
-        if isinstance(self, DistillationPipeline):
+        if "fake_score_transformer" in self.modules:
             for name, layer in self.modules[
                     "fake_score_transformer"].named_modules():
                 if not self.is_target_layer(name):
