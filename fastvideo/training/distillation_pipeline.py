@@ -35,8 +35,8 @@ from fastvideo.training.activation_checkpoint import (
     apply_activation_checkpointing)
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
-    clip_grad_norm_while_handling_failing_dtensor_cases, get_scheduler,
-    load_distillation_checkpoint, pred_noise_to_pred_video,
+    clip_grad_norm_while_handling_failing_dtensor_cases, count_trainable,
+    get_scheduler, load_distillation_checkpoint, pred_noise_to_pred_video,
     save_distillation_checkpoint, shift_timestep)
 from fastvideo.utils import is_vsa_available, set_random_seed
 
@@ -68,10 +68,17 @@ class DistillationPipeline(TrainingPipeline):
     current_trainstep: int
     video_latent_shape: tuple[int, ...]
     video_latent_shape_sp: tuple[int, ...]
+    real_score_transformer: torch.nn.Module
+    fake_score_transformer: torch.nn.Module
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError(
             "create_pipeline_stages should not be called for training pipeline")
+
+    def set_trainable(self) -> None:
+        super().set_trainable()
+        self.modules["real_score_transformer"].requires_grad_(False)
+        self.modules["vae"].requires_grad_(False)
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         """Initialize the distillation training pipeline with multiple models."""
@@ -81,7 +88,6 @@ class DistillationPipeline(TrainingPipeline):
 
         self.noise_scheduler = self.get_module("scheduler")
         self.vae = self.get_module("vae")
-        self.vae.requires_grad_(False)
 
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
@@ -90,10 +96,7 @@ class DistillationPipeline(TrainingPipeline):
         # self.transformer is the generator model
         self.real_score_transformer = self.get_module("real_score_transformer")
         self.fake_score_transformer = self.get_module("fake_score_transformer")
-
-        self.real_score_transformer.requires_grad_(False)
         self.real_score_transformer.eval()
-        self.fake_score_transformer.requires_grad_(True)
         self.fake_score_transformer.train()
 
         if training_args.enable_gradient_checkpointing_type is not None:
@@ -895,6 +898,14 @@ class DistillationPipeline(TrainingPipeline):
         else:
             set_random_seed(seed + self.global_rank)
 
+        # Check trainable params
+        num_trainble_generator = round(
+            count_trainable(self.transformer) / 1e9, 3)
+        num_trainble_critic = round(
+            count_trainable(self.fake_score_transformer) / 1e9, 3)
+        logger.info(
+            "rank: %s: # of trainble params in generator: %sB, # of trainble params in critic: %sB",
+            self.global_rank, num_trainble_generator, num_trainble_critic)
         # Set random seeds for deterministic training
         self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
             self.seed)
