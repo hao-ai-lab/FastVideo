@@ -899,12 +899,12 @@ class DistillationPipeline(TrainingPipeline):
             set_random_seed(seed + self.global_rank)
 
         # Check trainable params
-        num_trainble_generator = round(
+        num_trainable_generator = round(
             count_trainable(self.transformer) / 1e9, 3)
-        num_trainble_critic = round(
+        num_trainable_critic = round(
             count_trainable(self.fake_score_transformer) / 1e9, 3)
         logger.info(
-            "rank: %s: # of trainble params in generator: %sB, # of trainble params in critic: %sB",
+            "rank: %s: # of trainable params in generator: %sB, # of trainable params in critic: %sB",
             self.global_rank, num_trainble_generator, num_trainble_critic)
         # Set random seeds for deterministic training
         self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
