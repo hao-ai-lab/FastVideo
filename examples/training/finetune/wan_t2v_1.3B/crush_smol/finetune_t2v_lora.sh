@@ -7,7 +7,7 @@ export WANDB_MODE=online
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
-NUM_GPUS=2
+NUM_GPUS=1
 # export CUDA_VISIBLE_DEVICES=4,5
 
 
@@ -76,6 +76,7 @@ miscellaneous_args=(
   --dit_precision "fp32"
   --num_euler_timesteps 50
   --ema_start_step 0
+  --resume_from_checkpoint "checkpoints/wan_t2v_finetune_lora/checkpoint-160"
 )
 
 torchrun \

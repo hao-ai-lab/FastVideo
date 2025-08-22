@@ -58,6 +58,20 @@ class Executor(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def unmerge_lora_weights(self) -> None:
+        """
+        Unmerge the LoRA weights for the workers.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def merge_lora_weights(self) -> None:
+        """
+        Merge the LoRA weights for the workers.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def collective_rpc(self,
                        method: str | Callable[..., _R],
                        timeout: float | None = None,

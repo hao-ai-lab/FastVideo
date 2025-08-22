@@ -217,3 +217,11 @@ class LoRAPipeline(ComposedPipelineBase):
                 layer.disable_lora = True
         logger.info("Rank %d: LoRA adapter %s applied to %d layers", rank,
                     lora_path, adapted_count)
+
+    def merge_lora_weights(self) -> None:
+        for name, layer in self.lora_layers.items():
+            layer.merge_lora_weights()
+
+    def unmerge_lora_weights(self) -> None:
+        for name, layer in self.lora_layers.items():
+            layer.unmerge_lora_weights()
