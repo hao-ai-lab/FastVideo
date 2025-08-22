@@ -47,6 +47,8 @@ class PreprocessWorkflow(WorkflowBase):
         training_dataset = build_dataset(preprocess_config,
                                          split="train",
                                          validator=raw_data_validator)
+        # set load_from_cache_file to False to check filter stats
+        training_dataset = training_dataset.filter(raw_data_validator)
         # we do not use collate_fn here because we use iterable-style Dataset
         # and want to keep the original type of the dataset
         training_dataloader = DataLoader(
