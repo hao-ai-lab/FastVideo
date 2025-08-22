@@ -405,7 +405,7 @@ def build_dataset(preprocess_config: PreprocessConfig, split: str,
     if preprocess_config.dataset_type == DatasetType.HF:
         dataset = load_dataset(preprocess_config.dataset_path, split=split)
         dataset = dataset.filter(validator)
-        dataset = dataset.shard(num_shards=preprocess_config.num_gpus,
+        dataset = dataset.shard(num_shards=get_world_size(),
                                 index=get_world_rank())
     elif preprocess_config.dataset_type == DatasetType.MERGED:
         metadata_json_path = os.path.join(preprocess_config.dataset_path,
