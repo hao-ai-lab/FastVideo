@@ -170,9 +170,7 @@ class DistillationPipeline(TrainingPipeline):
     def _prepare_distillation(self,
                               training_batch: TrainingBatch) -> TrainingBatch:
         """Prepare training environment for distillation."""
-        self.transformer.requires_grad_(True)
         self.transformer.train()
-        self.fake_score_transformer.requires_grad_(True)
         self.fake_score_transformer.train()
 
         return training_batch
