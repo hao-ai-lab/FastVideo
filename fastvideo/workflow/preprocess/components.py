@@ -11,7 +11,9 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
+from datasets import Dataset, Video, load_dataset
 
+from fastvideo.configs.configs import DatasetType, PreprocessConfig
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import PreprocessBatch
 
@@ -395,3 +397,33 @@ class ParquetDatasetSaver:
             written_count += len(chunk_table)
 
         return written_count
+
+
+def build_dataset(preprocess_config: PreprocessConfig, split: str) -> Dataset:
+    if preprocess_config.dataset_type == DatasetType.HF:
+        dataset = load_dataset(preprocess_config.dataset_path, split=split)
+    elif preprocess_config.dataset_type == DatasetType.MERGED:
+        metadata_json_path = os.path.join(preprocess_config.dataset_path,
+                                          "videos2caption.json")
+        video_folder = os.path.join(preprocess_config.dataset_path, "videos")
+        dataset = load_dataset("json",
+                               data_files=metadata_json_path,
+                               split=split)
+        column_names = dataset.column_names
+        # rename columns to match the schema
+        if "cap" in column_names:
+            dataset = dataset.rename_column("cap", "caption")
+        if "path" in column_names:
+            dataset = dataset.rename_column("path", "name")
+        # add video column
+        def add_video_column(item: dict[str, Any]) -> dict[str, Any]:
+            item["video"] = os.path.join(video_folder, item["name"])
+            return item
+
+        dataset = dataset.map(add_video_column)
+        dataset = dataset.cast_column("video", Video())
+    else:
+        raise ValueError(
+            f"Invalid dataset type: {preprocess_config.dataset_type}")
+
+    return dataset

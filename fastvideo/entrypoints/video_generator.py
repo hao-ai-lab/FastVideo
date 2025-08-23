@@ -351,6 +351,16 @@ class VideoGenerator:
                          lora_path: str | None = None) -> None:
         self.executor.set_lora_adapter(lora_nickname, lora_path)
 
+    def unmerge_lora_weights(self) -> None:
+        """
+        Use unmerged weights for inference to produce videos that align with 
+        validation videos generated during training.
+        """
+        self.executor.unmerge_lora_weights()
+
+    def merge_lora_weights(self) -> None:
+        self.executor.merge_lora_weights()
+
     def shutdown(self):
         """
         Shutdown the video generator.

@@ -1,8 +1,32 @@
 import dataclasses
+from enum import Enum
 from typing import Any, Optional
 
 from fastvideo.configs.utils import update_config_from_args
 from fastvideo.utils import FlexibleArgumentParser, StoreBoolean
+
+
+class DatasetType(str, Enum):
+    """
+    Enumeration for different dataset types.
+    """
+    HF = "hf"
+    MERGED = "merged"
+
+    @classmethod
+    def from_string(cls, value: str) -> "DatasetType":
+        """Convert string to DatasetType enum."""
+        try:
+            return cls(value.lower())
+        except ValueError:
+            raise ValueError(
+                f"Invalid dataset type: {value}. Must be one of: {', '.join([m.value for m in cls])}"
+            ) from None
+
+    @classmethod
+    def choices(cls) -> list[str]:
+        """Get all available choices as strings for argparse."""
+        return [dataset_type.value for dataset_type in cls]
 
 
 @dataclasses.dataclass
@@ -12,6 +36,7 @@ class PreprocessConfig:
     # Model and dataset configuration
     model_path: str = ""
     dataset_path: str = ""
+    dataset_type: DatasetType = DatasetType.HF
     dataset_output_dir: str = "./output"
 
     # Dataloader configuration
@@ -54,6 +79,12 @@ class PreprocessConfig:
             type=str,
             default=PreprocessConfig.dataset_path,
             help="Path to the dataset directory for preprocessing")
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}dataset-type",
+            type=str,
+            choices=DatasetType.choices(),
+            default=PreprocessConfig.dataset_type.value,
+            help="Type of the dataset")
         preprocess_args.add_argument(
             f"--{prefix_with_dot}dataset-output-dir",
             type=str,
@@ -136,6 +167,10 @@ class PreprocessConfig:
     def from_kwargs(cls, kwargs: dict[str,
                                       Any]) -> Optional["PreprocessConfig"]:
         """Create PreprocessConfig from keyword arguments."""
+        if 'dataset_type' in kwargs and isinstance(kwargs['dataset_type'], str):
+            kwargs['dataset_type'] = DatasetType.from_string(
+                kwargs['dataset_type'])
+
         preprocess_config = cls()
         if not update_config_from_args(
                 preprocess_config, kwargs, prefix="preprocess", pop_args=True):
