@@ -1,6 +1,6 @@
 #!/bin/bash
 
-GPU_NUM=1 # 2,4,8
+GPU_NUM=2 # 2,4,8
 MODEL_PATH="Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
 DATASET_PATH="data/crush-smol/"
 OUTPUT_DIR="data/crush-smol_processed_i2v/"

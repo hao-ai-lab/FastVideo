@@ -3,7 +3,10 @@ from enum import Enum
 from typing import Any, Optional
 
 from fastvideo.configs.utils import update_config_from_args
+from fastvideo.logger import init_logger
 from fastvideo.utils import FlexibleArgumentParser, StoreBoolean
+
+logger = init_logger(__name__)
 
 
 class DatasetType(str, Enum):
@@ -60,6 +63,7 @@ class PreprocessConfig:
     # Model configuration
     training_cfg_rate: float = 0.0
 
+    # framework configuration
     seed: int = 42
 
     @staticmethod
