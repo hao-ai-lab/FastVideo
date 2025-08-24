@@ -56,6 +56,9 @@ pre-commit install --hook-type pre-commit --hook-type commit-msg
 
 # You can manually run pre-commit with
 pre-commit run --all-files
+
+# Unit tests
+pytest tests/
 ```
 
 If you are on a Hopper GPU, you should also install [FA3](https://github.com/Dao-AILab/flash-attention) for much better performance:
