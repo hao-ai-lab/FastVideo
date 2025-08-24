@@ -10,7 +10,8 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.conditioning import ConditioningStage
 from fastvideo.pipelines.stages.decoding import DecodingStage
 from fastvideo.pipelines.stages.denoising import (DenoisingStage,
-                                                  DmdDenoisingStage)
+                                                  DmdDenoisingStage,
+                                                  CosmosDenoisingStage)
 from fastvideo.pipelines.stages.encoding import EncodingStage
 from fastvideo.pipelines.stages.image_encoding import (ImageEncodingStage,
                                                        ImageVAEEncodingStage)
@@ -30,6 +31,7 @@ __all__ = [
     "ConditioningStage",
     "DenoisingStage",
     "DmdDenoisingStage",
+    "CosmosDenoisingStage",
     "EncodingStage",
     "DecodingStage",
     "ImageEncodingStage",

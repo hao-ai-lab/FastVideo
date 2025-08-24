@@ -88,6 +88,14 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             The type of dynamic resolution-dependent timestep shifting to apply. Either "exponential" or "linear".
         stochastic_sampling (`bool`, defaults to False):
             Whether to use stochastic sampling.
+        final_sigmas_type (`str`, defaults to "sigma_min"):
+            The type of final sigmas to use. Either "sigma_min" or "zero".
+        sigma_max (`float`, *optional*):
+            The maximum sigma value for the noise schedule.
+        sigma_min (`float`, *optional*):
+            The minimum sigma value for the noise schedule.
+        sigma_data (`float`, *optional*):
+            The sigma data value for scaling.
     """
 
     _compatibles: list[Any] = []
@@ -110,6 +118,10 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
         use_beta_sigmas: bool | None = False,
         time_shift_type: str = "exponential",
         stochastic_sampling: bool = False,
+        final_sigmas_type: str = "sigma_min",
+        sigma_max: float | None = None,
+        sigma_min: float | None = None,
+        sigma_data: float | None = None,
     ):
         if sum([
                 self.config.use_beta_sigmas, self.config.use_exponential_sigmas,
@@ -403,9 +415,14 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
                 [sigmas_tensor,
                  torch.ones(1, device=sigmas_tensor.device)])
         else:
-            sigmas_tensor = torch.cat(
-                [sigmas_tensor,
-                 torch.zeros(1, device=sigmas_tensor.device)])
+            # Handle final_sigmas_type parameter
+            if self.config.final_sigmas_type == "sigma_min":
+                # Use sigma_min instead of zero for final sigma
+                final_sigma = torch.tensor([self.sigma_min], device=sigmas_tensor.device)
+            else:  # "zero" or default
+                final_sigma = torch.zeros(1, device=sigmas_tensor.device)
+            
+            sigmas_tensor = torch.cat([sigmas_tensor, final_sigma])
 
         self.timesteps = timesteps_tensor
         self.sigmas = sigmas_tensor

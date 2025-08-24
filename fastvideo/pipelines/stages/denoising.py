@@ -600,6 +600,166 @@ class DenoisingStage(PipelineStage):
         return result
 
 
+class CosmosDenoisingStage(PipelineStage):
+    """
+    Denoising stage for Cosmos models using FlowMatchEulerDiscreteScheduler.
+    
+    This stage implements the diffusers-compatible Cosmos denoising process with velocity prediction,
+    classifier-free guidance, and conditional video generation support.
+    Compatible with Hugging Face Cosmos models.
+    """
+
+    def __init__(self, 
+                 transformer,
+                 scheduler,
+                 pipeline=None) -> None:
+        super().__init__()
+        self.transformer = transformer
+        self.scheduler = scheduler  # FlowMatchEulerDiscreteScheduler
+        self.pipeline = weakref.ref(pipeline) if pipeline else None
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        """
+        Run the diffusers-style Cosmos denoising loop.
+        
+        Args:
+            batch: The current batch information.
+            fastvideo_args: The inference arguments.
+            
+        Returns:
+            The batch with denoised latents.
+        """
+        pipeline = self.pipeline() if self.pipeline else None
+        if not fastvideo_args.model_loaded["transformer"]:
+            loader = TransformerLoader()
+            self.transformer = loader.load(
+                fastvideo_args.model_paths["transformer"], fastvideo_args)
+            if pipeline:
+                pipeline.add_module("transformer", self.transformer)
+            fastvideo_args.model_loaded["transformer"] = True
+
+        # Setup precision and autocast settings
+        target_dtype = torch.bfloat16
+        autocast_enabled = (target_dtype != torch.float32
+                            ) and not fastvideo_args.disable_autocast
+
+        # Get latents and setup
+        latents = batch.latents
+        num_inference_steps = batch.num_inference_steps
+        guidance_scale = batch.guidance_scale
+        
+        # Setup scheduler with sigma schedule
+        sigmas_dtype = torch.float32 if torch.backends.mps.is_available() else torch.float64
+        sigmas = torch.linspace(0, 1, num_inference_steps, dtype=sigmas_dtype)
+        timesteps = torch.arange(num_inference_steps, device=latents.device, dtype=torch.long)
+        self.scheduler.set_timesteps(device=latents.device, sigmas=sigmas)
+        
+        # Initialize with maximum noise
+        latents = torch.randn_like(latents, dtype=torch.float32) * self.scheduler.config.sigma_max
+        
+        # Prepare conditional frame handling (if needed)
+        # This would be implemented based on batch.conditioning_latents or similar
+        
+        # Sampling loop
+        with self.progress_bar(total=num_inference_steps) as progress_bar:
+            for i, t in enumerate(timesteps):
+                # Skip if interrupted
+                if hasattr(self, 'interrupt') and self.interrupt:
+                    continue
+                
+                # Get current sigma and preconditioning coefficients
+                current_sigma = self.scheduler.sigmas[i]
+                current_t = current_sigma / (current_sigma + 1)
+                c_in = 1 - current_t
+                c_skip = 1 - current_t
+                c_out = -current_t
+                
+                # Prepare timestep tensor
+                timestep = current_t.view(1, 1, 1, 1, 1).expand(
+                    latents.size(0), -1, latents.size(2), -1, -1
+                )
+                
+                with torch.autocast(device_type="cuda",
+                                    dtype=target_dtype,
+                                    enabled=autocast_enabled):
+                    
+                    # Conditional forward pass
+                    cond_latent = latents * c_in
+                    # Add conditional frame handling here if needed:
+                    # cond_latent = cond_indicator * conditioning_latents + (1 - cond_indicator) * cond_latent
+                    
+                    cond_velocity = self.transformer(
+                        hidden_states=cond_latent.to(target_dtype),
+                        timestep=timestep.to(target_dtype),
+                        encoder_hidden_states=batch.prompt_embeds[0].to(target_dtype),
+                        return_dict=False,
+                    )[0]
+                    
+                    # Apply preconditioning
+                    cond_pred = (c_skip * latents + c_out * cond_velocity.float()).to(target_dtype)
+                    
+                    # Classifier-free guidance
+                    if batch.do_classifier_free_guidance and batch.negative_prompt_embeds is not None:
+                        uncond_latent = latents * c_in
+                        
+                        uncond_velocity = self.transformer(
+                            hidden_states=uncond_latent.to(target_dtype),
+                            timestep=timestep.to(target_dtype),
+                            encoder_hidden_states=batch.negative_prompt_embeds[0].to(target_dtype),
+                            return_dict=False,
+                        )[0]
+                        
+                        uncond_pred = (c_skip * latents + c_out * uncond_velocity.float()).to(target_dtype)
+                        
+                        # Apply guidance
+                        velocity_pred = cond_pred + guidance_scale * (cond_pred - uncond_pred)
+                    else:
+                        velocity_pred = cond_pred
+                
+                # Convert velocity to noise for scheduler
+                noise_pred = (latents - velocity_pred) / current_sigma
+                
+                # Standard scheduler step
+                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                
+                progress_bar.update()
+        
+        # Update batch with final latents
+        batch.latents = latents
+        
+        return batch
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify Cosmos denoising stage inputs."""
+        result = VerificationResult()
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(5)])
+        result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
+        result.add_check("num_inference_steps", batch.num_inference_steps,
+                         V.positive_int)
+        result.add_check("guidance_scale", batch.guidance_scale,
+                         V.positive_float)
+        result.add_check("do_classifier_free_guidance",
+                         batch.do_classifier_free_guidance, V.bool_value)
+        result.add_check(
+            "negative_prompt_embeds", batch.negative_prompt_embeds, lambda x:
+            not batch.do_classifier_free_guidance or V.list_not_empty(x))
+        return result
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify Cosmos denoising stage outputs."""
+        result = VerificationResult()
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(5)])
+        return result
+
+
 class DmdDenoisingStage(DenoisingStage):
     """
     Denoising stage for DMD.

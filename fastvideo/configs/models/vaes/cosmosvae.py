@@ -18,6 +18,14 @@ class CosmosVAEArchConfig(VAEArchConfig):
     attn_scales: tuple[float, ...] = ()
     temperal_downsample: tuple[bool, ...] = (False, True, True)
     dropout: float = 0.0
+    decoder_base_dim: int | None = None
+    is_residual: bool = False
+    in_channels: int = 3
+    out_channels: int = 3
+    patch_size: int | None = None
+    scale_factor_temporal: int = 4
+    scale_factor_spatial: int = 8
+    clip_output: bool = True
     latents_mean: tuple[float, ...] = (
         -0.7571,
         -0.7089,
@@ -62,6 +70,8 @@ class CosmosVAEArchConfig(VAEArchConfig):
             self.latents_std).view(1, self.z_dim, 1, 1, 1)
         self.shift_factor: torch.Tensor = torch.tensor(self.latents_mean).view(
             1, self.z_dim, 1, 1, 1)
+        self.temporal_compression_ratio = self.scale_factor_temporal
+        self.spatial_compression_ratio = self.scale_factor_spatial
 
 
 @dataclass
