@@ -98,6 +98,7 @@ dmd_args=(
 torchrun \
 --nnodes 1 \
 --nproc_per_node $NUM_GPUS \
+--master_port $MASTER_PORT \
     fastvideo/training/wan_distillation_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \

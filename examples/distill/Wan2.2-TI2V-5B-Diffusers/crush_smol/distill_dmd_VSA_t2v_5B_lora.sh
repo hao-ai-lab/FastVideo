@@ -4,7 +4,7 @@
 export WANDB_MODE="online"
 export NCCL_P2P_DISABLE=1
 export TORCH_NCCL_ENABLE_MONITORING=0
-export MASTER_PORT=29500
+export MASTER_PORT=29501
 export TOKENIZERS_PARALLELISM=false
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
@@ -100,6 +100,7 @@ dmd_args=(
 torchrun \
 --nnodes 1 \
 --nproc_per_node $NUM_GPUS \
+--master_port $MASTER_PORT \
     fastvideo/training/wan_distillation_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
