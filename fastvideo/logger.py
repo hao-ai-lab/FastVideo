@@ -120,14 +120,14 @@ def _info(logger: Logger,
 
     if not _warned_local_main_process and local_main_process_only:
         logger.warning(
-            '%s is_local_main_process is set to True, logging only from the local main process.%s',
+            '%s By default, logger.info(..) will only log from the local main process. Set logger.info(..., is_local_main_process=False) to log from all processes.%s',
             GREEN,
             RESET,
         )
         _warned_local_main_process = True
     if not _warned_main_process and main_process_only:
         logger.warning(
-            '%s is_main_process_only is set to True, logging only from the main process.%s',
+            '%s is_main_process_only is set to True, logging only from the main (RANK==0) process.%s',
             GREEN,
             RESET,
         )

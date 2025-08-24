@@ -1,6 +1,6 @@
 # Welcome to FastVideo
 
-:::{figure} ../../assets/logo.png
+:::{figure} ../../assets/logos/logo.svg
 :align: center
 :alt: FastVideo
 :class: no-scaled-link
@@ -101,7 +101,6 @@ sliding_tile_attention/demo
 :maxdepth: 1
 
 video_sparse_attention/installation
-video_sparse_attention/demo
 :::
 
 :::{toctree}

@@ -39,6 +39,7 @@ conda activate fastvideo
 
 :::{tip}
 We highly recommend using `uv` to install FastVideo. In our experience, `uv` speeds up installation by at least 3x.
+Note that you can also use `uv` to install FastVideo in a Conda environment.
 :::
 
 Or you can create a new Python environment using [uv](https://docs.astral.sh/uv/), a very fast Python environment manager. Please follow the [documentation](https://docs.astral.sh/uv/#getting-started) to install `uv`. After installing `uv`, you can create a new Python environment using the following command:

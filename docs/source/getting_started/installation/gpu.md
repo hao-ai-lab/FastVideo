@@ -6,7 +6,7 @@ Instructions to install FastVideo for NVIDIA CUDA GPUs.
 
 - **OS: Linux or Windows WSL**
 - **Python: 3.10-3.12**
-- **CUDA 12.4**
+- **CUDA 12.8**
 - **At least 1 NVIDIA GPU**
 
 ## Set up using Python
@@ -38,6 +38,7 @@ conda activate fastvideo
 
 :::{tip}
 We highly recommend using `uv` to install FastVideo. In our experience, `uv` speeds up installation by at least 3x.
+Note that you can also use `uv` to install FastVideo in a Conda environment.
 :::
 
 Or you can create a new Python environment using [uv](https://docs.astral.sh/uv/), a very fast Python environment manager. Please follow the [documentation](https://docs.astral.sh/uv/#getting-started) to install `uv`. After installing `uv`, you can create a new Python environment using the following command:
@@ -60,7 +61,7 @@ uv pip install fastvideo
 Also optionally install flash-attn:
 
 ```bash
-pip install flash-attn==2.7.4.post1 --no-build-isolation
+pip install flash-attn --no-build-isolation
 ```
 
 ### Installation from Source
@@ -87,7 +88,7 @@ uv pip install -e .
 #### Flash Attention
 
 ```bash
-pip install flash-attn==2.7.4.post1 --no-build-isolation
+pip install flash-attn --no-build-isolation
 ```
 
 ## Set up using Docker
@@ -102,7 +103,7 @@ If you're planning to contribute to FastVideo please see the following page:
 ## Hardware Requirements
 
 ### For Basic Inference
-- NVIDIA GPU with CUDA 12.4 support
+- NVIDIA GPU with CUDA 12.8 support
 
 ### For Lora Finetuning
 - 40GB GPU memory each for 2 GPUs with lora
