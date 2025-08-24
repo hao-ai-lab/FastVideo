@@ -39,6 +39,41 @@ The `HuggingFace Model ID` can be directly pass to `from_pretrained()` methods a
   * Sliding Tile Attn
   * Sage Attn
   * Video Sparse Attention (VSA)
+- * FastWan2.1 T2V 1.3B
+  * `FastVideo/FastWan2.1-T2V-1.3B-Diffusers`
+  * 480P
+  * ⭕
+  * ⭕
+  * ⭕
+  * ✅
+- * FastWan2.2 TI2V 5B Full Attn*
+  * `FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers`
+  * 720P
+  * ⭕
+  * ⭕
+  * ⭕
+  * ✅
+- * Wan2.2 TI2V 5B 
+  * `Wan-AI/Wan2.2-TI2V-5B-Diffusers`
+  * 720P
+  * ⭕
+  * ⭕
+  * ✅
+  * ⭕
+- * Wan2.2 T2V A14B
+  * `Wan-AI/Wan2.2-T2V-A14B-Diffusers`
+  * 480P<br>720P
+  * ❌
+  * ❌
+  * ✅
+  * ⭕
+- * Wan2.2 I2V A14B
+  * `Wan-AI/Wan2.2-I2V-A14B-Diffusers`
+  * 480P<br>720P
+  * ❌
+  * ❌
+  * ✅
+  * ⭕
 - * HunyuanVideo
   * `hunyuanvideo-community/HunyuanVideo`
   * 720px1280p<br>544px960p
@@ -79,41 +114,6 @@ The `HuggingFace Model ID` can be directly pass to `from_pretrained()` methods a
   * 720P
   * ✅
   * ✅
-  * ✅
-  * ⭕
-- * FastWan2.1 T2V 1.3B
-  * `FastVideo/FastWan2.1-T2V-1.3B-Diffusers`
-  * 480P
-  * ⭕
-  * ⭕
-  * ⭕
-  * ✅
-- * FastWan2.2 TI2V 5B Full Attn*
-  * `FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers`
-  * 720P
-  * ⭕
-  * ⭕
-  * ⭕
-  * ✅
-- * Wan2.2 TI2V 5B 
-  * `Wan-AI/Wan2.2-TI2V-5B-Diffusers`
-  * 720P
-  * ⭕
-  * ⭕
-  * ✅
-  * ⭕
-- * Wan2.2 T2V A14B
-  * `Wan-AI/Wan2.2-T2V-A14B-Diffusers`
-  * 480P<br>720P
-  * ❌
-  * ❌
-  * ✅
-  * ⭕
-- * Wan2.2 I2V A14B
-  * `Wan-AI/Wan2.2-I2V-A14B-Diffusers`
-  * 480P<br>720P
-  * ❌
-  * ❌
   * ✅
   * ⭕
 - * StepVideo T2V
