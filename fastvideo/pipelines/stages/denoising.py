@@ -650,11 +650,10 @@ class CosmosDenoisingStage(DenoisingStage):
         num_inference_steps = batch.num_inference_steps
         guidance_scale = batch.guidance_scale
         
-        # Setup scheduler with sigma schedule
-        sigmas_dtype = torch.float32 if torch.backends.mps.is_available() else torch.float64
-        sigmas = torch.linspace(0, 1, num_inference_steps, dtype=sigmas_dtype)
-        timesteps = torch.arange(num_inference_steps, device=latents.device, dtype=torch.long)
-        self.scheduler.set_timesteps(device=latents.device, sigmas=sigmas)
+        
+        # Setup scheduler timesteps (let scheduler generate proper sigmas)
+        self.scheduler.set_timesteps(num_inference_steps, device=latents.device)
+        timesteps = self.scheduler.timesteps
         
         # Initialize with maximum noise
         latents = torch.randn_like(latents, dtype=torch.float32) * self.scheduler.sigma_max
@@ -669,11 +668,11 @@ class CosmosDenoisingStage(DenoisingStage):
                 if hasattr(self, 'interrupt') and self.interrupt:
                     continue
                 
-                # Get current sigma and preconditioning coefficients
+                # Get current sigma and preconditioning coefficients (from diffusers cosmos)
                 current_sigma = self.scheduler.sigmas[i]
                 current_t = current_sigma / (current_sigma + 1)
                 c_in = 1 - current_t
-                c_skip = 1 - current_t
+                c_skip = 1 - current_t  
                 c_out = -current_t
                 
                 # Prepare timestep tensor
@@ -692,18 +691,38 @@ class CosmosDenoisingStage(DenoisingStage):
                     
                     with set_forward_context(
                         current_timestep=i,
-                        attn_metadata=None,  # TODO: implement attention metadata if needed
+                        attn_metadata=None,
                         forward_batch=batch,
                     ):
+                        # Use conditioning masks from CosmosLatentPreparationStage
+                        condition_mask = batch.cond_mask.to(target_dtype) if hasattr(batch, 'cond_mask') else None
+                        padding_mask = torch.zeros(1, 1, cond_latent.shape[3], cond_latent.shape[4], 
+                                                 device=cond_latent.device, dtype=target_dtype)
+                        
+                        # Fallback if masks not available
+                        if condition_mask is None:
+                            batch_size, num_channels, num_frames, height, width = cond_latent.shape
+                            condition_mask = torch.zeros(batch_size, 1, num_frames, height, width, 
+                                                       device=cond_latent.device, dtype=target_dtype)
+                        
+                        
                         cond_velocity = self.transformer(
                             hidden_states=cond_latent.to(target_dtype),
                             timestep=timestep.to(target_dtype),
                             encoder_hidden_states=batch.prompt_embeds[0].to(target_dtype),
+                            fps=24,  # TODO: get fps from batch or config
+                            condition_mask=condition_mask,
+                            padding_mask=padding_mask,
                             return_dict=False,
                         )[0]
                     
-                    # Apply preconditioning
+                    # Apply preconditioning and conditional masking
                     cond_pred = (c_skip * latents + c_out * cond_velocity.float()).to(target_dtype)
+                    
+                    # Apply conditional indicator masking (from CosmosLatentPreparationStage)
+                    if hasattr(batch, 'cond_indicator') and batch.cond_indicator is not None:
+                        conditioning_latents = batch.conditioning_latents if batch.conditioning_latents is not None else torch.zeros_like(latents)
+                        cond_pred = batch.cond_indicator * conditioning_latents + (1 - batch.cond_indicator) * cond_pred
                     
                     # Classifier-free guidance
                     if batch.do_classifier_free_guidance and batch.negative_prompt_embeds is not None:
@@ -711,28 +730,59 @@ class CosmosDenoisingStage(DenoisingStage):
                         
                         with set_forward_context(
                             current_timestep=i,
-                            attn_metadata=None,  # TODO: implement attention metadata if needed
+                            attn_metadata=None,
                             forward_batch=batch,
                         ):
+                            # Use uncond_mask for unconditional pass if available
+                            uncond_condition_mask = batch.uncond_mask.to(target_dtype) if hasattr(batch, 'uncond_mask') and batch.uncond_mask is not None else condition_mask
+                            
                             uncond_velocity = self.transformer(
                                 hidden_states=uncond_latent.to(target_dtype),
                                 timestep=timestep.to(target_dtype),
                                 encoder_hidden_states=batch.negative_prompt_embeds[0].to(target_dtype),
+                                fps=24,  # TODO: get fps from batch or config
+                                condition_mask=uncond_condition_mask,
+                                padding_mask=padding_mask,
                                 return_dict=False,
                             )[0]
                         
                         uncond_pred = (c_skip * latents + c_out * uncond_velocity.float()).to(target_dtype)
                         
+                        # Apply conditional indicator masking for unconditional prediction
+                        if hasattr(batch, 'uncond_indicator') and batch.uncond_indicator is not None:
+                            unconditioning_latents = conditioning_latents  # Same as conditioning for cosmos
+                            uncond_pred = batch.uncond_indicator * unconditioning_latents + (1 - batch.uncond_indicator) * uncond_pred
+                        
                         # Apply guidance
-                        velocity_pred = cond_pred + guidance_scale * (cond_pred - uncond_pred)
+                        noise_pred = cond_pred + guidance_scale * (cond_pred - uncond_pred)
                     else:
-                        velocity_pred = cond_pred
+                        noise_pred = cond_pred
                 
-                # Convert velocity to noise for scheduler
-                noise_pred = (latents - velocity_pred) / current_sigma
+                # Debug: Check for NaN values before conversion
+                logger.info(f"Step {i}: Before conversion - latents NaN count: {torch.isnan(latents).sum()}")
+                logger.info(f"Step {i}: Before conversion - noise_pred NaN count: {torch.isnan(noise_pred).sum()}")
+                logger.info(f"Step {i}: current_sigma: {current_sigma}")
+                
+                # Convert from velocity prediction to noise (Cosmos-specific conversion)
+                # Add small epsilon to prevent division by zero
+                current_sigma_safe = torch.clamp(current_sigma, min=1e-8)
+                noise_pred = (latents - noise_pred) / current_sigma_safe
+                
+                # Debug: Check for NaN values after conversion
+                logger.info(f"Step {i}: After conversion - noise_pred NaN count: {torch.isnan(noise_pred).sum()}")
                 
                 # Standard scheduler step
+                latents_before = latents.clone()
                 latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                
+                # Debug: Check for NaN values after scheduler step
+                logger.info(f"Step {i}: After scheduler - latents NaN count: {torch.isnan(latents).sum()}")
+                logger.info(f"Step {i}: latents shape change: {latents_before.shape} -> {latents.shape}")
+                
+                # Break if NaN detected
+                if torch.isnan(latents).sum() > 0:
+                    logger.error(f"NaN detected at step {i}, breaking denoising loop")
+                    break
                 
                 progress_bar.update()
         

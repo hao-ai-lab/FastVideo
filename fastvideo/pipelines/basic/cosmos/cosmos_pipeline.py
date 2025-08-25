@@ -15,7 +15,7 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
                                            CosmosDenoisingStage, InputValidationStage,
-                                           LatentPreparationStage,
+                                           CosmosLatentPreparationStage,
                                            TextEncodingStage,
                                            TimestepPreparationStage)
 from fastvideo.pipelines.stages.base import PipelineStage
@@ -56,9 +56,9 @@ class Cosmos2VideoToWorldPipeline(ComposedPipelineBase):
                            scheduler=self.get_module("scheduler")))
 
         self.add_stage(stage_name="latent_preparation_stage",
-                       stage=LatentPreparationStage(
+                       stage=CosmosLatentPreparationStage(
                            scheduler=self.get_module("scheduler"),
-                           transformer=self.get_module("transformer", None)))
+                           transformer=self.get_module("transformer")))
 
         self.add_stage(stage_name="denoising_stage",
                        stage=CosmosDenoisingStage(
