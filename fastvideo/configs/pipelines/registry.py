@@ -50,6 +50,7 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     "wandmdpipeline": lambda id: "wandmdpipeline" in id.lower(),
     "wancausaldmdpipeline": lambda id: "wancausaldmdpipeline" in id.lower(),
     "stepvideo": lambda id: "stepvideo" in id.lower(),
+    "wancausaldmdpipeline": lambda id: "wancausaldmdpipeline" in id.lower(),
     # Add other pipeline architecture detectors
 }
 

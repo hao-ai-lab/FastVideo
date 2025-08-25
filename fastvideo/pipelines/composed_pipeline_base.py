@@ -121,14 +121,25 @@ class ComposedPipelineBase(ABC):
                         model_path: str,
                         device: str | None = None,
                         torch_dtype: torch.dtype | None = None,
-                        pipeline_config: str | PipelineConfig | None = None,
+                        pipeline_config: PipelineConfig | None = None,
                         args: argparse.Namespace | None = None,
                         required_config_modules: list[str] | None = None,
                         loaded_modules: dict[str, torch.nn.Module]
                         | None = None,
                         **kwargs) -> "ComposedPipelineBase":
         """
-        Load a pipeline from a pretrained model.
+        Load a pipeline from a pretrained model. 
+        Few different patterns are supported:
+        - Only provide model_path:
+            - This will load the pipeline in inference mode.
+            - The pipeline will be initialized with the default config.
+            - The pipeline will be initialized with the default modules.
+            - The pipeline will be initialized with the default stages.
+            - The pipeline will be initialized with the default stages.
+        - override the default config using pipeline_config or args or kwargs
+        - override the default modules using loaded_modules
+        - override the pipelineconfig
+
         loaded_modules: Optional[Dict[str, torch.nn.Module]] = None,
         If provided, loaded_modules will be used instead of loading from config/pretrained weights.
         """
@@ -136,9 +147,18 @@ class ComposedPipelineBase(ABC):
 
             kwargs['model_path'] = model_path
             fastvideo_args = FastVideoArgs.from_kwargs(**kwargs)
+            if pipeline_config is not None:
+                fastvideo_args.pipeline_config = pipeline_config
+            if fastvideo_args.override_transformer_cls_name is not None:
+                pipeline_config = PipelineConfig.from_pretrained("wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers")
+                fastvideo_args.pipeline_config = pipeline_config
         else:
             assert args is not None, "args must be provided for training mode"
             fastvideo_args = TrainingArgs.from_cli_args(args)
+            if fastvideo_args.override_transformer_cls_name is not None:
+                pipeline_config = PipelineConfig.from_pretrained("wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers")
+                fastvideo_args.pipeline_config = pipeline_config
+                logger.info("in 2 Overriding transformer cls name to %s", fastvideo_args.override_transformer_cls_name)
             # TODO(will): fix this so that its not so ugly
             fastvideo_args.model_path = model_path
             for key, value in kwargs.items():
@@ -149,7 +169,8 @@ class ComposedPipelineBase(ABC):
             # model is loaded with the correct precision. Subsequently we will
             # use FSDP2's MixedPrecisionPolicy to set the precision for the
             # fwd, bwd, and other operations' precision.
-            assert fastvideo_args.pipeline_config.dit_precision == 'fp32', 'only fp32 is supported for training'
+            fastvideo_args.pipeline_config.dit_precision = 'fp32'
+            # assert fastvideo_args.pipeline_config.dit_precision == 'fp32', 'only fp32 is supported for training'
 
         logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)
 

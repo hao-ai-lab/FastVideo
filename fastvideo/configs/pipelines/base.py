@@ -45,6 +45,8 @@ class PipelineConfig:
     embedded_cfg_scale: float = 6.0
     flow_shift: float | None = None
     disable_autocast: bool = False
+    ti2v_task: bool = False
+    t2v_as_i2v_task: bool = False
 
     # Model configuration
     dit_config: DiTConfig = field(default_factory=DiTConfig)
@@ -215,6 +217,24 @@ class PipelineConfig:
             "Comma-separated list of denoising steps (e.g., '1000,757,522')",
         )
 
+        # TI2V task
+        parser.add_argument(
+            f"--{prefix_with_dot}ti2v-task",
+            action=StoreBoolean,
+            dest=f"{prefix_with_dot.replace('-', '_')}ti2v_task",
+            default=PipelineConfig.ti2v_task,
+            help="Enable TI2V",
+        )
+
+        # T2V to I2V task
+        parser.add_argument(
+            f"--{prefix_with_dot}t2v-as-i2v-task",
+            action=StoreBoolean,
+            dest=f"{prefix_with_dot.replace('-', '_')}t2v_as_i2v_task",
+            default=PipelineConfig.t2v_as_i2v_task,
+            help="Enable T2V to I2V task",
+        )
+
         # Add VAE configuration arguments
         from fastvideo.configs.models.vaes.base import VAEConfig
         VAEConfig.add_cli_args(parser, prefix=f"{prefix_with_dot}vae-config")
@@ -246,7 +266,9 @@ class PipelineConfig:
         """
         from fastvideo.configs.pipelines.registry import (
             get_pipeline_config_cls_from_name)
+        logger.info("WTF model_path: %s", model_path)
         pipeline_config_cls = get_pipeline_config_cls_from_name(model_path)
+        logger.info("pipeline_config_cls: %s", pipeline_config_cls)
 
         return cast(PipelineConfig, pipeline_config_cls(model_path=model_path))
 

@@ -158,6 +158,7 @@ class FastVideoArgs:
         "transformer": True,
         "vae": True,
     })
+    override_transformer_cls_name: str | None = None
 
     # # DMD parameters
     # dmd_denoising_steps: List[int] | None = field(default=None)
@@ -396,6 +397,12 @@ class FastVideoArgs:
             default=FastVideoArgs.enable_stage_verification,
             help="Enable input/output verification for pipeline stages",
         )
+        parser.add_argument(
+            "--override-transformer-cls-name",
+            type=str,
+            default=FastVideoArgs.override_transformer_cls_name,
+            help="Override transformer cls name",
+        )
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)
 
@@ -627,6 +634,7 @@ class TrainingArgs(FastVideoArgs):
     checkpoints_total_limit: int = 0
     checkpointing_steps: int = 0
     resume_from_checkpoint: str = ""  # specify the checkpoint folder to resume from
+    init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
 
     # optimizer & scheduler
     num_train_epochs: int = 0
@@ -688,6 +696,8 @@ class TrainingArgs(FastVideoArgs):
     log_visualization: bool = False
     # simulate generator forward to match inference
     simulate_generator_forward: bool = False
+    warp_denoising_step: bool = False
+    intermediate_latents_visualization: bool = False
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -859,6 +869,10 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--resume-from-checkpoint",
                             type=str,
                             help="Path to checkpoint to resume from")
+        parser.add_argument(
+            "--init-weights-from-safetensors",
+            type=str,
+            help="Path to safetensors file for initial weight loading")
         parser.add_argument("--logging-dir",
                             type=str,
                             help="Directory for logging")
@@ -1041,6 +1055,12 @@ class TrainingArgs(FastVideoArgs):
             "--simulate-generator-forward",
             action=StoreBoolean,
             help="Whether to simulate generator forward to match inference")
+        parser.add_argument(
+            "--warp-denoising-step",
+            action=StoreBoolean,
+            help=
+            "Whether to warp denoising step according to the scheduler time shift"
+        )
 
         return parser
 

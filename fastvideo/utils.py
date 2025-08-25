@@ -2,6 +2,10 @@
 # Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/utils.py
 
 import argparse
+from einops import rearrange
+import torchvision
+import numpy as np
+import imageio
 import ctypes
 import hashlib
 import importlib

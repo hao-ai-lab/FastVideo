@@ -12,8 +12,10 @@ import os
 from collections.abc import Iterator
 from typing import Any
 
+import numpy as np
 import pyarrow as pa
 import torch
+from PIL import Image
 from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm import tqdm
@@ -193,7 +195,6 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                                                         fastvideo_args)
                     result_batch = self.decoding_stage(result_batch,
                                                        fastvideo_args)
-
                     trajectory_latents.append(
                         result_batch.trajectory_latents.cpu())
                     trajectory_timesteps.append(

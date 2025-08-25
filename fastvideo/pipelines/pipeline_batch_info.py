@@ -151,7 +151,7 @@ class ForwardBatch:
     output: torch.Tensor | None = None
     return_trajectory_latents: bool = False
     return_trajectory_decoded: bool = False
-    trajectory_timesteps: list[torch.Tensor] | None = None
+    trajectory_timesteps: list[int] | None = None
     trajectory_latents: torch.Tensor | None = None
     trajectory_decoded: list[torch.Tensor] | None = None
 
@@ -246,6 +246,7 @@ class TrainingBatch:
     fake_score_loss: float = 0.0
 
     dmd_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
+    latent_vis_dict: dict[str, torch.Tensor] = field(default_factory=dict)
     fake_score_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
 
 
