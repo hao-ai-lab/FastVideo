@@ -415,6 +415,10 @@ class TransformerLoader(ComponentLoader):
             raise ValueError(
                 "Model config does not contain a _class_name attribute. "
                 "Only diffusers format is supported.")
+        logger.info("transformer cls_name: %s", cls_name)
+        if fastvideo_args.override_transformer_cls_name is not None:
+            cls_name = fastvideo_args.override_transformer_cls_name
+            logger.info("Overriding transformer cls_name to %s", cls_name)
 
         fastvideo_args.model_paths["transformer"] = model_path
 
@@ -429,6 +433,16 @@ class TransformerLoader(ComponentLoader):
             os.path.join(str(model_path), "*.safetensors"))
         if not safetensors_list:
             raise ValueError(f"No safetensors files found in {model_path}")
+
+        # Check if we should use custom initialization weights
+        custom_weights_path = getattr(fastvideo_args, 'init_weights_from_safetensors', None)
+        use_custom_weights = (custom_weights_path and os.path.exists(custom_weights_path) and 
+                            fastvideo_args.training_mode and 
+                            not hasattr(fastvideo_args, '_loading_teacher_critic_model'))
+
+        if use_custom_weights:
+            logger.info("Using custom initialization weights from: %s", custom_weights_path)
+            safetensors_list = [custom_weights_path]
 
         logger.info("Loading model from %s safetensors files in %s",
                     len(safetensors_list), model_path)

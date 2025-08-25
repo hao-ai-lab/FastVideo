@@ -140,11 +140,12 @@ class DenoisingStage(PipelineStage):
             latents = latents[:, :, rank_in_sp_group, :, :, :]
             batch.latents = latents
             if batch.image_latent is not None:
-                image_latent = rearrange(batch.image_latent,
-                                         "b c (n t) h w -> b c n t h w",
-                                         n=sp_world_size).contiguous()
-                image_latent = image_latent[:, :, rank_in_sp_group, :, :, :]
-                batch.image_latent = image_latent
+                if not fastvideo_args.pipeline_config.ti2v_task and not fastvideo_args.pipeline_config.t2v_as_i2v_task:
+                    image_latent = rearrange(batch.image_latent,
+                                             "b c (n t) h w -> b c n t h w",
+                                             n=sp_world_size).contiguous()
+                    image_latent = image_latent[:, :, rank_in_sp_group, :, :, :]
+                    batch.image_latent = image_latent
         # Get timesteps and calculate warmup steps
         timesteps = batch.timesteps
         # TODO(will): remove this once we add input/output validation for stages
@@ -253,6 +254,9 @@ class DenoisingStage(PipelineStage):
                                                              patch_size[2])
             seq_len = int(math.ceil(seq_len / sp_world_size)) * sp_world_size
 
+        trajectory_timesteps: list[int] = []
+        trajectory_latents: list[torch.Tensor] = []
+
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -280,14 +284,27 @@ class DenoisingStage(PipelineStage):
 
                 # Expand latents for I2V
                 latent_model_input = latents.to(target_dtype)
-                if batch.image_latent is not None:
+                if batch.image_latent is not None and not fastvideo_args.pipeline_config.t2v_as_i2v_task:
                     assert not fastvideo_args.pipeline_config.ti2v_task, "image latents should not be provided for TI2V task"
                     latent_model_input = torch.cat(
                         [latent_model_input, batch.image_latent],
                         dim=1).to(target_dtype)
+                elif batch.image_latent is not None and fastvideo_args.pipeline_config.t2v_as_i2v_task:
+                    assert batch.image_latent is not None, "image latents should be provided for T2V to I2V task"
+                    if rank_in_sp_group == 0:
+                        logger.info("latent_model_input.shape: %s",
+                                    latent_model_input.shape)
+                        latent_model_input = torch.cat([
+                            batch.image_latent,
+                            latent_model_input[:, :, 1:, :, :],
+                        ],
+                                                       dim=2).to(target_dtype)
+                        logger.info("latent_model_input.shape: %s",
+                                    latent_model_input.shape)
 
                 assert not torch.isnan(
                     latent_model_input).any(), "latent_model_input contains nan"
+
                 if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
                     timestep = torch.stack([t]).to(get_local_torch_device())
                     temp_ts = (mask2[0][0][:, ::2, ::2] * timestep).flatten()
@@ -302,6 +319,13 @@ class DenoisingStage(PipelineStage):
 
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)
+                if fastvideo_args.pipeline_config.t2v_as_i2v_task:
+                    if rank_in_sp_group == 0:
+                        latent_model_input = torch.cat([
+                            batch.image_latent,
+                            latent_model_input[:, :, 1:, :, :],
+                        ],
+                                                       dim=2).to(target_dtype)
 
                 # Prepare inputs for transformer
                 guidance_expand = (
@@ -433,6 +457,12 @@ class DenoisingStage(PipelineStage):
                         latents = (1. - mask2[0]) * z + mask2[0] * latents
                         # latents = latents.unsqueeze(0)
 
+                # save trajectory latents if needed
+                if batch.return_trajectory_latents:
+                    trajectory_timesteps.append(t)
+                    # trajectory_latents.append(latents.cpu())
+                    trajectory_latents.append(latents)
+
                 # Update progress bar
                 if i == len(timesteps) - 1 or (
                     (i + 1) > num_warmup_steps and
@@ -441,8 +471,32 @@ class DenoisingStage(PipelineStage):
                     progress_bar.update()
 
         # Gather results if using sequence parallelism
+        trajectory_tensor: torch.Tensor | None = None
+        if trajectory_latents:
+            trajectory_tensor = torch.stack(trajectory_latents, dim=1)
+        else:
+            trajectory_tensor = None
+
         if sp_group:
             latents = sequence_model_parallel_all_gather(latents, dim=2)
+            if batch.return_trajectory_latents:
+                # logger.info("before stack trajectory_latents.shape: %s", trajectory_latents[0].shape)
+                logger.info("after stack trajectory_latents.shape: %s", trajectory_tensor.shape)
+                trajectory_tensor = trajectory_tensor.to(
+                    get_local_torch_device())
+                trajectory_tensor = sequence_model_parallel_all_gather(
+                    trajectory_tensor, dim=3)
+
+        if trajectory_tensor is not None:
+            batch.trajectory_timesteps = torch.tensor(trajectory_timesteps).cpu()
+            batch.trajectory_latents = trajectory_tensor.cpu()
+
+        if fastvideo_args.pipeline_config.t2v_as_i2v_task:
+            latents = torch.cat([
+                batch.image_latent,
+                latents[:, :, 1:, :, :],
+            ],
+                                dim=2)
 
         # Update batch with final latents
         batch.latents = latents

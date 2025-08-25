@@ -10,6 +10,8 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.preprocess.preprocess_pipeline_i2v import (
     PreprocessPipeline_I2V)
+from fastvideo.pipelines.preprocess.preprocess_pipeline_ode_trajectory import (
+    PreprocessPipeline_ODE_Trajectory)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_t2v import (
     PreprocessPipeline_T2V)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_text import (
@@ -48,7 +50,6 @@ def main(args) -> None:
         text_encoder_cpu_offload=False,
         pipeline_config=pipeline_config,
     )
-
     if args.preprocess_task == "t2v":
         PreprocessPipeline = PreprocessPipeline_T2V
     elif args.preprocess_task == "i2v":
