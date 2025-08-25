@@ -600,7 +600,7 @@ class DenoisingStage(PipelineStage):
         return result
 
 
-class CosmosDenoisingStage(PipelineStage):
+class CosmosDenoisingStage(DenoisingStage):
     """
     Denoising stage for Cosmos models using FlowMatchEulerDiscreteScheduler.
     
@@ -613,10 +613,8 @@ class CosmosDenoisingStage(PipelineStage):
                  transformer,
                  scheduler,
                  pipeline=None) -> None:
-        super().__init__()
-        self.transformer = transformer
-        self.scheduler = scheduler  # FlowMatchEulerDiscreteScheduler
-        self.pipeline = weakref.ref(pipeline) if pipeline else None
+        super().__init__(transformer, scheduler, pipeline)
+        # FlowMatchEulerDiscreteScheduler is already set by parent
 
     def forward(
         self,
@@ -659,7 +657,7 @@ class CosmosDenoisingStage(PipelineStage):
         self.scheduler.set_timesteps(device=latents.device, sigmas=sigmas)
         
         # Initialize with maximum noise
-        latents = torch.randn_like(latents, dtype=torch.float32) * self.scheduler.config.sigma_max
+        latents = torch.randn_like(latents, dtype=torch.float32) * self.scheduler.sigma_max
         
         # Prepare conditional frame handling (if needed)
         # This would be implemented based on batch.conditioning_latents or similar
@@ -692,12 +690,17 @@ class CosmosDenoisingStage(PipelineStage):
                     # Add conditional frame handling here if needed:
                     # cond_latent = cond_indicator * conditioning_latents + (1 - cond_indicator) * cond_latent
                     
-                    cond_velocity = self.transformer(
-                        hidden_states=cond_latent.to(target_dtype),
-                        timestep=timestep.to(target_dtype),
-                        encoder_hidden_states=batch.prompt_embeds[0].to(target_dtype),
-                        return_dict=False,
-                    )[0]
+                    with set_forward_context(
+                        current_timestep=i,
+                        attn_metadata=None,  # TODO: implement attention metadata if needed
+                        forward_batch=batch,
+                    ):
+                        cond_velocity = self.transformer(
+                            hidden_states=cond_latent.to(target_dtype),
+                            timestep=timestep.to(target_dtype),
+                            encoder_hidden_states=batch.prompt_embeds[0].to(target_dtype),
+                            return_dict=False,
+                        )[0]
                     
                     # Apply preconditioning
                     cond_pred = (c_skip * latents + c_out * cond_velocity.float()).to(target_dtype)
@@ -706,12 +709,17 @@ class CosmosDenoisingStage(PipelineStage):
                     if batch.do_classifier_free_guidance and batch.negative_prompt_embeds is not None:
                         uncond_latent = latents * c_in
                         
-                        uncond_velocity = self.transformer(
-                            hidden_states=uncond_latent.to(target_dtype),
-                            timestep=timestep.to(target_dtype),
-                            encoder_hidden_states=batch.negative_prompt_embeds[0].to(target_dtype),
-                            return_dict=False,
-                        )[0]
+                        with set_forward_context(
+                            current_timestep=i,
+                            attn_metadata=None,  # TODO: implement attention metadata if needed
+                            forward_batch=batch,
+                        ):
+                            uncond_velocity = self.transformer(
+                                hidden_states=uncond_latent.to(target_dtype),
+                                timestep=timestep.to(target_dtype),
+                                encoder_hidden_states=batch.negative_prompt_embeds[0].to(target_dtype),
+                                return_dict=False,
+                            )[0]
                         
                         uncond_pred = (c_skip * latents + c_out * uncond_velocity.float()).to(target_dtype)
                         
