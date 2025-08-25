@@ -237,6 +237,9 @@ class DenoisingStage(PipelineStage):
                                                              patch_size[2])
             seq_len = int(math.ceil(seq_len / sp_world_size)) * sp_world_size
 
+        trajectory_timesteps: list[int] = []
+        trajectory_latents: list[torch.Tensor] = []
+
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -411,6 +414,11 @@ class DenoisingStage(PipelineStage):
                         latents = (1. - mask2[0]) * z + mask2[0] * latents
                         # latents = latents.unsqueeze(0)
 
+                # save trajectory latents if needed
+                if batch.return_trajectory_latents:
+                    trajectory_timesteps.append(t)
+                    trajectory_latents.append(latents.cpu())
+
                 # Update progress bar
                 if i == len(timesteps) - 1 or (
                     (i + 1) > num_warmup_steps and
@@ -421,6 +429,17 @@ class DenoisingStage(PipelineStage):
         # Gather results if using sequence parallelism
         if sp_group:
             latents = sequence_model_parallel_all_gather(latents, dim=2)
+            trajectory_tensor = torch.cat(trajectory_latents, dim=0)
+            trajectory_tensor = trajectory_tensor.to(get_local_torch_device())
+            trajectory_tensor = sequence_model_parallel_all_gather(
+                trajectory_tensor, dim=2)
+            # Undo the previous cat by splitting trajectory_tensor back into a list of tensors
+            batch.trajectory_latents = list(
+                zip(
+                    trajectory_timesteps,
+                    torch.chunk(trajectory_tensor,
+                                len(trajectory_timesteps),
+                                dim=0), strict=False))
 
         if fastvideo_args.pipeline_config.t2v_as_i2v_task:
             latents = torch.cat([
