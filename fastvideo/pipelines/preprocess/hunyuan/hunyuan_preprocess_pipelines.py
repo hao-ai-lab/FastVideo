@@ -9,7 +9,8 @@ from fastvideo.pipelines.stages.image_encoding import ImageVAEEncodingStage
 
 class PreprocessPipelineI2V(ComposedPipelineBase):
     _required_config_modules = [
-        "image_encoder", "image_processor", "text_encoder", "tokenizer", "vae"
+        "image_encoder", "image_processor", "text_encoder", "tokenizer",
+        "text_encoder_2", "tokenizer_2", "vae"
     ]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
@@ -51,7 +52,9 @@ class PreprocessPipelineI2V(ComposedPipelineBase):
 
 
 class PreprocessPipelineT2V(ComposedPipelineBase):
-    _required_config_modules = ["text_encoder", "tokenizer", "vae"]
+    _required_config_modules = [
+        "text_encoder", "tokenizer", "text_encoder_2", "tokenizer_2", "vae"
+    ]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         assert fastvideo_args.preprocess_config is not None
@@ -61,10 +64,34 @@ class PreprocessPipelineT2V(ComposedPipelineBase):
                            preprocess_config.training_cfg_rate,
                            seed=fastvideo_args.preprocess_config.seed,
                        ))
+        # llama_tokenizer_kwargs = {
+        #     "padding": "max_length",
+        #     "truncation": True,
+        #     "max_length": 256,
+        #     "return_tensors": "pt"
+        # }
+        # clip_tokenizer_kwargs = {
+        #     "padding": "max_length",
+        #     "truncation": True,
+        #     "max_length": 77,
+        #     "return_tensors": "pt"
+        # }
+        # if len(fastvideo_args.pipeline_config.text_encoder_configs) >= 2:
+        #     fastvideo_args.pipeline_config.text_encoder_configs[0].tokenizer_kwargs = llama_tokenizer_kwargs
+        #     fastvideo_args.pipeline_config.text_encoder_configs[1].tokenizer_kwargs = clip_tokenizer_kwargs
+        text_encoders = [
+            self.get_module("text_encoder"),
+            self.get_module("text_encoder_2")
+        ]
+        tokenizers = [
+            self.get_module("tokenizer"),
+            self.get_module("tokenizer_2")
+        ]
+
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=TextEncodingStage(
-                           text_encoders=[self.get_module("text_encoder")],
-                           tokenizers=[self.get_module("tokenizer")],
+                           text_encoders=text_encoders,
+                           tokenizers=tokenizers,
                        ))
         self.add_stage(
             stage_name="video_transform_stage",

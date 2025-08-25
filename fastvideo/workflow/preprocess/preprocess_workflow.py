@@ -44,13 +44,7 @@ class PreprocessWorkflow(WorkflowBase):
         self.add_component("raw_data_validator", raw_data_validator)
 
         # training dataset
-<<<<<<< HEAD
-        training_dataset = build_dataset(preprocess_config,
-                                         split="train",
-                                         validator=raw_data_validator)
-=======
         training_dataset = build_dataset(preprocess_config, split="train")
->>>>>>> 15df36ab ([Feat][Preprocess] support merged dataset (#752))
         # set load_from_cache_file to False to check filter stats
         training_dataset = training_dataset.filter(raw_data_validator)
         # we do not use collate_fn here because we use iterable-style Dataset
@@ -66,13 +60,8 @@ class PreprocessWorkflow(WorkflowBase):
         # try to load validation dataset if it exists
         try:
             validation_dataset = build_dataset(preprocess_config,
-<<<<<<< HEAD
-                                               split="validation",
-                                               validator=raw_data_validator)
-=======
                                                split="validation")
             validation_dataset = validation_dataset.filter(raw_data_validator)
->>>>>>> 15df36ab ([Feat][Preprocess] support merged dataset (#752))
             validation_dataloader = DataLoader(
                 validation_dataset,
                 batch_size=preprocess_config.preprocess_video_batch_size,

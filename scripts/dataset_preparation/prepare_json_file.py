@@ -23,8 +23,10 @@ def get_video_info(video_path):
     fps = info.get("video_fps", 0)
     duration = num_frames / fps if fps > 0 else 0
 
-    # Extract name
-    _, _, videos_dir, video_name = str(video_path).split("/")
+    from pathlib import Path
+    video_path = Path(video_path)
+    videos_dir = video_path.parent.name
+    video_name = video_path.name
 
     return {
         "path": str(video_name),
@@ -100,6 +102,7 @@ def prepare_dataset_json(folder_path,
 
     # Save to JSON file
     output_file = folder_path / output_name
+    print(folder_path,output_file,output_name)
     with open(output_file, 'w') as f:
         json.dump(dataset_info, f, indent=2)
 

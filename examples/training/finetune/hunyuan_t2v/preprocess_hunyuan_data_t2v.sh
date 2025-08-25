@@ -2,14 +2,15 @@
 
 GPU_NUM=1 # 2,4,8
 MODEL_PATH="hunyuanvideo-community/HunyuanVideo"
-DATASET_PATH="/FastVideo/data/mini_i2v_dataset/crush-smol_raw"
-OUTPUT_DIR="/FastVideo/data/mini_i2v_dataset/crush-smol_processed_t2v_hunyuan/"
+DATASET_PATH="data/crush-smol"
+OUTPUT_DIR="data/crush-smol_processed_t2v_hunyuan/"
 
 torchrun --nproc_per_node=$GPU_NUM \
     -m fastvideo.pipelines.preprocess.v1_preprocessing_new \
     --model_path $MODEL_PATH \
     --mode preprocess \
     --workload_type t2v \
+    --preprocess.dataset_type merged \
     --preprocess.dataset_path $DATASET_PATH \
     --preprocess.dataset_output_dir $OUTPUT_DIR \
     --preprocess.preprocess_video_batch_size 2 \
@@ -21,3 +22,4 @@ torchrun --nproc_per_node=$GPU_NUM \
     --preprocess.samples_per_file 8 \
     --preprocess.flush_frequency 8 \
     --preprocess.video_length_tolerance_range 5
+    
