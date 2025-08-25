@@ -91,7 +91,7 @@ class HunyuanVAEAttention(nn.Module):
         key = key.view(batch_size, -1, self.heads, head_dim).transpose(1, 2)
         value = value.view(batch_size, -1, self.heads, head_dim).transpose(1, 2)
 
-        # Perform scaled dot-product attention
+        # Perform scaled dot-product attentionz
         hidden_states = F.scaled_dot_product_attention(query,
                                                        key,
                                                        value,
@@ -361,7 +361,7 @@ class HunyuanVideoMidBlock3D(nn.Module):
                         hidden_states.device,
                         batch_size=batch_size)
                     hidden_states = attn(hidden_states,
-                                         attention_mask=attention_mask)
+                                         attention_mask=attention_mask.unsqueeze(1))
                     hidden_states = hidden_states.unflatten(
                         1, (num_frames, height, width)).permute(0, 4, 1, 2, 3)
 
@@ -385,7 +385,7 @@ class HunyuanVideoMidBlock3D(nn.Module):
                         hidden_states.device,
                         batch_size=batch_size)
                     hidden_states = attn(hidden_states,
-                                         attention_mask=attention_mask)
+                                         attention_mask=attention_mask.unsqueeze(1))
                     hidden_states = hidden_states.unflatten(
                         1, (num_frames, height, width)).permute(0, 4, 1, 2, 3)
 
