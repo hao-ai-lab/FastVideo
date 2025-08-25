@@ -79,8 +79,10 @@ class PreprocessingDataValidator:
 
     def _validate_data_type(self, batch: dict[str, Any]) -> bool:
         """Validate basic validity of data items"""
+        print("-------------------------------")
+        print(batch)
         return not (batch["caption"] is None or batch["caption"] == ""
-                    or batch["fps"] is None or batch["fps"] <= 0
+                    or "fps" not in batch or batch["fps"] is None or batch["fps"] <= 0
                     or batch["num_frames"] is None or batch["num_frames"] <= 0)
 
     def _validate_resolution(self, batch: dict[str, Any]) -> bool:
