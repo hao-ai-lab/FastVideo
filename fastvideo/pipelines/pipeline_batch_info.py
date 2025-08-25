@@ -147,7 +147,11 @@ class ForwardBatch:
     modules: dict[str, Any] = field(default_factory=dict)
 
     # Final output (after pipeline completion)
-    output: Any = None
+    output: torch.Tensor | None = None
+    return_trajectory_latents: bool = False
+    return_trajectory_decoded: bool = False
+    trajectory_latents: list[tuple[int, torch.Tensor]] | None = None
+    trajectory_decoded: list[tuple[int, torch.Tensor]] | None = None
 
     # Extra parameters that might be needed by specific pipeline implementations
     extra: dict[str, Any] = field(default_factory=dict)

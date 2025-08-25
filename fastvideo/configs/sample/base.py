@@ -47,6 +47,8 @@ class SamplingParam:
     # Misc
     save_video: bool = True
     return_frames: bool = False
+    return_trajectory_latents: bool = False  # returns all latents for each timestep
+    return_trajectory_decoded: bool = False  # returns decoded latents for each timestep
 
     def __post_init__(self) -> None:
         self.data_type = "video" if self.num_frames > 1 else "image"
@@ -190,6 +192,18 @@ class SamplingParam:
             type=str,
             default=SamplingParam.image_path,
             help="Path to input image for image-to-video generation",
+        )
+        parser.add_argument(
+            "--return-trajectory-latents",
+            action="store_true",
+            default=SamplingParam.return_trajectory_latents,
+            help="Whether to return the trajectory",
+        )
+        parser.add_argument(
+            "--return-trajectory-decoded",
+            action="store_true",
+            default=SamplingParam.return_trajectory_decoded,
+            help="Whether to return the decoded trajectory",
         )
         return parser
 
