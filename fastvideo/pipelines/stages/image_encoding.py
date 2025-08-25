@@ -105,6 +105,81 @@ class ImageVAEEncodingStage(PipelineStage):
     def __init__(self, vae: ParallelTiledVAE) -> None:
         self.vae: ParallelTiledVAE = vae
 
+    def encode_image(self,
+                     image: PIL.Image.Image,
+                     height: int,
+                     width: int,
+                     fastvideo_args: FastVideoArgs,
+                     generator: torch.Generator | None = None) -> torch.Tensor:
+        """
+        Encode image into latent space.
+        """
+        image = self.preprocess(
+            image,
+            vae_scale_factor=self.vae.spatial_compression_ratio,
+            height=height,
+            width=width).to(get_local_torch_device(), dtype=torch.float32)
+
+        # (B, C, H, W) -> (B, C, 1, H, W)
+        print(f"image.shape: {image.shape}")
+        image = image.unsqueeze(2)
+        print(f"after unsqueeze image.shape: {image.shape}")
+        return self.encode_tensor(image, fastvideo_args, generator)
+
+    def encode_tensor(self,
+                      video_condition: torch.Tensor,
+                      fastvideo_args: FastVideoArgs,
+                      generator: torch.Generator | None = None) -> torch.Tensor:
+        """
+        Encode frames into latent space.
+        """
+        self.vae = self.vae.to(get_local_torch_device())
+        video_condition = video_condition.to(device=get_local_torch_device(),
+                                             dtype=torch.float32)
+
+        # Setup VAE precision
+        vae_dtype = PRECISION_TO_TYPE[
+            fastvideo_args.pipeline_config.vae_precision]
+        vae_autocast_enabled = (
+            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+
+        # Encode Image
+        with torch.autocast(device_type="cuda",
+                            dtype=vae_dtype,
+                            enabled=vae_autocast_enabled):
+            if fastvideo_args.pipeline_config.vae_tiling:
+                self.vae.enable_tiling()
+            # if fastvideo_args.vae_sp:
+            #     self.vae.enable_parallel()
+            if not vae_autocast_enabled:
+                video_condition = video_condition.to(vae_dtype)
+            encoder_output = self.vae.encode(video_condition)
+
+        if fastvideo_args.mode == ExecutionMode.PREPROCESS:
+            latent_condition = encoder_output.mean
+        else:
+            generator = generator
+            if generator is None:
+                raise ValueError("Generator must be provided")
+            latent_condition = self.retrieve_latents(encoder_output, generator)
+
+        # Apply shifting if needed
+        if (hasattr(self.vae, "shift_factor")
+                and self.vae.shift_factor is not None):
+            if isinstance(self.vae.shift_factor, torch.Tensor):
+                latent_condition -= self.vae.shift_factor.to(
+                    latent_condition.device, latent_condition.dtype)
+            else:
+                latent_condition -= self.vae.shift_factor
+
+        if isinstance(self.vae.scaling_factor, torch.Tensor):
+            latent_condition = latent_condition * self.vae.scaling_factor.to(
+                latent_condition.device, latent_condition.dtype)
+        else:
+            latent_condition = latent_condition * self.vae.scaling_factor
+
+        return latent_condition
+
     def forward(
         self,
         batch: ForwardBatch,
@@ -157,57 +232,28 @@ class ImageVAEEncodingStage(PipelineStage):
         # (B, C, H, W) -> (B, C, 1, H, W)
         image = image.unsqueeze(2)
 
-        video_condition = torch.cat([
-            image,
-            image.new_zeros(image.shape[0], image.shape[1], num_frames - 1,
-                            image.shape[3], image.shape[4])
-        ],
-                                    dim=2)
-        video_condition = video_condition.to(device=get_local_torch_device(),
-                                             dtype=torch.float32)
+        if fastvideo_args.pipeline_config.t2v_as_i2v_task:
+            # repeat the image self.vae.temporal_compression_ratio times
+            video_condition = image.repeat(1, 1,
+                                           self.vae.temporal_compression_ratio,
+                                           1, 1)
+            # video_condition = image
+            logger.info("video_condition.shape: %s", video_condition.shape)
+        else:
+            video_condition = torch.cat([
+                image,
+                image.new_zeros(image.shape[0], image.shape[1], num_frames - 1,
+                                image.shape[3], image.shape[4])
+            ],
+                                        dim=2)
 
-        # Setup VAE precision
-        vae_dtype = PRECISION_TO_TYPE[
-            fastvideo_args.pipeline_config.vae_precision]
-        vae_autocast_enabled = (
-            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
-
-        # Encode Image
-        with torch.autocast(device_type="cuda",
-                            dtype=vae_dtype,
-                            enabled=vae_autocast_enabled):
-            if fastvideo_args.pipeline_config.vae_tiling:
-                self.vae.enable_tiling()
-            # if fastvideo_args.vae_sp:
-            #     self.vae.enable_parallel()
-            if not vae_autocast_enabled:
-                video_condition = video_condition.to(vae_dtype)
-            encoder_output = self.vae.encode(video_condition)
+        latent_condition = self.encode_tensor(video_condition, fastvideo_args,
+                                              batch.generator)
 
         if fastvideo_args.mode == ExecutionMode.PREPROCESS:
-            latent_condition = encoder_output.mean
-        else:
-            generator = batch.generator
-            if generator is None:
-                raise ValueError("Generator must be provided")
-            latent_condition = self.retrieve_latents(encoder_output, generator)
-
-        # Apply shifting if needed
-        if (hasattr(self.vae, "shift_factor")
-                and self.vae.shift_factor is not None):
-            if isinstance(self.vae.shift_factor, torch.Tensor):
-                latent_condition -= self.vae.shift_factor.to(
-                    latent_condition.device, latent_condition.dtype)
-            else:
-                latent_condition -= self.vae.shift_factor
-
-        if isinstance(self.vae.scaling_factor, torch.Tensor):
-            latent_condition = latent_condition * self.vae.scaling_factor.to(
-                latent_condition.device, latent_condition.dtype)
-        else:
-            latent_condition = latent_condition * self.vae.scaling_factor
-
-        if fastvideo_args.mode == ExecutionMode.PREPROCESS:
+            batch.image_latent = latent_condition
+        elif fastvideo_args.pipeline_config.t2v_as_i2v_task:
+            logger.info("latent_condition.shape: %s", latent_condition.shape)
             batch.image_latent = latent_condition
         else:
             mask_lat_size = torch.ones(1, 1, num_frames, latent_height,

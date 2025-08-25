@@ -1,0 +1,132 @@
+#!/bin/bash
+#SBATCH --job-name=ode_crush
+#SBATCH --partition=main
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --gres=gpu:8
+#SBATCH --cpus-per-task=128
+#SBATCH --mem=1440G
+#SBATCH --output=ode_crush_output/ode_crush.out
+#SBATCH --error=ode_crush_output/ode_crush.err
+#SBATCH --exclusive
+set -e -x
+
+# Environment Setup
+source ~/conda/miniconda/bin/activate
+conda activate will-fv2
+
+export WANDB_MODE="online"
+export NCCL_P2P_DISABLE=1
+export TORCH_NCCL_ENABLE_MONITORING=0
+# different cache dir for different processes
+export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
+export MASTER_PORT=29500
+export NODE_RANK=$SLURM_PROCID
+nodes=( $(scontrol show hostnames $SLURM_JOB_NODELIST) )
+export MASTER_ADDR=${nodes[0]}
+export CUDA_VISIBLE_DEVICES=$SLURM_LOCALID
+export TOKENIZERS_PARALLELISM=false
+export WANDB_BASE_URL="https://api.wandb.ai"
+export WANDB_MODE=online
+export WANDB_API_KEY='8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde'
+# export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
+
+echo "MASTER_ADDR: $MASTER_ADDR"
+echo "NODE_RANK: $NODE_RANK"
+
+
+# MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
+MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+DATA_DIR="data/crush-smol_processed_t2v_1_3b_ode_init_5/combined_parquet_dataset/"
+VALIDATION_DATASET_FILE="examples/training/consistency_finetune/ode_init/validation.json"
+NUM_GPUS=2
+# export CUDA_VISIBLE_DEVICES=4,5
+# IP=[MASTER NODE IP]
+
+# Training arguments
+training_args=(
+  --tracker_project_name "wan_ode_init"
+  --output_dir "wan_ode_init_warp_2"
+  --override_transformer_cls_name "CausalWanTransformer3DModel"
+  --wandb_run_name "2warp_fixed_wan_ode_init_5e-6"
+  # --resume_from_checkpoint "ode_init_diffusers/"
+  # --warp_denoising_step
+  --max_train_steps 6001
+  --train_batch_size 1
+  --train_sp_batch_size 1
+  --gradient_accumulation_steps 1
+  --num_latent_t 21
+  --num_height 480
+  --num_width 832
+  --num_frames 77
+  # --enable_gradient_checkpointing_type "full"
+)
+
+# Parallel arguments
+parallel_args=(
+  --num_gpus $NUM_GPUS
+  --sp_size 1
+  --tp_size 1
+  --hsdp_replicate_dim $NUM_GPUS
+  --hsdp_shard_dim 1
+)
+
+# Model arguments
+model_args=(
+  --model_path $MODEL_PATH
+  --pretrained_model_name_or_path $MODEL_PATH
+)
+
+# Dataset arguments
+dataset_args=(
+  --data_path "$DATA_DIR" 
+  --dataloader_num_workers 1
+)
+
+# Validation arguments
+validation_args=(
+  --log_validation
+  --validation_dataset_file "$VALIDATION_DATASET_FILE"
+  --validation_steps 20
+  --validation_sampling_steps "50"
+  --validation_guidance_scale "6.0"
+)
+
+# Optimizer arguments
+optimizer_args=(
+  --learning_rate 5e-6
+  --mixed_precision "bf16"
+  --checkpointing_steps 2000
+  --weight_decay 1e-4
+  --max_grad_norm 1.0
+)
+
+# Miscellaneous arguments
+miscellaneous_args=(
+  --inference_mode False
+  --checkpoints_total_limit 3
+  --training_cfg_rate 0.1
+  --multi_phased_distill_schedule "4000-1"
+  --not_apply_cfg_solver
+  --dit_precision "fp32"
+  --num_euler_timesteps 50
+  --ema_start_step 0
+  --enable_gradient_checkpointing_type "full"
+)
+
+# If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
+srun torchrun \
+  --nnodes $SLURM_JOB_NUM_NODES \
+  --nproc_per_node $NUM_GPUS \
+  --node_rank $SLURM_PROCID \
+  --rdzv_backend=c10d \
+  --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
+    fastvideo/training/ode_causal_pipeline.py \
+    "${parallel_args[@]}" \
+    "${model_args[@]}" \
+    "${dataset_args[@]}" \
+    "${training_args[@]}" \
+    "${optimizer_args[@]}" \
+    "${validation_args[@]}" \
+    "${miscellaneous_args[@]}"

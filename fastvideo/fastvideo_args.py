@@ -158,6 +158,7 @@ class FastVideoArgs:
         "transformer": True,
         "vae": True,
     })
+    override_transformer_cls_name: str | None = None
 
     # # DMD parameters
     # dmd_denoising_steps: List[int] | None = field(default=None)
@@ -395,6 +396,12 @@ class FastVideoArgs:
             action=StoreBoolean,
             default=FastVideoArgs.enable_stage_verification,
             help="Enable input/output verification for pipeline stages",
+        )
+        parser.add_argument(
+            "--override-transformer-cls-name",
+            type=str,
+            default=FastVideoArgs.override_transformer_cls_name,
+            help="Override transformer cls name",
         )
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)
@@ -688,6 +695,7 @@ class TrainingArgs(FastVideoArgs):
     log_visualization: bool = False
     # simulate generator forward to match inference
     simulate_generator_forward: bool = False
+    warp_denoising_step: bool = False
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -1041,6 +1049,10 @@ class TrainingArgs(FastVideoArgs):
             "--simulate-generator-forward",
             action=StoreBoolean,
             help="Whether to simulate generator forward to match inference")
+        parser.add_argument(
+            "--warp-denoising-step",
+            action=StoreBoolean,
+            help="Whether to warp denoising step according to the scheduler time shift")
 
         return parser
 

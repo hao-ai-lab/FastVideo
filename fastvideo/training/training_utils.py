@@ -346,10 +346,14 @@ def load_checkpoint(transformer,
     """
     if not os.path.exists(checkpoint_path):
         logger.warning("Checkpoint path %s does not exist", checkpoint_path)
+        assert False
         return 0
 
     # Extract step number from checkpoint path
-    step = int(os.path.basename(checkpoint_path).split('-')[-1])
+    try:
+        step = int(os.path.basename(checkpoint_path).split('-')[-1])
+    except:
+        step = 1
 
     if rank == 0:
         logger.info("Loading checkpoint from step %s", step)

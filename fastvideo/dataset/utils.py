@@ -3,6 +3,9 @@ from typing import Any, cast
 
 import numpy as np
 import torch
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 def pad(t: torch.Tensor, padding_length: int) -> tuple[torch.Tensor, torch.Tensor]:
