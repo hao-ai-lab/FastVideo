@@ -6,20 +6,20 @@ export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-DATA_DIR="data/crush-smol_processed_t2v_old"
-VALIDATION_DATASET_FILE="examples/training/finetune/Wan2.1-Fun-1.3B-InP/crush_smol/validation.json"
-NUM_GPUS=4
+DATA_DIR="data/crush-smol_processed_t2v_i2v_1_3b"
+VALIDATION_DATASET_FILE="examples/datasets/crush_smol/validation.json"
+NUM_GPUS=8
 # export CUDA_VISIBLE_DEVICES=4,5
 
 
 # Training arguments
 training_args=(
-  --tracker_project_name "wan_t2v_finetune"
-  --output_dir "checkpoints/wan_t2v_finetune"
+  --tracker_project_name "wan_t2v_i2v_finetune"
+  --output_dir "checkpoints/wan_t2v_i2v_finetune"
   --max_train_steps 5000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 8
+  --gradient_accumulation_steps 2
   --num_latent_t 20
   --num_height 480
   --num_width 832
@@ -30,10 +30,10 @@ training_args=(
 # Parallel arguments
 parallel_args=(
   --num_gpus $NUM_GPUS 
-  --sp_size $NUM_GPUS 
+  --sp_size 4
   --tp_size 1
-  --hsdp_replicate_dim 1
-  --hsdp_shard_dim $NUM_GPUS
+  --hsdp_replicate_dim 2
+  --hsdp_shard_dim 4
 )
 
 # Model arguments
@@ -83,7 +83,7 @@ miscellaneous_args=(
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
-    fastvideo/training/wan_training_pipeline.py \
+    fastvideo/training/wan_t2v_i2v_training_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

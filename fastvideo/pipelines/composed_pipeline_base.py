@@ -121,14 +121,25 @@ class ComposedPipelineBase(ABC):
                         model_path: str,
                         device: str | None = None,
                         torch_dtype: torch.dtype | None = None,
-                        pipeline_config: str | PipelineConfig | None = None,
+                        pipeline_config: PipelineConfig | None = None,
                         args: argparse.Namespace | None = None,
                         required_config_modules: list[str] | None = None,
                         loaded_modules: dict[str, torch.nn.Module]
                         | None = None,
                         **kwargs) -> "ComposedPipelineBase":
         """
-        Load a pipeline from a pretrained model.
+        Load a pipeline from a pretrained model. 
+        Few different patterns are supported:
+        - Only provide model_path:
+            - This will load the pipeline in inference mode.
+            - The pipeline will be initialized with the default config.
+            - The pipeline will be initialized with the default modules.
+            - The pipeline will be initialized with the default stages.
+            - The pipeline will be initialized with the default stages.
+        - override the default config using pipeline_config or args or kwargs
+        - override the default modules using loaded_modules
+        - override the pipelineconfig
+
         loaded_modules: Optional[Dict[str, torch.nn.Module]] = None,
         If provided, loaded_modules will be used instead of loading from config/pretrained weights.
         """
@@ -136,6 +147,8 @@ class ComposedPipelineBase(ABC):
 
             kwargs['model_path'] = model_path
             fastvideo_args = FastVideoArgs.from_kwargs(**kwargs)
+            if pipeline_config is not None:
+                fastvideo_args.pipeline_config = pipeline_config
         else:
             assert args is not None, "args must be provided for training mode"
             fastvideo_args = TrainingArgs.from_cli_args(args)

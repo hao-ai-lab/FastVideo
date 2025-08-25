@@ -45,6 +45,7 @@ class PipelineConfig:
     embedded_cfg_scale: float = 6.0
     flow_shift: float | None = None
     disable_autocast: bool = False
+    ti2v_task: bool = False
 
     # Model configuration
     dit_config: DiTConfig = field(default_factory=DiTConfig)
@@ -209,6 +210,15 @@ class PipelineConfig:
             default=PipelineConfig.dmd_denoising_steps,
             help=
             "Comma-separated list of denoising steps (e.g., '1000,757,522')",
+        )
+
+        # TI2V task
+        parser.add_argument(
+            f"--{prefix_with_dot}ti2v-task",
+            action=StoreBoolean,
+            dest=f"{prefix_with_dot.replace('-', '_')}ti2v_task",
+            default=PipelineConfig.ti2v_task,
+            help="Enable TI2V",
         )
 
         # Add VAE configuration arguments
