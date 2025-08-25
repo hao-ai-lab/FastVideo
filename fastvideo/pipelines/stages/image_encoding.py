@@ -157,12 +157,21 @@ class ImageVAEEncodingStage(PipelineStage):
         # (B, C, H, W) -> (B, C, 1, H, W)
         image = image.unsqueeze(2)
 
-        video_condition = torch.cat([
-            image,
-            image.new_zeros(image.shape[0], image.shape[1], num_frames - 1,
-                            image.shape[3], image.shape[4])
-        ],
-                                    dim=2)
+        if fastvideo_args.pipeline_config.t2v_as_i2v_task:
+            # repeat the image self.vae.temporal_compression_ratio times
+            video_condition = image.repeat(1, 1,
+                                           self.vae.temporal_compression_ratio,
+                                           1, 1)
+            # video_condition = image
+            logger.info("video_condition.shape: %s", video_condition.shape)
+        else:
+            assert False, "should not be here"
+            video_condition = torch.cat([
+                image,
+                image.new_zeros(image.shape[0], image.shape[1], num_frames - 1,
+                                image.shape[3], image.shape[4])
+            ],
+                                        dim=2)
         video_condition = video_condition.to(device=get_local_torch_device(),
                                              dtype=torch.float32)
 
@@ -208,6 +217,9 @@ class ImageVAEEncodingStage(PipelineStage):
             latent_condition = latent_condition * self.vae.scaling_factor
 
         if fastvideo_args.mode == ExecutionMode.PREPROCESS:
+            batch.image_latent = latent_condition
+        elif fastvideo_args.pipeline_config.t2v_as_i2v_task:
+            logger.info("latent_condition.shape: %s", latent_condition.shape)
             batch.image_latent = latent_condition
         else:
             mask_lat_size = torch.ones(1, 1, num_frames, latent_height,
