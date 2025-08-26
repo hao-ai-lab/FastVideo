@@ -4,9 +4,11 @@ from typing import cast
 
 import numpy as np
 import torch
+import torchvision
 from einops import rearrange
 from torchvision import transforms
 
+from fastvideo.configs.configs import VideoLoaderType
 from fastvideo.dataset.transform import (CenterCropResizeVideo,
                                          TemporalRandomCrop)
 from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
@@ -61,7 +63,16 @@ class VideoTransformStage(PipelineStage):
                 else:
                     frame_indices = frame_indices[:self.num_frames]
 
-            video = batch.video_loader[i].get_frames_at(frame_indices).data
+            if fastvideo_args.preprocess_config.video_loader_type == VideoLoaderType.TORCHCODEC:
+                video = batch.video_loader[i].get_frames_at(frame_indices).data
+            elif fastvideo_args.preprocess_config.video_loader_type == VideoLoaderType.TORCHVISION:
+                video, _, _ = torchvision.io.read_video(batch.video_loader[i],
+                                                        output_format="TCHW")
+                video = video[frame_indices]
+            else:
+                raise ValueError(
+                    f"Invalid video loader type: {fastvideo_args.preprocess_config.video_loader_type}"
+                )
             video = self.video_transform(video)
             video_pixel_batch.append(video)
 
