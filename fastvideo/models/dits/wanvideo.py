@@ -816,3 +816,4 @@ class WanTransformer3DModel(CachableDiT):
             return hidden_states + self.previous_residual_even
         else:
             return hidden_states + self.previous_residual_odd
+        

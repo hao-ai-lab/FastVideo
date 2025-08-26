@@ -8,6 +8,7 @@ import weakref
 from collections.abc import Iterable
 from typing import Any
 
+import math
 import torch
 from einops import rearrange
 from tqdm.auto import tqdm
@@ -199,7 +200,6 @@ class DenoisingStage(PipelineStage):
         assert latent_model_input.shape[0] == 1, "only support batch size 1"
 
         if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
-            logger.info("===========Using TI2V task===========")
             # TI2V directly replaces the first frame of the latent with
             # the image latent instead of appending along the channel dim
             assert batch.image_latent is None, "TI2V task should not have image latents"
@@ -235,7 +235,6 @@ class DenoisingStage(PipelineStage):
                        1) * (batch.height // spatial_scale) * (
                            batch.width // spatial_scale) // (patch_size[1] *
                                                              patch_size[2])
-            import math
             seq_len = int(math.ceil(seq_len / sp_world_size)) * sp_world_size
 
         # Run denoising loop
