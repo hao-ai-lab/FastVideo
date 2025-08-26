@@ -1,3 +1,0 @@
-(vsa-demo)=
-
-# 🎬 Demo

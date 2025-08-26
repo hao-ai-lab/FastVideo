@@ -1,5 +1,5 @@
 <div align="center">
-<img src=assets/logo.png width="30%"/>
+<img src=assets/logos/logo.svg width="30%"/>
 </div>
 
 **FastVideo is a unified post-training and inference framework for accelerated video generation.**

@@ -49,7 +49,7 @@ dependencies = [
     "av",
 
     # Preprocessing Dependencies
-    "torchcodec"
+    "torchcodec==0.5.0"
 ]
 
 [tool.uv]
@@ -171,4 +171,4 @@ Repository = "https://github.com/hao-ai-lab/FastVideo"
 [tool.comfy]
 PublisherId = "fastvideo"
 DisplayName = "FastVideo"
-Icon = "https://raw.githubusercontent.com/hao-ai-lab/FastVideo/main/comfyui/assets/logo.png"
+Icon = "https://raw.githubusercontent.com/hao-ai-lab/FastVideo/main/comfyui/assets/icon_simple.svg"

@@ -5,7 +5,7 @@ This page contains step-by-step instructions to get you quickly started with vid
 ## Requirements
 - **OS**: Linux (Tested on Ubuntu 22.04+)
 - **Python**: 3.10-3.12
-- **CUDA**: 12.4
+- **CUDA**: 12.8
 - **GPU**: At least one NVIDIA GPU
 
 ## Installation

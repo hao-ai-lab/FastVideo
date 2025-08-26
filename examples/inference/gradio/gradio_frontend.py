@@ -261,7 +261,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
     initial_values = get_default_values("FastWan2.1-T2V-1.3B")
     
     with gr.Blocks(title="FastWan", theme=theme) as demo:
-        gr.Image("fastvideo-logos/main/svg/full.svg", show_label=False, container=False, height=80)
+        gr.Image("assets/logos/logo.svg", show_label=False, container=False, height=80)
         gr.HTML("""
         <div style="text-align: center; margin-bottom: 10px;">
             <p style="font-size: 18px;"> Make Video Generation Go Blurrrrrrr </p>
@@ -637,10 +637,10 @@ def main():
     
     app = FastAPI()
     
-    @app.get("/logo.png")
+    @app.get("/logo.svg")
     def get_logo():
         return FileResponse(
-            "fastvideo-logos/main/svg/full.svg", 
+            "assets/logos/logo.svg", 
             media_type="image/svg+xml",
             headers={
                 "Cache-Control": "public, max-age=3600",
@@ -650,7 +650,7 @@ def main():
     
     @app.get("/favicon.ico")
     def get_favicon():
-        favicon_path = "fastvideo-logos/main/svg/icon-simple.svg"
+        favicon_path = "assets/logos/icon_simple.svg"
         
         if os.path.exists(favicon_path):
             return FileResponse(
@@ -683,7 +683,7 @@ def main():
             <meta property="og:url" content="{base_url}/">
             <meta property="og:title" content="FastWan">
             <meta property="og:description" content="Make video generation go blurrrrrrr">
-            <meta property="og:image" content="{base_url}/logo.png">
+            <meta property="og:image" content="{base_url}/logo.svg">
             <meta property="og:image:width" content="1200">
             <meta property="og:image:height" content="630">
             <meta property="og:site_name" content="FastWan">
@@ -692,7 +692,7 @@ def main():
             <meta property="twitter:url" content="{base_url}/">
             <meta property="twitter:title" content="FastWan">
             <meta property="twitter:description" content="Make video generation go blurrrrrrr">
-            <meta property="twitter:image" content="{base_url}/logo.png">
+            <meta property="twitter:image" content="{base_url}/logo.svg">
             <link rel="icon" type="image/png" sizes="32x32" href="/favicon.ico">
             <link rel="icon" type="image/png" sizes="16x16" href="/favicon.ico">
             <link rel="apple-touch-icon" href="/favicon.ico">

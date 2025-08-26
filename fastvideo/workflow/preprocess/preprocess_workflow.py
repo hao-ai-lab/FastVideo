@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 from fastvideo.configs.configs import PreprocessConfig
 from fastvideo.dataset.dataloader.schema import (pyarrow_schema_i2v,
                                                  pyarrow_schema_t2v)
+from fastvideo.distributed.parallel_state import get_world_rank
 from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_registry import PipelineType
@@ -43,9 +44,9 @@ class PreprocessWorkflow(WorkflowBase):
         self.add_component("raw_data_validator", raw_data_validator)
 
         # training dataset
-        training_dataset = build_dataset(preprocess_config, split="train")
-        # set load_from_cache_file to False to check filter stats
-        training_dataset = training_dataset.filter(raw_data_validator)
+        training_dataset = build_dataset(preprocess_config,
+                                         split="train",
+                                         validator=raw_data_validator)
         # we do not use collate_fn here because we use iterable-style Dataset
         # and want to keep the original type of the dataset
         training_dataloader = DataLoader(
@@ -59,8 +60,8 @@ class PreprocessWorkflow(WorkflowBase):
         # try to load validation dataset if it exists
         try:
             validation_dataset = build_dataset(preprocess_config,
-                                               split="validation")
-            validation_dataset = validation_dataset.filter(raw_data_validator)
+                                               split="validation",
+                                               validator=raw_data_validator)
             validation_dataloader = DataLoader(
                 validation_dataset,
                 batch_size=preprocess_config.preprocess_video_batch_size,
@@ -103,13 +104,15 @@ class PreprocessWorkflow(WorkflowBase):
         dataset_output_dir = self.fastvideo_args.preprocess_config.dataset_output_dir
         os.makedirs(dataset_output_dir, exist_ok=True)
 
-        validation_dataset_output_dir = os.path.join(dataset_output_dir,
-                                                     "validation_dataset")
+        validation_dataset_output_dir = os.path.join(
+            dataset_output_dir, "validation_dataset",
+            f"worker_{get_world_rank()}")
         os.makedirs(validation_dataset_output_dir, exist_ok=True)
         self.validation_dataset_output_dir = validation_dataset_output_dir
 
-        training_dataset_output_dir = os.path.join(dataset_output_dir,
-                                                   "training_dataset")
+        training_dataset_output_dir = os.path.join(
+            dataset_output_dir, "training_dataset",
+            f"worker_{get_world_rank()}")
         os.makedirs(training_dataset_output_dir, exist_ok=True)
         self.training_dataset_output_dir = training_dataset_output_dir
 

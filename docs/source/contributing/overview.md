@@ -22,8 +22,18 @@ source ~/.bashrc
 Create and activate a Conda environment for FastVideo:
 
 ```
-conda create -n fastvideo python=3.10 -y
+conda create -n fastvideo python=3.12 -y
 conda activate fastvideo
+```
+
+Install `uv` (optional, but recommended):
+
+From instructions on [uv](https://astral.sh/uv/):
+
+```
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# or 
+wget -qO- https://astral.sh/uv/install.sh | sh
 ```
 
 Clone the FastVideo repository and go to the FastVideo directory:
@@ -36,10 +46,10 @@ git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 Now you can install FastVideo and setup git hooks for running linting. By using `pre-commit`, the linters will run and have to pass before you'll be able to make a commit.
 
 ```bash
-pip install -e .[dev]
+uv pip install -e .[dev]
 
 # Can also install flash-attn (optional)
-pip install flash-attn==2.7.4.post1 --no-build-isolation 
+uv pip install flash-attn --no-build-isolation 
 
 # Linting, formatting and static type checking
 pre-commit install --hook-type pre-commit --hook-type commit-msg
@@ -49,4 +59,15 @@ pre-commit run --all-files
 
 # Unit tests
 pytest tests/
+```
+
+If you are on a Hopper GPU, you should also install [FA3](https://github.com/Dao-AILab/flash-attention) for much better performance:
+
+```
+git clone https://github.com/Dao-AILab/flash-attention.git && cd flash-attention/hopper
+
+# make sure you have ninja installed
+uv pip install ninja
+
+python setup.py install
 ```
