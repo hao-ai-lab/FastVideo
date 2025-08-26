@@ -205,12 +205,23 @@ class DenoisingStage(PipelineStage):
             assert batch.image_latent is None, "TI2V task should not have image latents"
             assert self.vae is not None, "VAE is not provided for TI2V task"
             z = self.vae.encode(batch.pil_image).mean.float()
-            logger.info(f"z shape: {z.shape}")
-            logger.info(f"latent_model_input shape: {latent_model_input.shape}")
+            if (hasattr(self.vae, "shift_factor")
+                and self.vae.shift_factor is not None):
+                if isinstance(self.vae.shift_factor, torch.Tensor):
+                    z -= self.vae.shift_factor.to(
+                        z.device, z.dtype)
+                else:
+                    z -= self.vae.shift_factor
+
+            if isinstance(self.vae.scaling_factor, torch.Tensor):
+                z = z * self.vae.scaling_factor.to(
+                    z.device, z.dtype)
+            else:
+                z = z * self.vae.scaling_factor
+
             latent_model_input = latent_model_input.squeeze(0)
-            mask1, mask2 = masks_like([latent_model_input], zero=True)
-            # logger.info(f"mask1 shape: {mask1.shape}")
-            # logger.info(f"mask2 shape: {mask2.shape}")
+            _, mask2 = masks_like([latent_model_input], zero=True)
+
             latent_model_input = (1. -
                                   mask2[0]) * z + mask2[0] * latent_model_input
             # latent_model_input = latent_model_input.unsqueeze(0)
@@ -226,12 +237,9 @@ class DenoisingStage(PipelineStage):
                                                              patch_size[2])
             import math
             seq_len = int(math.ceil(seq_len / sp_world_size)) * sp_world_size
-        logger.info("latents shape: %s", latents.shape)
 
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
-            # logger.info(f"seq_len: {seq_len}")
-            logger.info(f"init timesteps: {timesteps}")
             for i, t in enumerate(timesteps):
                 # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:
@@ -263,32 +271,18 @@ class DenoisingStage(PipelineStage):
                         [latent_model_input, batch.image_latent],
                         dim=1).to(target_dtype)
                 if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
-                    logger.info(f"before ti2v timestep: {t}")
                     timestep = [t]
                     timestep = torch.stack(timestep).to(
                         get_local_torch_device())
-
-                    logger.info(f"mask2 shape: {mask2[0].shape}")
-                    logger.info(f"mask[0][0] shape: {mask2[0][0].shape}")
-                    logger.info(
-                        f"mask[0][0][:, ::2, ::2] shape: {mask2[0][0][:, ::2, ::2].shape}"
-                    )
-                    temp_ts = (mask2[0][0][:, ::2, ::2] * timestep)
-                    logger.info(f"temp_ts shape before flatten: {temp_ts.shape}")
-                    temp_ts = temp_ts.flatten()
-                    logger.info(f"temp_ts: {temp_ts}")
-                    logger.info(f"temp_ts shape: {temp_ts.shape}")
+                    temp_ts = (mask2[0][0][:, ::2, ::2] * timestep).flatten()
                     temp_ts = torch.cat([
                         temp_ts,
                         temp_ts.new_ones(seq_len - temp_ts.size(0)) * timestep
                     ])
                     timestep = temp_ts.unsqueeze(0)
-                    logger.info(f"after ti2v timestep: {timestep}")
                     t_expand = timestep.repeat(latent_model_input.shape[0], 1)
                 else:
                     t_expand = t.repeat(latent_model_input.shape[0])
-                logger.info(f"t_expand shape: {t_expand.shape}")
-                # logger.info(f"t_expand: {t_expand}")
 
                 assert torch.isnan(latent_model_input).sum() == 0
                 latent_model_input = self.scheduler.scale_model_input(
