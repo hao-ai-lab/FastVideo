@@ -7,7 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from safetensors.torch import load_file
-from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor import DTensor
 
 from fastvideo.distributed import get_local_torch_device
@@ -32,6 +32,7 @@ class LoRAPipeline(ComposedPipelineBase):
     cur_adapter_name: str = ""
     cur_adapter_path: str = ""
     lora_layers: dict[str, BaseLayerWithLoRA] = {}
+    lora_layers_critic: dict[str, BaseLayerWithLoRA] = {}
     fastvideo_args: FastVideoArgs | TrainingArgs
     exclude_lora_layers: list[str] = []
     device: torch.device = get_local_torch_device()
@@ -81,6 +82,17 @@ class LoRAPipeline(ComposedPipelineBase):
 
     def set_trainable(self) -> None:
 
+        def set_lora_grads(lora_layers: dict[str, BaseLayerWithLoRA],
+                           device_mesh: DeviceMesh):
+            for name, layer in lora_layers.items():
+                layer.lora_A.requires_grad_(True)
+                layer.lora_B.requires_grad_(True)
+                layer.base_layer.requires_grad_(False)
+                layer.lora_A = nn.Parameter(
+                    DTensor.from_local(layer.lora_A, device_mesh=device_mesh))
+                layer.lora_B = nn.Parameter(
+                    DTensor.from_local(layer.lora_B, device_mesh=device_mesh))
+
         is_lora_training = self.training_mode and getattr(
             self.fastvideo_args, "lora_training", False)
         if not is_lora_training:
@@ -88,18 +100,12 @@ class LoRAPipeline(ComposedPipelineBase):
             return
 
         self.modules["transformer"].requires_grad_(False)
+        if "fake_score_transformer" in self.modules:
+            self.modules["fake_score_transformer"].requires_grad_(False)
         device_mesh = init_device_mesh("cuda", (dist.get_world_size(), 1),
                                        mesh_dim_names=["fake", "replicate"])
-        for name, layer in self.lora_layers.items():
-            # Enable grads for lora weights only
-            # Must convert to DTensor for compatibility with other FSDP modules in grad calculation
-            layer.lora_A.requires_grad_(True)
-            layer.lora_B.requires_grad_(True)
-            layer.base_layer.requires_grad_(False)
-            layer.lora_A = nn.Parameter(
-                DTensor.from_local(layer.lora_A, device_mesh=device_mesh))
-            layer.lora_B = nn.Parameter(
-                DTensor.from_local(layer.lora_B, device_mesh=device_mesh))
+        set_lora_grads(self.lora_layers, device_mesh)
+        set_lora_grads(self.lora_layers_critic, device_mesh)
 
     def convert_to_lora_layers(self) -> None:
         """
@@ -130,6 +136,24 @@ class LoRAPipeline(ComposedPipelineBase):
                 replace_submodule(self.modules["transformer"], name, layer)
                 converted_count += 1
         logger.info("Converted %d layers to LoRA layers", converted_count)
+
+        if "fake_score_transformer" in self.modules:
+            for name, layer in self.modules[
+                    "fake_score_transformer"].named_modules():
+                if not self.is_target_layer(name):
+                    continue
+                layer = get_lora_layer(layer,
+                                       lora_rank=self.lora_rank,
+                                       lora_alpha=self.lora_alpha,
+                                       training_mode=self.training_mode)
+                if layer is not None:
+                    self.lora_layers_critic[name] = layer
+                    replace_submodule(self.modules["fake_score_transformer"],
+                                      name, layer)
+                    converted_count += 1
+            logger.info(
+                "Converted %d layers to LoRA layers in the critic model",
+                converted_count)
 
     def set_lora_adapter(self,
                          lora_nickname: str,
