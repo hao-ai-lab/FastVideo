@@ -4,11 +4,11 @@ Denoising stage for diffusion pipelines.
 """
 
 import inspect
+import math
 import weakref
 from collections.abc import Iterable
 from typing import Any
 
-import math
 import torch
 from einops import rearrange
 from tqdm.auto import tqdm
@@ -206,16 +206,14 @@ class DenoisingStage(PipelineStage):
             assert self.vae is not None, "VAE is not provided for TI2V task"
             z = self.vae.encode(batch.pil_image).mean.float()
             if (hasattr(self.vae, "shift_factor")
-                and self.vae.shift_factor is not None):
+                    and self.vae.shift_factor is not None):
                 if isinstance(self.vae.shift_factor, torch.Tensor):
-                    z -= self.vae.shift_factor.to(
-                        z.device, z.dtype)
+                    z -= self.vae.shift_factor.to(z.device, z.dtype)
                 else:
                     z -= self.vae.shift_factor
 
             if isinstance(self.vae.scaling_factor, torch.Tensor):
-                z = z * self.vae.scaling_factor.to(
-                    z.device, z.dtype)
+                z = z * self.vae.scaling_factor.to(z.device, z.dtype)
             else:
                 z = z * self.vae.scaling_factor
 
@@ -270,9 +268,7 @@ class DenoisingStage(PipelineStage):
                         [latent_model_input, batch.image_latent],
                         dim=1).to(target_dtype)
                 if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
-                    timestep = [t]
-                    timestep = torch.stack(timestep).to(
-                        get_local_torch_device())
+                    timestep = torch.stack([t]).to(get_local_torch_device())
                     temp_ts = (mask2[0][0][:, ::2, ::2] * timestep).flatten()
                     temp_ts = torch.cat([
                         temp_ts,

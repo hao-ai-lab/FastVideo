@@ -86,7 +86,9 @@ class TimestepEmbedder(nn.Module):
                        dtype=dtype)
         self.freq_dtype = freq_dtype
 
-    def forward(self, t: torch.Tensor, timestep_seq_len: int | None = None) -> torch.Tensor:
+    def forward(self,
+                t: torch.Tensor,
+                timestep_seq_len: int | None = None) -> torch.Tensor:
         t_freq = timestep_embedding(t,
                                     self.frequency_embedding_size,
                                     self.max_period,
