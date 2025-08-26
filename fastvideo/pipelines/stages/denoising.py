@@ -292,6 +292,11 @@ class DenoisingStage(PipelineStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                         )
+                        sum_value = noise_pred.float().sum().item()
+                        logger.info(f"DenoisingStage: step {i}, noise_pred sum = {sum_value:.6f}")
+                        # Write to output file
+                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                            f.write(f"DenoisingStage: step {i}, noise_pred sum = {sum_value:.6f}\n")
 
                     # Apply guidance
                     if batch.do_classifier_free_guidance:
@@ -311,9 +316,19 @@ class DenoisingStage(PipelineStage):
                                 **image_kwargs,
                                 **neg_cond_kwargs,
                             )
+                        sum_value = noise_pred_uncond.float().sum().item()
+                        logger.info(f"DenoisingStage: step {i}, noise_pred_uncond sum = {sum_value:.6f}")
+                        # Write to output file
+                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                            f.write(f"DenoisingStage: step {i}, noise_pred_uncond sum = {sum_value:.6f}\n")
                         noise_pred_text = noise_pred
                         noise_pred = noise_pred_uncond + current_guidance_scale * (
                             noise_pred_text - noise_pred_uncond)
+                        sum_value = noise_pred.float().sum().item()
+                        logger.info(f"DenoisingStage: step {i}, final noise_pred sum = {sum_value:.6f}")
+                        # Write to output file
+                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                            f.write(f"DenoisingStage: step {i}, final noise_pred sum = {sum_value:.6f}\n")
 
                         # Apply guidance rescale if needed
                         if batch.guidance_rescale > 0.0:
@@ -329,6 +344,11 @@ class DenoisingStage(PipelineStage):
                                                   latents,
                                                   **extra_step_kwargs,
                                                   return_dict=False)[0]
+                    sum_value = latents.float().sum().item()
+                    logger.info(f"DenoisingStage: step {i}, updated latents sum = {sum_value:.6f}")
+                    # Write to output file
+                    with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                        f.write(f"DenoisingStage: step {i}, updated latents sum = {sum_value:.6f}\n")
                 # Update progress bar
                 if i == len(timesteps) - 1 or (
                     (i + 1) > num_warmup_steps and
@@ -715,6 +735,11 @@ class CosmosDenoisingStage(DenoisingStage):
                             padding_mask=padding_mask,
                             return_dict=False,
                         )[0]
+                        sum_value = cond_velocity.float().sum().item()
+                        logger.info(f"CosmosDenoisingStage: step {i}, cond_velocity sum = {sum_value:.6f}")
+                        # Write to output file
+                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                            f.write(f"CosmosDenoisingStage: step {i}, cond_velocity sum = {sum_value:.6f}\n")
                     
                     # Apply preconditioning and conditional masking
                     cond_pred = (c_skip * latents + c_out * cond_velocity.float()).to(target_dtype)
@@ -745,6 +770,11 @@ class CosmosDenoisingStage(DenoisingStage):
                                 padding_mask=padding_mask,
                                 return_dict=False,
                             )[0]
+                            sum_value = uncond_velocity.float().sum().item()
+                            logger.info(f"CosmosDenoisingStage: step {i}, uncond_velocity sum = {sum_value:.6f}")
+                            # Write to output file
+                            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                                f.write(f"CosmosDenoisingStage: step {i}, uncond_velocity sum = {sum_value:.6f}\n")
                         
                         uncond_pred = (c_skip * latents + c_out * uncond_velocity.float()).to(target_dtype)
                         
@@ -755,6 +785,11 @@ class CosmosDenoisingStage(DenoisingStage):
                         
                         # Apply guidance
                         noise_pred = cond_pred + guidance_scale * (cond_pred - uncond_pred)
+                        sum_value = noise_pred.float().sum().item()
+                        logger.info(f"CosmosDenoisingStage: step {i}, final noise_pred sum = {sum_value:.6f}")
+                        # Write to output file
+                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                            f.write(f"CosmosDenoisingStage: step {i}, final noise_pred sum = {sum_value:.6f}\n")
                     else:
                         noise_pred = cond_pred
                 
@@ -774,6 +809,11 @@ class CosmosDenoisingStage(DenoisingStage):
                 # Standard scheduler step
                 latents_before = latents.clone()
                 latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                sum_value = latents.float().sum().item()
+                logger.info(f"CosmosDenoisingStage: step {i}, updated latents sum = {sum_value:.6f}")
+                # Write to output file
+                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                    f.write(f"CosmosDenoisingStage: step {i}, updated latents sum = {sum_value:.6f}\n")
                 
                 # Debug: Check for NaN values after scheduler step
                 logger.info(f"Step {i}: After scheduler - latents NaN count: {torch.isnan(latents).sum()}")

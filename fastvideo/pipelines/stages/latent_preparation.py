@@ -105,6 +105,11 @@ class LatentPreparationStage(PipelineStage):
         # Update batch with prepared latents
         batch.latents = latents
         batch.raw_latent_shape = latents.shape
+        sum_value = latents.float().sum().item()
+        logger.info(f"LatentPreparationStage: latents sum = {sum_value:.6f}")
+        # Write to output file
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"LatentPreparationStage: latents sum = {sum_value:.6f}\n")
 
         return batch
 
@@ -162,9 +167,10 @@ class CosmosLatentPreparationStage(PipelineStage):
             raise ValueError("Height and width must be provided")
 
         # Calculate Cosmos-specific dimensions
-        # Note: Cosmos uses different scale factors than other models  
-        vae_scale_factor_spatial = 8  # Cosmos VAE spatial compression
-        vae_scale_factor_temporal = 8  # Cosmos VAE temporal compression
+        # Use the same VAE scale factors as diffusers to match their latent shapes
+        # Based on diffusers pipeline: lines 205-206
+        vae_scale_factor_spatial = 8  # Standard spatial compression (matches diffusers)
+        vae_scale_factor_temporal = 4  # Temporal compression (matches diffusers default)
         
         # Use same formula as diffusers cosmos pipeline
         num_latent_frames = (num_frames - 1) // vae_scale_factor_temporal + 1
@@ -217,6 +223,11 @@ class CosmosLatentPreparationStage(PipelineStage):
         # Store in batch
         batch.latents = latents
         batch.raw_latent_shape = latents.shape
+        sum_value = latents.float().sum().item()
+        logger.info(f"CosmosLatentPreparationStage: latents sum = {sum_value:.6f}, shape = {latents.shape}, sigma_max = {self.scheduler.sigma_max}")
+        # Write to output file
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"CosmosLatentPreparationStage: latents sum = {sum_value:.6f}, shape = {latents.shape}, sigma_max = {self.scheduler.sigma_max}\n")
         
         # Store Cosmos-specific conditioning data
         batch.conditioning_latents = None  # No conditioning frames for now
