@@ -688,7 +688,7 @@ class TypeBasedDispatcher:
 
 
 # For non-torch.distributed debugging
-def remote_oint() -> None:
+def remote_breakpoint() -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind(("localhost", 0))  # Let the OS pick an ephemeral port.
