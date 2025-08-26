@@ -9,6 +9,8 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.preprocess.preprocess_pipeline_i2v import (
     PreprocessPipeline_I2V)
+from fastvideo.pipelines.preprocess.preprocess_pipeline_ode_trajectory import (
+    PreprocessPipeline_ODE_Trajectory)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_t2v import (
     PreprocessPipeline_T2V)
 from fastvideo.utils import maybe_download_model
@@ -35,7 +37,17 @@ def main(args) -> None:
         text_encoder_cpu_offload=False,
         pipeline_config=pipeline_config,
     )
-    PreprocessPipeline = PreprocessPipeline_I2V if args.preprocess_task == "i2v" else PreprocessPipeline_T2V
+    if args.preprocess_task == "t2v":
+        PreprocessPipeline = PreprocessPipeline_T2V
+    elif args.preprocess_task == "i2v":
+        PreprocessPipeline = PreprocessPipeline_I2V
+    elif args.preprocess_task == "ode_trajectory":
+        PreprocessPipeline = PreprocessPipeline_ODE_Trajectory
+    else:
+        raise ValueError(f"Invalid preprocess task: {args.preprocess_task}")
+    
+    logger.info(f"Preprocess task: {args.preprocess_task} using {PreprocessPipeline.__name__}")
+
     pipeline = PreprocessPipeline(args.model_path, fastvideo_args)
     pipeline.forward(batch=None, fastvideo_args=fastvideo_args, args=args)
 

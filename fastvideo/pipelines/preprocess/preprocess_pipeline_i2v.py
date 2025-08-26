@@ -24,9 +24,7 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
     """I2V preprocessing pipeline implementation."""
 
     _required_config_modules = [
-        "text_encoder",
-        "tokenizer",
-        "vae",
+        "text_encoder", "tokenizer", "vae", "image_encoder", "image_processor"
     ]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
