@@ -10,6 +10,7 @@ torchrun --nproc_per_node=$GPU_NUM \
     --model_path $MODEL_PATH \
     --mode preprocess \
     --workload_type t2v \
+    --preprocess.video_loader_type torchvision \
     --preprocess.dataset_type merged \
     --preprocess.dataset_path $DATASET_PATH \
     --preprocess.dataset_output_dir $OUTPUT_DIR \
