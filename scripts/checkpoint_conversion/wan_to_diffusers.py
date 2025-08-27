@@ -1,4 +1,5 @@
 from huggingface_hub import save_torch_state_dict, load_state_dict_from_file
+# from safetensors import safetensors
 from safetensors.torch import save_file
 import torch
 import re
@@ -67,7 +68,8 @@ _param_names_mapping: dict = {
     r"blocks.\1.norm2.\2",
 }
 
-state_dict = load_state_dict_from_file("FastVideo/diffusion_pytorch_model.safetensors")
+state_dict = load_state_dict_from_file("checkpoints/self_forcing_dmd.pt")
+# state_dict = state_dict["generator_ema"]
 new_state_dict = OrderedDict()
 for k, v in state_dict.items():
     new_key = k
@@ -84,5 +86,6 @@ del state_dict
 
 save_torch_state_dict(
     new_state_dict,
-    "Wan2.1-Fun-1.3B-InP-Diffusers/transformer"
+    "new_diffusers/",
+    max_shard_size="10GB"
 )

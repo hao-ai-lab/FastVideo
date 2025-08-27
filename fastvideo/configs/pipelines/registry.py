@@ -9,6 +9,7 @@ from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
 from fastvideo.configs.pipelines.wan import (FastWan2_1_T2V_480P_Config,
                                              FastWan2_2_TI2V_5B_Config,
+                                             SelfForcingWanT2V480PConfig,
                                              WanI2V480PConfig, WanI2V720PConfig,
                                              WanT2V480PConfig, WanT2V720PConfig)
 from fastvideo.logger import init_logger
@@ -34,6 +35,7 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "Wan-AI/Wan2.2-TI2V-5B-Diffusers": WanT2V720PConfig,
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": WanT2V480PConfig,
     "Wan-AI/Wan2.2-I2V-A14B-Diffusers": WanI2V480PConfig,
+    "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers": SelfForcingWanT2V480PConfig,
     # Add other specific weight variants
 }
 
