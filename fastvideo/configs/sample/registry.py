@@ -35,7 +35,8 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VSamplingParam,
     "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": FastWanT2V480PConfig,
     "Wan-AI/Wan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_SamplingParam,
-    "FastVideo/FastWan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_SamplingParam,
+    "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers":
+    Wan2_2_TI2V_5B_SamplingParam,
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": Wan2_2_T2V_A14B_SamplingParam,
     "Wan-AI/Wan2.2-I2V-A14B-Diffusers": Wan2_2_I2V_A14B_SamplingParam,
     # Add other specific weight variants
