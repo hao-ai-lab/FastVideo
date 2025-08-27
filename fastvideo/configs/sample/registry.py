@@ -17,6 +17,7 @@ from fastvideo.configs.sample.wan import (
     WanI2V_14B_720P_SamplingParam,
     WanT2V_1_3B_SamplingParam,
     WanT2V_14B_SamplingParam,
+    SelfForcingWanT2V480PConfig,
 )
 # isort: on
 from fastvideo.logger import init_logger
@@ -28,17 +29,29 @@ logger = init_logger(__name__)
 SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "FastVideo/FastHunyuan-diffusers": FastHunyuanSamplingParam,
     "hunyuanvideo-community/HunyuanVideo": HunyuanSamplingParam,
+    "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VSamplingParam,
+
+    # Wan2.1
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V_1_3B_SamplingParam,
     "Wan-AI/Wan2.1-T2V-14B-Diffusers": WanT2V_14B_SamplingParam,
     "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V_14B_480P_SamplingParam,
     "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V_14B_720P_SamplingParam,
-    "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VSamplingParam,
-    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": FastWanT2V480PConfig,
+
+    # Wan2.2
     "Wan-AI/Wan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_SamplingParam,
     "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers":
     Wan2_2_TI2V_5B_SamplingParam,
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": Wan2_2_T2V_A14B_SamplingParam,
     "Wan-AI/Wan2.2-I2V-A14B-Diffusers": Wan2_2_I2V_A14B_SamplingParam,
+
+    # FastWan2.1
+    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": FastWanT2V480PConfig,
+
+    # FastWan2.2
+    "FastVideo/FastWan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_SamplingParam,
+
+    # Causal Self-Forcing Wan2.1
+    "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers": SelfForcingWanT2V480PConfig,
     # Add other specific weight variants
 }
 
