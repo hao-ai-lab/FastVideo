@@ -41,6 +41,8 @@ def generate_video():
         # Run inference
         print("Generating video...")
         result = generator.generate_video(
+            height=704,
+            width=1280,
             prompt=prompt,
             negative_prompt=negative_prompt,
             num_frames=21,

@@ -14,6 +14,6 @@ image = load_image(
 )
 
 video = pipe(
-    image=image, prompt=prompt, negative_prompt=negative_prompt, generator=torch.Generator().manual_seed(1), num_frames=25
+    image=image, prompt=prompt, negative_prompt=negative_prompt, generator=torch.Generator().manual_seed(1), num_frames=21
 ).frames[0]
 export_to_video(video, "output.mp4", fps=16)

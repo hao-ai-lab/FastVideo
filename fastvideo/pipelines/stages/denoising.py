@@ -624,7 +624,7 @@ class CosmosDenoisingStage(DenoisingStage):
     """
     Denoising stage for Cosmos models using FlowMatchEulerDiscreteScheduler.
     
-    This stage implements the diffusers-compatible Cosmos denoising process with velocity prediction,
+    This stage implements the diffusers-compatible Cosmos denoising process with noise prediction,
     classifier-free guidance, and conditional video generation support.
     Compatible with Hugging Face Cosmos models.
     """
@@ -671,15 +671,24 @@ class CosmosDenoisingStage(DenoisingStage):
         guidance_scale = batch.guidance_scale
         
         
-        # Setup scheduler timesteps (let scheduler generate proper sigmas)
+        # Setup scheduler timesteps like Diffusers does
+        # Diffusers uses set_timesteps without custom sigmas, letting the scheduler generate them
         self.scheduler.set_timesteps(num_inference_steps, device=latents.device)
         timesteps = self.scheduler.timesteps
         
-        # Initialize with maximum noise
-        latents = torch.randn_like(latents, dtype=torch.float32) * self.scheduler.sigma_max
+        # Handle final sigmas like diffusers
+        if hasattr(self.scheduler.config, 'final_sigmas_type') and self.scheduler.config.final_sigmas_type == "sigma_min":
+            if len(self.scheduler.sigmas) > 1:
+                self.scheduler.sigmas[-1] = self.scheduler.sigmas[-2]
         
-        # Prepare conditional frame handling (if needed)
-        # This would be implemented based on batch.conditioning_latents or similar
+        # Debug: Log sigma information
+        logger.info(f"CosmosDenoisingStage - Scheduler sigmas shape: {self.scheduler.sigmas.shape}")
+        logger.info(f"CosmosDenoisingStage - Sigma range: {self.scheduler.sigmas.min():.6f} to {self.scheduler.sigmas.max():.6f}")
+        logger.info(f"CosmosDenoisingStage - First few sigmas: {self.scheduler.sigmas[:5]}")
+        
+        # Get conditioning setup from batch (prepared by CosmosLatentPreparationStage)
+        conditioning_latents = getattr(batch, 'conditioning_latents', None)
+        unconditioning_latents = conditioning_latents  # Same for cosmos
         
         # Sampling loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
@@ -695,6 +704,11 @@ class CosmosDenoisingStage(DenoisingStage):
                 c_skip = 1 - current_t  
                 c_out = -current_t
                 
+                # Debug: Log sigma and coefficients for first few steps
+                if i < 3:
+                    logger.info(f"Step {i}: current_sigma={current_sigma:.6f}, current_t={current_t:.6f}")
+                    logger.info(f"Step {i}: c_in={c_in:.6f}, c_skip={c_skip:.6f}, c_out={c_out:.6f}")
+                
                 # Prepare timestep tensor
                 timestep = current_t.view(1, 1, 1, 1, 1).expand(
                     latents.size(0), -1, latents.size(2), -1, -1
@@ -706,8 +720,9 @@ class CosmosDenoisingStage(DenoisingStage):
                     
                     # Conditional forward pass
                     cond_latent = latents * c_in
-                    # Add conditional frame handling here if needed:
-                    # cond_latent = cond_indicator * conditioning_latents + (1 - cond_indicator) * cond_latent
+                    # Add conditional frame handling like diffusers
+                    if hasattr(batch, 'cond_indicator') and batch.cond_indicator is not None and conditioning_latents is not None:
+                        cond_latent = batch.cond_indicator * conditioning_latents + (1 - batch.cond_indicator) * cond_latent
                     
                     with set_forward_context(
                         current_timestep=i,
@@ -726,7 +741,16 @@ class CosmosDenoisingStage(DenoisingStage):
                                                        device=cond_latent.device, dtype=target_dtype)
                         
                         
-                        cond_velocity = self.transformer(
+                        # Debug transformer inputs for first few steps
+                        if i < 3:
+                            logger.info(f"Step {i}: Transformer inputs:")
+                            logger.info(f"  cond_latent shape: {cond_latent.shape}, sum: {cond_latent.float().sum().item():.6f}")
+                            logger.info(f"  timestep shape: {timestep.shape}, values: {timestep.flatten()[:5]}")
+                            logger.info(f"  prompt_embeds shape: {batch.prompt_embeds[0].shape}")
+                            logger.info(f"  condition_mask shape: {condition_mask.shape if condition_mask is not None else None}")
+                            logger.info(f"  padding_mask shape: {padding_mask.shape}")
+                        
+                        noise_pred = self.transformer(
                             hidden_states=cond_latent.to(target_dtype),
                             timestep=timestep.to(target_dtype),
                             encoder_hidden_states=batch.prompt_embeds[0].to(target_dtype),
@@ -735,14 +759,14 @@ class CosmosDenoisingStage(DenoisingStage):
                             padding_mask=padding_mask,
                             return_dict=False,
                         )[0]
-                        sum_value = cond_velocity.float().sum().item()
-                        logger.info(f"CosmosDenoisingStage: step {i}, cond_velocity sum = {sum_value:.6f}")
+                        sum_value = noise_pred.float().sum().item()
+                        logger.info(f"CosmosDenoisingStage: step {i}, noise_pred sum = {sum_value:.6f}")
                         # Write to output file
                         with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                            f.write(f"CosmosDenoisingStage: step {i}, cond_velocity sum = {sum_value:.6f}\n")
+                            f.write(f"CosmosDenoisingStage: step {i}, noise_pred sum = {sum_value:.6f}\n")
                     
-                    # Apply preconditioning and conditional masking
-                    cond_pred = (c_skip * latents + c_out * cond_velocity.float()).to(target_dtype)
+                    # Apply preconditioning exactly like diffusers
+                    cond_pred = (c_skip * latents + c_out * noise_pred.float()).to(target_dtype)
                     
                     # Apply conditional indicator masking (from CosmosLatentPreparationStage)
                     if hasattr(batch, 'cond_indicator') and batch.cond_indicator is not None:
@@ -761,7 +785,13 @@ class CosmosDenoisingStage(DenoisingStage):
                             # Use uncond_mask for unconditional pass if available
                             uncond_condition_mask = batch.uncond_mask.to(target_dtype) if hasattr(batch, 'uncond_mask') and batch.uncond_mask is not None else condition_mask
                             
-                            uncond_velocity = self.transformer(
+                            # Debug unconditional transformer inputs for first few steps
+                            if i < 3:
+                                logger.info(f"Step {i}: Uncond transformer inputs:")
+                                logger.info(f"  uncond_latent sum: {uncond_latent.float().sum().item():.6f}")
+                                logger.info(f"  negative_prompt_embeds shape: {batch.negative_prompt_embeds[0].shape}")
+                            
+                            noise_pred_uncond = self.transformer(
                                 hidden_states=uncond_latent.to(target_dtype),
                                 timestep=timestep.to(target_dtype),
                                 encoder_hidden_states=batch.negative_prompt_embeds[0].to(target_dtype),
@@ -770,59 +800,61 @@ class CosmosDenoisingStage(DenoisingStage):
                                 padding_mask=padding_mask,
                                 return_dict=False,
                             )[0]
-                            sum_value = uncond_velocity.float().sum().item()
-                            logger.info(f"CosmosDenoisingStage: step {i}, uncond_velocity sum = {sum_value:.6f}")
+                            sum_value = noise_pred_uncond.float().sum().item()
+                            logger.info(f"CosmosDenoisingStage: step {i}, noise_pred_uncond sum = {sum_value:.6f}")
                             # Write to output file
                             with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                                f.write(f"CosmosDenoisingStage: step {i}, uncond_velocity sum = {sum_value:.6f}\n")
+                                f.write(f"CosmosDenoisingStage: step {i}, noise_pred_uncond sum = {sum_value:.6f}\n")
                         
-                        uncond_pred = (c_skip * latents + c_out * uncond_velocity.float()).to(target_dtype)
+                        uncond_pred = (c_skip * latents + c_out * noise_pred_uncond.float()).to(target_dtype)
                         
-                        # Apply conditional indicator masking for unconditional prediction
-                        if hasattr(batch, 'uncond_indicator') and batch.uncond_indicator is not None:
-                            unconditioning_latents = conditioning_latents  # Same as conditioning for cosmos
+                        # Apply conditional indicator masking for unconditional prediction like diffusers
+                        if hasattr(batch, 'uncond_indicator') and batch.uncond_indicator is not None and unconditioning_latents is not None:
                             uncond_pred = batch.uncond_indicator * unconditioning_latents + (1 - batch.uncond_indicator) * uncond_pred
                         
-                        # Apply guidance
-                        noise_pred = cond_pred + guidance_scale * (cond_pred - uncond_pred)
-                        sum_value = noise_pred.float().sum().item()
+                        # Apply guidance exactly like diffusers  
+                        guidance_diff = cond_pred - uncond_pred
+                        final_pred = cond_pred + guidance_scale * guidance_diff
+                        
+                        # Debug guidance computation
+                        if i < 3:  # Log first few steps
+                            logger.info(f"Step {i}: Guidance debug:")
+                            logger.info(f"  cond_pred sum = {cond_pred.float().sum().item():.6f}")
+                            logger.info(f"  uncond_pred sum = {uncond_pred.float().sum().item():.6f}") 
+                            logger.info(f"  guidance_diff sum = {guidance_diff.float().sum().item():.6f}")
+                            logger.info(f"  guidance_scale = {guidance_scale}")
+                            logger.info(f"  final_pred sum = {final_pred.float().sum().item():.6f}")
+                        
+                        sum_value = final_pred.float().sum().item()
                         logger.info(f"CosmosDenoisingStage: step {i}, final noise_pred sum = {sum_value:.6f}")
                         # Write to output file
                         with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
                             f.write(f"CosmosDenoisingStage: step {i}, final noise_pred sum = {sum_value:.6f}\n")
                     else:
-                        noise_pred = cond_pred
+                        final_pred = cond_pred
+                        if i < 3:
+                            logger.info(f"Step {i}: No CFG, using cond_pred directly: {final_pred.float().sum().item():.6f}")
                 
-                # Debug: Check for NaN values before conversion
-                logger.info(f"Step {i}: Before conversion - latents NaN count: {torch.isnan(latents).sum()}")
-                logger.info(f"Step {i}: Before conversion - noise_pred NaN count: {torch.isnan(noise_pred).sum()}")
-                logger.info(f"Step {i}: current_sigma: {current_sigma}")
+                # Convert to noise for scheduler step exactly like diffusers
+                # Add safety check to prevent division by zero
+                if current_sigma > 1e-8:
+                    noise_for_scheduler = (latents - final_pred) / current_sigma
+                else:
+                    logger.warning(f"Step {i}: current_sigma too small ({current_sigma}), using final_pred directly")
+                    noise_for_scheduler = final_pred
                 
-                # Convert from velocity prediction to noise (Cosmos-specific conversion)
-                # Add small epsilon to prevent division by zero
-                current_sigma_safe = torch.clamp(current_sigma, min=1e-8)
-                noise_pred = (latents - noise_pred) / current_sigma_safe
+                # Debug: Check for NaN values before scheduler step
+                if torch.isnan(noise_for_scheduler).sum() > 0:
+                    logger.error(f"Step {i}: NaN detected in noise_for_scheduler, sum: {noise_for_scheduler.float().sum().item()}")
+                    logger.error(f"Step {i}: latents sum: {latents.float().sum().item()}, final_pred sum: {final_pred.float().sum().item()}, current_sigma: {current_sigma}")
                 
-                # Debug: Check for NaN values after conversion
-                logger.info(f"Step {i}: After conversion - noise_pred NaN count: {torch.isnan(noise_pred).sum()}")
-                
-                # Standard scheduler step
-                latents_before = latents.clone()
-                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                # Standard scheduler step like diffusers
+                latents = self.scheduler.step(noise_for_scheduler, t, latents, return_dict=False)[0]
                 sum_value = latents.float().sum().item()
                 logger.info(f"CosmosDenoisingStage: step {i}, updated latents sum = {sum_value:.6f}")
                 # Write to output file
                 with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
                     f.write(f"CosmosDenoisingStage: step {i}, updated latents sum = {sum_value:.6f}\n")
-                
-                # Debug: Check for NaN values after scheduler step
-                logger.info(f"Step {i}: After scheduler - latents NaN count: {torch.isnan(latents).sum()}")
-                logger.info(f"Step {i}: latents shape change: {latents_before.shape} -> {latents.shape}")
-                
-                # Break if NaN detected
-                if torch.isnan(latents).sum() > 0:
-                    logger.error(f"NaN detected at step {i}, breaking denoising loop")
-                    break
                 
                 progress_bar.update()
         

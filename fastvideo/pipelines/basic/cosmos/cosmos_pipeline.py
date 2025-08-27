@@ -90,7 +90,8 @@ class Cosmos2VideoToWorldPipeline(ComposedPipelineBase):
         self.add_stage(stage_name="latent_preparation_stage",
                        stage=CosmosLatentPreparationStage(
                            scheduler=self.get_module("scheduler"),
-                           transformer=self.get_module("transformer")))
+                           transformer=self.get_module("transformer"),
+                           vae=self.get_module("vae")))
 
         # Denoising loop - corresponds to main denoising loop in __call__
         # Source: /workspace/diffusers/src/diffusers/pipelines/cosmos/pipeline_cosmos2_video2world.py:673-752

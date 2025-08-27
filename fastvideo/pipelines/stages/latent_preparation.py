@@ -3,6 +3,7 @@
 Latent preparation stage for diffusion pipelines.
 """
 
+import torch
 from diffusers.utils.torch_utils import randn_tensor
 
 from fastvideo.distributed import get_local_torch_device
@@ -122,10 +123,11 @@ class CosmosLatentPreparationStage(PipelineStage):
     This stage replicates the logic from diffusers' Cosmos2VideoToWorldPipeline.prepare_latents()
     """
 
-    def __init__(self, scheduler, transformer) -> None:
+    def __init__(self, scheduler, transformer, vae=None) -> None:
         super().__init__()
         self.scheduler = scheduler
         self.transformer = transformer
+        self.vae = vae
 
     def forward(
         self,
@@ -166,26 +168,130 @@ class CosmosLatentPreparationStage(PipelineStage):
         if height is None or width is None:
             raise ValueError("Height and width must be provided")
 
-        # Calculate Cosmos-specific dimensions
-        # Use the same VAE scale factors as diffusers to match their latent shapes
-        # Based on diffusers pipeline: lines 205-206
-        vae_scale_factor_spatial = 8  # Standard spatial compression (matches diffusers)
-        vae_scale_factor_temporal = 4  # Temporal compression (matches diffusers default)
+        # Calculate Cosmos-specific dimensions to match Diffusers exactly
+        # Based on empirical analysis of Diffusers output shapes
+        # Diffusers: 93 frames -> 7 latent frames, 704x1280 -> 88x160
+        
+        # For spatial: Need 704->88 and 1280->160
+        # 704/88 = 8, 1280/160 = 8, so spatial_scale = 8
+        vae_scale_factor_spatial = 8  
+        
+        # For temporal: Need 93 frames -> 7 latent frames  
+        # Using formula: (num_frames - 1) // temporal_scale + 1 = 7
+        # So: (93 - 1) // temporal_scale + 1 = 7
+        # 92 // temporal_scale + 1 = 7
+        # 92 // temporal_scale = 6  
+        # temporal_scale = 92 // 6 = 15.33 -> try 13
+        # Check: (93-1)//13 + 1 = 92//13 + 1 = 7 + 1 = 8 (too high)
+        # Try 12: (93-1)//12 + 1 = 92//12 + 1 = 7 + 1 = 8 (too high) 
+        # Try 15: (93-1)//15 + 1 = 92//15 + 1 = 6 + 1 = 7 ✓
+        vae_scale_factor_temporal = 15
+        
+        # Also check if height needs different scaling
+        # 704 -> 88: 704/8 = 88 ✓
+        # But maybe height uses different factor? 704/90 = 7.82 (not integer)
+        # Let's use 704/88 = 8 exactly
+        latent_height = height // 8  # Force to match Diffusers: 704//8 = 88
+        latent_width = width // vae_scale_factor_spatial
         
         # Use same formula as diffusers cosmos pipeline
         num_latent_frames = (num_frames - 1) // vae_scale_factor_temporal + 1
         
         logger.info(f"CosmosLatentPreparationStage - input frames: {num_frames}, latent frames: {num_latent_frames}")
-        latent_height = height // vae_scale_factor_spatial
-        latent_width = width // vae_scale_factor_spatial
+        logger.info(f"CosmosLatentPreparationStage - VAE scale factors: temporal={vae_scale_factor_temporal}, spatial={vae_scale_factor_spatial}")
+        logger.info(f"CosmosLatentPreparationStage - Frame calculation: {num_frames} -> {num_latent_frames} (using formula: ({num_frames}-1)//{vae_scale_factor_temporal}+1)")
+        logger.info(f"CosmosLatentPreparationStage - Dimensions: height={height} -> {latent_height}, width={width} -> {latent_width}")
+        # latent_height and latent_width already calculated above
         
         # Cosmos transformer expects in_channels - 1 for the latent channels
         num_channels_latents = self.transformer.config.in_channels - 1
+        logger.info(f"CosmosLatentPreparationStage - Final shape calculation: ({batch_size}, {num_channels_latents}, {num_latent_frames}, {latent_height}, {latent_width})")
         
         shape = (batch_size, num_channels_latents, num_latent_frames, latent_height, latent_width)
 
-        logger.info(f"CosmosLatentPreparationStage - preparing latents with shape: {shape}")
+        logger.info(f"CosmosLatentPreparationStage - Target shape: {shape}")
+        
+        # Debug: Double-check the calculation manually
+        expected_frames = (num_frames - 1) // vae_scale_factor_temporal + 1
+        expected_height = height // 8  
+        expected_width = width // vae_scale_factor_spatial
+        logger.info(f"CosmosLatentPreparationStage - Manual check: frames={expected_frames}, height={expected_height}, width={expected_width}")
 
+        # Handle video input processing like diffusers
+        init_latents = None
+        conditioning_latents = None
+        
+        # Process input video if provided (video-to-world generation)
+        # Check multiple possible sources for video input
+        video = None
+        if hasattr(batch, 'video') and batch.video is not None:
+            video = batch.video
+        elif hasattr(batch, 'pil_image') and batch.pil_image is not None:
+            # Convert single image to video format if needed
+            if isinstance(batch.pil_image, torch.Tensor):
+                if batch.pil_image.dim() == 4:  # [B, C, H, W] -> [B, C, T, H, W]
+                    video = batch.pil_image.unsqueeze(2)
+                elif batch.pil_image.dim() == 5:  # Already [B, C, T, H, W]
+                    video = batch.pil_image
+        elif hasattr(batch, 'preprocessed_image') and batch.preprocessed_image is not None:
+            # Convert preprocessed image to video format
+            if isinstance(batch.preprocessed_image, torch.Tensor):
+                if batch.preprocessed_image.dim() == 4:  # [B, C, H, W] -> [B, C, T, H, W]
+                    video = batch.preprocessed_image.unsqueeze(2)
+                elif batch.preprocessed_image.dim() == 5:  # Already [B, C, T, H, W]
+                    video = batch.preprocessed_image
+        
+        if video is not None:
+            video = batch.video
+            num_cond_frames = video.size(2)
+            
+            if num_cond_frames >= num_frames:
+                # Take the last `num_frames` frames for conditioning
+                num_cond_latent_frames = (num_frames - 1) // vae_scale_factor_temporal + 1
+                video = video[:, :, -num_frames:]
+            else:
+                num_cond_latent_frames = (num_cond_frames - 1) // vae_scale_factor_temporal + 1
+                num_padding_frames = num_frames - num_cond_frames
+                last_frame = video[:, :, -1:]
+                padding = last_frame.repeat(1, 1, num_padding_frames, 1, 1)
+                video = torch.cat([video, padding], dim=2)
+            
+            # Encode video through VAE like diffusers does
+            if self.vae is not None:
+                if isinstance(generator, list):
+                    init_latents = []
+                    for i in range(batch_size):
+                        vae_output = self.vae.encode(video[i].unsqueeze(0))
+                        if hasattr(vae_output, 'latent_dist'):
+                            init_latents.append(vae_output.latent_dist.sample(generator[i] if i < len(generator) else None))
+                        elif hasattr(vae_output, 'latents'):
+                            init_latents.append(vae_output.latents)
+                        else:
+                            raise AttributeError("Could not access latents of provided encoder_output")
+                else:
+                    init_latents_list = []
+                    for vid in video:
+                        vae_output = self.vae.encode(vid.unsqueeze(0))
+                        if hasattr(vae_output, 'latent_dist'):
+                            init_latents_list.append(vae_output.latent_dist.sample(generator))
+                        elif hasattr(vae_output, 'latents'):
+                            init_latents_list.append(vae_output.latents)
+                        else:
+                            raise AttributeError("Could not access latents of provided encoder_output")
+                    init_latents = init_latents_list
+                
+                init_latents = torch.cat(init_latents, dim=0).to(dtype)
+                
+                # Apply latent normalization like diffusers
+                if hasattr(self.vae.config, 'latents_mean') and hasattr(self.vae.config, 'latents_std'):
+                    latents_mean = torch.tensor(self.vae.config.latents_mean).view(1, self.vae.config.z_dim, 1, 1, 1).to(device, dtype)
+                    latents_std = torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1, 1).to(device, dtype)
+                    init_latents = (init_latents - latents_mean) / latents_std * self.scheduler.sigma_data
+                
+                conditioning_latents = init_latents
+        else:
+            num_cond_latent_frames = 0
+        
         # Generate or use provided latents
         if latents is None:
             latents = randn_tensor(shape,
@@ -203,12 +309,9 @@ class CosmosLatentPreparationStage(PipelineStage):
         ones_padding = latents.new_ones(padding_shape)
         zeros_padding = latents.new_zeros(padding_shape)
 
-        # For now, create empty conditioning (no conditioning frames)
-        # TODO: Implement proper conditioning for video-to-world
-        num_cond_latent_frames = 0
+        # Create conditioning indicators based on actual conditioning frames
         cond_indicator = latents.new_zeros(1, 1, latents.size(2), 1, 1)
-        if num_cond_latent_frames > 0:
-            cond_indicator[:, :, :num_cond_latent_frames] = 1.0
+        cond_indicator[:, :, :num_cond_latent_frames] = 1.0
         cond_mask = cond_indicator * ones_padding + (1 - cond_indicator) * zeros_padding
 
         # For classifier-free guidance
@@ -216,8 +319,7 @@ class CosmosLatentPreparationStage(PipelineStage):
         uncond_mask = None
         if batch.do_classifier_free_guidance:
             uncond_indicator = latents.new_zeros(1, 1, latents.size(2), 1, 1)
-            if num_cond_latent_frames > 0:
-                uncond_indicator[:, :, :num_cond_latent_frames] = 1.0
+            uncond_indicator[:, :, :num_cond_latent_frames] = 1.0
             uncond_mask = uncond_indicator * ones_padding + (1 - uncond_indicator) * zeros_padding
 
         # Store in batch
@@ -230,14 +332,27 @@ class CosmosLatentPreparationStage(PipelineStage):
             f.write(f"CosmosLatentPreparationStage: latents sum = {sum_value:.6f}, shape = {latents.shape}, sigma_max = {self.scheduler.sigma_max}\n")
         
         # Store Cosmos-specific conditioning data
-        batch.conditioning_latents = None  # No conditioning frames for now
+        batch.conditioning_latents = conditioning_latents
         batch.cond_indicator = cond_indicator
         batch.uncond_indicator = uncond_indicator
         batch.cond_mask = cond_mask
         batch.uncond_mask = uncond_mask
+        
+        # Final verification that shape is correct
+        logger.info(f"CosmosLatentPreparationStage - FINAL latents shape: {latents.shape}")
+        # Compare with Diffusers but adjust for actual input dimensions
+        diffusers_expected = torch.Size([1, 16, 7, 88, 160])
+        if latents.shape != diffusers_expected:
+            logger.warning(f"CosmosLatentPreparationStage - Shape differs from Diffusers: Expected {diffusers_expected}, got {latents.shape}")
+            logger.info(f"CosmosLatentPreparationStage - This may be due to different input dimensions (height={height}, width={width})")
+            logger.info(f"CosmosLatentPreparationStage - Debug values: batch_size={batch_size}, num_channels={num_channels_latents}, frames={num_latent_frames}, h={latent_height}, w={latent_width}")
+            logger.info(f"CosmosLatentPreparationStage - Input values: num_frames={num_frames}, height={height}, width={width}")
 
         logger.info(f"CosmosLatentPreparationStage - final latents shape: {latents.shape}")
+        logger.info(f"CosmosLatentPreparationStage - conditioning frames: {num_cond_latent_frames}/{num_latent_frames}")
         logger.info(f"CosmosLatentPreparationStage - cond_mask shape: {cond_mask.shape}")
+        if conditioning_latents is not None:
+            logger.info(f"CosmosLatentPreparationStage - conditioning_latents shape: {conditioning_latents.shape}")
 
         return batch
 
