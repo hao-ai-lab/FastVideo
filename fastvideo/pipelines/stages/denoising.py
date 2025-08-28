@@ -227,11 +227,8 @@ class DenoisingStage(PipelineStage):
                     latent_model_input = torch.cat(
                         [latent_model_input, batch.image_latent],
                         dim=1).to(target_dtype)
-                try:
-                    assert not torch.isnan(latent_model_input).any(
-                    ), "latent_model_input contains nan"
-                except AssertionError:
-                    torch.distributed.breakpoint()
+                assert not torch.isnan(
+                    latent_model_input).any(), "latent_model_input contains nan"
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)
 
@@ -724,11 +721,8 @@ class DmdDenoisingStage(DenoisingStage):
                         batch.image_latent.permute(0, 2, 1, 3, 4)
                     ],
                                                    dim=2).to(target_dtype)
-                try:
-                    assert not torch.isnan(latent_model_input).any(
-                    ), "latent_model_input contains nan"
-                except AssertionError:
-                    torch.distributed.breakpoint()
+                assert not torch.isnan(
+                    latent_model_input).any(), "latent_model_input contains nan"
 
                 # Prepare inputs for transformer
                 t_expand = t.repeat(latent_model_input.shape[0])
