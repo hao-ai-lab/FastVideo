@@ -590,6 +590,11 @@ class TrainingArgs(FastVideoArgs):
     # text encoder & vae & diffusion model
     pretrained_model_name_or_path: str = ""
     dit_model_name_or_path: str = ""
+    
+    # DMD model paths - separate paths for each network
+    generator_model_path: str = ""  # path for generator (student) model
+    real_score_model_path: str = ""  # path for real score (teacher) model
+    fake_score_model_path: str = ""  # path for fake score (critic) model
 
     # diffusion setting
     ema_decay: float = 0.0
@@ -644,6 +649,7 @@ class TrainingArgs(FastVideoArgs):
     linear_quadratic_threshold: float = 0.0
     linear_range: float = 0.0
     weight_decay: float = 0.0
+    betas: str = "0.9,0.999"  # betas for optimizer, format: "beta1,beta2"
     use_ema: bool = False
     multi_phased_distill_schedule: str = ""
     pred_decay_weight: float = 0.0
@@ -669,6 +675,7 @@ class TrainingArgs(FastVideoArgs):
     real_score_guidance_scale: float = 3.5
     fake_score_learning_rate: float = 0.0  # separate learning rate for fake_score_transformer, if 0.0, use learning_rate
     fake_score_lr_scheduler: str = "constant"  # separate lr scheduler for fake_score_transformer, if not set, use lr_scheduler
+    fake_score_betas: str = "0.9,0.999"  # betas for fake score optimizer, format: "beta1,beta2"
     training_state_checkpointing_steps: int = 0  # for resuming training
     weight_only_checkpointing_steps: int = 0  # for inference
     log_visualization: bool = False
@@ -774,6 +781,17 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--cache-dir",
                             type=str,
                             help="Directory to cache models")
+        
+        # DMD model paths - separate paths for each network
+        parser.add_argument("--generator-model-path",
+                            type=str,
+                            help="Path to generator (student) model for DMD distillation")
+        parser.add_argument("--real-score-model-path",
+                            type=str,
+                            help="Path to real score (teacher) model for DMD distillation")
+        parser.add_argument("--fake-score-model-path",
+                            type=str,
+                            help="Path to fake score (critic) model for DMD distillation")
 
         # Diffusion settings
         parser.add_argument("--ema-decay",
@@ -949,6 +967,10 @@ class TrainingArgs(FastVideoArgs):
                             help="Linear quadratic threshold")
         parser.add_argument("--linear-range", type=float, help="Linear range")
         parser.add_argument("--weight-decay", type=float, help="Weight decay")
+        parser.add_argument("--betas",
+                            type=str,
+                            default=TrainingArgs.betas,
+                            help="Betas for optimizer (format: 'beta1,beta2')")
         parser.add_argument("--use-ema",
                             action=StoreBoolean,
                             help="Whether to use EMA")
@@ -1006,6 +1028,10 @@ class TrainingArgs(FastVideoArgs):
                             type=float,
                             default=TrainingArgs.fake_score_learning_rate,
                             help="Learning rate for fake score transformer")
+        parser.add_argument("--fake-score-betas",
+                            type=str,
+                            default=TrainingArgs.fake_score_betas,
+                            help="Betas for fake score optimizer (format: 'beta1,beta2')")
         parser.add_argument(
             "--fake-score-lr-scheduler",
             type=str,

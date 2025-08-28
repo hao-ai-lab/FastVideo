@@ -13,8 +13,10 @@ from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 
 # isort: off
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
-                                        CausalDMDDenosingStage, InputValidationStage,
-                                        LatentPreparationStage, TextEncodingStage,
+                                        CausalDMDDenosingStage,
+                                        InputValidationStage,
+                                        LatentPreparationStage,
+                                        TextEncodingStage,
                                         TimestepPreparationStage)
 # isort: on
 
@@ -65,5 +67,3 @@ class WanCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
 
 
 EntryClass = WanCausalDMDPipeline
-
-

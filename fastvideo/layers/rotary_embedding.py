@@ -33,6 +33,8 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
+logger = init_logger(__name__)
+
 def _rotate_neox(x: torch.Tensor) -> torch.Tensor:
     x1 = x[..., :x.shape[-1] // 2]
     x2 = x[..., x.shape[-1] // 2:]
@@ -297,7 +299,6 @@ def get_nd_rotary_pos_embed(
 
     if start_frame > 0:
         full_grid[0] += start_frame
-        logger.info(full_grid[0])
 
     # Shard the grid if using sequence parallelism (sp_world_size > 1)
     assert shard_dim < len(

@@ -37,8 +37,8 @@ from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases, get_scheduler,
     load_distillation_checkpoint, pred_noise_to_pred_video,
-    save_distillation_checkpoint, shift_timestep)
-from fastvideo.utils import is_vsa_available, set_random_seed
+    save_distillation_checkpoint, shift_timestep, EMA_FSDP)
+from fastvideo.utils import is_vsa_available, set_random_seed, load_module_from_path
 
 import wandb  # isort: skip
 
@@ -87,9 +87,25 @@ class DistillationPipeline(TrainingPipeline):
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
             shift=self.timestep_shift)
 
-        # self.transformer is the generator model
-        self.real_score_transformer = self.get_module("real_score_transformer")
-        self.fake_score_transformer = self.get_module("fake_score_transformer")
+        if training_args.real_score_model_path:
+            logger.info(f"Loading real score transformer from: {training_args.real_score_model_path}")
+            self.real_score_transformer = load_module_from_path(
+                training_args.real_score_model_path, 
+                "transformer", 
+                training_args
+            )
+        else:
+            self.real_score_transformer = self.get_module("real_score_transformer")
+            
+        if training_args.fake_score_model_path:
+            logger.info(f"Loading fake score transformer from: {training_args.fake_score_model_path}")
+            self.fake_score_transformer = load_module_from_path(
+                training_args.fake_score_model_path, 
+                "transformer", 
+                training_args
+            )
+        else:
+            self.fake_score_transformer = self.get_module("fake_score_transformer")
 
         self.real_score_transformer.requires_grad_(False)
         self.real_score_transformer.eval()
@@ -116,10 +132,13 @@ class DistillationPipeline(TrainingPipeline):
         if fake_score_lr == 0.0:
             fake_score_lr = training_args.learning_rate
 
+        betas_str = training_args.fake_score_betas
+        betas = tuple(float(x.strip()) for x in betas_str.split(","))
+        
         self.fake_score_optimizer = torch.optim.AdamW(
             fake_score_params,
             lr=fake_score_lr,
-            betas=(0.9, 0.999),
+            betas=betas,
             weight_decay=training_args.weight_decay,
             eps=1e-8,
         )
@@ -158,6 +177,13 @@ class DistillationPipeline(TrainingPipeline):
 
         self.real_score_guidance_scale = self.training_args.real_score_guidance_scale
 
+        self.generator_ema = None
+        if (self.training_args.ema_decay is not None) and (self.training_args.ema_decay > 0.0):
+            self.generator_ema = EMA_FSDP(self.transformer, decay=self.training_args.ema_decay)
+            logger.info(f"Initialized generator EMA with decay={self.training_args.ema_decay}")
+        else:
+            logger.info("Generator EMA disabled (ema_decay <= 0.0)")
+
     @abstractmethod
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         """Initialize validation pipeline - must be implemented by subclasses."""
@@ -173,6 +199,103 @@ class DistillationPipeline(TrainingPipeline):
         self.fake_score_transformer.train()
 
         return training_batch
+
+    def apply_ema_to_model(self, model):
+        """Apply EMA weights to the model for validation or inference."""
+        if self.generator_ema is not None:
+            with self.generator_ema.apply_to_model(model):
+                return model
+        return model
+
+    def get_ema_model_copy(self):
+        """Get a copy of the model with EMA weights applied."""
+        if self.generator_ema is not None:
+            ema_model = copy.deepcopy(self.transformer)
+            self.generator_ema.copy_to_unwrapped(ema_model)
+            return ema_model
+        return None
+
+    def is_ema_ready(self):
+        """Check if EMA is ready for use (after ema_start_step)."""
+        return (self.generator_ema is not None and 
+                self.current_trainstep >= self.training_args.ema_start_step)
+
+    def save_ema_weights(self, output_dir: str, step: int):
+        """Save EMA weights separately for inference purposes."""
+        if self.generator_ema is None:
+            logger.warning("Cannot save EMA weights: EMA not initialized")
+            return
+        
+        if not self.is_ema_ready():
+            logger.warning("Cannot save EMA weights: EMA not ready yet (step < ema_start_step)")
+            return
+        
+        try:
+            ema_model = self.get_ema_model_copy()
+            if ema_model is None:
+                logger.warning("Failed to create EMA model copy")
+                return
+
+            ema_save_dir = os.path.join(output_dir, f"ema_checkpoint-{step}")
+            os.makedirs(ema_save_dir, exist_ok=True)
+            
+            # save as diffusers format
+            from fastvideo.training.training_utils import gather_state_dict_on_cpu_rank0, custom_to_hf_state_dict
+            from safetensors.torch import save_file
+            cpu_state = gather_state_dict_on_cpu_rank0(ema_model, device=None)
+            
+            if self.global_rank == 0:
+                weight_path = os.path.join(ema_save_dir, "diffusion_pytorch_model.safetensors")
+                diffusers_state_dict = custom_to_hf_state_dict(
+                    cpu_state, ema_model.reverse_param_names_mapping)
+                save_file(diffusers_state_dict, weight_path)
+                
+                config_dict = ema_model.hf_config
+                if "dtype" in config_dict:
+                    del config_dict["dtype"]
+                config_path = os.path.join(ema_save_dir, "config.json")
+                with open(config_path, "w") as f:
+                    json.dump(config_dict, f, indent=4)
+                
+                logger.info(f"EMA weights saved to {weight_path}")
+            
+            del ema_model
+            
+        except Exception as e:
+            logger.error(f"Failed to save EMA weights: {str(e)}")
+
+    def get_ema_stats(self):
+        """Get EMA statistics for monitoring."""
+        if self.generator_ema is None:
+            return {
+                "ema_enabled": False,
+                "ema_decay": None,
+                "ema_start_step": self.training_args.ema_start_step,
+                "ema_ready": False,
+                "ema_step": self.current_trainstep,
+            }
+        
+        return {
+            "ema_enabled": True,
+            "ema_decay": self.training_args.ema_decay,
+            "ema_start_step": self.training_args.ema_start_step,
+            "ema_ready": self.is_ema_ready(),
+            "ema_step": self.current_trainstep,
+        }
+
+    def reset_ema(self):
+        """Reset EMA to current model weights."""
+        if self.generator_ema is not None:
+            logger.info("Resetting EMA to current model weights")
+            self.generator_ema.update(self.transformer)
+            # Force update to current weights by setting decay to 0 temporarily
+            original_decay = self.generator_ema.decay
+            self.generator_ema.decay = 0.0
+            self.generator_ema.update(self.transformer)
+            self.generator_ema.decay = original_decay
+            logger.info("EMA reset completed")
+        else:
+            logger.warning("Cannot reset EMA: EMA not initialized")
 
     def _build_distill_input_kwargs(
             self, noise_input: torch.Tensor, timestep: torch.Tensor,
@@ -587,6 +710,10 @@ class DistillationPipeline(TrainingPipeline):
             self._clip_model_grad_norm_(batch_gen, self.transformer)
             self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)
+            
+            if self.generator_ema is not None:
+                self.generator_ema.update(self.transformer)
+            
             avg_dmd_loss = torch.tensor(total_dmd_loss /
                                         gradient_accumulation_steps,
                                         device=self.device)
@@ -637,7 +764,8 @@ class DistillationPipeline(TrainingPipeline):
             self.transformer, self.fake_score_transformer, self.global_rank,
             self.training_args.resume_from_checkpoint, self.optimizer,
             self.fake_score_optimizer, self.train_dataloader, self.lr_scheduler,
-            self.fake_score_lr_scheduler, self.noise_random_generator)
+            self.fake_score_lr_scheduler, self.noise_random_generator,
+            self.generator_ema)
 
         if resumed_step > 0:
             self.init_steps = resumed_step
@@ -667,6 +795,12 @@ class DistillationPipeline(TrainingPipeline):
             "  Fake score transformer parameters: %s B",
             sum(p.numel()
                 for p in self.fake_score_transformer.parameters()) / 1e9)
+
+        if self.generator_ema is not None:
+            logger.info("  Generator EMA enabled with decay: %s", self.training_args.ema_decay)
+            logger.info("  Generator EMA start step: %s", self.training_args.ema_start_step)
+        else:
+            logger.info("  Generator EMA disabled")
 
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
@@ -699,6 +833,17 @@ class DistillationPipeline(TrainingPipeline):
 
         transformer.eval()
 
+        # Optionally use EMA model for validation if available and ready
+        use_ema_for_validation = (self.training_args.use_ema and 
+                                  self.is_ema_ready())
+        if use_ema_for_validation:
+            logger.info("Using EMA model for validation")
+            validation_transformer = self.transformer
+            ema_context = self.generator_ema.apply_to_model(validation_transformer)
+        else:
+            validation_transformer = transformer
+            ema_context = None
+
         validation_steps = training_args.validation_sampling_steps.split(",")
         validation_steps = [int(step) for step in validation_steps]
         validation_steps = [step for step in validation_steps if step > 0]
@@ -714,50 +859,98 @@ class DistillationPipeline(TrainingPipeline):
             step_videos: list[np.ndarray] = []
             step_captions: list[str] = []
 
-            for validation_batch in validation_dataloader:
-                batch = self._prepare_validation_batch(sampling_param,
-                                                       training_args,
-                                                       validation_batch,
-                                                       num_inference_steps)
+            if ema_context is not None:
+                with ema_context:
+                    for validation_batch in validation_dataloader:
+                        batch = self._prepare_validation_batch(sampling_param,
+                                                               training_args,
+                                                               validation_batch,
+                                                               num_inference_steps)
 
-                negative_prompt = batch.negative_prompt
-                batch_negative = ForwardBatch(
-                    data_type="video",
-                    prompt=negative_prompt,
-                    prompt_embeds=[],
-                    prompt_attention_mask=[],
-                )
-                result_batch = self.validation_pipeline.prompt_encoding_stage(  # type: ignore
-                    batch_negative, training_args)
-                self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds[
-                    0], result_batch.prompt_attention_mask[0]
+                        negative_prompt = batch.negative_prompt
+                        batch_negative = ForwardBatch(
+                            data_type="video",
+                            prompt=negative_prompt,
+                            prompt_embeds=[],
+                            prompt_attention_mask=[],
+                        )
+                        result_batch = self.validation_pipeline.prompt_encoding_stage(  # type: ignore
+                            batch_negative, training_args)
+                        self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds[
+                            0], result_batch.prompt_attention_mask[0]
 
-                logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
-                            self.global_rank,
-                            self.rank_in_sp_group,
-                            batch.prompt,
-                            local_main_process_only=False)
+                        logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
+                                    self.global_rank,
+                                    self.rank_in_sp_group,
+                                    batch.prompt,
+                                    local_main_process_only=False)
 
-                assert batch.prompt is not None and isinstance(
-                    batch.prompt, str)
-                step_captions.append(batch.prompt)
+                        assert batch.prompt is not None and isinstance(
+                            batch.prompt, str)
+                        step_captions.append(batch.prompt)
 
-                # Run validation inference
-                with torch.no_grad():
-                    output_batch = self.validation_pipeline.forward(
-                        batch, training_args)
-                samples = output_batch.output
-                if self.rank_in_sp_group != 0:
-                    continue
+                        # Run validation inference
+                        with torch.no_grad():
+                            output_batch = self.validation_pipeline.forward(
+                                batch, training_args)
+                        samples = output_batch.output
+                        if self.rank_in_sp_group != 0:
+                            continue
 
-                # Process outputs
-                video = rearrange(samples, "b c t h w -> t b c h w")
-                frames = []
-                for x in video:
-                    x = torchvision.utils.make_grid(x, nrow=6)
-                    x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-                    frames.append((x * 255).numpy().astype(np.uint8))
-                step_videos.append(frames)
+                        # Process outputs
+                        video = rearrange(samples, "b c t h w -> t b c h w")
+                        frames = []
+                        for x in video:
+                            x = torchvision.utils.make_grid(x, nrow=6)
+                            x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+                            frames.append((x * 255).numpy().astype(np.uint8))
+                        step_videos.append(frames)
+            else:
+                # Use original transformer without EMA
+                for validation_batch in validation_dataloader:
+                    batch = self._prepare_validation_batch(sampling_param,
+                                                           training_args,
+                                                           validation_batch,
+                                                           num_inference_steps)
+
+                    negative_prompt = batch.negative_prompt
+                    batch_negative = ForwardBatch(
+                        data_type="video",
+                        prompt=negative_prompt,
+                        prompt_embeds=[],
+                        prompt_attention_mask=[],
+                    )
+                    result_batch = self.validation_pipeline.prompt_encoding_stage(  # type: ignore
+                        batch_negative, training_args)
+                    self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds[
+                        0], result_batch.prompt_attention_mask[0]
+
+                    logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
+                                self.global_rank,
+                                self.rank_in_sp_group,
+                                batch.prompt,
+                                local_main_process_only=False)
+
+                    assert batch.prompt is not None and isinstance(
+                        batch.prompt, str)
+                    step_captions.append(batch.prompt)
+
+                    # Run validation inference
+                    with torch.no_grad():
+                        output_batch = self.validation_pipeline.forward(
+                            batch, training_args)
+                    samples = output_batch.output
+                    if self.rank_in_sp_group != 0:
+                        continue
+
+                    # Process outputs
+                    video = rearrange(samples, "b c t h w -> t b c h w")
+                    frames = []
+                    for x in video:
+                        x = torchvision.utils.make_grid(x, nrow=6)
+                        x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+                        frames.append((x * 255).numpy().astype(np.uint8))
+                    step_videos.append(frames)
 
             # Log validation results for this step
             world_group = get_world_group()
@@ -947,6 +1140,11 @@ class DistillationPipeline(TrainingPipeline):
             self.current_trainstep = step
             training_batch.current_vsa_sparsity = current_vsa_sparsity
 
+            if (step >= self.training_args.ema_start_step) and \
+                    (self.generator_ema is None) and (self.training_args.ema_decay > 0):
+                self.generator_ema = EMA_FSDP(self.transformer, decay=self.training_args.ema_decay)
+                logger.info(f"Created generator EMA at step {step} with decay={self.training_args.ema_decay}")
+
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 training_batch = self.train_one_step(training_batch)
 
@@ -965,6 +1163,7 @@ class DistillationPipeline(TrainingPipeline):
                 "fake_score_loss": f"{fake_score_loss:.4f}",
                 "step_time": f"{step_time:.2f}s",
                 "grad_norm": grad_norm,
+                "ema": "✓" if (self.generator_ema is not None and self.is_ema_ready()) else "✗",
             })
             progress_bar.update(1)
 
@@ -991,6 +1190,15 @@ class DistillationPipeline(TrainingPipeline):
                     log_data["train_generator_loss"] = generator_loss
                 if use_vsa:
                     log_data["VSA_train_sparsity"] = current_vsa_sparsity
+
+                if self.generator_ema is not None:
+                    log_data["ema_enabled"] = True
+                    log_data["ema_decay"] = self.training_args.ema_decay
+                else:
+                    log_data["ema_enabled"] = False
+
+                ema_stats = self.get_ema_stats()
+                log_data.update(ema_stats)
 
                 if training_batch.dmd_latent_vis_dict:
                     dmd_additional_logs = {
@@ -1023,7 +1231,8 @@ class DistillationPipeline(TrainingPipeline):
                     self.global_rank, self.training_args.output_dir, step,
                     self.optimizer, self.fake_score_optimizer,
                     self.train_dataloader, self.lr_scheduler,
-                    self.fake_score_lr_scheduler, self.noise_random_generator)
+                    self.fake_score_lr_scheduler, self.noise_random_generator,
+                    self.generator_ema)
 
                 if self.transformer:
                     self.transformer.train()
@@ -1040,7 +1249,11 @@ class DistillationPipeline(TrainingPipeline):
                                              self.global_rank,
                                              self.training_args.output_dir,
                                              f"{step}_weight_only",
-                                             only_save_generator_weight=True)
+                                             only_save_generator_weight=True,
+                                             generator_ema=self.generator_ema)
+                
+                if self.training_args.use_ema and self.is_ema_ready():
+                    self.save_ema_weights(self.training_args.output_dir, step)
 
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 if self.training_args.log_visualization:
@@ -1060,7 +1273,10 @@ class DistillationPipeline(TrainingPipeline):
             self.training_args.output_dir, self.training_args.max_train_steps,
             self.optimizer, self.fake_score_optimizer, self.train_dataloader,
             self.lr_scheduler, self.fake_score_lr_scheduler,
-            self.noise_random_generator)
+            self.noise_random_generator, self.generator_ema)
+
+        if self.training_args.use_ema and self.is_ema_ready():
+            self.save_ema_weights(self.training_args.output_dir, self.training_args.max_train_steps)
 
         if get_sp_group():
             cleanup_dist_env_and_memory()
