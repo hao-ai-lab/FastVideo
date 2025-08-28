@@ -314,6 +314,7 @@ class CausalWanTransformer3DModel(BaseDiT):
         inner_dim = config.num_attention_heads * config.attention_head_dim
         self.hidden_size = config.hidden_size
         self.num_attention_heads = config.num_attention_heads
+        self.attention_head_dim = config.attention_head_dim
         self.in_channels = config.in_channels
         self.out_channels = config.out_channels
         self.num_channels_latents = config.num_channels_latents

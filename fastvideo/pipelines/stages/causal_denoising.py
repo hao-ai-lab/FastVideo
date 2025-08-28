@@ -42,6 +42,8 @@ class CausalDMDDenosingStage(DenoisingStage):
         self.crossattn_cache: list | None = None
         # Model-dependent constants (aligned with causal_inference.py assumptions)
         self.num_transformer_blocks = self.transformer.config.arch_config.num_layers
+        self.num_frames_per_block = self.transformer.config.arch_config.num_frames_per_block
+        self.sliding_window_num_frames = self.transformer.config.arch_config.sliding_window_num_frames
 
         try:
             self.local_attn_size = getattr(self.transformer.model,
@@ -63,17 +65,8 @@ class CausalDMDDenosingStage(DenoisingStage):
         patch_ratio = self.transformer.config.arch_config.patch_size[
             -1] * self.transformer.config.arch_config.patch_size[-2]
         self.frame_seq_length = latent_seq_length // patch_ratio
-
-        # Args
-        try:
-            num_frames_per_block = getattr(batch, "num_frames_per_block", 1)
-        except Exception:
-            num_frames_per_block = 1
-        try:
-            independent_first_frame = getattr(fastvideo_args.pipeline_config,
-                                              "independent_first_frame", False)
-        except Exception:
-            independent_first_frame = False
+        # TODO(will): make this a parameter once we add i2v support
+        independent_first_frame = self.transformer.independent_first_frame
 
         # Timesteps for DMD
         timesteps = torch.tensor(
@@ -108,9 +101,12 @@ class CausalDMDDenosingStage(DenoisingStage):
             self._initialize_kv_cache(batch_size=latents.shape[0],
                                       dtype=target_dtype,
                                       device=latents.device)
-            self._initialize_crossattn_cache(batch_size=latents.shape[0],
-                                             dtype=target_dtype,
-                                             device=latents.device)
+            self._initialize_crossattn_cache(
+                batch_size=latents.shape[0],
+                max_text_len=fastvideo_args.pipeline_config.
+                text_encoder_configs[0].arch_config.text_len,
+                dtype=target_dtype,
+                device=latents.device)
         else:
             assert self.crossattn_cache is not None
             # reset cross-attention cache
@@ -165,7 +161,7 @@ class CausalDMDDenosingStage(DenoisingStage):
 
             # process remaining input frames in blocks of num_frame_per_block
             while remaining_frames > 0:
-                block = min(num_frames_per_block, remaining_frames)
+                block = min(self.num_frames_per_block, remaining_frames)
                 ref_btchw = image_latent[:, :, current_start_frame:
                                          current_start_frame +
                                          block, :, :].to(target_dtype).permute(
@@ -193,20 +189,20 @@ class CausalDMDDenosingStage(DenoisingStage):
         # Determine block sizes
         if not independent_first_frame or (independent_first_frame
                                            and batch.image_latent is not None):
-            if t % num_frames_per_block != 0:
+            if t % self.num_frames_per_block != 0:
                 raise ValueError(
                     "num_frames must be divisible by num_frames_per_block for causal DMD denoising"
                 )
-            num_blocks = t // num_frames_per_block
-            block_sizes = [num_frames_per_block] * num_blocks
+            num_blocks = t // self.num_frames_per_block
+            block_sizes = [self.num_frames_per_block] * num_blocks
             start_index = 0
         else:
-            if (t - 1) % num_frames_per_block != 0:
+            if (t - 1) % self.num_frames_per_block != 0:
                 raise ValueError(
                     "(num_frames - 1) must be divisible by num_frame_per_block when independent_first_frame=True"
                 )
-            num_blocks = (t - 1) // num_frames_per_block
-            block_sizes = [1] + [num_frames_per_block] * num_blocks
+            num_blocks = (t - 1) // self.num_frames_per_block
+            block_sizes = [1] + [self.num_frames_per_block] * num_blocks
             start_index = 0
 
         # DMD loop in causal blocks
@@ -352,19 +348,27 @@ class CausalDMDDenosingStage(DenoisingStage):
         Initialize a Per-GPU KV cache aligned with the Wan model assumptions.
         """
         kv_cache1 = []
+        num_attention_heads = self.transformer.num_attention_heads
+        attention_head_dim = self.transformer.attention_head_dim
         if self.local_attn_size != -1:
             kv_cache_size = self.local_attn_size * self.frame_seq_length
         else:
-            kv_cache_size = 32760
+            kv_cache_size = self.frame_seq_length * self.sliding_window_num_frames
 
         for _ in range(self.num_transformer_blocks):
             kv_cache1.append({
                 "k":
-                torch.zeros([batch_size, kv_cache_size, 12, 128],
+                torch.zeros([
+                    batch_size, kv_cache_size, num_attention_heads,
+                    attention_head_dim
+                ],
                             dtype=dtype,
                             device=device),
                 "v":
-                torch.zeros([batch_size, kv_cache_size, 12, 128],
+                torch.zeros([
+                    batch_size, kv_cache_size, num_attention_heads,
+                    attention_head_dim
+                ],
                             dtype=dtype,
                             device=device),
                 "global_end_index":
@@ -375,19 +379,28 @@ class CausalDMDDenosingStage(DenoisingStage):
 
         self.kv_cache1 = kv_cache1
 
-    def _initialize_crossattn_cache(self, batch_size, dtype, device) -> None:
+    def _initialize_crossattn_cache(self, batch_size, max_text_len, dtype,
+                                    device) -> None:
         """
         Initialize a Per-GPU cross-attention cache aligned with the Wan model assumptions.
         """
         crossattn_cache = []
+        num_attention_heads = self.transformer.num_attention_heads
+        attention_head_dim = self.transformer.attention_head_dim
         for _ in range(self.num_transformer_blocks):
             crossattn_cache.append({
                 "k":
-                torch.zeros([batch_size, 512, 12, 128],
+                torch.zeros([
+                    batch_size, max_text_len, num_attention_heads,
+                    attention_head_dim
+                ],
                             dtype=dtype,
                             device=device),
                 "v":
-                torch.zeros([batch_size, 512, 12, 128],
+                torch.zeros([
+                    batch_size, max_text_len, num_attention_heads,
+                    attention_head_dim
+                ],
                             dtype=dtype,
                             device=device),
                 "is_init":

@@ -173,10 +173,6 @@ class ForwardBatch:
     logging_info: PipelineLoggingInfo = field(
         default_factory=PipelineLoggingInfo)
 
-    # Causal Wan parameters
-    num_frames_per_block: int = 3
-    sliding_window_num_frames: int = 21
-
     def __post_init__(self):
         """Initialize dependent fields after dataclass initialization."""
 
