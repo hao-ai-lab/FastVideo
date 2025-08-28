@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=t2v
 #SBATCH --partition=main
-#SBATCH --nodes=8
-#SBATCH --ntasks=8
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:8
+#SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
 #SBATCH --output=dmd_t2v_output/t2v_%j.out
@@ -14,7 +14,7 @@ set -e -x
 
 # Environment Setup
 source ~/conda/miniconda/bin/activate
-conda activate your_env
+conda activate matthew-fv
 
 # Basic Info
 export WANDB_MODE="online"
@@ -37,15 +37,15 @@ echo "MASTER_ADDR: $MASTER_ADDR"
 echo "NODE_RANK: $NODE_RANK"
 
 # Configs
-NUM_GPUS=8
+NUM_GPUS=1
 
 # Model paths for DMD distillation:
 GENERATOR_MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
 REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"  # Teacher model
 FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Critic model
 
-DATA_DIR=your_data_dir
-VALIDATION_DATASET_FILE=your_validation_dataset_file
+DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
+VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
@@ -75,7 +75,7 @@ parallel_args=(
 
 # Model arguments
 model_args=(
-  --model_path $GENERATOR_MODEL_PATH  # TODO: remove this in this script
+  --model_path $GENERATOR_MODEL_PATH  # TODO: check if you can remove this in this script
   --pretrained_model_name_or_path $GENERATOR_MODEL_PATH
   --generator_model_path $GENERATOR_MODEL_PATH
   --real_score_model_path $REAL_SCORE_MODEL_PATH
@@ -114,12 +114,12 @@ miscellaneous_args=(
   --checkpoints_total_limit 3
   --training_cfg_rate 0.0
   --dit_precision "fp32"
-  --ema_start_step 0
   --flow_shift 5
   --seed 1000
   --use_ema True
   --ema_decay 0.99
   --ema_start_step 200
+  --resume_from_checkpoint "/mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors"
 )
 
 # DMD arguments

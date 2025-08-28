@@ -58,9 +58,9 @@ class CausalDMDDenosingStage(DenoisingStage):
 
         # Args
         try:
-            num_frames_per_block = getattr(batch, "num_frames_per_block", 1)
+            num_frames_per_block = getattr(batch, "num_frames_per_block", 3)
         except Exception:
-            num_frames_per_block = 1
+            num_frames_per_block = 3
         try:
             independent_first_frame = getattr(fastvideo_args.pipeline_config,
                                               "independent_first_frame", False)

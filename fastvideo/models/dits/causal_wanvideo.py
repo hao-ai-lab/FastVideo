@@ -367,7 +367,7 @@ class CausalWanTransformer3DModel(BaseDiT):
 
         # Causal-specific
         self.block_mask = None
-        self.num_frame_per_block = 1
+        self.num_frame_per_block = 3
         self.independent_first_frame = False
 
         self.__post_init__()
@@ -375,7 +375,7 @@ class CausalWanTransformer3DModel(BaseDiT):
     @staticmethod
     def _prepare_blockwise_causal_attn_mask(
         device: torch.device | str, num_frames: int = 21,
-        frame_seqlen: int = 1560, num_frame_per_block=1, local_attn_size=-1
+        frame_seqlen: int = 1560, num_frame_per_block=3, local_attn_size=-1
     ) -> BlockMask:
         """
         we will divide the token sequence into the following format
