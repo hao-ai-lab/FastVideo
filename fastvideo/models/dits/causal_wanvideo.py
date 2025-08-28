@@ -545,6 +545,7 @@ class CausalWanTransformer3DModel(BaseDiT):
                 timestep: torch.LongTensor,
                 encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
                 | None = None,
+                start_frame: int = 0,
                 **kwargs) -> torch.Tensor:
 
         orig_dtype = hidden_states.dtype
@@ -572,7 +573,9 @@ class CausalWanTransformer3DModel(BaseDiT):
             self.num_attention_heads,
             rope_dim_list,
             dtype=torch.float32 if current_platform.is_mps() else torch.float64,
-            rope_theta=10000)
+            rope_theta=10000,
+            start_frame=start_frame
+        )
         freqs_cos = freqs_cos.to(hidden_states.device)
         freqs_sin = freqs_sin.to(hidden_states.device)
         freqs_cis = (freqs_cos.float(),
