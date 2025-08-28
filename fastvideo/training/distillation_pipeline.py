@@ -107,7 +107,7 @@ class DistillationPipeline(TrainingPipeline):
         else:
             self.fake_score_transformer = self.get_module("fake_score_transformer")
 
-        # self.real_score_transformer.requires_grad_(False)
+        self.real_score_transformer.requires_grad_(False)
         self.real_score_transformer.eval()
         self.fake_score_transformer.requires_grad_(True)
         self.fake_score_transformer.train()
