@@ -45,7 +45,7 @@ REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"  # Teacher model
 FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Critic model
 
 DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
-VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/wei/FastVideo/examples/distill/SFWan2.1-I2V/validation.json"
+VALIDATION_DATASET_FILE="examples/distill/SFWan2.1-I2V/validation.json"
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
