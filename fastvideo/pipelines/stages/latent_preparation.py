@@ -176,16 +176,10 @@ class CosmosLatentPreparationStage(PipelineStage):
         # 704/88 = 8, 1280/160 = 8, so spatial_scale = 8
         vae_scale_factor_spatial = 8  
         
-        # For temporal: Need 93 frames -> 7 latent frames  
-        # Using formula: (num_frames - 1) // temporal_scale + 1 = 7
-        # So: (93 - 1) // temporal_scale + 1 = 7
-        # 92 // temporal_scale + 1 = 7
-        # 92 // temporal_scale = 6  
-        # temporal_scale = 92 // 6 = 15.33 -> try 13
-        # Check: (93-1)//13 + 1 = 92//13 + 1 = 7 + 1 = 8 (too high)
-        # Try 12: (93-1)//12 + 1 = 92//12 + 1 = 7 + 1 = 8 (too high) 
-        # Try 15: (93-1)//15 + 1 = 92//15 + 1 = 6 + 1 = 7 ✓
-        vae_scale_factor_temporal = 15
+        # For temporal: Use the same scale factor as diffusers Cosmos pipeline
+        # Diffusers uses vae_scale_factor_temporal = 4 as default
+        # For 21 frames: (21-1)//4+1 = 20//4+1 = 5+1 = 6 latent frames (matches diffusers)
+        vae_scale_factor_temporal = 4
         
         # Also check if height needs different scaling
         # 704 -> 88: 704/8 = 88 ✓
@@ -224,60 +218,135 @@ class CosmosLatentPreparationStage(PipelineStage):
         # Process input video if provided (video-to-world generation)
         # Check multiple possible sources for video input
         video = None
+        logger.info(f"CosmosLatentPreparationStage - Checking for video inputs:")
+        logger.info(f"  batch.video: {getattr(batch, 'video', 'Not found')}")
+        logger.info(f"  batch.pil_image: {getattr(batch, 'pil_image', 'Not found')}")
+        logger.info(f"  batch.preprocessed_image: {getattr(batch, 'preprocessed_image', 'Not found')}")
+        
         if hasattr(batch, 'video') and batch.video is not None:
             video = batch.video
+            logger.info("CosmosLatentPreparationStage - Using batch.video")
         elif hasattr(batch, 'pil_image') and batch.pil_image is not None:
+            logger.info(f"CosmosLatentPreparationStage - Found pil_image of type: {type(batch.pil_image)}")
             # Convert single image to video format if needed
             if isinstance(batch.pil_image, torch.Tensor):
+                logger.info(f"CosmosLatentPreparationStage - pil_image tensor shape: {batch.pil_image.shape}")
                 if batch.pil_image.dim() == 4:  # [B, C, H, W] -> [B, C, T, H, W]
                     video = batch.pil_image.unsqueeze(2)
+                    logger.info(f"CosmosLatentPreparationStage - Converted 4D to 5D tensor: {video.shape}")
                 elif batch.pil_image.dim() == 5:  # Already [B, C, T, H, W]
                     video = batch.pil_image
+                    logger.info(f"CosmosLatentPreparationStage - Using 5D tensor as-is: {video.shape}")
+            else:
+                logger.info("CosmosLatentPreparationStage - pil_image is not a tensor, needs preprocessing")
+                # Following diffusers approach for image-to-video preprocessing
+                # Convert PIL image to tensor and add temporal dimension
+                import torchvision.transforms as transforms
+                
+                # Create transform pipeline similar to diffusers VideoProcessor
+                transform = transforms.Compose([
+                    transforms.Resize((height, width), antialias=True),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])  # Normalize to [-1, 1]
+                ])
+                
+                # Apply transform to get [C, H, W] tensor
+                image_tensor = transform(batch.pil_image)
+                logger.info(f"CosmosLatentPreparationStage - Transformed PIL to tensor: {image_tensor.shape}")
+                
+                # Add batch dimension: [C, H, W] -> [B, C, H, W]
+                image_tensor = image_tensor.unsqueeze(0)
+                
+                # Add time dimension like diffusers: [B, C, H, W] -> [B, C, T, H, W]
+                video = image_tensor.unsqueeze(2)  # Add time dim at position 2
+                logger.info(f"CosmosLatentPreparationStage - Added batch and time dims: {video.shape}")
+                
+                # Move to correct device and ensure compatible dtype for VAE
+                # Use VAE's parameter dtype to avoid dtype mismatches
+                if self.vae is not None:
+                    vae_dtype = next(self.vae.parameters()).dtype
+                else:
+                    vae_dtype = dtype
+                video = video.to(device=device, dtype=vae_dtype)
+                logger.info(f"CosmosLatentPreparationStage - Video tensor device: {video.device}, dtype: {video.dtype}")
         elif hasattr(batch, 'preprocessed_image') and batch.preprocessed_image is not None:
+            logger.info(f"CosmosLatentPreparationStage - Found preprocessed_image of type: {type(batch.preprocessed_image)}")
             # Convert preprocessed image to video format
             if isinstance(batch.preprocessed_image, torch.Tensor):
+                logger.info(f"CosmosLatentPreparationStage - preprocessed_image tensor shape: {batch.preprocessed_image.shape}")
                 if batch.preprocessed_image.dim() == 4:  # [B, C, H, W] -> [B, C, T, H, W]
                     video = batch.preprocessed_image.unsqueeze(2)
+                    logger.info(f"CosmosLatentPreparationStage - Converted 4D to 5D tensor: {video.shape}")
                 elif batch.preprocessed_image.dim() == 5:  # Already [B, C, T, H, W]
                     video = batch.preprocessed_image
+                    logger.info(f"CosmosLatentPreparationStage - Using 5D tensor as-is: {video.shape}")
+        else:
+            logger.info("CosmosLatentPreparationStage - No video input sources found")
         
         if video is not None:
-            video = batch.video
             num_cond_frames = video.size(2)
+            
+            logger.info(f"CosmosLatentPreparationStage - Number of conditioning frames: {num_cond_frames}")
             
             if num_cond_frames >= num_frames:
                 # Take the last `num_frames` frames for conditioning
                 num_cond_latent_frames = (num_frames - 1) // vae_scale_factor_temporal + 1
                 video = video[:, :, -num_frames:]
+                logger.info(f"CosmosLatentPreparationStage - Using last {num_frames} frames from {num_cond_frames} conditioning frames")
             else:
                 num_cond_latent_frames = (num_cond_frames - 1) // vae_scale_factor_temporal + 1
                 num_padding_frames = num_frames - num_cond_frames
                 last_frame = video[:, :, -1:]
                 padding = last_frame.repeat(1, 1, num_padding_frames, 1, 1)
                 video = torch.cat([video, padding], dim=2)
+                logger.info(f"CosmosLatentPreparationStage - Padding {num_cond_frames} conditioning frames with {num_padding_frames} repeated frames")
             
             # Encode video through VAE like diffusers does
             if self.vae is not None:
+                # Move VAE to correct device before encoding
+                self.vae = self.vae.to(device)
                 if isinstance(generator, list):
                     init_latents = []
                     for i in range(batch_size):
                         vae_output = self.vae.encode(video[i].unsqueeze(0))
+                        logger.info(f"CosmosLatentPreparationStage - VAE output type: {type(vae_output)}, attributes: {dir(vae_output)}")
+                        
+                        # Handle different VAE output types
                         if hasattr(vae_output, 'latent_dist'):
                             init_latents.append(vae_output.latent_dist.sample(generator[i] if i < len(generator) else None))
                         elif hasattr(vae_output, 'latents'):
                             init_latents.append(vae_output.latents)
+                        elif hasattr(vae_output, 'sample'):
+                            init_latents.append(vae_output.sample(generator[i] if i < len(generator) else None))
+                        elif isinstance(vae_output, torch.Tensor):
+                            # Direct tensor output
+                            init_latents.append(vae_output)
                         else:
-                            raise AttributeError("Could not access latents of provided encoder_output")
+                            # Try to get the first attribute that looks like latents
+                            attrs = [attr for attr in dir(vae_output) if not attr.startswith('_')]
+                            logger.info(f"CosmosLatentPreparationStage - Available attributes: {attrs}")
+                            raise AttributeError(f"Could not access latents from VAE output. Available attributes: {attrs}")
                 else:
                     init_latents_list = []
                     for vid in video:
                         vae_output = self.vae.encode(vid.unsqueeze(0))
+                        logger.info(f"CosmosLatentPreparationStage - VAE output type: {type(vae_output)}, attributes: {dir(vae_output)}")
+                        
+                        # Handle different VAE output types
                         if hasattr(vae_output, 'latent_dist'):
                             init_latents_list.append(vae_output.latent_dist.sample(generator))
                         elif hasattr(vae_output, 'latents'):
                             init_latents_list.append(vae_output.latents)
+                        elif hasattr(vae_output, 'sample'):
+                            init_latents_list.append(vae_output.sample(generator))
+                        elif isinstance(vae_output, torch.Tensor):
+                            # Direct tensor output
+                            init_latents_list.append(vae_output)
                         else:
-                            raise AttributeError("Could not access latents of provided encoder_output")
+                            # Try to get the first attribute that looks like latents
+                            attrs = [attr for attr in dir(vae_output) if not attr.startswith('_')]
+                            logger.info(f"CosmosLatentPreparationStage - Available attributes: {attrs}")
+                            raise AttributeError(f"Could not access latents from VAE output. Available attributes: {attrs}")
                     init_latents = init_latents_list
                 
                 init_latents = torch.cat(init_latents, dim=0).to(dtype)
@@ -289,8 +358,12 @@ class CosmosLatentPreparationStage(PipelineStage):
                     init_latents = (init_latents - latents_mean) / latents_std * self.scheduler.sigma_data
                 
                 conditioning_latents = init_latents
+                
+                # Offload VAE to CPU after encoding to save memory
+                self.vae.to("cpu")
         else:
             num_cond_latent_frames = 0
+            logger.info("CosmosLatentPreparationStage - No conditioning frames detected (no video input)")
         
         # Generate or use provided latents
         if latents is None:
@@ -301,7 +374,7 @@ class CosmosLatentPreparationStage(PipelineStage):
         else:
             latents = latents.to(device=device, dtype=dtype)
 
-        # Scale latents by sigma_max (Cosmos-specific)
+        # Scale latents by sigma_max (Cosmos-specific) - exactly like diffusers
         latents = latents * self.scheduler.sigma_max
 
         # Create conditioning masks (for video-to-world generation)
@@ -340,8 +413,9 @@ class CosmosLatentPreparationStage(PipelineStage):
         
         # Final verification that shape is correct
         logger.info(f"CosmosLatentPreparationStage - FINAL latents shape: {latents.shape}")
-        # Compare with Diffusers but adjust for actual input dimensions
-        diffusers_expected = torch.Size([1, 16, 7, 88, 160])
+        # Compare with Diffusers expected shape for our dimensions
+        # For 21 frames with temporal_scale=4: (21-1)//4+1 = 6 latent frames
+        diffusers_expected = torch.Size([1, 16, 6, 88, 160])
         if latents.shape != diffusers_expected:
             logger.warning(f"CosmosLatentPreparationStage - Shape differs from Diffusers: Expected {diffusers_expected}, got {latents.shape}")
             logger.info(f"CosmosLatentPreparationStage - This may be due to different input dimensions (height={height}, width={width})")

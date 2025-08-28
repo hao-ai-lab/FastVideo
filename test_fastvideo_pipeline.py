@@ -46,7 +46,7 @@ def generate_video():
             prompt=prompt,
             negative_prompt=negative_prompt,
             num_frames=21,
-            input_path=input_image_path,
+            image_path=input_image_path,
             num_inference_steps=35,
             guidance_scale=7.0,
             seed=42,

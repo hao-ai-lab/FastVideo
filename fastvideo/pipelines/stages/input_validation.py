@@ -36,9 +36,12 @@ class InputValidationStage(PipelineStage):
         assert seed is not None
         seeds = [seed + i for i in range(num_videos_per_prompt)]
         batch.seeds = seeds
-        # Peiyuan: using GPU seed will cause A100 and H100 to generate different results...
+        # Use device-specific generators to match diffusers behavior
+        # diffusers uses torch.Generator(device=device).manual_seed() 
+        from fastvideo.distributed import get_local_torch_device
+        device = get_local_torch_device()
         batch.generator = [
-            torch.Generator("cpu").manual_seed(seed) for seed in seeds
+            torch.Generator(device=device).manual_seed(seed) for seed in seeds
         ]
 
     def forward(
