@@ -24,6 +24,7 @@ from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
+from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
@@ -778,8 +779,6 @@ class DmdDenoisingStage(DenoisingStage):
                             **pos_cond_kwargs,
                         ).permute(0, 2, 1, 3, 4)
 
-                    from fastvideo.training.training_utils import (
-                        pred_noise_to_pred_video)
                     pred_video = pred_noise_to_pred_video(
                         pred_noise=pred_noise.flatten(0, 1),
                         noise_input_latent=noise_latents.flatten(0, 1),

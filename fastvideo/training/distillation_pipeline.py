@@ -29,6 +29,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
+from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines import (ComposedPipelineBase, ForwardBatch,
                                  TrainingBatch)
 from fastvideo.training.activation_checkpoint import (
@@ -36,8 +37,7 @@ from fastvideo.training.activation_checkpoint import (
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases, get_scheduler,
-    load_distillation_checkpoint, pred_noise_to_pred_video,
-    save_distillation_checkpoint, shift_timestep)
+    load_distillation_checkpoint, save_distillation_checkpoint, shift_timestep)
 from fastvideo.utils import is_vsa_available, set_random_seed
 
 import wandb  # isort: skip
