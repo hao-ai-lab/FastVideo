@@ -113,6 +113,21 @@ class CausalWanSelfAttention(nn.Module):
                 dim=1
             )
 
+            # Adjust block mask to match the actual sequence length (TODO: Check if this is okay)
+            actual_q_len = padded_roped_query.shape[1]
+            actual_kv_len = padded_roped_key.shape[1]
+            if block_mask.shape[-1] != actual_q_len or block_mask.shape[-2] != actual_kv_len:
+                def dynamic_attention_mask(b, h, q_idx, kv_idx):
+                    return kv_idx <= q_idx
+                
+                from torch.nn.attention.flex_attention import create_block_mask
+                block_mask = create_block_mask(
+                    dynamic_attention_mask, 
+                    B=None, H=None, 
+                    Q_LEN=actual_q_len, KV_LEN=actual_kv_len, 
+                    _compile=False, device=q.device
+                )
+
             x = flex_attention(
                 query=padded_roped_query.transpose(2, 1),
                 key=padded_roped_key.transpose(2, 1),
@@ -367,7 +382,7 @@ class CausalWanTransformer3DModel(BaseDiT):
 
         # Causal-specific
         self.block_mask = None
-        self.num_frame_per_block = 3
+        self.num_frame_per_block = 1
         self.independent_first_frame = False
 
         self.__post_init__()
@@ -375,7 +390,7 @@ class CausalWanTransformer3DModel(BaseDiT):
     @staticmethod
     def _prepare_blockwise_causal_attn_mask(
         device: torch.device | str, num_frames: int = 21,
-        frame_seqlen: int = 1560, num_frame_per_block=3, local_attn_size=-1
+        frame_seqlen: int = 1560, num_frame_per_block=1, local_attn_size=-1
     ) -> BlockMask:
         """
         we will divide the token sequence into the following format

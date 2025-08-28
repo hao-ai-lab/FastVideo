@@ -34,7 +34,6 @@ from torch.distributed.fsdp import MixedPrecisionPolicy
 import fastvideo.envs as envs
 from fastvideo.logger import init_logger
 
-from fastvideo.models.loader.component_loader import PipelineComponentLoader
 
 logger = init_logger(__name__)
 
@@ -615,48 +614,6 @@ def maybe_download_model_index(model_name_or_path: str) -> dict[str, Any]:
         raise ValueError(
             f"Failed to download or parse model_index.json for {model_name_or_path}: {e}"
         ) from e
-
-def load_module_from_path(model_path: str, module_type: str, training_args: TrainingArgs):
-    """
-    Load a module from a specific path using the same loading logic as the pipeline.
-    
-    Args:
-        model_path: Path to the model
-        module_type: Type of module to load (e.g., "transformer")
-        training_args: Training arguments
-        
-    Returns:
-        The loaded module
-    """
-    logger.info(f"Loading {module_type} from custom path: {model_path}")
-    config = verify_model_config_and_directory(model_path)
-    
-    if module_type not in config:
-        if hasattr(self, '_extra_config_module_map') and module_type in self._extra_config_module_map:
-            extra_module = self._extra_config_module_map[module_type]
-            if extra_module in config:
-                module_type = extra_module
-                logger.info(f"Using {extra_module} for {module_type}")
-            else:
-                raise ValueError(f"Module {module_type} not found in config at {model_path}")
-        else:
-            raise ValueError(f"Module {module_type} not found in config at {model_path}")
-    
-    module_info = config[module_type]
-    if module_info is None:
-        raise ValueError(f"Module {module_type} has null value in config at {model_path}")
-    
-    transformers_or_diffusers, architecture = module_info
-    component_path = os.path.join(model_path, module_type)
-    module = PipelineComponentLoader.load_module(
-        module_name=module_type,
-        component_model_path=component_path,
-        transformers_or_diffusers=transformers_or_diffusers,
-        fastvideo_args=training_args,
-    )
-    
-    logger.info(f"Successfully loaded {module_type} from {component_path}")
-    return module
 
 def update_environment_variables(envs: dict[str, str]):
     for k, v in envs.items():
