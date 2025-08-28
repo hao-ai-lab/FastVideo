@@ -481,6 +481,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                                 crossattn_cache=self.crossattn_cache,
                                 current_start=(pos_start_base + start_index) *
                                 self.frame_seq_length,
+                                start_frame=start_index,
                                 **image_kwargs,
                                 **pos_cond_kwargs,
                             ).permute(0, 2, 1, 3, 4)
@@ -507,12 +508,12 @@ class CausalDMDDenosingStage(DenoisingStage):
                                 batch.generator, list) else
                                        batch.generator)).to(self.device)
                         noise_btchw = noise
-                        current_latents_btchw = self.scheduler.add_noise(
+                        noise_latents_btchw = self.scheduler.add_noise(
                             pred_video_btchw.flatten(0, 1),
                             noise_btchw.flatten(0, 1),
                             next_timestep).unflatten(0,
                                                      pred_video_btchw.shape[:2])
-                        current_latents = current_latents_btchw.permute(
+                        current_latents = noise_latents_btchw.permute(
                             0, 2, 1, 3, 4)
                     else:
                         current_latents = pred_video_btchw.permute(
@@ -546,6 +547,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                             crossattn_cache=self.crossattn_cache,
                             current_start=(pos_start_base + start_index) *
                             self.frame_seq_length,
+                            start_frame=start_index,
                             **image_kwargs,
                             **pos_cond_kwargs,
                         )

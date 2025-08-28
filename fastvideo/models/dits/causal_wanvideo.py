@@ -440,6 +440,7 @@ class CausalWanTransformer3DModel(BaseDiT):
                 crossattn_cache: dict = None,
                 current_start: int = 0,
                 cache_start: int = 0,
+                start_frame: int = 0,
                 **kwargs) -> torch.Tensor:
         r"""
         Run the diffusion model with kv caching.
@@ -474,7 +475,7 @@ class CausalWanTransformer3DModel(BaseDiT):
             rope_dim_list,
             dtype=torch.float32 if current_platform.is_mps() else torch.float64,
             rope_theta=10000,
-            start_frame=current_start # Assume that current_start is 0 when kv_cache is None
+            start_frame=start_frame # Assume that start_frame is 0 when kv_cache is None
         )
         freqs_cos = freqs_cos.to(hidden_states.device)
         freqs_sin = freqs_sin.to(hidden_states.device)
