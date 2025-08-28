@@ -826,27 +826,6 @@ def custom_to_hf_state_dict(
     return new_state_dict
 
 
-def pred_noise_to_pred_video(pred_noise: torch.Tensor,
-                             noise_input_latent: torch.Tensor,
-                             timestep: torch.Tensor,
-                             scheduler: Any) -> torch.Tensor:
-    """
-    Convert predicted noise to clean latent.
-    """
-    timestep = timestep.expand(noise_input_latent.shape[0])
-    dtype = pred_noise.dtype
-    device = pred_noise.device
-    pred_noise = pred_noise.float().to(device)
-    noise_input_latent = noise_input_latent.float().to(device)
-    sigmas = scheduler.sigmas.float().to(device)
-    timesteps = scheduler.timesteps.float().to(device)
-    timestep_id = torch.argmin(
-        (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
-    sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
-    pred_video = noise_input_latent - sigma_t * pred_noise
-    return pred_video.to(dtype)
-
-
 def shift_timestep(timestep: torch.Tensor, shift: float,
                    num_train_timestep: float) -> torch.Tensor:
     if shift == 1:

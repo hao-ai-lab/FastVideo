@@ -3,11 +3,12 @@ import torch  # type: ignore
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
+from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
+from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.denoising import DenoisingStage
-from fastvideo.training.training_utils import pred_noise_to_pred_video
 
 try:
     from fastvideo.attention.backends.sliding_tile_attn import (
@@ -25,6 +26,8 @@ except ImportError:
     vsa_available = False
     VideoSparseAttentionBackend = None  # type: ignore
 
+logger = init_logger(__name__)
+
 
 class CausalDMDDenosingStage(DenoisingStage):
     """
@@ -38,8 +41,8 @@ class CausalDMDDenosingStage(DenoisingStage):
         self.kv_cache1: list | None = None
         self.crossattn_cache: list | None = None
         # Model-dependent constants (aligned with causal_inference.py assumptions)
-        self.num_transformer_blocks = 30
-        self.frame_seq_length = 1560
+        self.num_transformer_blocks = self.transformer.config.arch_config.num_layers
+
         try:
             self.local_attn_size = getattr(self.transformer.model,
                                            "local_attn_size",
@@ -55,6 +58,11 @@ class CausalDMDDenosingStage(DenoisingStage):
         target_dtype = torch.bfloat16
         autocast_enabled = (target_dtype != torch.float32
                             ) and not fastvideo_args.disable_autocast
+
+        latent_seq_length = batch.latents.shape[-1] * batch.latents.shape[-2]
+        patch_ratio = self.transformer.config.arch_config.patch_size[
+            -1] * self.transformer.config.arch_config.patch_size[-2]
+        self.frame_seq_length = latent_seq_length // patch_ratio
 
         # Args
         try:
