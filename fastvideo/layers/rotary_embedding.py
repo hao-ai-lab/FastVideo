@@ -297,7 +297,6 @@ def get_nd_rotary_pos_embed(
 
     if start_frame > 0:
         full_grid[0] += start_frame
-        logger.info(full_grid[0])
 
     # Shard the grid if using sequence parallelism (sp_world_size > 1)
     assert shard_dim < len(

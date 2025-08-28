@@ -58,14 +58,6 @@ class CausalWanSelfAttention(nn.Module):
         self.parallel_attention = parallel_attention
         self.max_attention_size = 32760 if local_attn_size == -1 else local_attn_size * 1560
 
-        # layers
-        self.to_q = ReplicatedLinear(dim, dim)
-        self.to_k = ReplicatedLinear(dim, dim)
-        self.to_v = ReplicatedLinear(dim, dim)
-        self.to_out = ReplicatedLinear(dim, dim)
-        self.norm_q = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
-        self.norm_k = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
-
         # Scaled dot product attention
         self.attn = LocalAttention(
             num_heads=num_heads,
@@ -96,8 +88,8 @@ class CausalWanSelfAttention(nn.Module):
             cache_start = current_start
 
         cos, sin = freqs_cis
-        roped_query = _apply_rotary_emb(q, cos, sin, is_neox_style=False)
-        roped_key = _apply_rotary_emb(k, cos, sin, is_neox_style=False)
+        roped_query = _apply_rotary_emb(q, cos, sin, is_neox_style=False).type_as(v)
+        roped_key = _apply_rotary_emb(k, cos, sin, is_neox_style=False).type_as(v)
 
         if kv_cache is None:
             # Padding for flex attention
@@ -165,9 +157,6 @@ class CausalWanSelfAttention(nn.Module):
             kv_cache["global_end_index"].fill_(current_end)
             kv_cache["local_end_index"].fill_(local_end_index)
 
-        # output
-        x = x.flatten(2)
-        x = self.to_out(x)
         return x
 
 class CausalWanTransformerBlock(nn.Module):
@@ -281,7 +270,7 @@ class CausalWanTransformerBlock(nn.Module):
         key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
 
-        attn_output, _ = self.attn1(query, key, value, freqs_cis, block_mask, kv_cache, current_start, cache_start)
+        attn_output = self.attn1(query, key, value, freqs_cis, block_mask, kv_cache, current_start, cache_start)
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)
@@ -515,7 +504,8 @@ class CausalWanTransformer3DModel(BaseDiT):
                 causal_kwargs = {
                     "kv_cache": kv_cache[block_index],
                     "current_start": current_start,
-                    "cache_start": cache_start
+                    "cache_start": cache_start,
+                    "block_mask": self.block_mask
                 }
                 hidden_states = self._gradient_checkpointing_func(
                     block, hidden_states, encoder_hidden_states,
@@ -526,7 +516,8 @@ class CausalWanTransformer3DModel(BaseDiT):
                     "kv_cache": kv_cache[block_index],
                     "crossattn_cache": crossattn_cache[block_index],
                     "current_start": current_start,
-                    "cache_start": cache_start
+                    "cache_start": cache_start,
+                    "block_mask": self.block_mask
                 }
                 hidden_states = block(hidden_states, encoder_hidden_states,
                                         timestep_proj, freqs_cis,

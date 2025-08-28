@@ -273,10 +273,10 @@ class CausalDMDDenosingStage(DenoisingStage):
 
         # Args
         try:
-            num_frame_per_block = getattr(fastvideo_args.pipeline_config,
-                                          "num_frame_per_block", 1)
+            num_frames_per_block = getattr(batch,
+                                          "num_frames_per_block", 1)
         except Exception:
-            num_frame_per_block = 1
+            num_frames_per_block = 1
         try:
             independent_first_frame = getattr(fastvideo_args.pipeline_config,
                                               "independent_first_frame", False)
@@ -314,10 +314,10 @@ class CausalDMDDenosingStage(DenoisingStage):
         # Initialize or reset caches
         if self.kv_cache1 is None:
             self._initialize_kv_cache(batch_size=latents.shape[0],
-                                      dtype=latents.dtype,
+                                      dtype=target_dtype,
                                       device=latents.device)
             self._initialize_crossattn_cache(batch_size=latents.shape[0],
-                                             dtype=latents.dtype,
+                                             dtype=target_dtype,
                                              device=latents.device)
         else:
             # reset cross-attention cache
@@ -372,7 +372,7 @@ class CausalDMDDenosingStage(DenoisingStage):
 
             # process remaining input frames in blocks of num_frame_per_block
             while remaining_frames > 0:
-                block = min(num_frame_per_block, remaining_frames)
+                block = min(num_frames_per_block, remaining_frames)
                 ref_btchw = image_latent[:, :, current_start_frame:
                                          current_start_frame +
                                          block, :, :].to(target_dtype).permute(
@@ -400,20 +400,20 @@ class CausalDMDDenosingStage(DenoisingStage):
         # Determine block sizes
         if not independent_first_frame or (independent_first_frame
                                            and batch.image_latent is not None):
-            if t % num_frame_per_block != 0:
+            if t % num_frames_per_block != 0:
                 raise ValueError(
-                    "num_frames must be divisible by num_frame_per_block for causal DMD denoising"
+                    "num_frames must be divisible by num_frames_per_block for causal DMD denoising"
                 )
-            num_blocks = t // num_frame_per_block
-            block_sizes = [num_frame_per_block] * num_blocks
+            num_blocks = t // num_frames_per_block
+            block_sizes = [num_frames_per_block] * num_blocks
             start_index = 0
         else:
-            if (t - 1) % num_frame_per_block != 0:
+            if (t - 1) % num_frames_per_block != 0:
                 raise ValueError(
                     "(num_frames - 1) must be divisible by num_frame_per_block when independent_first_frame=True"
                 )
-            num_blocks = (t - 1) // num_frame_per_block
-            block_sizes = [1] + [num_frame_per_block] * num_blocks
+            num_blocks = (t - 1) // num_frames_per_block
+            block_sizes = [1] + [num_frames_per_block] * num_blocks
             start_index = 0
 
         # DMD loop in causal blocks
@@ -474,7 +474,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                                                  forward_batch=batch):
                             # Run transformer; follow DMD stage pattern
                             pred_noise_btchw = self.transformer(
-                                latent_model_input.permute(0, 2, 1, 3, 4),
+                                latent_model_input,
                                 prompt_embeds,
                                 t_expand,
                                 kv_cache=self.kv_cache1,
@@ -531,22 +531,24 @@ class CausalDMDDenosingStage(DenoisingStage):
                 t_context = torch.ones([latents.shape[0]],
                                        device=latents.device,
                                        dtype=torch.long) * int(context_noise)
-                context_btchw = current_latents.to(target_dtype).permute(
-                    0, 2, 1, 3, 4)
+                context_bcthw = current_latents.to(target_dtype)
                 with torch.autocast(device_type="cuda",
                                     dtype=target_dtype,
                                     enabled=autocast_enabled):
-                    _ = self.transformer(
-                        context_btchw,
-                        prompt_embeds,
-                        t_context,
-                        kv_cache=self.kv_cache1,
-                        crossattn_cache=self.crossattn_cache,
-                        current_start=(pos_start_base + start_index) *
-                        self.frame_seq_length,
-                        **image_kwargs,
-                        **pos_cond_kwargs,
-                    )
+                    with set_forward_context(current_timestep=0,
+                                             attn_metadata=attn_metadata,
+                                             forward_batch=batch):
+                        _ = self.transformer(
+                            context_bcthw,
+                            prompt_embeds,
+                            t_context,
+                            kv_cache=self.kv_cache1,
+                            crossattn_cache=self.crossattn_cache,
+                            current_start=(pos_start_base + start_index) *
+                            self.frame_seq_length,
+                            **image_kwargs,
+                            **pos_cond_kwargs,
+                        )
                 start_index += current_num_frames
 
         batch.latents = latents
