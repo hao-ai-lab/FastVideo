@@ -88,7 +88,6 @@ class DistillationPipeline(TrainingPipeline):
 
         self.noise_scheduler = self.get_module("scheduler")
         self.vae = self.get_module("vae")
-
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
             shift=self.timestep_shift)

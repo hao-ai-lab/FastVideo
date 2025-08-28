@@ -145,7 +145,8 @@ class DenoisingStage(PipelineStage):
         # Prepare image latents and embeddings for I2V generation
         image_embeds = batch.image_embeds
         if len(image_embeds) > 0:
-            assert torch.isnan(image_embeds[0]).sum() == 0
+            assert not torch.isnan(
+                image_embeds[0]).any(), "image_embeds contains nan"
             image_embeds = [
                 image_embed.to(target_dtype) for image_embed in image_embeds
             ]
@@ -182,11 +183,13 @@ class DenoisingStage(PipelineStage):
         # Get latents and embeddings
         latents = batch.latents
         prompt_embeds = batch.prompt_embeds
-        assert torch.isnan(prompt_embeds[0]).sum() == 0
+        assert not torch.isnan(
+            prompt_embeds[0]).any(), "prompt_embeds contains nan"
         if batch.do_classifier_free_guidance:
             neg_prompt_embeds = batch.negative_prompt_embeds
             assert neg_prompt_embeds is not None
-            assert torch.isnan(neg_prompt_embeds[0]).sum() == 0
+            assert not torch.isnan(
+                neg_prompt_embeds[0]).any(), "neg_prompt_embeds contains nan"
 
         # (Wan2.2) Calculate timestep to switch from high noise expert to low noise expert
         if fastvideo_args.boundary_ratio is not None:
@@ -224,7 +227,11 @@ class DenoisingStage(PipelineStage):
                     latent_model_input = torch.cat(
                         [latent_model_input, batch.image_latent],
                         dim=1).to(target_dtype)
-                assert torch.isnan(latent_model_input).sum() == 0
+                try:
+                    assert not torch.isnan(latent_model_input).any(
+                    ), "latent_model_input contains nan"
+                except AssertionError:
+                    torch.distributed.breakpoint()
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)
 
@@ -677,7 +684,8 @@ class DmdDenoisingStage(DenoisingStage):
 
         video_raw_latent_shape = latents.shape
         prompt_embeds = batch.prompt_embeds
-        assert torch.isnan(prompt_embeds[0]).sum() == 0
+        assert not torch.isnan(
+            prompt_embeds[0]).any(), "prompt_embeds contains nan"
         timesteps = torch.tensor(
             fastvideo_args.pipeline_config.dmd_denoising_steps,
             dtype=torch.long,
@@ -716,7 +724,11 @@ class DmdDenoisingStage(DenoisingStage):
                         batch.image_latent.permute(0, 2, 1, 3, 4)
                     ],
                                                    dim=2).to(target_dtype)
-                assert torch.isnan(latent_model_input).sum() == 0
+                try:
+                    assert not torch.isnan(latent_model_input).any(
+                    ), "latent_model_input contains nan"
+                except AssertionError:
+                    torch.distributed.breakpoint()
 
                 # Prepare inputs for transformer
                 t_expand = t.repeat(latent_model_input.shape[0])
