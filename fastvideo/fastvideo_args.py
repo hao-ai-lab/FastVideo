@@ -618,6 +618,7 @@ class TrainingArgs(FastVideoArgs):
     checkpoints_total_limit: int = 0
     checkpointing_steps: int = 0
     resume_from_checkpoint: str = ""  # specify the checkpoint folder to resume from
+    init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
 
     # optimizer & scheduler
     num_train_epochs: int = 0
@@ -863,6 +864,9 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--resume-from-checkpoint",
                             type=str,
                             help="Path to checkpoint to resume from")
+        parser.add_argument("--init-weights-from-safetensors",
+                            type=str,
+                            help="Path to safetensors file for initial weight loading")
         parser.add_argument("--logging-dir",
                             type=str,
                             help="Directory for logging")

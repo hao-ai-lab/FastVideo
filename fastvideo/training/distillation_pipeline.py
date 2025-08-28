@@ -38,7 +38,7 @@ from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases, get_scheduler,
     load_distillation_checkpoint, pred_noise_to_pred_video,
     save_distillation_checkpoint, shift_timestep, EMA_FSDP)
-from fastvideo.utils import is_vsa_available, set_random_seed, load_module_from_path
+from fastvideo.utils import is_vsa_available, maybe_download_model, set_random_seed, verify_model_config_and_directory
 
 import wandb  # isort: skip
 
@@ -89,7 +89,7 @@ class DistillationPipeline(TrainingPipeline):
 
         if training_args.real_score_model_path:
             logger.info(f"Loading real score transformer from: {training_args.real_score_model_path}")
-            self.real_score_transformer = load_module_from_path(
+            self.real_score_transformer = self.load_module_from_path(
                 training_args.real_score_model_path, 
                 "transformer", 
                 training_args
@@ -99,7 +99,7 @@ class DistillationPipeline(TrainingPipeline):
             
         if training_args.fake_score_model_path:
             logger.info(f"Loading fake score transformer from: {training_args.fake_score_model_path}")
-            self.fake_score_transformer = load_module_from_path(
+            self.fake_score_transformer = self.load_module_from_path(
                 training_args.fake_score_model_path, 
                 "transformer", 
                 training_args
@@ -184,6 +184,61 @@ class DistillationPipeline(TrainingPipeline):
         else:
             logger.info("Generator EMA disabled (ema_decay <= 0.0)")
 
+    def load_module_from_path(self, model_path: str, module_type: str, training_args: "TrainingArgs"):
+        """
+        Load a module from a specific path using the same loading logic as the pipeline.
+        
+        Args:
+            model_path: Path to the model
+            module_type: Type of module to load (e.g., "transformer")
+            training_args: Training arguments
+            
+        Returns:
+            The loaded module
+        """
+        logger.info(f"Loading {module_type} from custom path: {model_path}")
+        # Set flag to prevent custom weight loading for teacher/critic models
+        training_args._loading_teacher_critic_model = True
+        
+        try:
+            from fastvideo.models.loader.component_loader import PipelineComponentLoader
+            # Download the model if it's a Hugging Face model ID
+            local_model_path = maybe_download_model(model_path)
+            logger.info(f"Model downloaded/found at: {local_model_path}")
+            config = verify_model_config_and_directory(local_model_path)
+            
+            if module_type not in config:
+                if hasattr(self, '_extra_config_module_map') and module_type in self._extra_config_module_map:
+                    extra_module = self._extra_config_module_map[module_type]
+                    if extra_module in config:
+                        module_type = extra_module
+                        logger.info(f"Using {extra_module} for {module_type}")
+                    else:
+                        raise ValueError(f"Module {module_type} not found in config at {local_model_path}")
+                else:
+                    raise ValueError(f"Module {module_type} not found in config at {local_model_path}")
+            
+            module_info = config[module_type]
+            if module_info is None:
+                raise ValueError(f"Module {module_type} has null value in config at {local_model_path}")
+            
+            transformers_or_diffusers, architecture = module_info
+            component_path = os.path.join(local_model_path, module_type)
+            module = PipelineComponentLoader.load_module(
+                module_name=module_type,
+                component_model_path=component_path,
+                transformers_or_diffusers=transformers_or_diffusers,
+                fastvideo_args=training_args,
+            )
+            
+            logger.info(f"Successfully loaded {module_type} from {component_path}")
+            return module
+        finally:
+            # Always clean up the flag
+            if hasattr(training_args, '_loading_teacher_critic_model'):
+                delattr(training_args, '_loading_teacher_critic_model')
+
+
     @abstractmethod
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         """Initialize validation pipeline - must be implemented by subclasses."""
@@ -215,10 +270,12 @@ class DistillationPipeline(TrainingPipeline):
             return ema_model
         return None
 
-    def is_ema_ready(self):
+    def is_ema_ready(self, current_step: int = None):
         """Check if EMA is ready for use (after ema_start_step)."""
+        if current_step is None:
+            current_step = getattr(self, 'current_trainstep', 0)
         return (self.generator_ema is not None and 
-                self.current_trainstep >= self.training_args.ema_start_step)
+                current_step >= self.training_args.ema_start_step)
 
     def save_ema_weights(self, output_dir: str, step: int):
         """Save EMA weights separately for inference purposes."""
@@ -835,7 +892,7 @@ class DistillationPipeline(TrainingPipeline):
 
         # Optionally use EMA model for validation if available and ready
         use_ema_for_validation = (self.training_args.use_ema and 
-                                  self.is_ema_ready())
+                                  self.is_ema_ready(global_step))
         if use_ema_for_validation:
             logger.info("Using EMA model for validation")
             validation_transformer = self.transformer
@@ -1096,6 +1153,10 @@ class DistillationPipeline(TrainingPipeline):
         self.validation_random_generator = torch.Generator(
             device="cpu").manual_seed(self.seed)
         logger.info("Initialized random seeds with seed: %s", seed)
+        
+        # Initialize current_trainstep for EMA ready checks
+        #TODO: check if needed
+        self.current_trainstep = self.init_steps
 
         # Resume from checkpoint if specified (this will restore random states)
         if self.training_args.resume_from_checkpoint:

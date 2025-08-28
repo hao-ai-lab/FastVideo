@@ -7,7 +7,6 @@ from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.denoising import DenoisingStage
-from fastvideo.training.training_utils import pred_noise_to_pred_video
 
 try:
     from fastvideo.attention.backends.sliding_tile_attn import (
@@ -58,9 +57,9 @@ class CausalDMDDenosingStage(DenoisingStage):
 
         # Args
         try:
-            num_frames_per_block = getattr(batch, "num_frames_per_block", 3)
+            num_frames_per_block = getattr(batch, "num_frames_per_block", 1)
         except Exception:
-            num_frames_per_block = 3
+            num_frames_per_block = 1
         try:
             independent_first_frame = getattr(fastvideo_args.pipeline_config,
                                               "independent_first_frame", False)
@@ -272,6 +271,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                         ).permute(0, 2, 1, 3, 4)
 
                     # Convert pred noise to pred video with FM Euler scheduler utilities
+                    from fastvideo.training.training_utils import pred_noise_to_pred_video
                     pred_video_btchw = pred_noise_to_pred_video(
                         pred_noise=pred_noise_btchw.flatten(0, 1),
                         noise_input_latent=noise_latents.flatten(0, 1),
