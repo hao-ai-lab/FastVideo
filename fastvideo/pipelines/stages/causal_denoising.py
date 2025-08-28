@@ -250,8 +250,8 @@ class CausalDMDDenosingStage(DenoisingStage):
         super().__init__(transformer, scheduler)
         self.scheduler = FlowMatchEulerDiscreteScheduler(shift=8.0)
         # KV and cross-attention cache state (initialized on first forward)
-        self.kv_cache1 = None
-        self.crossattn_cache = None
+        self.kv_cache1: list | None = None
+        self.crossattn_cache: list | None = None
         # Model-dependent constants (aligned with causal_inference.py assumptions)
         self.num_transformer_blocks = 30
         self.frame_seq_length = 1560
@@ -273,8 +273,7 @@ class CausalDMDDenosingStage(DenoisingStage):
 
         # Args
         try:
-            num_frames_per_block = getattr(batch,
-                                          "num_frames_per_block", 1)
+            num_frames_per_block = getattr(batch, "num_frames_per_block", 1)
         except Exception:
             num_frames_per_block = 1
         try:
@@ -290,7 +289,7 @@ class CausalDMDDenosingStage(DenoisingStage):
             device=get_local_torch_device())
 
         # Image kwargs (kept empty unless caller provides compatible args)
-        image_kwargs = {}
+        image_kwargs: dict = {}
 
         pos_cond_kwargs = self.prepare_extra_func_kwargs(
             self.transformer.forward,
@@ -320,6 +319,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                                              dtype=target_dtype,
                                              device=latents.device)
         else:
+            assert self.crossattn_cache is not None
             # reset cross-attention cache
             for block_index in range(self.num_transformer_blocks):
                 self.crossattn_cache[block_index][
@@ -468,23 +468,23 @@ class CausalDMDDenosingStage(DenoisingStage):
 
                     with torch.autocast(device_type="cuda",
                                         dtype=target_dtype,
-                                        enabled=autocast_enabled):
-                        with set_forward_context(current_timestep=i,
-                                                 attn_metadata=attn_metadata,
-                                                 forward_batch=batch):
-                            # Run transformer; follow DMD stage pattern
-                            pred_noise_btchw = self.transformer(
-                                latent_model_input,
-                                prompt_embeds,
-                                t_expand,
-                                kv_cache=self.kv_cache1,
-                                crossattn_cache=self.crossattn_cache,
-                                current_start=(pos_start_base + start_index) *
-                                self.frame_seq_length,
-                                start_frame=start_index,
-                                **image_kwargs,
-                                **pos_cond_kwargs,
-                            ).permute(0, 2, 1, 3, 4)
+                                        enabled=autocast_enabled), \
+                        set_forward_context(current_timestep=i,
+                                            attn_metadata=attn_metadata,
+                                            forward_batch=batch):
+                        # Run transformer; follow DMD stage pattern
+                        pred_noise_btchw = self.transformer(
+                            latent_model_input,
+                            prompt_embeds,
+                            t_expand,
+                            kv_cache=self.kv_cache1,
+                            crossattn_cache=self.crossattn_cache,
+                            current_start=(pos_start_base + start_index) *
+                            self.frame_seq_length,
+                            start_frame=start_index,
+                            **image_kwargs,
+                            **pos_cond_kwargs,
+                        ).permute(0, 2, 1, 3, 4)
 
                     # Convert pred noise to pred video with FM Euler scheduler utilities
                     from fastvideo.training.training_utils import (
@@ -535,28 +535,28 @@ class CausalDMDDenosingStage(DenoisingStage):
                 context_bcthw = current_latents.to(target_dtype)
                 with torch.autocast(device_type="cuda",
                                     dtype=target_dtype,
-                                    enabled=autocast_enabled):
-                    with set_forward_context(current_timestep=0,
-                                             attn_metadata=attn_metadata,
-                                             forward_batch=batch):
-                        _ = self.transformer(
-                            context_bcthw,
-                            prompt_embeds,
-                            t_context,
-                            kv_cache=self.kv_cache1,
-                            crossattn_cache=self.crossattn_cache,
-                            current_start=(pos_start_base + start_index) *
-                            self.frame_seq_length,
-                            start_frame=start_index,
-                            **image_kwargs,
-                            **pos_cond_kwargs,
-                        )
+                                    enabled=autocast_enabled), \
+                    set_forward_context(current_timestep=0,
+                                        attn_metadata=attn_metadata,
+                                        forward_batch=batch):
+                    _ = self.transformer(
+                        context_bcthw,
+                        prompt_embeds,
+                        t_context,
+                        kv_cache=self.kv_cache1,
+                        crossattn_cache=self.crossattn_cache,
+                        current_start=(pos_start_base + start_index) *
+                        self.frame_seq_length,
+                        start_frame=start_index,
+                        **image_kwargs,
+                        **pos_cond_kwargs,
+                    )
                 start_index += current_num_frames
 
         batch.latents = latents
         return batch
 
-    def _initialize_kv_cache(self, batch_size, dtype, device):
+    def _initialize_kv_cache(self, batch_size, dtype, device) -> None:
         """
         Initialize a Per-GPU KV cache aligned with the Wan model assumptions.
         """
@@ -584,7 +584,7 @@ class CausalDMDDenosingStage(DenoisingStage):
 
         self.kv_cache1 = kv_cache1
 
-    def _initialize_crossattn_cache(self, batch_size, dtype, device):
+    def _initialize_crossattn_cache(self, batch_size, dtype, device) -> None:
         """
         Initialize a Per-GPU cross-attention cache aligned with the Wan model assumptions.
         """
