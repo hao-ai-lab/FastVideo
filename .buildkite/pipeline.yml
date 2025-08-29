@@ -118,7 +118,7 @@ steps:
             - path:
                 - "fastvideo/**"
                 - "csrc/attn/video_sparse_attn/**"
-                - "csrc/attn/tk/**"
+                - "csrc/attn/video_sparse_attn/tk/**"
                 - "csrc/attn/video_sparse_attn/setup.py"
                 - "csrc/attn/video_sparse_attn/config_vsa.py"
                 - "csrc/attn/video_sparse_attn/vsa.cpp"
@@ -162,7 +162,7 @@ steps:
                   queue: "default"
             - path:
                 - "csrc/attn/video_sparse_attn/**"
-                - "csrc/attn/tk/**"
+                - "csrc/attn/video_sparse_attn/tk/**"
                 - "csrc/attn/tests/test_vsa.py"
                 - "csrc/attn/video_sparse_attn/setup.py"
                 - "csrc/attn/video_sparse_attn/config_vsa.py"

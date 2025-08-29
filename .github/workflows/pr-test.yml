@@ -105,12 +105,13 @@ jobs:
               - 'docker/Dockerfile.python3.12'
             sta-kernel-paths: &sta-kernel-paths
               - 'csrc/attn/sliding_tile_attn/**'
+              - 'csrc/attn/sliding_tile_attn/tk/**'
               - 'csrc/attn/sliding_tile_attn/setup.py'
               - 'csrc/attn/sliding_tile_attn/config_sta.py'
               - 'csrc/attn/sliding_tile_attn/st_attn.cpp'
             vsa-kernel-paths: &vsa-kernel-paths
               - 'csrc/attn/video_sparse_attn/**'
-              - 'csrc/attn/tk/**'
+              - 'csrc/attn/video_sparse_attn/tk/**'
               - 'csrc/attn/video_sparse_attn/setup.py'
               - 'csrc/attn/video_sparse_attn/config_vsa.py'
               - 'csrc/attn/video_sparse_attn/vsa.cpp'
