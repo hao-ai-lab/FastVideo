@@ -7,9 +7,7 @@ These are e2e example scripts for finetuning Wan2.1 T2V with VSA to accelerate i
 ## Make sure you have installed VSA
 
 ```bash
-cd csrc/attn
-git submodule update --init --recursive
-python setup_vsa.py install
+pip install vsa
 ```
 
 ### Download the synthetic dataset:
