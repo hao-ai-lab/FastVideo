@@ -7,12 +7,13 @@ from collections.abc import Callable
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
+
 # isort: off
 from fastvideo.configs.pipelines.wan import (
     FastWan2_1_T2V_480P_Config, FastWan2_2_TI2V_5B_Config,
-                                             SelfForcingWanT2V480PConfig,
-    Wan2_2_I2V_A14B_Config, Wan2_2_T2V_A14B_Config, Wan2_2_TI2V_5B_Config,
-    WanI2V480PConfig, WanI2V720PConfig, WanT2V480PConfig, WanT2V720PConfig)
+    SelfForcingWanT2V480PConfig, Wan2_2_I2V_A14B_Config, Wan2_2_T2V_A14B_Config,
+    Wan2_2_TI2V_5B_Config, WanI2V480PConfig, WanI2V720PConfig, WanT2V480PConfig,
+    WanT2V720PConfig)
 # isort: on
 from fastvideo.logger import init_logger
 from fastvideo.utils import (maybe_download_model_index,
