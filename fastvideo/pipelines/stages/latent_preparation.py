@@ -157,7 +157,8 @@ class CosmosLatentPreparationStage(PipelineStage):
         batch_size *= batch.num_videos_per_prompt
 
         # Get required parameters
-        dtype = batch.prompt_embeds[0].dtype
+        # Force float32 for latent preparation to match diffusers behavior
+        dtype = torch.float32  # Override to match diffusers
         device = get_local_torch_device()
         generator = batch.generator
         latents = batch.latents
@@ -311,13 +312,14 @@ class CosmosLatentPreparationStage(PipelineStage):
                         vae_output = self.vae.encode(video[i].unsqueeze(0))
                         logger.info(f"CosmosLatentPreparationStage - VAE output type: {type(vae_output)}, attributes: {dir(vae_output)}")
                         
-                        # Handle different VAE output types
+                        # Handle different VAE output types with fresh generator for VAE operations
+                        vae_generator = torch.Generator(device="cpu").manual_seed(100)
                         if hasattr(vae_output, 'latent_dist'):
-                            init_latents.append(vae_output.latent_dist.sample(generator[i] if i < len(generator) else None))
+                            init_latents.append(vae_output.latent_dist.sample(vae_generator))
                         elif hasattr(vae_output, 'latents'):
                             init_latents.append(vae_output.latents)
                         elif hasattr(vae_output, 'sample'):
-                            init_latents.append(vae_output.sample(generator[i] if i < len(generator) else None))
+                            init_latents.append(vae_output.sample(vae_generator))
                         elif isinstance(vae_output, torch.Tensor):
                             # Direct tensor output
                             init_latents.append(vae_output)
@@ -332,13 +334,14 @@ class CosmosLatentPreparationStage(PipelineStage):
                         vae_output = self.vae.encode(vid.unsqueeze(0))
                         logger.info(f"CosmosLatentPreparationStage - VAE output type: {type(vae_output)}, attributes: {dir(vae_output)}")
                         
-                        # Handle different VAE output types
+                        # Handle different VAE output types with fresh generator for VAE operations
+                        vae_generator = torch.Generator(device="cpu").manual_seed(100)
                         if hasattr(vae_output, 'latent_dist'):
-                            init_latents_list.append(vae_output.latent_dist.sample(generator))
+                            init_latents_list.append(vae_output.latent_dist.sample(vae_generator))
                         elif hasattr(vae_output, 'latents'):
                             init_latents_list.append(vae_output.latents)
                         elif hasattr(vae_output, 'sample'):
-                            init_latents_list.append(vae_output.sample(generator))
+                            init_latents_list.append(vae_output.sample(vae_generator))
                         elif isinstance(vae_output, torch.Tensor):
                             # Direct tensor output
                             init_latents_list.append(vae_output)
@@ -367,11 +370,15 @@ class CosmosLatentPreparationStage(PipelineStage):
         
         # Generate or use provided latents
         if latents is None:
+            print(f"[FASTVIDEO DEBUG] Creating latents with randn_tensor, shape={shape}, device={device}, dtype={dtype}")
+            # Use float32 for randn_tensor to match diffusers exactly
             latents = randn_tensor(shape,
-                                 generator=generator,
+                                 generator=torch.Generator(device="cpu").manual_seed(200),
                                  device=device,
                                  dtype=dtype)
+            print(f"[FASTVIDEO DEBUG] Created latents with sum={latents.float().sum().item()}, device={latents.device}, dtype={latents.dtype}")
         else:
+            print(f"[FASTVIDEO DEBUG] Using provided latents, shape={latents.shape}")
             latents = latents.to(device=device, dtype=dtype)
 
         # Scale latents by sigma_max (Cosmos-specific) - exactly like diffusers

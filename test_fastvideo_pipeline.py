@@ -33,7 +33,7 @@ def generate_video():
         print("Creating FastVideo generator...")
         generator = VideoGenerator.from_pretrained(
             model_path="nvidia/Cosmos-Predict2-2B-Video2World",
-            num_gpus=2,
+            num_gpus=1,
         )
         
         print("Generator created successfully")
@@ -49,7 +49,7 @@ def generate_video():
             image_path=input_image_path,
             num_inference_steps=35,
             guidance_scale=7.0,
-            seed=42,
+            seed=1,
             save_video=True,
             output_path=output_path
         )
