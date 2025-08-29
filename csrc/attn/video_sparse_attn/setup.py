@@ -9,7 +9,7 @@ target = target.lower()
 
 # Package metadata
 PACKAGE_NAME = "vsa"
-VERSION = "0.0.2"
+VERSION = "0.0.3"
 AUTHOR = "Hao AI Lab"
 DESCRIPTION = "Video Sparse Attention Kernel Used in FastVideo"
 URL = "https://github.com/hao-ai-lab/FastVideo/tree/main/csrc/attn/video_sparse_attn"
