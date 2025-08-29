@@ -21,7 +21,7 @@ sudo apt update
 sudo apt install clang-11
 ```
 
-Set up CUDA environment (if using CUDA 12.8):
+Set up CUDA environment (if using CUDA 12.4):
 
 ```bash
 export CUDA_HOME=/usr/local/cuda-12.4
