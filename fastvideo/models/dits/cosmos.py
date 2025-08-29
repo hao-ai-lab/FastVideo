@@ -688,6 +688,7 @@ class CosmosTransformer3DModel(BaseDiT):
                 condition_mask: torch.Tensor | None = None,
                 padding_mask: torch.Tensor | None = None,
                 **kwargs) -> torch.Tensor:
+        print(f"[FASTVIDEO TRANSFORMER] Input hidden_states sum = {hidden_states.float().sum().item()}")
         forward_batch = get_forward_context().forward_batch
         enable_teacache = forward_batch is not None and forward_batch.enable_teacache
 
@@ -796,4 +797,5 @@ class CosmosTransformer3DModel(BaseDiT):
         hidden_states = hidden_states.permute(0, 7, 1, 6, 2, 4, 3, 5)
         hidden_states = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
 
+        print(f"[FASTVIDEO TRANSFORMER] Output hidden_states sum = {hidden_states.float().sum().item()}")
         return hidden_states

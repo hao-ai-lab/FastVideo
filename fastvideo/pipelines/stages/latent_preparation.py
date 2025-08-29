@@ -353,14 +353,20 @@ class CosmosLatentPreparationStage(PipelineStage):
                     init_latents = init_latents_list
                 
                 init_latents = torch.cat(init_latents, dim=0).to(dtype)
+                print(f"[FASTVIDEO CONDITIONING DEBUG] Raw VAE latents sum = {init_latents.float().sum().item()}")
                 
                 # Apply latent normalization like diffusers
                 if hasattr(self.vae.config, 'latents_mean') and hasattr(self.vae.config, 'latents_std'):
                     latents_mean = torch.tensor(self.vae.config.latents_mean).view(1, self.vae.config.z_dim, 1, 1, 1).to(device, dtype)
                     latents_std = torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1, 1).to(device, dtype)
+                    print(f"[FASTVIDEO CONDITIONING DEBUG] latents_mean = {self.vae.config.latents_mean}, latents_std = {self.vae.config.latents_std}")
+                    print(f"[FASTVIDEO CONDITIONING DEBUG] scheduler.sigma_data = {self.scheduler.sigma_data}")
+                    print(f"[FASTVIDEO CONDITIONING DEBUG] Before normalization sum = {init_latents.float().sum().item()}")
                     init_latents = (init_latents - latents_mean) / latents_std * self.scheduler.sigma_data
+                    print(f"[FASTVIDEO CONDITIONING DEBUG] After normalization sum = {init_latents.float().sum().item()}")
                 
                 conditioning_latents = init_latents
+                print(f"[FASTVIDEO CONDITIONING DEBUG] Final conditioning_latents sum = {conditioning_latents.float().sum().item()}")
                 
                 # Offload VAE to CPU after encoding to save memory
                 self.vae.to("cpu")
