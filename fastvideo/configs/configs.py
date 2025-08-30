@@ -32,6 +32,29 @@ class DatasetType(str, Enum):
         return [dataset_type.value for dataset_type in cls]
 
 
+class VideoLoaderType(str, Enum):
+    """
+    Enumeration for different video loaders.
+    """
+    TORCHCODEC = "torchcodec"
+    TORCHVISION = "torchvision"
+
+    @classmethod
+    def from_string(cls, value: str) -> "VideoLoaderType":
+        """Convert string to VideoLoader enum."""
+        try:
+            return cls(value.lower())
+        except ValueError:
+            raise ValueError(
+                f"Invalid video loader: {value}. Must be one of: {', '.join([m.value for m in cls])}"
+            ) from None
+
+    @classmethod
+    def choices(cls) -> list[str]:
+        """Get all available choices as strings for argparse."""
+        return [video_loader.value for video_loader in cls]
+
+
 @dataclasses.dataclass
 class PreprocessConfig:
     """Configuration for preprocessing operations."""
@@ -51,6 +74,7 @@ class PreprocessConfig:
     flush_frequency: int = 256
 
     # Video processing parameters
+    video_loader_type: VideoLoaderType = VideoLoaderType.TORCHCODEC
     max_height: int = 480
     max_width: int = 848
     num_frames: int = 163
@@ -120,6 +144,12 @@ class PreprocessConfig:
                                      help="How often to save to parquet files")
 
         # Video processing parameters
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}video-loader-type",
+            type=str,
+            choices=VideoLoaderType.choices(),
+            default=PreprocessConfig.video_loader_type.value,
+            help="Type of the video loader")
         preprocess_args.add_argument(f"--{prefix_with_dot}max-height",
                                      type=int,
                                      default=PreprocessConfig.max_height,
@@ -174,6 +204,10 @@ class PreprocessConfig:
         if 'dataset_type' in kwargs and isinstance(kwargs['dataset_type'], str):
             kwargs['dataset_type'] = DatasetType.from_string(
                 kwargs['dataset_type'])
+        if 'video_loader_type' in kwargs and isinstance(
+                kwargs['video_loader_type'], str):
+            kwargs['video_loader_type'] = VideoLoaderType.from_string(
+                kwargs['video_loader_type'])
 
         preprocess_config = cls()
         if not update_config_from_args(

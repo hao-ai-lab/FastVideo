@@ -13,7 +13,8 @@ import pyarrow.parquet as pq
 import torch
 from datasets import Dataset, Video, load_dataset
 
-from fastvideo.configs.configs import DatasetType, PreprocessConfig
+from fastvideo.configs.configs import (DatasetType, PreprocessConfig,
+                                       VideoLoaderType)
 from fastvideo.distributed.parallel_state import get_world_rank, get_world_size
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import PreprocessBatch
@@ -431,7 +432,8 @@ def build_dataset(preprocess_config: PreprocessConfig, split: str,
             return item
 
         dataset = dataset.map(add_video_column)
-        dataset = dataset.cast_column("video", Video())
+        if preprocess_config.video_loader_type == VideoLoaderType.TORCHCODEC:
+            dataset = dataset.cast_column("video", Video())
     else:
         raise ValueError(
             f"Invalid dataset type: {preprocess_config.dataset_type}")
