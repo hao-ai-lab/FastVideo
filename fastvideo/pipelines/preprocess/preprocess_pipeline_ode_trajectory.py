@@ -155,7 +155,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     prompt_attention_mask=prompt_attention_mask,
                     height=args.max_height,
                     width=args.max_width,
-                    num_frames=81
+                    num_frames=81,
                     fps=args.train_fps,
                 )
                 fastvideo_args.pipeline_config.ti2v_task = True

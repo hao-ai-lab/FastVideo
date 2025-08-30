@@ -54,7 +54,6 @@ class WanT2VI2VTrainingPipeline(TrainingPipeline):
         pipeline_config = PipelineConfig.from_pretrained(
             training_args.model_path)
         pipeline_config.vae_config.load_encoder = True
-        pipeline_config.t2v_as_i2v_task = True
         self.validation_pipeline = WanImageToVideoPipeline.from_pretrained(
             training_args.model_path,
             args=None,

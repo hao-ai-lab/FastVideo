@@ -6,7 +6,7 @@ export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-DATA_DIR="data/crush-smol_processed_t2v_i2v_1_3b"
+DATA_DIR="data/crush-smol_processed_t2v_old"
 VALIDATION_DATASET_FILE="examples/datasets/crush_smol/validation.json"
 NUM_GPUS=8
 # export CUDA_VISIBLE_DEVICES=4,5
@@ -77,6 +77,7 @@ miscellaneous_args=(
   --num_euler_timesteps 50
   --ema_start_step 0
   --enable_gradient_checkpointing_type "full"
+  --t2v_as_i2v_task True
   # --resume_from_checkpoint "checkpoints/wan_t2v_finetune/checkpoint-2500"
 )
 
