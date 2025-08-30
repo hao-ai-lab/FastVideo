@@ -150,6 +150,7 @@ class ForwardBatch:
     output: torch.Tensor | None = None
     return_trajectory_latents: bool = False
     return_trajectory_decoded: bool = False
+    trajectory_timesteps: list[int] | None = None
     trajectory_latents: list[tuple[int, torch.Tensor]] | None = None
     trajectory_decoded: list[tuple[int, torch.Tensor]] | None = None
 
