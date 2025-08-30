@@ -104,8 +104,13 @@ class ImageVAEEncodingStage(PipelineStage):
 
     def __init__(self, vae: ParallelTiledVAE) -> None:
         self.vae: ParallelTiledVAE = vae
-    
-    def encode_image(self, image: PIL.Image.Image, height: int, width: int, fastvideo_args: FastVideoArgs, generator: torch.Generator | None = None) -> torch.Tensor:
+
+    def encode_image(self,
+                     image: PIL.Image.Image,
+                     height: int,
+                     width: int,
+                     fastvideo_args: FastVideoArgs,
+                     generator: torch.Generator | None = None) -> torch.Tensor:
         """
         Encode image into latent space.
         """
@@ -120,8 +125,11 @@ class ImageVAEEncodingStage(PipelineStage):
         image = image.unsqueeze(2)
         print(f"after unsqueeze image.shape: {image.shape}")
         return self.encode_tensor(image, fastvideo_args, generator)
-    
-    def encode_tensor(self, video_condition: torch.Tensor, fastvideo_args: FastVideoArgs, generator: torch.Generator | None = None) -> torch.Tensor:
+
+    def encode_tensor(self,
+                      video_condition: torch.Tensor,
+                      fastvideo_args: FastVideoArgs,
+                      generator: torch.Generator | None = None) -> torch.Tensor:
         """
         Encode frames into latent space.
         """
@@ -239,7 +247,8 @@ class ImageVAEEncodingStage(PipelineStage):
             ],
                                         dim=2)
 
-        latent_condition = self.encode_tensor(video_condition, fastvideo_args, batch.generator)
+        latent_condition = self.encode_tensor(video_condition, fastvideo_args,
+                                              batch.generator)
 
         if fastvideo_args.mode == ExecutionMode.PREPROCESS:
             batch.image_latent = latent_condition
