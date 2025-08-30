@@ -80,8 +80,7 @@ class CLIPTextConfig(TextEncoderConfig):
             "truncation": True,
             "max_length": 77,
             "return_tensors": "pt"
-        }
-    )
+        })
     num_hidden_layers_override: int | None = None
     require_post_norm: bool | None = None
     prefix: str = "clip"

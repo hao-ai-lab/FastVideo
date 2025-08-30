@@ -78,8 +78,8 @@ class PreprocessingDataValidator:
 
     def _validate_data_type(self, batch: dict[str, Any]) -> bool:
         """Validate basic validity of data items"""
-        return not (batch["caption"] is None or batch["caption"] == ""
-                    or "fps" not in batch or batch["fps"] is None or batch["fps"] <= 0
+        return not (batch["caption"] is None or batch["caption"] == "" or "fps"
+                    not in batch or batch["fps"] is None or batch["fps"] <= 0
                     or batch["num_frames"] is None or batch["num_frames"] <= 0)
 
     def _validate_resolution(self, batch: dict[str, Any]) -> bool:
@@ -397,7 +397,6 @@ class ParquetDatasetSaver:
             written_count += len(chunk_table)
 
         return written_count
-
 
 
 def build_dataset(preprocess_config: PreprocessConfig, split: str) -> Dataset:
