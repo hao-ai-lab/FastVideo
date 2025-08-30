@@ -45,8 +45,10 @@ def main(args) -> None:
         PreprocessPipeline = PreprocessPipeline_ODE_Trajectory
     else:
         raise ValueError(f"Invalid preprocess task: {args.preprocess_task}")
-    
-    logger.info(f"Preprocess task: {args.preprocess_task} using {PreprocessPipeline.__name__}")
+
+    logger.info(
+        f"Preprocess task: {args.preprocess_task} using {PreprocessPipeline.__name__}"
+    )
 
     pipeline = PreprocessPipeline(args.model_path, fastvideo_args)
     pipeline.forward(batch=None, fastvideo_args=fastvideo_args, args=args)

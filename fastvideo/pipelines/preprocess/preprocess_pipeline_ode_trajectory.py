@@ -9,11 +9,11 @@ Sec 4.3 of CausVid paper: https://arxiv.org/pdf/2412.07772
 """
 
 import os
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 import numpy as np
 import pyarrow as pa
-import pyarrow.parquet as pq
 import torch
 from PIL import Image
 from torch.utils.data import DataLoader
@@ -24,7 +24,6 @@ from fastvideo.dataset import getdataset
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_ode_trajectory
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
-from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (
@@ -37,17 +36,20 @@ from fastvideo.pipelines.stages import (DenoisingStage, ImageVAEEncodingStage,
 
 logger = init_logger(__name__)
 
+
 class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
     """ODE Trajectory preprocessing pipeline implementation."""
 
-    _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
+    _required_config_modules = [
+        "text_encoder", "tokenizer", "vae", "transformer", "scheduler"
+    ]
     preprocess_dataloader: StatefulDataLoader
     preprocess_loader_iter: Iterator[dict[str, Any]]
 
     def get_schema_fields(self):
         """Get the schema fields for ODE Trajectory pipeline."""
         return [f.name for f in pyarrow_schema_ode_trajectory]
-    
+
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
         self.add_stage(stage_name="input_validation_stage",
@@ -59,8 +61,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                        ))
         self.add_stage(stage_name="vae_encoding_stage",
                        stage=ImageVAEEncodingStage(
-                           vae=self.get_module("vae"),
-                       ))
+                           vae=self.get_module("vae"), ))
         self.add_stage(stage_name="timestep_preparation_stage",
                        stage=TimestepPreparationStage(
                            scheduler=self.get_module("scheduler")))
@@ -76,8 +77,9 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                            pipeline=self,
                        ))
 
-    
-    def preprocess_video_and_text_and_trajectory(self, fastvideo_args: FastVideoArgs, args):
+    def preprocess_video_and_text_and_trajectory(self,
+                                                 fastvideo_args: FastVideoArgs,
+                                                 args):
 
         for batch_idx, data in enumerate(self.pbar):
             if data is None:
@@ -146,7 +148,6 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                 prompt_embeds = non_padded_embeds
                 prompt_attention_mask = non_padded_masks
 
-
                 # Collect the trajectory data
                 batch = ForwardBatch(
                     data_type="video",
@@ -160,12 +161,16 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                 )
                 fastvideo_args.pipeline_config.ti2v_task = True
 
-                result_batch = self.input_validation_stage(batch, fastvideo_args)
+                result_batch = self.input_validation_stage(
+                    batch, fastvideo_args)
                 # result_batch = self.prompt_encoding_stage(result_batch, fastvideo_args)
                 # result_batch = self.vae_encoding_stage(result_batch, fastvideo_args)
-                result_batch = self.timestep_preparation_stage(batch, fastvideo_args)
-                result_batch = self.latent_preparation_stage(result_batch, fastvideo_args)
-                result_batch = self.denoising_stage(result_batch, fastvideo_args)
+                result_batch = self.timestep_preparation_stage(
+                    batch, fastvideo_args)
+                result_batch = self.latent_preparation_stage(
+                    result_batch, fastvideo_args)
+                result_batch = self.denoising_stage(result_batch,
+                                                    fastvideo_args)
                 trajectory_latents = result_batch.trajectory_latents
 
             # Prepare batch data for Parquet dataset
@@ -277,14 +282,13 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
             # processed_img = self.get_module("image_processor")(
             #     images=frame_pil, return_tensors="pt")
             unprocessed_images.append(frame_pil)
-
         """Get VAE features from the first frame of each video"""
         video_conditions = []
         for frame in unprocessed_images:
 
-            latent = self.vae_encoding_stage.encode_image(frame, height, width, fastvideo_args, generator)
+            latent = self.vae_encoding_stage.encode_image(
+                frame, height, width, fastvideo_args, generator)
             video_conditions.append(latent)
-
 
             # processed_img = frame.to(device="cpu", dtype=torch.float32)
             # processed_img = processed_img.unsqueeze(0).permute(0, 3, 1,
@@ -394,7 +398,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
         os.makedirs(args.output_dir, exist_ok=True)
         # Create directory for combined data
         self.combined_parquet_dir = os.path.join(args.output_dir,
-                                            "combined_parquet_dataset")
+                                                 "combined_parquet_dataset")
         os.makedirs(self.combined_parquet_dir, exist_ok=True)
 
         # Loading dataset
@@ -411,13 +415,14 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
         self.num_processed_samples = 0
         # Add progress bar for video preprocessing
         self.pbar = tqdm(self.preprocess_loader_iter,
-                    desc="Processing videos",
-                    unit="batch",
-                    disable=self.local_rank != 0)
+                         desc="Processing videos",
+                         unit="batch",
+                         disable=self.local_rank != 0)
 
         # Initialize class variables for data sharing
         self.video_data: dict[str, Any] = {}  # Store video metadata and paths
         self.latent_data: dict[str, Any] = {}  # Store latent tensors
         self.preprocess_video_and_text_and_trajectory(fastvideo_args, args)
+
 
 EntryClass = PreprocessPipeline_ODE_Trajectory
