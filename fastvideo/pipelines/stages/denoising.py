@@ -132,7 +132,7 @@ class DenoisingStage(PipelineStage):
             latents = latents[:, :, rank_in_sp_group, :, :, :]
             batch.latents = latents
             if batch.image_latent is not None:
-                if not fastvideo_args.pipeline_config.ti2v_task:
+                if not fastvideo_args.pipeline_config.ti2v_task and not fastvideo_args.pipeline_config.t2v_as_i2v_task:
                     image_latent = rearrange(batch.image_latent,
                                              "b c (n t) h w -> b c n t h w",
                                              n=sp_world_size).contiguous()
@@ -429,17 +429,18 @@ class DenoisingStage(PipelineStage):
         # Gather results if using sequence parallelism
         if sp_group:
             latents = sequence_model_parallel_all_gather(latents, dim=2)
-            trajectory_tensor = torch.cat(trajectory_latents, dim=0)
-            trajectory_tensor = trajectory_tensor.to(get_local_torch_device())
-            trajectory_tensor = sequence_model_parallel_all_gather(
-                trajectory_tensor, dim=2)
-            # Undo the previous cat by splitting trajectory_tensor back into a list of tensors
-            batch.trajectory_latents = list(
-                zip(
-                    trajectory_timesteps,
-                    torch.chunk(trajectory_tensor,
-                                len(trajectory_timesteps),
-                                dim=0), strict=False))
+            if batch.return_trajectory_latents:
+                trajectory_tensor = torch.cat(trajectory_latents, dim=0)
+                trajectory_tensor = trajectory_tensor.to(get_local_torch_device())
+                trajectory_tensor = sequence_model_parallel_all_gather(
+                    trajectory_tensor, dim=2)
+                # Undo the previous cat by splitting trajectory_tensor back into a list of tensors
+                batch.trajectory_latents = list(
+                    zip(
+                        trajectory_timesteps,
+                        torch.chunk(trajectory_tensor,
+                                    len(trajectory_timesteps),
+                                    dim=0), strict=False))
 
         if fastvideo_args.pipeline_config.t2v_as_i2v_task:
             latents = torch.cat([
