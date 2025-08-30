@@ -71,12 +71,15 @@ class EncodingStage(PipelineStage):
         # Setup VAE precision
         vae_dtype = PRECISION_TO_TYPE[
             fastvideo_args.pipeline_config.vae_precision]
-        vae_autocast_enabled = (
-            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        # vae_autocast_enabled = (
+        #     vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        vae_autocast_enabled = True
 
         # Normalize input to [-1, 1] range (reverse of decoding normalization)
         latents = (batch.latents * 2.0 - 1.0).clamp(-1, 1)
 
+        print("84, Latents dtype: ", latents.dtype)
+        torch.save(latents, "new_before_vae.pt")
         # Move to appropriate device and dtype
         latents = latents.to(get_local_torch_device())
 
@@ -91,25 +94,29 @@ class EncodingStage(PipelineStage):
             if not vae_autocast_enabled:
                 latents = latents.to(vae_dtype)
             latents = self.vae.encode(latents).mean
+        torch.save(latents, "new_after_vae.pt")
+        print("95, Latents after VAE: ", latents.shape)
 
-        # Apply shifting if needed (reverse of decoding)
-        if (hasattr(self.vae, "shift_factor")
-                and self.vae.shift_factor is not None):
-            if isinstance(self.vae.shift_factor, torch.Tensor):
-                latents -= self.vae.shift_factor.to(latents.device,
-                                                    latents.dtype)
-            else:
-                latents -= self.vae.shift_factor
+        # # Apply shifting if needed (reverse of decoding)
+        # if (hasattr(self.vae, "shift_factor")
+        #         and self.vae.shift_factor is not None):
+        #     if isinstance(self.vae.shift_factor, torch.Tensor):
+        #         latents -= self.vae.shift_factor.to(latents.device,
+        #                                             latents.dtype)
+        #     else:
+        #         latents -= self.vae.shift_factor
 
-        # Apply scaling factor
-        if (hasattr(self.vae, "scaling_factor")
-                and self.vae.scaling_factor is not None):
-            if isinstance(self.vae.scaling_factor, torch.Tensor):
-                latents = latents * self.vae.scaling_factor.to(
-                    latents.device, latents.dtype)
-            else:
-                latents = latents * self.vae.scaling_factor
+        # # Apply scaling factor
+        # if (hasattr(self.vae, "scaling_factor")
+        #         and self.vae.scaling_factor is not None):
+        #     if isinstance(self.vae.scaling_factor, torch.Tensor):
+        #         latents = latents * self.vae.scaling_factor.to(
+        #             latents.device, latents.dtype)
+        #     else:
+        #         latents = latents * self.vae.scaling_factor
 
+        # torch.save(latents, "new_after_scale.pt")
+        # print("121, Latents after scale: ", latents.shape)
         # Update batch with encoded latents
         batch.latents = latents
 
