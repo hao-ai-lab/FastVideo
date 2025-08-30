@@ -74,7 +74,13 @@ class CLIPVisionArchConfig(ImageEncoderArchConfig):
 class CLIPTextConfig(TextEncoderConfig):
     arch_config: TextEncoderArchConfig = field(
         default_factory=CLIPTextArchConfig)
-
+    tokenizer_kwargs: dict = field(
+        default_factory=lambda: {
+            "padding": "max_length",
+            "truncation": True,
+            "max_length": 77,
+            "return_tensors": "pt"
+        })
     num_hidden_layers_override: int | None = None
     require_post_norm: bool | None = None
     prefix: str = "clip"
