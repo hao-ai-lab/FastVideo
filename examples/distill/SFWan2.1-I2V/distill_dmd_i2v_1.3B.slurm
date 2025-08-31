@@ -51,9 +51,9 @@ VALIDATION_DATASET_FILE="examples/distill/SFWan2.1-I2V/validation.json"
 
 # Training arguments
 training_args=(
-  --tracker_project_name SFwan_t2v_distill_dmd
+  --tracker_project_name SFwan_t2v_distill_self_forcing_dmd
   --output_dir "checkpoints/SFwan_t2v_finetune"
-  --max_train_steps 1000
+  --max_train_steps 4000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
@@ -62,6 +62,11 @@ training_args=(
   --num_width 832
   --num_frames 81
   --enable_gradient_checkpointing_type "full"
+  --log_visualization
+  --simulate_generator_forward
+  --num_frame_per_block 3
+  --enable_gradient_masking
+  --gradient_mask_last_n_frames 21
 )
 
 # Parallel arguments
@@ -122,12 +127,12 @@ miscellaneous_args=(
   --init_weights_from_safetensors "/mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors"
 )
 
-# DMD argumentsisn
+# Self-forcing DMD arguments
 dmd_args=(
   --dmd_denoising_steps '1000,750,500,250'
   --min_timestep_ratio 0.02
   --max_timestep_ratio 0.98
-  --generator_update_interval 5
+  --dfake_gen_update_ratio 5
   --real_score_guidance_scale 3.0
   --fake_score_learning_rate 4e-7
   --fake_score_betas '0.0,0.999'
@@ -139,7 +144,7 @@ srun torchrun \
 --node_rank $SLURM_PROCID \
 --rdzv_backend=c10d \
 --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
-    fastvideo/training/wan_distillation_pipeline.py \
+    fastvideo/training/wan_self_forcing_distillation_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

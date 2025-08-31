@@ -26,9 +26,7 @@ def main():
 
     start_time = time.perf_counter()
     prompt = (
-        "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
-        "wide with interest. The playful yet serene atmosphere is complemented by soft "
-        "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
+        "A large metal cylinder is seen pressing down on a pile of colorful candies, flattening them as if they were under a hydraulic press. The candies are crushed and broken into small pieces, creating a mess on the table."
     )
     video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, sampling_param=sampling_param)
     end_time = time.perf_counter()
@@ -37,29 +35,29 @@ def main():
 
     # Generate another video with a different prompt, without reloading the
     # model!
-    gen_time_list = []
-    for i in range(10):
-        start_time = time.perf_counter()
-        prompt2 = (
-            "A majestic lion strides across the golden savanna, its powerful frame "
-            "glistening under the warm afternoon sun. The tall grass ripples gently in "
-            "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
-            "embodying the raw energy of the wild. Low angle, steady tracking shot, "
-            "cinematic.")
-        video2 = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=True, sampling_param=sampling_param)
-        end_time = time.perf_counter()
-        gen_time2 = end_time - start_time
-        gen_time_list.append(gen_time2)
-        # print(f"Time taken for video {i}: {gen_time2} seconds")
+    # gen_time_list = []
+    # for i in range(10):
+    #     start_time = time.perf_counter()
+    #     prompt2 = (
+    #         "A majestic lion strides across the golden savanna, its powerful frame "
+    #         "glistening under the warm afternoon sun. The tall grass ripples gently in "
+    #         "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
+    #         "embodying the raw energy of the wild. Low angle, steady tracking shot, "
+    #         "cinematic.")
+    #     video2 = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=True, sampling_param=sampling_param)
+    #     end_time = time.perf_counter()
+    #     gen_time2 = end_time - start_time
+    #     gen_time_list.append(gen_time2)
+    #     # print(f"Time taken for video {i}: {gen_time2} seconds")
 
-    print(f"Time taken for first video: {gen_time1} seconds")
-    print(f"Average time taken for 10 videos: {sum(gen_time_list) / len(gen_time_list)} seconds")
-    for i, gen_time in enumerate(gen_time_list):
-        print(f"Time taken for video {i}: {gen_time} seconds")
+    # print(f"Time taken for first video: {gen_time1} seconds")
+    # print(f"Average time taken for 10 videos: {sum(gen_time_list) / len(gen_time_list)} seconds")
+    # for i, gen_time in enumerate(gen_time_list):
+    #     print(f"Time taken for video {i}: {gen_time} seconds")
 
-    # print(f"Time taken for second video: {gen_time2} seconds")
-    print(f"Time taken to load model: {load_time} seconds")
-    print(f"Time taken for first e2e generation: {e2e_gen_time} seconds")
+    # # print(f"Time taken for second video: {gen_time2} seconds")
+    # print(f"Time taken to load model: {load_time} seconds")
+    # print(f"Time taken for first e2e generation: {e2e_gen_time} seconds")
 
 
 if __name__ == "__main__":

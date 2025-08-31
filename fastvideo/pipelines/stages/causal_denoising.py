@@ -347,7 +347,7 @@ class CausalDMDDenosingStage(DenoisingStage):
         if self.local_attn_size != -1:
             kv_cache_size = self.local_attn_size * self.frame_seq_length
         else:
-            kv_cache_size = 32760
+            kv_cache_size = max(self.frame_seq_length, getattr(self, 'num_frames', 1) * self.frame_seq_length)
 
         for _ in range(self.num_transformer_blocks):
             kv_cache1.append({
