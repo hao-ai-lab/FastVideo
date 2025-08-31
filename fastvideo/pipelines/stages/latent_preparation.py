@@ -59,6 +59,10 @@ class LatentPreparationStage(PipelineStage):
 
         # Adjust batch size for number of videos per prompt
         batch_size *= batch.num_videos_per_prompt
+        logger.info(f"===== batch_size: {batch_size}")
+        logger.info(f"===== batch.prompt: {batch.prompt}")
+        logger.info(f"===== batch.prompt_embeds: {batch.prompt_embeds}")
+        logger.info(f"===== batch.prompt_attention_mask: {batch.prompt_attention_mask}")
 
         # Get required parameters
         dtype = batch.prompt_embeds[0].dtype

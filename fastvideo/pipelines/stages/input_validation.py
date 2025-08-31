@@ -35,9 +35,15 @@ class InputValidationStage(PipelineStage):
         """Generate seeds for the inference"""
         seed = batch.seed
         num_videos_per_prompt = batch.num_videos_per_prompt
+        if isinstance(batch.prompt, list):
+            num_prompts = len(batch.prompt)
+        else:
+            num_prompts = 1
+
+        total_num_videos = num_prompts * num_videos_per_prompt
 
         assert seed is not None
-        seeds = [seed + i for i in range(num_videos_per_prompt)]
+        seeds = [seed + i for i in range(total_num_videos)]
         batch.seeds = seeds
         # Peiyuan: using GPU seed will cause A100 and H100 to generate different results...
         batch.generator = [

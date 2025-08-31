@@ -3,6 +3,9 @@ from typing import Any, cast
 
 import numpy as np
 import torch
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 def pad(t: torch.Tensor, padding_length: int) -> torch.Tensor:
@@ -143,7 +146,10 @@ def collate_rows_from_parquet_schema(rows,
             bytes_key = f"{tensor_name}_bytes"
 
             if shape_key in row and bytes_key in row:
+                logger.info("WTF shape_key: %s", shape_key)
+                # logger.info("WTF bytes_key: %s", bytes_key)
                 shape = row[shape_key]
+                logger.info("WTF shape: %s", shape)
                 bytes_data = row[bytes_key]
 
                 if len(bytes_data) == 0:

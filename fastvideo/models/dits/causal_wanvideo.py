@@ -558,6 +558,7 @@ class CausalWanTransformer3DModel(BaseDiT):
         else:
             encoder_hidden_states_image = None
 
+        logger.info(f"===== hidden_states: {hidden_states.shape}")
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
         post_patch_num_frames = num_frames // p_t

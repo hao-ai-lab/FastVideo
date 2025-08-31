@@ -262,7 +262,9 @@ class PipelineConfig:
         """
         from fastvideo.configs.pipelines.registry import (
             get_pipeline_config_cls_from_name)
+        logger.info("WTF model_path: %s", model_path)
         pipeline_config_cls = get_pipeline_config_cls_from_name(model_path)
+        logger.info("pipeline_config_cls: %s", pipeline_config_cls)
 
         return cast(PipelineConfig, pipeline_config_cls(model_path=model_path))
 

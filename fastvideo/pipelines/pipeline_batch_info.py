@@ -211,6 +211,10 @@ class TrainingBatch:
     infos: list[dict[str, Any]] | None = None
     mask_lat_size: torch.Tensor | None = None
 
+    # ODE trajectory supervision
+    trajectory_latents: torch.Tensor | None = None
+    trajectory_timesteps: torch.Tensor | None = None
+
     # Transformer inputs
     noisy_model_input: torch.Tensor | None = None
     timesteps: torch.Tensor | None = None

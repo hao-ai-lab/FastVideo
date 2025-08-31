@@ -96,17 +96,16 @@ pyarrow_schema_ode_trajectory = pa.schema([
     # e.g., 'bfloat16' or 'float32'
     pa.field("text_embedding_dtype", pa.string()),
     # I2V
-    pa.field("first_frame_latent_bytes", pa.binary()),
-    pa.field("first_frame_latent_shape", pa.list_(pa.int64())),
-    pa.field("first_frame_latent_dtype", pa.string()),
+    pa.field("image_condition_latents_bytes", pa.binary()),
+    pa.field("image_condition_latents_shape", pa.list_(pa.int64())),
+    pa.field("image_condition_latents_dtype", pa.string()),
     # --- ODE Trajectory ---
-    pa.field("ode_trajectory_bytes", pa.binary()),
-    pa.field("ode_trajectory_shape", pa.list_(pa.int64())),
-    pa.field("ode_trajectory_dtype", pa.string()),
-    # --- ODE Trajectory Timesteps ---
-    pa.field("ode_timesteps_bytes", pa.binary()),
-    pa.field("ode_timesteps_shape", pa.list_(pa.int64())),
-    pa.field("ode_timesteps_dtype", pa.string()),
+    pa.field("trajectory_latents_bytes", pa.binary()),
+    pa.field("trajectory_latents_shape", pa.list_(pa.int64())),
+    pa.field("trajectory_latents_dtype", pa.string()),
+    pa.field("trajectory_timesteps_bytes", pa.binary()),
+    pa.field("trajectory_timesteps_shape", pa.list_(pa.int64())),
+    pa.field("trajectory_timesteps_dtype", pa.string()),
     # --- Metadata ---
     pa.field("file_name", pa.string()),
     pa.field("caption", pa.string()),

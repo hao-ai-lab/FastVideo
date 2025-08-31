@@ -149,9 +149,16 @@ class ComposedPipelineBase(ABC):
             fastvideo_args = FastVideoArgs.from_kwargs(**kwargs)
             if pipeline_config is not None:
                 fastvideo_args.pipeline_config = pipeline_config
+            if fastvideo_args.override_transformer_cls_name is not None:
+                pipeline_config = PipelineConfig.from_pretrained("wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers")
+                fastvideo_args.pipeline_config = pipeline_config
         else:
             assert args is not None, "args must be provided for training mode"
             fastvideo_args = TrainingArgs.from_cli_args(args)
+            if fastvideo_args.override_transformer_cls_name is not None:
+                pipeline_config = PipelineConfig.from_pretrained("wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers")
+                fastvideo_args.pipeline_config = pipeline_config
+                logger.info("in 2 Overriding transformer cls name to %s", fastvideo_args.override_transformer_cls_name)
             # TODO(will): fix this so that its not so ugly
             fastvideo_args.model_path = model_path
             for key, value in kwargs.items():
@@ -162,7 +169,8 @@ class ComposedPipelineBase(ABC):
             # model is loaded with the correct precision. Subsequently we will
             # use FSDP2's MixedPrecisionPolicy to set the precision for the
             # fwd, bwd, and other operations' precision.
-            assert fastvideo_args.pipeline_config.dit_precision == 'fp32', 'only fp32 is supported for training'
+            fastvideo_args.pipeline_config.dit_precision = 'fp32'
+            # assert fastvideo_args.pipeline_config.dit_precision == 'fp32', 'only fp32 is supported for training'
 
         logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)
 

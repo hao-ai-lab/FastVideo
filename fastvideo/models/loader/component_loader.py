@@ -415,6 +415,10 @@ class TransformerLoader(ComponentLoader):
             raise ValueError(
                 "Model config does not contain a _class_name attribute. "
                 "Only diffusers format is supported.")
+        logger.info("transformer cls_name: %s", cls_name)
+        if fastvideo_args.override_transformer_cls_name is not None:
+            cls_name = fastvideo_args.override_transformer_cls_name
+            logger.info("Overriding transformer cls_name to %s", cls_name)
 
         fastvideo_args.model_paths["transformer"] = model_path
 

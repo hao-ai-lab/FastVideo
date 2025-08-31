@@ -20,11 +20,13 @@ from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm import tqdm
 
+from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset import getdataset
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_ode_trajectory
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
+from fastvideo.utils import shallow_asdict
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (
     BasePreprocessPipeline)
@@ -119,6 +121,9 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     valid_data, fastvideo_args)
 
                 batch_captions = valid_data["text"]
+                # for i in range(len(batch_captions)):
+                #     caption = batch_captions[i]
+                #     logger.info(f"===== batch_captions: {caption}")
                 batch = ForwardBatch(
                     data_type="video",
                     prompt=batch_captions,
@@ -146,33 +151,70 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
 
                 # Update the tensors with non-padded versions
                 prompt_embeds = non_padded_embeds
-                prompt_attention_mask = non_padded_masks
+                prompt_attention_masks = non_padded_masks
 
-                # Collect the trajectory data
-                batch = ForwardBatch(
-                    data_type="video",
-                    prompt=batch_captions,
-                    prompt_embeds=prompt_embeds,
-                    prompt_attention_mask=prompt_attention_mask,
-                    height=args.max_height,
-                    width=args.max_width,
-                    num_frames=81,
-                    fps=args.train_fps,
-                )
-                fastvideo_args.pipeline_config.ti2v_task = True
+                # logger.info(f"===== prompt_embeds: {prompt_embeds[0].shape}")
+                # logger.info(f"===== prompt_attention_masks: {prompt_attention_masks[0].shape}")
 
-                result_batch = self.input_validation_stage(
-                    batch, fastvideo_args)
-                # result_batch = self.prompt_encoding_stage(result_batch, fastvideo_args)
-                # result_batch = self.vae_encoding_stage(result_batch, fastvideo_args)
-                result_batch = self.timestep_preparation_stage(
-                    batch, fastvideo_args)
-                result_batch = self.latent_preparation_stage(
-                    result_batch, fastvideo_args)
-                result_batch = self.denoising_stage(result_batch,
-                                                    fastvideo_args)
-                trajectory_latents = result_batch.trajectory_latents
+                sampling_params = SamplingParam.from_pretrained(
+                    args.model_path)
 
+                trajectory_latents = []
+                trajectory_timesteps = []
+                for i, (prompt_embed, prompt_attention_mask) in enumerate(zip(prompt_embeds, prompt_attention_masks)):
+                    prompt_embed = prompt_embed.unsqueeze(0)
+                    prompt_attention_mask = prompt_attention_mask.unsqueeze(0)
+                    logger.info(f"what")
+                    logger.info(f"===== prompt_embed: {prompt_embed.shape}")
+                    logger.info(f"===== prompt_attention_mask: {prompt_attention_mask.shape}")
+                    # Collect the trajectory data
+                    batch = ForwardBatch(
+                        **shallow_asdict(sampling_params),
+                        # data_type="video",
+                        # seed=args.seed,
+                        # prompt=batch_captions[i],
+                        # prompt_embeds=[prompt_embed],
+                        # prompt_attention_mask=[prompt_attention_mask],
+                        # height=args.max_height,
+                        # width=args.max_width,
+                        # num_frames=81,
+                        # fps=args.train_fps,
+                        # return_trajectory_latents=True,
+                        # guidance_scale=3.0,
+                        # do_classifier_free_guidance=True,
+                    )
+                    batch.prompt_embeds = [prompt_embed]
+                    batch.prompt_attention_mask = [prompt_attention_mask]
+                    batch.return_trajectory_latents = True
+                    batch.height = args.max_height
+                    batch.width = args.max_width
+                    # batch.num_frames = 81
+                    batch.fps = args.train_fps
+                    batch.guidance_scale = 3.0
+                    batch.do_classifier_free_guidance = True
+                    # fastvideo_args.pipeline_config.ti2v_task = True
+
+                    result_batch = self.input_validation_stage(
+                        batch, fastvideo_args)
+                    # result_batch = self.prompt_encoding_stage(result_batch, fastvideo_args)
+                    # result_batch = self.vae_encoding_stage(result_batch, fastvideo_args)
+                    result_batch = self.timestep_preparation_stage(
+                        batch, fastvideo_args)
+                    result_batch = self.latent_preparation_stage(
+                        result_batch, fastvideo_args)
+                    result_batch = self.denoising_stage(result_batch,
+                                                        fastvideo_args)
+                    # trajectory_latents = result_batch.trajectory_latents
+                    trajectory_latents.append(result_batch.trajectory_latents.cpu())
+                    trajectory_timesteps.append(result_batch.trajectory_timesteps.cpu())
+
+            extra_features["trajectory_latents"] = trajectory_latents
+            extra_features["trajectory_timesteps"] = trajectory_timesteps
+            logger.info(f"===== trajectory_latents: {trajectory_latents[0].shape}")
+            logger.info(f"===== trajectory_latents len: {len(trajectory_latents)}")
+            logger.info(f"===== trajectory_timesteps: {trajectory_timesteps}")
+            logger.info(f"===== trajectory_timesteps len: {len(trajectory_timesteps)}")
+            # assert False
             # Prepare batch data for Parquet dataset
             batch_data = []
 
@@ -194,11 +236,22 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                 sample_extra_features = {}
                 if extra_features:
                     for key, value in extra_features.items():
+                        logger.info(f"===== key: {key}")
                         if isinstance(value, torch.Tensor):
+                            logger.info(f"===== value: {value[idx].shape}")
                             sample_extra_features[key] = value[idx].cpu().numpy(
                             )
                         else:
-                            sample_extra_features[key] = value[idx]
+                            assert isinstance(value, list)
+                            if isinstance(value[idx], torch.Tensor):
+                                logger.info(f"===== value in list: {value[idx].shape}")
+                                sample_extra_features[key] = value[idx].cpu().float().numpy(
+                                )
+                            else:
+                                logger.info(f"===== value in list: not tensor")
+                                sample_extra_features[key] = value[idx]
+                            # logger.info(f"===== value: not tensor")
+                            # sample_extra_features[key] = value[idx]
 
                 # Create record for Parquet dataset
                 record = self.create_record(
@@ -275,10 +328,12 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
         # latent_width = width // self.get_module("vae").spatial_compression_ratio
 
         unprocessed_images = []
+        pil_images = []
         # Frame has values between -1 and 1
         for frame in first_frame:
             frame = (frame + 1) * 127.5
             frame_pil = Image.fromarray(frame.cpu().numpy().astype(np.uint8))
+            pil_images.append(frame_pil)
             # processed_img = self.get_module("image_processor")(
             #     images=frame_pil, return_tensors="pt")
             unprocessed_images.append(frame_pil)
@@ -299,7 +354,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
             #     device=get_local_torch_device(), dtype=torch.float32)
             # video_conditions.append(video_condition)
 
-        video_conditions = torch.cat(video_conditions, dim=0)
+        # video_conditions = torch.cat(video_conditions, dim=0)
 
         # with torch.autocast(device_type="cuda",
         #                     dtype=torch.float32,
@@ -323,8 +378,8 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
         #     latent_condition = latent_condition * self.get_module(
         #         "vae").scaling_factor
 
-        features["first_frame_latent"] = video_conditions
-
+        features["image_condition_latents"] = video_conditions
+        features["pil_images"] = pil_images
         return features
 
     def create_record(
@@ -343,35 +398,49 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                                        idx=idx,
                                        extra_features=extra_features)
 
-        if extra_features and "clip_feature" in extra_features:
-            clip_feature = extra_features["clip_feature"]
+        if extra_features and "image_condition_latents" in extra_features:
+            image_condition_latents = extra_features["image_condition_latents"]
             record.update({
-                "clip_feature_bytes": clip_feature.tobytes(),
-                "clip_feature_shape": list(clip_feature.shape),
-                "clip_feature_dtype": str(clip_feature.dtype),
+                "image_condition_latents_bytes":
+                image_condition_latents.tobytes(),
+                "image_condition_latents_shape":
+                list(image_condition_latents.shape),
+                "image_condition_latents_dtype":
+                str(image_condition_latents.dtype),
             })
         else:
             record.update({
-                "clip_feature_bytes": b"",
-                "clip_feature_shape": [],
-                "clip_feature_dtype": "",
+                "image_condition_latents_bytes": b"",
+                "image_condition_latents_shape": [],
+                "image_condition_latents_dtype": "",
             })
 
-        if extra_features and "first_frame_latent" in extra_features:
-            first_frame_latent = extra_features["first_frame_latent"]
+        if extra_features and "trajectory_latents" in extra_features:
+            trajectory_latents = extra_features["trajectory_latents"]
             record.update({
-                "first_frame_latent_bytes":
-                first_frame_latent.tobytes(),
-                "first_frame_latent_shape":
-                list(first_frame_latent.shape),
-                "first_frame_latent_dtype":
-                str(first_frame_latent.dtype),
+                "trajectory_latents_bytes": trajectory_latents.tobytes(),
+                "trajectory_latents_shape": list(trajectory_latents.shape),
+                "trajectory_latents_dtype": str(trajectory_latents.dtype),
             })
         else:
             record.update({
-                "first_frame_latent_bytes": b"",
-                "first_frame_latent_shape": [],
-                "first_frame_latent_dtype": "",
+                "trajectory_latents_bytes": b"",
+                "trajectory_latents_shape": [],
+                "trajectory_latents_dtype": "",
+            })
+
+        if extra_features and "trajectory_timesteps" in extra_features:
+            trajectory_timesteps = extra_features["trajectory_timesteps"]
+            record.update({
+                "trajectory_timesteps_bytes": trajectory_timesteps.tobytes(),
+                "trajectory_timesteps_shape": list(trajectory_timesteps.shape),
+                "trajectory_timesteps_dtype": str(trajectory_timesteps.dtype),
+            })
+        else:
+            record.update({
+                "trajectory_timesteps_bytes": b"",
+                "trajectory_timesteps_shape": [],
+                "trajectory_timesteps_dtype": "",
             })
 
         if extra_features and "pil_image" in extra_features:
