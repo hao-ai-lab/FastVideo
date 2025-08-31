@@ -18,10 +18,10 @@ from fastvideo.pipelines import TrainingBatch
 from fastvideo.training.distillation_pipeline import DistillationPipeline
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
-    pred_noise_to_pred_video,
     EMA_FSDP,
     save_distillation_checkpoint,
 )
+from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.distributed import get_world_group
 import torch.distributed as dist
 import numpy as np

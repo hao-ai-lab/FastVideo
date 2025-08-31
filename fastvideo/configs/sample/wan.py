@@ -148,5 +148,4 @@ class Wan2_2_I2V_A14B_SamplingParam(Wan2_2_Base_SamplingParam):
 # =============================================
 @dataclass
 class SelfForcingWanT2V480PConfig(WanT2V_1_3B_SamplingParam):
-    num_frames_per_block: int = 3
-    sliding_window_num_frames: int = 21
+    pass
