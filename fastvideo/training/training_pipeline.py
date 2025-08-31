@@ -607,14 +607,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         validation_dataloader = DataLoader(validation_dataset,
                                            batch_size=None,
                                            num_workers=0)
-        num_trainable_generator = count_trainable(self.transformer)
-        num_trainable_critic = count_trainable(self.fake_score_transformer)
-        logger.info(
-            "rank: %s: num_trainable_generator: %s, num_trainable_critic: %s",
-            self.global_rank,
-            num_trainable_generator,
-            num_trainable_critic,
-            local_main_process_only=False)
         transformer.eval()
 
         validation_steps = training_args.validation_sampling_steps.split(",")
