@@ -64,7 +64,7 @@ training_args=(
   --enable_gradient_checkpointing_type "full"
   --log_visualization
   --simulate_generator_forward
-  --num_frame_per_block 3
+  --num_frame_per_block 4
   --enable_gradient_masking
   --gradient_mask_last_n_frames 21
 )

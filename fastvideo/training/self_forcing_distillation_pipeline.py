@@ -135,7 +135,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         # Step 5: Forward pass with KV cache if available
         if hasattr(self.transformer, '_forward_inference'):
             # Use causal inference forward with KV cache
-            pred_noise = self.transformer._forward_inference(
+            pred_noise = self.transformer(
                 hidden_states=training_batch.input_kwargs['hidden_states'],
                 encoder_hidden_states=training_batch.input_kwargs['encoder_hidden_states'],
                 timestep=training_batch.input_kwargs['timestep'],
@@ -219,76 +219,117 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 num_early_blocks = start_gradient_frame_index // num_frame_per_block
                 gradient_mask[:, :num_early_blocks * num_frame_per_block] = False
 
-        # Step 5: Multi-step simulation with KV cache management
-        current_start_frame = 0
+        # Step 5: Multi-step simulation with causal block processing
+        # Get num_frames_per_block from transformer config like causal_denoising.py
+        num_frames_per_block = getattr(self.training_args, 'num_frame_per_block', 4)
+        
+        t = num_frames
+        if not independent_first_frame or (independent_first_frame and hasattr(training_batch, 'image_latent') and training_batch.image_latent is not None):
+            if t % num_frames_per_block != 0:
+                raise ValueError(
+                    "num_frames must be divisible by num_frames_per_block for causal DMD denoising"
+                )
+            num_blocks = t // num_frames_per_block
+            block_sizes = [num_frames_per_block] * num_blocks
+        else:
+            if (t - 1) % num_frames_per_block != 0:
+                raise ValueError(
+                    "(num_frames - 1) must be divisible by num_frame_per_block when independent_first_frame=True"
+                )
+            num_blocks = (t - 1) // num_frames_per_block
+            block_sizes = [1] + [num_frames_per_block] * num_blocks
+
         max_target_idx = len(self.denoising_step_list) - 1
         noise_latents = []
         noise_latent_index = target_timestep_idx_int - 1
         
         if max_target_idx > 0:
-            # Run student model for all steps before the target timestep
+            # Run student model for all steps before the target timestep with causal blocks
             with torch.no_grad():
-                for step_idx in range(max_target_idx):
-                    current_timestep = self.denoising_step_list[step_idx]
-                    current_timestep_tensor = current_timestep * torch.ones(
-                        1, device=self.device, dtype=torch.long)
+                start_index = 0
+                current_start_frame = 0
+                
+                # Process each causal block
+                for current_num_frames in block_sizes:
+                    # Extract current block from the full latents
+                    block_latents = current_noise_latents[:, start_index:start_index + current_num_frames, :, :, :]
                     
-                    # Build input kwargs with KV cache support
-                    training_batch_temp = self._build_distill_input_kwargs(
-                        current_noise_latents, current_timestep_tensor,
-                        training_batch.conditional_dict, training_batch)
-                    
-                    # Add KV cache parameters for causal generation
-                    if hasattr(self.transformer, '_forward_inference'):
-                        # Use causal inference forward with KV cache
-                        pred_flow = self.transformer._forward_inference(
-                            hidden_states=training_batch_temp.input_kwargs['hidden_states'],
-                            encoder_hidden_states=training_batch_temp.input_kwargs['encoder_hidden_states'],
-                            timestep=training_batch_temp.input_kwargs['timestep'],
-                            encoder_hidden_states_image=training_batch_temp.input_kwargs.get('encoder_hidden_states_image'),
-                            kv_cache=kv_cache,
-                            crossattn_cache=crossattn_cache,
-                            current_start=current_start_frame * 1560,  # frame_seq_length = 1560
-                            cache_start=0
-                        ).permute(0, 2, 1, 3, 4)
-                    else:
-                        # Fallback to regular forward
-                        pred_flow = self.transformer(**training_batch_temp.input_kwargs).permute(0, 2, 1, 3, 4)
-                    
-                    pred_clean = pred_noise_to_pred_video(
-                        pred_noise=pred_flow.flatten(0, 1),
-                        noise_input_latent=current_noise_latents.flatten(0, 1),
-                        timestep=current_timestep_tensor,
-                        scheduler=self.noise_scheduler).unflatten(
-                            0, pred_flow.shape[:2])
+                    # Process denoising timesteps for this block
+                    for step_idx in range(max_target_idx):
+                        current_timestep = self.denoising_step_list[step_idx]
+                        current_timestep_tensor = current_timestep * torch.ones(
+                            1, device=self.device, dtype=torch.long)
+                        
+                        # Build input kwargs with KV cache support for this block
+                        training_batch_temp = self._build_distill_input_kwargs(
+                            block_latents, current_timestep_tensor,
+                            training_batch.conditional_dict, training_batch)
+                        
+                        # Add KV cache parameters for causal generation
+                        if hasattr(self.transformer, '_forward_inference'):
+                            # Use causal inference forward with KV cache
+                            pred_flow = self.transformer(
+                                hidden_states=training_batch_temp.input_kwargs['hidden_states'],
+                                encoder_hidden_states=training_batch_temp.input_kwargs['encoder_hidden_states'],
+                                timestep=training_batch_temp.input_kwargs['timestep'],
+                                encoder_hidden_states_image=training_batch_temp.input_kwargs.get('encoder_hidden_states_image'),
+                                kv_cache=kv_cache,
+                                crossattn_cache=crossattn_cache,
+                                current_start=current_start_frame * 1560,  # TODO: remove hardcode
+                                cache_start=0
+                            ).permute(0, 2, 1, 3, 4)
+                        else:
+                            # Fallback to regular forward
+                            pred_flow = self.transformer(**training_batch_temp.input_kwargs).permute(0, 2, 1, 3, 4)
+                        
+                        pred_clean = pred_noise_to_pred_video(
+                            pred_noise=pred_flow.flatten(0, 1),
+                            noise_input_latent=block_latents.flatten(0, 1),
+                            timestep=current_timestep_tensor,
+                            scheduler=self.noise_scheduler).unflatten(
+                                0, pred_flow.shape[:2])
 
-                    # Add noise for the next timestep
-                    next_timestep = self.denoising_step_list[step_idx + 1]
-                    next_timestep_tensor = next_timestep * torch.ones(
-                        1, device=self.device, dtype=torch.long)
-                    noise = torch.randn(self.video_latent_shape,
-                                        device=self.device,
-                                        dtype=pred_clean.dtype)
-                    if self.sp_world_size > 1:
-                        noise = rearrange(noise,
-                                          "b (n t) c h w -> b n t c h w",
-                                          n=self.sp_world_size).contiguous()
-                        noise = noise[:, self.rank_in_sp_group, :, :, :, :]
-                    current_noise_latents = self.noise_scheduler.add_noise(
-                        pred_clean.flatten(0, 1), noise.flatten(0, 1),
-                        next_timestep_tensor).unflatten(0, pred_clean.shape[:2])
-                    latent_copy = current_noise_latents.clone()
+                        # Add noise for the next timestep
+                        if step_idx < max_target_idx - 1:
+                            next_timestep = self.denoising_step_list[step_idx + 1]
+                            next_timestep_tensor = next_timestep * torch.ones(
+                                1, device=self.device, dtype=torch.long)
+                            
+                            # Generate noise for this block size
+                            block_noise_shape = (batch_size, current_num_frames, *self.video_latent_shape[2:])
+                            noise = torch.randn(block_noise_shape,
+                                              device=self.device,
+                                              dtype=pred_clean.dtype)
+                            if self.sp_world_size > 1:
+                                noise = rearrange(noise,
+                                                "b (n t) c h w -> b n t c h w",
+                                                n=self.sp_world_size).contiguous()
+                                noise = noise[:, self.rank_in_sp_group, :, :, :, :]
+                            block_latents = self.noise_scheduler.add_noise(
+                                pred_clean.flatten(0, 1), noise.flatten(0, 1),
+                                next_timestep_tensor).unflatten(0, pred_clean.shape[:2])
+                        else:
+                            # Final step: use clean prediction
+                            block_latents = pred_clean
+                    
+                    # Store the processed block result
+                    latent_copy = block_latents.clone()
                     noise_latents.append(latent_copy)
                     
-                    # Update current frame position for KV cache
-                    current_start_frame += current_noise_latents.shape[1]
+                    # Update indices for next block
+                    current_start_frame += current_num_frames
+                    start_index += current_num_frames
+                
+                # Reconstruct full latents from blocks
+                if noise_latents:
+                    current_noise_latents = torch.cat(noise_latents, dim=1)
 
         # Step 6: Use the simulated noisy input for the final training step
         if noise_latent_index >= 0:
             assert noise_latent_index < len(
                 self.denoising_step_list
             ) - 1, "noise_latent_index is out of bounds"
-            noisy_input = noise_latents[noise_latent_index]
+            noisy_input = current_noise_latents
         else:
             noisy_input = current_noise_latents_copy
 
@@ -337,7 +378,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             training_batch.dmd_latent_vis_dict["start_gradient_frame_index"] = torch.tensor(
                 start_gradient_frame_index, dtype=torch.float32, device=self.device)
         
-        # Clean up caches to prevent memory leaks
         self._reset_simulation_caches(kv_cache, crossattn_cache)
         
         return pred_video
@@ -375,15 +415,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             attention_head_dim = getattr(self.transformer, 'attention_head_dim', 128)
             text_len = getattr(self.transformer, 'text_len', 512)
         
-        # Initialize KV cache with proper size calculation
+        num_max_frames = getattr(self.training_args, "num_frames", num_frames)
+        kv_cache_size = num_max_frames * frame_seq_length
+
         kv_cache = []
-        if local_attn_size != -1:
-            # Use frame_seq_length directly as the cache size per frame
-            kv_cache_size = frame_seq_length
-        else:
-            # Default cache size should be large enough for the sequence
-            kv_cache_size = max(32760, frame_seq_length)
-            
         for _ in range(num_transformer_blocks):
             kv_cache.append({
                 "k": torch.zeros([batch_size, kv_cache_size, num_attention_heads, attention_head_dim], dtype=dtype, device=device),
