@@ -44,8 +44,8 @@ GENERATOR_MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
 REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"  # Teacher model
 FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Critic model
 
-DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
-VALIDATION_DATASET_FILE="examples/distill/SFWan2.1-I2V/validation.json"
+DATA_DIR="data/crush-smol-single_processed_t2v/combined_parquet_dataset/"
+VALIDATION_DATASET_FILE="data/crush-smol-single_processed_t2v/validation.json"
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
@@ -53,7 +53,7 @@ VALIDATION_DATASET_FILE="examples/distill/SFWan2.1-I2V/validation.json"
 training_args=(
   --tracker_project_name SFwan_t2v_distill_self_forcing_dmd
   --output_dir "checkpoints/SFwan_t2v_finetune"
-  --max_train_steps 4000
+  --max_train_steps 500
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
@@ -64,7 +64,7 @@ training_args=(
   --enable_gradient_checkpointing_type "full"
   --log_visualization
   --simulate_generator_forward
-  --num_frame_per_block 4
+  --num_frame_per_block 3
   --enable_gradient_masking
   --gradient_mask_last_n_frames 21
 )
@@ -97,17 +97,17 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 200
-  --validation_sampling_steps "3"
+  --validation_steps 10
+  --validation_sampling_steps "1"
   --validation_guidance_scale "6.0" # not used for dmd inference
 )
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 2e-6
+  --learning_rate 1e-5
   --mixed_precision "bf16"
-  --training_state_checkpointing_steps 500
-  --weight_only_checkpointing_steps 500
+  --training_state_checkpointing_steps 50
+  --weight_only_checkpointing_steps 50
   --weight_decay 0.01
   --betas '0.0,0.999'
   --max_grad_norm 1.0
@@ -121,10 +121,10 @@ miscellaneous_args=(
   --dit_precision "fp32"
   --flow_shift 5
   --seed 1000
-  --use_ema True
-  --ema_decay 0.99
-  --ema_start_step 200
-  --init_weights_from_safetensors "/mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors"
+  # --use_ema True
+  # --ema_decay 0.99
+  # --ema_start_step 200
+  # --init_weights_from_safetensors "/mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors"
 )
 
 # Self-forcing DMD arguments
@@ -134,7 +134,7 @@ dmd_args=(
   --max_timestep_ratio 0.98
   --dfake_gen_update_ratio 5
   --real_score_guidance_scale 3.0
-  --fake_score_learning_rate 4e-7
+  --fake_score_learning_rate 8e-6
   --fake_score_betas '0.0,0.999'
 )
 
