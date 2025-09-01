@@ -29,6 +29,9 @@ import torch
 
 from fastvideo.distributed.parallel_state import get_sp_group
 from fastvideo.layers.custom_op import CustomOp
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 def _rotate_neox(x: torch.Tensor) -> torch.Tensor:
@@ -267,6 +270,7 @@ def get_nd_rotary_pos_embed(
     sp_rank: int = 0,
     sp_world_size: int = 1,
     dtype: torch.dtype = torch.float32,
+    start_frame: int = 0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     This is a n-d version of precompute_freqs_cis, which is a RoPE for tokens with n-d structure.
@@ -291,6 +295,9 @@ def get_nd_rotary_pos_embed(
     # Get the full grid
     full_grid = get_meshgrid_nd(
         start, *args, dim=len(rope_dim_list))  # [3, W, H, D] / [2, W, H]
+
+    if start_frame > 0:
+        full_grid[0] += start_frame
 
     # Shard the grid if using sequence parallelism (sp_world_size > 1)
     assert shard_dim < len(
@@ -370,6 +377,7 @@ def get_rotary_pos_embed(
     interpolation_factor=1.0,
     shard_dim: int = 0,
     dtype: torch.dtype = torch.float32,
+    start_frame: int = 0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Generate rotary positional embeddings for the given sizes.
@@ -413,6 +421,7 @@ def get_rotary_pos_embed(
         sp_rank=sp_rank,
         sp_world_size=sp_world_size,
         dtype=dtype,
+        start_frame=start_frame,
     )
     return freqs_cos, freqs_sin
 

@@ -1,7 +1,7 @@
 import os
 import subprocess
 
-from csrc.attn.config_sta import kernels, sources, target
+from config_sta import kernels, sources, target
 from setuptools import find_packages, setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
@@ -9,7 +9,7 @@ target = target.lower()
 
 # Package metadata
 PACKAGE_NAME = "st_attn"
-VERSION = "0.0.4"
+VERSION = "0.0.6"
 AUTHOR = "Hao AI Lab"
 DESCRIPTION = "Sliding Tile Atteniton Kernel Used in FastVideo"
 URL = "https://github.com/hao-ai-lab/FastVideo/tree/main/csrc/sliding_tile_attention"

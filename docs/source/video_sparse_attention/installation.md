@@ -4,8 +4,7 @@
 You can install the Video Sparse Attention package using
 
 ```bash
-git submodule update --init --recursive
-python setup_vsa.py install
+pip install vsa
 ```
 
 # Building from Source
@@ -34,9 +33,9 @@ export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 Install VSA:
 
 ```bash
-cd csrc/attn/
+cd csrc/attn/video_sparse_attn/
 git submodule update --init --recursive
-python setup_vsa.py install
+python setup.py install
 ```
 
 # 🧪 Test

@@ -1,37 +1,36 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Wan video diffusion pipeline implementation.
+Wan causal DMD pipeline implementation.
 
-This module contains an implementation of the Wan video diffusion pipeline
-using the modular pipeline architecture.
+This module wires the causal DMD denoising stage into the modular pipeline.
 """
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
-    FlowUniPCMultistepScheduler)
+from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
+    FlowMatchEulerDiscreteScheduler)
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
+
+# isort: off
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
-                                        DenoisingStage, InputValidationStage,
+                                        CausalDMDDenosingStage,
+                                        InputValidationStage,
                                         LatentPreparationStage,
                                         TextEncodingStage,
                                         TimestepPreparationStage)
+# isort: on
 
 logger = init_logger(__name__)
 
 
-class WanPipeline(LoRAPipeline, ComposedPipelineBase):
-    """
-    Wan video diffusion pipeline with LoRA support.
-    """
+class WanCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
 
     _required_config_modules = [
         "text_encoder", "tokenizer", "vae", "transformer", "scheduler"
     ]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        # We use UniPCMScheduler from Wan2.1 official repo, not the one in diffusers.
-        self.modules["scheduler"] = FlowUniPCMultistepScheduler(
+        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
             shift=fastvideo_args.pipeline_config.flow_shift)
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
@@ -59,16 +58,12 @@ class WanPipeline(LoRAPipeline, ComposedPipelineBase):
                            transformer=self.get_module("transformer", None)))
 
         self.add_stage(stage_name="denoising_stage",
-                       stage=DenoisingStage(
+                       stage=CausalDMDDenosingStage(
                            transformer=self.get_module("transformer"),
-                           transformer_2=self.get_module("transformer_2", None),
-                           scheduler=self.get_module("scheduler"),
-                           vae=self.get_module("vae"),
-                           pipeline=self))
+                           scheduler=self.get_module("scheduler")))
 
         self.add_stage(stage_name="decoding_stage",
-                       stage=DecodingStage(vae=self.get_module("vae"),
-                                           pipeline=self))
+                       stage=DecodingStage(vae=self.get_module("vae")))
 
 
-EntryClass = WanPipeline
+EntryClass = WanCausalDMDPipeline

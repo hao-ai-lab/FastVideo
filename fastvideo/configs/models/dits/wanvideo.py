@@ -92,6 +92,12 @@ class WanVideoArchConfig(DiTArchConfig):
     pos_embed_seq_len: int | None = None
     exclude_lora_layers: list[str] = field(default_factory=lambda: ["embedder"])
 
+    # Causal Wan
+    local_attn_size: int = -1  # Window size for temporal local attention (-1 indicates global attention)
+    sink_size: int = 0  # Size of the attention sink, we keep the first `sink_size` frames unchanged when rolling the KV cache
+    num_frames_per_block: int = 3
+    sliding_window_num_frames: int = 21
+
     def __post_init__(self):
         super().__post_init__()
         self.out_channels = self.out_channels or self.in_channels

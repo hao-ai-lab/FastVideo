@@ -58,15 +58,15 @@ RUN source $HOME/.local/bin/env && \
 # Install STA (Sliding Tile Attention)
 RUN source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
-    cd csrc/attn && \
+    cd csrc/attn/sliding_tile_attn && \
     git submodule update --init --recursive && \
-    python setup_sta.py install
+    python setup.py install
 
 # Install VSA 
 RUN source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
-    cd csrc/attn && \
+    cd csrc/attn/video_sparse_attn && \
     git submodule update --init --recursive && \
-    python setup_vsa.py install
+    python setup.py install
 
 EXPOSE 22

@@ -1,18 +1,20 @@
 
-
 # Attention Kernel Used in FastVideo
 
-
-
-## Video Sparse Attention (VSA)
+## Sliding Tile Attention (STA)
+We only support H100 for STA.
 
 ### Installation
-We support H100 (via TK) and any other GPU (via triton) for VSA.
+```bash
+pip install st_attn
+``` 
+
+Install from source:
+
 ```bash
 git submodule update --init --recursive
-python setup_vsa.py install
+python setup.py install
 ```
-
 
 If you encounter error during installation, try below:
 Install C++20 for ThunderKittens:
@@ -31,34 +33,6 @@ export CUDA_HOME=/usr/local/cuda-12.8
 export PATH=${CUDA_HOME}/bin:${PATH} 
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 ```
-
-### Verify if you have successfully installed
-
-```bash
-# test numerical
-python tests/test_vsa.py
-# (For H100) test speed
-python benchmarks/bench_vsa_hopper.py
-```
-bench_vsa_hopper.py should print something like this:
-```bash
-Using topk=76 kv blocks per q block (out of 768 total kv blocks)
-
-=== BLOCK SPARSE ATTENTION BENCHMARK ===
-Block Sparse Forward  - TFLOPS: 5622.26
-Block Sparse Backward - TFLOPS: 3865.68
-```
-
-
-## Sliding Tile Attention (STA)
-We only support H100 for STA.
-```bash
-git submodule update --init --recursive
-python setup_sta.py install
-```
-
-
-
 
 ###  Usage
 End-2-end inference with FastVideo:
@@ -83,12 +57,12 @@ out = sliding_tile_attention(q, k, v, window_size, 0, False)
 
 ### Test
 ```bash
-python tests/test_sta.py # test STA
-python tests/test_vsa.py # test VSA
+python ../tests/test_sta.py # test STA
+python ../tests/test_vsa.py # test VSA
 ```
 ### Benchmark
 ```bash
-python benchmarks/bench_sta.py
+python ../benchmarks/bench_sta.py
 ```
 
 
@@ -105,7 +79,7 @@ STA removes mixed blocks.
 
 
 <div align="center">
-<img src=../../assets/sliding_tile_attn_map.png width="80%"/>
+<img src=../../../assets/sliding_tile_attn_map.png width="80%"/>
 </div>
 
 ## Acknowledgement

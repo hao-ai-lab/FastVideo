@@ -7,6 +7,7 @@ complete diffusion pipelines.
 """
 
 from fastvideo.pipelines.stages.base import PipelineStage
+from fastvideo.pipelines.stages.causal_denoising import CausalDMDDenosingStage
 from fastvideo.pipelines.stages.conditioning import ConditioningStage
 from fastvideo.pipelines.stages.decoding import DecodingStage
 from fastvideo.pipelines.stages.denoising import (DenoisingStage,
@@ -30,6 +31,7 @@ __all__ = [
     "ConditioningStage",
     "DenoisingStage",
     "DmdDenoisingStage",
+    "CausalDMDDenosingStage",
     "EncodingStage",
     "DecodingStage",
     "ImageEncodingStage",
