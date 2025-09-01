@@ -152,7 +152,7 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         t = traj_timesteps[batch_indices, nearest_idx]  # [B]
 
         # Scale model input as in inference for consistency with stored trajectories
-        # scaled_latents = self.modules["scheduler"].scale_model_input(current_latents, t)
+        noisy_input = self.modules["scheduler"].scale_model_input(noisy_input, t)
 
         # Prepare inputs for transformer
         input_kwargs = {
@@ -169,6 +169,16 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             noise_pred = self.transformer(**input_kwargs)
         if isinstance(noise_pred, (tuple, list)):
             noise_pred = noise_pred[0]
+
+        from fastvideo.models.utils import pred_noise_to_pred_video
+        noise_pred = pred_noise_to_pred_video(
+            pred_noise=noise_pred.flatten(0, 1),
+            noise_input_latent=noisy_input.flatten(0, 1),
+            timestep=t,
+            scheduler=self.modules["scheduler"]).unflatten(
+                0, noise_pred.shape[:2])
+
+        # noisy_input = pred_noise_to_pred_video(noise_pred, noisy_input, t, self.modules["scheduler"])
         # next_latent_pred = self.modules["scheduler"].step(
         #     noise_pred, t, current_latents, return_dict=False)[0]
         return noise_pred, target_latent, t

@@ -8,7 +8,7 @@ def main():
     # model.
     # If a local path is provided, FastVideo will make a best effort
     # attempt to identify the optimal arguments.
-    model_name = "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
+    model_name = "SFWan2.1-T2V-1.3B-Diffusers/snapshots/bd804886ec4fe04fcc5a3fe17644428b9cee94c0/"
     generator = VideoGenerator.from_pretrained(
         model_name,
         # FastVideo will automatically handle distributed setup
@@ -19,6 +19,7 @@ def main():
     )
 
     sampling_param = SamplingParam.from_pretrained(model_name)
+    sampling_param.num_frames = 81
 
     prompt = (
         "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "

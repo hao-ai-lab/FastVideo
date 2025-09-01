@@ -128,13 +128,17 @@ class DecodingStage(PipelineStage):
         # decode trajectory latents if needed
         if batch.return_trajectory_decoded:
             batch.trajectory_decoded = []
+            logger.info(f"batch.trajectory_latents.shape: {batch.trajectory_latents.shape}")
             assert batch.trajectory_latents is not None, "batch should have trajectory latents"
-            for timestep, latent in batch.trajectory_latents:
+            for idx in range(batch.trajectory_latents.shape[1]):
+                # bathc.trajectory_latents is [batch_size, timesteps, channels, frames, height, width]
+                cur_latent = batch.trajectory_latents[:, idx, :, :, :, :]
+                logger.info(f"cur_latent.shape: {cur_latent.shape}")
+                cur_timestep = batch.trajectory_timesteps[idx]
                 logger.info(
-                    f"decoding trajectory latent for timestep: {timestep}")
-                decoded_latent = self.decode(latent, fastvideo_args)
-                batch.trajectory_decoded.append(
-                    (timestep, decoded_latent.cpu().float()))
+                    f"decoding trajectory latent for timestep: {cur_timestep}")
+                decoded_frames = self.decode(cur_latent, fastvideo_args)
+                batch.trajectory_decoded.append(decoded_frames.cpu().float())
 
         # Convert to CPU float32 for compatibility
         frames = frames.cpu().float()

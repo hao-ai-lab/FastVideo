@@ -135,8 +135,8 @@ _self_forcing_to_diffusers_param_names_mapping: dict = {
     r"blocks.\1.norm2.\2",
 }
 
-state_dict = load_state_dict_from_file("checkpoints/self_forcing_dmd.pt")
-state_dict = state_dict["generator_ema"]
+state_dict = load_state_dict_from_file("checkpoints/ode_init.pt")
+state_dict = state_dict["generator"]
 new_state_dict = OrderedDict()
 for k, v in state_dict.items():
     new_key = k
@@ -156,6 +156,6 @@ del state_dict
 
 save_torch_state_dict(
     new_state_dict,
-    "new2/",
+    "ode_init_diffusers/",
     max_shard_size="10GB"
 )

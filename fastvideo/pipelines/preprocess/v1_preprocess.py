@@ -26,7 +26,7 @@ def main(args) -> None:
     pipeline_config = PipelineConfig.from_pretrained(args.model_path)
     kwargs = {
         "vae_precision": "fp32",
-        "vae_config": WanVAEConfig(load_encoder=True, load_decoder=False),
+        "vae_config": WanVAEConfig(load_encoder=True, load_decoder=True),
     }
     pipeline_config.update_config_from_dict(kwargs)
     fastvideo_args = FastVideoArgs(

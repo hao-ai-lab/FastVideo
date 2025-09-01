@@ -26,7 +26,7 @@ from fastvideo.dataset.dataloader.schema import pyarrow_schema_ode_trajectory
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.utils import shallow_asdict
+from fastvideo.utils import shallow_asdict, save_decoded_latents_as_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (
     BasePreprocessPipeline)
@@ -34,7 +34,8 @@ from fastvideo.pipelines.stages import (DenoisingStage, ImageVAEEncodingStage,
                                         InputValidationStage,
                                         LatentPreparationStage,
                                         TextEncodingStage,
-                                        TimestepPreparationStage)
+                                        TimestepPreparationStage,
+                                        DecodingStage)
 
 logger = init_logger(__name__)
 
@@ -78,6 +79,8 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                            scheduler=self.get_module("scheduler"),
                            pipeline=self,
                        ))
+        self.add_stage(stage_name="decoding_stage",
+                       stage=DecodingStage(vae=self.get_module("vae")))
 
     def preprocess_video_and_text_and_trajectory(self,
                                                  fastvideo_args: FastVideoArgs,
@@ -121,37 +124,34 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     valid_data, fastvideo_args)
 
                 batch_captions = valid_data["text"]
-                # for i in range(len(batch_captions)):
-                #     caption = batch_captions[i]
-                #     logger.info(f"===== batch_captions: {caption}")
-                batch = ForwardBatch(
-                    data_type="video",
-                    prompt=batch_captions,
-                    prompt_embeds=[],
-                    prompt_attention_mask=[],
+                # Encode text using the standalone TextEncodingStage API
+                prompt_embeds_list, prompt_masks_list = self.prompt_encoding_stage.encode_text(
+                    batch_captions,
+                    fastvideo_args,
+                    encoder_index=[0],
+                    return_attention_mask=True,
                 )
-                assert hasattr(self, "prompt_encoding_stage")
-                result_batch = self.prompt_encoding_stage(batch, fastvideo_args)
-                prompt_embeds, prompt_attention_mask = result_batch.prompt_embeds[
-                    0], result_batch.prompt_attention_mask[0]
-                assert prompt_embeds.shape[0] == prompt_attention_mask.shape[0]
+                prompt_embeds = prompt_embeds_list[0]
+                prompt_attention_masks = prompt_masks_list[0]
+                assert prompt_embeds.shape[0] == prompt_attention_masks.shape[0]
 
-                # Get sequence lengths from attention masks (number of 1s)
-                seq_lens = prompt_attention_mask.sum(dim=1)
+                # # Get sequence lengths from attention masks (number of 1s)
+                # seq_lens = prompt_attention_mask.sum(dim=1)
 
-                non_padded_embeds = []
-                non_padded_masks = []
+                # non_padded_embeds = []
+                # non_padded_masks = []
 
-                # Process each item in the batch
-                for i in range(prompt_embeds.size(0)):
-                    seq_len = seq_lens[i].item()
-                    # Slice the embeddings and masks to keep only non-padding parts
-                    non_padded_embeds.append(prompt_embeds[i, :seq_len])
-                    non_padded_masks.append(prompt_attention_mask[i, :seq_len])
+                # # Process each item in the batch
+                # for i in range(prompt_embeds.size(0)):
+                #     seq_len = seq_lens[i].item()
+                #     # Slice the embeddings and masks to keep only non-padding parts
+                #     non_padded_embeds.append(prompt_embeds[i, :seq_len])
+                #     non_padded_masks.append(prompt_attention_mask[i, :seq_len])
 
                 # Update the tensors with non-padded versions
-                prompt_embeds = non_padded_embeds
-                prompt_attention_masks = non_padded_masks
+                # prompt_embeds = non_padded_embeds
+                # prompt_attention_masks = non_padded_masks
+                # prompt_embeds = prompt_embeds
 
                 # logger.info(f"===== prompt_embeds: {prompt_embeds[0].shape}")
                 # logger.info(f"===== prompt_attention_masks: {prompt_attention_masks[0].shape}")
@@ -159,8 +159,23 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                 sampling_params = SamplingParam.from_pretrained(
                     args.model_path)
 
+                # encode negative prompt for trajectory collection
+                if sampling_params.guidance_scale > 1 and sampling_params.negative_prompt is not None:
+                    negative_prompt_embeds_list, negative_prompt_masks_list = self.prompt_encoding_stage.encode_text(
+                        sampling_params.negative_prompt,
+                        fastvideo_args,
+                        encoder_index=[0],
+                        return_attention_mask=True,
+                    )
+                    negative_prompt_embed = negative_prompt_embeds_list[0][0]
+                    negative_prompt_attention_mask = negative_prompt_masks_list[0][0]
+                else:
+                    negative_prompt_embed = None
+                    negative_prompt_attention_mask = None
+
                 trajectory_latents = []
                 trajectory_timesteps = []
+                trajectory_decoded = []
                 for i, (prompt_embed, prompt_attention_mask) in enumerate(zip(prompt_embeds, prompt_attention_masks)):
                     prompt_embed = prompt_embed.unsqueeze(0)
                     prompt_attention_mask = prompt_attention_mask.unsqueeze(0)
@@ -185,7 +200,10 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     )
                     batch.prompt_embeds = [prompt_embed]
                     batch.prompt_attention_mask = [prompt_attention_mask]
+                    batch.negative_prompt_embeds = [negative_prompt_embed]
+                    batch.negative_attention_mask = [negative_prompt_attention_mask]
                     batch.return_trajectory_latents = True
+                    batch.return_trajectory_decoded = False
                     batch.height = args.max_height
                     batch.width = args.max_width
                     # batch.num_frames = 81
@@ -204,9 +222,11 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                         result_batch, fastvideo_args)
                     result_batch = self.denoising_stage(result_batch,
                                                         fastvideo_args)
+                    result_batch = self.decoding_stage(result_batch, fastvideo_args)
                     # trajectory_latents = result_batch.trajectory_latents
                     trajectory_latents.append(result_batch.trajectory_latents.cpu())
                     trajectory_timesteps.append(result_batch.trajectory_timesteps.cpu())
+                    trajectory_decoded.append(result_batch.trajectory_decoded)
 
             extra_features["trajectory_latents"] = trajectory_latents
             extra_features["trajectory_timesteps"] = trajectory_timesteps
@@ -214,6 +234,13 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
             logger.info(f"===== trajectory_latents len: {len(trajectory_latents)}")
             logger.info(f"===== trajectory_timesteps: {trajectory_timesteps}")
             logger.info(f"===== trajectory_timesteps len: {len(trajectory_timesteps)}")
+
+            if batch.return_trajectory_decoded:
+                logger.info(f"===== SAVING TRAJECTORY DECODED")
+                for i, decoded_frames in enumerate(trajectory_decoded):
+                    for j, decoded_frame in enumerate(decoded_frames):
+                        logger.info(f"===== SAVING TRAJECTORY DECODED {i} for prompt {batch_captions[i]}")
+                        save_decoded_latents_as_video(decoded_frame, f"decoded_videos/trajectory_decoded_{i}_{j}.mp4", args.train_fps)
             # assert False
             # Prepare batch data for Parquet dataset
             batch_data = []
@@ -344,39 +371,6 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
             latent = self.vae_encoding_stage.encode_image(
                 frame, height, width, fastvideo_args, generator)
             video_conditions.append(latent)
-
-            # processed_img = frame.to(device="cpu", dtype=torch.float32)
-            # processed_img = processed_img.unsqueeze(0).permute(0, 3, 1,
-            #                                                    2).unsqueeze(2)
-            # # (B, H, W, C) -> (B, C, 1, H, W)
-            # video_condition = processed_img.unsqueeze(2)
-            # video_condition = video_condition.to(
-            #     device=get_local_torch_device(), dtype=torch.float32)
-            # video_conditions.append(video_condition)
-
-        # video_conditions = torch.cat(video_conditions, dim=0)
-
-        # with torch.autocast(device_type="cuda",
-        #                     dtype=torch.float32,
-        #                     enabled=True):
-        #     encoder_outputs = self.get_module("vae").encode(video_conditions)
-
-        # latent_condition = encoder_outputs.mean
-        # if (hasattr(self.get_module("vae"), "shift_factor")
-        #         and self.get_module("vae").shift_factor is not None):
-        #     if isinstance(self.get_module("vae").shift_factor, torch.Tensor):
-        #         latent_condition -= self.get_module("vae").shift_factor.to(
-        #             latent_condition.device, latent_condition.dtype)
-        #     else:
-        #         latent_condition -= self.get_module("vae").shift_factor
-
-        # if isinstance(self.get_module("vae").scaling_factor, torch.Tensor):
-        #     latent_condition = latent_condition * self.get_module(
-        #         "vae").scaling_factor.to(latent_condition.device,
-        #                                  latent_condition.dtype)
-        # else:
-        #     latent_condition = latent_condition * self.get_module(
-        #         "vae").scaling_factor
 
         features["image_condition_latents"] = video_conditions
         features["pil_images"] = pil_images
