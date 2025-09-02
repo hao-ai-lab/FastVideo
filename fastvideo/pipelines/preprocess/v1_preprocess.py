@@ -42,6 +42,7 @@ def main(args) -> None:
     elif args.preprocess_task == "i2v":
         PreprocessPipeline = PreprocessPipeline_I2V
     elif args.preprocess_task == "ode_trajectory":
+        print("Preprocess pipeline...")
         PreprocessPipeline = PreprocessPipeline_ODE_Trajectory
     else:
         raise ValueError(f"Invalid preprocess task: {args.preprocess_task}")
