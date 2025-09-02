@@ -30,7 +30,7 @@ cat > "$SINGLE_EXAMPLE_DIR/validation.json" << 'EOF'
         "num_inference_steps": 50,
         "height": 480,
         "width": 832,
-        "num_frames": 77
+        "num_frames": 81
       }
     ]
   }

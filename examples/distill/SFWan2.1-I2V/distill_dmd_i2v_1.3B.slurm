@@ -98,7 +98,7 @@ validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
   --validation_steps 10
-  --validation_sampling_steps "1"
+  --validation_sampling_steps "4"
   --validation_guidance_scale "6.0" # not used for dmd inference
 )
 
@@ -121,10 +121,10 @@ miscellaneous_args=(
   --dit_precision "fp32"
   --flow_shift 5
   --seed 1000
-  # --use_ema True
-  # --ema_decay 0.99
-  # --ema_start_step 200
-  # --init_weights_from_safetensors "/mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors"
+  --use_ema True
+  --ema_decay 0.99
+  --ema_start_step 100
+  --init_weights_from_safetensors "/mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors"
 )
 
 # Self-forcing DMD arguments

@@ -157,7 +157,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             timestep=timestep,
             scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
 
-        # Step 7: Clean up caches to prevent memory leaks
         self._reset_simulation_caches(kv_cache, crossattn_cache)
 
         return pred_video
@@ -200,7 +199,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         # Step 4: Determine gradient masking for frame-level selective training
         num_frames = current_noise_latents.shape[1]
-        num_frame_per_block = getattr(self.training_args, 'num_frame_per_block', 4)
+        num_frame_per_block = getattr(self.training_args, 'num_frame_per_block', 3)
         independent_first_frame = getattr(self.training_args, 'independent_first_frame', False)
         enable_gradient_masking = getattr(self.training_args, 'enable_gradient_masking', True)
         gradient_mask_last_n_frames = getattr(self.training_args, 'gradient_mask_last_n_frames', 21)
@@ -220,8 +219,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 gradient_mask[:, :num_early_blocks * num_frame_per_block] = False
 
         # Step 5: Multi-step simulation with causal block processing
-        # Get num_frames_per_block from transformer config like causal_denoising.py
-        num_frames_per_block = getattr(self.training_args, 'num_frame_per_block', 4)
+        num_frames_per_block = getattr(self.training_args, 'num_frame_per_block', 3)
         
         t = num_frames
         if not independent_first_frame or (independent_first_frame and hasattr(training_batch, 'image_latent') and training_batch.image_latent is not None):
@@ -384,7 +382,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
     def _initialize_simulation_caches(self, batch_size: int, dtype: torch.dtype, device: torch.device):
         """Initialize KV cache and cross-attention cache for multi-step simulation."""
-        # Get actual model parameters instead of hardcoded values
         num_transformer_blocks = len(self.transformer.blocks)
         
         # Calculate frame sequence length based on input dimensions and patch size
@@ -509,7 +506,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 batch.attn_metadata.VSA_sparsity = 0.0
             batches.append(batch)
 
-        # Initialize visualization dictionaries
         training_batch.dmd_latent_vis_dict = {}
         training_batch.fake_score_latent_vis_dict = {}
 
@@ -811,7 +807,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             progress_bar.update(1)
 
             if self.global_rank == 0:
-                # Prepare logging data
                 log_data = {
                     "train_total_loss": total_loss,
                     "train_fake_score_loss": fake_score_loss,
@@ -821,7 +816,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     "avg_step_time": avg_step_time,
                     "grad_norm": grad_norm,
                 }
-                # Only log generator loss when generator is actually trained
                 if (step % self.dfake_gen_update_ratio == 0):
                     log_data["train_generator_loss"] = generator_loss
                 if use_vsa:
@@ -850,12 +844,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
                 wandb.log(log_data, step=step)
 
-                # Add visualization during validation
                 if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                     if self.training_args.log_visualization:
                         self.visualize_intermediate_latents(training_batch, self.training_args, step)
 
-            # Save training state checkpoint (for resuming training)
             if (self.training_args.training_state_checkpointing_steps > 0
                     and step % self.training_args.training_state_checkpointing_steps == 0):
                 print("rank", self.global_rank,
@@ -872,7 +864,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     self.transformer.train()
                 self.sp_group.barrier()
 
-            # Save weight-only checkpoint
             if (self.training_args.weight_only_checkpointing_steps > 0
                     and step % self.training_args.weight_only_checkpointing_steps == 0):
                 print("rank", self.global_rank,
@@ -893,7 +884,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         wandb.finish()
 
-        # Save final training state checkpoint
         print("rank", self.global_rank,
               "save final training state checkpoint at step",
               self.training_args.max_train_steps)

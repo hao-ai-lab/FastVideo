@@ -14,7 +14,7 @@ torchrun --nproc_per_node=$GPU_NUM \
     --seed 42 \
     --max_height 480 \
     --max_width 832 \
-    --num_frames 77 \
+    --num_frames 81 \
     --dataloader_num_workers 0 \
     --output_dir=$OUTPUT_DIR \
     --train_fps 16 \
