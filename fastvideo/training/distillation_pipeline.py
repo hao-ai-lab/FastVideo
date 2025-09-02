@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import copy
 import gc
+import json
 import os
 import time
 from abc import abstractmethod
@@ -36,8 +37,9 @@ from fastvideo.training.activation_checkpoint import (
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases, get_scheduler,
-    load_distillation_checkpoint, pred_noise_to_pred_video,
+    load_distillation_checkpoint,
     save_distillation_checkpoint, shift_timestep, EMA_FSDP)
+from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.utils import is_vsa_available, maybe_download_model, set_random_seed, verify_model_config_and_directory
 
 import wandb  # isort: skip
@@ -1084,16 +1086,16 @@ class DistillationPipeline(TrainingPipeline):
                                                         latents.dtype)
                 else:
                     latents += self.vae.shift_factor
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                video = self.vae.decode(latents)
-            video = (video / 2 + 0.5).clamp(0, 1)
-            video = video.cpu().float()
-            video = video.permute(0, 2, 1, 3, 4)
-            video = (video * 255).numpy().astype(np.uint8)
-            wandb_loss_dict[latent_key] = wandb.Video(
-                video, fps=24, format="mp4")  # change to 16 for Wan2.1
-            # Clean up references
-            del video, latents
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    video = self.vae.decode(latents)
+                video = (video / 2 + 0.5).clamp(0, 1)
+                video = video.cpu().float()
+                video = video.permute(0, 2, 1, 3, 4)
+                video = (video * 255).numpy().astype(np.uint8)
+                wandb_loss_dict[latent_key] = wandb.Video(
+                    video, fps=24, format="mp4")  # change to 16 for Wan2.1
+                # Clean up references
+                del video, latents
 
         # Process DMD training data if available - use decode_stage instead of self.vae.decode
         if 'generator_pred_video' in dmd_latents_vis_dict:

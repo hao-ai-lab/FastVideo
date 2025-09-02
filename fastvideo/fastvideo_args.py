@@ -671,6 +671,7 @@ class TrainingArgs(FastVideoArgs):
 
     # distillation args
     generator_update_interval: int = 5
+    dfake_gen_update_ratio: int = 5  # self-forcing: how often to train generator vs critic
     min_timestep_ratio: float = 0.2
     max_timestep_ratio: float = 0.98
     real_score_guidance_scale: float = 3.5
@@ -682,6 +683,13 @@ class TrainingArgs(FastVideoArgs):
     log_visualization: bool = False
     # simulate generator forward to match inference
     simulate_generator_forward: bool = False
+    
+    # Self-forcing specific arguments
+    num_frame_per_block: int = 3
+    independent_first_frame: bool = False
+    enable_gradient_masking: bool = True
+    gradient_mask_last_n_frames: int = 21
+    validate_cache_structure: bool = False  # Debug flag for cache validation
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -1016,6 +1024,10 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             default=TrainingArgs.generator_update_interval,
                             help="Ratio of student updates to critic updates.")
+        parser.add_argument("--dfake-gen-update-ratio",
+                            type=int,
+                            default=TrainingArgs.dfake_gen_update_ratio,
+                            help="Self-forcing: How often to train generator vs critic (train generator every N steps).")
         parser.add_argument("--min-timestep-ratio",
                             type=float,
                             default=TrainingArgs.min_timestep_ratio,
@@ -1042,12 +1054,32 @@ class TrainingArgs(FastVideoArgs):
             default=TrainingArgs.fake_score_lr_scheduler,
             help="Learning rate scheduler for fake score transformer")
         parser.add_argument("--log-visualization",
-                            action=StoreBoolean,
-                            help="Whether to log visualization")
+                             action=StoreBoolean,
+                             help="Whether to log visualization")
         parser.add_argument(
             "--simulate-generator-forward",
             action=StoreBoolean,
             help="Whether to simulate generator forward to match inference")
+        
+        # Self-forcing specific arguments
+        parser.add_argument("--num-frame-per-block",
+                            type=int,
+                            default=TrainingArgs.num_frame_per_block,
+                            help="Number of frames per block for causal generation")
+        parser.add_argument("--independent-first-frame",
+                            action=StoreBoolean,
+                            help="Whether the first frame is independent in causal generation")
+        parser.add_argument("--enable-gradient-masking",
+                            action=StoreBoolean,
+                            help="Whether to enable frame-level gradient masking")
+        parser.add_argument("--gradient-mask-last-n-frames",
+                            type=int,
+                            default=TrainingArgs.gradient_mask_last_n_frames,
+                            help="Number of last frames to enable gradients for")
+        parser.add_argument(
+            "--validate-cache-structure",
+            action=StoreBoolean,
+            help="Whether to validate KV cache structure (debug flag)")
 
         return parser
 
