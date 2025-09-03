@@ -17,7 +17,9 @@ class DiTArchConfig(ArchConfig):
     _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (
         AttentionBackendEnum.SLIDING_TILE_ATTN, AttentionBackendEnum.SAGE_ATTN,
         AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA,
-        AttentionBackendEnum.VIDEO_SPARSE_ATTN)
+        AttentionBackendEnum.VIDEO_SPARSE_ATTN,
+        AttentionBackendEnum.VMOBA_ATTN,
+        )
 
     hidden_size: int = 0
     num_attention_heads: int = 0

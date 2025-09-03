@@ -41,6 +41,13 @@ except ImportError:
     st_attn_available = False
 
 try:
+    from fastvideo.attention.backends.vmoba import (
+        VMOBAAttentionBackend)
+    vmoba_attn_available = True
+except ImportError:
+    vmoba_attn_available = False
+
+try:
     from fastvideo.attention.backends.video_sparse_attn import (
         VideoSparseAttentionBackend)
     vsa_available = True
@@ -77,6 +84,7 @@ class DenoisingStage(PipelineStage):
             supported_attention_backends=(
                 AttentionBackendEnum.SLIDING_TILE_ATTN,
                 AttentionBackendEnum.VIDEO_SPARSE_ATTN,
+                AttentionBackendEnum.VMOBA_ATTN,
                 AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA
             )  # hack
         )
@@ -322,6 +330,22 @@ class DenoisingStage(PipelineStage):
                                 VSA_sparsity,  # type: ignore
                                 device=get_local_torch_device(),
                             )
+                            assert attn_metadata is not None, "attn_metadata cannot be None"
+                        else:
+                            attn_metadata = None
+                    elif (vmoba_attn_available and self.attn_backend == VMOBAAttentionBackend):
+                        self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls()
+                        if self.attn_metadata_builder_cls is not None:
+                            self.attn_metadata_builder = self.attn_metadata_builder_cls()
+                            # Prepare V-MoBA parameters from config
+                            moba_params = fastvideo_args.moba_config.copy()
+                            moba_params.update({
+                                "current_timestep": i,
+                                "raw_latent_shape": batch.raw_latent_shape[2:5],
+                                "patch_size": fastvideo_args.pipeline_config.dit_config.patch_size,
+                                "device": get_local_torch_device(),
+                            })
+                            attn_metadata = self.attn_metadata_builder.build(**moba_params)
                             assert attn_metadata is not None, "attn_metadata cannot be None"
                         else:
                             attn_metadata = None

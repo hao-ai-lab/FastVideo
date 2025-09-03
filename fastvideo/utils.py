@@ -814,6 +814,11 @@ def is_vsa_available() -> bool:
     return importlib.util.find_spec("vsa") is not None
 
 
+@lru_cache(maxsize=1)
+def is_vmoba_available() -> bool:
+    return importlib.util.find_spec("vmoba") is not None
+
+
 # adapted from: https://github.com/Wan-Video/Wan2.2/blob/main/wan/utils/utils.py
 def masks_like(tensor,
                zero=False,

@@ -159,6 +159,20 @@ class CudaPlatformBase(Platform):
                     str(e))
                 raise ImportError(
                     "Video Sparse Attention backend is not installed. ") from e
+        elif selected_backend == AttentionBackendEnum.VMOBA_ATTN:
+            try:
+                from vmoba import moba_attn_varlen, process_moba_input, process_moba_output
+
+                from fastvideo.attention.backends.vmoba import VMOBAAttentionBackend
+                logger.info("Using Video MOBA Attention backend.")
+                
+                return "fastvideo.attention.backends.vmoba.VMOBAAttentionBackend"
+            except ImportError as e:
+                logger.error(
+                    "Failed to import Video MoBA Attention backend: %s",
+                    str(e))
+                raise ImportError(
+                    "Video MoBA Attention backend is not installed. ") from e
         elif selected_backend == AttentionBackendEnum.TORCH_SDPA:
             logger.info("Using Torch SDPA backend.")
             return "fastvideo.attention.backends.sdpa.SDPABackend"
