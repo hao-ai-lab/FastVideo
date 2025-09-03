@@ -244,19 +244,31 @@ class CausalWanTransformerBlock(nn.Module):
         current_start: int = 0,
         cache_start: int | None = None,
     ) -> torch.Tensor:
+        logger.info("temb.shape: %s", temb.shape)
+        num_frames = temb.shape[1]
+        logger.info("first hidden_states.shape: %s", hidden_states.shape)
+        logger.info("num_frames: %s", num_frames)
         if hidden_states.dim() == 4:
             hidden_states = hidden_states.squeeze(1)
+        frame_seqlen = hidden_states.shape[1] // temb.shape[1]
+        logger.info("frame_seqlen: %s", frame_seqlen)
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
         # assert orig_dtype != torch.float32
         e = self.scale_shift_table + temb.float()
+        logger.info("e.shape: %s", e.shape)
         shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
-            6, dim=1)
+            6, dim=2)
         assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
-        norm_hidden_states = (self.norm1(hidden_states.float()) *
-                              (1 + scale_msa) + shift_msa).to(orig_dtype)
+        print(f"hidden_states: {hidden_states.shape}")
+        print(f"hidden_states: {scale_msa.shape}")
+        print(f"hidden_states: {shift_msa.shape}")
+        # norm_hidden_states = (self.norm1(hidden_states.float()) *
+        #                       (1 + scale_msa) + shift_msa).to(orig_dtype)
+        norm_hidden_states = (self.norm1(hidden_states.float()).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) *
+                              (1 + scale_msa) + shift_msa).flatten(1, 2).to(orig_dtype)
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)
@@ -487,8 +499,8 @@ class CausalWanTransformer3DModel(BaseDiT):
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
-            timestep, encoder_hidden_states, encoder_hidden_states_image)
-        timestep_proj = timestep_proj.unflatten(1, (6, -1))
+            timestep.flatten(), encoder_hidden_states, encoder_hidden_states_image)
+        timestep_proj = timestep_proj.unflatten(1, (6, self.hidden_size)).unflatten(dim=0, sizes=timestep.shape)
 
         if encoder_hidden_states_image is not None:
             encoder_hidden_states = torch.concat(
@@ -597,8 +609,8 @@ class CausalWanTransformer3DModel(BaseDiT):
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
-            timestep, encoder_hidden_states, encoder_hidden_states_image)
-        timestep_proj = timestep_proj.unflatten(1, (6, -1))
+            timestep.flatten(), encoder_hidden_states, encoder_hidden_states_image)
+        timestep_proj = timestep_proj.unflatten(1, (6, self.hidden_size)).unflatten(dim=0, sizes=timestep.shape)
 
         if encoder_hidden_states_image is not None:
             encoder_hidden_states = torch.concat(

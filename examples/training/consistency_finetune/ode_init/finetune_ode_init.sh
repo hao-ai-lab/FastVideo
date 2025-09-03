@@ -5,8 +5,8 @@ export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-MODEL_PATH="SFWan2.1-T2V-1.3B-Diffusers/snapshots/bd804886ec4fe04fcc5a3fe17644428b9cee94c0/"
-DATA_DIR="data/crush-smol_processed_t2v_1_3b_ode_init_single/combined_parquet_dataset/"
+MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
+DATA_DIR="data/crush-smol_processed_t2v_1_3b_ode_init_5/combined_parquet_dataset/"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 NUM_GPUS=1
 # export CUDA_VISIBLE_DEVICES=4,5
@@ -17,7 +17,7 @@ training_args=(
   --tracker_project_name "wan_ode_init"
   --output_dir "wan_ode_init"
   --override_transformer_cls_name "CausalWanTransformer3DModel"
-  --wandb_run_name "wan_ode_init_8e-6"
+  --wandb_run_name "fixed_wan_ode_init_6e-6"
   # --resume_from_checkpoint "ode_init_diffusers/"
   --max_train_steps 2000
   --train_batch_size 1
@@ -62,7 +62,7 @@ validation_args=(
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 8e-6
+  --learning_rate 6e-6
   --mixed_precision "bf16"
   --checkpointing_steps 2000
   --weight_decay 1e-4

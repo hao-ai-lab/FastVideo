@@ -228,7 +228,10 @@ class CausalDMDDenosingStage(DenoisingStage):
                                                        dim=2)
 
                     # Prepare inputs
-                    t_expand = t_cur.repeat(latent_model_input.shape[0])
+                    t_expand = t_cur.expand(latent_model_input.shape[0])
+                    # t_expand = t_cur * torch.ones((latent_model_input.shape[0], 1), device=latent_model_input.device, dtype=torch.long)
+                    # t_expand = t_expand.repeat(1, self.sliding_window_num_frames)
+
 
                     # Attention metadata if needed
                     if (vsa_available and self.attn_backend
@@ -262,10 +265,11 @@ class CausalDMDDenosingStage(DenoisingStage):
                                             attn_metadata=attn_metadata,
                                             forward_batch=batch):
                         # Run transformer; follow DMD stage pattern
+                        t_expanded_noise= t_cur * torch.ones((latent_model_input.shape[0], 1), device=latent_model_input.device, dtype=torch.long)
                         pred_noise_btchw = self.transformer(
                             latent_model_input,
                             prompt_embeds,
-                            t_expand,
+                            t_expanded_noise,
                             kv_cache=self.kv_cache1,
                             crossattn_cache=self.crossattn_cache,
                             current_start=(pos_start_base + start_index) *
@@ -326,10 +330,11 @@ class CausalDMDDenosingStage(DenoisingStage):
                     set_forward_context(current_timestep=0,
                                         attn_metadata=attn_metadata,
                                         forward_batch=batch):
+                    t_expanded_context = t_context * torch.ones((context_bcthw.shape[0], 1), device=context_bcthw.device, dtype=torch.long)
                     _ = self.transformer(
                         context_bcthw,
                         prompt_embeds,
-                        t_context,
+                        t_expanded_context,
                         kv_cache=self.kv_cache1,
                         crossattn_cache=self.crossattn_cache,
                         current_start=(pos_start_base + start_index) *
