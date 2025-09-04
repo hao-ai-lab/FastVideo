@@ -146,7 +146,7 @@ def pred_noise_to_pred_video(pred_noise: torch.Tensor,
     """
     Convert predicted noise to clean latent.
     """
-    timestep = timestep.expand(noise_input_latent.shape[0])
+    # timestep = timestep.expand(noise_input_latent.shape[0])
     dtype = pred_noise.dtype
     device = pred_noise.device
     pred_noise = pred_noise.float().to(device)

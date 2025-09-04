@@ -103,7 +103,14 @@ class ScaleResidual(nn.Module):
     def forward(self, residual: torch.Tensor, x: torch.Tensor,
                 gate: torch.Tensor) -> torch.Tensor:
         """Apply gated residual connection."""
-        return residual + x * gate
+        logger.info("x.shape: %s", x.shape)
+        if isinstance(gate, torch.Tensor):
+            logger.info("gate.shape: %s", gate.shape)
+        else:
+            logger.info("gate: %s", gate)
+        num_frames = gate.shape[1]
+        frame_seqlen = x.shape[1] // num_frames
+        return residual + (x.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * gate).flatten(1, 2)
 
 
 # adapted from Diffusers: https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/normalization.py
@@ -246,7 +253,15 @@ class LayerNormScaleShift(nn.Module):
                 scale: torch.Tensor) -> torch.Tensor:
         """Apply ln followed by scale and shift in a single fused operation."""
         normalized = self.norm(x)
-        if self.compute_dtype == torch.float32:
-            return (normalized.float() * (1.0 + scale) + shift).to(x.dtype)
+        if scale.dim() == 4:
+            num_frames = scale.shape[1]
+            frame_seqlen = normalized.shape[1] // num_frames
+            if self.compute_dtype == torch.float32:
+                return (normalized.float().unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1.0 + scale) + shift).flatten(1, 2).to(x.dtype)
+            else:
+                return (normalized.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1.0 + scale) + shift).flatten(1, 2)
         else:
-            return normalized * (1.0 + scale) + shift
+            if self.compute_dtype == torch.float32:
+                return (normalized.float() * (1.0 + scale) + shift).to(x.dtype)
+            else:
+                return normalized * (1.0 + scale) + shift
