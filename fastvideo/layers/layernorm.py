@@ -103,11 +103,10 @@ class ScaleResidual(nn.Module):
     def forward(self, residual: torch.Tensor, x: torch.Tensor,
                 gate: torch.Tensor) -> torch.Tensor:
         """Apply gated residual connection."""
-        logger.info("x.shape: %s", x.shape)
-        if isinstance(gate, torch.Tensor):
-            logger.info("gate.shape: %s", gate.shape)
-        else:
-            logger.info("gate: %s", gate)
+        # logger.info("x.shape: %s", x.shape)
+        # if isinstance(gate, torch.Tensor):
+            # logger.info("gate.shape: %s", gate.shape)
+
         num_frames = gate.shape[1]
         frame_seqlen = x.shape[1] // num_frames
         return residual + (x.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * gate).flatten(1, 2)
@@ -182,13 +181,13 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
               but before normalization)
         """
         # Apply residual connection with gating
-        logger.info("x.shape: %s", x.shape)
+        # logger.info("x.shape: %s", x.shape)
         if isinstance(gate, int): 
             # used by cross-attention, should be 1
             assert gate == 1
             residual_output = residual + x * gate
         elif isinstance(gate, torch.Tensor):
-            logger.info("gate.shape: %s", gate.shape)
+            # logger.info("gate.shape: %s", gate.shape)
             if gate.dim() == 3:
                 # used by bidirectional self attention
                 residual_output = residual + x * gate
@@ -200,7 +199,7 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
                 # residual_output = residual + x * gate
         else:
             raise ValueError(f"Gate type {type(gate)} not supported")
-        logger.info("residual_output.shape: %s", residual_output.shape)
+        # logger.info("residual_output.shape: %s", residual_output.shape)
 
         # Apply normalization
         normalized = self.norm(residual_output)

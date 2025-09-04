@@ -8,7 +8,7 @@ def main():
     # model.
     # If a local path is provided, FastVideo will make a best effort
     # attempt to identify the optimal arguments.
-    model_name = "SFWan2.1-T2V-1.3B-Diffusers/snapshots/bd804886ec4fe04fcc5a3fe17644428b9cee94c0/"
+    model_name = "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
     generator = VideoGenerator.from_pretrained(
         model_name,
         # FastVideo will automatically handle distributed setup

@@ -117,6 +117,7 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         else:
             raise ValueError(
                 f"Unexpected trajectory_timesteps dim: {trajectory_timesteps.dim()}")
+        trajectory_latents = trajectory_latents.permute(0, 1, 3, 2, 4, 5)
 
         # Move to device
         device = get_local_torch_device()
@@ -164,14 +165,14 @@ class ODEInitTrainingPipeline(TrainingPipeline):
                                    traj_timesteps: torch.Tensor,
                                    encoder_hidden_states: torch.Tensor,
                                    encoder_attention_mask: torch.Tensor
-                                   ) -> torch.Tensor:
+                                   ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         device = get_local_torch_device()
 
-        logger.info(f"traj_latents: {traj_latents.shape}")
-        logger.info(f"traj_timesteps: {traj_timesteps.shape}")
+        # logger.info(f"traj_latents: {traj_latents.shape}")
+        # logger.info(f"traj_timesteps: {traj_timesteps.shape}")
 
         # Shapes: traj_latents [B, S, C, T, H, W], traj_timesteps [B, S]
-        B, S, num_channels, num_frames, height, width = traj_latents.shape
+        B, S, num_frames, num_channels, height, width = traj_latents.shape
 
         # Lazily cache nearest trajectory index per DMD step based on the (fixed) S timesteps
         if self._cached_closest_idx_per_dmd is None:
@@ -181,16 +182,17 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             # distances_ks: [K, S] = |s_steps - dmd|
             distances_ks = (s_steps.unsqueeze(0) - dmd.unsqueeze(1)).abs()
             self._cached_closest_idx_per_dmd = distances_ks.argmin(dim=1).to(torch.long).cpu()  # [K]
-            logger.info(f"self._cached_closest_idx_per_dmd: {self._cached_closest_idx_per_dmd}")
+            # logger.info(f"self._cached_closest_idx_per_dmd: {self._cached_closest_idx_per_dmd}")
 
-        logger.info(f"traj_latents: {traj_latents.shape}")
+        # logger.info(f"traj_latents: {traj_latents.shape}")
         # Select the K indexes from traj_latents using self._cached_closest_idx_per_dmd
         # traj_latents: [B, S, C, T, H, W], self._cached_closest_idx_per_dmd: [K]
         # Output: [B, K, C, T, H, W]
         relevant_traj_latents = torch.index_select(
             traj_latents, dim=1, index=self._cached_closest_idx_per_dmd.to(traj_latents.device)
         )
-        logger.info(f"relevant_traj_latents: {relevant_traj_latents.shape}")
+        # logger.info(f"relevant_traj_latents: {relevant_traj_latents.shape}")
+        target_latent = relevant_traj_latents[:, -1]
         # assert relevant_traj_latents.shape[0] == 1
 
         indexes = self._get_timestep( # [B, num_frames]
@@ -202,11 +204,11 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             uniform_timestep=False
         )
         # noisy_input = relevant_traj_latents[indexes]
-        logger.info(f"indexes: {indexes.shape}")
+        # logger.info(f"indexes: {indexes.shape}")
         noisy_input = torch.gather(
             relevant_traj_latents, dim=1,
-            index=indexes.reshape(B, 1, 1, num_frames, 1, 1).expand(
-                -1, -1, num_channels, -1, height, width).to(self.device)
+            index=indexes.reshape(B, 1, num_frames, 1, 1, 1).expand(
+                -1, -1, -1, num_channels, height, width).to(self.device)
         ).squeeze(1)
         # noisy_input = noisy_input.unsqueeze(0)
 
@@ -225,15 +227,15 @@ class ODEInitTrainingPipeline(TrainingPipeline):
 
         # Scale model input as in inference for consistency with stored trajectories
         # noisy_input = self.modules["scheduler"].scale_model_input(noisy_input, t)
-        logger.info(f"indexes: {indexes.shape}")
-        logger.info(f"indexes: {indexes}")
+        # logger.info(f"indexes: {indexes.shape}")
+        # logger.info(f"indexes: {indexes}")
         timestep = self.dmd_denoising_steps[indexes]
-        logger.info(f"timestep: {timestep.shape}")
-        logger.info(f"timestep: {timestep}")
+        # logger.info(f"timestep: {timestep.shape}")
+        # logger.info(f"timestep: {timestep}")
 
         # Prepare inputs for transformer
         input_kwargs = {
-            "hidden_states": noisy_input,
+            "hidden_states": noisy_input.permute(0, 2, 1, 3, 4),
             "encoder_hidden_states": encoder_hidden_states,
             "timestep": timestep.to(device, dtype=torch.bfloat16),
             "encoder_attention_mask": encoder_attention_mask,
@@ -243,7 +245,8 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         with set_forward_context(current_timestep=timestep,
                             attn_metadata=None,
                             forward_batch=None):
-            noise_pred = self.transformer(**input_kwargs)
+            noise_pred = self.transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
+            # logger.info(f"noise_pred: {noise_pred.shape}")
         if isinstance(noise_pred, (tuple, list)):
             noise_pred = noise_pred[0]
 
@@ -251,7 +254,7 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         noise_pred = pred_noise_to_pred_video(
             pred_noise=noise_pred.flatten(0, 1),
             noise_input_latent=noisy_input.flatten(0, 1),
-            timestep=timestep,
+            timestep=timestep.flatten(0, 1),
             scheduler=self.modules["scheduler"]).unflatten(
                 0, noise_pred.shape[:2])
 

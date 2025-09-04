@@ -6,6 +6,9 @@ from typing import Any
 import torch
 
 
+from fastvideo.logger import init_logger
+logger = init_logger(__name__)
+
 # TODO(PY): move it elsewhere
 def auto_attributes(init_func):
     """
@@ -146,7 +149,10 @@ def pred_noise_to_pred_video(pred_noise: torch.Tensor,
     """
     Convert predicted noise to clean latent.
     """
-    # timestep = timestep.expand(noise_input_latent.shape[0])
+    logger.info(f"timestep: {timestep.shape}")
+    logger.info(f"noise_input_latent: {noise_input_latent.shape}")
+    logger.info(f"pred_noise: {pred_noise.shape}")
+    timestep = timestep.expand(noise_input_latent.shape[0])
     dtype = pred_noise.dtype
     device = pred_noise.device
     pred_noise = pred_noise.float().to(device)

@@ -378,8 +378,10 @@ class CausalWanTransformer3DModel(BaseDiT):
                                             elementwise_affine=False,
                                             dtype=torch.float32,
                                             compute_dtype=torch.float32)
-        self.proj_out = nn.Linear(
-            inner_dim, config.out_channels * math.prod(config.patch_size))
+        # Debug: Log configuration values
+        proj_out_dim = config.out_channels * math.prod(config.patch_size)
+        
+        self.proj_out = nn.Linear(inner_dim, proj_out_dim)
         self.scale_shift_table = nn.Parameter(
             torch.randn(1, 2, inner_dim) / inner_dim**0.5)
 
@@ -468,7 +470,7 @@ class CausalWanTransformer3DModel(BaseDiT):
         This function will be run for num_frame times.
         Process the latent frames one by one (1560 tokens each)
         """
-        logger.info("forward inference hidden_states.shape: %s", hidden_states.shape)
+        # logger.info("forward inference hidden_states.shape: %s", hidden_states.shape)
 
         orig_dtype = hidden_states.dtype
         if not isinstance(encoder_hidden_states, torch.Tensor):
@@ -505,7 +507,7 @@ class CausalWanTransformer3DModel(BaseDiT):
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
-        logger.info("forward inference flattened and transposed hidden_states.shape: %s", hidden_states.shape)
+        # logger.info("forward inference flattened and transposed hidden_states.shape: %s", hidden_states.shape)
 
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
             timestep.flatten(), encoder_hidden_states, encoder_hidden_states_image)
@@ -547,9 +549,9 @@ class CausalWanTransformer3DModel(BaseDiT):
                                         **causal_kwargs)
 
         # 5. Output norm, projection & unpatchify
-        logger.info("===== INFERENCE 5. Output norm, projection & unpatchify")
-        logger.info("hidden_states.shape: %s", hidden_states.shape)
-        logger.info("temb.shape: %s", temb.shape)
+        # logger.info("===== INFERENCE 5. Output norm, projection & unpatchify")
+        # logger.info("hidden_states.shape: %s", hidden_states.shape)
+        # logger.info("temb.shape: %s", temb.shape)
         shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2,
                                                                           dim=1)
         hidden_states = self.norm_out(hidden_states, shift, scale)
@@ -573,7 +575,8 @@ class CausalWanTransformer3DModel(BaseDiT):
                 start_frame: int = 0,
                 **kwargs) -> torch.Tensor:
 
-        logger.info("===== forward train hidden_states.shape: %s", hidden_states.shape)
+        # logger.info("===== forward train hidden_states.shape: %s", hidden_states.shape)
+        # logger.info("===== forward train timestep.shape: %s", timestep.shape)
         orig_dtype = hidden_states.dtype
         if not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
@@ -619,10 +622,13 @@ class CausalWanTransformer3DModel(BaseDiT):
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
-        logger.info("forward train flattened and transposed hidden_states.shape: %s", hidden_states.shape)
+        # logger.info("forward train flattened and transposed hidden_states.shape: %s", hidden_states.shape)
 
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
             timestep.flatten(), encoder_hidden_states, encoder_hidden_states_image)
+        # logger.info("forward train timestep_proj.shape: %s", timestep_proj.shape)
+        # logger.info("forward train timestep.shape: %s", timestep.shape)
+        # logger.info("forward train temb.shape: %s", temb.shape)
         timestep_proj = timestep_proj.unflatten(1, (6, self.hidden_size)).unflatten(dim=0, sizes=timestep.shape)
 
         if encoder_hidden_states_image is not None:
@@ -655,13 +661,23 @@ class CausalWanTransformer3DModel(BaseDiT):
                                         block_mask=self.block_mask)
 
         # 5. Output norm, projection & unpatchify
-        logger.info("===== TRAIN 5. Output norm, projection & unpatchify")
-        logger.info("hidden_states.shape: %s", hidden_states.shape)
-        logger.info("temb.shape: %s", temb.shape)
-        shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2,
-                                                                          dim=1)
+        # logger.info("===== TRAIN 5. Output norm, projection & unpatchify")
+        # logger.info("hidden_states.shape: %s", hidden_states.shape)
+        # logger.info("temb.shape: %s", temb.shape)
+        # shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2,
+        temb = temb.unflatten(dim=0, sizes=timestep.shape).unsqueeze(2)
+        # logger.info("WTFWTF train temb.shape: %s", temb.shape)
+        # logger.info("WTFWTF train self.scale_shift_table.shape: %s", self.scale_shift_table.shape)
+        shift, scale = (self.scale_shift_table.unsqueeze(1) + temb).chunk(2,
+                                                                          dim=2)
+        # logger.info("DEBUG scale.shape: %s", scale.shape)
+        # logger.info("DEBUG shift.shape: %s", shift.shape)
         hidden_states = self.norm_out(hidden_states, shift, scale)
         hidden_states = self.proj_out(hidden_states)
+        # logger.info("DEBUG after proj_out hidden_states.shape: %s", hidden_states.shape)
+        # logger.info(f"DEBUG reshape dimensions: batch_size={batch_size}, post_patch_num_frames={post_patch_num_frames}")
+        # logger.info(f"DEBUG reshape dimensions: post_patch_height={post_patch_height}, post_patch_width={post_patch_width}")
+        # logger.info(f"DEBUG patch dimensions: p_t={p_t}, p_h={p_h}, p_w={p_w}")
 
         hidden_states = hidden_states.reshape(batch_size, post_patch_num_frames,
                                               post_patch_height,
