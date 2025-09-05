@@ -816,7 +816,13 @@ def is_vsa_available() -> bool:
 
 @lru_cache(maxsize=1)
 def is_vmoba_available() -> bool:
-    return importlib.util.find_spec("vmoba") is not None
+    if importlib.util.find_spec("vmoba") is None:
+        return False
+    try:
+        import flash_attn
+        return flash_attn.__version__ >= "2.7.4"
+    except Exception:
+        return False
 
 
 # adapted from: https://github.com/Wan-Video/Wan2.2/blob/main/wan/utils/utils.py

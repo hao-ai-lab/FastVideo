@@ -42,7 +42,8 @@ except ImportError:
 
 try:
     from fastvideo.attention.backends.vmoba import VMOBAAttentionBackend
-    vmoba_attn_available = True
+    from fastvideo.utils import is_vmoba_available
+    vmoba_attn_available = is_vmoba_available
 except ImportError:
     vmoba_attn_available = False
 
