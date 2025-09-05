@@ -176,9 +176,9 @@ class DistillationPipeline(TrainingPipeline):
             timesteps = torch.cat((self.noise_scheduler.timesteps.cpu(),
                                    torch.tensor([0],
                                                 dtype=torch.float32))).cuda()
-            self.dmd_denoising_steps = timesteps[1000 -
-                                                 self.dmd_denoising_steps]
-            logger.info("Warping dmd_denoising_steps")
+            self.denoising_step_list = timesteps[1000 -
+                                                 self.denoising_step_list]
+            logger.info("Warping denoising_step_list")
 
         self.denoising_step_list = self.denoising_step_list.to(
             get_local_torch_device())
