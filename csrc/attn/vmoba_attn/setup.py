@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 from setuptools import find_packages, setup
 
 PACKAGE_NAME = "vmoba"

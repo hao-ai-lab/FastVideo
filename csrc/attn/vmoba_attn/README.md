@@ -1,5 +1,3 @@
-
-
 # Attention Kernel Used in FastVideo
 
 ## VMoBA: Mixture-of-Block Attention for Video Diffusion Models (VMoBA)
