@@ -34,6 +34,7 @@ from torch.distributed.fsdp import MixedPrecisionPolicy
 import fastvideo.envs as envs
 from fastvideo.logger import init_logger
 
+
 logger = init_logger(__name__)
 
 T = TypeVar("T")
@@ -613,7 +614,6 @@ def maybe_download_model_index(model_name_or_path: str) -> dict[str, Any]:
         raise ValueError(
             f"Failed to download or parse model_index.json for {model_name_or_path}: {e}"
         ) from e
-
 
 def update_environment_variables(envs: dict[str, str]):
     for k, v in envs.items():

@@ -126,10 +126,14 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         params_to_optimize = list(
             filter(lambda p: p.requires_grad, params_to_optimize))
+        # Parse betas from string format "beta1,beta2"
+        betas_str = training_args.betas
+        betas = tuple(float(x.strip()) for x in betas_str.split(","))
+        
         self.optimizer = torch.optim.AdamW(
             params_to_optimize,
             lr=training_args.learning_rate,
-            betas=(0.9, 0.999),
+            betas=betas,
             weight_decay=training_args.weight_decay,
             eps=1e-8,
         )

@@ -838,6 +838,7 @@ class DmdDenoisingStage(DenoisingStage):
                             **pos_cond_kwargs,
                         ).permute(0, 2, 1, 3, 4)
 
+                    from fastvideo.models.utils import pred_noise_to_pred_video
                     pred_video = pred_noise_to_pred_video(
                         pred_noise=pred_noise.flatten(0, 1),
                         noise_input_latent=noise_latents.flatten(0, 1),
