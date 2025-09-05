@@ -12,6 +12,7 @@ from fastvideo.configs.pipelines.wan import (FastWan2_1_T2V_480P_Config,
                                              SelfForcingWanT2V480PConfig,
                                              WanI2V480PConfig, WanI2V720PConfig,
                                              WanT2V480PConfig, WanT2V720PConfig)
+
 from fastvideo.logger import init_logger
 from fastvideo.utils import (maybe_download_model_index,
                              verify_model_config_and_directory)

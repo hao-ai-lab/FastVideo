@@ -9,10 +9,10 @@ target = target.lower()
 
 # Package metadata
 PACKAGE_NAME = "vsa"
-VERSION = "0.0.1"
+VERSION = "0.0.3"
 AUTHOR = "Hao AI Lab"
 DESCRIPTION = "Video Sparse Attention Kernel Used in FastVideo"
-URL = "https://github.com/hao-ai-lab/FastVideo/tree/main/csrc/attn"
+URL = "https://github.com/hao-ai-lab/FastVideo/tree/main/csrc/attn/video_sparse_attn"
 
 # Set environment variables
 tk_root = os.getenv('THUNDERKITTENS_ROOT', os.path.abspath(os.path.join(os.getcwd(), 'tk/')))

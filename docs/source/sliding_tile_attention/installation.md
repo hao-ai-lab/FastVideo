@@ -4,7 +4,7 @@
 You can install the Sliding Tile Attention package using
 
 ```
-pip install st_attn==0.0.4
+pip install st_attn
 ``` 
 
 # Building from Source
@@ -12,7 +12,6 @@ We test our code on Pytorch 2.5.0 and CUDA>=12.4. Currently we only have impleme
 First, install C++20 for ThunderKittens:
 
 ```bash
-cd csrc/sliding_tile_attention/
 sudo apt update
 sudo apt install gcc-11 g++-11
 
@@ -22,14 +21,20 @@ sudo apt update
 sudo apt install clang-11
 ```
 
-Install STA:
+Set up CUDA environment (if using CUDA 12.4):
 
 ```bash
 export CUDA_HOME=/usr/local/cuda-12.4
 export PATH=${CUDA_HOME}/bin:${PATH} 
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
+```
+
+Install STA:
+
+```bash
+cd csrc/attn/sliding_tile_attn/
 git submodule update --init --recursive
-python setup_sta.py install
+python setup.py install
 ```
 
 # 🧪 Test

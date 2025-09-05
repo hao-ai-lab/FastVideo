@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-import gc
 import dataclasses
 import math
 import os
@@ -126,14 +125,10 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         params_to_optimize = list(
             filter(lambda p: p.requires_grad, params_to_optimize))
-        # Parse betas from string format "beta1,beta2"
-        betas_str = training_args.betas
-        betas = tuple(float(x.strip()) for x in betas_str.split(","))
-        
         self.optimizer = torch.optim.AdamW(
             params_to_optimize,
             lr=training_args.learning_rate,
-            betas=betas,
+            betas=(0.9, 0.999),
             weight_decay=training_args.weight_decay,
             eps=1e-8,
         )
@@ -213,13 +208,26 @@ class TrainingPipeline(LoRAPipeline, ABC):
             "Training pipelines must implement this method")
 
     def _prepare_training(self, training_batch: TrainingBatch) -> TrainingBatch:
-        self.transformer.train()
-        self.optimizer.zero_grad()
+        # At the beginning, disable training for all models
+        self._disable_training(self.transformer, self.optimizer)
         if self.transformer_2 is not None:
-            self.transformer_2.train()
-            self.optimizer_2.zero_grad()
+            self._disable_training(self.transformer_2, self.optimizer_2)
+        
         training_batch.total_loss = 0.0
         return training_batch
+
+    def _enable_training(self, model: torch.nn.Module, optimizer: torch.optim.Optimizer) -> None:
+        """Enable training mode and gradients for the specified model."""
+        for param in model.parameters():
+            param.requires_grad = True
+        model.train()
+        optimizer.zero_grad()
+
+    def _disable_training(self, model: torch.nn.Module, optimizer: torch.optim.Optimizer) -> None:
+        """Disable training mode and gradients for the specified model."""
+        for param in model.parameters():
+            param.requires_grad = False
+        optimizer.zero_grad(set_to_none=True)
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         batch = next(self.train_loader_iter, None)  # type: ignore
@@ -266,6 +274,15 @@ class TrainingPipeline(LoRAPipeline, ABC):
                             dtype=latents.dtype)
         timesteps = self._sample_timesteps(batch_size, latents.device)
 
+        # Enable training for the model that will be trained next and disable the other
+        if self.train_transformer_2:
+            self._enable_training(self.transformer_2, self.optimizer_2)
+            self._disable_training(self.transformer, self.optimizer)
+        else:
+            self._enable_training(self.transformer, self.optimizer)
+            if self.transformer_2 is not None:
+                self._disable_training(self.transformer_2, self.optimizer_2)
+
         if self.training_args.sp_size > 1:
             # Make sure that the timesteps are the same across all sp processes.
             sp_group = get_sp_group()
@@ -291,7 +308,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
     def _sample_timesteps(self, batch_size, device):
         # Determine which model to train based on the boundary timestep
         if (self.transformer_2 is not None and self.boundary_timestep is not None and
-                torch.rand(1, generator=self.noise_random_generator).item() <= self.training_args.boundary_ratio):
+                torch.rand(1, generator=self.noise_random_generator).item() > self.training_args.boundary_ratio):
             self.train_transformer_2 = True
         else:
             self.train_transformer_2 = False
@@ -313,9 +330,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         boundary_ratio = self.training_args.boundary_ratio
         if self.train_transformer_2:
-            u = (1 - boundary_ratio) + u * boundary_ratio # min: 1 - boundary_ratio, max: 1
+            u = boundary_ratio + u * (1.0 - boundary_ratio)
         else:
-            u = u * (1 - boundary_ratio) # min: 0, max: 1 - boundary_ratio
+            u = u * boundary_ratio
 
         indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
         return self.noise_scheduler.timesteps[indices].to(device=device)
@@ -495,11 +512,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         logger.info("Starting training with %s B trainable parameters",
                     round(num_trainable_params / 1e9, 3))
 
-        if getattr(self, "transformer_2", None) is not None:
-            num_trainable_params = _get_trainable_params(self.transformer_2)
-            logger.info("Transformer 2: Starting training with %s B trainable parameters",
-                        round(num_trainable_params / 1e9, 3))
-
         # Set random seeds for deterministic training
         self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
             self.seed)
@@ -520,7 +532,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         self._log_training_info()
 
-        self._log_validation(self.training_args,
+        self._log_validation(self.transformer, self.training_args,
                              self.init_steps)
 
         # Train!
@@ -582,7 +594,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 self.transformer.train()
                 self.sp_group.barrier()
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
-                self._log_validation(self.training_args, step)
+                self._log_validation(self.transformer, self.training_args, step)
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                 trainable_params = round(
                     _get_trainable_params(self.transformer) / 1e9, 3)
@@ -663,12 +675,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
         return batch
 
     @torch.no_grad()
-    def _log_validation(self, training_args, global_step) -> None:
+    def _log_validation(self, transformer, training_args, global_step) -> None:
         """
         Generate a validation video and log it to wandb to check the quality during training.
         """
         training_args.inference_mode = True
-        training_args.dit_cpu_offload = False
+        training_args.dit_cpu_offload = True
         if not training_args.log_validation:
             return
         if self.validation_pipeline is None:
@@ -690,9 +702,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                                            batch_size=None,
                                            num_workers=0)
 
-        self.transformer.eval()
-        if getattr(self, "transformer_2", None) is not None:
-            self.transformer_2.eval()
+        transformer.eval()
 
         validation_steps = training_args.validation_sampling_steps.split(",")
         validation_steps = [int(step) for step in validation_steps]
@@ -784,6 +794,4 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         # Re-enable gradients for training
         training_args.inference_mode = False
-        self.transformer.train()
-        if getattr(self, "transformer_2", None) is not None:
-            self.transformer_2.train()
+        transformer.train()

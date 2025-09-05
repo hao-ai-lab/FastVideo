@@ -10,6 +10,7 @@ from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
 # isort: off
 from fastvideo.configs.sample.wan import (
     FastWanT2V480PConfig,
+    Wan2_1_Fun_1_3B_InP_SamplingParam,
     Wan2_2_I2V_A14B_SamplingParam,
     Wan2_2_T2V_A14B_SamplingParam,
     Wan2_2_TI2V_5B_SamplingParam,

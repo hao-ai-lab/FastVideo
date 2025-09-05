@@ -119,7 +119,7 @@ class FastVideoArgs:
     output_type: str = "pil"
 
     # CPU offload parameters
-    dit_cpu_offload: bool = True
+    dit_cpu_offload: bool = False
     use_fsdp_inference: bool = True
     text_encoder_cpu_offload: bool = True
     image_encoder_cpu_offload: bool = True

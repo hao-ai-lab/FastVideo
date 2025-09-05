@@ -33,8 +33,6 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
-logger = init_logger(__name__)
-
 def _rotate_neox(x: torch.Tensor) -> torch.Tensor:
     x1 = x[..., :x.shape[-1] // 2]
     x2 = x[..., x.shape[-1] // 2:]

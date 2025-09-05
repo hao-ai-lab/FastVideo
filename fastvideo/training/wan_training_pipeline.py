@@ -34,7 +34,7 @@ class WanTrainingPipeline(TrainingPipeline):
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing validation pipeline...")
         args_copy = deepcopy(training_args)
-
+        assert training_args.dit_cpu_offload == False
         args_copy.inference_mode = True
         validation_pipeline = WanPipeline.from_pretrained(
             training_args.model_path,
@@ -42,12 +42,13 @@ class WanTrainingPipeline(TrainingPipeline):
             inference_mode=True,
             loaded_modules={
                 "transformer": self.get_module("transformer"),
+                "transformer_2": self.get_module("transformer_2")
             },
             tp_size=training_args.tp_size,
             sp_size=training_args.sp_size,
             num_gpus=training_args.num_gpus,
             pin_cpu_memory=training_args.pin_cpu_memory,
-            dit_cpu_offload=True)
+            dit_cpu_offload=training_args.dit_cpu_offload)
 
         self.validation_pipeline = validation_pipeline
 
