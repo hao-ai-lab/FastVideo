@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Inspired by SGLang: https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/server_args.py
 """The arguments of FastVideo Inference."""
-import json
 import argparse
 import dataclasses
+import json
 from contextlib import contextmanager
 from dataclasses import field
 from enum import Enum
@@ -172,11 +172,13 @@ class FastVideoArgs:
     def __post_init__(self):
         if self.moba_config_path:
             try:
-                with open(self.moba_config_path, 'r') as f:
+                with open(self.moba_config_path) as f:
                     self.moba_config = json.load(f)
-                logger.info(f"Loaded V-MoBA config from {self.moba_config_path}")
+                logger.info("Loaded V-MoBA config from %s",
+                            self.moba_config_path)
             except (FileNotFoundError, json.JSONDecodeError) as e:
-                logger.error(f"Failed to load V-MoBA config from {self.moba_config_path}: {e}")
+                logger.error("Failed to load V-MoBA config from %s: %s",
+                             self.moba_config_path, e)
                 raise
         self.check_fastvideo_args()
 
@@ -1002,7 +1004,8 @@ class TrainingArgs(FastVideoArgs):
             "--moba-config-path",
             type=str,
             default=None,
-            help="Path to a JSON file containing V-MoBA specific configurations.",
+            help=
+            "Path to a JSON file containing V-MoBA specific configurations.",
         )
 
         # Distillation arguments

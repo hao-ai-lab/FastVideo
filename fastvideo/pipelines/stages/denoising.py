@@ -41,8 +41,7 @@ except ImportError:
     st_attn_available = False
 
 try:
-    from fastvideo.attention.backends.vmoba import (
-        VMOBAAttentionBackend)
+    from fastvideo.attention.backends.vmoba import VMOBAAttentionBackend
     vmoba_attn_available = True
 except ImportError:
     vmoba_attn_available = False
@@ -333,19 +332,28 @@ class DenoisingStage(PipelineStage):
                             assert attn_metadata is not None, "attn_metadata cannot be None"
                         else:
                             attn_metadata = None
-                    elif (vmoba_attn_available and self.attn_backend == VMOBAAttentionBackend):
-                        self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls()
+                    elif (vmoba_attn_available
+                          and self.attn_backend == VMOBAAttentionBackend):
+                        self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
+                        )
                         if self.attn_metadata_builder_cls is not None:
-                            self.attn_metadata_builder = self.attn_metadata_builder_cls()
+                            self.attn_metadata_builder = self.attn_metadata_builder_cls(
+                            )
                             # Prepare V-MoBA parameters from config
                             moba_params = fastvideo_args.moba_config.copy()
                             moba_params.update({
-                                "current_timestep": i,
-                                "raw_latent_shape": batch.raw_latent_shape[2:5],
-                                "patch_size": fastvideo_args.pipeline_config.dit_config.patch_size,
-                                "device": get_local_torch_device(),
+                                "current_timestep":
+                                i,
+                                "raw_latent_shape":
+                                batch.raw_latent_shape[2:5],
+                                "patch_size":
+                                fastvideo_args.pipeline_config.dit_config.
+                                patch_size,
+                                "device":
+                                get_local_torch_device(),
                             })
-                            attn_metadata = self.attn_metadata_builder.build(**moba_params)
+                            attn_metadata = self.attn_metadata_builder.build(
+                                **moba_params)
                             assert attn_metadata is not None, "attn_metadata cannot be None"
                         else:
                             attn_metadata = None
