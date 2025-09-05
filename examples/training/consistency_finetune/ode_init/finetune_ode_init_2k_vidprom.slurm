@@ -39,7 +39,7 @@ echo "NODE_RANK: $NODE_RANK"
 # MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATA_DIR="/mnt/sharefs/users/hao.zhang/klin/preproc/data/test-ode-preprocessing/"
-VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
+VALIDATION_DATASET_FILE="examples/training/consistency_finetune/ode_init/validation.json"
 NUM_GPUS=8
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]

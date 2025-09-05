@@ -1,27 +1,57 @@
 #!/bin/bash
+#SBATCH --job-name=4e6_ode_vidprom2k
+#SBATCH --partition=main
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --gres=gpu:8
+#SBATCH --cpus-per-task=128
+#SBATCH --mem=1440G
+#SBATCH --output=ode_vidprom2k_outputtest/ode_vidprom2k_4e-6.out
+#SBATCH --error=ode_vidprom2k_outputtest/ode_vidprom2k_4e-6.err
+#SBATCH --exclusive
+set -e -x
 
+# Environment Setup
+source ~/conda/miniconda/bin/activate
+conda activate will-fv2
+
+export WANDB_MODE="online"
+export NCCL_P2P_DISABLE=1
+export TORCH_NCCL_ENABLE_MONITORING=0
+# different cache dir for different processes
+export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
+export MASTER_PORT=29500
+export NODE_RANK=$SLURM_PROCID
+nodes=( $(scontrol show hostnames $SLURM_JOB_NODELIST) )
+export MASTER_ADDR=${nodes[0]}
+export CUDA_VISIBLE_DEVICES=$SLURM_LOCALID
+export TOKENIZERS_PARALLELISM=false
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
-export TOKENIZERS_PARALLELISM=false
+export WANDB_API_KEY='8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde'
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
+
+echo "MASTER_ADDR: $MASTER_ADDR"
+echo "NODE_RANK: $NODE_RANK"
+
 
 # MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-# DATA_DIR="data/crush-smol_processed_t2v_1_3b_ode_init_5/combined_parquet_dataset/"
 DATA_DIR="/mnt/sharefs/users/hao.zhang/klin/preproc/data/test-ode-preprocessing-extended-t2v-1-3b/"
-VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
-NUM_GPUS=1
+VALIDATION_DATASET_FILE="examples/training/consistency_finetune/ode_init/validation.json"
+NUM_GPUS=2
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
   --tracker_project_name "wan_ode_init"
-  --output_dir "wan_ode_init_70k"
+  --output_dir "wan_ode_init_vidprom_70k_test"
   --override_transformer_cls_name "CausalWanTransformer3DModel"
-  --wandb_run_name "fixed_wan_ode_init_70k_6e-6"
+  --wandb_run_name "vidprom_70k_wan_ode_init_4e-6_test"
   # --resume_from_checkpoint "ode_init_diffusers/"
-  --max_train_steps 6000
+  --max_train_steps 6001
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
@@ -38,7 +68,7 @@ parallel_args=(
   --num_gpus $NUM_GPUS
   --sp_size 1
   --tp_size 1
-  --hsdp_replicate_dim 1
+  --hsdp_replicate_dim 2
   --hsdp_shard_dim 1
 )
 
@@ -58,16 +88,16 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 50
+  --validation_steps 100
   --validation_sampling_steps "50"
   --validation_guidance_scale "6.0"
 )
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 6e-6
+  --learning_rate 4e-6
   --mixed_precision "bf16"
-  --checkpointing_steps 1000
+  --checkpointing_steps 2000
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )
@@ -82,13 +112,16 @@ miscellaneous_args=(
   --dit_precision "fp32"
   --num_euler_timesteps 50
   --ema_start_step 0
-  --enable_gradient_checkpointing_type "full"
+  # --enable_gradient_checkpointing_type "full"
 )
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
-torchrun \
-  --nnodes 1 \
+srun torchrun \
+  --nnodes $SLURM_JOB_NUM_NODES \
   --nproc_per_node $NUM_GPUS \
+  --node_rank $SLURM_PROCID \
+  --rdzv_backend=c10d \
+  --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
     fastvideo/training/ode_causal_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \

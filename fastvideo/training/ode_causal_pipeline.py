@@ -53,6 +53,17 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             shift=self.timestep_shift)
 
         self.dmd_denoising_steps = torch.tensor([1000, 750, 500, 250], dtype=torch.long, device=get_local_torch_device())
+        if training_args.warp_denoising_step:  # Warp the denoising step according to the scheduler time shift
+            timesteps = torch.cat((self.noise_scheduler.timesteps.cpu(), torch.tensor([0], dtype=torch.float32))).cuda()
+            logger.info(f"timesteps: {timesteps}")
+            self.dmd_denoising_steps = timesteps[1000 - self.dmd_denoising_steps]
+            logger.info(f"warped self.dmd_denoising_steps: {self.dmd_denoising_steps}")
+        else:
+            logger.info(f"not warped")
+        self.dmd_denoising_steps = self.dmd_denoising_steps.to(get_local_torch_device())
+
+        logger.info(f"denoising_step_list: {self.dmd_denoising_steps}")
+
         logger.info("Initialized ODE-init training pipeline with %s denoising steps", len(self.dmd_denoising_steps))
         # Cache for nearest trajectory index per DMD step (computed lazily on first batch)
         self._cached_closest_idx_per_dmd = None
@@ -117,6 +128,7 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         else:
             raise ValueError(
                 f"Unexpected trajectory_timesteps dim: {trajectory_timesteps.dim()}")
+        # [B, S, C, T, H, W] -> [B, S, T, C, H, W] to match self-forcing
         trajectory_latents = trajectory_latents.permute(0, 1, 3, 2, 4, 5)
 
         # Move to device
