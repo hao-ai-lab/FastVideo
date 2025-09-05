@@ -37,11 +37,6 @@ on:
         required: false
         default: false
         type: boolean
-      run_causal_ssim_test:
-        description: "Run causal-ssim-test"
-        required: false
-        default: false
-        type: boolean
       run_training_test:
         description: "Run training-test"
         required: false
@@ -241,32 +236,6 @@ jobs:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
 
-  causal-ssim-test:
-    needs: change-filter
-    if: >-
-      github.event_name != 'workflow_dispatch' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_ssim_test == 'true')
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: [
-          # {version: "3.10", tag: "latest"},
-          # {version: "3.11", tag: "py3.11-latest"},
-          {version: "3.12", tag: "py3.12-latest"}
-        ]
-    uses: ./.github/workflows/runpod-test.yml
-    with:
-      job_id: "ssim-test-py${{ matrix.python-version.version }}"
-      gpu_type: "NVIDIA A40"
-      gpu_count: 2
-      volume_size: 200
-      disk_size: 200
-      image: "ghcr.io/${{ github.repository }}/fastvideo-dev:${{ matrix.python-version.tag }}"
-      test_command: "uv pip install -e .[test] && pytest ./fastvideo/tests/ssim -vs"
-      timeout_minutes: 60
-    secrets:
-      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
-  
   training-test:
     needs: change-filter
     if: >-
