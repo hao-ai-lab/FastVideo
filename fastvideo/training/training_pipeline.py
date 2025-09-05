@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import gc
 import dataclasses
 import math
 import os
@@ -286,7 +287,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
     def _sample_timesteps(self, batch_size, device):
         # Determine which model to train based on the boundary timestep
         if (self.transformer_2 is not None and self.boundary_timestep is not None and
-                torch.rand(1, generator=self.noise_random_generator).item() > self.training_args.boundary_ratio):
+                torch.rand(1, generator=self.noise_random_generator).item() <= self.training_args.boundary_ratio):
             self.train_transformer_2 = True
         else:
             self.train_transformer_2 = False
@@ -308,9 +309,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         boundary_ratio = self.training_args.boundary_ratio
         if self.train_transformer_2:
-            u = boundary_ratio + u * (1.0 - boundary_ratio)
+            u = (1 - boundary_ratio) + u * boundary_ratio # min: 1 - boundary_ratio, max: 1
         else:
-            u = u * boundary_ratio
+            u = u * (1 - boundary_ratio) # min: 0, max: 1 - boundary_ratio
 
         indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
         return self.noise_scheduler.timesteps[indices].to(device=device)
@@ -490,6 +491,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
         logger.info("Starting training with %s B trainable parameters",
                     round(num_trainable_params / 1e9, 3))
 
+        if getattr(self, "transformer_2", None) is not None:
+            num_trainable_params = _get_trainable_params(self.transformer_2)
+            logger.info("Transformer 2: Starting training with %s B trainable parameters",
+                        round(num_trainable_params / 1e9, 3))
+
         # Set random seeds for deterministic training
         self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
             self.seed)
@@ -510,7 +516,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         self._log_training_info()
 
-        self._log_validation(self.transformer, self.training_args,
+        self._log_validation(self.training_args,
                              self.init_steps)
 
         # Train!
@@ -572,7 +578,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 self.transformer.train()
                 self.sp_group.barrier()
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
-                self._log_validation(self.transformer, self.training_args, step)
+                self._log_validation(self.training_args, step)
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                 trainable_params = round(
                     _get_trainable_params(self.transformer) / 1e9, 3)
@@ -653,12 +659,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
         return batch
 
     @torch.no_grad()
-    def _log_validation(self, transformer, training_args, global_step) -> None:
+    def _log_validation(self, training_args, global_step) -> None:
         """
         Generate a validation video and log it to wandb to check the quality during training.
         """
         training_args.inference_mode = True
-        training_args.dit_cpu_offload = True
+        training_args.dit_cpu_offload = False
         if not training_args.log_validation:
             return
         if self.validation_pipeline is None:
@@ -680,7 +686,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
                                            batch_size=None,
                                            num_workers=0)
 
-        transformer.eval()
+        self.transformer.eval()
+        if getattr(self, "transformer_2", None) is not None:
+            self.transformer_2.eval()
 
         validation_steps = training_args.validation_sampling_steps.split(",")
         validation_steps = [int(step) for step in validation_steps]
@@ -772,4 +780,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         # Re-enable gradients for training
         training_args.inference_mode = False
-        transformer.train()
+        self.transformer.train()
+        if getattr(self, "transformer_2", None) is not None:
+            self.transformer_2.train()
