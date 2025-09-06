@@ -37,6 +37,12 @@ def getdataset(args) -> VideoCaptionMergedDataset:
                                      temporal_sample=temporal_sample,
                                      transform_topcrop=transform_topcrop,
                                      seed=args.seed)
+                                    
+
+def gettextdataset(args) -> TextDataset:
+    return TextDataset(data_merge_path=args.data_merge_path,
+                       args=args,
+                       seed=args.seed)
 
 
 def gettextdataset(args) -> TextDataset:

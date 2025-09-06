@@ -253,6 +253,10 @@ class DenoisingStage(PipelineStage):
                                                              patch_size[2])
             seq_len = int(math.ceil(seq_len / sp_world_size)) * sp_world_size
 
+        # Initialize lists for ODE trajectory
+        trajectory_timesteps: list[torch.Tensor] = []
+        trajectory_latents: list[torch.Tensor] = []
+
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -433,6 +437,11 @@ class DenoisingStage(PipelineStage):
                         latents = (1. - mask2[0]) * z + mask2[0] * latents
                         # latents = latents.unsqueeze(0)
 
+                # save trajectory latents if needed
+                if batch.return_trajectory_latents:
+                    trajectory_timesteps.append(t)
+                    trajectory_latents.append(latents)
+
                 # Update progress bar
                 if i == len(timesteps) - 1 or (
                     (i + 1) > num_warmup_steps and
@@ -441,8 +450,27 @@ class DenoisingStage(PipelineStage):
                     progress_bar.update()
 
         # Gather results if using sequence parallelism
+        trajectory_tensor: torch.Tensor | None = None
+        if trajectory_latents:
+            trajectory_tensor = torch.stack(trajectory_latents, dim=1)
+            trajectory_timesteps_tensor = torch.stack(trajectory_timesteps,
+                                                      dim=0)
+        else:
+            trajectory_tensor = None
+            trajectory_timesteps_tensor = None
+
+        # Gather results if using sequence parallelism
         if sp_group:
             latents = sequence_model_parallel_all_gather(latents, dim=2)
+            if batch.return_trajectory_latents:
+                trajectory_tensor = trajectory_tensor.to(
+                    get_local_torch_device())
+                trajectory_tensor = sequence_model_parallel_all_gather(
+                    trajectory_tensor, dim=3)
+
+        if trajectory_tensor is not None and trajectory_timesteps_tensor is not None:
+            batch.trajectory_timesteps = trajectory_timesteps_tensor.cpu()
+            batch.trajectory_latents = trajectory_tensor.cpu()
 
         # Update batch with final latents
         batch.latents = latents

@@ -10,6 +10,8 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.preprocess.preprocess_pipeline_i2v import (
     PreprocessPipeline_I2V)
+from fastvideo.pipelines.preprocess.preprocess_pipeline_ode_trajectory import (
+    PreprocessPipeline_ODE_Trajectory)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_t2v import (
     PreprocessPipeline_T2V)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_text import (
@@ -48,13 +50,14 @@ def main(args) -> None:
         text_encoder_cpu_offload=False,
         pipeline_config=pipeline_config,
     )
-
     if args.preprocess_task == "t2v":
         PreprocessPipeline = PreprocessPipeline_T2V
     elif args.preprocess_task == "i2v":
         PreprocessPipeline = PreprocessPipeline_I2V
     elif args.preprocess_task == "text_only":
         PreprocessPipeline = PreprocessPipeline_Text
+    elif args.preprocess_task == "ode_trajectory":
+        PreprocessPipeline = PreprocessPipeline_ODE_Trajectory
     else:
         raise ValueError(f"Invalid preprocess task: {args.preprocess_task}. "
                          f"Valid options: t2v, i2v, ode_trajectory, text_only")
@@ -103,7 +106,7 @@ if __name__ == "__main__":
     parser.add_argument("--preprocess_task",
                         type=str,
                         default="t2v",
-                        choices=["t2v", "i2v", "text_only"],
+                        choices=["t2v", "i2v", "text_only", "ode_trajectory"],
                         help="Type of preprocessing task to run")
     parser.add_argument("--train_fps", type=int, default=30)
     parser.add_argument("--use_image_num", type=int, default=0)

@@ -148,7 +148,12 @@ class ForwardBatch:
     modules: dict[str, Any] = field(default_factory=dict)
 
     # Final output (after pipeline completion)
-    output: Any = None
+    output: torch.Tensor | None = None
+    return_trajectory_latents: bool = False
+    return_trajectory_decoded: bool = False
+    trajectory_timesteps: list[torch.Tensor] | None = None
+    trajectory_latents: torch.Tensor | None = None
+    trajectory_decoded: list[torch.Tensor] | None = None
 
     # Extra parameters that might be needed by specific pipeline implementations
     extra: dict[str, Any] = field(default_factory=dict)
@@ -206,6 +211,10 @@ class TrainingBatch:
     image_latents: torch.Tensor | None = None
     infos: list[dict[str, Any]] | None = None
     mask_lat_size: torch.Tensor | None = None
+
+    # ODE trajectory supervision
+    trajectory_latents: torch.Tensor | None = None
+    trajectory_timesteps: torch.Tensor | None = None
 
     # Transformer inputs
     noisy_model_input: torch.Tensor | None = None

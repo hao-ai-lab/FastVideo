@@ -64,5 +64,3 @@ def test_parquet_dataset_saver_flush_and_last(tmp_path: Path):
     assert len(files2) == 2
     total = sum(pq.read_table(str(f)).num_rows for f in files2)
     assert total == 5
-
-
