@@ -191,6 +191,13 @@ class SamplingParam:
             default=SamplingParam.image_path,
             help="Path to input image for image-to-video generation",
         )
+        parser.add_argument(
+            "--moba-config-path",
+            type=str,
+            default=None,
+            help=
+            "Path to a JSON file containing V-MoBA specific configurations.",
+        )
         return parser
 
 

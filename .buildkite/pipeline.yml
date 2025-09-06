@@ -176,3 +176,12 @@ steps:
                   - TEST_TYPE=precision_vsa
                 agents:
                   queue: "default"
+            - path:
+                - "csrc/attn/vmoba_attn/**"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: "Precision Tests VMoba"
+                env:
+                  - TEST_TYPE=precision_vmoba
+                agents:
+                  queue: "default"

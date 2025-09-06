@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Inspired by SGLang: https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/server_args.py
 """The arguments of FastVideo Inference."""
-
 import argparse
 import dataclasses
+import json
 from contextlib import contextmanager
 from dataclasses import field
 from enum import Enum
@@ -139,6 +139,10 @@ class FastVideoArgs:
     # VSA parameters
     VSA_sparsity: float = 0.0  # inference/validation sparsity
 
+    # V-MoBA parameters
+    moba_config_path: str | None = None
+    moba_config: dict[str, Any] = field(default_factory=dict)
+
     # Master port for distributed training/inference
     master_port: int | None = None
 
@@ -166,6 +170,16 @@ class FastVideoArgs:
         return not self.inference_mode
 
     def __post_init__(self):
+        if self.moba_config_path:
+            try:
+                with open(self.moba_config_path) as f:
+                    self.moba_config = json.load(f)
+                logger.info("Loaded V-MoBA config from %s",
+                            self.moba_config_path)
+            except (FileNotFoundError, json.JSONDecodeError) as e:
+                logger.error("Failed to load V-MoBA config from %s: %s",
+                             self.moba_config_path, e)
+                raise
         self.check_fastvideo_args()
 
     @staticmethod
@@ -984,6 +998,15 @@ class TrainingArgs(FastVideoArgs):
                             help="Whether to use LoRA training")
         parser.add_argument("--lora-rank", type=int, help="LoRA rank")
         parser.add_argument("--lora-alpha", type=int, help="LoRA alpha")
+
+        # V-MoBA parameters
+        parser.add_argument(
+            "--moba-config-path",
+            type=str,
+            default=None,
+            help=
+            "Path to a JSON file containing V-MoBA specific configurations.",
+        )
 
         # Distillation arguments
         parser.add_argument("--generator-update-interval",
