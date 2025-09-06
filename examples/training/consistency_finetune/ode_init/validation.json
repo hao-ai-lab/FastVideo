@@ -1,0 +1,40 @@
+{
+  "data": [
+    {
+      "caption": "A large metal cylinder is seen pressing down on a pile of Oreo cookies, flattening them as if they were under a hydraulic press.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 40,
+      "height": 480,
+      "width": 832,
+      "num_frames": 77
+    },
+    {
+      "caption": "A stylish woman walks down a Tokyo street filled with warm glowing neon and animated city signage. She wears a black leather jacket, a long red dress, and black boots, and carries a black purse. She wears sunglasses and red lipstick. She walks confidently and casually. The street is damp and reflective, creating a mirror effect of the colorful lights. Many pedestrians walk about.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 40,
+      "height": 480,
+      "width": 832,
+      "num_frames": 77
+    },
+    {
+      "caption": "A white and orange tabby cat is seen happily darting through a dense garden, as if chasing something. Its eyes are wide and happy as it jogs forward, scanning the branches, flowers, and leaves as it walks. The path is narrow as it makes its way between all the plants. the scene is captured from a ground-level angle, following the cat closely, giving a low and intimate perspective. The image is cinematic with warm tones and a grainy texture. The scattered daylight between the leaves and plants above creates a warm contrast, accentuating the cat’s orange fur. The shot is clear and sharp, with a shallow depth of field.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 40,
+      "height": 480,
+      "width": 832,
+      "num_frames": 77
+    },
+    {
+      "caption": "A watermelon wearing a helmet is crushed by a hydraulic press, causing it to flatten and burst open.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 40,
+      "height": 480,
+      "width": 832,
+      "num_frames": 77
+    }
+  ]
+}
