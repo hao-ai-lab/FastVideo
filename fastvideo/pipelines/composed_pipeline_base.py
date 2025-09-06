@@ -79,7 +79,7 @@ class ComposedPipelineBase(ABC):
             for name, module in self.modules.items():
                 if not isinstance(module, torch.nn.Module):
                     continue
-                if name == "transformer":
+                if "transformer" in name:
                     module.requires_grad_(True)
                 else:
                     module.requires_grad_(False)

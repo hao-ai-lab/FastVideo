@@ -38,8 +38,8 @@ from fastvideo.training.activation_checkpoint import (
     apply_activation_checkpointing)
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
-    compute_density_for_timestep_sampling, get_scheduler, get_sigmas,
-    load_checkpoint, normalize_dit_input, save_checkpoint,
+    compute_density_for_timestep_sampling, count_trainable, get_scheduler,
+    get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint,
     shard_latents_across_sp)
 from fastvideo.utils import is_vsa_available, set_random_seed, shallow_asdict
 
@@ -48,10 +48,6 @@ import wandb  # isort: skip
 vsa_available = is_vsa_available()
 
 logger = init_logger(__name__)
-
-
-def _get_trainable_params(model: torch.nn.Module) -> int:
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
 class TrainingPipeline(LoRAPipeline, ABC):
@@ -113,6 +109,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 enable_gradient_checkpointing_type)
 
         noise_scheduler = self.modules["scheduler"]
+        # Set grads for proper modules based on the training mode (Distill, LoRA, etc.)
         self.set_trainable()
         params_to_optimize = self.transformer.parameters()
         params_to_optimize = list(
@@ -417,7 +414,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     local_main_process_only=False)
         if not self.post_init_called:
             self.post_init()
-        num_trainable_params = _get_trainable_params(self.transformer)
+        num_trainable_params = count_trainable(self.transformer)
         logger.info("Starting training with %s B trainable parameters",
                     round(num_trainable_params / 1e9, 3))
 
@@ -506,7 +503,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 self._log_validation(self.transformer, self.training_args, step)
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                 trainable_params = round(
-                    _get_trainable_params(self.transformer) / 1e9, 3)
+                    count_trainable(self.transformer) / 1e9, 3)
                 logger.info(
                     "GPU memory usage after validation: %s MB, trainable params: %sB",
                     gpu_memory_usage, trainable_params)
@@ -542,7 +539,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         logger.info("  Total optimization steps = %s",
                     self.training_args.max_train_steps)
         logger.info("  Total training parameters per FSDP shard = %s B",
-                    round(_get_trainable_params(self.transformer) / 1e9, 3))
+                    round(count_trainable(self.transformer) / 1e9, 3))
         # print dtype
         logger.info("  Master weight dtype: %s",
                     self.transformer.parameters().__next__().dtype)
@@ -610,7 +607,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         validation_dataloader = DataLoader(validation_dataset,
                                            batch_size=None,
                                            num_workers=0)
-
         transformer.eval()
 
         validation_steps = training_args.validation_sampling_steps.split(",")
