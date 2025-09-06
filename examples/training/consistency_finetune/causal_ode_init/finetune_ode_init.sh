@@ -3,24 +3,19 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
-# export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-# MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-# DATA_DIR="data/crush-smol_processed_t2v_1_3b_ode_init_5/combined_parquet_dataset/"
-DATA_DIR="/mnt/sharefs/users/hao.zhang/klin/preproc/data/test-ode-preprocessing-extended-t2v-1-3b/"
+DATA_DIR="data/crush-smol_processed_t2v_1_3b_ode_init/"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 NUM_GPUS=1
-# export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
   --tracker_project_name "wan_ode_init"
-  --output_dir "wan_ode_init_70k"
+  --output_dir "wan_ode_init_crush_smol"
   --override_transformer_cls_name "CausalWanTransformer3DModel"
-  --wandb_run_name "fixed_wan_ode_init_70k_6e-6"
-  # --resume_from_checkpoint "ode_init_diffusers/"
+  --wandb_run_name "wan_ode_init_crush_smol"
   --max_train_steps 6000
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -30,7 +25,7 @@ training_args=(
   --num_width 832
   --num_frames 77
   --warp_denoising_step
-  # --enable_gradient_checkpointing_type "full"
+  --enable_gradient_checkpointing_type "full"
 )
 
 # Parallel arguments
@@ -82,7 +77,6 @@ miscellaneous_args=(
   --dit_precision "fp32"
   --num_euler_timesteps 50
   --ema_start_step 0
-  --enable_gradient_checkpointing_type "full"
 )
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
