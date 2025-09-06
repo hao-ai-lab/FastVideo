@@ -306,6 +306,18 @@ class CosmosLatentPreparationStage(PipelineStage):
             if self.vae is not None:
                 # Move VAE to correct device before encoding
                 self.vae = self.vae.to(device)
+                
+                # Log VAE info and input video stats
+                print(f"[FASTVIDEO VAE DEBUG] VAE model: {type(self.vae).__name__}")
+                print(f"[FASTVIDEO VAE DEBUG] VAE config z_dim: {self.vae.config.z_dim}")
+                print(f"[FASTVIDEO VAE DEBUG] Input video shape: {video.shape}, dtype: {video.dtype}, device: {video.device}")
+                print(f"[FASTVIDEO VAE DEBUG] Input video sum: {video.float().sum().item():.6f}")
+                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                    f.write(f"FastVideo VAE: model_type = {type(self.vae).__name__}\n")
+                    f.write(f"FastVideo VAE: z_dim = {self.vae.config.z_dim}\n")
+                    f.write(f"FastVideo VAE: input_video_shape = {video.shape}\n")
+                    f.write(f"FastVideo VAE: input_video_sum = {video.float().sum().item():.6f}\n")
+                
                 if isinstance(generator, list):
                     init_latents = []
                     for i in range(batch_size):
@@ -361,9 +373,17 @@ class CosmosLatentPreparationStage(PipelineStage):
                     latents_std = torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1, 1).to(device, dtype)
                     print(f"[FASTVIDEO CONDITIONING DEBUG] latents_mean = {self.vae.config.latents_mean}, latents_std = {self.vae.config.latents_std}")
                     print(f"[FASTVIDEO CONDITIONING DEBUG] scheduler.sigma_data = {self.scheduler.sigma_data}")
+                    with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                        f.write(f"FastVideo Conditioning: scheduler.sigma_data = {self.scheduler.sigma_data}\n")
+                        f.write(f"FastVideo Conditioning: latents_mean = {self.vae.config.latents_mean}\n")
+                        f.write(f"FastVideo Conditioning: latents_std = {self.vae.config.latents_std}\n")
                     print(f"[FASTVIDEO CONDITIONING DEBUG] Before normalization sum = {init_latents.float().sum().item()}")
+                    with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                        f.write(f"FastVideo Conditioning: before_normalization_sum = {init_latents.float().sum().item():.6f}\n")
                     init_latents = (init_latents - latents_mean) / latents_std * self.scheduler.sigma_data
                     print(f"[FASTVIDEO CONDITIONING DEBUG] After normalization sum = {init_latents.float().sum().item()}")
+                    with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                        f.write(f"FastVideo Conditioning: after_normalization_sum = {init_latents.float().sum().item():.6f}\n")
                 
                 conditioning_latents = init_latents
                 print(f"[FASTVIDEO CONDITIONING DEBUG] Final conditioning_latents sum = {conditioning_latents.float().sum().item()}")
@@ -440,6 +460,38 @@ class CosmosLatentPreparationStage(PipelineStage):
         logger.info(f"CosmosLatentPreparationStage - cond_mask shape: {cond_mask.shape}")
         if conditioning_latents is not None:
             logger.info(f"CosmosLatentPreparationStage - conditioning_latents shape: {conditioning_latents.shape}")
+
+        # Log tensor sums to fastvideo_hidden_states.log
+        sum_value = latents.float().sum().item()
+        print(f"FastVideo LatentPreparation: latents sum = {sum_value:.6f}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"FastVideo LatentPreparation: latents sum = {sum_value:.6f}\n")
+        
+        if conditioning_latents is not None:
+            sum_value = conditioning_latents.float().sum().item()
+            print(f"FastVideo LatentPreparation: conditioning_latents sum = {sum_value:.6f}")
+            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                f.write(f"FastVideo LatentPreparation: conditioning_latents sum = {sum_value:.6f}\n")
+        
+        sum_value = cond_indicator.float().sum().item()
+        print(f"FastVideo LatentPreparation: cond_indicator sum = {sum_value:.6f}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"FastVideo LatentPreparation: cond_indicator sum = {sum_value:.6f}\n")
+        
+        sum_value = uncond_indicator.float().sum().item()
+        print(f"FastVideo LatentPreparation: uncond_indicator sum = {sum_value:.6f}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"FastVideo LatentPreparation: uncond_indicator sum = {sum_value:.6f}\n")
+        
+        sum_value = cond_mask.float().sum().item()
+        print(f"FastVideo LatentPreparation: cond_mask sum = {sum_value:.6f}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"FastVideo LatentPreparation: cond_mask sum = {sum_value:.6f}\n")
+        
+        sum_value = uncond_mask.float().sum().item()
+        print(f"FastVideo LatentPreparation: uncond_mask sum = {sum_value:.6f}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"FastVideo LatentPreparation: uncond_mask sum = {sum_value:.6f}\n")
 
         return batch
 

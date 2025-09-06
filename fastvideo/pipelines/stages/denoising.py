@@ -660,8 +660,14 @@ class CosmosDenoisingStage(DenoisingStage):
                 pipeline.add_module("transformer", self.transformer)
             fastvideo_args.model_loaded["transformer"] = True
 
-        # Setup precision and autocast settings
-        target_dtype = torch.bfloat16
+        # Setup precision to match diffusers exactly
+        # Diffusers uses transformer.dtype (bfloat16) and converts inputs before transformer calls
+        # For FSDP wrapped models, we need to access the underlying module
+        if hasattr(self.transformer, 'module'):
+            transformer_dtype = next(self.transformer.module.parameters()).dtype
+        else:
+            transformer_dtype = next(self.transformer.parameters()).dtype
+        target_dtype = transformer_dtype
         autocast_enabled = (target_dtype != torch.float32
                             ) and not fastvideo_args.disable_autocast
 
@@ -669,10 +675,16 @@ class CosmosDenoisingStage(DenoisingStage):
         latents = batch.latents
         num_inference_steps = batch.num_inference_steps
         guidance_scale = batch.guidance_scale
+
+        sum_value = latents.float().sum().item()
+        # Write to output file
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"Denoising init: latents sum = {sum_value:.6f}, shape = {latents.shape}\n")
         
         
-        # Setup scheduler timesteps like Diffusers does
-        # Diffusers uses set_timesteps without custom sigmas, letting the scheduler generate them
+        # Setup scheduler timesteps - use default scheduler sigma generation
+        # The torch.linspace(0, 1, num_inference_steps) approach was incorrect for FlowMatchEulerDiscreteScheduler
+        # Let the scheduler generate its own sigmas using the configured sigma_max, sigma_min, etc.
         self.scheduler.set_timesteps(num_inference_steps, device=latents.device)
         timesteps = self.scheduler.timesteps
         
