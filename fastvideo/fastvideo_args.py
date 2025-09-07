@@ -590,7 +590,7 @@ class TrainingArgs(FastVideoArgs):
     # text encoder & vae & diffusion model
     pretrained_model_name_or_path: str = ""
     dit_model_name_or_path: str = ""
-    
+
     # DMD model paths - separate paths for each network
     generator_model_path: str = ""  # path for generator (student) model
     real_score_model_path: str = ""  # path for real score (teacher) model
@@ -683,7 +683,8 @@ class TrainingArgs(FastVideoArgs):
     log_visualization: bool = False
     # simulate generator forward to match inference
     simulate_generator_forward: bool = False
-    
+    warp_denoising_step: bool = False
+
     # Self-forcing specific arguments
     num_frame_per_block: int = 3
     independent_first_frame: bool = False
@@ -790,17 +791,20 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--cache-dir",
                             type=str,
                             help="Directory to cache models")
-        
+
         # DMD model paths - separate paths for each network
-        parser.add_argument("--generator-model-path",
-                            type=str,
-                            help="Path to generator (student) model for DMD distillation")
-        parser.add_argument("--real-score-model-path",
-                            type=str,
-                            help="Path to real score (teacher) model for DMD distillation")
-        parser.add_argument("--fake-score-model-path",
-                            type=str,
-                            help="Path to fake score (critic) model for DMD distillation")
+        parser.add_argument(
+            "--generator-model-path",
+            type=str,
+            help="Path to generator (student) model for DMD distillation")
+        parser.add_argument(
+            "--real-score-model-path",
+            type=str,
+            help="Path to real score (teacher) model for DMD distillation")
+        parser.add_argument(
+            "--fake-score-model-path",
+            type=str,
+            help="Path to fake score (critic) model for DMD distillation")
 
         # Diffusion settings
         parser.add_argument("--ema-decay",
@@ -872,9 +876,10 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--resume-from-checkpoint",
                             type=str,
                             help="Path to checkpoint to resume from")
-        parser.add_argument("--init-weights-from-safetensors",
-                            type=str,
-                            help="Path to safetensors file for initial weight loading")
+        parser.add_argument(
+            "--init-weights-from-safetensors",
+            type=str,
+            help="Path to safetensors file for initial weight loading")
         parser.add_argument("--logging-dir",
                             type=str,
                             help="Directory for logging")
@@ -1024,10 +1029,13 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             default=TrainingArgs.generator_update_interval,
                             help="Ratio of student updates to critic updates.")
-        parser.add_argument("--dfake-gen-update-ratio",
-                            type=int,
-                            default=TrainingArgs.dfake_gen_update_ratio,
-                            help="Self-forcing: How often to train generator vs critic (train generator every N steps).")
+        parser.add_argument(
+            "--dfake-gen-update-ratio",
+            type=int,
+            default=TrainingArgs.dfake_gen_update_ratio,
+            help=
+            "Self-forcing: How often to train generator vs critic (train generator every N steps)."
+        )
         parser.add_argument("--min-timestep-ratio",
                             type=float,
                             default=TrainingArgs.min_timestep_ratio,
@@ -1044,38 +1052,49 @@ class TrainingArgs(FastVideoArgs):
                             type=float,
                             default=TrainingArgs.fake_score_learning_rate,
                             help="Learning rate for fake score transformer")
-        parser.add_argument("--fake-score-betas",
-                            type=str,
-                            default=TrainingArgs.fake_score_betas,
-                            help="Betas for fake score optimizer (format: 'beta1,beta2')")
+        parser.add_argument(
+            "--fake-score-betas",
+            type=str,
+            default=TrainingArgs.fake_score_betas,
+            help="Betas for fake score optimizer (format: 'beta1,beta2')")
         parser.add_argument(
             "--fake-score-lr-scheduler",
             type=str,
             default=TrainingArgs.fake_score_lr_scheduler,
             help="Learning rate scheduler for fake score transformer")
         parser.add_argument("--log-visualization",
-                             action=StoreBoolean,
-                             help="Whether to log visualization")
+                            action=StoreBoolean,
+                            help="Whether to log visualization")
         parser.add_argument(
             "--simulate-generator-forward",
             action=StoreBoolean,
             help="Whether to simulate generator forward to match inference")
-        
+        parser.add_argument(
+            "--warp-denoising-step",
+            action=StoreBoolean,
+            help=
+            "Whether to warp denoising step according to the scheduler time shift"
+        )
+
         # Self-forcing specific arguments
-        parser.add_argument("--num-frame-per-block",
-                            type=int,
-                            default=TrainingArgs.num_frame_per_block,
-                            help="Number of frames per block for causal generation")
-        parser.add_argument("--independent-first-frame",
-                            action=StoreBoolean,
-                            help="Whether the first frame is independent in causal generation")
-        parser.add_argument("--enable-gradient-masking",
-                            action=StoreBoolean,
-                            help="Whether to enable frame-level gradient masking")
-        parser.add_argument("--gradient-mask-last-n-frames",
-                            type=int,
-                            default=TrainingArgs.gradient_mask_last_n_frames,
-                            help="Number of last frames to enable gradients for")
+        parser.add_argument(
+            "--num-frame-per-block",
+            type=int,
+            default=TrainingArgs.num_frame_per_block,
+            help="Number of frames per block for causal generation")
+        parser.add_argument(
+            "--independent-first-frame",
+            action=StoreBoolean,
+            help="Whether the first frame is independent in causal generation")
+        parser.add_argument(
+            "--enable-gradient-masking",
+            action=StoreBoolean,
+            help="Whether to enable frame-level gradient masking")
+        parser.add_argument(
+            "--gradient-mask-last-n-frames",
+            type=int,
+            default=TrainingArgs.gradient_mask_last_n_frames,
+            help="Number of last frames to enable gradients for")
         parser.add_argument(
             "--validate-cache-structure",
             action=StoreBoolean,

@@ -136,9 +136,11 @@ class ComposedPipelineBase(ABC):
 
             kwargs['model_path'] = model_path
             fastvideo_args = FastVideoArgs.from_kwargs(**kwargs)
+            logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)
         else:
             assert args is not None, "args must be provided for training mode"
             fastvideo_args = TrainingArgs.from_cli_args(args)
+            logger.info("training args in from_pretrained: %s", fastvideo_args)
             # TODO(will): fix this so that its not so ugly
             fastvideo_args.model_path = model_path
             for key, value in kwargs.items():

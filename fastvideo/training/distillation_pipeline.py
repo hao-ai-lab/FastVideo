@@ -30,17 +30,18 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
+from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines import (ComposedPipelineBase, ForwardBatch,
                                  TrainingBatch)
 from fastvideo.training.activation_checkpoint import (
     apply_activation_checkpointing)
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
-    clip_grad_norm_while_handling_failing_dtensor_cases, get_scheduler,
-    load_distillation_checkpoint,
-    save_distillation_checkpoint, shift_timestep, EMA_FSDP)
-from fastvideo.models.utils import pred_noise_to_pred_video
-from fastvideo.utils import is_vsa_available, maybe_download_model, set_random_seed, verify_model_config_and_directory
+    EMA_FSDP, clip_grad_norm_while_handling_failing_dtensor_cases,
+    get_scheduler, load_distillation_checkpoint, save_distillation_checkpoint,
+    shift_timestep)
+from fastvideo.utils import (is_vsa_available, maybe_download_model,
+                             set_random_seed, verify_model_config_and_directory)
 
 import wandb  # isort: skip
 
@@ -90,24 +91,26 @@ class DistillationPipeline(TrainingPipeline):
             shift=self.timestep_shift)
 
         if training_args.real_score_model_path:
-            logger.info(f"Loading real score transformer from: {training_args.real_score_model_path}")
+            logger.info(
+                f"Loading real score transformer from: {training_args.real_score_model_path}"
+            )
             self.real_score_transformer = self.load_module_from_path(
-                training_args.real_score_model_path, 
-                "transformer", 
-                training_args
-            )
+                training_args.real_score_model_path, "transformer",
+                training_args)
         else:
-            self.real_score_transformer = self.get_module("real_score_transformer")
-            
+            self.real_score_transformer = self.get_module(
+                "real_score_transformer")
+
         if training_args.fake_score_model_path:
-            logger.info(f"Loading fake score transformer from: {training_args.fake_score_model_path}")
-            self.fake_score_transformer = self.load_module_from_path(
-                training_args.fake_score_model_path, 
-                "transformer", 
-                training_args
+            logger.info(
+                f"Loading fake score transformer from: {training_args.fake_score_model_path}"
             )
+            self.fake_score_transformer = self.load_module_from_path(
+                training_args.fake_score_model_path, "transformer",
+                training_args)
         else:
-            self.fake_score_transformer = self.get_module("fake_score_transformer")
+            self.fake_score_transformer = self.get_module(
+                "fake_score_transformer")
 
         self.real_score_transformer.requires_grad_(False)
         self.real_score_transformer.eval()
@@ -136,7 +139,7 @@ class DistillationPipeline(TrainingPipeline):
 
         betas_str = training_args.fake_score_betas
         betas = tuple(float(x.strip()) for x in betas_str.split(","))
-        
+
         self.fake_score_optimizer = torch.optim.AdamW(
             fake_score_params,
             lr=fake_score_lr,
@@ -168,8 +171,19 @@ class DistillationPipeline(TrainingPipeline):
             self.training_args.pipeline_config.dmd_denoising_steps,
             dtype=torch.long,
             device=get_local_torch_device())
-        logger.info("Distillation generator model to %s denoising steps",
-                    len(self.denoising_step_list))
+
+        if training_args.warp_denoising_step:  # Warp the denoising step according to the scheduler time shift
+            timesteps = torch.cat((self.noise_scheduler.timesteps.cpu(),
+                                   torch.tensor([0],
+                                                dtype=torch.float32))).cuda()
+            self.denoising_step_list = timesteps[1000 -
+                                                 self.denoising_step_list]
+            logger.info("Warping denoising_step_list")
+
+        self.denoising_step_list = self.denoising_step_list.to(
+            get_local_torch_device())
+        logger.info("Distillation generator model to %s denoising steps: %s",
+                    len(self.denoising_step_list), self.denoising_step_list)
         self.num_train_timestep = self.noise_scheduler.num_train_timesteps
 
         self.min_timestep = int(self.training_args.min_timestep_ratio *
@@ -180,13 +194,18 @@ class DistillationPipeline(TrainingPipeline):
         self.real_score_guidance_scale = self.training_args.real_score_guidance_scale
 
         self.generator_ema = None
-        if (self.training_args.ema_decay is not None) and (self.training_args.ema_decay > 0.0):
-            self.generator_ema = EMA_FSDP(self.transformer, decay=self.training_args.ema_decay)
-            logger.info(f"Initialized generator EMA with decay={self.training_args.ema_decay}")
+        if (self.training_args.ema_decay
+                is not None) and (self.training_args.ema_decay > 0.0):
+            self.generator_ema = EMA_FSDP(self.transformer,
+                                          decay=self.training_args.ema_decay)
+            logger.info(
+                f"Initialized generator EMA with decay={self.training_args.ema_decay}"
+            )
         else:
             logger.info("Generator EMA disabled (ema_decay <= 0.0)")
 
-    def load_module_from_path(self, model_path: str, module_type: str, training_args: "TrainingArgs"):
+    def load_module_from_path(self, model_path: str, module_type: str,
+                              training_args: "TrainingArgs"):
         """
         Load a module from a specific path using the same loading logic as the pipeline.
         
@@ -201,29 +220,38 @@ class DistillationPipeline(TrainingPipeline):
         logger.info(f"Loading {module_type} from custom path: {model_path}")
         # Set flag to prevent custom weight loading for teacher/critic models
         training_args._loading_teacher_critic_model = True
-        
+
         try:
-            from fastvideo.models.loader.component_loader import PipelineComponentLoader
+            from fastvideo.models.loader.component_loader import (
+                PipelineComponentLoader)
+
             # Download the model if it's a Hugging Face model ID
             local_model_path = maybe_download_model(model_path)
             logger.info(f"Model downloaded/found at: {local_model_path}")
             config = verify_model_config_and_directory(local_model_path)
-            
+
             if module_type not in config:
-                if hasattr(self, '_extra_config_module_map') and module_type in self._extra_config_module_map:
+                if hasattr(self, '_extra_config_module_map'
+                           ) and module_type in self._extra_config_module_map:
                     extra_module = self._extra_config_module_map[module_type]
                     if extra_module in config:
                         module_type = extra_module
                         logger.info(f"Using {extra_module} for {module_type}")
                     else:
-                        raise ValueError(f"Module {module_type} not found in config at {local_model_path}")
+                        raise ValueError(
+                            f"Module {module_type} not found in config at {local_model_path}"
+                        )
                 else:
-                    raise ValueError(f"Module {module_type} not found in config at {local_model_path}")
-            
+                    raise ValueError(
+                        f"Module {module_type} not found in config at {local_model_path}"
+                    )
+
             module_info = config[module_type]
             if module_info is None:
-                raise ValueError(f"Module {module_type} has null value in config at {local_model_path}")
-            
+                raise ValueError(
+                    f"Module {module_type} has null value in config at {local_model_path}"
+                )
+
             transformers_or_diffusers, architecture = module_info
             component_path = os.path.join(local_model_path, module_type)
             module = PipelineComponentLoader.load_module(
@@ -232,14 +260,14 @@ class DistillationPipeline(TrainingPipeline):
                 transformers_or_diffusers=transformers_or_diffusers,
                 fastvideo_args=training_args,
             )
-            
-            logger.info(f"Successfully loaded {module_type} from {component_path}")
+
+            logger.info(
+                f"Successfully loaded {module_type} from {component_path}")
             return module
         finally:
             # Always clean up the flag
             if hasattr(training_args, '_loading_teacher_critic_model'):
                 delattr(training_args, '_loading_teacher_critic_model')
-
 
     @abstractmethod
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
@@ -276,19 +304,21 @@ class DistillationPipeline(TrainingPipeline):
         """Check if EMA is ready for use (after ema_start_step)."""
         if current_step is None:
             current_step = getattr(self, 'current_trainstep', 0)
-        return (self.generator_ema is not None and 
-                current_step >= self.training_args.ema_start_step)
+        return (self.generator_ema is not None
+                and current_step >= self.training_args.ema_start_step)
 
     def save_ema_weights(self, output_dir: str, step: int):
         """Save EMA weights separately for inference purposes."""
         if self.generator_ema is None:
             logger.warning("Cannot save EMA weights: EMA not initialized")
             return
-        
+
         if not self.is_ema_ready():
-            logger.warning("Cannot save EMA weights: EMA not ready yet (step < ema_start_step)")
+            logger.warning(
+                "Cannot save EMA weights: EMA not ready yet (step < ema_start_step)"
+            )
             return
-        
+
         try:
             ema_model = self.get_ema_model_copy()
             if ema_model is None:
@@ -297,29 +327,32 @@ class DistillationPipeline(TrainingPipeline):
 
             ema_save_dir = os.path.join(output_dir, f"ema_checkpoint-{step}")
             os.makedirs(ema_save_dir, exist_ok=True)
-            
+
             # save as diffusers format
-            from fastvideo.training.training_utils import gather_state_dict_on_cpu_rank0, custom_to_hf_state_dict
             from safetensors.torch import save_file
+
+            from fastvideo.training.training_utils import (
+                custom_to_hf_state_dict, gather_state_dict_on_cpu_rank0)
             cpu_state = gather_state_dict_on_cpu_rank0(ema_model, device=None)
-            
+
             if self.global_rank == 0:
-                weight_path = os.path.join(ema_save_dir, "diffusion_pytorch_model.safetensors")
+                weight_path = os.path.join(
+                    ema_save_dir, "diffusion_pytorch_model.safetensors")
                 diffusers_state_dict = custom_to_hf_state_dict(
                     cpu_state, ema_model.reverse_param_names_mapping)
                 save_file(diffusers_state_dict, weight_path)
-                
+
                 config_dict = ema_model.hf_config
                 if "dtype" in config_dict:
                     del config_dict["dtype"]
                 config_path = os.path.join(ema_save_dir, "config.json")
                 with open(config_path, "w") as f:
                     json.dump(config_dict, f, indent=4)
-                
+
                 logger.info(f"EMA weights saved to {weight_path}")
-            
+
             del ema_model
-            
+
         except Exception as e:
             logger.error(f"Failed to save EMA weights: {str(e)}")
 
@@ -333,7 +366,7 @@ class DistillationPipeline(TrainingPipeline):
                 "ema_ready": False,
                 "ema_step": self.current_trainstep,
             }
-        
+
         return {
             "ema_enabled": True,
             "ema_decay": self.training_args.ema_decay,
@@ -769,10 +802,10 @@ class DistillationPipeline(TrainingPipeline):
             self._clip_model_grad_norm_(batch_gen, self.transformer)
             self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)
-            
+
             if self.generator_ema is not None:
                 self.generator_ema.update(self.transformer)
-            
+
             avg_dmd_loss = torch.tensor(total_dmd_loss /
                                         gradient_accumulation_steps,
                                         device=self.device)
@@ -856,8 +889,10 @@ class DistillationPipeline(TrainingPipeline):
                 for p in self.fake_score_transformer.parameters()) / 1e9)
 
         if self.generator_ema is not None:
-            logger.info("  Generator EMA enabled with decay: %s", self.training_args.ema_decay)
-            logger.info("  Generator EMA start step: %s", self.training_args.ema_start_step)
+            logger.info("  Generator EMA enabled with decay: %s",
+                        self.training_args.ema_decay)
+            logger.info("  Generator EMA start step: %s",
+                        self.training_args.ema_start_step)
         else:
             logger.info("  Generator EMA disabled")
 
@@ -893,12 +928,13 @@ class DistillationPipeline(TrainingPipeline):
         transformer.eval()
 
         # Optionally use EMA model for validation if available and ready
-        use_ema_for_validation = (self.training_args.use_ema and 
-                                  self.is_ema_ready(global_step))
+        use_ema_for_validation = (self.training_args.use_ema
+                                  and self.is_ema_ready(global_step))
         if use_ema_for_validation:
             logger.info("Using EMA model for validation")
             validation_transformer = self.transformer
-            ema_context = self.generator_ema.apply_to_model(validation_transformer)
+            ema_context = self.generator_ema.apply_to_model(
+                validation_transformer)
         else:
             validation_transformer = transformer
             ema_context = None
@@ -921,10 +957,9 @@ class DistillationPipeline(TrainingPipeline):
             if ema_context is not None:
                 with ema_context:
                     for validation_batch in validation_dataloader:
-                        batch = self._prepare_validation_batch(sampling_param,
-                                                               training_args,
-                                                               validation_batch,
-                                                               num_inference_steps)
+                        batch = self._prepare_validation_batch(
+                            sampling_param, training_args, validation_batch,
+                            num_inference_steps)
 
                         negative_prompt = batch.negative_prompt
                         batch_negative = ForwardBatch(
@@ -938,11 +973,12 @@ class DistillationPipeline(TrainingPipeline):
                         self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds[
                             0], result_batch.prompt_attention_mask[0]
 
-                        logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
-                                    self.global_rank,
-                                    self.rank_in_sp_group,
-                                    batch.prompt,
-                                    local_main_process_only=False)
+                        logger.info(
+                            "rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
+                            self.global_rank,
+                            self.rank_in_sp_group,
+                            batch.prompt,
+                            local_main_process_only=False)
 
                         assert batch.prompt is not None and isinstance(
                             batch.prompt, str)
@@ -967,10 +1003,9 @@ class DistillationPipeline(TrainingPipeline):
             else:
                 # Use original transformer without EMA
                 for validation_batch in validation_dataloader:
-                    batch = self._prepare_validation_batch(sampling_param,
-                                                           training_args,
-                                                           validation_batch,
-                                                           num_inference_steps)
+                    batch = self._prepare_validation_batch(
+                        sampling_param, training_args, validation_batch,
+                        num_inference_steps)
 
                     negative_prompt = batch.negative_prompt
                     batch_negative = ForwardBatch(
@@ -984,11 +1019,12 @@ class DistillationPipeline(TrainingPipeline):
                     self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds[
                         0], result_batch.prompt_attention_mask[0]
 
-                    logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
-                                self.global_rank,
-                                self.rank_in_sp_group,
-                                batch.prompt,
-                                local_main_process_only=False)
+                    logger.info(
+                        "rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
+                        self.global_rank,
+                        self.rank_in_sp_group,
+                        batch.prompt,
+                        local_main_process_only=False)
 
                     assert batch.prompt is not None and isinstance(
                         batch.prompt, str)
@@ -1155,7 +1191,7 @@ class DistillationPipeline(TrainingPipeline):
         self.validation_random_generator = torch.Generator(
             device="cpu").manual_seed(self.seed)
         logger.info("Initialized random seeds with seed: %s", seed)
-        
+
         # Initialize current_trainstep for EMA ready checks
         #TODO: check if needed
         self.current_trainstep = self.init_steps
@@ -1205,8 +1241,11 @@ class DistillationPipeline(TrainingPipeline):
 
             if (step >= self.training_args.ema_start_step) and \
                     (self.generator_ema is None) and (self.training_args.ema_decay > 0):
-                self.generator_ema = EMA_FSDP(self.transformer, decay=self.training_args.ema_decay)
-                logger.info(f"Created generator EMA at step {step} with decay={self.training_args.ema_decay}")
+                self.generator_ema = EMA_FSDP(
+                    self.transformer, decay=self.training_args.ema_decay)
+                logger.info(
+                    f"Created generator EMA at step {step} with decay={self.training_args.ema_decay}"
+                )
 
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 training_batch = self.train_one_step(training_batch)
@@ -1221,12 +1260,19 @@ class DistillationPipeline(TrainingPipeline):
             avg_step_time = sum(step_times) / len(step_times)
 
             progress_bar.set_postfix({
-                "total_loss": f"{total_loss:.4f}",
-                "generator_loss": f"{generator_loss:.4f}",
-                "fake_score_loss": f"{fake_score_loss:.4f}",
-                "step_time": f"{step_time:.2f}s",
-                "grad_norm": grad_norm,
-                "ema": "✓" if (self.generator_ema is not None and self.is_ema_ready()) else "✗",
+                "total_loss":
+                f"{total_loss:.4f}",
+                "generator_loss":
+                f"{generator_loss:.4f}",
+                "fake_score_loss":
+                f"{fake_score_loss:.4f}",
+                "step_time":
+                f"{step_time:.2f}s",
+                "grad_norm":
+                grad_norm,
+                "ema":
+                "✓" if (self.generator_ema is not None and self.is_ema_ready())
+                else "✗",
             })
             progress_bar.update(1)
 
@@ -1314,7 +1360,7 @@ class DistillationPipeline(TrainingPipeline):
                                              f"{step}_weight_only",
                                              only_save_generator_weight=True,
                                              generator_ema=self.generator_ema)
-                
+
                 if self.training_args.use_ema and self.is_ema_ready():
                     self.save_ema_weights(self.training_args.output_dir, step)
 
@@ -1339,7 +1385,8 @@ class DistillationPipeline(TrainingPipeline):
             self.noise_random_generator, self.generator_ema)
 
         if self.training_args.use_ema and self.is_ema_ready():
-            self.save_ema_weights(self.training_args.output_dir, self.training_args.max_train_steps)
+            self.save_ema_weights(self.training_args.output_dir,
+                                  self.training_args.max_train_steps)
 
         if get_sp_group():
             cleanup_dist_env_and_memory()

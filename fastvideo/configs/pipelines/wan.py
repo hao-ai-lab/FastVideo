@@ -146,5 +146,6 @@ class Wan2_2_I2V_A14B_Config(WanT2V480PConfig):
 @dataclass
 class SelfForcingWanT2V480PConfig(WanT2V480PConfig):
     is_causal: bool = True
+    flow_shift: int = 5
     dmd_denoising_steps: list[int] | None = field(
         default_factory=lambda: [1000, 750, 500, 250])
