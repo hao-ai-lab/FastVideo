@@ -34,17 +34,23 @@ from fastvideo.pipelines.stages import (DecodingStage, DenoisingStage,
                                         TextEncodingStage,
                                         TimestepPreparationStage)
 from fastvideo.utils import save_decoded_latents_as_video, shallow_asdict
-from fastvideo.distributed import get_local_torch_device
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler)
 
 logger = init_logger(__name__)
 
-class FlowMatchScheduler():
+
+class FlowMatchScheduler:
 
     order = 1
 
-    def __init__(self, num_inference_steps=100, num_train_timesteps=1000, shift=3.0, sigma_max=1.0, sigma_min=0.003 / 1.002, inverse_timesteps=False, extra_one_step=False, reverse_sigmas=False):
+    def __init__(self,
+                 num_inference_steps=100,
+                 num_train_timesteps=1000,
+                 shift=3.0,
+                 sigma_max=1.0,
+                 sigma_min=0.003 / 1.002,
+                 inverse_timesteps=False,
+                 extra_one_step=False,
+                 reverse_sigmas=False):
         self.num_train_timesteps = num_train_timesteps
         self.shift = shift
         self.sigma_max = sigma_max
@@ -54,15 +60,19 @@ class FlowMatchScheduler():
         self.reverse_sigmas = reverse_sigmas
         self.set_timesteps(num_inference_steps)
 
-    def set_timesteps(self, num_inference_steps=100, denoising_strength=1.0, training=False, device=None):
+    def set_timesteps(self,
+                      num_inference_steps=100,
+                      denoising_strength=1.0,
+                      training=False,
+                      device=None):
         sigma_start = self.sigma_min + \
             (self.sigma_max - self.sigma_min) * denoising_strength
         if self.extra_one_step:
-            self.sigmas = torch.linspace(
-                sigma_start, self.sigma_min, num_inference_steps + 1)[:-1]
+            self.sigmas = torch.linspace(sigma_start, self.sigma_min,
+                                         num_inference_steps + 1)[:-1]
         else:
-            self.sigmas = torch.linspace(
-                sigma_start, self.sigma_min, num_inference_steps)
+            self.sigmas = torch.linspace(sigma_start, self.sigma_min,
+                                         num_inference_steps)
         if self.inverse_timesteps:
             self.sigmas = torch.flip(self.sigmas, dims=[0])
         self.sigmas = self.shift * self.sigmas / \
@@ -72,14 +82,20 @@ class FlowMatchScheduler():
         self.timesteps = self.sigmas * self.num_train_timesteps
         if training:
             x = self.timesteps
-            y = torch.exp(-2 * ((x - num_inference_steps / 2) /
-                          num_inference_steps) ** 2)
+            y = torch.exp(
+                -2 * ((x - num_inference_steps / 2) / num_inference_steps)**2)
             y_shifted = y - y.min()
             bsmntw_weighing = y_shifted * \
                 (num_inference_steps / y_shifted.sum())
             self.linear_timesteps_weights = bsmntw_weighing
 
-    def step(self, model_output, timestep, sample, to_final=False, return_dict=False, **kwargs):
+    def step(self,
+             model_output,
+             timestep,
+             sample,
+             to_final=False,
+             return_dict=False,
+             **kwargs):
         assert return_dict is False
         assert kwargs == {}
         self.sigmas = self.sigmas.to(model_output.device)
@@ -91,16 +107,14 @@ class FlowMatchScheduler():
         #     (self.timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
         # assert timestep.ndim == 1
         # assert timestep.shape[0] == 1
-        timestep_id = torch.argmin(
-            (self.timesteps - timestep).abs(), dim=0)
+        timestep_id = torch.argmin((self.timesteps - timestep).abs(), dim=0)
         sigma = self.sigmas[timestep_id].reshape(-1, 1, 1, 1)
         if to_final or (timestep_id + 1 >= len(self.timesteps)).any():
-            sigma_ = 1 if (
-                self.inverse_timesteps or self.reverse_sigmas) else 0
+            sigma_ = 1 if (self.inverse_timesteps or self.reverse_sigmas) else 0
         else:
             sigma_ = self.sigmas[timestep_id + 1].reshape(-1, 1, 1, 1)
         prev_sample = sample + model_output * (sigma_ - sigma)
-        return (prev_sample,)
+        return (prev_sample, )
 
     def scale_model_input(self, sample: torch.Tensor, *args,
                           **kwargs) -> torch.Tensor:
@@ -163,16 +177,19 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
-        logger.info('WTF flow_shift: %s', fastvideo_args.pipeline_config.flow_shift)
-        assert fastvideo_args.pipeline_config.flow_shift  == 5
+        logger.info('WTF flow_shift: %s',
+                    fastvideo_args.pipeline_config.flow_shift)
+        assert fastvideo_args.pipeline_config.flow_shift == 5
         # self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
-            # shift=fastvideo_args.pipeline_config.flow_shift)
+        # shift=fastvideo_args.pipeline_config.flow_shift)
         self.modules["scheduler"] = FlowMatchScheduler(
             shift=fastvideo_args.pipeline_config.flow_shift,
             sigma_min=0.0,
             extra_one_step=True)
-        self.modules["scheduler"].set_timesteps(num_inference_steps=48, denoising_strength=1.0)
-        logger.info('WTF scheduler timesteps: %s', self.modules["scheduler"].timesteps)
+        self.modules["scheduler"].set_timesteps(num_inference_steps=48,
+                                                denoising_strength=1.0)
+        logger.info('WTF scheduler timesteps: %s',
+                    self.modules["scheduler"].timesteps)
         # scheduler = FlowMatchScheduler(
         #     shift=8.0, sigma_min=0.0, extra_one_step=True)
         # device = get_local_torch_device()
@@ -286,7 +303,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                         negative_prompt_attention_mask
                     ]
                     batch.return_trajectory_latents = True
-                    batch.return_trajectory_decoded = True
+                    batch.return_trajectory_decoded = False
                     batch.height = args.max_height
                     batch.width = args.max_width
                     batch.fps = args.train_fps
