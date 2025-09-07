@@ -52,7 +52,42 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         super().initialize_training_pipeline(training_args)
         self.dfake_gen_update_ratio = getattr(training_args, 'dfake_gen_update_ratio', 5)
 
+        # Self-forcing specific properties
+        self.num_frame_per_block = getattr(training_args, 'num_frame_per_block', 3)
+        self.independent_first_frame = getattr(training_args, 'independent_first_frame', False)
+        self.same_step_across_blocks = getattr(training_args, 'same_step_across_blocks', False)
+        self.last_step_only = getattr(training_args, 'last_step_only', False)
+        self.context_noise = getattr(training_args, 'context_noise', 0)
+        
+        # Calculate frame sequence length - this will be set properly in _prepare_dit_inputs
+        self.frame_seq_length = 1560  # TODO: Calculate this dynamically based on patch size
+        
+        # Cache references (will be initialized per forward pass)
+        self.kv_cache1 = None
+        self.crossattn_cache = None
+
         logger.info(f"Self-forcing generator update ratio: {self.dfake_gen_update_ratio}")
+
+    def generate_and_sync_list(self, num_blocks, num_denoising_steps, device):
+        """Generate and synchronize random exit flags across distributed processes."""
+        rank = dist.get_rank() if dist.is_initialized() else 0
+
+        if rank == 0:
+            # Generate random indices
+            indices = torch.randint(
+                low=0,
+                high=num_denoising_steps,
+                size=(num_blocks,),
+                device=device
+            )
+            if self.last_step_only:
+                indices = torch.ones_like(indices) * (num_denoising_steps - 1)
+        else:
+            indices = torch.empty(num_blocks, dtype=torch.long, device=device)
+
+        if dist.is_initialized():
+            dist.broadcast(indices, src=0)  # Broadcast the random indices to all ranks
+        return indices.tolist()
 
     def generator_loss(self, training_batch: TrainingBatch) -> tuple[torch.Tensor, dict[str, Any]]:
         """
@@ -162,223 +197,278 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         return pred_video
 
     def _generator_multi_step_simulation_forward(
-            self, training_batch: TrainingBatch) -> torch.Tensor:
-        """Forward pass through student transformer matching inference procedure with KV cache management."""
+            self, training_batch: TrainingBatch, return_sim_steps: bool = False) -> torch.Tensor:
+        """Forward pass through student transformer matching inference procedure with KV cache management.
+        
+        This function is adapted from the reference self-forcing implementation's inference_with_trajectory
+        and includes gradient masking logic for dynamic frame generation.
+        """
         latents = training_batch.latents
         dtype = latents.dtype
         batch_size = latents.shape[0]
+        initial_latent = getattr(training_batch, 'image_latent', None)
+        
+        # Dynamic frame generation logic (adapted from _run_generator)
+        num_training_frames = getattr(self.training_args, 'num_frames', 21)
+        
+        # During training, the number of generated frames should be uniformly sampled from
+        # [21, self.num_training_frames], but still being a multiple of self.num_frame_per_block
+        min_num_frames = 20 if self.independent_first_frame else 21
+        max_num_frames = num_training_frames - 1 if self.independent_first_frame else num_training_frames
+        assert max_num_frames % self.num_frame_per_block == 0
+        assert min_num_frames % self.num_frame_per_block == 0
+        max_num_blocks = max_num_frames // self.num_frame_per_block
+        min_num_blocks = min_num_frames // self.num_frame_per_block
+        
+        # Sample number of blocks and sync across processes
+        num_generated_blocks = torch.randint(min_num_blocks, max_num_blocks + 1, (1,), device=self.device)
+        if dist.is_initialized():
+            dist.broadcast(num_generated_blocks, src=0)
+        num_generated_blocks = num_generated_blocks.item()
+        num_generated_frames = num_generated_blocks * self.num_frame_per_block
+        if self.independent_first_frame and initial_latent is None:
+            num_generated_frames += 1
+            min_num_frames += 1
+        
+        # Create noise with dynamic shape
+        if initial_latent is not None:
+            noise_shape = [batch_size, num_generated_frames - 1, *self.video_latent_shape[2:]]
+        else:
+            noise_shape = [batch_size, num_generated_frames, *self.video_latent_shape[2:]]
+        
+        noise = torch.randn(noise_shape, device=self.device, dtype=dtype)
+        if self.sp_world_size > 1:
+            noise = rearrange(noise, "b (n t) c h w -> b n t c h w", n=self.sp_world_size).contiguous()
+            noise = noise[:, self.rank_in_sp_group, :, :, :, :]
+        
+        batch_size, num_frames, num_channels, height, width = noise.shape
+        
+        # Block size calculation
+        if not self.independent_first_frame or (self.independent_first_frame and initial_latent is not None):
+            assert num_frames % self.num_frame_per_block == 0
+            num_blocks = num_frames // self.num_frame_per_block
+        else:
+            assert (num_frames - 1) % self.num_frame_per_block == 0
+            num_blocks = (num_frames - 1) // self.num_frame_per_block
+            
+        num_input_frames = initial_latent.shape[1] if initial_latent is not None else 0
+        num_output_frames = num_frames + num_input_frames
+        output = torch.zeros([batch_size, num_output_frames, num_channels, height, width],
+                           device=noise.device, dtype=noise.dtype)
 
-        # Step 1: Randomly sample a target timestep index from denoising_step_list
-        target_timestep_idx = torch.randint(0,
-                                            len(self.denoising_step_list), [1],
-                                            device=self.device,
-                                            dtype=torch.long)
-        target_timestep_idx_int = target_timestep_idx.item()
-        target_timestep = self.denoising_step_list[target_timestep_idx]
-
-        # Step 2: Initialize KV cache and cross-attention cache for causal generation
-        kv_cache, crossattn_cache = self._initialize_simulation_caches(batch_size, dtype, self.device)
+        # Step 1: Initialize KV cache to all zeros
+        self.kv_cache1, self.crossattn_cache = self._initialize_simulation_caches(batch_size, dtype, self.device)
         
         # Validate cache structure (can be disabled in production)
         if getattr(self.training_args, 'validate_cache_structure', False):
-            self._validate_cache_structure(kv_cache, crossattn_cache, batch_size)
+            self._validate_cache_structure(self.kv_cache1, self.crossattn_cache, batch_size)
 
-        # Step 3: Simulate the multi-step inference process up to the target timestep
-        # Start from pure noise like in inference
-        current_noise_latents = torch.randn(self.video_latent_shape,
-                                            device=self.device,
-                                            dtype=dtype)
-        if self.sp_world_size > 1:
-            current_noise_latents = rearrange(
-                current_noise_latents,
-                "b (n t) c h w -> b n t c h w",
-                n=self.sp_world_size).contiguous()
-            current_noise_latents = current_noise_latents[:, self.
-                                                          rank_in_sp_group, :, :, :, :]
-        current_noise_latents_copy = current_noise_latents.clone()
-
-        # Step 4: Determine gradient masking for frame-level selective training
-        num_frames = current_noise_latents.shape[1]
-        num_frame_per_block = getattr(self.training_args, 'num_frame_per_block', 3)
-        independent_first_frame = getattr(self.training_args, 'independent_first_frame', False)
-        enable_gradient_masking = getattr(self.training_args, 'enable_gradient_masking', True)
-        gradient_mask_last_n_frames = getattr(self.training_args, 'gradient_mask_last_n_frames', 21)
-        
-        gradient_mask = None
-        if enable_gradient_masking:
-            # Calculate which frames should have gradients enabled (last N frames)
-            start_gradient_frame_index = max(0, num_frames - gradient_mask_last_n_frames)
-            gradient_mask = torch.ones(batch_size, num_frames, dtype=torch.bool, device=self.device)
-            
-            if independent_first_frame:
-                # First frame is independent, disable gradients for early frames
-                gradient_mask[:, :max(1, start_gradient_frame_index)] = False
-            else:
-                # Disable gradients for early blocks
-                num_early_blocks = start_gradient_frame_index // num_frame_per_block
-                gradient_mask[:, :num_early_blocks * num_frame_per_block] = False
-
-        # Step 5: Multi-step simulation with causal block processing
-        num_frames_per_block = getattr(self.training_args, 'num_frame_per_block', 3)
-        
-        t = num_frames
-        if not independent_first_frame or (independent_first_frame and hasattr(training_batch, 'image_latent') and training_batch.image_latent is not None):
-            if t % num_frames_per_block != 0:
-                raise ValueError(
-                    "num_frames must be divisible by num_frames_per_block for causal DMD denoising"
-                )
-            num_blocks = t // num_frames_per_block
-            block_sizes = [num_frames_per_block] * num_blocks
-        else:
-            if (t - 1) % num_frames_per_block != 0:
-                raise ValueError(
-                    "(num_frames - 1) must be divisible by num_frame_per_block when independent_first_frame=True"
-                )
-            num_blocks = (t - 1) // num_frames_per_block
-            block_sizes = [1] + [num_frames_per_block] * num_blocks
-
-        max_target_idx = len(self.denoising_step_list) - 1
-        noise_latents = []
-        noise_latent_index = target_timestep_idx_int - 1
-        
-        if max_target_idx > 0:
-            # Run student model for all steps before the target timestep with causal blocks
+        # Step 2: Cache context feature
+        current_start_frame = 0
+        if initial_latent is not None:
+            timestep = torch.ones([batch_size, 1], device=noise.device, dtype=torch.int64) * 0
+            output[:, :1] = initial_latent
             with torch.no_grad():
-                start_index = 0
-                current_start_frame = 0
-                
-                # Process each causal block
-                for current_num_frames in block_sizes:
-                    # Extract current block from the full latents
-                    block_latents = current_noise_latents[:, start_index:start_index + current_num_frames, :, :, :]
+                # Build input kwargs for initial latent
+                training_batch_temp = self._build_distill_input_kwargs(
+                    initial_latent, timestep * 0, training_batch.conditional_dict, training_batch)
+            
+                self.transformer(
+                    hidden_states=training_batch_temp.input_kwargs['hidden_states'],
+                    encoder_hidden_states=training_batch_temp.input_kwargs['encoder_hidden_states'],
+                    timestep=training_batch_temp.input_kwargs['timestep'],
+                    encoder_hidden_states_image=training_batch_temp.input_kwargs.get('encoder_hidden_states_image'),
+                    kv_cache=self.kv_cache1,
+                    crossattn_cache=self.crossattn_cache,
+                    current_start=current_start_frame * self.frame_seq_length
+                )
+            current_start_frame += 1
+
+        # Step 3: Temporal denoising loop
+        all_num_frames = [self.num_frame_per_block] * num_blocks
+        if self.independent_first_frame and initial_latent is None:
+            all_num_frames = [1] + all_num_frames
+        num_denoising_steps = len(self.denoising_step_list)
+        exit_flags = self.generate_and_sync_list(len(all_num_frames), num_denoising_steps, device=noise.device)
+        start_gradient_frame_index = num_output_frames - 21
+
+        for block_index, current_num_frames in enumerate(all_num_frames):
+            noisy_input = noise[:, current_start_frame - num_input_frames:current_start_frame + current_num_frames - num_input_frames]
+
+            # Step 3.1: Spatial denoising loop
+            for index, current_timestep in enumerate(self.denoising_step_list):
+                if self.same_step_across_blocks:
+                    exit_flag = (index == exit_flags[0])
+                else:
+                    exit_flag = (index == exit_flags[block_index])
                     
-                    # Process denoising timesteps for this block
-                    for step_idx in range(max_target_idx):
-                        current_timestep = self.denoising_step_list[step_idx]
-                        current_timestep_tensor = current_timestep * torch.ones(
-                            1, device=self.device, dtype=torch.long)
-                        
-                        # Build input kwargs with KV cache support for this block
+                timestep = torch.ones([batch_size, current_num_frames], device=noise.device, dtype=torch.int64) * current_timestep
+
+                if not exit_flag:
+                    with torch.no_grad():
+                        # Build input kwargs
                         training_batch_temp = self._build_distill_input_kwargs(
-                            block_latents, current_timestep_tensor,
-                            training_batch.conditional_dict, training_batch)
+                            noisy_input, timestep, training_batch.conditional_dict, training_batch)
                         
-                        # Add KV cache parameters for causal generation
-                        if hasattr(self.transformer, '_forward_inference'):
-                            # Use causal inference forward with KV cache
+                        pred_flow = self.transformer(
+                            hidden_states=training_batch_temp.input_kwargs['hidden_states'],
+                            encoder_hidden_states=training_batch_temp.input_kwargs['encoder_hidden_states'],
+                            timestep=training_batch_temp.input_kwargs['timestep'],
+                            encoder_hidden_states_image=training_batch_temp.input_kwargs.get('encoder_hidden_states_image'),
+                            kv_cache=self.kv_cache1,
+                            crossattn_cache=self.crossattn_cache,
+                            current_start=current_start_frame * self.frame_seq_length
+                        ).permute(0, 2, 1, 3, 4)
+                        
+                        denoised_pred = pred_noise_to_pred_video(
+                            pred_noise=pred_flow.flatten(0, 1),
+                            noise_input_latent=noisy_input.flatten(0, 1),
+                            timestep=timestep.flatten(),
+                            scheduler=self.noise_scheduler).unflatten(0, pred_flow.shape[:2])
+                        
+                        next_timestep = self.denoising_step_list[index + 1]
+                        noisy_input = self.noise_scheduler.add_noise(
+                            denoised_pred.flatten(0, 1),
+                            torch.randn_like(denoised_pred.flatten(0, 1)),
+                            next_timestep * torch.ones([batch_size * current_num_frames], device=noise.device, dtype=torch.long)
+                        ).unflatten(0, denoised_pred.shape[:2])
+                else:
+                    # Final prediction with gradient control
+                    if current_start_frame < start_gradient_frame_index:
+                        with torch.no_grad():
+                            training_batch_temp = self._build_distill_input_kwargs(
+                                noisy_input, timestep, training_batch.conditional_dict, training_batch)
+                            
                             pred_flow = self.transformer(
                                 hidden_states=training_batch_temp.input_kwargs['hidden_states'],
                                 encoder_hidden_states=training_batch_temp.input_kwargs['encoder_hidden_states'],
                                 timestep=training_batch_temp.input_kwargs['timestep'],
                                 encoder_hidden_states_image=training_batch_temp.input_kwargs.get('encoder_hidden_states_image'),
-                                kv_cache=kv_cache,
-                                crossattn_cache=crossattn_cache,
-                                current_start=current_start_frame * 1560,  # TODO: remove hardcode
-                                cache_start=0
+                                kv_cache=self.kv_cache1,
+                                crossattn_cache=self.crossattn_cache,
+                                current_start=current_start_frame * self.frame_seq_length
                             ).permute(0, 2, 1, 3, 4)
-                        else:
-                            # Fallback to regular forward
-                            pred_flow = self.transformer(**training_batch_temp.input_kwargs).permute(0, 2, 1, 3, 4)
-                        
-                        pred_clean = pred_noise_to_pred_video(
-                            pred_noise=pred_flow.flatten(0, 1),
-                            noise_input_latent=block_latents.flatten(0, 1),
-                            timestep=current_timestep_tensor,
-                            scheduler=self.noise_scheduler).unflatten(
-                                0, pred_flow.shape[:2])
-
-                        # Add noise for the next timestep
-                        if step_idx < max_target_idx - 1:
-                            next_timestep = self.denoising_step_list[step_idx + 1]
-                            next_timestep_tensor = next_timestep * torch.ones(
-                                1, device=self.device, dtype=torch.long)
-                            
-                            # Generate noise for this block size
-                            block_noise_shape = (batch_size, current_num_frames, *self.video_latent_shape[2:])
-                            noise = torch.randn(block_noise_shape,
-                                              device=self.device,
-                                              dtype=pred_clean.dtype)
-                            if self.sp_world_size > 1:
-                                noise = rearrange(noise,
-                                                "b (n t) c h w -> b n t c h w",
-                                                n=self.sp_world_size).contiguous()
-                                noise = noise[:, self.rank_in_sp_group, :, :, :, :]
-                            block_latents = self.noise_scheduler.add_noise(
-                                pred_clean.flatten(0, 1), noise.flatten(0, 1),
-                                next_timestep_tensor).unflatten(0, pred_clean.shape[:2])
-                        else:
-                            # Final step: use clean prediction
-                            block_latents = pred_clean
+                    else:
+                        training_batch_temp = self._build_distill_input_kwargs(
+                            noisy_input, timestep, training_batch.conditional_dict, training_batch)
+    
+                        pred_flow = self.transformer(
+                            hidden_states=training_batch_temp.input_kwargs['hidden_states'],
+                            encoder_hidden_states=training_batch_temp.input_kwargs['encoder_hidden_states'],
+                            timestep=training_batch_temp.input_kwargs['timestep'],
+                            encoder_hidden_states_image=training_batch_temp.input_kwargs.get('encoder_hidden_states_image'),
+                            kv_cache=self.kv_cache1,
+                            crossattn_cache=self.crossattn_cache,
+                            current_start=current_start_frame * self.frame_seq_length
+                        ).permute(0, 2, 1, 3, 4)
                     
-                    # Store the processed block result
-                    latent_copy = block_latents.clone()
-                    noise_latents.append(latent_copy)
-                    
-                    # Update indices for next block
-                    current_start_frame += current_num_frames
-                    start_index += current_num_frames
-                
-                # Reconstruct full latents from blocks
-                if noise_latents:
-                    current_noise_latents = torch.cat(noise_latents, dim=1)
+                    denoised_pred = pred_noise_to_pred_video(
+                        pred_noise=pred_flow.flatten(0, 1),
+                        noise_input_latent=noisy_input.flatten(0, 1),
+                        timestep=timestep.flatten(),
+                        scheduler=self.noise_scheduler).unflatten(0, pred_flow.shape[:2])
+                    break
 
-        # Step 6: Use the simulated noisy input for the final training step
-        if noise_latent_index >= 0:
-            assert noise_latent_index < len(
-                self.denoising_step_list
-            ) - 1, "noise_latent_index is out of bounds"
-            noisy_input = current_noise_latents
-        else:
-            noisy_input = current_noise_latents_copy
+            # Step 3.2: record the model's output
+            output[:, current_start_frame:current_start_frame + current_num_frames] = denoised_pred
 
-        # Step 7: Final student prediction with selective gradient computation
-        training_batch = self._build_distill_input_kwargs(
-            noisy_input, target_timestep, training_batch.conditional_dict,
-            training_batch)
-        
-        # Apply gradient masking during final forward pass
-        if gradient_mask is not None:
-            # Create a custom forward function that applies gradient masking
-            def masked_forward():
-                pred_flow = self.transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
-                pred_video = pred_noise_to_pred_video(
-                    pred_noise=pred_flow.flatten(0, 1),
-                    noise_input_latent=noisy_input.flatten(0, 1),
-                    timestep=target_timestep,
-                    scheduler=self.noise_scheduler).unflatten(0, pred_flow.shape[:2])
-                
-                # Apply gradient masking: detach frames that shouldn't contribute gradients
-                masked_pred_video = pred_video.clone()
-                masked_pred_video = torch.where(
-                    gradient_mask.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1),  # Broadcast to [B, F, 1, 1, 1]
-                    pred_video,  # Keep original values where gradient_mask is True
-                    pred_video.detach()  # Detach where gradient_mask is False
-                )
-                
-                return masked_pred_video
+            # Step 3.3: rerun with timestep zero to update the cache
+            context_timestep = torch.ones_like(timestep) * self.context_noise
+            denoised_pred = self.noise_scheduler.add_noise(
+                denoised_pred.flatten(0, 1),
+                torch.randn_like(denoised_pred.flatten(0, 1)),
+                context_timestep * torch.ones([batch_size * current_num_frames], device=noise.device, dtype=torch.long)
+            ).unflatten(0, denoised_pred.shape[:2])
             
-            pred_video = masked_forward()
-        else:
-            pred_flow = self.transformer(**training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
-            pred_video = pred_noise_to_pred_video(
-                pred_noise=pred_flow.flatten(0, 1),
-                noise_input_latent=noisy_input.flatten(0, 1),
-                timestep=target_timestep,
-                scheduler=self.noise_scheduler).unflatten(0, pred_flow.shape[:2])
+            with torch.no_grad():
+                training_batch_temp = self._build_distill_input_kwargs(
+                    denoised_pred, context_timestep, training_batch.conditional_dict, training_batch)
+                
+                self.transformer(
+                    hidden_states=training_batch_temp.input_kwargs['hidden_states'],
+                    encoder_hidden_states=training_batch_temp.input_kwargs['encoder_hidden_states'],
+                    timestep=training_batch_temp.input_kwargs['timestep'],
+                    encoder_hidden_states_image=training_batch_temp.input_kwargs.get('encoder_hidden_states_image'),
+                    kv_cache=self.kv_cache1,
+                    crossattn_cache=self.crossattn_cache,
+                    current_start=current_start_frame * self.frame_seq_length
+                )
+
+            # Step 3.4: update the start and end frame indices
+            current_start_frame += current_num_frames
+
+        # Handle last 21 frames logic 
+        pred_image_or_video = output
+        if num_input_frames > 0:
+            pred_image_or_video = output[:, num_input_frames:]
         
-        training_batch.dmd_latent_vis_dict[
-            "generator_timestep"] = target_timestep.float().detach()
+        # Slice last 21 frames if we generated more
+        gradient_mask = None
+        if pred_image_or_video.shape[1] > 21:
+            with torch.no_grad():
+                # Reencode to get image latent
+                latent_to_decode = pred_image_or_video[:, :-20, ...]
+                # Decode to video
+                latent_to_decode = latent_to_decode.permute(0, 2, 1, 3, 4)  # [B, C, F, H, W]
+                
+                # Apply VAE scaling and shift factors
+                if isinstance(self.vae.scaling_factor, torch.Tensor):
+                    latent_to_decode = latent_to_decode / self.vae.scaling_factor.to(latent_to_decode.device, latent_to_decode.dtype)
+                else:
+                    latent_to_decode = latent_to_decode / self.vae.scaling_factor
+                
+                if hasattr(self.vae, "shift_factor") and self.vae.shift_factor is not None:
+                    if isinstance(self.vae.shift_factor, torch.Tensor):
+                        latent_to_decode += self.vae.shift_factor.to(latent_to_decode.device, latent_to_decode.dtype)
+                    else:
+                        latent_to_decode += self.vae.shift_factor
+                
+                # Decode to pixels
+                pixels = self.vae.decode(latent_to_decode)
+                frame = pixels[:, :, -1:, :, :].to(dtype)  # Last frame [B, C, 1, H, W]
+                
+                # Encode frame back to get image latent
+                image_latent = self.vae.encode(frame).to(dtype)
+                image_latent = image_latent.permute(0, 2, 1, 3, 4)  # [B, F, C, H, W]
+            
+            pred_image_or_video_last_21 = torch.cat([image_latent, pred_image_or_video[:, -20:, ...]], dim=1)
+        else:
+            pred_image_or_video_last_21 = pred_image_or_video
+        
+        # Set up gradient mask if we generated more than minimum frames
+        if num_generated_frames != min_num_frames:
+            # Currently, we do not use gradient for the first chunk, since it contains image latents
+            gradient_mask = torch.ones_like(pred_image_or_video_last_21, dtype=torch.bool)
+            if self.independent_first_frame:
+                gradient_mask[:, :1] = False
+            else:
+                gradient_mask[:, :self.num_frame_per_block] = False
+        
+        # Apply gradient masking if needed
+        final_output = pred_image_or_video_last_21.to(dtype)
+        if gradient_mask is not None:
+            # Apply gradient masking: detach frames that shouldn't contribute gradients
+            final_output = torch.where(
+                gradient_mask,
+                pred_image_or_video_last_21,  # Keep original values where gradient_mask is True
+                pred_image_or_video_last_21.detach()  # Detach where gradient_mask is False
+            )
+
+        # Store visualization data
+        training_batch.dmd_latent_vis_dict["generator_timestep"] = torch.tensor(
+            self.denoising_step_list[exit_flags[0]], dtype=torch.float32, device=self.device)
         
         # Store gradient mask information for debugging
         if gradient_mask is not None:
             training_batch.dmd_latent_vis_dict["gradient_mask"] = gradient_mask.float()
-            start_gradient_frame_index = max(0, num_frames - gradient_mask_last_n_frames)
-            training_batch.dmd_latent_vis_dict["start_gradient_frame_index"] = torch.tensor(
-                start_gradient_frame_index, dtype=torch.float32, device=self.device)
+            training_batch.dmd_latent_vis_dict["num_generated_frames"] = torch.tensor(
+                num_generated_frames, dtype=torch.float32, device=self.device)
+            training_batch.dmd_latent_vis_dict["min_num_frames"] = torch.tensor(
+                min_num_frames, dtype=torch.float32, device=self.device)
         
-        self._reset_simulation_caches(kv_cache, crossattn_cache)
-        
-        return pred_video
+        self._reset_simulation_caches(self.kv_cache1, self.crossattn_cache)
+
+        return final_output if gradient_mask is not None else pred_image_or_video
 
     def _initialize_simulation_caches(self, batch_size: int, dtype: torch.dtype, device: torch.device):
         """Initialize KV cache and cross-attention cache for multi-step simulation."""

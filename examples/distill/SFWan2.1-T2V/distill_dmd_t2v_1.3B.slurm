@@ -39,7 +39,7 @@ echo "NODE_RANK: $NODE_RANK"
 # Configs
 NUM_GPUS=1
 
-# Model paths for DMD distillation:
+# Model paths for Self-Forcing DMD distillation:
 GENERATOR_MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
 REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"  # Teacher model
 FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Critic model
@@ -51,7 +51,7 @@ VALIDATION_DATASET_FILE="data/crush-smol-single_processed_t2v/validation.json"
 
 # Training arguments
 training_args=(
-  --tracker_project_name SFwan_t2v_distill_self_forcing_dmd
+  --tracker_project_name SFwan_t2v_distill_self_forcing_dmd  # Updated for self-forcing DMD
   --output_dir "checkpoints/SFwan_t2v_finetune"
   --max_train_steps 500
   --train_batch_size 1
@@ -60,11 +60,11 @@ training_args=(
   --num_latent_t 21
   --num_height 480
   --num_width 832
-  --num_frames 81
+  --num_frames 81  # Must be divisible by num_frame_per_block (81 % 3 = 0 ✓)
   --enable_gradient_checkpointing_type "full"
   --log_visualization
   --simulate_generator_forward
-  --num_frame_per_block 3
+  --num_frame_per_block 3  # Frame generation block size for self-forcing
   --enable_gradient_masking
   --gradient_mask_last_n_frames 21
 )
@@ -138,6 +138,15 @@ dmd_args=(
   --fake_score_betas '0.0,0.999'
 )
 
+# Self-forcing specific arguments
+self_forcing_args=(
+  --independent_first_frame False  # Whether to treat first frame independently
+  --same_step_across_blocks False  # Whether to use same denoising step across all blocks
+  --last_step_only False  # Whether to only use the last denoising step
+  --context_noise 0  # Amount of noise to add during context caching (0 = no noise)
+  --validate_cache_structure False  # Set to True for debugging KV cache issues
+)
+
 srun torchrun \
 --nnodes $SLURM_JOB_NUM_NODES \
 --nproc_per_node $NUM_GPUS \
@@ -152,4 +161,5 @@ srun torchrun \
     "${optimizer_args[@]}" \
     "${validation_args[@]}" \
     "${miscellaneous_args[@]}" \
-    "${dmd_args[@]}"
+    "${dmd_args[@]}" \
+    "${self_forcing_args[@]}"

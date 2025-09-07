@@ -691,6 +691,9 @@ class TrainingArgs(FastVideoArgs):
     enable_gradient_masking: bool = True
     gradient_mask_last_n_frames: int = 21
     validate_cache_structure: bool = False  # Debug flag for cache validation
+    same_step_across_blocks: bool = False  # Use same exit timestep for all blocks
+    last_step_only: bool = False  # Only use the last timestep for training
+    context_noise: int = 0  # Context noise level for cache updates
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -1099,6 +1102,19 @@ class TrainingArgs(FastVideoArgs):
             "--validate-cache-structure",
             action=StoreBoolean,
             help="Whether to validate KV cache structure (debug flag)")
+        parser.add_argument(
+            "--same-step-across-blocks",
+            action=StoreBoolean,
+            help="Whether to use the same exit timestep for all blocks")
+        parser.add_argument(
+            "--last-step-only",
+            action=StoreBoolean,
+            help="Whether to only use the last timestep for training")
+        parser.add_argument(
+            "--context-noise",
+            type=int,
+            default=TrainingArgs.context_noise,
+            help="Context noise level for cache updates")
 
         return parser
 
