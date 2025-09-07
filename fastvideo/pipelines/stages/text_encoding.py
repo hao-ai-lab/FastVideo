@@ -116,6 +116,16 @@ class TextEncodingStage(PipelineStage):
                 with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
                     f.write(f"TextEncodingStage: negative_prompt_embeds sum = {sum_value:.6f}\n")
 
+                # Apply attention mask length processing (like Diffusers does)
+                lengths = negative_attention_mask.sum(dim=1).cpu()
+                for i, length in enumerate(lengths):
+                    negative_prompt_embeds[i, length:] = 0
+                
+                sum_value = negative_prompt_embeds.float().sum().item()
+                logger.info(f"TextEncodingStage: negative_prompt_embeds sum after masking = {sum_value:.6f}")
+                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                    f.write(f"TextEncodingStage: negative_prompt_embeds sum after masking = {sum_value:.6f}\n")
+
                 assert batch.negative_prompt_embeds is not None
                 batch.negative_prompt_embeds.append(negative_prompt_embeds)
                 if batch.negative_attention_mask is not None:
