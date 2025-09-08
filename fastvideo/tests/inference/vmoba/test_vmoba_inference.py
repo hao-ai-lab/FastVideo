@@ -9,8 +9,7 @@ def test_inference_vmoba():
 
     num_gpus = "1"
     model_base = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-    output_dir = Path("outputs_video/")
-    prompt_txt = "assets/prompt.txt"
+    output_dir = Path("outputs_video/vmoba_1.3B/")
     moba_config = "fastvideo/configs/backend/vmoba/wan_1.3B_77_480_832.json"
 
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VMOBA_ATTN"
@@ -33,7 +32,7 @@ def test_inference_vmoba():
         "--fps", "16",
         "--guidance-scale", "6.0",
         "--flow-shift", "8.0",
-        "--prompt-txt", prompt_txt,
+        "--prompt", "A majestic lion strides across the golden savanna, its powerful frame glistening under the warm afternoon sun. The tall grass ripples gently in the breeze, enhancing the lion's commanding presence. The tone is vibrant, embodying the raw energy of the wild. Low angle, steady tracking shot, cinematic.",
         "--negative-prompt", (
             "Bright tones, overexposed, static, blurred details, subtitles, style, "
             "works, paintings, images, static, overall gray, worst quality, low quality, "
