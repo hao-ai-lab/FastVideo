@@ -3,7 +3,7 @@
 import torch
 import pytest
 import random
-from vmoba import moba_attn_varlen
+from csrc.attn.vmoba_attn.vmoba  import moba_attn_varlen
 
 def generate_test_data(batch_size, total_seqlen, num_heads, head_dim, dtype, device="cuda"):
     """
