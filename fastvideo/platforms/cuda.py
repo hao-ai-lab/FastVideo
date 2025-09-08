@@ -161,8 +161,8 @@ class CudaPlatformBase(Platform):
                     "Video Sparse Attention backend is not installed. ") from e
         elif selected_backend == AttentionBackendEnum.VMOBA_ATTN:
             try:
-                from csrc.attn.vmoba_attn.vmoba import moba_attn_varlen  # noqa: F401
-
+                from csrc.attn.vmoba_attn.vmoba import (  # noqa: F401
+                    moba_attn_varlen)
                 from fastvideo.attention.backends.vmoba import (  # noqa: F401
                     VMOBAAttentionBackend)
                 logger.info("Using Video MOBA Attention backend.")
