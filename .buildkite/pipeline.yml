@@ -188,7 +188,7 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "csrc/attn/vmoba_attn/vmoba"
+                - "csrc/attn/vmoba_attn/vmoba/**"
                 - "fastvideo/attention/backends/vmoba.py"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
