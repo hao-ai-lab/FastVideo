@@ -109,6 +109,15 @@ case "$TEST_TYPE" in
         log "Running distillation DMD tests..."
         MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_distill_dmd_tests"
         ;;
+        # run_inference_tests_vmoba
+    "inference_vmoba")
+        log "Running V-MoBA inference tests..."
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_inference_tests_vmoba"
+        ;;
+    "precision_vmoba")
+        log "Running V-MoBA precision tests..."
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_precision_tests_vmoba"
+        ;;
     *)
         log "Error: Unknown test type: $TEST_TYPE"
         exit 1
