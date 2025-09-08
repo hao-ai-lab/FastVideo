@@ -636,10 +636,14 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
         timestep: torch.IntTensor,
     ) -> torch.Tensor:
         self.sigmas = self.sigmas.to(noise.device)
-        timestep = timestep.expand(clean_latent.shape[0])
+        # TODO: hack
+        if timestep.ndim == 2 and timestep.shape[1] == 1:
+            timestep = timestep.expand(clean_latent.shape[0])
         self.timesteps = self.timesteps.to(noise.device)
         logger.info("self.timesteps shape: %s", self.timesteps.shape)
         logger.info("timestep shape: %s", timestep.shape)
+        if timestep.ndim > 1:
+            timestep = timestep.squeeze(0)
         timestep_id = torch.argmin(
             (self.timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
         sigma = self.sigmas[timestep_id].reshape(-1, 1, 1, 1)

@@ -27,6 +27,7 @@ from fastvideo.layers.activation import get_act_fn
 from fastvideo.models.vaes.common import (DiagonalGaussianDistribution,
                                           ParallelTiledVAE)
 from fastvideo.platforms import current_platform
+from fastvideo.logger import init_logger
 
 CACHE_T = 2
 
@@ -35,6 +36,7 @@ feat_cache = contextvars.ContextVar("feat_cache", default=None)
 feat_idx = contextvars.ContextVar("feat_idx", default=0)
 first_chunk = contextvars.ContextVar("first_chunk", default=None)
 
+logger = init_logger(__name__)
 
 @contextmanager
 def forward_context(first_frame_arg=False,
@@ -1129,6 +1131,7 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
             self._conv_idx = 0
             self._feat_map = [None] * self._conv_num
         # cache encode
+        logger.info("self.config.load_encoder: %s", self.config.load_encoder)
         if self.config.load_encoder:
             self._enc_conv_num = _count_conv3d(self.encoder)
             self._enc_conv_idx = 0

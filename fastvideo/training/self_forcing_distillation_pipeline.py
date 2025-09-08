@@ -59,6 +59,16 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         self.last_step_only = getattr(training_args, 'last_step_only', False)
         self.context_noise = getattr(training_args, 'context_noise', 0)
         
+        # # # Ensure VAE encoder is loaded and properly initialized
+        # # # TODO: hack
+        # if hasattr(self.vae, 'config'):
+        #     self.vae.config.load_encoder = True
+        #     # Initialize the encoder cache if the VAE supports feature caching
+        #     if hasattr(self.vae, 'use_feature_cache') and self.vae.use_feature_cache:
+        #         if hasattr(self.vae, 'clear_cache'):
+        #             self.vae.clear_cache()
+        #             logger.info("Initialized VAE encoder feature cache")
+        
         # Calculate frame sequence length - this will be set properly in _prepare_dit_inputs
         self.frame_seq_length = 1560  # TODO: Calculate this dynamically based on patch size
         
@@ -436,7 +446,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 frame = pixels[:, :, -1:, :, :].to(dtype)  # Last frame [B, C, 1, H, W]
                 
                 # Encode frame back to get image latent
-                image_latent = self.vae.encode(frame).to(dtype)
+                image_latent = self.vae.encode(frame).mean.to(dtype)
                 image_latent = image_latent.permute(0, 2, 1, 3, 4)  # [B, F, C, H, W]
             
             pred_image_or_video_last_21 = torch.cat([image_latent, pred_image_or_video[:, -20:, ...]], dim=1)
