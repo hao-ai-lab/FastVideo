@@ -28,10 +28,6 @@ class LTXPipeline(ComposedPipelineBase):
         "text_encoder", "tokenizer", "vae", "transformer", "scheduler"
     ]
 
-    @property
-    def required_config_modules(self) -> List[str]:
-        return self._required_config_modules
-        
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """Initialize pipeline-specific components."""
         pass
