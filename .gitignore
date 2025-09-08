@@ -66,3 +66,4 @@ docs/source/distillation/examples/
 !comfyui/assets/**/*.gif
 
 dmd_t2v_output/
+sf_output/
