@@ -147,6 +147,10 @@ class CausalWanSelfAttention(nn.Module):
                 # Assign new keys/values directly up to current_end
                 local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
                 local_start_index = local_end_index - num_new_tokens
+
+                kv_cache["k"] = kv_cache["k"].clone()
+                kv_cache["v"] = kv_cache["v"].clone()
+
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
             x = self.attn(

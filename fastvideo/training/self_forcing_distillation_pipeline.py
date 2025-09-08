@@ -52,27 +52,14 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         super().initialize_training_pipeline(training_args)
         self.dfake_gen_update_ratio = getattr(training_args, 'dfake_gen_update_ratio', 5)
 
-        # Self-forcing specific properties
         self.num_frame_per_block = getattr(training_args, 'num_frame_per_block', 3)
         self.independent_first_frame = getattr(training_args, 'independent_first_frame', False)
         self.same_step_across_blocks = getattr(training_args, 'same_step_across_blocks', False)
         self.last_step_only = getattr(training_args, 'last_step_only', False)
         self.context_noise = getattr(training_args, 'context_noise', 0)
         
-        # # # Ensure VAE encoder is loaded and properly initialized
-        # # # TODO: hack
-        # if hasattr(self.vae, 'config'):
-        #     self.vae.config.load_encoder = True
-        #     # Initialize the encoder cache if the VAE supports feature caching
-        #     if hasattr(self.vae, 'use_feature_cache') and self.vae.use_feature_cache:
-        #         if hasattr(self.vae, 'clear_cache'):
-        #             self.vae.clear_cache()
-        #             logger.info("Initialized VAE encoder feature cache")
-        
-        # Calculate frame sequence length - this will be set properly in _prepare_dit_inputs
         self.frame_seq_length = 1560  # TODO: Calculate this dynamically based on patch size
         
-        # Cache references (will be initialized per forward pass)
         self.kv_cache1 = None
         self.crossattn_cache = None
 
