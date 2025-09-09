@@ -74,12 +74,13 @@ class CausalDMDDenosingStage(DenoisingStage):
             dtype=torch.long).cpu()
 
         if fastvideo_args.pipeline_config.warp_denoising_step:
+            logger.info("Warping timesteps...")
             scheduler_timesteps = torch.cat((self.scheduler.timesteps.cpu(),
                                              torch.tensor([0],
                                                           dtype=torch.float32)))
             timesteps = scheduler_timesteps[1000 - timesteps]
         timesteps = timesteps.to(get_local_torch_device())
-        logger.info("using timesteps: %s", timesteps)
+        logger.info("Using timesteps: %s", timesteps)
 
         # Image kwargs (kept empty unless caller provides compatible args)
         image_kwargs: dict = {}

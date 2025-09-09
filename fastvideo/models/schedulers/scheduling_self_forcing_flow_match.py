@@ -1,4 +1,4 @@
-
+# SPDX-License-Identifier: Apache-2.0
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.schedulers.scheduling_utils import SchedulerMixin
 from diffusers.utils import BaseOutput
@@ -24,7 +24,7 @@ class SelfForcingFlowMatchSchedulerOutput(BaseOutput):
 class SelfForcingFlowMatchScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
 
     order = 1
-    def __init__(self, num_inference_steps=100, num_train_timesteps=1000, shift=3.0, sigma_max=1.0, sigma_min=0.003 / 1.002, inverse_timesteps=False, extra_one_step=False, reverse_sigmas=False):
+    def __init__(self, num_inference_steps=100, num_train_timesteps=1000, shift=3.0, sigma_max=1.0, sigma_min=0.003 / 1.002, inverse_timesteps=False, extra_one_step=False, reverse_sigmas=False, training=False):
         self.num_train_timesteps = num_train_timesteps
         self.shift = shift
         self.sigma_max = sigma_max
@@ -32,7 +32,7 @@ class SelfForcingFlowMatchScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
         self.inverse_timesteps = inverse_timesteps
         self.extra_one_step = extra_one_step
         self.reverse_sigmas = reverse_sigmas
-        self.set_timesteps(num_inference_steps)
+        self.set_timesteps(num_inference_steps, training=training)
 
     def set_timesteps(self, num_inference_steps=100, denoising_strength=1.0, training=False, return_dict=False, **kwargs):
         sigma_start = self.sigma_min + \
