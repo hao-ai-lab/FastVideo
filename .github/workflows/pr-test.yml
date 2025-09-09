@@ -235,7 +235,7 @@ jobs:
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
-  
+
   training-test:
     needs: change-filter
     if: >-

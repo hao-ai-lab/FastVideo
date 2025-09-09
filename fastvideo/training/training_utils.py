@@ -1278,3 +1278,7 @@ def get_scheduler(
                          num_warmup_steps=num_warmup_steps,
                          num_training_steps=num_training_steps,
                          last_epoch=last_epoch)
+
+
+def count_trainable(model: torch.nn.Module) -> int:
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)

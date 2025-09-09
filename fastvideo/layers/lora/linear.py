@@ -63,7 +63,7 @@ class BaseLayerWithLoRA(nn.Module):
                             device=self.base_layer.weight.device,
                             dtype=self.base_layer.weight.dtype))
             torch.nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
-            torch.nn.init.kaiming_uniform_(self.lora_B, a=math.sqrt(5))
+            torch.nn.init.zeros_(self.lora_B)
         else:
             self.lora_A = None
             self.lora_B = None

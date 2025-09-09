@@ -92,24 +92,6 @@ class EncodingStage(PipelineStage):
                 latents = latents.to(vae_dtype)
             latents = self.vae.encode(latents).mean
 
-        # Apply shifting if needed (reverse of decoding)
-        if (hasattr(self.vae, "shift_factor")
-                and self.vae.shift_factor is not None):
-            if isinstance(self.vae.shift_factor, torch.Tensor):
-                latents -= self.vae.shift_factor.to(latents.device,
-                                                    latents.dtype)
-            else:
-                latents -= self.vae.shift_factor
-
-        # Apply scaling factor
-        if (hasattr(self.vae, "scaling_factor")
-                and self.vae.scaling_factor is not None):
-            if isinstance(self.vae.scaling_factor, torch.Tensor):
-                latents = latents * self.vae.scaling_factor.to(
-                    latents.device, latents.dtype)
-            else:
-                latents = latents * self.vae.scaling_factor
-
         # Update batch with encoded latents
         batch.latents = latents
 

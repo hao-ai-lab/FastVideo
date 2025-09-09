@@ -4,7 +4,7 @@
 export WANDB_MODE="online"
 export NCCL_P2P_DISABLE=1
 export TORCH_NCCL_ENABLE_MONITORING=0
-export MASTER_PORT=29500
+export MASTER_PORT=29501
 export TOKENIZERS_PARALLELISM=false
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
@@ -34,6 +34,8 @@ training_args=(
   --enable_gradient_checkpointing_type "full"
   --training_state_checkpointing_steps=500
   --weight_only_checkpointing_steps=500
+  --lora_rank 32
+  --lora_training True
 )
 
 # Parallel arguments
@@ -68,7 +70,7 @@ validation_args=(
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate=1e-5
+  --learning_rate=1e-4
   --mixed_precision="bf16"
   --weight_decay 0.01
   --max_grad_norm 1.0
