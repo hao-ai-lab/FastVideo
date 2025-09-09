@@ -187,13 +187,13 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
             assert gate == 1
             residual_output = residual + x
         elif isinstance(gate, torch.Tensor):
-            if gate.dim() == 3:
+            if gate.dim() <= 3:
                 # used by bidirectional self attention
                 # gate.shape: [batch_size, 1, inner_dim]
                 residual_output = residual + x * gate
             else:
                 # gate.shape: [batch_size, num_frames, 1, inner_dim]
-                assert gate.dim() == 4
+                assert gate.dim() == 4, f"Gate dim: {gate.dim()}"
                 num_frames = gate.shape[1]
                 frame_seqlen = x.shape[1] // num_frames
                 residual_output = residual + (

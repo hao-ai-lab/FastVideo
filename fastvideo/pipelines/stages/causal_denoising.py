@@ -4,8 +4,6 @@ from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler)
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.denoising import DenoisingStage
@@ -38,7 +36,6 @@ class CausalDMDDenosingStage(DenoisingStage):
 
     def __init__(self, transformer, scheduler) -> None:
         super().__init__(transformer, scheduler)
-        self.scheduler = FlowMatchEulerDiscreteScheduler(shift=8.0)
         # KV and cross-attention cache state (initialized on first forward)
         self.kv_cache1: list | None = None
         self.crossattn_cache: list | None = None
