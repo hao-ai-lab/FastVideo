@@ -26,18 +26,140 @@ from fastvideo.dataset.dataloader.schema import pyarrow_schema_ode_trajectory
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.utils import shallow_asdict, save_decoded_latents_as_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (
     BasePreprocessPipeline)
-from fastvideo.pipelines.stages import (DenoisingStage, ImageVAEEncodingStage,
+from fastvideo.pipelines.stages import (DecodingStage, DenoisingStage,
+                                        ImageVAEEncodingStage,
                                         InputValidationStage,
                                         LatentPreparationStage,
                                         TextEncodingStage,
-                                        TimestepPreparationStage,
-                                        DecodingStage)
+                                        TimestepPreparationStage)
+from fastvideo.utils import save_decoded_latents_as_video, shallow_asdict
 
 logger = init_logger(__name__)
+
+
+class FlowMatchScheduler:
+
+    order = 1
+
+    def __init__(self,
+                 num_inference_steps=100,
+                 num_train_timesteps=1000,
+                 shift=3.0,
+                 sigma_max=1.0,
+                 sigma_min=0.003 / 1.002,
+                 inverse_timesteps=False,
+                 extra_one_step=False,
+                 reverse_sigmas=False):
+        self.num_train_timesteps = num_train_timesteps
+        self.shift = shift
+        self.sigma_max = sigma_max
+        self.sigma_min = sigma_min
+        self.inverse_timesteps = inverse_timesteps
+        self.extra_one_step = extra_one_step
+        self.reverse_sigmas = reverse_sigmas
+        self.set_timesteps(num_inference_steps)
+
+    def set_timesteps(self,
+                      num_inference_steps=100,
+                      denoising_strength=1.0,
+                      training=False,
+                      device=None):
+        sigma_start = self.sigma_min + \
+            (self.sigma_max - self.sigma_min) * denoising_strength
+        if self.extra_one_step:
+            self.sigmas = torch.linspace(sigma_start, self.sigma_min,
+                                         num_inference_steps + 1)[:-1]
+        else:
+            self.sigmas = torch.linspace(sigma_start, self.sigma_min,
+                                         num_inference_steps)
+        if self.inverse_timesteps:
+            self.sigmas = torch.flip(self.sigmas, dims=[0])
+        self.sigmas = self.shift * self.sigmas / \
+            (1 + (self.shift - 1) * self.sigmas)
+        if self.reverse_sigmas:
+            self.sigmas = 1 - self.sigmas
+        self.timesteps = self.sigmas * self.num_train_timesteps
+        if training:
+            x = self.timesteps
+            y = torch.exp(
+                -2 * ((x - num_inference_steps / 2) / num_inference_steps)**2)
+            y_shifted = y - y.min()
+            bsmntw_weighing = y_shifted * \
+                (num_inference_steps / y_shifted.sum())
+            self.linear_timesteps_weights = bsmntw_weighing
+
+    def step(self,
+             model_output,
+             timestep,
+             sample,
+             to_final=False,
+             return_dict=False,
+             **kwargs):
+        assert return_dict is False
+        assert kwargs == {}
+        self.sigmas = self.sigmas.to(model_output.device)
+        self.timesteps = self.timesteps.to(model_output.device)
+        logger.info('step timestep: %s', timestep)
+        logger.info('step timestep: %s', timestep.shape)
+        # timestep  is [num_frames]
+        # timestep_id = torch.argmin(
+        #     (self.timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
+        # assert timestep.ndim == 1
+        # assert timestep.shape[0] == 1
+        timestep_id = torch.argmin((self.timesteps - timestep).abs(), dim=0)
+        sigma = self.sigmas[timestep_id].reshape(-1, 1, 1, 1)
+        if to_final or (timestep_id + 1 >= len(self.timesteps)).any():
+            sigma_ = 1 if (self.inverse_timesteps or self.reverse_sigmas) else 0
+        else:
+            sigma_ = self.sigmas[timestep_id + 1].reshape(-1, 1, 1, 1)
+        prev_sample = sample + model_output * (sigma_ - sigma)
+        return (prev_sample, )
+
+    def scale_model_input(self, sample: torch.Tensor, *args,
+                          **kwargs) -> torch.Tensor:
+        """
+        Ensures interchangeability with schedulers that need to scale the denoising model input depending on the
+        current timestep.
+
+        Args:
+            sample (`torch.Tensor`):
+                The input sample.
+
+        Returns:
+            `torch.Tensor`:
+                A scaled input sample.
+        """
+        return sample
+
+    def add_noise(self, original_samples, noise, timestep):
+        """
+        Diffusion forward corruption process.
+        Input:
+            - clean_latent: the clean latent with shape [B, C, H, W]
+            - noise: the noise with shape [B, C, H, W]
+            - timestep: the timestep with shape [B]
+        Output: the corrupted latent with shape [B, C, H, W]
+        """
+        self.sigmas = self.sigmas.to(noise.device)
+        self.timesteps = self.timesteps.to(noise.device)
+        timestep_id = torch.argmin(
+            (self.timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
+        sigma = self.sigmas[timestep_id].reshape(-1, 1, 1, 1)
+        sample = (1 - sigma) * original_samples + sigma * noise
+        return sample.type_as(noise)
+
+    def training_target(self, sample, noise, timestep):
+        target = noise - sample
+        return target
+
+    def training_weight(self, timestep):
+        timestep_id = torch.argmin(
+            (self.timesteps - timestep.to(self.timesteps.device)).abs())
+        weights = self.linear_timesteps_weights[timestep_id]
+        return weights
 
 
 class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
@@ -55,6 +177,22 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
+        fastvideo_args.pipeline_config.flow_shift = 5
+        logger.info('WTF flow_shift: %s',
+                    fastvideo_args.pipeline_config.flow_shift)
+
+        assert fastvideo_args.pipeline_config.flow_shift == 5
+        # self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
+        # shift=fastvideo_args.pipeline_config.flow_shift)
+        self.modules["scheduler"] = FlowMatchScheduler(
+            shift=fastvideo_args.pipeline_config.flow_shift,
+            sigma_min=0.0,
+            extra_one_step=True)
+        self.modules["scheduler"].set_timesteps(num_inference_steps=48,
+                                                denoising_strength=1.0)
+        logger.info('WTF scheduler timesteps: %s',
+                    self.modules["scheduler"].timesteps)
+
         self.add_stage(stage_name="input_validation_stage",
                        stage=InputValidationStage())
         self.add_stage(stage_name="prompt_encoding_stage",
@@ -124,6 +262,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     valid_data, fastvideo_args)
 
                 batch_captions = valid_data["text"]
+                logger.info(f"===== batch_captions: {batch_captions}")
                 # Encode text using the standalone TextEncodingStage API
                 prompt_embeds_list, prompt_masks_list = self.prompt_encoding_stage.encode_text(
                     batch_captions,
@@ -156,8 +295,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                 # logger.info(f"===== prompt_embeds: {prompt_embeds[0].shape}")
                 # logger.info(f"===== prompt_attention_masks: {prompt_attention_masks[0].shape}")
 
-                sampling_params = SamplingParam.from_pretrained(
-                    args.model_path)
+                sampling_params = SamplingParam.from_pretrained(args.model_path)
 
                 # encode negative prompt for trajectory collection
                 if sampling_params.guidance_scale > 1 and sampling_params.negative_prompt is not None:
@@ -168,7 +306,8 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                         return_attention_mask=True,
                     )
                     negative_prompt_embed = negative_prompt_embeds_list[0][0]
-                    negative_prompt_attention_mask = negative_prompt_masks_list[0][0]
+                    negative_prompt_attention_mask = negative_prompt_masks_list[
+                        0][0]
                 else:
                     negative_prompt_embed = None
                     negative_prompt_attention_mask = None
@@ -176,12 +315,15 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                 trajectory_latents = []
                 trajectory_timesteps = []
                 trajectory_decoded = []
-                for i, (prompt_embed, prompt_attention_mask) in enumerate(zip(prompt_embeds, prompt_attention_masks)):
+                for i, (prompt_embed, prompt_attention_mask) in enumerate(
+                        zip(prompt_embeds, prompt_attention_masks, strict=False)):
                     prompt_embed = prompt_embed.unsqueeze(0)
                     prompt_attention_mask = prompt_attention_mask.unsqueeze(0)
-                    logger.info(f"what")
+                    logger.info("what")
                     logger.info(f"===== prompt_embed: {prompt_embed.shape}")
-                    logger.info(f"===== prompt_attention_mask: {prompt_attention_mask.shape}")
+                    logger.info(
+                        f"===== prompt_attention_mask: {prompt_attention_mask.shape}"
+                    )
                     # Collect the trajectory data
                     batch = ForwardBatch(
                         **shallow_asdict(sampling_params),
@@ -201,14 +343,17 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     batch.prompt_embeds = [prompt_embed]
                     batch.prompt_attention_mask = [prompt_attention_mask]
                     batch.negative_prompt_embeds = [negative_prompt_embed]
-                    batch.negative_attention_mask = [negative_prompt_attention_mask]
+                    batch.negative_attention_mask = [
+                        negative_prompt_attention_mask
+                    ]
                     batch.return_trajectory_latents = True
                     batch.return_trajectory_decoded = False
                     batch.height = args.max_height
                     batch.width = args.max_width
+                    batch.num_inference_steps = 48
                     # batch.num_frames = 81
                     batch.fps = args.train_fps
-                    batch.guidance_scale = 3.0
+                    batch.guidance_scale = 6.0
                     batch.do_classifier_free_guidance = True
                     # fastvideo_args.pipeline_config.ti2v_task = True
 
@@ -222,25 +367,36 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                         result_batch, fastvideo_args)
                     result_batch = self.denoising_stage(result_batch,
                                                         fastvideo_args)
-                    result_batch = self.decoding_stage(result_batch, fastvideo_args)
+                    result_batch = self.decoding_stage(result_batch,
+                                                       fastvideo_args)
                     # trajectory_latents = result_batch.trajectory_latents
-                    trajectory_latents.append(result_batch.trajectory_latents.cpu())
-                    trajectory_timesteps.append(result_batch.trajectory_timesteps.cpu())
+                    trajectory_latents.append(
+                        result_batch.trajectory_latents.cpu())
+                    trajectory_timesteps.append(
+                        result_batch.trajectory_timesteps.cpu())
                     trajectory_decoded.append(result_batch.trajectory_decoded)
 
             extra_features["trajectory_latents"] = trajectory_latents
             extra_features["trajectory_timesteps"] = trajectory_timesteps
-            logger.info(f"===== trajectory_latents: {trajectory_latents[0].shape}")
-            logger.info(f"===== trajectory_latents len: {len(trajectory_latents)}")
+            logger.info(
+                f"===== trajectory_latents: {trajectory_latents[0].shape}")
+            logger.info(
+                f"===== trajectory_latents len: {len(trajectory_latents)}")
             logger.info(f"===== trajectory_timesteps: {trajectory_timesteps}")
-            logger.info(f"===== trajectory_timesteps len: {len(trajectory_timesteps)}")
+            logger.info(
+                f"===== trajectory_timesteps len: {len(trajectory_timesteps)}")
 
             if batch.return_trajectory_decoded:
-                logger.info(f"===== SAVING TRAJECTORY DECODED")
+                logger.info("===== SAVING TRAJECTORY DECODED")
                 for i, decoded_frames in enumerate(trajectory_decoded):
                     for j, decoded_frame in enumerate(decoded_frames):
-                        logger.info(f"===== SAVING TRAJECTORY DECODED {i} for prompt {batch_captions[i]}")
-                        save_decoded_latents_as_video(decoded_frame, f"decoded_videos/trajectory_decoded_{i}_{j}.mp4", args.train_fps)
+                        logger.info(
+                            f"===== SAVING TRAJECTORY DECODED {i} for prompt {batch_captions[i]}"
+                        )
+                        save_decoded_latents_as_video(
+                            decoded_frame,
+                            f"decoded_videos/trajectory_decoded_{i}_{j}.mp4",
+                            args.train_fps)
             # assert False
             # Prepare batch data for Parquet dataset
             batch_data = []
@@ -271,11 +427,12 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                         else:
                             assert isinstance(value, list)
                             if isinstance(value[idx], torch.Tensor):
-                                logger.info(f"===== value in list: {value[idx].shape}")
-                                sample_extra_features[key] = value[idx].cpu().float().numpy(
-                                )
+                                logger.info(
+                                    f"===== value in list: {value[idx].shape}")
+                                sample_extra_features[key] = value[idx].cpu(
+                                ).float().numpy()
                             else:
-                                logger.info(f"===== value in list: not tensor")
+                                logger.info("===== value in list: not tensor")
                                 sample_extra_features[key] = value[idx]
                             # logger.info(f"===== value: not tensor")
                             # sample_extra_features[key] = value[idx]
@@ -412,9 +569,12 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
         if extra_features and "trajectory_latents" in extra_features:
             trajectory_latents = extra_features["trajectory_latents"]
             record.update({
-                "trajectory_latents_bytes": trajectory_latents.tobytes(),
-                "trajectory_latents_shape": list(trajectory_latents.shape),
-                "trajectory_latents_dtype": str(trajectory_latents.dtype),
+                "trajectory_latents_bytes":
+                trajectory_latents.tobytes(),
+                "trajectory_latents_shape":
+                list(trajectory_latents.shape),
+                "trajectory_latents_dtype":
+                str(trajectory_latents.dtype),
             })
         else:
             record.update({
@@ -426,9 +586,12 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
         if extra_features and "trajectory_timesteps" in extra_features:
             trajectory_timesteps = extra_features["trajectory_timesteps"]
             record.update({
-                "trajectory_timesteps_bytes": trajectory_timesteps.tobytes(),
-                "trajectory_timesteps_shape": list(trajectory_timesteps.shape),
-                "trajectory_timesteps_dtype": str(trajectory_timesteps.dtype),
+                "trajectory_timesteps_bytes":
+                trajectory_timesteps.tobytes(),
+                "trajectory_timesteps_shape":
+                list(trajectory_timesteps.shape),
+                "trajectory_timesteps_dtype":
+                str(trajectory_timesteps.dtype),
             })
         else:
             record.update({

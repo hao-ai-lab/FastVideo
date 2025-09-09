@@ -4,11 +4,12 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
+export WANDB_API_KEY='8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde'
 
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-DATA_DIR="data/crush-smol_processed_t2v_1_3b_ode_init/combined_parquet_dataset/"
+DATA_DIR="/mnt/weka/home/hao.zhang/wl/FastVideo2/data/crush-smol_processed_t2v_1_3b_ode_init_single"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
-NUM_GPUS=8
+NUM_GPUS=1
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
@@ -17,9 +18,10 @@ training_args=(
   --tracker_project_name "wan_ode_init"
   --output_dir "wan_ode_init_crush_smol"
   --override_transformer_cls_name "CausalWanTransformer3DModel"
-  --wandb_run_name "wan_ode_init_crush_smol"
+  --wandb_run_name "overfitwan_ode_init_crush_smol"
   # --resume_from_checkpoint "ode_init_diffusers/"
   --max_train_steps 2001
+  # --warp_denoising_step
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
@@ -35,7 +37,7 @@ parallel_args=(
   --num_gpus $NUM_GPUS
   --sp_size 1
   --tp_size 1
-  --hsdp_replicate_dim 8
+  --hsdp_replicate_dim 1
   --hsdp_shard_dim 1
 )
 
@@ -55,14 +57,14 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 100
+  --validation_steps 20
   --validation_sampling_steps "50"
   --validation_guidance_scale "6.0"
 )
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 8e-6
+  --learning_rate 1e-5
   --mixed_precision "bf16"
   --checkpointing_steps 500
   --weight_decay 1e-4

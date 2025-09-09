@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=4e6_ode_vidprom2k
+#SBATCH --job-name=4e6B8_16kFV_no_warp_ode_vidprom
 #SBATCH --partition=main
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -7,8 +7,8 @@
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
-#SBATCH --output=ode_vidprom2k_outputtest/ode_vidprom2k_4e-6.out
-#SBATCH --error=ode_vidprom2k_outputtest/ode_vidprom2k_4e-6.err
+#SBATCH --output=ode_vidprom16k_no_warp/ode_vidprom8b16k_4e-6.out
+#SBATCH --error=ode_vidprom16k_no_warp/ode_vidprom8b16k_4e-6.err
 #SBATCH --exclusive
 set -e -x
 
@@ -38,7 +38,7 @@ echo "NODE_RANK: $NODE_RANK"
 
 # MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-DATA_DIR="/mnt/sharefs/users/hao.zhang/klin/preproc/data/test-ode-preprocessing-extended-t2v-1-3b/"
+DATA_DIR="/mnt/sharefs/users/hao.zhang/klin/preproc/data/test-ode-preprocessing-16k-t2v-1-3b/"
 VALIDATION_DATASET_FILE="examples/training/consistency_finetune/ode_init/validation.json"
 NUM_GPUS=2
 # export CUDA_VISIBLE_DEVICES=4,5
@@ -47,9 +47,9 @@ NUM_GPUS=2
 # Training arguments
 training_args=(
   --tracker_project_name "wan_ode_init"
-  --output_dir "wan_ode_init_vidprom_70k_test"
+  --output_dir "vidprom_8b16k_test_no_warp_4e-6"
   --override_transformer_cls_name "CausalWanTransformer3DModel"
-  --wandb_run_name "vidprom_70k_wan_ode_init_4e-6_test"
+  --wandb_run_name "vidprom_8b16k_wan_ode_init_4e-6"
   # --resume_from_checkpoint "ode_init_diffusers/"
   --max_train_steps 6001
   --train_batch_size 1
@@ -59,8 +59,8 @@ training_args=(
   --num_height 480
   --num_width 832
   --num_frames 77
-  --warp_denoising_step
-  # --enable_gradient_checkpointing_type "full"
+  --dmd_denoising_steps "1000,750,500,0"
+  --enable_gradient_checkpointing_type "full"
 )
 
 # Parallel arguments
@@ -68,7 +68,7 @@ parallel_args=(
   --num_gpus $NUM_GPUS
   --sp_size 1
   --tp_size 1
-  --hsdp_replicate_dim 2
+  --hsdp_replicate_dim $NUM_GPUS
   --hsdp_shard_dim 1
 )
 
@@ -88,7 +88,7 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 100
+  --validation_steps 50
   --validation_sampling_steps "50"
   --validation_guidance_scale "6.0"
 )
@@ -97,7 +97,7 @@ validation_args=(
 optimizer_args=(
   --learning_rate 4e-6
   --mixed_precision "bf16"
-  --checkpointing_steps 2000
+  --checkpointing_steps 500
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )

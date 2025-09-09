@@ -40,17 +40,18 @@ echo "NODE_RANK: $NODE_RANK"
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATA_DIR="data/crush-smol_processed_t2v_1_3b_ode_init_5/combined_parquet_dataset/"
 VALIDATION_DATASET_FILE="examples/training/consistency_finetune/ode_init/validation.json"
-NUM_GPUS=8
+NUM_GPUS=2
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
   --tracker_project_name "wan_ode_init"
-  --output_dir "wan_ode_init"
+  --output_dir "wan_ode_init_warp_2"
   --override_transformer_cls_name "CausalWanTransformer3DModel"
-  --wandb_run_name "fixed_wan_ode_init_5e-6"
+  --wandb_run_name "2warp_fixed_wan_ode_init_5e-6"
   # --resume_from_checkpoint "ode_init_diffusers/"
+  # --warp_denoising_step
   --max_train_steps 6001
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -67,7 +68,7 @@ parallel_args=(
   --num_gpus $NUM_GPUS
   --sp_size 1
   --tp_size 1
-  --hsdp_replicate_dim 8
+  --hsdp_replicate_dim $NUM_GPUS
   --hsdp_shard_dim 1
 )
 
@@ -87,7 +88,7 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 100
+  --validation_steps 20
   --validation_sampling_steps "50"
   --validation_guidance_scale "6.0"
 )
