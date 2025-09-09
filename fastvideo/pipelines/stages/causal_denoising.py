@@ -71,8 +71,15 @@ class CausalDMDDenosingStage(DenoisingStage):
         # Timesteps for DMD
         timesteps = torch.tensor(
             fastvideo_args.pipeline_config.dmd_denoising_steps,
-            dtype=torch.long,
-            device=get_local_torch_device())
+            dtype=torch.long).cpu()
+
+        if fastvideo_args.pipeline_config.warp_denoising_step:
+            scheduler_timesteps = torch.cat((self.scheduler.timesteps.cpu(),
+                                             torch.tensor([0],
+                                                          dtype=torch.float32)))
+            timesteps = scheduler_timesteps[1000 - timesteps]
+        timesteps = timesteps.to(get_local_torch_device())
+        logger.info("using timesteps: %s", timesteps)
 
         # Image kwargs (kept empty unless caller provides compatible args)
         image_kwargs: dict = {}
@@ -262,10 +269,14 @@ class CausalDMDDenosingStage(DenoisingStage):
                                             attn_metadata=attn_metadata,
                                             forward_batch=batch):
                         # Run transformer; follow DMD stage pattern
+                        t_expanded_noise = t_cur * torch.ones(
+                            (latent_model_input.shape[0], 1),
+                            device=latent_model_input.device,
+                            dtype=torch.long)
                         pred_noise_btchw = self.transformer(
                             latent_model_input,
                             prompt_embeds,
-                            t_expand,
+                            t_expanded_noise,
                             kv_cache=self.kv_cache1,
                             crossattn_cache=self.crossattn_cache,
                             current_start=(pos_start_base + start_index) *
@@ -326,10 +337,14 @@ class CausalDMDDenosingStage(DenoisingStage):
                     set_forward_context(current_timestep=0,
                                         attn_metadata=attn_metadata,
                                         forward_batch=batch):
+                    t_expanded_context = t_context * torch.ones(
+                        (context_bcthw.shape[0], 1),
+                        device=context_bcthw.device,
+                        dtype=torch.long)
                     _ = self.transformer(
                         context_bcthw,
                         prompt_embeds,
-                        t_context,
+                        t_expanded_context,
                         kv_cache=self.kv_cache1,
                         crossattn_cache=self.crossattn_cache,
                         current_start=(pos_start_base + start_index) *

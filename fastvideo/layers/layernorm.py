@@ -100,7 +100,12 @@ class ScaleResidual(nn.Module):
     def forward(self, residual: torch.Tensor, x: torch.Tensor,
                 gate: torch.Tensor) -> torch.Tensor:
         """Apply gated residual connection."""
-        return residual + x * gate
+        # x.shape: [batch_size, seq_len, inner_dim]
+        # gate.shape: [batch_size, num_frames, 1, inner_dim]
+        num_frames = gate.shape[1]
+        frame_seqlen = x.shape[1] // num_frames
+        return residual + (x.unflatten(dim=1, sizes=(num_frames, frame_seqlen))
+                           * gate).flatten(1, 2)
 
 
 # adapted from Diffusers: https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/normalization.py
@@ -159,7 +164,7 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
     def forward(self, residual: torch.Tensor, x: torch.Tensor,
-                gate: torch.Tensor, shift: torch.Tensor,
+                gate: torch.Tensor | int, shift: torch.Tensor,
                 scale: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Apply gated residual connection, followed by layernorm and 
@@ -171,12 +176,42 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
             - residual value (value after residual connection 
               but before normalization)
         """
+        # x.shape: [batch_size, seq_len, inner_dim]
         # Apply residual connection with gating
-        residual_output = residual + x * gate
+        if isinstance(gate, int):
+            # used by cross-attention, should be 1
+            assert gate == 1
+            residual_output = residual + x
+        elif isinstance(gate, torch.Tensor):
+            if gate.dim() == 3:
+                # used by bidirectional self attention
+                # gate.shape: [batch_size, 1, inner_dim]
+                residual_output = residual + x * gate
+            else:
+                # gate.shape: [batch_size, num_frames, 1, inner_dim]
+                assert gate.dim() == 4
+                num_frames = gate.shape[1]
+                frame_seqlen = x.shape[1] // num_frames
+                residual_output = residual + (
+                    x.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) *
+                    gate).flatten(1, 2)
+        else:
+            raise ValueError(f"Gate type {type(gate)} not supported")
+        # residual_output.shape: [batch_size, seq_len, inner_dim]
+
         # Apply normalization
         normalized = self.norm(residual_output)
         # Apply scale and shift
-        modulated = normalized * (1.0 + scale) + shift
+        if isinstance(scale, torch.Tensor) and scale.dim() == 4:
+            # scale.shape: [batch_size, num_frames, 1, inner_dim]
+            # shift.shape: [batch_size, num_frames, 1, inner_dim]
+            num_frames = scale.shape[1]
+            frame_seqlen = normalized.shape[1] // num_frames
+            modulated = (
+                normalized.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) *
+                (1.0 + scale) + shift).flatten(1, 2)
+        else:
+            modulated = normalized * (1.0 + scale) + shift
         return modulated, residual_output
 
 
@@ -219,7 +254,22 @@ class LayerNormScaleShift(nn.Module):
                 scale: torch.Tensor) -> torch.Tensor:
         """Apply ln followed by scale and shift in a single fused operation."""
         normalized = self.norm(x)
-        if self.compute_dtype == torch.float32:
-            return (normalized.float() * (1.0 + scale) + shift).to(x.dtype)
+        if scale.dim() == 4:
+            num_frames = scale.shape[1]
+            frame_seqlen = normalized.shape[1] // num_frames
+            if self.compute_dtype == torch.float32:
+                return (normalized.float().unflatten(
+                    dim=1, sizes=(num_frames, frame_seqlen)) * (1.0 + scale) +
+                        shift).flatten(1, 2).to(x.dtype)
+            else:
+                return (normalized.unflatten(dim=1,
+                                             sizes=(num_frames, frame_seqlen)) *
+                        (1.0 + scale) + shift).flatten(1, 2)
         else:
-            return normalized * (1.0 + scale) + shift
+            # normalized.shape: [batch_size, seq_len, inner_dim]
+            # scale.shape: [batch_size, 1, inner_dim]
+            # shift.shape: [batch_size, 1, inner_dim]
+            if self.compute_dtype == torch.float32:
+                return (normalized.float() * (1.0 + scale) + shift).to(x.dtype)
+            else:
+                return normalized * (1.0 + scale) + shift
