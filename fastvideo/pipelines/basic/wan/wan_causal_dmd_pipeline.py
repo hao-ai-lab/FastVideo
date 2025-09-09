@@ -16,8 +16,7 @@ from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
                                         CausalDMDDenosingStage,
                                         InputValidationStage,
                                         LatentPreparationStage,
-                                        TextEncodingStage,
-                                        TimestepPreparationStage)
+                                        TextEncodingStage)
 # isort: on
 
 logger = init_logger(__name__)
@@ -47,10 +46,6 @@ class WanCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
 
         self.add_stage(stage_name="conditioning_stage",
                        stage=ConditioningStage())
-
-        self.add_stage(stage_name="timestep_preparation_stage",
-                       stage=TimestepPreparationStage(
-                           scheduler=self.get_module("scheduler")))
 
         self.add_stage(stage_name="latent_preparation_stage",
                        stage=LatentPreparationStage(
