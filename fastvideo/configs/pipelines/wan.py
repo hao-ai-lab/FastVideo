@@ -69,6 +69,7 @@ class WanT2V720PConfig(WanT2V480PConfig):
 
     # Denoising stage
     flow_shift: float | None = 5.0
+    warp_denoising_step: bool = True
 
 
 @dataclass
@@ -132,6 +133,11 @@ class FastWan2_2_TI2V_5B_Config(Wan2_2_TI2V_5B_Config):
 class Wan2_2_T2V_A14B_Config(WanT2V480PConfig):
     flow_shift: float | None = 12.0
     boundary_ratio: float | None = 0.875
+
+    # self-forcing params
+    dmd_denoising_steps: list[int] | None = field(
+    default_factory=lambda: [1000, 750, 500, 250])
+    warp_denoising_step: bool = True
 
     def __post_init__(self) -> None:
         self.dit_config.boundary_ratio = self.boundary_ratio

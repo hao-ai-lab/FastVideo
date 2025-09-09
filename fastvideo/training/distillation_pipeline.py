@@ -12,6 +12,7 @@ from typing import Any
 import imageio
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 import torchvision
 from einops import rearrange
@@ -39,7 +40,7 @@ from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
     EMA_FSDP, clip_grad_norm_while_handling_failing_dtensor_cases,
     get_scheduler, load_distillation_checkpoint, save_distillation_checkpoint,
-    shift_timestep)
+    shift_timestep, compute_density_for_timestep_sampling, get_sigmas)
 from fastvideo.utils import (is_vsa_available, maybe_download_model,
                              set_random_seed, verify_model_config_and_directory)
 
@@ -71,6 +72,7 @@ class DistillationPipeline(TrainingPipeline):
     current_trainstep: int
     video_latent_shape: tuple[int, ...]
     video_latent_shape_sp: tuple[int, ...]
+    train_fake_score_transformer_2: bool = False
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError(
@@ -90,40 +92,82 @@ class DistillationPipeline(TrainingPipeline):
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
             shift=self.timestep_shift)
 
+        if self.training_args.boundary_ratio is not None:
+            self.boundary_timestep = self.training_args.boundary_ratio * self.noise_scheduler.num_train_timesteps
+        else:
+            self.boundary_timestep = None
+        
         if training_args.real_score_model_path:
-            logger.info("Loading real score transformer from: %s",
-                        training_args.real_score_model_path)
+            logger.info(
+                f"Loading real score transformer from: {training_args.real_score_model_path}"
+            )
             self.real_score_transformer = self.load_module_from_path(
                 training_args.real_score_model_path, "transformer",
                 training_args)
+            try:
+                self.real_score_transformer_2 = self.load_module_from_path(
+                    training_args.real_score_model_path, "transformer_2",
+                    training_args)
+                logger.info("Loaded real score transformer_2 for MoE support")
+            except:
+                logger.info("real score transformer_2 not found, using single transformer")
+                self.real_score_transformer_2 = None
         else:
-            self.real_score_transformer = self.get_module(
-                "real_score_transformer")
+            self.real_score_transformer = self.get_module("real_score_transformer")
+            self.real_score_transformer_2 = None
 
         if training_args.fake_score_model_path:
-            logger.info("Loading fake score transformer from: %s",
-                        training_args.fake_score_model_path)
+            logger.info(
+                f"Loading fake score transformer from: {training_args.fake_score_model_path}"
+            )
             self.fake_score_transformer = self.load_module_from_path(
                 training_args.fake_score_model_path, "transformer",
                 training_args)
+            try:
+                self.fake_score_transformer_2 = self.load_module_from_path(
+                    training_args.fake_score_model_path, "transformer_2",
+                    training_args)
+                logger.info("Loaded fake score transformer_2 for MoE support")
+            except:
+                logger.info("fake score transformer_2 not found, using single transformer")
+                self.fake_score_transformer_2 = None
         else:
-            self.fake_score_transformer = self.get_module(
-                "fake_score_transformer")
+            self.fake_score_transformer = self.get_module("fake_score_transformer")
+            self.fake_score_transformer_2 = None
 
         self.real_score_transformer.requires_grad_(False)
         self.real_score_transformer.eval()
+        if self.real_score_transformer_2 is not None:
+            self.real_score_transformer_2.requires_grad_(False)
+            self.real_score_transformer_2.eval()
+
+        # Set training modes for fake score transformers (trainable)
         self.fake_score_transformer.requires_grad_(True)
         self.fake_score_transformer.train()
+        if self.fake_score_transformer_2 is not None:
+            self.fake_score_transformer_2.requires_grad_(True)
+            self.fake_score_transformer_2.train()
 
         if training_args.enable_gradient_checkpointing_type is not None:
             self.fake_score_transformer = apply_activation_checkpointing(
                 self.fake_score_transformer,
                 checkpointing_type=training_args.
                 enable_gradient_checkpointing_type)
+            if self.fake_score_transformer_2 is not None:
+                self.fake_score_transformer_2 = apply_activation_checkpointing(
+                    self.fake_score_transformer_2,
+                    checkpointing_type=training_args.
+                    enable_gradient_checkpointing_type)
+            
             self.real_score_transformer = apply_activation_checkpointing(
                 self.real_score_transformer,
                 checkpointing_type=training_args.
                 enable_gradient_checkpointing_type)
+            if self.real_score_transformer_2 is not None:
+                self.real_score_transformer_2 = apply_activation_checkpointing(
+                    self.real_score_transformer_2,
+                    checkpointing_type=training_args.
+                    enable_gradient_checkpointing_type)
 
         # Initialize optimizers
         fake_score_params = list(
@@ -156,6 +200,27 @@ class DistillationPipeline(TrainingPipeline):
             min_lr_ratio=training_args.min_lr_ratio,
             last_epoch=self.init_steps - 1,
         )
+
+        if self.fake_score_transformer_2 is not None:
+            fake_score_params_2 = list(filter(lambda p: p.requires_grad,
+                           self.fake_score_transformer_2.parameters()))
+            self.fake_score_optimizer_2 = torch.optim.AdamW(
+                fake_score_params_2,
+                lr=fake_score_lr,
+                betas=betas,
+                weight_decay=training_args.weight_decay,
+                eps=1e-8,
+            )
+            self.fake_score_lr_scheduler_2 = get_scheduler(
+                training_args.fake_score_lr_scheduler,
+                optimizer=self.fake_score_optimizer_2,
+                num_warmup_steps=training_args.lr_warmup_steps,
+                num_training_steps=training_args.max_train_steps,
+                num_cycles=training_args.lr_num_cycles,
+                power=training_args.lr_power,
+                min_lr_ratio=training_args.min_lr_ratio,
+                last_epoch=self.init_steps - 1,
+            )
 
         logger.info(
             "Distillation optimizers initialized: generator and fake_score")
@@ -278,8 +343,14 @@ class DistillationPipeline(TrainingPipeline):
         """Prepare training environment for distillation."""
         self.transformer.requires_grad_(True)
         self.transformer.train()
+        if self.transformer_2 is not None:
+            self.transformer_2.requires_grad_(True)
+            self.transformer_2.train()
         self.fake_score_transformer.requires_grad_(True)
         self.fake_score_transformer.train()
+        if self.fake_score_transformer_2 is not None:
+            self.fake_score_transformer_2.requires_grad_(True)
+            self.fake_score_transformer_2.train()
 
         return training_batch
 
@@ -387,6 +458,33 @@ class DistillationPipeline(TrainingPipeline):
         else:
             logger.warning("Cannot reset EMA: EMA not initialized")
 
+    def _get_real_score_transformer(self, timestep: torch.Tensor):
+        """
+        Get the appropriate real score transformer based on timestep and boundary logic.
+        """
+        if self.real_score_transformer_2 is not None and self.boundary_timestep is not None:
+            if timestep.item() <= self.boundary_timestep:
+                return self.real_score_transformer_2  # Low noise expert
+            else:
+                return self.real_score_transformer    # High noise expert
+        else:
+            return self.real_score_transformer
+
+    def _get_fake_score_transformer(self, timestep: torch.Tensor):
+        """
+        Get the appropriate fake score transformer based on timestep and boundary logic.
+        """
+        if self.fake_score_transformer_2 is not None and self.boundary_timestep is not None:
+            if timestep.item() <= self.boundary_timestep:
+                self.train_fake_score_transformer_2 = True
+                return self.fake_score_transformer_2  # Low noise expert
+            else:
+                self.train_fake_score_transformer_2 = False
+                return self.fake_score_transformer    # High noise expert
+        else:
+            self.train_fake_score_transformer_2 = False
+            return self.fake_score_transformer
+
     def _build_distill_input_kwargs(
             self, noise_input: torch.Tensor, timestep: torch.Tensor,
             text_dict: dict[str, torch.Tensor] | None,
@@ -433,6 +531,7 @@ class DistillationPipeline(TrainingPipeline):
         training_batch = self._build_distill_input_kwargs(
             noisy_latent, timestep, training_batch.conditional_dict,
             training_batch)
+        
         pred_noise = self.transformer(**training_batch.input_kwargs).permute(
             0, 2, 1, 3, 4)
         pred_video = pred_noise_to_pred_video(
@@ -575,7 +674,8 @@ class DistillationPipeline(TrainingPipeline):
             training_batch = self._build_distill_input_kwargs(
                 noisy_latent, timestep, training_batch.conditional_dict,
                 training_batch)
-            fake_score_pred_noise = self.fake_score_transformer(
+            current_fake_score_transformer = self._get_fake_score_transformer(timestep)
+            fake_score_pred_noise = current_fake_score_transformer(
                 **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
             faker_score_pred_video = pred_noise_to_pred_video(
@@ -589,7 +689,8 @@ class DistillationPipeline(TrainingPipeline):
             training_batch = self._build_distill_input_kwargs(
                 noisy_latent, timestep, training_batch.conditional_dict,
                 training_batch)
-            real_score_pred_noise_cond = self.real_score_transformer(
+            current_real_score_transformer = self._get_real_score_transformer(timestep)
+            real_score_pred_noise_cond = current_real_score_transformer(
                 **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
             pred_real_video_cond = pred_noise_to_pred_video(
@@ -603,7 +704,8 @@ class DistillationPipeline(TrainingPipeline):
             training_batch = self._build_distill_input_kwargs(
                 noisy_latent, timestep, training_batch.unconditional_dict,
                 training_batch)
-            real_score_pred_noise_uncond = self.real_score_transformer(
+            # Use same transformer as conditional forward for consistency
+            real_score_pred_noise_uncond = current_real_score_transformer(
                 **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
             pred_real_video_uncond = pred_noise_to_pred_video(
@@ -686,7 +788,8 @@ class DistillationPipeline(TrainingPipeline):
                 noisy_generator_pred_video, fake_score_timestep,
                 training_batch.conditional_dict, training_batch)
 
-            fake_score_pred_noise = self.fake_score_transformer(
+            current_fake_score_transformer = self._get_fake_score_transformer(fake_score_timestep)
+            fake_score_pred_noise = current_fake_score_transformer(
                 **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
         target = fake_score_noise - generator_pred_video
@@ -800,6 +903,8 @@ class DistillationPipeline(TrainingPipeline):
                         attn_metadata=batch_gen.attn_metadata_vsa):
                     (dmd_loss / gradient_accumulation_steps).backward()
                 total_dmd_loss += dmd_loss.detach().item()
+            
+            # Only clip gradients for the model that is currently training
             self._clip_model_grad_norm_(batch_gen, self.transformer)
             for param in self.transformer.parameters():
                 # check if the gradient is not None and not zero
@@ -822,6 +927,7 @@ class DistillationPipeline(TrainingPipeline):
             training_batch.generator_loss = 0.0
 
         self.fake_score_optimizer.zero_grad()
+        self.fake_score_optimizer_2.zero_grad()
         total_fake_score_loss = 0.0
         for batch in batches:
             batch_fake = copy.deepcopy(batch)
@@ -832,14 +938,34 @@ class DistillationPipeline(TrainingPipeline):
             total_fake_score_loss += fake_score_loss.detach().item()
             fake_score_latent_vis_dict.update(
                 batch_fake.fake_score_latent_vis_dict)
-        self._clip_model_grad_norm_(batch_fake, self.fake_score_transformer)
+        if self.train_fake_score_transformer_2 and self.fake_score_transformer_2 is not None:
+            self._clip_model_grad_norm_(batch_fake, self.fake_score_transformer_2)
+        else:
+            self._clip_model_grad_norm_(batch_fake, self.fake_score_transformer)
+        
+        # Check gradients for fake score transformer
         for param in self.fake_score_transformer.parameters():
-            # check if the gradient is not None and not zero
-            assert param.grad is not None and param.grad.abs().sum() > 0
-        self.fake_score_optimizer.step()
-        self.fake_score_lr_scheduler.step()
+            if param.requires_grad:
+                assert param.grad is not None and param.grad.abs().sum() > 0
+        
+        # Check gradients for fake score transformer_2 if available
+        if self.train_fake_score_transformer_2 and self.fake_score_transformer_2 is not None:
+            for param in self.fake_score_transformer_2.parameters():
+                if param.requires_grad:
+                    assert param.grad is not None and param.grad.abs().sum() > 0
+        
+        if self.train_fake_score_transformer_2 and self.fake_score_transformer_2 is not None:
+            self.fake_score_optimizer_2.step()
+            self.fake_score_lr_scheduler_2.step()
+        else:
+            self.fake_score_optimizer.step()
+            self.fake_score_lr_scheduler.step()
+        
+        # Step the appropriate scheduler
         self.lr_scheduler.step()
+            
         self.fake_score_optimizer.zero_grad(set_to_none=True)
+        self.fake_score_optimizer_2.zero_grad(set_to_none=True)
         avg_fake_score_loss = torch.tensor(total_fake_score_loss /
                                            gradient_accumulation_steps,
                                            device=self.device)
@@ -886,14 +1012,38 @@ class DistillationPipeline(TrainingPipeline):
         logger.info("  Max gradient norm: %s", self.training_args.max_grad_norm)
 
         logger.info(
-            "  Real score transformer parameters: %s B",
+            "  Real score transformer (high noise expert) parameters: %s B",
             sum(p.numel()
                 for p in self.real_score_transformer.parameters()) / 1e9)
+        
+        if self.real_score_transformer_2 is not None:
+            logger.info(
+                "  Real score transformer_2 (low noise expert) parameters: %s B",
+                sum(p.numel()
+                    for p in self.real_score_transformer_2.parameters()) / 1e9)
+            logger.info("  Real score MoE enabled with boundary_timestep: %s", 
+                       self.boundary_timestep)
 
         logger.info(
-            "  Fake score transformer parameters: %s B",
+            "  Fake score transformer (high noise expert) parameters: %s B",
             sum(p.numel()
                 for p in self.fake_score_transformer.parameters()) / 1e9)
+        
+        if self.fake_score_transformer_2 is not None:
+            logger.info(
+                "  Fake score transformer_2 (low noise expert) parameters: %s B",
+                sum(p.numel()
+                    for p in self.fake_score_transformer_2.parameters()) / 1e9)
+            logger.info("  Fake score MoE enabled with boundary_timestep: %s", 
+                       self.boundary_timestep)
+
+        if self.generator_ema is not None:
+            logger.info("  Generator EMA enabled with decay: %s",
+                        self.training_args.ema_decay)
+            logger.info("  Generator EMA start step: %s",
+                        self.training_args.ema_start_step)
+        else:
+            logger.info("  Generator EMA disabled")
 
         if self.generator_ema is not None:
             logger.info("  Generator EMA enabled with decay: %s",
