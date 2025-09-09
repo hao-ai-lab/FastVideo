@@ -101,11 +101,15 @@ class ScaleResidual(nn.Module):
                 gate: torch.Tensor) -> torch.Tensor:
         """Apply gated residual connection."""
         # x.shape: [batch_size, seq_len, inner_dim]
-        # gate.shape: [batch_size, num_frames, 1, inner_dim]
-        num_frames = gate.shape[1]
-        frame_seqlen = x.shape[1] // num_frames
-        return residual + (x.unflatten(dim=1, sizes=(num_frames, frame_seqlen))
-                           * gate).flatten(1, 2)
+        if gate.dim() == 4:
+            # gate.shape: [batch_size, num_frames, 1, inner_dim]
+            num_frames = gate.shape[1]
+            frame_seqlen = x.shape[1] // num_frames
+            return residual + (x.unflatten(
+                dim=1, sizes=(num_frames, frame_seqlen)) * gate).flatten(1, 2)
+        else:
+            # gate.shape: [batch_size, 1, inner_dim]
+            return residual + x * gate
 
 
 # adapted from Diffusers: https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/normalization.py
