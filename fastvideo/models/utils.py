@@ -145,8 +145,30 @@ def pred_noise_to_pred_video(pred_noise: torch.Tensor,
                              scheduler: Any) -> torch.Tensor:
     """
     Convert predicted noise to clean latent.
+
+    Args:
+    pred_noise: the predicted noise with shape [B, C, H, W]
+        where B is batch_size or batch_size * num_frames
+    noise_input_latent: the noisy latent with shape [B, C, H, W],
+    timestep: the timestep with shape [1] or [bs * num_frames] or [bs, num_frames]
+    scheduler: the scheduler
+
+    Returns:
+        the predicted video with shape [B, C, H, W]
     """
-    timestep = timestep.expand(noise_input_latent.shape[0])
+    # If timestep is [bs, num_frames]
+    if timestep.ndim == 2:
+        timestep = timestep.flatten(0, 1)
+        assert timestep.numel() == noise_input_latent.shape[0]
+    elif timestep.ndim == 1:
+        # If timestep is [1]
+        if timestep.shape[0] == 1:
+            timestep = timestep.expand(noise_input_latent.shape[0])
+        else:
+            assert timestep.numel() == noise_input_latent.shape[0]
+    else:
+        raise ValueError(f"[pred_noise_to_pred_video] Invalid timestep shape: {timestep.shape}")
+    # timestep shape should be [B]
     dtype = pred_noise.dtype
     device = pred_noise.device
     pred_noise = pred_noise.float().to(device)
