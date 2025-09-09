@@ -10,41 +10,25 @@
 #SBATCH --output=dmd_t2v_output/t2v_%j.out
 #SBATCH --error=dmd_t2v_output/t2v_%j.err
 #SBATCH --exclusive
-set -e -x
-
-# Environment Setup
-source ~/conda/miniconda/bin/activate
-conda activate matthew-fv
 
 # Basic Info
-export WANDB_MODE="online"
 export NCCL_P2P_DISABLE=1
 export TORCH_NCCL_ENABLE_MONITORING=0
 # different cache dir for different processes
 export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
 export MASTER_PORT=29500
-export NODE_RANK=$SLURM_PROCID
-nodes=( $(scontrol show hostnames $SLURM_JOB_NODELIST) )
-export MASTER_ADDR=${nodes[0]}
-export CUDA_VISIBLE_DEVICES=$SLURM_LOCALID
 export TOKENIZERS_PARALLELISM=false
-export WANDB_API_KEY="2f25ad37933894dbf0966c838c0b8494987f9f2f"
-wandb login
+export WANDB_API_KEY="50632ebd88ffd970521cec9ab4a1a2d7e85bfc45"
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
-
-# export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
-
-echo "MASTER_ADDR: $MASTER_ADDR"
-echo "NODE_RANK: $NODE_RANK"
 
 # Configs
 NUM_GPUS=1
 
 # Model paths for Self-Forcing DMD distillation:
 GENERATOR_MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
-REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"  # Teacher model
+REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Teacher model
 FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Critic model
 
 DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
@@ -55,7 +39,7 @@ VALIDATION_DATASET_FILE="data/crush-smol-single_processed_t2v/validation.json"
 # Training arguments
 training_args=(
   --tracker_project_name SFwan_t2v_distill_self_forcing_dmd  # Updated for self-forcing DMD
-  --output_dir "checkpoints/SFwan_t2v_finetune"
+  --output_dir "/mnt/sharefs/users/hao.zhang/SFwan_t2v_finetune"
   --max_train_steps 500
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -150,12 +134,9 @@ self_forcing_args=(
   --validate_cache_structure False  # Set to True for debugging KV cache issues
 )
 
-srun torchrun \
---nnodes $SLURM_JOB_NUM_NODES \
+torchrun \
+--nnodes 1 \
 --nproc_per_node $NUM_GPUS \
---node_rank $SLURM_PROCID \
---rdzv_backend=c10d \
---rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
     fastvideo/training/wan_self_forcing_distillation_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \

@@ -546,6 +546,7 @@ class DistillationPipeline(TrainingPipeline):
     def _dmd_forward(self, generator_pred_video: torch.Tensor,
                      training_batch: TrainingBatch) -> torch.Tensor:
         """Compute DMD (Diffusion Model Distillation) loss."""
+        original_latent = generator_pred_video
         with torch.no_grad():
             timestep = torch.randint(0,
                                      self.num_train_timestep, [1],
@@ -570,7 +571,7 @@ class DistillationPipeline(TrainingPipeline):
 
             noisy_latent = self.noise_scheduler.add_noise(
                 generator_pred_video.flatten(0, 1), noise.flatten(0, 1),
-                timestep).unflatten(0, (1, generator_pred_video.shape[1]))
+                timestep).detach().unflatten(0, (1, generator_pred_video.shape[1]))
 
             # fake_score_transformer forward
             training_batch = self._build_distill_input_kwargs(
@@ -619,24 +620,24 @@ class DistillationPipeline(TrainingPipeline):
                 pred_real_video_uncond) * self.real_score_guidance_scale
 
             grad = (faker_score_pred_video - real_score_pred_video) / torch.abs(
-                generator_pred_video - real_score_pred_video).mean()
+                original_latent - real_score_pred_video).mean()
             grad = torch.nan_to_num(grad)
 
         dmd_loss = 0.5 * F.mse_loss(
-            generator_pred_video.float(),
-            (generator_pred_video.float() - grad.float()).detach())
+            original_latent.float(),
+            (original_latent.float() - grad.float()).detach())
 
         training_batch.dmd_latent_vis_dict.update({
             "training_batch_dmd_fwd_clean_latent":
             training_batch.latents,
             "generator_pred_video":
-            generator_pred_video,
+            original_latent.detach(),
             "real_score_pred_video":
-            real_score_pred_video,
+            real_score_pred_video.detach(),
             "faker_score_pred_video":
-            faker_score_pred_video,
+            faker_score_pred_video.detach(),
             "dmd_timestep":
-            timestep,
+            timestep.detach(),
         })
 
         return dmd_loss
@@ -802,6 +803,9 @@ class DistillationPipeline(TrainingPipeline):
                     (dmd_loss / gradient_accumulation_steps).backward()
                 total_dmd_loss += dmd_loss.detach().item()
             self._clip_model_grad_norm_(batch_gen, self.transformer)
+            for param in self.transformer.parameters():
+                # check if the gradient is not None and not zero
+                assert param.grad is not None and param.grad.abs().sum() > 0
             self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)
 
@@ -831,6 +835,9 @@ class DistillationPipeline(TrainingPipeline):
             fake_score_latent_vis_dict.update(
                 batch_fake.fake_score_latent_vis_dict)
         self._clip_model_grad_norm_(batch_fake, self.fake_score_transformer)
+        for param in self.fake_score_transformer.parameters():
+            # check if the gradient is not None and not zero
+            assert param.grad is not None and param.grad.abs().sum() > 0
         self.fake_score_optimizer.step()
         self.fake_score_lr_scheduler.step()
         self.lr_scheduler.step()
