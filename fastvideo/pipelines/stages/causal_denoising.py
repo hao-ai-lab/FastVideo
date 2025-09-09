@@ -337,10 +337,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                     set_forward_context(current_timestep=0,
                                         attn_metadata=attn_metadata,
                                         forward_batch=batch):
-                    t_expanded_context = t_context * torch.ones(
-                        (context_bcthw.shape[0], 1),
-                        device=context_bcthw.device,
-                        dtype=torch.long)
+                    t_expanded_context = t_context.unsqueeze(1)
                     _ = self.transformer(
                         context_bcthw,
                         prompt_embeds,
