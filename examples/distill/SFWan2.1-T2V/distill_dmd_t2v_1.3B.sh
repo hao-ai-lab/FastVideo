@@ -16,7 +16,7 @@ export NCCL_P2P_DISABLE=1
 export TORCH_NCCL_ENABLE_MONITORING=0
 # different cache dir for different processes
 export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
-export MASTER_PORT=29500
+export MASTER_PORT=29502
 export TOKENIZERS_PARALLELISM=false
 export WANDB_API_KEY="50632ebd88ffd970521cec9ab4a1a2d7e85bfc45"
 export WANDB_BASE_URL="https://api.wandb.ai"
@@ -40,7 +40,7 @@ VALIDATION_DATASET_FILE="data/crush-smol-single_processed_t2v/validation.json"
 training_args=(
   --tracker_project_name SFwan_t2v_distill_self_forcing_dmd  # Updated for self-forcing DMD
   --output_dir "/mnt/sharefs/users/hao.zhang/SFwan_t2v_finetune"
-  --max_train_steps 500
+  --max_train_steps 4000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
@@ -84,7 +84,7 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 10
+  --validation_steps 20
   --validation_sampling_steps "4"
   --validation_guidance_scale "6.0" # not used for dmd inference
 )
@@ -93,8 +93,8 @@ validation_args=(
 optimizer_args=(
   --learning_rate 1e-5
   --mixed_precision "bf16"
-  --training_state_checkpointing_steps 50
-  --weight_only_checkpointing_steps 50
+  --training_state_checkpointing_steps 200
+  --weight_only_checkpointing_steps 200
   --weight_decay 0.01
   --betas '0.0,0.999'
   --max_grad_norm 1.0
@@ -123,6 +123,7 @@ dmd_args=(
   --real_score_guidance_scale 3.0
   --fake_score_learning_rate 8e-6
   --fake_score_betas '0.0,0.999'
+  --warp_denoising_step
 )
 
 # Self-forcing specific arguments
@@ -136,6 +137,7 @@ self_forcing_args=(
 
 torchrun \
 --nnodes 1 \
+--master_port $MASTER_PORT \
 --nproc_per_node $NUM_GPUS \
     fastvideo/training/wan_self_forcing_distillation_pipeline.py \
     "${parallel_args[@]}" \

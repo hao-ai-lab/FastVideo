@@ -25,11 +25,6 @@ class WanSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
         "fake_score_transformer"
     ]
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        """Initialize Wan-specific scheduler."""
-        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
-            shift=fastvideo_args.pipeline_config.flow_shift)
-
     def create_training_stages(self, training_args: TrainingArgs):
         """
         May be used in future refactors.
