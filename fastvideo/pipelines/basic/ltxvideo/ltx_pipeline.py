@@ -8,11 +8,10 @@ using the modular pipeline architecture.
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-
 from fastvideo.pipelines import ComposedPipelineBase
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
                                         DenoisingStage, InputValidationStage,
-                                        LatentPreparationStage,CLIPImageEncodingStage,
+                                        LatentPreparationStage,
                                         TextEncodingStage,
                                         TimestepPreparationStage)
 
