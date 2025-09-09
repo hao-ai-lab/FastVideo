@@ -9,9 +9,6 @@ import torch.nn.functional as F
 from fastvideo.layers.custom_op import CustomOp
 from fastvideo.platforms import current_platform
 
-from fastvideo.logger import init_logger
-
-logger = init_logger(__name__)
 
 @CustomOp.register("rms_norm")
 class RMSNorm(CustomOp):
