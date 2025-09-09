@@ -1323,7 +1323,6 @@ class EMA_FSDP:
       ema.update(model)
       ema.state_dict()  # on rank 0
     """
-
     def __init__(self, module, decay: float = 0.999, mode: str = "local_shard"):
         self.decay = float(decay)
         self.mode = mode
@@ -1417,7 +1416,6 @@ class EMA_FSDP:
                 p.data.copy_(w.to(dtype=p.dtype, device=p.device))
 
     class _ApplyEMACtx:
-
         def __init__(self, ema: "EMA_FSDP", module):
             self.ema = ema
             self.module = module
