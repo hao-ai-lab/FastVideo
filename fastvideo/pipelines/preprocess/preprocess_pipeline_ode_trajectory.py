@@ -34,6 +34,8 @@ from fastvideo.pipelines.stages import (DecodingStage, DenoisingStage,
                                         TextEncodingStage,
                                         TimestepPreparationStage)
 from fastvideo.utils import save_decoded_latents_as_video, shallow_asdict
+from fastvideo.workflow.preprocess.parquet_io import (ParquetDatasetWriter,
+                                                      records_to_table)
 
 logger = init_logger(__name__)
 
@@ -171,9 +173,9 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
     pbar: Any
     num_processed_samples: int
 
-    def get_schema_fields(self) -> list[str]:
-        """Get the schema fields for ODE Trajectory pipeline."""
-        return [f.name for f in pyarrow_schema_ode_trajectory_text_only]
+    def get_pyarrow_schema(self) -> pa.Schema:
+        """Return the PyArrow schema for ODE Trajectory pipeline."""
+        return pyarrow_schema_ode_trajectory_text_only
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
@@ -383,65 +385,33 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     batch_data.append(record)
 
                 if batch_data:
-                    # Add progress bar for writing to Parquet dataset
                     write_pbar = tqdm(total=1,
                                       desc="Writing to Parquet dataset",
                                       unit="batch")
-                    # Convert batch data to PyArrow arrays
-                    arrays = []
-                    for field in self.get_schema_fields():
-                        if field.endswith('_bytes'):
-                            arrays.append(
-                                pa.array(
-                                    [record[field] for record in batch_data],
-                                    type=pa.binary()))
-                        elif field.endswith('_shape'):
-                            arrays.append(
-                                pa.array(
-                                    [record[field] for record in batch_data],
-                                    type=pa.list_(pa.int32())))
-                        elif field in ['width', 'height', 'num_frames']:
-                            arrays.append(
-                                pa.array(
-                                    [record[field] for record in batch_data],
-                                    type=pa.int32()))
-                        elif field in ['duration_sec', 'fps']:
-                            arrays.append(
-                                pa.array(
-                                    [record[field] for record in batch_data],
-                                    type=pa.float32()))
-                        else:
-                            arrays.append(
-                                pa.array(
-                                    [record[field] for record in batch_data]))
-
-                    table = pa.Table.from_arrays(arrays,
-                                                 names=self.get_schema_fields())
+                    table = records_to_table(batch_data,
+                                             self.get_pyarrow_schema())
                     write_pbar.update(1)
                     write_pbar.close()
 
-                    # Store the table in a list for later processing
-                    if not hasattr(self, 'all_tables'):
-                        self.all_tables = []
-                    self.all_tables.append(table)
+                    if not hasattr(self, 'dataset_writer'):
+                        self.dataset_writer = ParquetDatasetWriter(
+                            out_dir=self.combined_parquet_dir,
+                            samples_per_file=args.samples_per_file,
+                        )
+                    self.dataset_writer.append_table(table)
 
                     logger.info("Collected batch with %s samples", len(table))
 
                 if self.num_processed_samples >= args.flush_frequency:
-                    self._flush_tables(self.num_processed_samples, args,
-                                       self.combined_parquet_dir)
+                    written = self.dataset_writer.flush()
+                    logger.info("Flushed %s samples to parquet", written)
                     self.num_processed_samples = 0
-                    self.all_tables = []
 
         # Final flush for any remaining samples
-        if hasattr(self, 'all_tables'
-                   ) and self.all_tables and self.num_processed_samples > 0:
-            logger.info("Final flush with %s remaining samples",
-                        self.num_processed_samples)
-            self._flush_tables(self.num_processed_samples, args,
-                               self.combined_parquet_dir)
-            self.num_processed_samples = 0
-            self.all_tables = []
+        if hasattr(self, 'dataset_writer'):
+            written = self.dataset_writer.flush()
+            if written:
+                logger.info("Final flush wrote %s samples", written)
 
     def create_text_only_record(
             self,

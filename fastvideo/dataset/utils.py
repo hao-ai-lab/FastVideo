@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 
-def pad(t: torch.Tensor, padding_length: int) -> torch.Tensor:
+def pad(t: torch.Tensor, padding_length: int) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Pad or crop an embedding [L, D] to exactly padding_length tokens.
     Return:

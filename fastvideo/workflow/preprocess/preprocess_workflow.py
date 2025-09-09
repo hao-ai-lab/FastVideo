@@ -85,16 +85,16 @@ class PreprocessWorkflow(WorkflowBase):
         # record creator
         if self.fastvideo_args.workload_type == WorkloadType.I2V:
             record_creator = i2v_record_creator
-            schema_fields = [f.name for f in pyarrow_schema_i2v]
+            schema = pyarrow_schema_i2v
         else:
             record_creator = basic_t2v_record_creator
-            schema_fields = [f.name for f in pyarrow_schema_t2v]
+            schema = pyarrow_schema_t2v
         processed_dataset_saver = ParquetDatasetSaver(
             flush_frequency=self.fastvideo_args.preprocess_config.
             flush_frequency,
             samples_per_file=self.fastvideo_args.preprocess_config.
             samples_per_file,
-            schema_fields=schema_fields,
+            schema=schema,
             record_creator=record_creator,
         )
         self.add_component("processed_dataset_saver", processed_dataset_saver)
