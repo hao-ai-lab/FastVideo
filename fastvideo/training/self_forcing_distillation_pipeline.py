@@ -207,7 +207,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         initial_latent = getattr(training_batch, 'image_latent', None)
         
         # Dynamic frame generation logic (adapted from _run_generator)
-        num_training_frames = getattr(self.training_args, 'num_frames', 21)
+        num_training_frames = getattr(self.training_args, 'num_latent_t', 21)
         
         # During training, the number of generated frames should be uniformly sampled from
         # [21, self.num_training_frames], but still being a multiple of self.num_frame_per_block
@@ -251,9 +251,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             
         num_input_frames = initial_latent.shape[1] if initial_latent is not None else 0
         num_output_frames = num_frames + num_input_frames
-        if dist.get_rank() == 0:
-            logger.info(f"num_frames: {num_frames}")
-            logger.info(f"num_input_frames: {num_input_frames}")
         output = torch.zeros([batch_size, num_output_frames, num_channels, height, width],
                            device=noise.device, dtype=noise.dtype)
 
@@ -291,7 +288,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             all_num_frames = [1] + all_num_frames
         num_denoising_steps = len(self.denoising_step_list)
         exit_flags = self.generate_and_sync_list(len(all_num_frames), num_denoising_steps, device=noise.device)
-        start_gradient_frame_index = num_output_frames - 21
+        start_gradient_frame_index = max(0, num_output_frames - 21)
 
         for block_index, current_num_frames in enumerate(all_num_frames):
             noisy_input = noise[:, current_start_frame - num_input_frames:current_start_frame + current_num_frames - num_input_frames]

@@ -764,14 +764,8 @@ class DistillationPipeline(TrainingPipeline):
         for _ in range(gradient_accumulation_steps):
             batch = self._prepare_distillation(training_batch)
             batch = self._get_next_batch(batch)
-            if dist.get_rank() == 0:
-                logger.info("batch.latents shape: %s", batch.latents.shape)
             batch = self._normalize_dit_input(batch)
-            if dist.get_rank() == 0:
-                logger.info("batch.latents shape: %s", batch.latents.shape)
             batch = self._prepare_dit_inputs(batch)
-            if dist.get_rank() == 0:
-                logger.info("batch.latents shape: %s", batch.latents.shape)
             batch = self._build_attention_metadata(batch)
             batch.attn_metadata_vsa = copy.deepcopy(batch.attn_metadata)
             if batch.attn_metadata is not None:
