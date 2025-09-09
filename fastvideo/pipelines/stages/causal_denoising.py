@@ -235,10 +235,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                                                        dim=2)
 
                     # Prepare inputs
-                    t_expand = t_cur.expand(latent_model_input.shape[0])
-                    # t_expand = t_cur * torch.ones((latent_model_input.shape[0], 1), device=latent_model_input.device, dtype=torch.long)
-                    # t_expand = t_expand.repeat(1, self.sliding_window_num_frames)
-
+                    t_expand = t_cur.repeat(latent_model_input.shape[0])
 
                     # Attention metadata if needed
                     if (vsa_available and self.attn_backend
