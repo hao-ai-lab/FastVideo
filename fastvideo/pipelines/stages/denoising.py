@@ -750,15 +750,20 @@ class CosmosDenoisingStage(DenoisingStage):
                         print(f"[FASTVIDEO DEBUG] Step {i}: SKIPPING conditioning frame injection!")
                         logger.warning(f"Step {i}: Missing conditioning data - cond_indicator: {hasattr(batch, 'cond_indicator')}, conditioning_latents: {conditioning_latents is not None}")
                     
-                    # cond_latent = cond_latent.to(target_dtype)
+                    # Convert cond_latent to target dtype BEFORE debug logging to match Diffusers
+                    cond_latent = cond_latent.to(target_dtype)
                     
-                    # # Apply conditional timestep processing like diffusers (lines 720-721)
-                    # cond_timestep = timestep
-                    # if hasattr(batch, 'cond_indicator') and batch.cond_indicator is not None:
-                    #     cond_timestep = batch.cond_indicator * t_conditioning + (1 - batch.cond_indicator) * timestep
-                    #     cond_timestep = cond_timestep.to(target_dtype)
-                    #     if i < 3:
-                    #         logger.info(f"Step {i}: Applied conditional timestep - t_conditioning: {t_conditioning:.6f}, cond_timestep sum: {cond_timestep.float().sum().item():.6f}")
+                    # Apply conditional timestep processing like Diffusers (lines 792-793)
+                    cond_timestep = timestep
+                    if hasattr(batch, 'cond_indicator') and batch.cond_indicator is not None:
+                        # Exactly match Diffusers: cond_timestep = cond_indicator * t_conditioning + (1 - cond_indicator) * timestep
+                        # First get t_conditioning (sigma_conditioning value from Diffusers)
+                        sigma_conditioning = 0.0001  # Same as Diffusers default
+                        t_conditioning = sigma_conditioning / (sigma_conditioning + 1)
+                        cond_timestep = batch.cond_indicator * t_conditioning + (1 - batch.cond_indicator) * timestep
+                        cond_timestep = cond_timestep.to(target_dtype)
+                        if i < 3:
+                            logger.info(f"Step {i}: Applied conditional timestep - t_conditioning: {t_conditioning:.6f}, cond_timestep sum: {cond_timestep.float().sum().item():.6f}")
                     
                     with set_forward_context(
                         current_timestep=i,
@@ -767,7 +772,8 @@ class CosmosDenoisingStage(DenoisingStage):
                     ):
                         # Use conditioning masks from CosmosLatentPreparationStage
                         condition_mask = batch.cond_mask.to(target_dtype) if hasattr(batch, 'cond_mask') else None
-                        padding_mask = torch.zeros(1, 1, cond_latent.shape[3], cond_latent.shape[4], 
+                        # Padding mask should match original image dimensions like Diffusers (704, 1280)
+                        padding_mask = torch.zeros(1, 1, batch.height, batch.width, 
                                                  device=cond_latent.device, dtype=target_dtype)
                         
                         # Fallback if masks not available
@@ -786,10 +792,34 @@ class CosmosDenoisingStage(DenoisingStage):
                             logger.info(f"  condition_mask shape: {condition_mask.shape if condition_mask is not None else None}")
                             logger.info(f"  padding_mask shape: {padding_mask.shape}")
                         
+                        # Log detailed transformer inputs for comparison with Diffusers
+                        if i < 3:
+                            print(f"FASTVIDEO TRANSFORMER INPUTS (step {i}):")
+                            print(f"  hidden_states: shape={cond_latent.shape}, sum={cond_latent.float().sum().item():.6f}, mean={cond_latent.float().mean().item():.6f}")
+                            print(f"  timestep: shape={cond_timestep.shape}, sum={cond_timestep.float().sum().item():.6f}, values={cond_timestep.flatten()[:5].float()}")
+                            print(f"  encoder_hidden_states: shape={batch.prompt_embeds[0].shape}, sum={batch.prompt_embeds[0].float().sum().item():.6f}")
+                            print(f"  condition_mask: shape={condition_mask.shape if condition_mask is not None else None}, sum={condition_mask.float().sum().item() if condition_mask is not None else None}")
+                            print(f"  padding_mask: shape={padding_mask.shape}, sum={padding_mask.float().sum().item():.6f}")
+                            print(f"  fps: {24}, target_dtype: {target_dtype}")
+                            print(f"  DTYPES: hidden_states={cond_latent.dtype}, timestep={cond_timestep.dtype}, encoder_hidden_states={batch.prompt_embeds[0].dtype}")
+                            print(f"  hidden_states first 5 values: {cond_latent.flatten()[:5].float()}")
+                            print(f"  encoder_hidden_states first 5 values: {batch.prompt_embeds[0].flatten()[:5].float()}")
+                            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                                f.write(f"FASTVIDEO TRANSFORMER INPUTS (step {i}):\n")
+                                f.write(f"  hidden_states: shape={cond_latent.shape}, sum={cond_latent.float().sum().item():.6f}, mean={cond_latent.float().mean().item():.6f}\n")
+                                f.write(f"  timestep: shape={cond_timestep.shape}, sum={cond_timestep.float().sum().item():.6f}, values={cond_timestep.flatten()[:5].float()}\n")
+                                f.write(f"  encoder_hidden_states: shape={batch.prompt_embeds[0].shape}, sum={batch.prompt_embeds[0].float().sum().item():.6f}\n")
+                                f.write(f"  condition_mask: shape={condition_mask.shape if condition_mask is not None else None}, sum={condition_mask.float().sum().item() if condition_mask is not None else None}\n")
+                                f.write(f"  padding_mask: shape={padding_mask.shape}, sum={padding_mask.float().sum().item():.6f}\n")
+                                f.write(f"  fps: {24}, target_dtype: {target_dtype}\n")
+                                f.write(f"  DTYPES: hidden_states={cond_latent.dtype}, timestep={cond_timestep.dtype}, encoder_hidden_states={batch.prompt_embeds[0].dtype}\n")
+                                f.write(f"  hidden_states first 5 values: {cond_latent.flatten()[:5].float()}\n")
+                                f.write(f"  encoder_hidden_states first 5 values: {batch.prompt_embeds[0].flatten()[:5].float()}\n")
+                        
                         print(f"[FASTVIDEO DENOISING] About to call transformer with hidden_states sum = {cond_latent.float().sum().item()}")
                         noise_pred = self.transformer(
-                            hidden_states=cond_latent.to(target_dtype),
-                            timestep=timestep.to(target_dtype),
+                            hidden_states=cond_latent,  # Already converted to target_dtype above
+                            timestep=cond_timestep.to(target_dtype),
                             encoder_hidden_states=batch.prompt_embeds[0].to(target_dtype),
                             fps=24,  # TODO: get fps from batch or config
                             condition_mask=condition_mask,
@@ -805,11 +835,7 @@ class CosmosDenoisingStage(DenoisingStage):
                     # Apply preconditioning exactly like diffusers
                     cond_pred = (c_skip * latents + c_out * noise_pred.float()).to(target_dtype)
                     
-                    # Apply conditional indicator masking (from CosmosLatentPreparationStage)
-                    if hasattr(batch, 'cond_indicator') and batch.cond_indicator is not None:
-                        conditioning_latents = batch.conditioning_latents if batch.conditioning_latents is not None else torch.zeros_like(latents)
-                        cond_pred = batch.cond_indicator * conditioning_latents + (1 - batch.cond_indicator) * cond_pred
-                    
+                    # NOTE: Conditioning frame injection is applied to cond_latent BEFORE transformer call (line 746), not after                    
                     # Classifier-free guidance
                     if batch.do_classifier_free_guidance and batch.negative_prompt_embeds is not None:
                         # Unconditional pass - match diffusers logic (lines 755-759)
@@ -830,9 +856,17 @@ class CosmosDenoisingStage(DenoisingStage):
                                 logger.info(f"  negative_prompt_embeds shape: {batch.negative_prompt_embeds[0].shape}")
                                 # sum: {uncond_timestep.float().sum().item():.6f}")
                             
+                            # Apply same conditional timestep processing for unconditional pass
+                            uncond_timestep = timestep
+                            if hasattr(batch, 'uncond_indicator') and batch.uncond_indicator is not None:
+                                sigma_conditioning = 0.0001  # Same as Diffusers default
+                                t_conditioning = sigma_conditioning / (sigma_conditioning + 1)
+                                uncond_timestep = batch.uncond_indicator * t_conditioning + (1 - batch.uncond_indicator) * timestep
+                                uncond_timestep = uncond_timestep.to(target_dtype)
+                            
                             noise_pred_uncond = self.transformer(
                                 hidden_states=uncond_latent.to(target_dtype),
-                                timestep=timestep.to(target_dtype),
+                                timestep=uncond_timestep.to(target_dtype),
                                 encoder_hidden_states=batch.negative_prompt_embeds[0].to(target_dtype),
                                 fps=24,  # TODO: get fps from batch or config
                                 condition_mask=uncond_condition_mask,

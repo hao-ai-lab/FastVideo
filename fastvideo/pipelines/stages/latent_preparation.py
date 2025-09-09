@@ -240,36 +240,30 @@ class CosmosLatentPreparationStage(PipelineStage):
                     logger.info(f"CosmosLatentPreparationStage - Using 5D tensor as-is: {video.shape}")
             else:
                 logger.info("CosmosLatentPreparationStage - pil_image is not a tensor, needs preprocessing")
-                # Following diffusers approach for image-to-video preprocessing
-                # Convert PIL image to tensor and add temporal dimension
-                import torchvision.transforms as transforms
+                # Use same preprocessing as diffusers VideoProcessor
+                from diffusers.video_processor import VideoProcessor
                 
-                # Create transform pipeline similar to diffusers VideoProcessor
-                transform = transforms.Compose([
-                    transforms.Resize((height, width), antialias=True),
-                    transforms.ToTensor(),
-                    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])  # Normalize to [-1, 1]
-                ])
+                # Create VideoProcessor with same parameters as diffusers Cosmos pipeline
+                vae_scale_factor_spatial = 8  # Same as diffusers
+                video_processor = VideoProcessor(vae_scale_factor=vae_scale_factor_spatial)
                 
-                # Apply transform to get [C, H, W] tensor
-                image_tensor = transform(batch.pil_image)
-                logger.info(f"CosmosLatentPreparationStage - Transformed PIL to tensor: {image_tensor.shape}")
+                # Use exact same method as diffusers: preprocess image then unsqueeze for time dimension
+                processed_image = video_processor.preprocess(batch.pil_image, height, width)
+                logger.info(f"CosmosLatentPreparationStage - VideoProcessor preprocess result: shape={processed_image.shape}, dtype={processed_image.dtype}, device={processed_image.device}")
                 
-                # Add batch dimension: [C, H, W] -> [B, C, H, W]
-                image_tensor = image_tensor.unsqueeze(0)
+                # Add time dimension exactly like diffusers: unsqueeze(2)  
+                video = processed_image.unsqueeze(2)
+                logger.info(f"CosmosLatentPreparationStage - After unsqueeze(2): shape={video.shape}, dtype={video.dtype}, device={video.device}")
                 
-                # Add time dimension like diffusers: [B, C, H, W] -> [B, C, T, H, W]
-                video = image_tensor.unsqueeze(2)  # Add time dim at position 2
-                logger.info(f"CosmosLatentPreparationStage - Added batch and time dims: {video.shape}")
-                
-                # Move to correct device and ensure compatible dtype for VAE
-                # Use VAE's parameter dtype to avoid dtype mismatches
+                # Exactly match diffusers' device/dtype handling: to(device=device, dtype=vae_dtype)
+                # Get VAE dtype exactly like diffusers
                 if self.vae is not None:
-                    vae_dtype = next(self.vae.parameters()).dtype
+                    vae_dtype = next(self.vae.parameters()).dtype  # Get VAE's parameter dtype
                 else:
                     vae_dtype = dtype
+                
                 video = video.to(device=device, dtype=vae_dtype)
-                logger.info(f"CosmosLatentPreparationStage - Video tensor device: {video.device}, dtype: {video.dtype}")
+                logger.info(f"CosmosLatentPreparationStage - After to(device, dtype): shape={video.shape}, dtype={video.dtype}, device={video.device}, vae_dtype={vae_dtype}")
         elif hasattr(batch, 'preprocessed_image') and batch.preprocessed_image is not None:
             logger.info(f"CosmosLatentPreparationStage - Found preprocessed_image of type: {type(batch.preprocessed_image)}")
             # Convert preprocessed image to video format

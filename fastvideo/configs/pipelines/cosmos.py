@@ -16,21 +16,12 @@ from fastvideo.configs.pipelines.base import PipelineConfig
 def t5_large_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
     """Postprocess T5 Large text encoder outputs for Cosmos pipeline.
     
-    Handles attention masks and sequence padding for the T5 Large model.
+    Return raw last_hidden_state without truncation/padding.
     """
     hidden_state = outputs.last_hidden_state
     
     if hidden_state is None:
         raise ValueError("T5 Large outputs missing last_hidden_state")
-    
-    mask = outputs.attention_mask
-    
-    # If no attention mask provided, assume all tokens are valid
-    if mask is None:
-        batch_size, seq_len = hidden_state.shape[:2]
-        mask = torch.ones(batch_size, seq_len, device=hidden_state.device, dtype=torch.long)
-    
-    seq_lens = mask.gt(0).sum(dim=1).long()
     
     # Check for NaN values and provide debugging info
     nan_count = torch.isnan(hidden_state).sum()
@@ -42,16 +33,8 @@ def t5_large_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
         # Replace NaN values with zeros to avoid pipeline failure
         hidden_state = hidden_state.masked_fill(torch.isnan(hidden_state), 0.0)
     
-    # Create list of tensors with proper sequence lengths
-    prompt_embeds = [u[:v] for u, v in zip(hidden_state, seq_lens, strict=True)]
-    
-    # Stack tensors with padding to fixed length (like wan.py implementation)
-    prompt_embeds_tensor: torch.Tensor = torch.stack([
-        torch.cat([u, u.new_zeros(512 - u.size(0), u.size(1))])
-        for u in prompt_embeds
-    ], dim=0)
-    
-    return prompt_embeds_tensor
+    # Return raw last_hidden_state (no truncation/padding)
+    return hidden_state
 
 
 @dataclass
@@ -134,7 +117,7 @@ class CosmosConfig(PipelineConfig):
     
     # Denoising parameters
     embedded_cfg_scale: int = 6
-    flow_shift: int = 7
+    flow_shift: float = 1.0  # Changed to 1.0 to match diffusers (no shift transformation)
 
     def __post_init__(self):
         self.vae_config.load_encoder = True

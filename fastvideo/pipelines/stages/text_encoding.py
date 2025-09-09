@@ -90,6 +90,11 @@ class TextEncodingStage(PipelineStage):
             # Write to output file
             with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
                 f.write(f"TextEncodingStage: prompt_embeds sum = {sum_value:.6f}\n")
+
+            lengths = attention_mask.sum(dim=1).cpu()
+            for i, length in enumerate(lengths):
+                prompt_embeds[i, length:] = 0
+
             batch.prompt_embeds.append(prompt_embeds)
             if batch.prompt_attention_mask is not None:
                 batch.prompt_attention_mask.append(attention_mask)
