@@ -158,9 +158,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             noise = noise[:, self.rank_in_sp_group, :, :, :, :]
         noisy_latent = self.noise_scheduler.add_noise(latents.flatten(0, 1),
                                                       noise.flatten(0, 1),
-                                                      timestep).unflatten(
-                                                          0,
-                                                          (1, latents.shape[1]))
+                                                      torch.tensor([timestep], device=noise.device))
 
         # Step 4: Build input kwargs with KV cache support
         training_batch = self._build_distill_input_kwargs(
@@ -189,7 +187,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         pred_video = pred_noise_to_pred_video(
             pred_noise=pred_noise.flatten(0, 1),
             noise_input_latent=noisy_latent.flatten(0, 1),
-            timestep=timestep,
+            timestep=torch.tensor([timestep], device=noisy_latent.device),
             scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
 
         self._reset_simulation_caches(kv_cache, crossattn_cache)
@@ -253,6 +251,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             
         num_input_frames = initial_latent.shape[1] if initial_latent is not None else 0
         num_output_frames = num_frames + num_input_frames
+        if dist.get_rank() == 0:
+            logger.info(f"num_frames: {num_frames}")
+            logger.info(f"num_input_frames: {num_input_frames}")
         output = torch.zeros([batch_size, num_output_frames, num_channels, height, width],
                            device=noise.device, dtype=noise.dtype)
 
@@ -303,7 +304,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     exit_flag = (index == exit_flags[block_index])
                     
                 timestep = torch.ones([batch_size, current_num_frames], device=noise.device, dtype=torch.int64) * current_timestep
-                logger.info("timestep shape at initalization: %s", timestep.shape)
 
                 if not exit_flag:
                     with torch.no_grad():
@@ -311,7 +311,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                         training_batch_temp = self._build_distill_input_kwargs(
                             noisy_input, timestep, training_batch.conditional_dict, training_batch)
                         
-                        logger.info("timestep shape in generator: %s", timestep.shape)
                         pred_flow = self.transformer(
                             hidden_states=training_batch_temp.input_kwargs['hidden_states'],
                             encoder_hidden_states=training_batch_temp.input_kwargs['encoder_hidden_states'],
@@ -325,21 +324,18 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                         denoised_pred = pred_noise_to_pred_video(
                             pred_noise=pred_flow.flatten(0, 1),
                             noise_input_latent=noisy_input.flatten(0, 1),
-                            timestep=timestep.flatten(),
+                            timestep=timestep,
                             scheduler=self.noise_scheduler).unflatten(0, pred_flow.shape[:2])
                         
                         next_timestep = self.denoising_step_list[index + 1]
-                        logger.info("denoised_pred shape before: %s", denoised_pred.shape)
                         noisy_input = self.noise_scheduler.add_noise(
                             denoised_pred.flatten(0, 1),
                             torch.randn_like(denoised_pred.flatten(0, 1)),
                             next_timestep * torch.ones([batch_size * current_num_frames], device=noise.device, dtype=torch.long)
                         ).unflatten(0, denoised_pred.shape[:2])
-                        logger.info("denoised_pred shape after: %s", denoised_pred.shape)
                 else:
                     # Final prediction with gradient control
                     if current_start_frame < start_gradient_frame_index:
-                        logger.info("timestep shape in generator: %s", timestep.shape)
                         with torch.no_grad():
                             training_batch_temp = self._build_distill_input_kwargs(
                                 noisy_input, timestep, training_batch.conditional_dict, training_batch)
@@ -354,7 +350,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                 current_start=current_start_frame * self.frame_seq_length
                             ).permute(0, 2, 1, 3, 4)
                     else:
-                        logger.info("timestep shape in generator: %s", timestep.shape)
                         training_batch_temp = self._build_distill_input_kwargs(
                             noisy_input, timestep, training_batch.conditional_dict, training_batch)
     
@@ -371,7 +366,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     denoised_pred = pred_noise_to_pred_video(
                         pred_noise=pred_flow.flatten(0, 1),
                         noise_input_latent=noisy_input.flatten(0, 1),
-                        timestep=timestep.flatten(),
+                        timestep=timestep,
                         scheduler=self.noise_scheduler).unflatten(0, pred_flow.shape[:2])
                     break
 
@@ -380,13 +375,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
             # Step 3.3: rerun with timestep zero to update the cache
             context_timestep = torch.ones_like(timestep) * self.context_noise
-            logger.info("denoised_pred shape before: %s", denoised_pred.shape)
             denoised_pred = self.noise_scheduler.add_noise(
                 denoised_pred.flatten(0, 1),
                 torch.randn_like(denoised_pred.flatten(0, 1)),
-                context_timestep * torch.ones([batch_size * current_num_frames], device=noise.device, dtype=torch.long)
+                context_timestep
             ).unflatten(0, denoised_pred.shape[:2])
-            logger.info("denoised_pred shape after: %s", denoised_pred.shape)
             
             with torch.no_grad():
                 training_batch_temp = self._build_distill_input_kwargs(

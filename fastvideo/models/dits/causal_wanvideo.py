@@ -244,27 +244,27 @@ class CausalWanTransformerBlock(nn.Module):
         current_start: int = 0,
         cache_start: int | None = None,
     ) -> torch.Tensor:
-        logger.info("temb.shape: %s", temb.shape)
+        # logger.info("temb.shape: %s", temb.shape)
         num_frames = temb.shape[1]
-        logger.info("first hidden_states.shape: %s", hidden_states.shape)
-        logger.info("num_frames: %s", num_frames)
+        # logger.info("first hidden_states.shape: %s", hidden_states.shape)
+        # logger.info("num_frames: %s", num_frames)
         if hidden_states.dim() == 4:
             hidden_states = hidden_states.squeeze(1)
         frame_seqlen = hidden_states.shape[1] // temb.shape[1]
-        logger.info("frame_seqlen: %s", frame_seqlen)
+        # logger.info("frame_seqlen: %s", frame_seqlen)
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
         # assert orig_dtype != torch.float32
         e = self.scale_shift_table + temb.float()
-        logger.info("e.shape: %s", e.shape)
+        # logger.info("e.shape: %s", e.shape)
         shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
             6, dim=2)
         assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
-        logger.info("hidden_states.shape: %s", hidden_states.shape)
-        logger.info("scale_msa.shape: %s", scale_msa.shape)
-        logger.info("shift_msa.shape: %s", shift_msa.shape)
+        # logger.info("hidden_states.shape: %s", hidden_states.shape)
+        # logger.info("scale_msa.shape: %s", scale_msa.shape)
+        # logger.info("shift_msa.shape: %s", shift_msa.shape)
         
         norm_hidden_states_unflattened = self.norm1(hidden_states.float()).unflatten(dim=1, sizes=(num_frames, frame_seqlen))
         # logger.info("norm_hidden_states_unflattened.shape: %s", norm_hidden_states_unflattened.shape)
@@ -316,7 +316,7 @@ class CausalWanTransformerBlock(nn.Module):
         ff_output = self.ffn(norm_hidden_states)
         hidden_states = self.mlp_residual(hidden_states, ff_output, c_gate_msa)
         # logger.info("after mlp_residual norm_hidden_states.shape: %s", norm_hidden_states.shape)
-        logger.info("after mlp_residual hidden_states.shape: %s", hidden_states.shape)
+        # logger.info("after mlp_residual hidden_states.shape: %s", hidden_states.shape)
         hidden_states = hidden_states.to(orig_dtype)
 
         return hidden_states
@@ -513,7 +513,7 @@ class CausalWanTransformer3DModel(BaseDiT):
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
         # logger.info("forward inference flattened and transposed hidden_states.shape: %s", hidden_states.shape)
 
-        logger.info("timestep shape: %s", timestep.shape)
+        # logger.info("timestep shape: %s", timestep.shape)
 
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
             timestep.flatten(), encoder_hidden_states, encoder_hidden_states_image)

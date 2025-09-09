@@ -12,6 +12,7 @@ from typing import Any
 import imageio
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 import torchvision
 from einops import rearrange
@@ -728,16 +729,17 @@ class DistillationPipeline(TrainingPipeline):
             "encoder_hidden_states": training_batch.encoder_hidden_states,
             "encoder_attention_mask": training_batch.encoder_attention_mask,
         }
-        unconditional_dict = {
-            "encoder_hidden_states": self.negative_prompt_embeds,
-            "encoder_attention_mask": self.negative_prompt_attention_mask,
-        }
+        if getattr(self, "negative_prompt_embeds", None) is not None:
+            unconditional_dict = {
+                "encoder_hidden_states": self.negative_prompt_embeds,
+                "encoder_attention_mask": self.negative_prompt_attention_mask,
+            }
+            training_batch.unconditional_dict = unconditional_dict
 
         training_batch.dmd_latent_vis_dict = {}
         training_batch.fake_score_latent_vis_dict = {}
 
         training_batch.conditional_dict = conditional_dict
-        training_batch.unconditional_dict = unconditional_dict
         training_batch.raw_latent_shape = training_batch.latents.shape
         training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
         self.video_latent_shape = training_batch.latents.shape
@@ -762,8 +764,14 @@ class DistillationPipeline(TrainingPipeline):
         for _ in range(gradient_accumulation_steps):
             batch = self._prepare_distillation(training_batch)
             batch = self._get_next_batch(batch)
+            if dist.get_rank() == 0:
+                logger.info("batch.latents shape: %s", batch.latents.shape)
             batch = self._normalize_dit_input(batch)
+            if dist.get_rank() == 0:
+                logger.info("batch.latents shape: %s", batch.latents.shape)
             batch = self._prepare_dit_inputs(batch)
+            if dist.get_rank() == 0:
+                logger.info("batch.latents shape: %s", batch.latents.shape)
             batch = self._build_attention_metadata(batch)
             batch.attn_metadata_vsa = copy.deepcopy(batch.attn_metadata)
             if batch.attn_metadata is not None:
