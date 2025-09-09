@@ -50,7 +50,7 @@ class FlowMatchScheduler:
                  sigma_min=0.003 / 1.002,
                  inverse_timesteps=False,
                  extra_one_step=False,
-                 reverse_sigmas=False):
+                 reverse_sigmas=False) -> None:
         self.num_train_timesteps = num_train_timesteps
         self.shift = shift
         self.sigma_max = sigma_max
@@ -64,7 +64,7 @@ class FlowMatchScheduler:
                       num_inference_steps=100,
                       denoising_strength=1.0,
                       training=False,
-                      device=None):
+                      device=None) -> None:
         sigma_start = self.sigma_min + \
             (self.sigma_max - self.sigma_min) * denoising_strength
         if self.extra_one_step:
@@ -100,8 +100,8 @@ class FlowMatchScheduler:
         assert kwargs == {}
         self.sigmas = self.sigmas.to(model_output.device)
         self.timesteps = self.timesteps.to(model_output.device)
-        logger.info('step timestep: %s', timestep)
-        logger.info('step timestep: %s', timestep.shape)
+        # logger.info('step timestep: %s', timestep)
+        # logger.info('step timestep: %s', timestep.shape)
         # timestep  is [num_frames]
         # timestep_id = torch.argmin(
         #     (self.timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
@@ -302,6 +302,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     batch.negative_attention_mask = [
                         negative_prompt_attention_mask
                     ]
+                    batch.num_inference_steps = 48
                     batch.return_trajectory_latents = True
                     batch.return_trajectory_decoded = False
                     batch.height = args.max_height
