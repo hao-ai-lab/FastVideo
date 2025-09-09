@@ -30,7 +30,7 @@ class LTXVAEArchConfig(VAEArchConfig):
         # Spatial compression is usually patch_size * product of spatial downsampling
         self.spatial_compression_ratio = self.patch_size * (2 ** (len(self.block_out_channels) - 1))
         
-        if isinstance(self.scaling_factor, (int, float)):
+        if isinstance(self.scaling_factor, int | float):
             self.scaling_factor_tensor: torch.Tensor = torch.tensor(self.scaling_factor)
 
 
