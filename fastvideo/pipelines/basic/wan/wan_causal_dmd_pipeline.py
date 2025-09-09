@@ -28,10 +28,6 @@ class WanCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         "text_encoder", "tokenizer", "vae", "transformer", "scheduler"
     ]
 
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
-            shift=fastvideo_args.pipeline_config.flow_shift)
-
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""
 
