@@ -22,6 +22,7 @@ from fastvideo.training.training_utils import (
     save_distillation_checkpoint,
 )
 from fastvideo.models.utils import pred_noise_to_pred_video
+from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import SelfForcingFlowMatchScheduler
 from fastvideo.distributed import get_world_group
 import torch.distributed as dist
 import numpy as np
@@ -50,6 +51,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         logger.info("Initializing self-forcing distillation pipeline...")
 
         super().initialize_training_pipeline(training_args)
+        self.noise_scheduler = SelfForcingFlowMatchScheduler(
+            num_inference_steps=1000, shift=5.0, sigma_min=0.0, extra_one_step=True, training=True
+        )
         self.dfake_gen_update_ratio = getattr(training_args, 'dfake_gen_update_ratio', 5)
 
         # Self-forcing specific properties
@@ -158,7 +162,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             noise = noise[:, self.rank_in_sp_group, :, :, :, :]
         noisy_latent = self.noise_scheduler.add_noise(latents.flatten(0, 1),
                                                       noise.flatten(0, 1),
-                                                      torch.tensor([timestep], device=noise.device))
+                                                      timestep * torch.ones([latents.shape[0] * latents.shape[1]], device=noise.device, dtype=torch.long))
 
         # Step 4: Build input kwargs with KV cache support
         training_batch = self._build_distill_input_kwargs(
