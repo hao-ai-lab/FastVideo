@@ -12,7 +12,6 @@ import os
 from collections.abc import Iterator
 from typing import Any
 
-import numpy as np
 import pyarrow as pa
 import torch
 from torch.utils.data import DataLoader
@@ -38,6 +37,8 @@ from fastvideo.pipelines.stages import (DecodingStage, DenoisingStage,
 from fastvideo.utils import save_decoded_latents_as_video, shallow_asdict
 from fastvideo.workflow.preprocess.parquet_io import (ParquetDatasetWriter,
                                                       records_to_table)
+from fastvideo.workflow.preprocess.record_schema import (
+    ode_text_only_record_creator)
 
 logger = init_logger(__name__)
 
@@ -225,7 +226,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                                 args.train_fps)
 
                 # Prepare batch data for Parquet dataset
-                batch_data = []
+                batch_data: list[dict[str, Any]] = []
 
                 # Add progress bar for saving outputs
                 save_pbar = tqdm(enumerate(valid_data["path"]),
@@ -254,14 +255,16 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                                 else:
                                     sample_extra_features[key] = value[idx]
 
-                    # Create record for Parquet dataset (without VAE latents for text-only)
-                    record = self.create_text_only_record(
-                        args,
+                    # Create record for Parquet dataset (text-only ODE schema)
+                    record: dict[str, Any] = ode_text_only_record_creator(
                         video_name=video_name,
                         text_embedding=text_embedding,
-                        valid_data=valid_data,
-                        idx=idx,
-                        extra_features=sample_extra_features)
+                        caption=valid_data["text"][idx],
+                        trajectory_latents=sample_extra_features[
+                            "trajectory_latents"],
+                        trajectory_timesteps=sample_extra_features[
+                            "trajectory_timesteps"],
+                    )
                     batch_data.append(record)
 
                 if batch_data:
@@ -289,77 +292,9 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
 
         # Final flush for any remaining samples
         if hasattr(self, 'dataset_writer'):
-            written = self.dataset_writer.flush()
+            written = self.dataset_writer.flush(write_remainder=True)
             if written:
                 logger.info("Final flush wrote %s samples", written)
-
-    def create_text_only_record(
-            self,
-            args,
-            video_name: str,
-            text_embedding: np.ndarray,
-            valid_data: dict[str, Any],
-            idx: int,
-            extra_features: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Create a record for text-only preprocessing using text-only schema."""
-
-        # Create base record using only fields from text-only schema
-        record = {
-            "id": f"text_{video_name}_{idx}",
-            "text_embedding_bytes": text_embedding.tobytes(),
-            "text_embedding_shape": list(text_embedding.shape),
-            "text_embedding_dtype": str(text_embedding.dtype),
-            "file_name": video_name,
-            "caption": valid_data["text"][idx],
-            "media_type": "text",
-        }
-
-        assert extra_features is not None, "extra_features is required"
-        assert "trajectory_latents" in extra_features, "trajectory_latents is required"
-        assert "trajectory_timesteps" in extra_features, "trajectory_timesteps is required"
-
-        # Add trajectory data if available
-        if extra_features and "trajectory_latents" in extra_features:
-            trajectory_latents = extra_features[
-                "trajectory_latents"][idx] if isinstance(
-                    extra_features["trajectory_latents"],
-                    list) else extra_features["trajectory_latents"]
-            record.update({
-                "trajectory_latents_bytes":
-                trajectory_latents.tobytes(),
-                "trajectory_latents_shape":
-                list(trajectory_latents.shape),
-                "trajectory_latents_dtype":
-                str(trajectory_latents.dtype),
-            })
-        else:
-            record.update({
-                "trajectory_latents_bytes": b"",
-                "trajectory_latents_shape": [],
-                "trajectory_latents_dtype": "",
-            })
-
-        if extra_features and "trajectory_timesteps" in extra_features:
-            trajectory_timesteps = extra_features[
-                "trajectory_timesteps"][idx] if isinstance(
-                    extra_features["trajectory_timesteps"],
-                    list) else extra_features["trajectory_timesteps"]
-            record.update({
-                "trajectory_timesteps_bytes":
-                trajectory_timesteps.tobytes(),
-                "trajectory_timesteps_shape":
-                list(trajectory_timesteps.shape),
-                "trajectory_timesteps_dtype":
-                str(trajectory_timesteps.dtype),
-            })
-        else:
-            record.update({
-                "trajectory_timesteps_bytes": b"",
-                "trajectory_timesteps_shape": [],
-                "trajectory_timesteps_dtype": "",
-            })
-
-        return record
 
     def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs, args):
         if not self.post_init_called:
