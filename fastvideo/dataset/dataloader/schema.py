@@ -113,4 +113,6 @@ pyarrow_schema_text_only = pa.schema([
     pa.field("text_embedding_shape", pa.list_(pa.int64())),
     # e.g., 'bfloat16' or 'float32'
     pa.field("text_embedding_dtype", pa.string()),
+    # --- Metadata ---
+    pa.field("caption", pa.string()),
 ])

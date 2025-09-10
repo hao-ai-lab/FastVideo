@@ -112,7 +112,8 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
                         text_name=text_name,
                         text_embedding=text_embedding,
                         valid_data=valid_data,
-                        idx=idx)
+                        idx=idx,
+                        caption=valid_data["text"][idx])
                     batch_data.append(record)
 
                 if batch_data:
@@ -165,7 +166,8 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
             text_name: str,
             text_embedding: np.ndarray,
             valid_data: dict[str, Any],
-            idx: int) -> dict[str, Any]:
+            idx: int,
+            caption: str) -> dict[str, Any]:
         """Create a record for text-only preprocessing using text-only schema."""
         
         # Create base record using only fields from text-only schema
@@ -174,6 +176,7 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
             "text_embedding_bytes": text_embedding.tobytes(),
             "text_embedding_shape": list(text_embedding.shape),
             "text_embedding_dtype": str(text_embedding.dtype),
+            "caption": caption,
         }
 
         return record
