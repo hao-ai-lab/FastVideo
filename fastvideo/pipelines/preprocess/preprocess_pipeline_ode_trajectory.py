@@ -20,6 +20,8 @@ from tqdm import tqdm
 
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset import gettextdataset
+from fastvideo.dataset.dataloader.record_schema import (
+    ode_text_only_record_creator)
 from fastvideo.dataset.dataloader.schema import (
     pyarrow_schema_ode_trajectory_text_only)
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -37,8 +39,6 @@ from fastvideo.pipelines.stages import (DecodingStage, DenoisingStage,
 from fastvideo.utils import save_decoded_latents_as_video, shallow_asdict
 from fastvideo.workflow.preprocess.parquet_io import (ParquetDatasetWriter,
                                                       records_to_table)
-from fastvideo.workflow.preprocess.record_schema import (
-    ode_text_only_record_creator)
 
 logger = init_logger(__name__)
 

@@ -1,6 +1,6 @@
 import numpy as np
 
-from fastvideo.workflow.preprocess.record_schema import (
+from fastvideo.dataset.dataloader.record_schema import (
     basic_t2v_record_creator,
     i2v_record_creator,
     ode_text_only_record_creator,
