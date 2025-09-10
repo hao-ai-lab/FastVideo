@@ -40,7 +40,7 @@ class ComposedPipelineBase(ABC):
     _extra_config_module_map: dict[str, str] = {}
     training_args: TrainingArgs | None = None
     fastvideo_args: FastVideoArgs | TrainingArgs | None = None
-    modules: dict[str, torch.nn.Module] = {}
+    modules: dict[str, Any] = {}
     post_init_called: bool = False
 
     # TODO(will): args should support both inference args and training args
