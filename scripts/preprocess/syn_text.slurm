@@ -80,7 +80,7 @@ for i in {1..8}; do
         --samples_per_file 8 \
         --flush_frequency 8 \
         --video_length_tolerance_range 5 \
-        --preprocess_task "text" &
+        --preprocess_task "text_only" &
 done
 
 # Wait for all jobs on this node to complete
