@@ -222,7 +222,7 @@ class ParquetDatasetSaver:
 
         # If flush is needed
         if self.num_processed_samples >= self.flush_frequency:
-            self.flush_tables(output_dir)
+            self.flush_tables()
 
     def _process_non_padded_embeddings(
             self, prompt_embeds: torch.Tensor,
@@ -245,7 +245,7 @@ class ParquetDatasetSaver:
 
         return non_padded_embeds
 
-    def flush_tables(self, output_dir: str, write_remainder: bool = False):
+    def flush_tables(self, write_remainder: bool = False):
         """Flush buffered records to disk.
 
         Args:
@@ -261,15 +261,15 @@ class ParquetDatasetSaver:
         remainder = self.num_processed_samples % self.samples_per_file
         self.num_processed_samples = 0 if write_remainder else remainder
 
-    def flush_last(self, output_dir: str):
-        """Flush and write any remaining rows (final flush)."""
-        self.flush_tables(output_dir, write_remainder=True)
-
     def clean_up(self) -> None:
         """Clean up all tables"""
+        self.flush_tables(write_remainder=True)
         self._writer = None
         self.num_processed_samples = 0
         gc.collect()
+
+    def __del__(self):
+        self.clean_up()
 
 
 def build_dataset(preprocess_config: PreprocessConfig, split: str,

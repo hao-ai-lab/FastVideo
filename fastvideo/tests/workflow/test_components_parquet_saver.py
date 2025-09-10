@@ -53,13 +53,13 @@ def test_parquet_dataset_saver_flush_and_last(tmp_path: Path):
     out_dir = tmp_path / "saver_out"
     saver.save_and_write_parquet_batch(batch, str(out_dir))
     # First flush: should write one full file (3 rows), keep 2 in buffer
-    saver.flush_tables(str(out_dir))
+    saver.flush_tables()
     files = sorted(out_dir.rglob("*.parquet"))
     assert len(files) == 1
     assert pq.read_table(str(files[0])).num_rows == 3
 
     # Final flush: write remainder 2 rows
-    saver.flush_last(str(out_dir))
+    saver.flush_tables(write_remainder=True)
     files2 = sorted(out_dir.rglob("*.parquet"))
     assert len(files2) == 2
     total = sum(pq.read_table(str(f)).num_rows for f in files2)
