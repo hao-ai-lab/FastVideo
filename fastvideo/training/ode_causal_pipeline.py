@@ -11,8 +11,8 @@ from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler)
+from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
+    SelfForcingFlowMatchScheduler)
 from fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline import (
     WanCausalDMDPipeline)
 from fastvideo.training.training_pipeline import TrainingPipeline
@@ -36,8 +36,12 @@ class ODEInitTrainingPipeline(TrainingPipeline):
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         # Match the preprocess/generation scheduler for consistent stepping
-        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
-            shift=fastvideo_args.pipeline_config.flow_shift)
+        self.modules["scheduler"] = SelfForcingFlowMatchScheduler(
+            shift=fastvideo_args.pipeline_config.flow_shift,
+            sigma_min=0.0,
+            extra_one_step=True)
+        self.modules["scheduler"].set_timesteps(num_inference_steps=1000,
+                                                training=True)
 
     def set_schemas(self):
         self.train_dataset_schema = pyarrow_schema_ode_trajectory
@@ -51,14 +55,16 @@ class ODEInitTrainingPipeline(TrainingPipeline):
 
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
         assert self.timestep_shift == 5.0, "flow_shift must be 5.0"
-        self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
-            shift=self.timestep_shift)
+        self.noise_scheduler = SelfForcingFlowMatchScheduler(
+            shift=self.timestep_shift, sigma_min=0.0, extra_one_step=True)
+        self.noise_scheduler.set_timesteps(num_inference_steps=1000,
+                                           training=True)
 
         # logger.info(f"ARG dmd_denoising_steps: {training_args.pipeline_config.dmd_denoising_steps}")
         logger.info(
             f"ARG dmd_denoising_steps: {self.training_args.pipeline_config.dmd_denoising_steps}"
         )
-        self.dmd_denoising_steps = torch.tensor([1000, 750, 500, 0],
+        self.dmd_denoising_steps = torch.tensor([1000, 750, 500, 250],
                                                 dtype=torch.long,
                                                 device=get_local_torch_device())
         # self.dmd_denoising_steps = torch.tensor([1000, 750, 500, 250], dtype=torch.long, device=get_local_torch_device())
@@ -71,9 +77,9 @@ class ODEInitTrainingPipeline(TrainingPipeline):
                                                  self.dmd_denoising_steps]
             logger.info(
                 f"warped self.dmd_denoising_steps: {self.dmd_denoising_steps}")
-            assert False, "warp_denoising_step must be false"
+            # assert False, "warp_denoising_step must be false"
         else:
-            # assert False, "warp_denoising_step must be true"
+            assert False, "warp_denoising_step must be true"
             logger.info("not warped")
         self.dmd_denoising_steps = self.dmd_denoising_steps.to(
             get_local_torch_device())
@@ -98,7 +104,8 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         args_copy.inference_mode = True
         # Warm start validation with current transformer
         self.validation_pipeline = WanCausalDMDPipeline.from_pretrained(
-            training_args.model_path,
+            # training_args.model_path,
+            "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers",
             args=args_copy,  # type: ignore
             inference_mode=True,
             loaded_modules={
@@ -211,8 +218,12 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             # self._cached_closest_idx_per_dmd = distances_ks.argmin(dim=1).to(torch.long).cpu()  # [K]
             self._cached_closest_idx_per_dmd = torch.tensor(
                 [0, 12, 24, 36], dtype=torch.long).cpu()
-            # logger.info(f"self._cached_closest_idx_per_dmd: {self._cached_closest_idx_per_dmd}")
-            # logger.info(f"corresponding timesteps: {self.noise_scheduler.timesteps[self._cached_closest_idx_per_dmd]}")
+            logger.info(
+                f"self._cached_closest_idx_per_dmd: {self._cached_closest_idx_per_dmd}"
+            )
+            logger.info(
+                f"corresponding timesteps: {self.noise_scheduler.timesteps[self._cached_closest_idx_per_dmd]}"
+            )
 
         # logger.info(f"traj_latents: {traj_latents.shape}")
         # Select the K indexes from traj_latents using self._cached_closest_idx_per_dmd

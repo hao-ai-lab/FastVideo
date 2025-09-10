@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=4e6B8_16kFV_no_warp_ode_vidprom
+#SBATCH --job-name=1e5B2_16kFV_warp_ode_vidprom
 #SBATCH --partition=main
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -7,8 +7,8 @@
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
-#SBATCH --output=ode_vidprom16k_no_warp/ode_vidprom8b16k_4e-6.out
-#SBATCH --error=ode_vidprom16k_no_warp/ode_vidprom8b16k_4e-6.err
+#SBATCH --output=ode_vidprom16k_warp/ode_vidprom2b16k_1e-5.out
+#SBATCH --error=ode_vidprom16k_warp/ode_vidprom2b16k_1e-5.err
 #SBATCH --exclusive
 set -e -x
 
@@ -47,10 +47,11 @@ NUM_GPUS=2
 # Training arguments
 training_args=(
   --tracker_project_name "wan_ode_init"
-  --output_dir "vidprom_8b16k_test_no_warp_4e-6"
+  --output_dir "warpd_vidprom_2b16k_test_warp_1e-5"
   --override_transformer_cls_name "CausalWanTransformer3DModel"
-  --wandb_run_name "vidprom_8b16k_wan_ode_init_4e-6"
+  --wandb_run_name "Dwarp_vidprom_2b16k_wan_ode_init_1e-5"
   # --resume_from_checkpoint "ode_init_diffusers/"
+  --warp_denoising_step
   --max_train_steps 6001
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -59,7 +60,7 @@ training_args=(
   --num_height 480
   --num_width 832
   --num_frames 77
-  --dmd_denoising_steps "1000,750,500,0"
+  --dmd_denoising_steps "1000,750,500,250"
   --enable_gradient_checkpointing_type "full"
 )
 
@@ -95,7 +96,7 @@ validation_args=(
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 4e-6
+  --learning_rate 1e-5
   --mixed_precision "bf16"
   --checkpointing_steps 500
   --weight_decay 1e-4

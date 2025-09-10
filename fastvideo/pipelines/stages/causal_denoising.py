@@ -78,6 +78,8 @@ class CausalDMDDenosingStage(DenoisingStage):
                                              torch.tensor([0],
                                                           dtype=torch.float32)))
             timesteps = scheduler_timesteps[1000 - timesteps]
+        else:
+            assert False, "warp_denoising_step must be true"
         timesteps = timesteps.to(get_local_torch_device())
         logger.info("Using timesteps: %s", timesteps)
 
