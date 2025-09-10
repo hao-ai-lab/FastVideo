@@ -9,9 +9,9 @@ def main():
     # If a local path is provided, FastVideo will make a best effort
     # attempt to identify the optimal arguments.
     generator = VideoGenerator.from_pretrained(
-        "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        "Wan-AI/Wan2.1-T2V-14B-Diffusers",
         # FastVideo will automatically handle distributed setup
-        num_gpus=1,
+        num_gpus=4,
         use_fsdp_inference=True,
         dit_cpu_offload=False,
         vae_cpu_offload=False,

@@ -16,7 +16,7 @@ export NCCL_P2P_DISABLE=1
 export TORCH_NCCL_ENABLE_MONITORING=0
 # different cache dir for different processes
 export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
-export MASTER_PORT=29502
+export MASTER_PORT=29503
 export TOKENIZERS_PARALLELISM=false
 export WANDB_API_KEY="50632ebd88ffd970521cec9ab4a1a2d7e85bfc45"
 export WANDB_BASE_URL="https://api.wandb.ai"
@@ -24,11 +24,11 @@ export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 
 # Configs
-NUM_GPUS=1
+NUM_GPUS=4
 
 # Model paths for Self-Forcing DMD distillation:
 GENERATOR_MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
-REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Teacher model
+REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"  # Teacher model
 FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Critic model
 
 DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
@@ -58,11 +58,11 @@ training_args=(
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 1 # 64
+  --num_gpus $NUM_GPUS # 64
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1 # 64
-  --hsdp_shard_dim 1
+  --hsdp_shard_dim $NUM_GPUS
 )
 
 # Model arguments
@@ -84,7 +84,7 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 20
+  --validation_steps 50
   --validation_sampling_steps "4"
   --validation_guidance_scale "6.0" # not used for dmd inference
 )
@@ -93,8 +93,8 @@ validation_args=(
 optimizer_args=(
   --learning_rate 1e-5
   --mixed_precision "bf16"
-  --training_state_checkpointing_steps 200
-  --weight_only_checkpointing_steps 200
+  --training_state_checkpointing_steps 500
+  --weight_only_checkpointing_steps 500
   --weight_decay 0.01
   --betas '0.0,0.999'
   --max_grad_norm 1.0
