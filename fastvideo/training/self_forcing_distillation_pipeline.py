@@ -23,7 +23,7 @@ from fastvideo.training.training_utils import (
 )
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import SelfForcingFlowMatchScheduler
-from fastvideo.distributed import get_world_group
+from fastvideo.distributed import get_world_group, get_local_torch_device
 import torch.distributed as dist
 import numpy as np
 from fastvideo.utils import set_random_seed, is_vsa_available
@@ -578,6 +578,42 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 assert cache_dict["k"].shape[1] == text_len, f"Text length mismatch in crossattn_cache block {i}"
                 assert cache_dict["k"].shape[2] == num_attention_heads, f"Attention heads mismatch in crossattn_cache block {i}"
                 assert cache_dict["k"].shape[3] == attention_head_dim, f"Attention head dim mismatch in crossattn_cache block {i}"
+
+    def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
+        batch = next(self.train_loader_iter, None)  # type: ignore
+        if batch is None:
+            self.current_epoch += 1
+            logger.info("Starting epoch %s", self.current_epoch)
+            # Reset iterator for next epoch
+            self.train_loader_iter = iter(self.train_dataloader)
+            # Get first batch of new epoch
+            batch = next(self.train_loader_iter)
+
+        # latents, encoder_hidden_states, encoder_attention_mask, infos = batch
+        encoder_hidden_states = batch['text_embedding']
+        encoder_attention_mask = batch['text_attention_mask']
+        infos = batch['info_list']
+        
+        batch_size = encoder_hidden_states.shape[0]
+        vae_config = self.training_args.pipeline_config.vae_config.arch_config
+        num_channels = vae_config.z_dim  
+        spatial_compression_ratio = vae_config.spatial_compression_ratio
+        
+        latent_height = self.training_args.num_height // spatial_compression_ratio
+        latent_width = self.training_args.num_width // spatial_compression_ratio
+        
+        latents = torch.randn(batch_size, num_channels, self.training_args.num_latent_t, 
+                             latent_height, latent_width).to(get_local_torch_device(), dtype=torch.bfloat16)
+
+        training_batch.latents = latents.to(get_local_torch_device(),
+                                            dtype=torch.bfloat16)
+        training_batch.encoder_hidden_states = encoder_hidden_states.to(
+            get_local_torch_device(), dtype=torch.bfloat16)
+        training_batch.encoder_attention_mask = encoder_attention_mask.to(
+            get_local_torch_device(), dtype=torch.bfloat16)
+        training_batch.infos = infos
+
+        return training_batch
 
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
         """

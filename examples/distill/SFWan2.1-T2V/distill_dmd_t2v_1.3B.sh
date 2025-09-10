@@ -18,20 +18,20 @@ export TORCH_NCCL_ENABLE_MONITORING=0
 export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
 export MASTER_PORT=29503
 export TOKENIZERS_PARALLELISM=false
-export WANDB_API_KEY="50632ebd88ffd970521cec9ab4a1a2d7e85bfc45"
+export WANDB_API_KEY="2f25ad37933894dbf0966c838c0b8494987f9f2f"
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 
 # Configs
-NUM_GPUS=4
+NUM_GPUS=1
 
 # Model paths for Self-Forcing DMD distillation:
 GENERATOR_MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
 REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"  # Teacher model
 FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Critic model
 
-DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
+DATA_DIR="data/test-text-preprocessing/Node_0_GPU_1_File_1/combined_parquet_dataset/"
 VALIDATION_DATASET_FILE="data/crush-smol-single_processed_t2v/validation.json"
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
