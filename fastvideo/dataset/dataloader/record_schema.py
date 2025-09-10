@@ -1,5 +1,7 @@
 from typing import Any
 
+import numpy as np
+
 from fastvideo.pipelines.pipeline_batch_info import PreprocessBatch
 
 
@@ -120,3 +122,47 @@ def i2v_record_creator(batch: PreprocessBatch) -> list[dict[str, Any]]:
             })
 
     return records
+
+
+def ode_text_only_record_creator(
+        video_name: str, text_embedding: np.ndarray, caption: str,
+        trajectory_latents: np.ndarray,
+        trajectory_timesteps: np.ndarray) -> dict[str, Any]:
+    """Create a text-only ODE trajectory record matching pyarrow_schema_ode_trajectory_text_only.
+
+    Args:
+        video_name: Base name/id for the sample (without extension).
+        text_embedding: Text encoder output array [SeqLen, Dim].
+        caption: Original text prompt.
+        trajectory_latents: Collected trajectory latents array.
+        trajectory_timesteps: Collected timesteps array.
+
+    Returns:
+        dict suitable for records_to_table(…, pyarrow_schema_ode_trajectory_text_only)
+    """
+    assert trajectory_latents is not None, "trajectory_latents is required"
+    assert trajectory_timesteps is not None, "trajectory_timesteps is required"
+
+    record = {
+        "id": f"text_{video_name}",
+        "text_embedding_bytes": text_embedding.tobytes(),
+        "text_embedding_shape": list(text_embedding.shape),
+        "text_embedding_dtype": str(text_embedding.dtype),
+        "file_name": video_name,
+        "caption": caption,
+        "media_type": "text",
+    }
+
+    record.update({
+        "trajectory_latents_bytes": trajectory_latents.tobytes(),
+        "trajectory_latents_shape": list(trajectory_latents.shape),
+        "trajectory_latents_dtype": str(trajectory_latents.dtype),
+    })
+
+    record.update({
+        "trajectory_timesteps_bytes": trajectory_timesteps.tobytes(),
+        "trajectory_timesteps_shape": list(trajectory_timesteps.shape),
+        "trajectory_timesteps_dtype": str(trajectory_timesteps.dtype),
+    })
+
+    return record

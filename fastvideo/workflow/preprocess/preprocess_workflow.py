@@ -4,6 +4,8 @@ from typing import cast
 from torch.utils.data import DataLoader
 
 from fastvideo.configs.configs import PreprocessConfig
+from fastvideo.dataset.dataloader.record_schema import (
+    basic_t2v_record_creator, i2v_record_creator)
 from fastvideo.dataset.dataloader.schema import (pyarrow_schema_i2v,
                                                  pyarrow_schema_t2v)
 from fastvideo.distributed.parallel_state import get_world_rank
@@ -13,8 +15,6 @@ from fastvideo.pipelines.pipeline_registry import PipelineType
 from fastvideo.workflow.preprocess.components import (
     ParquetDatasetSaver, PreprocessingDataValidator, VideoForwardBatchBuilder,
     build_dataset)
-from fastvideo.workflow.preprocess.record_schema import (
-    basic_t2v_record_creator, i2v_record_creator)
 from fastvideo.workflow.workflow_base import WorkflowBase
 
 logger = init_logger(__name__)
@@ -85,16 +85,16 @@ class PreprocessWorkflow(WorkflowBase):
         # record creator
         if self.fastvideo_args.workload_type == WorkloadType.I2V:
             record_creator = i2v_record_creator
-            schema_fields = [f.name for f in pyarrow_schema_i2v]
+            schema = pyarrow_schema_i2v
         else:
             record_creator = basic_t2v_record_creator
-            schema_fields = [f.name for f in pyarrow_schema_t2v]
+            schema = pyarrow_schema_t2v
         processed_dataset_saver = ParquetDatasetSaver(
             flush_frequency=self.fastvideo_args.preprocess_config.
             flush_frequency,
             samples_per_file=self.fastvideo_args.preprocess_config.
             samples_per_file,
-            schema_fields=schema_fields,
+            schema=schema,
             record_creator=record_creator,
         )
         self.add_component("processed_dataset_saver", processed_dataset_saver)

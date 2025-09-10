@@ -40,9 +40,9 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
                            image_processor=self.get_module("image_processor"),
                        ))
 
-    def get_schema_fields(self) -> list[str]:
-        """Get the schema fields for I2V pipeline."""
-        return [f.name for f in pyarrow_schema_i2v]
+    def get_pyarrow_schema(self):
+        """Return the PyArrow schema for I2V pipeline."""
+        return pyarrow_schema_i2v
 
     def get_extra_features(self, valid_data: dict[str, Any],
                            fastvideo_args: FastVideoArgs) -> dict[str, Any]:
