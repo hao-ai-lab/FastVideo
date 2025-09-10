@@ -22,7 +22,7 @@ from tqdm.auto import tqdm
 import fastvideo.envs as envs
 from fastvideo.attention.backends.video_sparse_attn import (
     VideoSparseAttentionMetadataBuilder)
-from fastvideo.attention.backends.vmoba import VideoMobaAttentionMetadataBuilder
+# from fastvideo.attention.backends.vmoba import VideoMobaAttentionMetadataBuilder
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset import build_parquet_map_style_dataloader
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
@@ -42,13 +42,15 @@ from fastvideo.training.training_utils import (
     compute_density_for_timestep_sampling, get_scheduler, get_sigmas,
     load_checkpoint, normalize_dit_input, save_checkpoint,
     shard_latents_across_sp)
-from fastvideo.utils import (is_vmoba_available, is_vsa_available,
+# from fastvideo.utils import (is_vmoba_available, is_vsa_available,
+#                              set_random_seed, shallow_asdict)
+from fastvideo.utils import (is_vsa_available,
                              set_random_seed, shallow_asdict)
 
 import wandb  # isort: skip
 
 vsa_available = is_vsa_available()
-vmoba_available = is_vmoba_available()
+# vmoba_available = is_vmoba_available()
 
 logger = init_logger(__name__)
 
@@ -279,20 +281,20 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 patch_size=patch_size,
                 VSA_sparsity=current_vsa_sparsity,
                 device=get_local_torch_device())
-        elif vmoba_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN":
-            moba_params = self.training_args.moba_config.copy()
-            moba_params.update({
-                "current_timestep":
-                training_batch.timesteps,
-                "raw_latent_shape":
-                training_batch.raw_latent_shape[2:5],
-                "patch_size":
-                self.training_args.pipeline_config.dit_config.patch_size,
-                "device":
-                get_local_torch_device(),
-            })
-            training_batch.attn_metadata = VideoMobaAttentionMetadataBuilder(
-            ).build(**moba_params)
+        # elif vmoba_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN":
+        #     moba_params = self.training_args.moba_config.copy()
+        #     moba_params.update({
+        #         "current_timestep":
+        #         training_batch.timesteps,
+        #         "raw_latent_shape":
+        #         training_batch.raw_latent_shape[2:5],
+        #         "patch_size":
+        #         self.training_args.pipeline_config.dit_config.patch_size,
+        #         "device":
+        #         get_local_torch_device(),
+        #     })
+        #     training_batch.attn_metadata = VideoMobaAttentionMetadataBuilder(
+        #     ).build(**moba_params)
         else:
             training_batch.attn_metadata = None
 
@@ -317,7 +319,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
     def _transformer_forward_and_compute_loss(
             self, training_batch: TrainingBatch) -> TrainingBatch:
-        if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN" or vmoba_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN":
+        # if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN" or vmoba_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN":
+        if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
             assert training_batch.attn_metadata is not None
         else:
             assert training_batch.attn_metadata is None
@@ -483,9 +486,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 current_decay_times = min(step // vsa_decay_interval_steps,
                                           vsa_sparsity // vsa_decay_rate)
                 current_vsa_sparsity = current_decay_times * vsa_decay_rate
-            elif vmoba_available:
-                # TODO: add vmoba sparsity scheduling here
-                current_vsa_sparsity = 0.0
+            # elif vmoba_available:
+            #     # TODO: add vmoba sparsity scheduling here
+            #     pass
             else:
                 current_vsa_sparsity = 0.0
 
