@@ -91,8 +91,8 @@ class CosmosArchConfig(DiTArchConfig):
     eps: float = 1e-6
     exclude_lora_layers: list[str] = field(default_factory=lambda: ["embedder"])
     
-    # Attention backend selection
-    attention_backend: str = "distributed"  # Options: "distributed", "torch"
+    # Attention backend selection - use torch to match diffusers behavior
+    attention_backend: str = "torch"  # Options: "distributed", "torch"
 
     def __post_init__(self):
         super().__post_init__()
