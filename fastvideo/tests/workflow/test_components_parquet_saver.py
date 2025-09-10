@@ -38,7 +38,8 @@ def test_parquet_dataset_saver_flush_and_last(tmp_path: Path):
         data_type="video",
         latents=torch.randn(B, 2),
         prompt_embeds=[torch.randn(B, 1, 1)],
-        prompt_attention_mask=[torch.ones(B, 1)],
+        # Attention mask should be integer dtype in real pipelines
+        prompt_attention_mask=[torch.ones(B, 1, dtype=torch.int64)],
     )
     batch.video_file_name = [f"vid_{i}" for i in range(B)]
 
