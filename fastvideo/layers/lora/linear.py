@@ -77,8 +77,10 @@ class BaseLayerWithLoRA(nn.Module):
             lora_A = self.lora_A.to_local()
 
         if not self.merged and not self.disable_lora:
-            lora_A_sliced = self.slice_lora_a_weights(lora_A.to(x, non_blocking=True))
-            lora_B_sliced = self.slice_lora_b_weights(lora_B.to(x, non_blocking=True))
+            lora_A_sliced = self.slice_lora_a_weights(
+                lora_A.to(x, non_blocking=True))
+            lora_B_sliced = self.slice_lora_b_weights(
+                lora_B.to(x, non_blocking=True))
             delta = x @ lora_A_sliced.T @ lora_B_sliced.T
             if self.lora_alpha != self.lora_rank:
                 delta = delta * (
