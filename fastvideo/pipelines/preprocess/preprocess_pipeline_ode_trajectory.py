@@ -20,6 +20,8 @@ from tqdm import tqdm
 
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset import gettextdataset
+from fastvideo.dataset.dataloader.parquet_io import (ParquetDatasetWriter,
+                                                     records_to_table)
 from fastvideo.dataset.dataloader.record_schema import (
     ode_text_only_record_creator)
 from fastvideo.dataset.dataloader.schema import (
@@ -37,8 +39,6 @@ from fastvideo.pipelines.stages import (DecodingStage, DenoisingStage,
                                         TextEncodingStage,
                                         TimestepPreparationStage)
 from fastvideo.utils import save_decoded_latents_as_video, shallow_asdict
-from fastvideo.workflow.preprocess.parquet_io import (ParquetDatasetWriter,
-                                                      records_to_table)
 
 logger = init_logger(__name__)
 
@@ -63,23 +63,12 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
         logger.info('WTF flow_shift: %s',
                     fastvideo_args.pipeline_config.flow_shift)
         assert fastvideo_args.pipeline_config.flow_shift == 5
-        # self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
-        # shift=fastvideo_args.pipeline_config.flow_shift)
         self.modules["scheduler"] = SelfForcingFlowMatchScheduler(
             shift=fastvideo_args.pipeline_config.flow_shift,
             sigma_min=0.0,
             extra_one_step=True)
         self.modules["scheduler"].set_timesteps(num_inference_steps=48,
                                                 denoising_strength=1.0)
-        # logger.info('WTF scheduler timesteps: %s',
-        #             self.modules["scheduler"].timesteps)
-        # scheduler = FlowMatchScheduler(
-        #     shift=8.0, sigma_min=0.0, extra_one_step=True)
-        # device = get_local_torch_device()
-        # # scheduler.num_train_timesteps = 100
-        # scheduler.set_timesteps(num_inference_steps=50, denoising_strength=1.0)
-        # scheduler.sigmas = scheduler.sigmas.to(device)
-        # self.modules["scheduler"] = scheduler
 
         self.add_stage(stage_name="input_validation_stage",
                        stage=InputValidationStage())

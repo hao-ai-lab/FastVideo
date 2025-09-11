@@ -62,8 +62,15 @@ class SelfForcingFlowMatchScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
     def step(self, model_output: torch.FloatTensor, timestep: torch.FloatTensor, sample: torch.FloatTensor, to_final=False, return_dict=False, **kwargs):
         if timestep.ndim == 2:
             timestep = timestep.flatten(0, 1)
+        elif timestep.ndim == 0:
+            # handles the case where timestep is a scalar, this occurs when we
+            # use this scheduler for ODE trajectory
+            timestep = timestep.unsqueeze(0)
+
         self.sigmas = self.sigmas.to(model_output.device)
         self.timesteps = self.timesteps.to(model_output.device)
+        timestep = timestep.to(model_output.device)
+
         timestep_id = torch.argmin(
             (self.timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
         sigma = self.sigmas[timestep_id].reshape(-1, 1, 1, 1)
