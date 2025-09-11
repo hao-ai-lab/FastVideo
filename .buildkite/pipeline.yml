@@ -199,3 +199,14 @@ steps:
                   - TEST_TYPE=inference_vmoba
                 agents:
                   queue: "default"
+            - path:
+                - "fastvideo/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: "Unit Tests"
+                env:
+                  - TEST_TYPE=unit_test
+                agents:
+                  queue: "default"

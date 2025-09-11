@@ -62,8 +62,8 @@ on:
         required: false
         default: false
         type: boolean
-      run_nightly_test:
-        description: "Run nightly-test"
+      run_unit_test:
+        description: "Run unit-test"
         required: false
         default: false
         type: boolean
@@ -93,6 +93,7 @@ jobs:
       inference-test-STA: ${{ steps.filter.outputs.inference-test-STA }}
       precision-test-STA: ${{ steps.filter.outputs.precision-test-STA }}
       precision-test-VSA: ${{ steps.filter.outputs.precision-test-VSA }}
+      unit-test: ${{ steps.filter.outputs.unit-test }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -102,6 +103,8 @@ jobs:
             # Define reusable path patterns
             common-paths: &common-paths
               - 'pyproject.toml'
+              - 'docker/Dockerfile.python3.10'
+              - 'docker/Dockerfile.python3.11'
               - 'docker/Dockerfile.python3.12'
             sta-kernel-paths: &sta-kernel-paths
               - 'csrc/attn/sliding_tile_attn/**'
@@ -155,6 +158,9 @@ jobs:
             precision-test-VSA:
               - *common-paths
               - *vsa-kernel-paths
+            unit-test:
+              - 'fastvideo/**'
+              - *common-paths
 
   encoder-test:
     needs: change-filter
@@ -333,23 +339,42 @@ jobs:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
 
-  nightly-test:
+  unit-test:
+    needs: change-filter
     if: >-
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_nightly_test == 'true')
+      (github.event_name != 'workflow_dispatch' && needs.change-filter.outputs.unit-test == 'true') || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_unit_test == 'true')
     uses: ./.github/workflows/runpod-test.yml
     with:
-      job_id: "nightly-test"
-      gpu_type: "NVIDIA A40"
-      gpu_count: 4
+      job_id: "unit-test"
+      gpu_type: "NVIDIA L40S"
+      gpu_count: 1
       volume_size: 100
       disk_size: 100
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
-      test_command: "wandb login $WANDB_API_KEY && uv pip install -e .[test] && pytest ./fastvideo/tests/nightly/test_e2e_overfit_single_sample.py -vs"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/dataset/ -vs && pytest ./fastvideo/workflow/ -vs"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
-      WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+
+  # nightly-test:
+  #   if: >-
+  #     (github.event_name == 'workflow_dispatch' && github.event.inputs.run_nightly_test == 'true')
+  #   uses: ./.github/workflows/runpod-test.yml
+  #   with:
+  #     job_id: "nightly-test"
+  #     gpu_type: "NVIDIA A40"
+  #     gpu_count: 4
+  #     volume_size: 100
+  #     disk_size: 100
+  #     image: "ghcr.io/${{ github.repository }}/fastvideo-dev:py3.12-latest"
+  #     test_command: "wandb login $WANDB_API_KEY && uv pip install -e .[test] && pytest ./fastvideo/tests/nightly/test_e2e_overfit_single_sample.py -vs"
+  #     timeout_minutes: 30
+  #   secrets:
+  #     RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+  #     RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
+  #     WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
 
   runpod-cleanup:
     # Add other jobs to this list as you create them

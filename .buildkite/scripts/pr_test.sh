@@ -118,6 +118,10 @@ case "$TEST_TYPE" in
         log "Running V-MoBA precision tests..."
         MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_precision_tests_vmoba"
         ;;
+    "unit_test")
+        log "Running unit tests..."
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_unit_test"
+        ;;
     *)
         log "Error: Unknown test type: $TEST_TYPE"
         exit 1

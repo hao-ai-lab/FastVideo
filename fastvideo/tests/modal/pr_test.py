@@ -117,3 +117,8 @@ def run_inference_lora_tests():
 @app.function(gpu="L40S:2", image=image, timeout=900)
 def run_distill_dmd_tests():
     run_test("pytest ./fastvideo/tests/training/distill/test_distill_dmd.py -vs")
+
+@app.function(gpu="L40S:1", image=image, timeout=900)
+def run_unit_test():
+    run_test("pytest ./fastvideo/tests/dataset/ -vs")
+    run_test("pytest ./fastvideo/tests/workflow/ -vs")
