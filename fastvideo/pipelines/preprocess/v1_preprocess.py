@@ -1,5 +1,6 @@
 import argparse
 import os
+from typing import Any
 
 from fastvideo import PipelineConfig
 from fastvideo.configs.models.vaes import WanVAEConfig
@@ -9,11 +10,10 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.preprocess.preprocess_pipeline_i2v import (
     PreprocessPipeline_I2V)
-from fastvideo.pipelines.preprocess.preprocess_pipeline_ode_trajectory import (
-    PreprocessPipeline_ODE_Trajectory)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_t2v import (
     PreprocessPipeline_T2V)
-from fastvideo.pipelines.preprocess_text import PreprocessPipeline_Text
+from fastvideo.pipelines.preprocess.preprocess_pipeline_text import (
+    PreprocessPipeline_Text)
 from fastvideo.utils import maybe_download_model
 
 logger = init_logger(__name__)
@@ -24,22 +24,22 @@ def main(args) -> None:
     maybe_init_distributed_environment_and_model_parallel(1, 1)
     num_gpus = int(os.environ["WORLD_SIZE"])
     assert num_gpus == 1, "Only support 1 GPU"
-    
+
+    pipeline_config = PipelineConfig.from_pretrained(args.model_path)
+
+    kwargs: dict[str, Any] = {}
     if args.preprocess_task == "text_only":
-        pipeline_config = PipelineConfig.from_pretrained(args.model_path)
         kwargs = {
             "text_encoder_cpu_offload": False,
         }
-        pipeline_config.update_config_from_dict(kwargs)
     else:
         # Full config for video/image processing
-        pipeline_config = PipelineConfig.from_pretrained(args.model_path)
         kwargs = {
             "vae_precision": "fp32",
             "vae_config": WanVAEConfig(load_encoder=True, load_decoder=True),
         }
-        pipeline_config.update_config_from_dict(kwargs)
-    
+    pipeline_config.update_config_from_dict(kwargs)
+
     fastvideo_args = FastVideoArgs(
         model_path=args.model_path,
         num_gpus=get_world_size(),
@@ -48,24 +48,20 @@ def main(args) -> None:
         text_encoder_cpu_offload=False,
         pipeline_config=pipeline_config,
     )
-    
+
     if args.preprocess_task == "t2v":
         PreprocessPipeline = PreprocessPipeline_T2V
     elif args.preprocess_task == "i2v":
         PreprocessPipeline = PreprocessPipeline_I2V
-    elif args.preprocess_task == "ode_trajectory":
-        print("Preprocess pipeline...")
-        PreprocessPipeline = PreprocessPipeline_ODE_Trajectory
     elif args.preprocess_task == "text_only":
         print("Text-only preprocessing pipeline...")
         PreprocessPipeline = PreprocessPipeline_Text
     else:
         raise ValueError(f"Invalid preprocess task: {args.preprocess_task}. "
-                        f"Valid options: t2v, i2v, ode_trajectory, text_only")
+                         f"Valid options: t2v, i2v, ode_trajectory, text_only")
 
-    logger.info(
-        f"Preprocess task: {args.preprocess_task} using {PreprocessPipeline.__name__}"
-    )
+    logger.info("Preprocess task: %s using %s", args.preprocess_task,
+                PreprocessPipeline.__name__)
 
     pipeline = PreprocessPipeline(args.model_path, fastvideo_args)
     pipeline.forward(batch=None, fastvideo_args=fastvideo_args, args=args)
@@ -105,10 +101,10 @@ if __name__ == "__main__":
     parser.add_argument("--video_length_tolerance_range", type=int, default=2.0)
     parser.add_argument("--group_frame", action="store_true")  # TODO
     parser.add_argument("--group_resolution", action="store_true")  # TODO
-    parser.add_argument("--preprocess_task", 
-                        type=str, 
+    parser.add_argument("--preprocess_task",
+                        type=str,
                         default="t2v",
-                        choices=["t2v", "i2v", "ode_trajectory", "text_only"],
+                        choices=["t2v", "i2v", "text_only"],
                         help="Type of preprocessing task to run")
     parser.add_argument("--train_fps", type=int, default=30)
     parser.add_argument("--use_image_num", type=int, default=0)
