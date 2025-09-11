@@ -120,5 +120,4 @@ def run_distill_dmd_tests():
 
 @app.function(gpu="L40S:1", image=image, timeout=900)
 def run_unit_test():
-    run_test("pytest ./fastvideo/tests/dataset/ -vs")
-    run_test("pytest ./fastvideo/tests/workflow/ -vs")
+    run_test("pytest ./fastvideo/tests/dataset/ -vs & pytest ./fastvideo/tests/workflow/ -vs")
