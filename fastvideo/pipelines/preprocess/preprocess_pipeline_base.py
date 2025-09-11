@@ -423,7 +423,3 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 written = self.dataset_writer.flush()
                 logger.info("Flushed %s samples to parquet", written)
                 num_processed_samples = 0
-
-    def _final_flush_if_any(self):
-        if hasattr(self, 'dataset_writer'):
-            self.dataset_writer.flush()
