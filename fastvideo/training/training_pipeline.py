@@ -478,7 +478,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 current_vsa_sparsity = current_decay_times * vsa_decay_rate
             elif vmoba_available:
                 # TODO: add vmoba sparsity scheduling here
-                pass
+                current_vsa_sparsity = 0.0
             else:
                 current_vsa_sparsity = 0.0
 
