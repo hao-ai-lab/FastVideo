@@ -289,9 +289,14 @@ class CausalDMDDenosingStage(DenoisingStage):
                             start_frame=start_index,
                             **image_kwargs,
                             **pos_cond_kwargs,
-                        ).permute(0, 2, 1, 3, 4)
+                        )
                         if fastvideo_args.use_sf_wan:
+                            flow_pred, x0_pred = pred_noise_btchw
+                            logger.info(f"flow_pred.shape: {flow_pred.shape}")
+                            logger.info(f"x0_pred.shape: {x0_pred.shape}")
                             # SF wan wrapper requires BTCHW output
+                            pred_noise_btchw = flow_pred
+                        else:
                             pred_noise_btchw = pred_noise_btchw.permute(0, 2, 1, 3, 4)
 
                     # Convert pred noise to pred video with FM Euler scheduler utilities
@@ -360,7 +365,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                         start_frame=start_index,
                         **image_kwargs,
                         **pos_cond_kwargs,
-                    ).permute(0, 2, 1, 3, 4)
+                    )#.permute(0, 2, 1, 3, 4)
                     # if fastvideo_args.use_sf_wan:
                         # SF wan wrapper requires BTCHW output
                         # context_bcthw = context_bcthw.permute(0, 2, 1, 3, 4)

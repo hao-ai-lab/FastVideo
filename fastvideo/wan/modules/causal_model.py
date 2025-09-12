@@ -786,6 +786,9 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         # context
         context_lens = None
         logger.info(f"context: {context}")
+        for u in context:
+            logger.info(f"u.shape: {u.shape}")
+        context = [u.squeeze(0) for u in context]
         context = self.text_embedding(
             torch.stack([
                 torch.cat(

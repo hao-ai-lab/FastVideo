@@ -19,9 +19,13 @@ from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
                                         TextEncodingStage)
 # isort: on
 
+import torch
+
 from fastvideo.sf_utils.wan_wrapper import WanDiffusionWrapper
 
 logger = init_logger(__name__)
+
+from fastvideo.distributed import get_local_torch_device
 
 
 class WanCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
@@ -39,6 +43,9 @@ class WanCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
             sf_transformer = WanDiffusionWrapper(
                 model_name="Wan2.1-T2V-1.3B", timestep_shift=5.0, is_causal=True, config=config)
             del self.modules["transformer"]
+            state_dict = torch.load('checkpoints/self_forcing_dmd.pt')
+            sf_transformer.load_state_dict(state_dict['generator_ema'])
+            sf_transformer.to(get_local_torch_device())
             self.modules["transformer"] = sf_transformer
             logger.info("Using self-forcing Wan model for DMD inference")
 
