@@ -4,6 +4,7 @@ from fastvideo.dataset.dataloader.record_schema import (
     basic_t2v_record_creator,
     i2v_record_creator,
     ode_text_only_record_creator,
+    text_only_record_creator,
 )
 from fastvideo.pipelines.pipeline_batch_info import PreprocessBatch
 
@@ -104,3 +105,19 @@ def test_ode_text_only_record_creator():
     assert isinstance(rec["trajectory_timesteps_bytes"], (bytes, bytearray))
     assert rec["trajectory_timesteps_shape"] == list(tsteps.shape)
     assert rec["trajectory_timesteps_dtype"] == str(tsteps.dtype)
+
+
+def test_text_only_record_creator():
+    text_name = "note1"
+    caption = "a prompt"
+    text_embedding = np.ones((7, 16), dtype=np.float32)
+    rec = text_only_record_creator(
+        text_name=text_name,
+        text_embedding=text_embedding,
+        caption=caption,
+    )
+    assert rec["id"] == f"text_{text_name}"
+    assert isinstance(rec["text_embedding_bytes"], (bytes, bytearray))
+    assert rec["text_embedding_shape"] == list(text_embedding.shape)
+    assert rec["text_embedding_dtype"] == str(text_embedding.dtype)
+    assert rec["caption"] == caption

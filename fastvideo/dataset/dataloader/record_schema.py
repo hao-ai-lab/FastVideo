@@ -166,3 +166,25 @@ def ode_text_only_record_creator(
     })
 
     return record
+
+
+def text_only_record_creator(text_name: str, text_embedding: np.ndarray,
+                             caption: str) -> dict[str, Any]:
+    """Create a text-only record matching pyarrow_schema_text_only.
+
+    Args:
+        text_name: Base id/name for the text sample.
+        text_embedding: Text encoder output array [SeqLen, Dim].
+        caption: Original text prompt.
+
+    Returns:
+        dict suitable for records_to_table(…, pyarrow_schema_text_only)
+    """
+    record = {
+        "id": f"text_{text_name}",
+        "text_embedding_bytes": text_embedding.tobytes(),
+        "text_embedding_shape": list(text_embedding.shape),
+        "text_embedding_dtype": str(text_embedding.dtype),
+        "caption": caption,
+    }
+    return record
