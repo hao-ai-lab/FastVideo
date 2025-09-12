@@ -233,7 +233,6 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             traj_latents,
             dim=1,
             index=self._cached_closest_idx_per_dmd.to(traj_latents.device))
-        # logger.info(f"relevant_traj_latents: {relevant_traj_latents.shape}")
         # assert relevant_traj_latents.shape[0] == 1
 
         indexes = self._get_timestep(  # [B, num_frames]
@@ -244,7 +243,6 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             3,
             uniform_timestep=False)
         # noisy_input = relevant_traj_latents[indexes]
-        # logger.info(f"indexes: {indexes.shape}")
         noisy_input = torch.gather(
             relevant_traj_latents,
             dim=1,
