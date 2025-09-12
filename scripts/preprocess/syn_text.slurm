@@ -1,6 +1,5 @@
 #!/bin/bash
 #SBATCH --partition=main
-#SBATCH --qos=hao
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=8
 #SBATCH --gres=gpu:8
@@ -54,7 +53,7 @@ for i in {1..8}; do
     
     # Calculate which file this GPU should process
     file_num=$((START_FILE + i - 1))
-    DATA_MERGE_PATH="/mnt/weka/home/hao.zhang/wl/kev/preproc/prompts/v2m_${file_num}.txt"
+    DATA_MERGE_PATH="prompts/v2m_${file_num}.txt"
     
     # Create unique output directory based on node and GPU for text-only processing
     OUTPUT_DIR="data/test-text-preprocessing/Node_${NODE_ID}_GPU_${i}_File_${file_num}"
@@ -66,7 +65,7 @@ for i in {1..8}; do
     
     # Run the text-only preprocessing command in background
     CUDA_VISIBLE_DEVICES=$gpu taskset -c ${start_cpu}-${end_cpu} torchrun --nnodes=1 --nproc_per_node=$GPU_NUM --master_port $port \
-        /mnt/weka/home/hao.zhang/matthew/FastVideo/fastvideo/pipelines/preprocess/v1_preprocess.py \
+        fastvideo/pipelines/preprocess/v1_preprocess.py \
         --model_path $MODEL_BASE \
         --data_merge_path $DATA_MERGE_PATH \
         --preprocess_video_batch_size 2 \

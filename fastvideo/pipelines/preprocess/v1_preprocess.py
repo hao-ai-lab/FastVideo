@@ -54,7 +54,6 @@ def main(args) -> None:
     elif args.preprocess_task == "i2v":
         PreprocessPipeline = PreprocessPipeline_I2V
     elif args.preprocess_task == "text_only":
-        print("Text-only preprocessing pipeline...")
         PreprocessPipeline = PreprocessPipeline_Text
     else:
         raise ValueError(f"Invalid preprocess task: {args.preprocess_task}. "
