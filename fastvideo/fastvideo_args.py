@@ -165,6 +165,9 @@ class FastVideoArgs:
     # MoE parameters used by Wan2.2
     boundary_ratio: float | None = None
 
+    # XXX
+    use_sf_wan: bool = False # force self-forcing Wan model for both distillation and validation
+
     @property
     def training_mode(self) -> bool:
         return not self.inference_mode
@@ -190,6 +193,12 @@ class FastVideoArgs:
             type=str,
             help=
             "The path of the model weights. This can be a local folder or a Hugging Face repo ID.",
+        )
+        parser.add_argument(
+            "--use-sf-wan",
+            action=StoreBoolean,
+            default=FastVideoArgs.use_sf_wan,
+            help="Use self-forcing Wan model for both distillation and validation",
         )
         parser.add_argument(
             "--model-dir",

@@ -150,6 +150,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                 with torch.autocast(device_type="cuda",
                                     dtype=target_dtype,
                                     enabled=autocast_enabled):
+                    assert False, "image_first_btchw is not supported"
                     _ = self.transformer(
                         image_first_btchw,
                         prompt_embeds,
@@ -176,6 +177,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                 with torch.autocast(device_type="cuda",
                                     dtype=target_dtype,
                                     enabled=autocast_enabled):
+                    assert False, "ref_btchw is not supported"
                     _ = self.transformer(
                         ref_btchw,
                         prompt_embeds,
@@ -273,6 +275,9 @@ class CausalDMDDenosingStage(DenoisingStage):
                             (latent_model_input.shape[0], 1),
                             device=latent_model_input.device,
                             dtype=torch.long)
+                        if fastvideo_args.use_sf_wan:
+                            # SF wan wrapper requires BTCHW input
+                            latent_model_input = latent_model_input.permute(0, 2, 1, 3, 4)
                         pred_noise_btchw = self.transformer(
                             latent_model_input,
                             prompt_embeds,
@@ -285,6 +290,9 @@ class CausalDMDDenosingStage(DenoisingStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                         ).permute(0, 2, 1, 3, 4)
+                        if fastvideo_args.use_sf_wan:
+                            # SF wan wrapper requires BTCHW output
+                            pred_noise_btchw = pred_noise_btchw.permute(0, 2, 1, 3, 4)
 
                     # Convert pred noise to pred video with FM Euler scheduler utilities
                     pred_video_btchw = pred_noise_to_pred_video(
@@ -338,6 +346,9 @@ class CausalDMDDenosingStage(DenoisingStage):
                                         attn_metadata=attn_metadata,
                                         forward_batch=batch):
                     t_expanded_context = t_context.unsqueeze(1)
+                    if fastvideo_args.use_sf_wan:
+                        # SF wan wrapper requires BTCHW input
+                        context_bcthw = context_bcthw.permute(0, 2, 1, 3, 4)
                     _ = self.transformer(
                         context_bcthw,
                         prompt_embeds,
@@ -349,7 +360,10 @@ class CausalDMDDenosingStage(DenoisingStage):
                         start_frame=start_index,
                         **image_kwargs,
                         **pos_cond_kwargs,
-                    )
+                    ).permute(0, 2, 1, 3, 4)
+                    # if fastvideo_args.use_sf_wan:
+                        # SF wan wrapper requires BTCHW output
+                        # context_bcthw = context_bcthw.permute(0, 2, 1, 3, 4)
                 start_index += current_num_frames
 
         batch.latents = latents

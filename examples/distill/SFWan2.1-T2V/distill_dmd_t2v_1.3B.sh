@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=t2v
+#SBATCH --job-name=wl_t2v
 #SBATCH --partition=main
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -7,8 +7,8 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
-#SBATCH --output=dmd_t2v_output/t2v_%j.out
-#SBATCH --error=dmd_t2v_output/t2v_%j.err
+#SBATCH --output=dmd_t2v_output/t2v.out
+#SBATCH --error=dmd_t2v_output/t2v.err
 #SBATCH --exclusive
 
 # Basic Info
@@ -28,11 +28,13 @@ NUM_GPUS=1
 
 # Model paths for Self-Forcing DMD distillation:
 GENERATOR_MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
-REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"  # Teacher model
+REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Teacher model
 FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Critic model
 
-DATA_DIR="data/test-text-preprocessing/Node_0_GPU_1_File_1/combined_parquet_dataset/"
+# DATA_DIR="data/test-text-preprocessing/Node_0_GPU_1_File_1/combined_parquet_dataset/"
+DATA_DIR="/mnt/weka/home/hao.zhang/matthew/FastVideo/data/test-text-preprocessing"
 VALIDATION_DATASET_FILE="data/crush-smol-single_processed_t2v/validation.json"
+VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/wl/FastVideo/examples/distill/Wan2.2-TI2V-5B-Diffusers/Data-free/validation_64.json"
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
@@ -40,7 +42,7 @@ VALIDATION_DATASET_FILE="data/crush-smol-single_processed_t2v/validation.json"
 training_args=(
   --tracker_project_name SFwan_t2v_distill_self_forcing_dmd  # Updated for self-forcing DMD
   --output_dir "/mnt/sharefs/users/hao.zhang/SFwan_t2v_finetune"
-  --max_train_steps 4000
+  --max_train_steps 6000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
@@ -62,7 +64,7 @@ parallel_args=(
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1 # 64
-  --hsdp_shard_dim $NUM_GPUS
+  --hsdp_shard_dim 1
 )
 
 # Model arguments
@@ -84,7 +86,7 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 50
+  --validation_steps 10
   --validation_sampling_steps "4"
   --validation_guidance_scale "6.0" # not used for dmd inference
 )
@@ -111,7 +113,8 @@ miscellaneous_args=(
   --use_ema True
   --ema_decay 0.99
   --ema_start_step 100
-  --init_weights_from_safetensors "/mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors"
+  # --init_weights_from_safetensors "/mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors"
+  # --init_weights_from_safetensors "/mnt/weka/home/hao.zhang/wl/FastVideo2/warp_vidprom_8b16k_test_warp_1e-5/checkpoint-2000/transformer/diffusion_pytorch_model.safetensors"
 )
 
 # Self-forcing DMD arguments

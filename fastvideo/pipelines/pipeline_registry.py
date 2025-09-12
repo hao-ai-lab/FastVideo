@@ -205,7 +205,7 @@ def import_pipeline_classes(
         except ImportError as e:
             raise ImportError(
                 f"Could not import {pipeline_type_package_name} when importing pipeline classes: {e}"
-            ) from None
+            ) from e
 
         type_to_arch_to_pipeline_dict[pipeline_type_str] = arch_to_pipeline_dict
 

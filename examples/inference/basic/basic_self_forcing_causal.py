@@ -16,6 +16,7 @@ def main():
         use_fsdp_inference=True,
         text_encoder_cpu_offload=False,
         dit_cpu_offload=False,
+        use_sf_wan=True,
     )
 
     sampling_param = SamplingParam.from_pretrained(model_name)

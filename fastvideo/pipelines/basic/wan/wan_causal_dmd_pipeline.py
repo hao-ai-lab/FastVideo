@@ -19,6 +19,8 @@ from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
                                         TextEncodingStage)
 # isort: on
 
+from fastvideo.sf_utils.wan_wrapper import WanDiffusionWrapper
+
 logger = init_logger(__name__)
 
 
@@ -30,6 +32,15 @@ class WanCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""
+        if fastvideo_args.use_sf_wan:
+            # timestep shift is 5.0 for self-forcing Wan model
+            # see https://github.com/guandeh17/Self-Forcing/blob/33593df3e81fa3ec10239271dd2c100facac6de1/configs/self_forcing_dmd.yaml#L50
+            config = self.get_module("transformer").config
+            sf_transformer = WanDiffusionWrapper(
+                model_name="Wan2.1-T2V-1.3B", timestep_shift=5.0, is_causal=True, config=config)
+            del self.modules["transformer"]
+            self.modules["transformer"] = sf_transformer
+            logger.info("Using self-forcing Wan model for DMD inference")
 
         self.add_stage(stage_name="input_validation_stage",
                        stage=InputValidationStage())
