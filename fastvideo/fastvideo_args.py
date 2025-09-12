@@ -697,6 +697,7 @@ class TrainingArgs(FastVideoArgs):
     # simulate generator forward to match inference
     simulate_generator_forward: bool = False
     warp_denoising_step: bool = False
+    intermediate_latents_visualization: bool = False
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":

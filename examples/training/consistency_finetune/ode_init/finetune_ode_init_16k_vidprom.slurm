@@ -7,8 +7,8 @@
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
-#SBATCH --output=ode_vidprom16k_warp/ode_vidprom2b16k_1e-5.out
-#SBATCH --error=ode_vidprom16k_warp/ode_vidprom2b16k_1e-5.err
+#SBATCH --output=ode_vidprom16k_warp/Dode_vidprom8b16k_1e-5.out
+#SBATCH --error=ode_vidprom16k_warp/Dode_vidprom8b16k_1e-5.err
 #SBATCH --exclusive
 set -e -x
 
@@ -38,20 +38,21 @@ echo "NODE_RANK: $NODE_RANK"
 
 # MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-DATA_DIR="/mnt/sharefs/users/hao.zhang/klin/preproc/data/test-ode-preprocessing-16k-t2v-1-3b/"
+DATA_DIR="/mnt/sharefs/users/hao.zhang/klin/preproc/data/test-ode-preprocessing-16k-t2v-1-3b-81/"
 VALIDATION_DATASET_FILE="examples/training/consistency_finetune/ode_init/validation.json"
-NUM_GPUS=2
+NUM_GPUS=8
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
   --tracker_project_name "wan_ode_init"
-  --output_dir "warpd_vidprom_2b16k_test_warp_1e-5"
+  --output_dir "Dwarp_vidprom_8b16k_test_warp_1e-5"
   --override_transformer_cls_name "CausalWanTransformer3DModel"
-  --wandb_run_name "Dwarp_vidprom_2b16k_wan_ode_init_1e-5"
+  --wandb_run_name "Dwarp_vidprom_8b16k_wan_ode_init_1e-5"
   # --resume_from_checkpoint "ode_init_diffusers/"
   --warp_denoising_step
+  --log_visualization
   --max_train_steps 6001
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -92,6 +93,7 @@ validation_args=(
   --validation_steps 50
   --validation_sampling_steps "50"
   --validation_guidance_scale "6.0"
+  # --init_weights_from_safetensors "/mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors"
 )
 
 # Optimizer arguments

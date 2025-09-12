@@ -3,10 +3,12 @@ import sys
 from copy import deepcopy
 from typing import cast
 
+
 import torch
 import torch.nn.functional as F
-
-from fastvideo.dataset.dataloader.schema import pyarrow_schema_ode_trajectory
+import numpy as np
+import wandb
+from fastvideo.dataset.dataloader.schema import pyarrow_schema_ode_trajectory_text_only
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
@@ -16,6 +18,7 @@ from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
 from fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline import (
     WanCausalDMDPipeline)
 from fastvideo.training.training_pipeline import TrainingPipeline
+from fastvideo.pipelines.pipeline_batch_info import TrainingBatch
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases)
 
@@ -44,7 +47,7 @@ class ODEInitTrainingPipeline(TrainingPipeline):
                                                 training=True)
 
     def set_schemas(self):
-        self.train_dataset_schema = pyarrow_schema_ode_trajectory
+        self.train_dataset_schema = pyarrow_schema_ode_trajectory_text_only
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         super().initialize_training_pipeline(training_args)
@@ -198,7 +201,8 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         self, traj_latents: torch.Tensor, traj_timesteps: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
         encoder_attention_mask: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
+        latent_vis_dict = {}
         device = get_local_torch_device()
         target_latent = traj_latents[:, -1]
 
@@ -242,6 +246,8 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             num_frames,
             3,
             uniform_timestep=False)
+        logger.info(f"indexes: {indexes.shape}")
+        logger.info(f"indexes: {indexes}")
         # noisy_input = relevant_traj_latents[indexes]
         noisy_input = torch.gather(
             relevant_traj_latents,
@@ -273,6 +279,9 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         # logger.info(f"timestep: {timestep}")
 
         # Prepare inputs for transformer
+        latent_vis_dict["noisy_input"] = noisy_input.permute(0, 2, 1, 3, 4).detach().clone().cpu()
+        latent_vis_dict["x0"] = target_latent.permute(0, 2, 1, 3, 4).detach().clone().cpu()
+
         input_kwargs = {
             "hidden_states": noisy_input.permute(0, 2, 1, 3, 4),
             "encoder_hidden_states": encoder_hidden_states,
@@ -290,17 +299,18 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             noise_pred = noise_pred[0]
 
         from fastvideo.models.utils import pred_noise_to_pred_video
-        noise_pred = pred_noise_to_pred_video(
+        pred_video = pred_noise_to_pred_video(
             pred_noise=noise_pred.flatten(0, 1),
             noise_input_latent=noisy_input.flatten(0, 1),
             timestep=timestep.flatten(0, 1),
             scheduler=self.modules["scheduler"]).unflatten(
                 0, noise_pred.shape[:2])
+        latent_vis_dict["pred_video"] = pred_video.permute(0, 2, 1, 3, 4).detach().clone().cpu()
 
         # noisy_input = pred_noise_to_pred_video(noise_pred, noisy_input, t, self.modules["scheduler"])
         # next_latent_pred = self.modules["scheduler"].step(
         #     noise_pred, t, current_latents, return_dict=False)[0]
-        return noise_pred, target_latent, timestep
+        return pred_video, target_latent, timestep, latent_vis_dict
 
     def train_one_step(self, training_batch):  # type: ignore[override]
         self.transformer.train()
@@ -339,8 +349,10 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             #     t = t.long()
 
             # Forward to predict next latent by stepping scheduler with predicted noise
-            noise_pred, target_latent, t = self._step_predict_next_latent(
+            noise_pred, target_latent, t, latent_vis_dict = self._step_predict_next_latent(
                 traj_latents, traj_timesteps, text_embeds, text_attention_mask)
+            
+            training_batch.latent_vis_dict.update(latent_vis_dict)
 
             mask = t != 0
 
@@ -377,6 +389,35 @@ class ODEInitTrainingPipeline(TrainingPipeline):
                 grad_value = 0.0
         training_batch.grad_norm = grad_value
         return training_batch
+
+    def visualize_intermediate_latents(self, training_batch: TrainingBatch,
+                                       training_args: TrainingArgs, step: int):
+        """Add visualization data to wandb logging and save frames to disk."""
+        wandb_loss_dict = {}
+        latents_vis_dict = training_batch.latent_vis_dict
+        latent_log_keys = ['noisy_input', 'x0', 'pred_video']
+        for latent_key in latent_log_keys:
+            assert latent_key in latents_vis_dict and latents_vis_dict[latent_key] is not None
+            latent = latents_vis_dict[latent_key]
+            pixel_latent = self.validation_pipeline.decoding_stage.decode(latent, training_args)
+
+            video = pixel_latent.cpu().float()
+            video = video.permute(0, 2, 1, 3, 4)
+            video = (video * 255).numpy().astype(np.uint8)
+            wandb_loss_dict[latent_key] = wandb.Video(
+                video, fps=16, format="mp4")  # change to 16 for Wan2.1
+            # Clean up references
+            del video, pixel_latent, latent
+
+        # Log to wandb
+        if self.global_rank == 0:
+            wandb.log(wandb_loss_dict, step=step)
+
+
+        # dmd_latents_vis_dict = training_batch.dmd_latent_vis_dict
+        # fake_score_latents_vis_dict = training_batch.fake_score_latent_vis_dict
+        # fake_score_log_keys = ['generator_pred_video']
+        # dmd_log_keys = ['faker_score_pred_video', 'real_score_pred_video']
 
 
 def main(args) -> None:
