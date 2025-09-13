@@ -10,6 +10,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from fastvideo.dataset import getdataset
+from fastvideo.dataset.dataloader.parquet_io import (ParquetDatasetWriter,
+                                                     records_to_table)
 from fastvideo.dataset.preprocessing_datasets import PreprocessBatch
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -17,8 +19,6 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages import TextEncodingStage
-from fastvideo.workflow.preprocess.parquet_io import (ParquetDatasetWriter,
-                                                      records_to_table)
 
 logger = init_logger(__name__)
 

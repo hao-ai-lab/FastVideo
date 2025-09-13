@@ -51,6 +51,63 @@ class DecodingStage(PipelineStage):
         return result
 
     @torch.no_grad()
+    def decode(self, latents: torch.Tensor,
+               fastvideo_args: FastVideoArgs) -> torch.Tensor:
+        """
+        Decode latent representations into pixel space using VAE.
+        
+        Args:
+            latents: Input latent tensor with shape (batch, channels, frames, height_latents, width_latents)
+            fastvideo_args: Configuration containing:
+                - disable_autocast: Whether to disable automatic mixed precision (default: False)
+                - pipeline_config.vae_precision: VAE computation precision ("fp32", "fp16", "bf16")
+                - pipeline_config.vae_tiling: Whether to enable VAE tiling for memory efficiency
+            
+        Returns:
+            Decoded video tensor with shape (batch, channels, frames, height, width), 
+            normalized to [0, 1] range and moved to CPU as float32
+        """
+        self.vae = self.vae.to(get_local_torch_device())
+        latents = latents.to(get_local_torch_device())
+
+        # Setup VAE precision
+        vae_dtype = PRECISION_TO_TYPE[
+            fastvideo_args.pipeline_config.vae_precision]
+        vae_autocast_enabled = (
+            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+
+        if isinstance(self.vae.scaling_factor, torch.Tensor):
+            latents = latents / self.vae.scaling_factor.to(
+                latents.device, latents.dtype)
+        else:
+            latents = latents / self.vae.scaling_factor
+
+        # Apply shifting if needed
+        if (hasattr(self.vae, "shift_factor")
+                and self.vae.shift_factor is not None):
+            if isinstance(self.vae.shift_factor, torch.Tensor):
+                latents += self.vae.shift_factor.to(latents.device,
+                                                    latents.dtype)
+            else:
+                latents += self.vae.shift_factor
+
+        # Decode latents
+        with torch.autocast(device_type="cuda",
+                            dtype=vae_dtype,
+                            enabled=vae_autocast_enabled):
+            if fastvideo_args.pipeline_config.vae_tiling:
+                self.vae.enable_tiling()
+            # if fastvideo_args.vae_sp:
+            #     self.vae.enable_parallel()
+            if not vae_autocast_enabled:
+                latents = latents.to(vae_dtype)
+            image = self.vae.decode(latents)
+
+        # Normalize image to [0, 1] range
+        image = (image / 2 + 0.5).clamp(0, 1)
+        return image
+
+    @torch.no_grad()
     def forward(
         self,
         batch: ForwardBatch,
@@ -59,13 +116,28 @@ class DecodingStage(PipelineStage):
         """
         Decode latent representations into pixel space.
         
+        This method processes the batch through the VAE decoder, converting latent
+        representations to pixel-space video/images. It also optionally decodes
+        trajectory latents for visualization purposes.
+        
         Args:
-            batch: The current batch information.
-            fastvideo_args: The inference arguments.
+            batch: The current batch containing:
+                - latents: Tensor to decode (batch, channels, frames, height_latents, width_latents)
+                - return_trajectory_decoded (optional): Flag to decode trajectory latents
+                - trajectory_latents (optional): Latents at different timesteps
+                - trajectory_timesteps (optional): Corresponding timesteps
+            fastvideo_args: Configuration containing:
+                - output_type: "latent" to skip decoding, otherwise decode to pixels
+                - vae_cpu_offload: Whether to offload VAE to CPU after decoding
+                - model_loaded: Track VAE loading state
+                - model_paths: Path to VAE model if loading needed
             
         Returns:
-            The batch with decoded outputs.
+            Modified batch with:
+                - output: Decoded frames (batch, channels, frames, height, width) as CPU float32
+                - trajectory_decoded (if requested): List of decoded frames per timestep
         """
+        # load vae if not already loaded (used for memory constrained devices)
         pipeline = self.pipeline() if self.pipeline else None
         if not fastvideo_args.model_loaded["vae"]:
             loader = VAELoader()
@@ -75,58 +147,29 @@ class DecodingStage(PipelineStage):
                 pipeline.add_module("vae", self.vae)
             fastvideo_args.model_loaded["vae"] = True
 
-        self.vae = self.vae.to(get_local_torch_device())
-
-        latents = batch.latents
-        # TODO(will): remove this once we add input/output validation for stages
-        if latents is None:
-            raise ValueError("Latents must be provided")
-
-        # Skip decoding if output type is latent
         if fastvideo_args.output_type == "latent":
-            image = latents
+            frames = batch.latents
         else:
-            # Setup VAE precision
-            vae_dtype = PRECISION_TO_TYPE[
-                fastvideo_args.pipeline_config.vae_precision]
-            vae_autocast_enabled = (vae_dtype != torch.float32
-                                    ) and not fastvideo_args.disable_autocast
+            frames = self.decode(batch.latents, fastvideo_args)
 
-            if isinstance(self.vae.scaling_factor, torch.Tensor):
-                latents = latents / self.vae.scaling_factor.to(
-                    latents.device, latents.dtype)
-            else:
-                latents = latents / self.vae.scaling_factor
-
-            # Apply shifting if needed
-            if (hasattr(self.vae, "shift_factor")
-                    and self.vae.shift_factor is not None):
-                if isinstance(self.vae.shift_factor, torch.Tensor):
-                    latents += self.vae.shift_factor.to(latents.device,
-                                                        latents.dtype)
-                else:
-                    latents += self.vae.shift_factor
-
-            # Decode latents
-            with torch.autocast(device_type="cuda",
-                                dtype=vae_dtype,
-                                enabled=vae_autocast_enabled):
-                if fastvideo_args.pipeline_config.vae_tiling:
-                    self.vae.enable_tiling()
-                # if fastvideo_args.vae_sp:
-                #     self.vae.enable_parallel()
-                if not vae_autocast_enabled:
-                    latents = latents.to(vae_dtype)
-                image = self.vae.decode(latents)
-
-        # Normalize image to [0, 1] range
-        image = (image / 2 + 0.5).clamp(0, 1)
+        # decode trajectory latents if needed
+        if batch.return_trajectory_decoded:
+            batch.trajectory_decoded = []
+            assert batch.trajectory_latents is not None, "batch should have trajectory latents"
+            for idx in range(batch.trajectory_latents.shape[1]):
+                # batch.trajectory_latents is [batch_size, timesteps, channels, frames, height, width]
+                cur_latent = batch.trajectory_latents[:, idx, :, :, :, :]
+                cur_timestep = batch.trajectory_timesteps[idx]
+                logger.info("decoding trajectory latent for timestep: %s",
+                            cur_timestep)
+                decoded_frames = self.decode(cur_latent, fastvideo_args)
+                batch.trajectory_decoded.append(decoded_frames.cpu().float())
 
         # Convert to CPU float32 for compatibility
-        image = image.cpu().float()
+        frames = frames.cpu().float()
 
         # Update batch with decoded image
-        batch.output = image
+        batch.output = frames
 
         # Offload models if needed
         if hasattr(self, 'maybe_free_model_hooks'):
