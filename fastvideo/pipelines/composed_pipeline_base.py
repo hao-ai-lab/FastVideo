@@ -237,20 +237,19 @@ class ComposedPipelineBase(ABC):
         # remove keys that are not pipeline modules
         model_index.pop("_class_name")
         model_index.pop("_diffusers_version")
-        # @TODO(Wei): Temporary hack
         if "boundary_ratio" in model_index and model_index[
                 "boundary_ratio"] is not None:
             logger.info(
                 "MoE pipeline detected. Adding transformer_2 to self.required_config_modules..."
             )
             self.required_config_modules.append("transformer_2")
-            if fastvideo_args.boundary_ratio is None:
-                logger.info(
-                    "MoE pipeline detected. Setting boundary ratio to %s",
-                    model_index["boundary_ratio"])
-                fastvideo_args.boundary_ratio = model_index["boundary_ratio"]
+            logger.info("MoE pipeline detected. Setting boundary ratio to %s",
+                        model_index["boundary_ratio"])
+            fastvideo_args.pipeline_config.dit_config.boundary_ratio = model_index[
+                "boundary_ratio"]
 
         model_index.pop("boundary_ratio", None)
+        # used by Wan2.2 ti2v
         model_index.pop("expand_timesteps", None)
 
         # some sanity checks

@@ -40,6 +40,7 @@ class SamplingParam:
     num_inference_steps: int = 50
     guidance_scale: float = 1.0
     guidance_rescale: float = 0.0
+    boundary_timestep: float | None = None
 
     # TeaCache parameters
     enable_teacache: bool = False
@@ -166,6 +167,12 @@ class SamplingParam:
             type=float,
             default=SamplingParam.guidance_rescale,
             help="Guidance rescale factor",
+        )
+        parser.add_argument(
+            "--boundary-timestep",
+            type=float,
+            default=SamplingParam.boundary_timestep,
+            help="Boundary timestep",
         )
         parser.add_argument(
             "--save-video",

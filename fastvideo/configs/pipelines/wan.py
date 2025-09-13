@@ -108,19 +108,21 @@ class FastWan2_1_T2V_480P_Config(WanT2V480PConfig):
     dmd_denoising_steps: list[int] | None = field(
         default_factory=lambda: [1000, 757, 522])
 
-    def __post_init__(self) -> None:
-        self.vae_config.load_encoder = True
-        self.vae_config.load_decoder = True
+    # def __post_init__(self) -> None:
+    #     self.vae_config.load_encoder = True
+    #     self.vae_config.load_decoder = True
 
 
 @dataclass
 class Wan2_2_TI2V_5B_Config(WanT2V480PConfig):
     flow_shift: float | None = 5.0
     ti2v_task: bool = True
+    expand_timesteps: bool = True
 
     def __post_init__(self) -> None:
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
+        self.dit_config.expand_timesteps = self.expand_timesteps
 
 
 @dataclass
@@ -132,12 +134,22 @@ class FastWan2_2_TI2V_5B_Config(Wan2_2_TI2V_5B_Config):
 
 @dataclass
 class Wan2_2_T2V_A14B_Config(WanT2V480PConfig):
-    pass
+    flow_shift: float | None = 12.0
+    boundary_ratio = 0.875
+
+    def __post_init__(self) -> None:
+        self.dit_config.boundary_ratio = self.boundary_ratio
 
 
 @dataclass
 class Wan2_2_I2V_A14B_Config(WanT2V480PConfig):
-    pass
+    flow_shift: float | None = 5.0
+    boundary_ratio = 0.900
+
+    def __post_init__(self) -> None:
+        self.vae_config.load_encoder = True
+        self.vae_config.load_decoder = True
+        self.dit_config.boundary_ratio = self.boundary_ratio
 
 
 # =============================================

@@ -129,6 +129,7 @@ class ForwardBatch:
     timesteps: torch.Tensor | None = None
     timestep: torch.Tensor | float | int | None = None
     step_index: int | None = None
+    boundary_timestep: float | None = None
 
     # Scheduler parameters
     num_inference_steps: int = 50
