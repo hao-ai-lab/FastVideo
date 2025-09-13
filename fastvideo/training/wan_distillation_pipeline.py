@@ -41,6 +41,7 @@ class WanDistillationPipeline(DistillationPipeline):
         args_copy = deepcopy(training_args)
 
         args_copy.inference_mode = True
+        assert self.get_module("transformer") is not None, "transformer is not initialized for validation"
         validation_pipeline = WanDMDPipeline.from_pretrained(
             training_args.model_path,
             args=args_copy,  # type: ignore

@@ -1,15 +1,21 @@
 #!/bin/bash
 #SBATCH --job-name=wl_t2v
 #SBATCH --partition=main
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
+#SBATCH --nodes=4
+#SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
-#SBATCH --output=dmd_t2v_output/t2v.out
-#SBATCH --error=dmd_t2v_output/t2v.err
+#SBATCH --output=dmd_t2v_output/sf.out
+#SBATCH --error=dmd_t2v_output/sf.err
 #SBATCH --exclusive
+set -e -x
+
+
+# Environment Setup
+source ~/conda/miniconda/bin/activate
+conda activate will-fv
 
 # Basic Info
 export NCCL_P2P_DISABLE=1
@@ -18,13 +24,13 @@ export TORCH_NCCL_ENABLE_MONITORING=0
 export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
 export MASTER_PORT=29503
 export TOKENIZERS_PARALLELISM=false
-export WANDB_API_KEY="2f25ad37933894dbf0966c838c0b8494987f9f2f"
+export WANDB_API_KEY="8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde"
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 
 # Configs
-NUM_GPUS=1
+NUM_GPUS=8
 
 # Model paths for Self-Forcing DMD distillation:
 GENERATOR_MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
@@ -42,6 +48,8 @@ VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/wl/FastVideo/examples/distill/
 training_args=(
   --tracker_project_name SFwan_t2v_distill_self_forcing_dmd  # Updated for self-forcing DMD
   --output_dir "/mnt/sharefs/users/hao.zhang/SFwan_t2v_finetune"
+  # --use_sf_wan
+  # --sf_ode_init_path "checkpoints/ode_init.pt"
   --max_train_steps 6000
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -60,10 +68,10 @@ training_args=(
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus $NUM_GPUS # 64
+  --num_gpus 32 # 64
   --sp_size 1
   --tp_size 1
-  --hsdp_replicate_dim 1 # 64
+  --hsdp_replicate_dim 32 # 64
   --hsdp_shard_dim 1
 )
 
@@ -113,7 +121,7 @@ miscellaneous_args=(
   --use_ema True
   --ema_decay 0.99
   --ema_start_step 100
-  # --init_weights_from_safetensors "/mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors"
+  --init_weights_from_safetensors "/mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors"
   # --init_weights_from_safetensors "/mnt/weka/home/hao.zhang/wl/FastVideo2/warp_vidprom_8b16k_test_warp_1e-5/checkpoint-2000/transformer/diffusion_pytorch_model.safetensors"
 )
 
@@ -138,9 +146,11 @@ self_forcing_args=(
   --validate_cache_structure False  # Set to True for debugging KV cache issues
 )
 
-torchrun \
---nnodes 1 \
---master_port $MASTER_PORT \
+srun torchrun \
+--nnodes $SLURM_JOB_NUM_NODES \
+--node_rank $SLURM_PROCID \
+--rdzv_backend=c10d \
+--rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
 --nproc_per_node $NUM_GPUS \
     fastvideo/training/wan_self_forcing_distillation_pipeline.py \
     "${parallel_args[@]}" \

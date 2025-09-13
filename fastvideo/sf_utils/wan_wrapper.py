@@ -120,7 +120,8 @@ class WanDiffusionWrapper(torch.nn.Module):
             is_causal=False,
             local_attn_size=-1,
             sink_size=0,
-            config=None
+            config=None,
+            **kwargs
     ):
         super().__init__()
 
@@ -166,6 +167,10 @@ class WanDiffusionWrapper(torch.nn.Module):
 
         self.seq_len = 32760  # [1, 21, 16, 60, 104]
         self.post_init()
+
+    @property
+    def blocks(self):
+        return self.model.blocks
 
     def enable_gradient_checkpointing(self) -> None:
         self.model.enable_gradient_checkpointing()
@@ -276,13 +281,28 @@ class WanDiffusionWrapper(torch.nn.Module):
         aug_t: Optional[torch.Tensor] = None,
         cache_start: Optional[int] = None
     ) -> torch.Tensor:
+        noisy_image_or_video = noisy_image_or_video.permute(0, 2, 1, 3, 4)
         prompt_embeds = conditional_dict["prompt_embeds"]
 
         # [B, F] -> [B]
+        print(f"timestep: {timestep}")
+        print(f"self.uniform_timestep: {self.uniform_timestep}")
+        print(f"timestep.ndim: {timestep.ndim}")
+        print(f"timestep.shape: {timestep.shape}")
+        print(f"noisy_image_or_video.shape: {noisy_image_or_video.shape}")
         if self.uniform_timestep:
-            input_timestep = timestep[:, 0]
-        else:
+            # input_timestep = timestep[:, 0]
+            # if timestep.ndim == 1:
+            #     input_timestep = timestep.unsqueeze(0)
+            # else:
             input_timestep = timestep
+            pass
+        else:
+            if timestep.ndim == 1:
+                print(f"not uniform timestep, timestep.ndim == 1")
+                input_timestep = timestep.unsqueeze(0)
+            else:
+                input_timestep = timestep
 
         logits = None
         # X0 prediction
@@ -326,16 +346,17 @@ class WanDiffusionWrapper(torch.nn.Module):
                         seq_len=self.seq_len
                     ).permute(0, 2, 1, 3, 4)
 
-        pred_x0 = self._convert_flow_pred_to_x0(
-            flow_pred=flow_pred.flatten(0, 1),
-            xt=noisy_image_or_video.flatten(0, 1),
-            timestep=timestep.flatten(0, 1)
-        ).unflatten(0, flow_pred.shape[:2])
+        # pred_x0 = self._convert_flow_pred_to_x0(
+        #     flow_pred=flow_pred.flatten(0, 1),
+        #     xt=noisy_image_or_video.flatten(0, 1),
+        #     timestep=timestep.flatten(0, 1)
+        # ).unflatten(0, flow_pred.shape[:2])
 
         if logits is not None:
-            return flow_pred, pred_x0, logits
+            return flow_pred.permute(0, 2, 1, 3, 4), pred_x0.permute(0, 2, 1, 3, 4), logits
 
-        return flow_pred, pred_x0
+        return flow_pred.permute(0, 2, 1, 3, 4)
+        # return flow_pred.permute(0, 2, 1, 3, 4), pred_x0.permute(0, 2, 1, 3, 4)
 
     def get_scheduler(self) -> SchedulerInterface:
         """

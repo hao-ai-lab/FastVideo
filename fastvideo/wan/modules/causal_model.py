@@ -227,6 +227,13 @@ class CausalWanSelfAttention(nn.Module):
                 # Assign new keys/values directly up to current_end
                 local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
                 local_start_index = local_end_index - num_new_tokens
+                logger.info("local_start_index: %s, local_end_index: %s", local_start_index, local_end_index)
+                logger.info("type(kv_cache['k']): %s", type(kv_cache["k"]))
+                logger.info("type(roped_key): %s", type(roped_key))
+                logger.info("type(kv_cache['v']): %s", type(kv_cache["v"]))
+                logger.info("type(v): %s", type(v))
+                kv_cache["k"] = kv_cache["k"].detach()
+                kv_cache["v"] = kv_cache["v"].detach()
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
             x = attention(
@@ -785,9 +792,9 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         # context
         context_lens = None
-        logger.info(f"context: {context}")
-        for u in context:
-            logger.info(f"u.shape: {u.shape}")
+        # logger.info(f"context: {context}")
+        # for u in context:
+        #     logger.info(f"u.shape: {u.shape}")
         context = [u.squeeze(0) for u in context]
         context = self.text_embedding(
             torch.stack([

@@ -40,14 +40,17 @@ class WanCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
             # timestep shift is 5.0 for self-forcing Wan model
             # see https://github.com/guandeh17/Self-Forcing/blob/33593df3e81fa3ec10239271dd2c100facac6de1/configs/self_forcing_dmd.yaml#L50
             config = self.get_module("transformer").config
-            sf_transformer = WanDiffusionWrapper(
-                model_name="Wan2.1-T2V-1.3B", timestep_shift=5.0, is_causal=True, config=config)
-            del self.modules["transformer"]
-            state_dict = torch.load('checkpoints/self_forcing_dmd.pt')
-            sf_transformer.load_state_dict(state_dict['generator_ema'])
-            sf_transformer.to(get_local_torch_device())
-            self.modules["transformer"] = sf_transformer
-            logger.info("Using self-forcing Wan model for DMD inference")
+            if not isinstance(self.modules["transformer"], WanDiffusionWrapper):
+                sf_transformer = WanDiffusionWrapper(
+                    model_name="Wan2.1-T2V-1.3B", timestep_shift=5.0, is_causal=True, config=config)
+                del self.modules["transformer"]
+                state_dict = torch.load('checkpoints/self_forcing_dmd.pt')
+                sf_transformer.load_state_dict(state_dict['generator_ema'])
+                sf_transformer.to(get_local_torch_device())
+                self.modules["transformer"] = sf_transformer
+                logger.info("Using self-forcing Wan model for DMD inference")
+            else:
+                logger.info("transformer is already a WanDiffusionWrapper")
 
         self.add_stage(stage_name="input_validation_stage",
                        stage=InputValidationStage())

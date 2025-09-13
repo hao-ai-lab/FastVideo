@@ -29,6 +29,7 @@ import numpy as np
 from fastvideo.utils import set_random_seed, is_vsa_available
 import fastvideo.envs as envs
 from einops import rearrange
+from fastvideo.sf_utils.wan_wrapper import WanDiffusionWrapper
 
 logger = init_logger(__name__)
 
@@ -71,6 +72,15 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         self.crossattn_cache = None
 
         logger.info(f"Self-forcing generator update ratio: {self.dfake_gen_update_ratio}")
+
+        if training_args.use_sf_wan:
+            sf_transformer = self.load_sf_wan_module_from_path(training_args.model_path, "transformer", training_args, use_ode_init=True)
+            del self.transformer
+            self.transformer = sf_transformer
+            self.modules["transformer"] = sf_transformer
+            logger.info("Using self-forcing Wan model for DMD training")
+        else:
+            logger.info("transformer is not a WanDiffusionWrapper")
 
     def generate_and_sync_list(self, num_blocks, num_denoising_steps, device):
         """Generate and synchronize random exit flags across distributed processes."""

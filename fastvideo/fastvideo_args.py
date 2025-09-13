@@ -717,6 +717,7 @@ class TrainingArgs(FastVideoArgs):
     same_step_across_blocks: bool = False  # Use same exit timestep for all blocks
     last_step_only: bool = False  # Only use the last timestep for training
     context_noise: int = 0  # Context noise level for cache updates
+    sf_ode_init_path: str = ""  # Path to ODE init weights for self-forcing model
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -1147,6 +1148,11 @@ class TrainingArgs(FastVideoArgs):
             type=int,
             default=TrainingArgs.context_noise,
             help="Context noise level for cache updates")
+        parser.add_argument(
+            "--sf-ode-init-path",
+            type=str,
+            default=TrainingArgs.sf_ode_init_path,
+            help="Path to ODE init weights for self-forcing model")
 
         return parser
 

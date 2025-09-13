@@ -1,4 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
+from torch.distributed.fsdp import (CPUOffloadPolicy, FSDPModule,
+                                    MixedPrecisionPolicy, fully_shard)
+from torch.distributed import DeviceMesh, init_device_mesh
 import copy
 import gc
 import json
@@ -23,9 +26,11 @@ from tqdm.auto import tqdm
 import fastvideo.envs as envs
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset.validation_dataset import ValidationDataset
+from fastvideo.models.hf_transformer_utils import get_diffusers_config
 from fastvideo.distributed import (cleanup_dist_env_and_memory,
                                    get_local_torch_device, get_sp_group,
                                    get_world_group)
+from fastvideo.models.loader.fsdp_load import shard_model
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
@@ -43,6 +48,8 @@ from fastvideo.training.training_utils import (
     shift_timestep)
 from fastvideo.utils import (is_vsa_available, maybe_download_model,
                              set_random_seed, verify_model_config_and_directory)
+from fastvideo.sf_utils.wan_wrapper import WanDiffusionWrapper
+from fastvideo.sf_utils.distributed import fsdp_wrap
 
 import wandb  # isort: skip
 
@@ -206,6 +213,84 @@ class DistillationPipeline(TrainingPipeline):
             logger.info("Generator EMA disabled (ema_decay <= 0.0)")
 
     def load_module_from_path(self, model_path: str, module_type: str,
+                              training_args: "TrainingArgs"):
+        """
+        Load a module from a specific path using the same loading logic as the pipeline.
+        """
+        if training_args.use_sf_wan:
+            return self.load_sf_wan_module_from_path(model_path, module_type, training_args)
+        else:
+            return self.load_fastvideo_module_from_path(model_path, module_type, training_args)
+    
+    def load_sf_wan_module_from_path(self, model_path: str, module_type: str,
+                                    training_args: "TrainingArgs", use_ode_init: bool = False):
+        """
+        Load a module from a specific path using the same loading logic as the pipeline.
+        """
+        # get config.json from model_path
+        local_model_path = maybe_download_model(model_path)
+        model_path = os.path.join(local_model_path, 'transformer')
+        config = get_diffusers_config(model=model_path)
+        config.pop('_class_name')
+        dit_config = training_args.pipeline_config.dit_config
+        dit_config.update_model_arch(config)
+
+        # convert to WanDiffusionWrapper format
+        if "1.3B" in model_path:
+            model_name = "Wan2.1-T2V-1.3B"
+            # assert not use_ode_init, "ODE init is not supported for 1.3B model"
+        elif "14B" in model_path:
+            model_name = "Wan2.1-T2V-14B"
+            assert not use_ode_init, "ODE init is not supported for 14B model"
+        else:
+            raise ValueError(f"Unsupported SF Wan model name: {model_path}")
+        is_causal = use_ode_init
+        logger.info(f"Loading SF Wan model: {model_name}")
+        module = WanDiffusionWrapper(
+            model_name=model_name, timestep_shift=5.0, is_causal=is_causal, config=dit_config)
+        if use_ode_init:
+            logger.info(f"Loading ODE init weights from: {training_args.sf_ode_init_path}")
+            state_dict = torch.load(training_args.sf_ode_init_path)
+            if 'generator_ema' in state_dict:
+                state_dict = state_dict['generator_ema']
+            else:
+                state_dict = state_dict['generator']
+            module.load_state_dict(state_dict)
+        
+
+        mp_policy = MixedPrecisionPolicy(torch.bfloat16,
+                                        torch.float32,
+                                        None,
+                                        cast_forward_inputs=False)
+        device_mesh = init_device_mesh(
+            "cuda",
+            mesh_shape=(training_args.hsdp_replicate_dim, training_args.hsdp_shard_dim),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        from fastvideo.configs.models.dits.wanvideo import WanVideoArchConfig
+        config = WanVideoArchConfig()
+        shard_conditions = config._fsdp_shard_conditions
+        shard_model(
+            module,
+            cpu_offload=True,
+            reshard_after_forward=True,
+            mp_policy=mp_policy,
+            mesh=device_mesh,
+            fsdp_shard_conditions=shard_conditions,
+            pin_cpu_memory=True,
+        )
+        # module = fsdp_wrap(
+        #     module,
+        #     cpu_offload=True,
+        #     # sharding_strategy='hybrid_full',
+        #     mixed_precision=True,
+        #     wrap_strategy='size'
+        # )
+        module.to(get_local_torch_device())
+
+        return module
+
+    def load_fastvideo_module_from_path(self, model_path: str, module_type: str,
                               training_args: "TrainingArgs"):
         """
         Load a module from a specific path using the same loading logic as the pipeline.
