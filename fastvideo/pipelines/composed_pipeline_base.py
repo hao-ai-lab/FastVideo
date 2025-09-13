@@ -282,8 +282,8 @@ class ComposedPipelineBase(ABC):
                           architecture) in model_index.items():
             if transformers_or_diffusers is None:
                 logger.warning(
-                    "Module in model_index.json has null value, removing from required_config_modules"
-                )
+                    "Module %s in model_index.json has null value, removing from required_config_modules",
+                    module_name)
                 if module_name in self.required_config_modules:
                     self.required_config_modules.remove(module_name)
                 continue

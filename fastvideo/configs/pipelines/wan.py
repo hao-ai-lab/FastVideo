@@ -108,10 +108,6 @@ class FastWan2_1_T2V_480P_Config(WanT2V480PConfig):
     dmd_denoising_steps: list[int] | None = field(
         default_factory=lambda: [1000, 757, 522])
 
-    # def __post_init__(self) -> None:
-    #     self.vae_config.load_encoder = True
-    #     self.vae_config.load_decoder = True
-
 
 @dataclass
 class Wan2_2_TI2V_5B_Config(WanT2V480PConfig):
