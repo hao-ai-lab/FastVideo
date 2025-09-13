@@ -129,7 +129,7 @@ dmd_args=(
 # Self-forcing specific arguments
 self_forcing_args=(
   --independent_first_frame False  # Whether to treat first frame independently
-  --same_step_across_blocks False  # Whether to use same denoising step across all blocks
+  --same_step_across_blocks True  # Whether to use same denoising step across all blocks
   --last_step_only False  # Whether to only use the last denoising step
   --context_noise 0  # Amount of noise to add during context caching (0 = no noise)
   --validate_cache_structure False  # Set to True for debugging KV cache issues
