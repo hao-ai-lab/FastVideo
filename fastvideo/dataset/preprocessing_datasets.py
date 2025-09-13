@@ -628,3 +628,134 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """Load state dict from checkpoint."""
         self.processed_batches = state_dict["processed_batches"]
+
+
+class TextDataset(torch.utils.data.IterableDataset,
+                  torch.distributed.checkpoint.stateful.Stateful):
+    """
+    Text-only dataset for processing prompts from a simple text file.
+    
+    Assumes that data_merge_path is a text file with one prompt per line:
+    A cat playing with a ball
+    A dog running in the park
+    A person cooking dinner
+    ...
+    
+    This dataset processes text data through text encoding stages only.
+    """
+
+    def __init__(self,
+                 data_merge_path: str,
+                 args,
+                 start_idx: int = 0,
+                 seed: int = 42):
+        self.data_merge_path = data_merge_path
+        self.start_idx = start_idx
+        self.args = args
+        self.seed = seed
+
+        # Initialize tokenizer
+        tokenizer_path = os.path.join(args.model_path, "tokenizer")
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path,
+                                                  cache_dir=args.cache_dir)
+
+        # Initialize text encoding stage
+        self.text_encoding_stage = TextEncodingStage(
+            tokenizer=tokenizer,
+            text_max_length=args.text_max_length,
+            cfg_rate=getattr(args, 'training_cfg_rate', 0.0),
+            seed=self.seed)
+
+        # Process text data
+        self.processed_batches = self._process_text_data()
+
+    def _load_text_data(self) -> list[str]:
+        """Load text prompts from file."""
+        prompts = []
+        with open(self.data_merge_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line:  # Skip empty lines
+                    prompts.append(line)
+        
+        logger.info(f"Loaded {len(prompts)} text prompts from {self.data_merge_path}")
+        return prompts
+
+    def _process_text_data(self) -> list[PreprocessBatch]:
+        """Process the text prompts through text encoding stage."""
+        raw_prompts = self._load_text_data()
+        processed_batches = []
+
+        for idx, prompt in enumerate(raw_prompts):
+            # Create a text-only batch with dummy path
+            batch = PreprocessBatch(
+                path=f"text_prompt_{idx}",
+                cap=[prompt],  # TextEncodingStage expects a list
+                resolution=None,
+                fps=None,
+                duration=None,
+                num_frames=0,
+                sample_frame_index=None,
+                sample_num_frames=0
+            )
+            
+            processed_batches.append(batch)
+
+        logger.info(f"Processed {len(processed_batches)} text batches")
+        return processed_batches
+
+    def __iter__(self):
+        """Iterator for the dataset."""
+        # Set up distributed sampling if needed
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            rank = torch.distributed.get_rank()
+            world_size = torch.distributed.get_world_size()
+        else:
+            rank = 0
+            world_size = 1
+
+        # Calculate chunk for this rank
+        total_items = len(self.processed_batches)
+        items_per_rank = math.ceil(total_items / world_size)
+        start_idx = rank * items_per_rank + self.start_idx
+        end_idx = min(start_idx + items_per_rank, total_items)
+
+        # Yield items for this rank
+        for idx in range(start_idx, end_idx):
+            if idx < len(self.processed_batches):
+                yield self._get_item(idx)
+
+    def _get_item(self, idx: int) -> dict:
+        """Get a single processed text item."""
+        batch = self.processed_batches[idx]
+
+        # Apply text encoding stage
+        batch = self.text_encoding_stage.process(batch)
+
+        # Build result dictionary for text-only processing with required schema fields
+        result = {
+            "text": batch.text,
+            "input_ids": batch.input_ids,
+            "cond_mask": batch.cond_mask,
+            "path": batch.path,
+            # Required schema fields for ODE trajectory processing
+            "id": f"text_{idx}",
+            "file_name": batch.path,
+            "caption": batch.text,
+            "media_type": "text",
+            "width": 1,
+            "height": 1,
+            "num_frames": 0,
+            "duration_sec": 0.0,
+            "fps": 0.0,
+        }
+
+        return result
+
+    def state_dict(self) -> dict[str, Any]:
+        """Return state dict for checkpointing."""
+        return {"processed_batches": self.processed_batches}
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Load state dict from checkpoint."""
+        self.processed_batches = state_dict["processed_batches"]

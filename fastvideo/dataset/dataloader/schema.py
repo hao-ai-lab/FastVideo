@@ -102,3 +102,17 @@ pyarrow_schema_ode_trajectory_text_only = pa.schema([
     pa.field("caption", pa.string()),
     pa.field("media_type", pa.string()),  # Always 'text' for text-only
 ])
+
+
+pyarrow_schema_text_only = pa.schema([
+    pa.field("id", pa.string()),
+    # --- Text encoder output tensor ---
+    # Tensors are stored as raw bytes with shape and dtype info for loading
+    pa.field("text_embedding_bytes", pa.binary()),
+    # e.g., [SeqLen, Dim]
+    pa.field("text_embedding_shape", pa.list_(pa.int64())),
+    # e.g., 'bfloat16' or 'float32'
+    pa.field("text_embedding_dtype", pa.string()),
+    # --- Metadata ---
+    pa.field("caption", pa.string()),
+])
