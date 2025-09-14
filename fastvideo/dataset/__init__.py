@@ -45,12 +45,6 @@ def gettextdataset(args) -> TextDataset:
                        seed=args.seed)
 
 
-def gettextdataset(args) -> TextDataset:
-    return TextDataset(data_merge_path=args.data_merge_path,
-                       args=args,
-                       seed=args.seed)
-
-
 __all__ = [
     "build_parquet_map_style_dataloader", "ValidationDataset",
     "VideoCaptionMergedDataset", "TextDataset"
