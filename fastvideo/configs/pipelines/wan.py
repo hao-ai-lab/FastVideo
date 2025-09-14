@@ -82,7 +82,7 @@ class WanI2V480PConfig(WanT2V480PConfig):
         default_factory=CLIPVisionConfig)
     image_encoder_precision: str = "fp32"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
 
@@ -131,20 +131,19 @@ class FastWan2_2_TI2V_5B_Config(Wan2_2_TI2V_5B_Config):
 @dataclass
 class Wan2_2_T2V_A14B_Config(WanT2V480PConfig):
     flow_shift: float | None = 12.0
-    boundary_ratio = 0.875
+    boundary_ratio: float | None = 0.875
 
     def __post_init__(self) -> None:
         self.dit_config.boundary_ratio = self.boundary_ratio
 
 
 @dataclass
-class Wan2_2_I2V_A14B_Config(WanT2V480PConfig):
+class Wan2_2_I2V_A14B_Config(WanI2V480PConfig):
     flow_shift: float | None = 5.0
-    boundary_ratio = 0.900
+    boundary_ratio: float | None = 0.900
 
     def __post_init__(self) -> None:
-        self.vae_config.load_encoder = True
-        self.vae_config.load_decoder = True
+        super().__post_init__()
         self.dit_config.boundary_ratio = self.boundary_ratio
 
 
