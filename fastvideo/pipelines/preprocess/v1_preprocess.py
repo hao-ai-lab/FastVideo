@@ -57,6 +57,8 @@ def main(args) -> None:
     elif args.preprocess_task == "text_only":
         PreprocessPipeline = PreprocessPipeline_Text
     elif args.preprocess_task == "ode_trajectory":
+        assert args.flow_shift is not None, "flow_shift is required for ode_trajectory"
+        fastvideo_args.pipeline_config.flow_shift = args.flow_shift
         PreprocessPipeline = PreprocessPipeline_ODE_Trajectory
     else:
         raise ValueError(f"Invalid preprocess task: {args.preprocess_task}. "
@@ -103,6 +105,7 @@ if __name__ == "__main__":
     parser.add_argument("--video_length_tolerance_range", type=int, default=2.0)
     parser.add_argument("--group_frame", action="store_true")  # TODO
     parser.add_argument("--group_resolution", action="store_true")  # TODO
+    parser.add_argument("--flow_shift", type=float, default=None)
     parser.add_argument("--preprocess_task",
                         type=str,
                         default="t2v",

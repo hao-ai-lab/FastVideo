@@ -60,14 +60,11 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
-        logger.info('WTF flow_shift: %s',
-                    fastvideo_args.pipeline_config.flow_shift)
         assert fastvideo_args.pipeline_config.flow_shift == 5
         self.modules["scheduler"] = SelfForcingFlowMatchScheduler(
             shift=fastvideo_args.pipeline_config.flow_shift,
             sigma_min=0.0,
             extra_one_step=True)
-        assert fastvideo_args.pipeline_config.flow_shift == 5
         self.modules["scheduler"].set_timesteps(num_inference_steps=48,
                                                 denoising_strength=1.0)
 
@@ -177,6 +174,8 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     ]
                     batch.num_inference_steps = 48
                     batch.return_trajectory_latents = True
+                    # Enabling this will save the decoded trajectory videos.
+                    # Used for debugging.
                     batch.return_trajectory_decoded = False
                     batch.height = args.max_height
                     batch.width = args.max_width
