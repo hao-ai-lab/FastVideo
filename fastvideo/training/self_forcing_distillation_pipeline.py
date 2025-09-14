@@ -319,7 +319,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             encoder_hidden_states_image=training_batch_temp.input_kwargs.get('encoder_hidden_states_image'),
                             kv_cache=self.kv_cache1,
                             crossattn_cache=self.crossattn_cache,
-                            current_start=current_start_frame * self.frame_seq_length
+                            current_start=current_start_frame * self.frame_seq_length,
+                            start_frame=current_start_frame
                         ).permute(0, 2, 1, 3, 4)
                         
                         denoised_pred = pred_noise_to_pred_video(
@@ -348,7 +349,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                 encoder_hidden_states_image=training_batch_temp.input_kwargs.get('encoder_hidden_states_image'),
                                 kv_cache=self.kv_cache1,
                                 crossattn_cache=self.crossattn_cache,
-                                current_start=current_start_frame * self.frame_seq_length
+                                current_start=current_start_frame * self.frame_seq_length,
+                                start_frame=current_start_frame
                             ).permute(0, 2, 1, 3, 4)
                     else:
                         training_batch_temp = self._build_distill_input_kwargs(
@@ -361,7 +363,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             encoder_hidden_states_image=training_batch_temp.input_kwargs.get('encoder_hidden_states_image'),
                             kv_cache=self.kv_cache1,
                             crossattn_cache=self.crossattn_cache,
-                            current_start=current_start_frame * self.frame_seq_length
+                            current_start=current_start_frame * self.frame_seq_length,
+                            start_frame=current_start_frame
                         ).permute(0, 2, 1, 3, 4)
                     
                     denoised_pred = pred_noise_to_pred_video(
@@ -393,7 +396,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     encoder_hidden_states_image=training_batch_temp.input_kwargs.get('encoder_hidden_states_image'),
                     kv_cache=self.kv_cache1,
                     crossattn_cache=self.crossattn_cache,
-                    current_start=current_start_frame * self.frame_seq_length
+                    current_start=current_start_frame * self.frame_seq_length,
+                    start_frame=current_start_frame
                 )
 
             # Step 3.4: update the start and end frame indices
