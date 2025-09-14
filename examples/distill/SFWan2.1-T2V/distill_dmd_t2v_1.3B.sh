@@ -16,23 +16,23 @@ export NCCL_P2P_DISABLE=1
 export TORCH_NCCL_ENABLE_MONITORING=0
 # different cache dir for different processes
 export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
-export MASTER_PORT=29503
+export MASTER_PORT=29501
 export TOKENIZERS_PARALLELISM=false
-export WANDB_API_KEY="2f25ad37933894dbf0966c838c0b8494987f9f2f"
+export WANDB_API_KEY="50632ebd88ffd970521cec9ab4a1a2d7e85bfc45"
 export WANDB_BASE_URL="https://api.wandb.ai"
-export WANDB_MODE=online
+export WANDB_MODE=offline
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 
 # Configs
-NUM_GPUS=1
+NUM_GPUS=4
 
 # Model paths for Self-Forcing DMD distillation:
 GENERATOR_MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
 REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"  # Teacher model
 FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Critic model
 
-DATA_DIR="data/test-text-preprocessing/Node_0_GPU_1_File_1/combined_parquet_dataset/"
-VALIDATION_DATASET_FILE="data/crush-smol-single_processed_t2v/validation.json"
+DATA_DIR="data/mixkit-64_processed/Node_0_GPU_1_File_1/combined_parquet_dataset"
+VALIDATION_DATASET_FILE="data/mixkit-64_processed/validation.json"
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
@@ -84,7 +84,7 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 50
+  --validation_steps 100
   --validation_sampling_steps "4"
   --validation_guidance_scale "6.0" # not used for dmd inference
 )
@@ -129,7 +129,7 @@ dmd_args=(
 # Self-forcing specific arguments
 self_forcing_args=(
   --independent_first_frame False  # Whether to treat first frame independently
-  --same_step_across_blocks False  # Whether to use same denoising step across all blocks
+  --same_step_across_blocks True  # Whether to use same denoising step across all blocks
   --last_step_only False  # Whether to only use the last denoising step
   --context_noise 0  # Amount of noise to add during context caching (0 = no noise)
   --validate_cache_structure False  # Set to True for debugging KV cache issues

@@ -730,12 +730,11 @@ class DistillationPipeline(TrainingPipeline):
             "encoder_hidden_states": training_batch.encoder_hidden_states,
             "encoder_attention_mask": training_batch.encoder_attention_mask,
         }
-        if getattr(self, "negative_prompt_embeds", None) is not None:
-            unconditional_dict = {
-                "encoder_hidden_states": self.negative_prompt_embeds,
-                "encoder_attention_mask": self.negative_prompt_attention_mask,
-            }
-            training_batch.unconditional_dict = unconditional_dict
+        unconditional_dict = {
+            "encoder_hidden_states": self.negative_prompt_embeds,
+            "encoder_attention_mask": self.negative_prompt_attention_mask,
+        }
+        training_batch.unconditional_dict = unconditional_dict
 
         training_batch.dmd_latent_vis_dict = {}
         training_batch.fake_score_latent_vis_dict = {}
