@@ -28,14 +28,14 @@ HUNYUAN_PARAMS = {
     "width": 1280,
     "num_frames": 45,
     "num_inference_steps": 6,
-    "guidance_scale": 1,
-    "embedded_cfg_scale": 6,
-    "flow_shift": 17,
+    # "guidance_scale": 1,
+    # "embedded_cfg_scale": 6,
+    # "flow_shift": 17,
     "seed": 1024,
     "sp_size": 2,
     "tp_size": 1,
-    "vae_sp": True,
-    "fps": 24,
+    # "vae_sp": True,
+    # "fps": 24,
 }
 
 WAN_T2V_PARAMS = {
@@ -45,14 +45,14 @@ WAN_T2V_PARAMS = {
     "width": 832,
     "num_frames": 45,
     "num_inference_steps": 20,
-    "guidance_scale": 3,
-    "embedded_cfg_scale": 6,
-    "flow_shift": 7.0,
+    # "guidance_scale": 3,
+    # "embedded_cfg_scale": 6,
+    # "flow_shift": 7.0,
     "seed": 1024,
     "sp_size": 2,
     "tp_size": 1,
-    "vae_sp": True,
-    "fps": 24,
+    # "vae_sp": True,
+    # "fps": 24,
     "neg_prompt": "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards",
     "text-encoder-precision": ("fp32",)
 }
@@ -64,16 +64,31 @@ WAN_I2V_PARAMS = {
     "width": 832,
     "num_frames": 45,
     "num_inference_steps": 6,
-    "guidance_scale": 5.0,
-    "embedded_cfg_scale": 6,
-    "flow_shift": 7.0,
+    # "guidance_scale": 5.0,
+    # "embedded_cfg_scale": 6,
+    # "flow_shift": 7.0,
     "seed": 1024,
     "sp_size": 2,
     "tp_size": 1,
-    "vae_sp": True,
-    "fps": 24,
-    "neg_prompt": "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards",
+    # "vae_sp": True,
+    # "fps": 24,
+    # "neg_prompt": "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards",
     "text-encoder-precision": ("fp32",)
+}
+
+WAN2_2_I2V_PARAMS = {
+    "num_gpus": 2,
+    "model_path": "Wan-AI/Wan2.2-I2V-A14B-Diffusers",
+    "height": 480,
+    "width": 832,
+    "num_frames": 45,
+    "num_inference_steps": 20,
+    # "guidance_scale": 5.0,
+    # "embedded_cfg_scale": 6,
+    # "flow_shift": 7.0,
+    "seed": 1024,
+    "sp_size": 2,
+    "tp_size": 1,
 }
 
 MODEL_TO_PARAMS = {
@@ -83,6 +98,7 @@ MODEL_TO_PARAMS = {
 
 I2V_MODEL_TO_PARAMS = {
     "Wan2.1-I2V-14B-480P-Diffusers": WAN_I2V_PARAMS,
+    "Wan2.2-I2V-A14B-Diffusers": WAN2_2_I2V_PARAMS,
 }
 
 TEST_PROMPTS = [
@@ -125,7 +141,6 @@ def test_i2v_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     init_kwargs = {
         "num_gpus": BASE_PARAMS["num_gpus"],
-        "flow_shift": BASE_PARAMS["flow_shift"],
         "sp_size": BASE_PARAMS["sp_size"],
         "tp_size": BASE_PARAMS["tp_size"],
     }
@@ -142,10 +157,7 @@ def test_i2v_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
         "height": BASE_PARAMS["height"],
         "width": BASE_PARAMS["width"],
         "num_frames": BASE_PARAMS["num_frames"],
-        "guidance_scale": BASE_PARAMS["guidance_scale"],
-        "embedded_cfg_scale": BASE_PARAMS["embedded_cfg_scale"],
         "seed": BASE_PARAMS["seed"],
-        "fps": BASE_PARAMS["fps"],
     }
     if "neg_prompt" in BASE_PARAMS:
         generation_kwargs["neg_prompt"] = BASE_PARAMS["neg_prompt"]
@@ -225,7 +237,6 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     init_kwargs = {
         "num_gpus": BASE_PARAMS["num_gpus"],
-        "flow_shift": BASE_PARAMS["flow_shift"],
         "sp_size": BASE_PARAMS["sp_size"],
         "tp_size": BASE_PARAMS["tp_size"],
         "dit_cpu_offload": True,
@@ -242,10 +253,7 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
         "height": BASE_PARAMS["height"],
         "width": BASE_PARAMS["width"],
         "num_frames": BASE_PARAMS["num_frames"],
-        "guidance_scale": BASE_PARAMS["guidance_scale"],
-        "embedded_cfg_scale": BASE_PARAMS["embedded_cfg_scale"],
         "seed": BASE_PARAMS["seed"],
-        "fps": BASE_PARAMS["fps"],
     }
     if "neg_prompt" in BASE_PARAMS:
         generation_kwargs["neg_prompt"] = BASE_PARAMS["neg_prompt"]
