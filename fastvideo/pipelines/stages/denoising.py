@@ -204,13 +204,13 @@ class DenoisingStage(PipelineStage):
                 neg_prompt_embeds[0]).any(), "neg_prompt_embeds contains nan"
 
         # (Wan2.2) Calculate timestep to switch from high noise expert to low noise expert
-        if fastvideo_args.pipeline_config.dit_config.boundary_ratio is not None:
-            boundary_ratio = fastvideo_args.pipeline_config.dit_config.boundary_ratio
-            if batch.boundary_ratio is not None:
-                logger.info("Overriding boundary ratio from %s to %s",
-                            boundary_ratio, batch.boundary_ratio)
-                boundary_ratio = batch.boundary_ratio
+        boundary_ratio = fastvideo_args.pipeline_config.dit_config.boundary_ratio
+        if batch.boundary_ratio is not None:
+            logger.info("Overriding boundary ratio from %s to %s",
+                        boundary_ratio, batch.boundary_ratio)
+            boundary_ratio = batch.boundary_ratio
 
+        if boundary_ratio is not None:
             boundary_timestep = boundary_ratio * self.scheduler.num_train_timesteps
         else:
             boundary_timestep = None
