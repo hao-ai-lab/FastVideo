@@ -33,8 +33,8 @@ TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
 @pytest.mark.usefixtures("distributed_setup")
 def test_ori_causal_wan_transformer():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    precision = torch.float32
-    precision_str = "fp32"
+    precision = torch.bfloat16
+    precision_str = "bf16"
     args = FastVideoArgs(model_path=TRANSFORMER_PATH,
                          dit_cpu_offload=True,
                          pipeline_config=PipelineConfig(dit_config=WanVideoConfig(), dit_precision=precision_str))
@@ -160,8 +160,8 @@ def _causal_inference(transformer, latents, prompt_embeds, block_sizes, timestep
                 dtype=torch.long)
             if isinstance(transformer, CausalWanModel):
                 pred_noise_btchw = transformer(
-                    x=[current_latents[0]],
-                    context=[prompt_embeds[0]],
+                    x=current_latents,
+                    context=prompt_embeds,
                     t=t_expanded_noise,
                     seq_len=seq_len,
                     kv_cache=kv_cache1,
@@ -197,8 +197,8 @@ def _causal_inference(transformer, latents, prompt_embeds, block_sizes, timestep
             t_expanded_context = t_context.unsqueeze(1)
             if isinstance(transformer, CausalWanModel):
                 _ = transformer(
-                    x=[context_bcthw[0]],
-                    context=[prompt_embeds[0]],
+                    x=context_bcthw,
+                    context=prompt_embeds,
                     t=t_expanded_context,
                     seq_len=seq_len,
                     kv_cache=kv_cache1,

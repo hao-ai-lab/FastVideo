@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 import torch
-from fastvideo.wan.modules.model import WanModel
+from fastvideo.wan.modules.causal_model import CausalWanModel
 
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.forward_context import set_forward_context
@@ -22,7 +22,7 @@ logger = init_logger(__name__)
 os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
-BASE_MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+BASE_MODEL_PATH = "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
 MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
                                   local_dir=os.path.join(
                                       'data', BASE_MODEL_PATH))
@@ -30,7 +30,7 @@ TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_ori_wan_transformer():
+def test_train_ori_causal_wan_transformer():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     precision = torch.bfloat16
     precision_str = "bf16"
@@ -42,9 +42,19 @@ def test_ori_wan_transformer():
     loader = TransformerLoader()
     model2 = loader.load(TRANSFORMER_PATH, args).to(dtype=precision)
 
-    model1 = WanModel.from_pretrained(
+    model1 = CausalWanModel.from_pretrained(
         "/mnt/weka/home/hao.zhang/wei/Self-Forcing/wan_models/Wan2.1-T2V-1.3B", device=device,
         torch_dtype=precision).to(device, dtype=precision).requires_grad_(False)
+    causal_state_dict = torch.load("/mnt/weka/home/hao.zhang/wei/Self-Forcing/checkpoints/self_forcing_dmd.pt")["generator_ema"]
+    new_state_dict = {}
+    for k, v in causal_state_dict.items():
+        if k.startswith("model."):
+            new_state_dict[k.replace("model.", "")] = v
+    causal_state_dict = new_state_dict
+    model1.load_state_dict(causal_state_dict)
+
+    model1.num_frame_per_block = 3
+    model2.num_frame_per_block = 3
 
     total_params = sum(p.numel() for p in model1.parameters())
     # Calculate weight sum for model1 (converting to float64 to avoid overflow)
@@ -104,10 +114,11 @@ def test_ori_wan_transformer():
     )
 
     # with torch.amp.autocast('cuda', dtype=precision):
+    expanded_timestep = timestep * torch.ones((batch_size, 1), device=device, dtype=torch.long)
     output1 = model1(
         x=hidden_states,
         context=encoder_hidden_states,
-        t=timestep,
+        t=expanded_timestep,
         seq_len=seq_len,
     )
     with set_forward_context(
@@ -117,7 +128,7 @@ def test_ori_wan_transformer():
     ):
         output2 = model2(hidden_states=hidden_states,
                             encoder_hidden_states=encoder_hidden_states,
-                            timestep=timestep)
+                            timestep=expanded_timestep)
 
     # Check if outputs have the same shape
     assert output1.shape == output2.shape, f"Output shapes don't match: {output1.shape} vs {output2.shape}"
