@@ -27,6 +27,7 @@ class DiTArchConfig(ArchConfig):
     num_attention_heads: int = 0
     num_channels_latents: int = 0
     exclude_lora_layers: list[str] = field(default_factory=list)
+    boundary_ratio: float | None = None
 
     def __post_init__(self) -> None:
         if not self._compile_conditions:
