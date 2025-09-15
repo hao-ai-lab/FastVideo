@@ -6,8 +6,14 @@ import time
 import os
 import torch
 from typing import Tuple
-from flash_attn import flash_attn_varlen_func  # Use the new flash attention function
-from flash_attn.flash_attn_interface import _flash_attn_varlen_forward, _flash_attn_varlen_backward
+try:
+    from flash_attn import flash_attn_varlen_func  # Use the new flash attention function
+    from flash_attn.flash_attn_interface import _flash_attn_varlen_forward, _flash_attn_varlen_backward
+except ImportError:
+    _flash_attn_varlen_forward = None
+    _flash_attn_varlen_backward = None
+    flash_attn_varlen_func = None
+    
 from functools import lru_cache
 from einops import rearrange
 

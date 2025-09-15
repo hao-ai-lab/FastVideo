@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 import torch
 from einops import rearrange
-from flash_attn.bert_padding import pad_input
 
 from csrc.attn.vmoba_attn.vmoba import (moba_attn_varlen, process_moba_input,
                                         process_moba_output)
@@ -134,6 +133,8 @@ class VMOBAAttentionImpl(AttentionImpl):
                  **extra_impl_args) -> None:
         self.prefix = prefix
         self.layer_idx = self._get_layer_idx(prefix)
+        from flash_attn.bert_padding import pad_input
+        self.pad_input = pad_input
 
     def _get_layer_idx(self, prefix: str) -> int | None:
         match = re.search(r"blocks\.(\d+)", prefix)
@@ -169,7 +170,6 @@ class VMOBAAttentionImpl(AttentionImpl):
             moba_chunk_size = attn_metadata.st_chunk_size
             moba_topk = attn_metadata.st_topk
 
-        # torch.distributed.breakpoint()
         query, chunk_size = process_moba_input(query,
                                                attn_metadata.patch_resolution,
                                                moba_chunk_size)
@@ -205,8 +205,8 @@ class VMOBAAttentionImpl(AttentionImpl):
             simsum_threshold=attn_metadata.moba_threshold,
             threshold_type=attn_metadata.moba_threshold_type,
         )
-        hidden_states = pad_input(hidden_states, indices_q, batch_size,
-                                  sequence_length)
+        hidden_states = self.pad_input(hidden_states, indices_q, batch_size,
+                                       sequence_length)
         hidden_states = process_moba_output(hidden_states,
                                             attn_metadata.patch_resolution,
                                             moba_chunk_size)
