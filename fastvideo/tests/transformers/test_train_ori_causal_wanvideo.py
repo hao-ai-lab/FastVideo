@@ -107,18 +107,18 @@ def test_train_ori_causal_wan_transformer():
                                         dtype=precision)
 
     # Timestep
-    timestep = torch.tensor([500], device=device, dtype=precision)
+    timestep = torch.randint(0, 1000, (batch_size, 21), device=device, dtype=torch.long)
+    logger.info("timestep: %s", timestep)
 
     forward_batch = ForwardBatch(
         data_type="dummy",
     )
 
     # with torch.amp.autocast('cuda', dtype=precision):
-    expanded_timestep = timestep * torch.ones((batch_size, 1), device=device, dtype=torch.long)
     output1 = model1(
         x=hidden_states,
         context=encoder_hidden_states,
-        t=expanded_timestep,
+        t=timestep,
         seq_len=seq_len,
     )
     with set_forward_context(
@@ -128,7 +128,7 @@ def test_train_ori_causal_wan_transformer():
     ):
         output2 = model2(hidden_states=hidden_states,
                             encoder_hidden_states=encoder_hidden_states,
-                            timestep=expanded_timestep)
+                            timestep=timestep)
 
     # Check if outputs have the same shape
     assert output1.shape == output2.shape, f"Output shapes don't match: {output1.shape} vs {output2.shape}"
