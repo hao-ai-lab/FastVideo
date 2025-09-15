@@ -205,13 +205,13 @@ class DenoisingStage(PipelineStage):
 
         # (Wan2.2) Calculate timestep to switch from high noise expert to low noise expert
         if fastvideo_args.pipeline_config.dit_config.boundary_ratio is not None:
-            boundary_timestep = fastvideo_args.pipeline_config.dit_config.boundary_ratio
-            if batch.boundary_timestep is not None:
-                logger.info("Overriding boundary timestep from %s to %s",
-                            boundary_timestep, batch.boundary_timestep)
-                boundary_timestep = batch.boundary_timestep
+            boundary_ratio = fastvideo_args.pipeline_config.dit_config.boundary_ratio
+            if batch.boundary_ratio is not None:
+                logger.info("Overriding boundary ratio from %s to %s",
+                            boundary_ratio, batch.boundary_ratio)
+                boundary_ratio = batch.boundary_ratio
 
-            boundary_timestep *= self.scheduler.num_train_timesteps
+            boundary_timestep = boundary_ratio * self.scheduler.num_train_timesteps
         else:
             boundary_timestep = None
         latent_model_input = latents.to(target_dtype)
