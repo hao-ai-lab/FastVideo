@@ -586,8 +586,8 @@ class CausalWanTransformer3DModel(BaseDiT):
         )
         freqs_cos = freqs_cos.to(hidden_states.device)
         freqs_sin = freqs_sin.to(hidden_states.device)
-        freqs_cis = (freqs_cos.float(),
-                     freqs_sin.float()) if freqs_cos is not None else None
+        freqs_cis = (freqs_cos,
+                     freqs_sin) if freqs_cos is not None else None
 
         # Construct blockwise causal attn mask
         if self.block_mask is None:
@@ -600,7 +600,11 @@ class CausalWanTransformer3DModel(BaseDiT):
             )
 
         hidden_states = self.patch_embedding(hidden_states)
+        grid_sizes = torch.stack(
+            [torch.tensor(hidden_states[0].shape[1:], dtype=torch.long)])
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
+
+        encoder_hidden_states = torch.cat([encoder_hidden_states, encoder_hidden_states.new_zeros(1, self.text_len - encoder_hidden_states.size(1), encoder_hidden_states.size(2))], dim=1)
 
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
                         timestep.flatten(), encoder_hidden_states, encoder_hidden_states_image)
@@ -636,14 +640,9 @@ class CausalWanTransformer3DModel(BaseDiT):
         hidden_states = self.norm_out(hidden_states, shift, scale)
         hidden_states = self.proj_out(hidden_states)
 
-        hidden_states = hidden_states.reshape(batch_size, post_patch_num_frames,
-                                              post_patch_height,
-                                              post_patch_width, p_t, p_h, p_w,
-                                              -1)
-        hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
-        output = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
+        output = self.unpatchify(hidden_states, grid_sizes)
 
-        return output
+        return torch.stack(output)
 
     def forward(
         self,
