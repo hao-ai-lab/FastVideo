@@ -206,15 +206,6 @@ class PipelineConfig:
             "Bool for applying scheduler scale in set_timesteps, used in stepvideo",
         )
 
-        # Wan2.2 MoE parameters
-        parser.add_argument(
-            f"--{prefix_with_dot}boundary-ratio",
-            type=float,
-            dest=f"{prefix_with_dot.replace('-', '_')}boundary_ratio",
-            default=PipelineConfig.boundary_ratio,
-            help="Boundary ratio for Wan2.2 I2V",
-        )
-
         # DMD parameters
         parser.add_argument(
             f"--{prefix_with_dot}dmd-denoising-steps",
