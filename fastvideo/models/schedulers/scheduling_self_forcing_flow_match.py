@@ -22,8 +22,10 @@ class SelfForcingFlowMatchSchedulerOutput(BaseOutput):
     prev_sample: torch.FloatTensor
 
 class SelfForcingFlowMatchScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
-
+    
+    config_name = "scheduler_config.json"
     order = 1
+    @register_to_config
     def __init__(self, num_inference_steps=100, num_train_timesteps=1000, shift=3.0, sigma_max=1.0, sigma_min=0.003 / 1.002, inverse_timesteps=False, extra_one_step=False, reverse_sigmas=False, training=False):
         self.num_train_timesteps = num_train_timesteps
         self.shift = shift
