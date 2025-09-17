@@ -477,9 +477,8 @@ class TransformerLoader(ComponentLoader):
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)
 
-        dtypes = set(param.dtype for param in model.parameters())
-        if len(dtypes) > 1:
-            model = model.to(default_dtype)
+        logger.info("Converting model to dtype: %s", default_dtype)
+        model = model.to(default_dtype)
         model = model.eval()
         return model
 
