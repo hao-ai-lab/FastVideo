@@ -3,11 +3,13 @@ import sys
 from copy import deepcopy
 from typing import cast
 
+import numpy as np
 import torch
 import torch.nn.functional as F
-import numpy as np
+
 import wandb
-from fastvideo.dataset.dataloader.schema import pyarrow_schema_ode_trajectory_text_only
+from fastvideo.dataset.dataloader.schema import (
+    pyarrow_schema_ode_trajectory_text_only)
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
@@ -16,8 +18,8 @@ from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
     SelfForcingFlowMatchScheduler)
 from fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline import (
     WanCausalDMDPipeline)
-from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.pipelines.pipeline_batch_info import TrainingBatch
+from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases)
 
@@ -120,75 +122,55 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             dit_cpu_offload=True)
 
     def _get_next_batch(self, training_batch):  # type: ignore[override]
-        # batch = next(self.train_loader_iter, None)  # type: ignore
-        # if batch is None:
-        #     self.current_epoch += 1
-        #     logger.info("Starting epoch %s", self.current_epoch)
-        #     self.train_loader_iter = iter(self.train_dataloader)
-        #     batch = next(self.train_loader_iter)
+        batch = next(self.train_loader_iter, None)  # type: ignore
+        if batch is None:
+            self.current_epoch += 1
+            logger.info("Starting epoch %s", self.current_epoch)
+            self.train_loader_iter = iter(self.train_dataloader)
+            batch = next(self.train_loader_iter)
 
-        # # Required fields from parquet (ODE trajectory schema)
-        # encoder_hidden_states = batch['text_embedding']
-        # encoder_attention_mask = batch['text_attention_mask']
-        # infos = batch['info_list']
+        # Required fields from parquet (ODE trajectory schema)
+        encoder_hidden_states = batch['text_embedding']
+        encoder_attention_mask = batch['text_attention_mask']
+        infos = batch['info_list']
 
-        # # Trajectory tensors may include a leading singleton batch dim per row
-        # trajectory_latents = batch['trajectory_latents']
-        # if trajectory_latents.dim() == 7:
-        #     # [B, 1, S, C, T, H, W] -> [B, S, C, T, H, W]
-        #     trajectory_latents = trajectory_latents[:, 0]
-        # elif trajectory_latents.dim() == 6:
-        #     # already [B, S, C, T, H, W]
-        #     pass
-        # else:
-        #     raise ValueError(
-        #         f"Unexpected trajectory_latents dim: {trajectory_latents.dim()}"
-        #     )
+        # Trajectory tensors may include a leading singleton batch dim per row
+        trajectory_latents = batch['trajectory_latents']
+        if trajectory_latents.dim() == 7:
+            # [B, 1, S, C, T, H, W] -> [B, S, C, T, H, W]
+            trajectory_latents = trajectory_latents[:, 0]
+        elif trajectory_latents.dim() == 6:
+            # already [B, S, C, T, H, W]
+            pass
+        else:
+            raise ValueError(
+                f"Unexpected trajectory_latents dim: {trajectory_latents.dim()}"
+            )
 
-        # trajectory_timesteps = batch['trajectory_timesteps']
-        # if trajectory_timesteps.dim() == 3:
-        #     # [B, 1, S] -> [B, S]
-        #     trajectory_timesteps = trajectory_timesteps[:, 0]
-        # elif trajectory_timesteps.dim() == 2:
-        #     # [B, S]
-        #     pass
-        # else:
-        #     raise ValueError(
-        #         f"Unexpected trajectory_timesteps dim: {trajectory_timesteps.dim()}"
-        #     )
-        # # [B, S, C, T, H, W] -> [B, S, T, C, H, W] to match self-forcing
-        # trajectory_latents = trajectory_latents.permute(0, 1, 3, 2, 4, 5)
+        trajectory_timesteps = batch['trajectory_timesteps']
+        if trajectory_timesteps.dim() == 3:
+            # [B, 1, S] -> [B, S]
+            trajectory_timesteps = trajectory_timesteps[:, 0]
+        elif trajectory_timesteps.dim() == 2:
+            # [B, S]
+            pass
+        else:
+            raise ValueError(
+                f"Unexpected trajectory_timesteps dim: {trajectory_timesteps.dim()}"
+            )
+        # [B, S, C, T, H, W] -> [B, S, T, C, H, W] to match self-forcing
+        trajectory_latents = trajectory_latents.permute(0, 1, 3, 2, 4, 5)
 
-        # # Move to device
+        # Move to device
         device = get_local_torch_device()
-        # training_batch.encoder_hidden_states = encoder_hidden_states.to(
-        #     device, dtype=torch.bfloat16)
-        # training_batch.encoder_attention_mask = encoder_attention_mask.to(
-        #     device, dtype=torch.bfloat16)
-        # training_batch.infos = infos
+        training_batch.encoder_hidden_states = encoder_hidden_states.to(
+            device, dtype=torch.bfloat16)
+        training_batch.encoder_attention_mask = encoder_attention_mask.to(
+            device, dtype=torch.bfloat16)
+        training_batch.infos = infos
 
-        ## TEMP
-        path = "/mnt/weka/home/hao.zhang/wl/Self-Forcing/ode_single_full/00000.pt"
-        b = torch.load(path)
-        for k, v in b.items():
-            logger.info(f"b[{k}]: {type(v)}")
-            if isinstance(v, torch.Tensor):
-                logger.info(f"b[{k}]: {v.shape}")
-            else:
-                logger.info(f"b[{k}]: {v}")
-        training_batch.encoder_hidden_states = b["text_embedding"][0].unsqueeze(
-            0).to(device, dtype=torch.bfloat16)
-        trajectory_latents = b["ode_latent"].to(device, dtype=torch.bfloat16)
-        logger.info(f"trajectory_latents: {trajectory_latents.shape}")
-        logger.info(
-            f"encoder_hidden_states: {training_batch.encoder_hidden_states.shape}"
-        )
-
-        return training_batch, trajectory_latents.to(device,
-                                                     dtype=torch.bfloat16), None
-
-        # return training_batch, trajectory_latents.to(
-        #     device, dtype=torch.bfloat16), trajectory_timesteps.to(device)
+        return training_batch, trajectory_latents.to(
+            device, dtype=torch.bfloat16), trajectory_timesteps.to(device)
 
     def _get_timestep(self,
                       min_timestep: int,
