@@ -144,6 +144,8 @@ class Wan2_2_TI2V_5B_SamplingParam(Wan2_2_Base_SamplingParam):
 
 @dataclass
 class Wan2_2_T2V_A14B_SamplingParam(Wan2_2_Base_SamplingParam):
+    height: int = 720
+    width: int = 1280
     guidance_scale: float = 4.0  # high_noise
     guidance_scale_2: float = 3.0  # low_noise
     num_inference_steps: int = 40
@@ -154,6 +156,8 @@ class Wan2_2_T2V_A14B_SamplingParam(Wan2_2_Base_SamplingParam):
 
 @dataclass
 class Wan2_2_I2V_A14B_SamplingParam(Wan2_2_Base_SamplingParam):
+    height: int = 720
+    width: int = 1280
     guidance_scale: float = 3.5  # high_noise
     guidance_scale_2: float = 3.5  # low_noise
     num_inference_steps: int = 40

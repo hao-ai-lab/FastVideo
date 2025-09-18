@@ -45,11 +45,17 @@ class SelfForcingFlowMatchScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
                 sigma_start, self.sigma_min, num_inference_steps)
         if self.inverse_timesteps:
             self.sigmas = torch.flip(self.sigmas, dims=[0])
+        logger.info("before shift sigmas: %s", self.sigmas)
+        logger.info("sigma length: %s", len(self.sigmas))
+        logger.info("shift: %s", self.shift)
         self.sigmas = self.shift * self.sigmas / \
             (1 + (self.shift - 1) * self.sigmas)
+        logger.info("after shift sigmas: %s", self.sigmas)
+        logger.info("after shift sigmas length: %s", len(self.sigmas))
         if self.reverse_sigmas:
             self.sigmas = 1 - self.sigmas
         self.timesteps = self.sigmas * self.num_train_timesteps
+        logger.info("final timesteps: %s", self.timesteps)
         if training:
             x = self.timesteps
             y = torch.exp(-2 * ((x - num_inference_steps / 2) /

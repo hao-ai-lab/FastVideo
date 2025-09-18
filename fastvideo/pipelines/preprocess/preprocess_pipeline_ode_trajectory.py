@@ -60,13 +60,22 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
-        assert fastvideo_args.pipeline_config.flow_shift == 5
+        assert fastvideo_args.pipeline_config.flow_shift == 12
         self.modules["scheduler"] = SelfForcingFlowMatchScheduler(
             shift=fastvideo_args.pipeline_config.flow_shift,
             sigma_min=0.0,
             extra_one_step=True)
-        self.modules["scheduler"].set_timesteps(num_inference_steps=48,
+        logger.info("before 38 steps sigmas:")
+        self.modules["scheduler"].set_timesteps(num_inference_steps=38,
                                                 denoising_strength=1.0)
+        logger.info("before 39 steps sigmas:")
+        self.modules["scheduler"].set_timesteps(num_inference_steps=39,
+                                                denoising_strength=1.0)
+        logger.info("before 40 steps sigmas:")
+        self.modules["scheduler"].set_timesteps(num_inference_steps=40,
+                                                denoising_strength=1.0)
+        self.modules["scheduler"].timesteps = self.modules["scheduler"].timesteps.to(torch.int64)
+        logger.info("after casting timesteps: %s", self.modules["scheduler"].timesteps)
 
         self.add_stage(stage_name="input_validation_stage",
                        stage=InputValidationStage())
@@ -85,6 +94,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
         self.add_stage(stage_name="denoising_stage",
                        stage=DenoisingStage(
                            transformer=self.get_module("transformer"),
+                           transformer_2=self.get_module("transformer_2", None),
                            scheduler=self.get_module("scheduler"),
                            pipeline=self,
                        ))
@@ -172,7 +182,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     batch.negative_attention_mask = [
                         negative_prompt_attention_mask
                     ]
-                    batch.num_inference_steps = 48
+                    batch.num_inference_steps = 40
                     batch.return_trajectory_latents = True
                     # Enabling this will save the decoded trajectory videos.
                     # Used for debugging.
@@ -213,6 +223,11 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                                 decoded_frame,
                                 f"decoded_videos/trajectory_decoded_{i}_{j}.mp4",
                                 args.train_fps)
+                for i, latent in enumerate(trajectory_latents[0]):
+                    logger.info(f"sum for timestep %s is %s", trajectory_timesteps[i], latent.float().sum())
+                
+                for i in [0, 12, 24, 36]:
+                    logger.info(f"sum for timestep %s is %s", i, trajectory_latents[0][i].float().sum())
 
                 # Prepare batch data for Parquet dataset
                 batch_data: list[dict[str, Any]] = []

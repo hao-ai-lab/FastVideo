@@ -214,6 +214,10 @@ class DenoisingStage(PipelineStage):
             boundary_timestep = boundary_ratio * self.scheduler.num_train_timesteps
         else:
             boundary_timestep = None
+        
+        logger.info("boundary_timestep: %s", boundary_timestep)
+        logger.info("boundary_ratio: %s", boundary_ratio)
+        logger.info("self.scheduler.num_train_timesteps: %s", self.scheduler.num_train_timesteps)
         latent_model_input = latents.to(target_dtype)
         assert latent_model_input.shape[0] == 1, "only support batch size 1"
 
@@ -259,6 +263,13 @@ class DenoisingStage(PipelineStage):
 
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
+            logger.info("guidance_scale: %s", batch.guidance_scale)
+            logger.info("guidance_scale_2: %s", batch.guidance_scale_2)
+            logger.info("num_inference_steps: %s", num_inference_steps)
+            logger.info("timesteps: %s", timesteps)
+            timesteps[0] = timesteps[0] - 1.0
+            # timesteps = timesteps.to(torch.int64)
+            logger.info("new timesteps: %s", timesteps)
             for i, t in enumerate(timesteps):
                 # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:
@@ -270,6 +281,7 @@ class DenoisingStage(PipelineStage):
                                 self.transformer_2.parameters()).device.type
                             == 'cuda'):
                         self.transformer_2.to('cpu')
+                    logger.info("using high-noise stage for timestep: %s", t)
                     current_model = self.transformer
                     current_guidance_scale = batch.guidance_scale
                 else:
@@ -278,6 +290,7 @@ class DenoisingStage(PipelineStage):
                             self.transformer.parameters(
                             )).device.type == 'cuda':
                         self.transformer.to('cpu')
+                    logger.info("using low-noise stage for timestep: %s", t)
                     current_model = self.transformer_2
                     current_guidance_scale = batch.guidance_scale_2
                 assert current_model is not None, "current_model is None"
