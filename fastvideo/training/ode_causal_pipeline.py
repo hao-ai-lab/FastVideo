@@ -122,55 +122,75 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             dit_cpu_offload=True)
 
     def _get_next_batch(self, training_batch):  # type: ignore[override]
-        batch = next(self.train_loader_iter, None)  # type: ignore
-        if batch is None:
-            self.current_epoch += 1
-            logger.info("Starting epoch %s", self.current_epoch)
-            self.train_loader_iter = iter(self.train_dataloader)
-            batch = next(self.train_loader_iter)
+        # batch = next(self.train_loader_iter, None)  # type: ignore
+        # if batch is None:
+        #     self.current_epoch += 1
+        #     logger.info("Starting epoch %s", self.current_epoch)
+        #     self.train_loader_iter = iter(self.train_dataloader)
+        #     batch = next(self.train_loader_iter)
 
-        # Required fields from parquet (ODE trajectory schema)
-        encoder_hidden_states = batch['text_embedding']
-        encoder_attention_mask = batch['text_attention_mask']
-        infos = batch['info_list']
+        # # Required fields from parquet (ODE trajectory schema)
+        # encoder_hidden_states = batch['text_embedding']
+        # encoder_attention_mask = batch['text_attention_mask']
+        # infos = batch['info_list']
 
-        # Trajectory tensors may include a leading singleton batch dim per row
-        trajectory_latents = batch['trajectory_latents']
-        if trajectory_latents.dim() == 7:
-            # [B, 1, S, C, T, H, W] -> [B, S, C, T, H, W]
-            trajectory_latents = trajectory_latents[:, 0]
-        elif trajectory_latents.dim() == 6:
-            # already [B, S, C, T, H, W]
-            pass
-        else:
-            raise ValueError(
-                f"Unexpected trajectory_latents dim: {trajectory_latents.dim()}"
-            )
+        # # Trajectory tensors may include a leading singleton batch dim per row
+        # trajectory_latents = batch['trajectory_latents']
+        # if trajectory_latents.dim() == 7:
+        #     # [B, 1, S, C, T, H, W] -> [B, S, C, T, H, W]
+        #     trajectory_latents = trajectory_latents[:, 0]
+        # elif trajectory_latents.dim() == 6:
+        #     # already [B, S, C, T, H, W]
+        #     pass
+        # else:
+        #     raise ValueError(
+        #         f"Unexpected trajectory_latents dim: {trajectory_latents.dim()}"
+        #     )
 
-        trajectory_timesteps = batch['trajectory_timesteps']
-        if trajectory_timesteps.dim() == 3:
-            # [B, 1, S] -> [B, S]
-            trajectory_timesteps = trajectory_timesteps[:, 0]
-        elif trajectory_timesteps.dim() == 2:
-            # [B, S]
-            pass
-        else:
-            raise ValueError(
-                f"Unexpected trajectory_timesteps dim: {trajectory_timesteps.dim()}"
-            )
-        # [B, S, C, T, H, W] -> [B, S, T, C, H, W] to match self-forcing
-        trajectory_latents = trajectory_latents.permute(0, 1, 3, 2, 4, 5)
+        # trajectory_timesteps = batch['trajectory_timesteps']
+        # if trajectory_timesteps.dim() == 3:
+        #     # [B, 1, S] -> [B, S]
+        #     trajectory_timesteps = trajectory_timesteps[:, 0]
+        # elif trajectory_timesteps.dim() == 2:
+        #     # [B, S]
+        #     pass
+        # else:
+        #     raise ValueError(
+        #         f"Unexpected trajectory_timesteps dim: {trajectory_timesteps.dim()}"
+        #     )
+        # # [B, S, C, T, H, W] -> [B, S, T, C, H, W] to match self-forcing
+        # trajectory_latents = trajectory_latents.permute(0, 1, 3, 2, 4, 5)
 
-        # Move to device
+        # # Move to device
         device = get_local_torch_device()
-        training_batch.encoder_hidden_states = encoder_hidden_states.to(
-            device, dtype=torch.bfloat16)
-        training_batch.encoder_attention_mask = encoder_attention_mask.to(
-            device, dtype=torch.bfloat16)
-        training_batch.infos = infos
+        # training_batch.encoder_hidden_states = encoder_hidden_states.to(
+        #     device, dtype=torch.bfloat16)
+        # training_batch.encoder_attention_mask = encoder_attention_mask.to(
+        #     device, dtype=torch.bfloat16)
+        # training_batch.infos = infos
 
-        return training_batch, trajectory_latents.to(
-            device, dtype=torch.bfloat16), trajectory_timesteps.to(device)
+        # return training_batch, trajectory_latents.to(
+        #     device, dtype=torch.bfloat16), trajectory_timesteps.to(device)
+
+        ## TEMP
+        path = "/mnt/weka/home/hao.zhang/wl/Self-Forcing/ode_single_full/00000.pt"
+        b = torch.load(path)
+        for k, v in b.items():
+            logger.info(f"b[{k}]: {type(v)}")
+            if isinstance(v, torch.Tensor):
+                logger.info(f"b[{k}]: {v.shape}")
+            else:
+                logger.info(f"b[{k}]: {v}")
+        training_batch.encoder_hidden_states = b["text_embedding"][0].unsqueeze(
+            0).to(device, dtype=torch.bfloat16)
+        trajectory_latents = b["ode_latent"].to(device, dtype=torch.bfloat16)
+        logger.info(f"trajectory_latents: {trajectory_latents.shape}")
+        logger.info(
+            f"encoder_hidden_states: {training_batch.encoder_hidden_states.shape}"
+        )
+
+        return training_batch, trajectory_latents.to(device,
+                                                     dtype=torch.bfloat16), None
 
     def _get_timestep(self,
                       min_timestep: int,
@@ -287,29 +307,39 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         latent_vis_dict["x0"] = target_latent.permute(0, 2, 1, 3,
                                                       4).detach().clone().cpu()
 
-        model_dtype = next(self.transformer.parameters()).dtype
+        logger.info("noisy input sum: %s, noisy input shape: %s, noisy input dtype: %s", noisy_input.float().sum().item(), noisy_input.shape, noisy_input.dtype)
+        logger.info("encoder hidden states sum: %s, encoder hidden states shape: %s, encoder hidden states dtype: %s", encoder_hidden_states.float().sum().item(), encoder_hidden_states.shape, encoder_hidden_states.dtype)
+        logger.info("timestep sum: %s, timestep shape: %s, timestep dtype: %s", timestep.float().sum().item(), timestep.shape, timestep.dtype)
+        logger.info("model dtype set: %s. model weight sum: %s", set(p.dtype for p in self.transformer.parameters()), sum(p.float().sum().item() for p in self.transformer.parameters()))
+
+        # model_dtype = next(self.transformer.parameters()).dtype
+        model_dtype = torch.bfloat16
         input_kwargs = {
             "hidden_states": noisy_input.permute(0, 2, 1, 3, 4),
             "encoder_hidden_states": encoder_hidden_states,
-            "timestep": timestep.to(device, dtype=model_dtype),
+            "timestep": timestep,
             "return_dict": False,
+            "scheduler": self.modules["scheduler"]
         }
         # Predict noise and step the scheduler to obtain next latent
         with set_forward_context(current_timestep=timestep,
                                  attn_metadata=None,
                                  forward_batch=None):
-            noise_pred = self.transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
+            pred_video = self.transformer(**input_kwargs)
             # logger.info(f"noise_pred: {noise_pred.shape}")
-        if isinstance(noise_pred, (tuple, list)):
-            noise_pred = noise_pred[0]
+        # logger.info("noise pred sum: %s, noise pred shape: %s, noise pred dtype: %s", noise_pred.float().sum().item(), noise_pred.shape, noise_pred.dtype)
+        # if isinstance(noise_pred, (tuple, list)):
+        #     noise_pred = noise_pred[0]
 
-        from fastvideo.models.utils import pred_noise_to_pred_video
-        pred_video = pred_noise_to_pred_video(
-            pred_noise=noise_pred.flatten(0, 1),
-            noise_input_latent=noisy_input.flatten(0, 1),
-            timestep=timestep.to(dtype=model_dtype).flatten(0, 1),
-            scheduler=self.modules["scheduler"]).unflatten(
-                0, noise_pred.shape[:2])
+        # from fastvideo.models.utils import pred_noise_to_pred_video
+        # pred_video = pred_noise_to_pred_video(
+        #     pred_noise=noise_pred.flatten(0, 1),
+        #     noise_input_latent=noisy_input.flatten(0, 1),
+        #     timestep=timestep.to(dtype=model_dtype).flatten(0, 1),
+        #     scheduler=self.modules["scheduler"]).unflatten(
+        #         0, noise_pred.shape[:2])
+        logger.info("pred video sum: %s, pred video shape: %s, pred video dtype: %s", pred_video.float().sum().item(), pred_video.shape, pred_video.dtype)
+
         latent_vis_dict["pred_video"] = pred_video.permute(
             0, 2, 1, 3, 4).detach().clone().cpu()
 
@@ -356,7 +386,7 @@ class ODEInitTrainingPipeline(TrainingPipeline):
 
             # Forward to predict next latent by stepping scheduler with predicted noise
             noise_pred, target_latent, t, latent_vis_dict = self._step_predict_next_latent(
-                traj_latents, traj_timesteps, text_embeds, text_attention_mask)
+                traj_latents, training_batch.current_timestep, text_embeds, text_attention_mask)
 
             training_batch.latent_vis_dict.update(latent_vis_dict)
 
@@ -372,16 +402,29 @@ class ODEInitTrainingPipeline(TrainingPipeline):
                                      attn_metadata=None,
                                      forward_batch=None):
                 loss.backward()
+
+            logger.info("Loss sum: %s, Loss dtype: %s", loss.float().sum().item(), loss.dtype)
+            assert self.transformer.blocks[0].to_q.weight.dtype == torch.float32
+            logger.info("blocks[0].to_q param sum before backprop: %s", self.transformer.blocks[0].to_q.weight.float().sum().item())
+            logger.info("blocks[0].to_q param grad sum: %s", self.transformer.blocks[0].to_q.weight.grad.float().sum().item())
+            logger.info("Transformer grad dtype: %s", set(p.grad.dtype for p in self.transformer.parameters()))
+            logger.info(self.transformer.blocks[0].to_q.weight.grad)
+            logger.info("Transformer param dtype before backprop: %s", set(p.dtype for p in self.transformer.parameters()))
             avg_loss = loss.detach().clone()
             training_batch.total_loss += avg_loss.item()
 
         # Clip grad and step optimizers
-        grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
-            [p for p in self.transformer.parameters() if p.requires_grad],
-            args.max_grad_norm if args.max_grad_norm is not None else 0.0)
+        # grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
+        #     [p for p in self.transformer.parameters() if p.requires_grad],
+        #     args.max_grad_norm if args.max_grad_norm is not None else 0.0)
+        grad_norm = None
 
         self.optimizer.step()
-        self.lr_scheduler.step()
+        logger.info("Transformer param dtype after backprop: %s", set(p.dtype for p in self.transformer.parameters()))
+        logger.info("blocks[0].to_q param param after backprop sum: %s", self.transformer.blocks[0].to_q.weight.float().sum().item())
+
+        assert False
+        # self.lr_scheduler.step()
 
         if grad_norm is None:
             grad_value = 0.0

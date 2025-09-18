@@ -556,6 +556,8 @@ class CausalWanTransformer3DModel(BaseDiT):
                 start_frame: int = 0,
                 **kwargs) -> torch.Tensor:
 
+        logger.info("timestep dtype: %s, timestep sum: %s", timestep.dtype, timestep.float().sum().item())
+
         orig_dtype = hidden_states.dtype
         if not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
@@ -650,10 +652,59 @@ class CausalWanTransformer3DModel(BaseDiT):
         **kwargs
     ):
         if kwargs.get('kv_cache', None) is not None:
-            return self._forward_inference(*args, **kwargs)
+            noise_pred = self._forward_inference(*args, **kwargs).permute(0, 2, 1, 3, 4)
         else:
-            return self._forward_train(*args, **kwargs)
+            noise_pred = self._forward_train(*args, **kwargs).permute(0, 2, 1, 3, 4)
 
+        pred_video = self.pred_noise_to_pred_video(
+            pred_noise=noise_pred.flatten(0, 1),
+            noise_input_latent=kwargs.get("hidden_states", None).permute(0, 2, 1, 3, 4).flatten(0, 1),
+            timestep=kwargs.get("timestep", None).flatten(0, 1),
+            scheduler=kwargs.get("scheduler", None)
+        ).unflatten(0, noise_pred.shape[:2])
+        return pred_video
+
+    def pred_noise_to_pred_video(self, pred_noise: torch.Tensor,
+                             noise_input_latent: torch.Tensor,
+                             timestep: torch.Tensor,
+                             scheduler: Any) -> torch.Tensor:
+        """
+        Convert predicted noise to clean latent.
+
+        Args:
+        pred_noise: the predicted noise with shape [B, C, H, W]
+            where B is batch_size or batch_size * num_frames
+        noise_input_latent: the noisy latent with shape [B, C, H, W],
+        timestep: the timestep with shape [1] or [bs * num_frames] or [bs, num_frames]
+        scheduler: the scheduler
+
+        Returns:
+            the predicted video with shape [B, C, H, W]
+        """
+        # If timestep is [bs, num_frames]
+        if timestep.ndim == 2:
+            timestep = timestep.flatten(0, 1)
+            assert timestep.numel() == noise_input_latent.shape[0]
+        elif timestep.ndim == 1:
+            # If timestep is [1]
+            if timestep.shape[0] == 1:
+                timestep = timestep.expand(noise_input_latent.shape[0])
+            else:
+                assert timestep.numel() == noise_input_latent.shape[0]
+        else:
+            raise ValueError(f"[pred_noise_to_pred_video] Invalid timestep shape: {timestep.shape}")
+        # timestep shape should be [B]
+        dtype = pred_noise.dtype
+        device = pred_noise.device
+        pred_noise = pred_noise.double().to(device)
+        noise_input_latent = noise_input_latent.double().to(device)
+        sigmas = scheduler.sigmas.double().to(device)
+        timesteps = scheduler.timesteps.double().to(device)
+        timestep_id = torch.argmin(
+            (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
+        sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
+        pred_video = noise_input_latent - sigma_t * pred_noise
+        return pred_video.to(dtype)
 
     def unpatchify(self, x, grid_sizes):
         r"""

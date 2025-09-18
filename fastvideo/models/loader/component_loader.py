@@ -477,6 +477,9 @@ class TransformerLoader(ComponentLoader):
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)
 
+        # Need to convert the model to the default_dtype
+        # Otherwise, the model master weights will be in param_dtype, and the gradients will also be in param_dtype
+        # This means the param update will be in lower precision, causing precision loss
         logger.info("Converting model to dtype: %s", default_dtype)
         model = model.to(default_dtype)
         model = model.eval()
