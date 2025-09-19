@@ -605,6 +605,11 @@ class TrainingArgs(FastVideoArgs):
     pretrained_model_name_or_path: str = ""
     dit_model_name_or_path: str = ""
 
+    # DMD model paths - separate paths for each network
+    generator_model_path: str = ""  # path for generator (student) model
+    real_score_model_path: str = ""  # path for real score (teacher) model
+    fake_score_model_path: str = ""  # path for fake score (critic) model
+
     # diffusion setting
     ema_decay: float = 0.0
     ema_start_step: int = 0
@@ -627,6 +632,7 @@ class TrainingArgs(FastVideoArgs):
     checkpoints_total_limit: int = 0
     checkpointing_steps: int = 0
     resume_from_checkpoint: str = ""  # specify the checkpoint folder to resume from
+    init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
 
     # optimizer & scheduler
     num_train_epochs: int = 0
@@ -658,6 +664,7 @@ class TrainingArgs(FastVideoArgs):
     linear_quadratic_threshold: float = 0.0
     linear_range: float = 0.0
     weight_decay: float = 0.0
+    betas: str = "0.9,0.999"  # betas for optimizer, format: "beta1,beta2"
     use_ema: bool = False
     multi_phased_distill_schedule: str = ""
     pred_decay_weight: float = 0.0
@@ -678,16 +685,29 @@ class TrainingArgs(FastVideoArgs):
 
     # distillation args
     generator_update_interval: int = 5
+    dfake_gen_update_ratio: int = 5  # self-forcing: how often to train generator vs critic
     min_timestep_ratio: float = 0.2
     max_timestep_ratio: float = 0.98
     real_score_guidance_scale: float = 3.5
     fake_score_learning_rate: float = 0.0  # separate learning rate for fake_score_transformer, if 0.0, use learning_rate
     fake_score_lr_scheduler: str = "constant"  # separate lr scheduler for fake_score_transformer, if not set, use lr_scheduler
+    fake_score_betas: str = "0.9,0.999"  # betas for fake score optimizer, format: "beta1,beta2"
     training_state_checkpointing_steps: int = 0  # for resuming training
     weight_only_checkpointing_steps: int = 0  # for inference
     log_visualization: bool = False
     # simulate generator forward to match inference
     simulate_generator_forward: bool = False
+    warp_denoising_step: bool = False
+
+    # Self-forcing specific arguments
+    num_frame_per_block: int = 3
+    independent_first_frame: bool = False
+    enable_gradient_masking: bool = True
+    gradient_mask_last_n_frames: int = 21
+    validate_cache_structure: bool = False  # Debug flag for cache validation
+    same_step_across_blocks: bool = False  # Use same exit timestep for all blocks
+    last_step_only: bool = False  # Only use the last timestep for training
+    context_noise: int = 0  # Context noise level for cache updates
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -789,6 +809,20 @@ class TrainingArgs(FastVideoArgs):
                             type=str,
                             help="Directory to cache models")
 
+        # DMD model paths - separate paths for each network
+        parser.add_argument(
+            "--generator-model-path",
+            type=str,
+            help="Path to generator (student) model for DMD distillation")
+        parser.add_argument(
+            "--real-score-model-path",
+            type=str,
+            help="Path to real score (teacher) model for DMD distillation")
+        parser.add_argument(
+            "--fake-score-model-path",
+            type=str,
+            help="Path to fake score (critic) model for DMD distillation")
+
         # Diffusion settings
         parser.add_argument("--ema-decay",
                             type=float,
@@ -859,6 +893,10 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--resume-from-checkpoint",
                             type=str,
                             help="Path to checkpoint to resume from")
+        parser.add_argument(
+            "--init-weights-from-safetensors",
+            type=str,
+            help="Path to safetensors file for initial weight loading")
         parser.add_argument("--logging-dir",
                             type=str,
                             help="Directory for logging")
@@ -963,6 +1001,10 @@ class TrainingArgs(FastVideoArgs):
                             help="Linear quadratic threshold")
         parser.add_argument("--linear-range", type=float, help="Linear range")
         parser.add_argument("--weight-decay", type=float, help="Weight decay")
+        parser.add_argument("--betas",
+                            type=str,
+                            default=TrainingArgs.betas,
+                            help="Betas for optimizer (format: 'beta1,beta2')")
         parser.add_argument("--use-ema",
                             action=StoreBoolean,
                             help="Whether to use EMA")
@@ -1013,6 +1055,13 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             default=TrainingArgs.generator_update_interval,
                             help="Ratio of student updates to critic updates.")
+        parser.add_argument(
+            "--dfake-gen-update-ratio",
+            type=int,
+            default=TrainingArgs.dfake_gen_update_ratio,
+            help=
+            "Self-forcing: How often to train generator vs critic (train generator every N steps)."
+        )
         parser.add_argument("--min-timestep-ratio",
                             type=float,
                             default=TrainingArgs.min_timestep_ratio,
@@ -1030,6 +1079,11 @@ class TrainingArgs(FastVideoArgs):
                             default=TrainingArgs.fake_score_learning_rate,
                             help="Learning rate for fake score transformer")
         parser.add_argument(
+            "--fake-score-betas",
+            type=str,
+            default=TrainingArgs.fake_score_betas,
+            help="Betas for fake score optimizer (format: 'beta1,beta2')")
+        parser.add_argument(
             "--fake-score-lr-scheduler",
             type=str,
             default=TrainingArgs.fake_score_lr_scheduler,
@@ -1041,6 +1095,48 @@ class TrainingArgs(FastVideoArgs):
             "--simulate-generator-forward",
             action=StoreBoolean,
             help="Whether to simulate generator forward to match inference")
+        parser.add_argument(
+            "--warp-denoising-step",
+            action=StoreBoolean,
+            help=
+            "Whether to warp denoising step according to the scheduler time shift"
+        )
+
+        # Self-forcing specific arguments
+        parser.add_argument(
+            "--num-frame-per-block",
+            type=int,
+            default=TrainingArgs.num_frame_per_block,
+            help="Number of frames per block for causal generation")
+        parser.add_argument(
+            "--independent-first-frame",
+            action=StoreBoolean,
+            help="Whether the first frame is independent in causal generation")
+        parser.add_argument(
+            "--enable-gradient-masking",
+            action=StoreBoolean,
+            help="Whether to enable frame-level gradient masking")
+        parser.add_argument(
+            "--gradient-mask-last-n-frames",
+            type=int,
+            default=TrainingArgs.gradient_mask_last_n_frames,
+            help="Number of last frames to enable gradients for")
+        parser.add_argument(
+            "--validate-cache-structure",
+            action=StoreBoolean,
+            help="Whether to validate KV cache structure (debug flag)")
+        parser.add_argument(
+            "--same-step-across-blocks",
+            action=StoreBoolean,
+            help="Whether to use the same exit timestep for all blocks")
+        parser.add_argument(
+            "--last-step-only",
+            action=StoreBoolean,
+            help="Whether to only use the last timestep for training")
+        parser.add_argument("--context-noise",
+                            type=int,
+                            default=TrainingArgs.context_noise,
+                            help="Context noise level for cache updates")
 
         return parser
 

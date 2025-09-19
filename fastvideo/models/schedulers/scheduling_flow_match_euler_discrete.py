@@ -635,8 +635,31 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
         noise: torch.Tensor,
         timestep: torch.IntTensor,
     ) -> torch.Tensor:
+
+        """
+        Args:
+            clean_latent: the clean latent with shape [B, C, H, W],
+                where B is batch_size or batch_size * num_frames
+            noise: the noise with shape [B, C, H, W]
+            timestep: the timestep with shape [1] or [bs * num_frames] or [bs, num_frames]
+
+        Returns:
+            the corrupted latent with shape [B, C, H, W]
+        """
+        # If timestep is [bs, num_frames]
+        if timestep.ndim == 2:
+            timestep = timestep.flatten(0, 1)
+            assert timestep.numel() == clean_latent.shape[0]
+        elif timestep.ndim == 1:
+            # If timestep is [1]
+            if timestep.shape[0] == 1:
+                timestep = timestep.expand(clean_latent.shape[0])
+            else:
+                assert timestep.numel() == clean_latent.shape[0]
+        else:
+            raise ValueError(f"[add_noise] Invalid timestep shape: {timestep.shape}")
+        # timestep shape should be [B]
         self.sigmas = self.sigmas.to(noise.device)
-        timestep = timestep.expand(clean_latent.shape[0])
         self.timesteps = self.timesteps.to(noise.device)
         timestep_id = torch.argmin(
             (self.timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
