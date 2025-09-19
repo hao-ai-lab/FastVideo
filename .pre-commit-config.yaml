@@ -12,9 +12,6 @@ exclude: |
     scripts/.*|
     fastvideo/data_preprocess/.*|
     fastvideo/dataset/.*|
-    fastvideo/distill/.*|
-    fastvideo/distill\.py|
-    fastvideo/distill_adv\.py|
     fastvideo/models/.*|
     fastvideo/sample/.*|
     fastvideo/train\.py|
@@ -44,10 +41,10 @@ repos:
   - id: codespell
     additional_dependencies: ['tomli']
     args: ['--toml', 'pyproject.toml']
-- repo: https://github.com/PyCQA/isort
-  rev: 6.0.1
-  hooks:
-  - id: isort
+# - repo: https://github.com/PyCQA/isort
+#   rev: 6.0.1
+#   hooks:
+#   - id: isort
 - repo: https://github.com/jackdewinter/pymarkdown
   rev: v0.9.30
   hooks:
