@@ -7,8 +7,6 @@ This module wires the causal DMD denoising stage into the modular pipeline.
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler)
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 
 # isort: off

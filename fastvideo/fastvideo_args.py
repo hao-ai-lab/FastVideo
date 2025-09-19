@@ -1133,11 +1133,10 @@ class TrainingArgs(FastVideoArgs):
             "--last-step-only",
             action=StoreBoolean,
             help="Whether to only use the last timestep for training")
-        parser.add_argument(
-            "--context-noise",
-            type=int,
-            default=TrainingArgs.context_noise,
-            help="Context noise level for cache updates")
+        parser.add_argument("--context-noise",
+                            type=int,
+                            default=TrainingArgs.context_noise,
+                            help="Context noise level for cache updates")
 
         return parser
 

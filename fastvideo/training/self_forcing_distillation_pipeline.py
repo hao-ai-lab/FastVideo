@@ -12,7 +12,9 @@ from tqdm.auto import tqdm
 
 import fastvideo.envs as envs
 import wandb
-from fastvideo.distributed import get_local_torch_device, get_world_group
+from fastvideo.distributed import (cleanup_dist_env_and_memory,
+                                   get_local_torch_device, get_sp_group,
+                                   get_world_group)
 from fastvideo.fastvideo_args import TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
@@ -45,6 +47,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         """Initialize the self-forcing training pipeline."""
         logger.info("Initializing self-forcing distillation pipeline...")
 
+        self.generator_ema: EMA_FSDP | None = None
+
         super().initialize_training_pipeline(training_args)
         self.noise_scheduler = SelfForcingFlowMatchScheduler(
             num_inference_steps=1000,
@@ -69,14 +73,14 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         self.frame_seq_length = 1560  # TODO: Calculate this dynamically based on patch size
 
         # Cache references (will be initialized per forward pass)
-        self.kv_cache1 = None
-        self.crossattn_cache = None
+        self.kv_cache1: list[dict[str, Any]] | None = None
+        self.crossattn_cache: list[dict[str, Any]] | None = None
 
-        logger.info(
-            f"Self-forcing generator update ratio: {self.dfake_gen_update_ratio}"
-        )
+        logger.info("Self-forcing generator update ratio: %s",
+                    self.dfake_gen_update_ratio)
 
-    def generate_and_sync_list(self, num_blocks, num_denoising_steps, device):
+    def generate_and_sync_list(self, num_blocks: int, num_denoising_steps: int,
+                               device: torch.device) -> list[int]:
         """Generate and synchronize random exit flags across distributed processes."""
         rank = dist.get_rank() if dist.is_initialized() else 0
 
@@ -134,7 +138,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         updated_batch, flow_matching_loss = self.faker_score_forward(
             training_batch)
         training_batch.fake_score_latent_vis_dict = updated_batch.fake_score_latent_vis_dict
-        log_dict = {}
+        log_dict: dict[str, Any] = {}
 
         return flow_matching_loss, log_dict
 
@@ -478,7 +482,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         gradient_mask = None
         if pred_image_or_video.shape[1] > 21:
             with torch.no_grad():
-                # Reencode to get image latent
+                # Re-encode to get image latent
                 latent_to_decode = pred_image_or_video[:, :-20, ...]
                 # Decode to video
                 latent_to_decode = latent_to_decode.permute(
@@ -553,12 +557,15 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             training_batch.dmd_latent_vis_dict["min_num_frames"] = torch.tensor(
                 min_num_frames, dtype=torch.float32, device=self.device)
 
+        assert self.kv_cache1 is not None
+        assert self.crossattn_cache is not None
         self._reset_simulation_caches(self.kv_cache1, self.crossattn_cache)
 
         return final_output if gradient_mask is not None else pred_image_or_video
 
-    def _initialize_simulation_caches(self, batch_size: int, dtype: torch.dtype,
-                                      device: torch.device):
+    def _initialize_simulation_caches(
+        self, batch_size: int, dtype: torch.dtype, device: torch.device
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Initialize KV cache and cross-attention cache for multi-step simulation."""
         num_transformer_blocks = len(self.transformer.blocks)
 
@@ -576,7 +583,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         frame_seq_length = post_patch_height * post_patch_width
 
         # Get local attention size from transformer config
-        local_attn_size = getattr(self.transformer, 'local_attn_size', -1)
+        # local_attn_size = getattr(self.transformer, 'local_attn_size', -1)
 
         # Get model configuration parameters - handle FSDP wrapping
         if hasattr(self.transformer, 'config'):
@@ -642,7 +649,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         return kv_cache, crossattn_cache
 
-    def _reset_simulation_caches(self, kv_cache, crossattn_cache):
+    def _reset_simulation_caches(self, kv_cache: list[dict[str, Any]],
+                                 crossattn_cache: list[dict[str, Any]]) -> None:
         """Reset KV cache and cross-attention cache to clean state."""
         if kv_cache is not None:
             for cache_dict in kv_cache:
@@ -773,7 +781,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         training_batch.fake_score_latent_vis_dict = {}
 
         if train_generator:
-            logger.debug(f"Training generator at step {self.current_trainstep}")
             self.optimizer.zero_grad()
             total_generator_loss = 0.0
             generator_log_dict = {}
@@ -823,7 +830,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         else:
             training_batch.generator_loss = 0.0
 
-        logger.debug(f"Training critic at step {self.current_trainstep}")
         self.fake_score_optimizer.zero_grad()
         total_critic_loss = 0.0
         critic_log_dict = {}
@@ -884,15 +890,13 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         wandb_loss_dict = {}
 
         # Debug logging
-        logger.info(f"Step {step}: Starting visualization")
+        logger.info("Step %s: Starting visualization", step)
         if hasattr(training_batch, 'dmd_latent_vis_dict'):
-            logger.info(
-                f"DMD latent keys: {list(training_batch.dmd_latent_vis_dict.keys())}"
-            )
+            logger.info("DMD latent keys: %s",
+                        list(training_batch.dmd_latent_vis_dict.keys()))
         if hasattr(training_batch, 'fake_score_latent_vis_dict'):
-            logger.info(
-                f"Fake score latent keys: {list(training_batch.fake_score_latent_vis_dict.keys())}"
-            )
+            logger.info("Fake score latent keys: %s",
+                        list(training_batch.fake_score_latent_vis_dict.keys()))
 
         # Process generator predictions if available
         if hasattr(
@@ -906,12 +910,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
             for latent_key in dmd_log_keys:
                 if latent_key in dmd_latents_vis_dict:
-                    logger.info(f"Processing DMD latent: {latent_key}")
+                    logger.info("Processing DMD latent: %s", latent_key)
                     latents = dmd_latents_vis_dict[latent_key]
                     if not isinstance(latents, torch.Tensor):
-                        logger.warning(
-                            f"Expected tensor for {latent_key}, got {type(latents)}"
-                        )
+                        logger.warning("Expected tensor for %s, got %s",
+                                       latent_key, type(latents))
                         continue
 
                     latents = latents.detach()
@@ -940,12 +943,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                         video = (video * 255).numpy().astype(np.uint8)
                         wandb_loss_dict[f"dmd_{latent_key}"] = wandb.Video(
                             video, fps=24, format="mp4")
-                        logger.info(
-                            f"Successfully processed DMD latent: {latent_key}")
+                        logger.info("Successfully processed DMD latent: %s",
+                                    latent_key)
                     except Exception as e:
-                        logger.error(
-                            f"Error processing DMD latent {latent_key}: {str(e)}"
-                        )
+                        logger.error("Error processing DMD latent %s: %s",
+                                     latent_key, str(e))
                     del video, latents
 
         # Process critic predictions
@@ -956,12 +958,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
             for latent_key in fake_score_log_keys:
                 if latent_key in fake_score_latents_vis_dict:
-                    logger.info(f"Processing critic latent: {latent_key}")
+                    logger.info("Processing critic latent: %s", latent_key)
                     latents = fake_score_latents_vis_dict[latent_key]
                     if not isinstance(latents, torch.Tensor):
-                        logger.warning(
-                            f"Expected tensor for {latent_key}, got {type(latents)}"
-                        )
+                        logger.warning("Expected tensor for %s, got %s",
+                                       latent_key, type(latents))
                         continue
 
                     latents = latents.detach()
@@ -990,13 +991,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                         video = (video * 255).numpy().astype(np.uint8)
                         wandb_loss_dict[f"critic_{latent_key}"] = wandb.Video(
                             video, fps=24, format="mp4")
-                        logger.info(
-                            f"Successfully processed critic latent: {latent_key}"
-                        )
+                        logger.info("Successfully processed critic latent: %s",
+                                    latent_key)
                     except Exception as e:
-                        logger.error(
-                            f"Error processing critic latent {latent_key}: {str(e)}"
-                        )
+                        logger.error("Error processing critic latent %s: %s",
+                                     latent_key, str(e))
                     del video, latents
 
         # Log metadata
@@ -1012,16 +1011,16 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     "dmd_timestep"] = training_batch.dmd_latent_vis_dict[
                         "dmd_timestep"].item()
 
-        if hasattr(training_batch, 'fake_score_latent_vis_dict'
-                   ) and training_batch.fake_score_latent_vis_dict:
-            if "fake_score_timestep" in training_batch.fake_score_latent_vis_dict:
-                wandb_loss_dict[
-                    "fake_score_timestep"] = training_batch.fake_score_latent_vis_dict[
-                        "fake_score_timestep"].item()
+        if hasattr(
+                training_batch, 'fake_score_latent_vis_dict'
+        ) and training_batch.fake_score_latent_vis_dict and "fake_score_timestep" in training_batch.fake_score_latent_vis_dict:
+            wandb_loss_dict[
+                "fake_score_timestep"] = training_batch.fake_score_latent_vis_dict[
+                    "fake_score_timestep"].item()
 
         # Log final dict contents
-        logger.info(
-            f"Final wandb_loss_dict keys: {list(wandb_loss_dict.keys())}")
+        logger.info("Final wandb_loss_dict keys: %s",
+                    list(wandb_loss_dict.keys()))
 
         if self.global_rank == 0:
             wandb.log(wandb_loss_dict, step=step)
@@ -1059,7 +1058,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         self.train_loader_iter = iter(self.train_dataloader)
 
-        step_times = deque(maxlen=100)
+        step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
         self._log_validation(self.transformer, self.training_args,
@@ -1097,9 +1096,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     (self.generator_ema is None) and (self.training_args.ema_decay > 0):
                 self.generator_ema = EMA_FSDP(
                     self.transformer, decay=self.training_args.ema_decay)
-                logger.info(
-                    f"Created generator EMA at step {step} with decay={self.training_args.ema_decay}"
-                )
+                logger.info("Created generator EMA at step %s with decay=%s",
+                            step, self.training_args.ema_decay)
 
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 training_batch = self.train_one_step(training_batch)
@@ -1181,10 +1179,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
                 wandb.log(log_data, step=step)
 
-                if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
-                    if self.training_args.log_visualization:
-                        self.visualize_intermediate_latents(
-                            training_batch, self.training_args, step)
+                if self.training_args.log_validation and step % self.training_args.validation_steps == 0 and self.training_args.log_visualization:
+                    self.visualize_intermediate_latents(training_batch,
+                                                        self.training_args,
+                                                        step)
 
             if (self.training_args.training_state_checkpointing_steps > 0
                     and step %

@@ -466,11 +466,13 @@ def load_distillation_checkpoint(generator_transformer,
             ema_state = generator_states.get("ema")
             if ema_state is not None:
                 generator_ema.load_state_dict(ema_state)
-                logger.info("rank: %s, generator EMA state loaded successfully", rank)
+                logger.info("rank: %s, generator EMA state loaded successfully",
+                            rank)
             else:
                 logger.info("rank: %s, no EMA state found in checkpoint", rank)
         except Exception as e:
-            logger.warning("rank: %s, failed to load EMA state: %s", rank, str(e))
+            logger.warning("rank: %s, failed to load EMA state: %s", rank,
+                           str(e))
 
     # Load critic distributed checkpoint
     critic_dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint",
@@ -1317,6 +1319,7 @@ class EMA_FSDP:
       ema.update(model)
       ema.state_dict()  # on rank 0
     """
+
     def __init__(self, module, decay: float = 0.999, mode: str = "local_shard"):
         self.decay = float(decay)
         self.mode = mode
@@ -1342,7 +1345,10 @@ class EMA_FSDP:
         if self.mode == "rank0_full":
             cpu_state = gather_state_dict_on_cpu_rank0(module, device=None)
             if self.rank == 0:
-                self.shadow = {k: v.detach().clone().float().cpu() for k, v in cpu_state.items()}
+                self.shadow = {
+                    k: v.detach().clone().float().cpu()
+                    for k, v in cpu_state.items()
+                }
             else:
                 self.shadow = {}
             return
@@ -1383,7 +1389,10 @@ class EMA_FSDP:
 
     def state_dict(self) -> dict[str, torch.Tensor]:
         if self.mode == "rank0_full":
-            return {k: v.clone() for k, v in self.shadow.items()} if self.rank == 0 else {}
+            return {
+                k: v.clone()
+                for k, v in self.shadow.items()
+            } if self.rank == 0 else {}
         return {k: v.clone() for k, v in self.shadow.items()}
 
     def load_state_dict(self, sd: dict[str, torch.Tensor]):
@@ -1404,6 +1413,7 @@ class EMA_FSDP:
                 p.data.copy_(w.to(dtype=p.dtype, device=p.device))
 
     class _ApplyEMACtx:
+
         def __init__(self, ema: "EMA_FSDP", module):
             self.ema = ema
             self.module = module
@@ -1411,7 +1421,9 @@ class EMA_FSDP:
 
         def __enter__(self):
             if self.ema.mode != "local_shard":
-                raise RuntimeError("EMA apply_to_model is only supported for mode='local_shard'")
+                raise RuntimeError(
+                    "EMA apply_to_model is only supported for mode='local_shard'"
+                )
             with torch.no_grad():
                 for name, p in self.module.named_parameters():
                     if not p.requires_grad:
@@ -1421,14 +1433,17 @@ class EMA_FSDP:
                     if p_local.numel() == 0:
                         # Nothing to swap on this rank for this param
                         continue
-                    self.saved[name] = p_local.clone().to(device=p_local.device, dtype=p_local.dtype)
+                    self.saved[name] = p_local.clone().to(device=p_local.device,
+                                                          dtype=p_local.dtype)
                     if name in self.ema.shadow:
                         ema_cpu = self.ema.shadow[name]
                         if ema_cpu.numel() != p_local.numel():
                             # Shard shape mismatch (e.g., empty shard here), skip
                             continue
                         # Copy EMA shard into local param shard
-                        p_local.copy_(ema_cpu.to(dtype=p_local.dtype, device=p_local.device))
+                        p_local.copy_(
+                            ema_cpu.to(dtype=p_local.dtype,
+                                       device=p_local.device))
             return self.module
 
         def __exit__(self, exc_type, exc, tb):

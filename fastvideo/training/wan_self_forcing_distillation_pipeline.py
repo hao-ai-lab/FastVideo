@@ -4,10 +4,10 @@ from copy import deepcopy
 
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler)
-from fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline import WanCausalDMDPipeline
-from fastvideo.training.self_forcing_distillation_pipeline import SelfForcingDistillationPipeline
+from fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline import (
+    WanCausalDMDPipeline)
+from fastvideo.training.self_forcing_distillation_pipeline import (
+    SelfForcingDistillationPipeline)
 from fastvideo.utils import is_vsa_available
 
 vsa_available = is_vsa_available()
@@ -69,4 +69,4 @@ if __name__ == "__main__":
     parser = TrainingArgs.add_cli_args(parser)
     parser = FastVideoArgs.add_cli_args(parser)
     args = parser.parse_args()
-    main(args) 
+    main(args)
