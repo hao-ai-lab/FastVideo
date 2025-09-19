@@ -18,8 +18,11 @@ from fastvideo.distributed import (cleanup_dist_env_and_memory,
 from fastvideo.fastvideo_args import TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
+
+# isort: off
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
     SelfForcingFlowMatchScheduler)
+# isort: on
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.training.distillation_pipeline import DistillationPipeline
