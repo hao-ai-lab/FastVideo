@@ -31,6 +31,7 @@ class PlatformEnum(enum.Enum):
     MPS = enum.auto()
     OOT = enum.auto()
     UNSPECIFIED = enum.auto()
+    NPU = enum.auto()
 
 
 class CpuArchEnum(enum.Enum):
@@ -96,6 +97,9 @@ class Platform:
 
     def is_mps(self) -> bool:
         return self._enum == PlatformEnum.MPS
+    
+    def is_npu(self) -> bool:
+        return self._enum == PlatformEnum.NPU
 
     @classmethod
     def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None,

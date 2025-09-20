@@ -79,6 +79,29 @@ def find_nccl_library() -> str:
     return str(so_file)
 
 
+def find_hccl_library() -> str:
+    """
+    We either use the library file specified by the `HCCL_SO_PATH`
+    environment variable, or we find the library file brought by PyTorch.
+    After importing `torch`, `libhccl.so` can be
+    found by `ctypes` automatically.
+    """
+    so_file = envs.HCCL_SO_PATH
+
+    # manually load the nccl library
+    if so_file:
+        logger.info(
+            "Found hccl from environment variable HCCL_SO_PATH=%s",
+            so_file)
+    else:
+        if torch.version.cann is not None:
+            so_file = "libhccl.so"
+        else:
+            raise ValueError("HCCL only supports Ascend NPU backends.")
+        logger.info("Found hccl from library %s", so_file)
+    return so_file
+
+
 prev_set_stream = torch.cuda.set_stream
 
 _current_stream = None

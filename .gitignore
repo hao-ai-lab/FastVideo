@@ -64,6 +64,10 @@ docs/source/distillation/examples/
 !docs/source/_static/images/**/*.png
 !comfyui/assets/**/*.png
 !comfyui/assets/**/*.gif
+<<<<<<< HEAD
 
 dmd_t2v_output/
 preprocess_output_text/
+=======
+log/
+>>>>>>> 1a6592a4 (add: npu platform)

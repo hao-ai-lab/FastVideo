@@ -76,6 +76,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
             raise ValueError("lora rank must be set when using lora training")
 
         set_random_seed(fastvideo_args.seed)  # for lora param init
+        breakpoint()
         super().__init__(model_path, fastvideo_args, required_config_modules,
                          loaded_modules)  # type: ignore
 
@@ -395,6 +396,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 num_latent_t=self.training_args.num_latent_t)
 
             training_batch = self._build_attention_metadata(training_batch)
+            
             training_batch = self._build_input_kwargs(training_batch)
             training_batch = self._transformer_forward_and_compute_loss(
                 training_batch)
@@ -486,7 +488,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
             training_batch.current_timestep = step
             training_batch.current_vsa_sparsity = current_vsa_sparsity
             training_batch = self.train_one_step(training_batch)
-
             loss = training_batch.total_loss
             grad_norm = training_batch.grad_norm
 
@@ -527,7 +528,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 logger.info(
                     "GPU memory usage after validation: %s MB, trainable params: %sB",
                     gpu_memory_usage, trainable_params)
-
         wandb.finish()
         save_checkpoint(self.transformer, self.global_rank,
                         self.training_args.output_dir,
