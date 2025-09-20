@@ -40,7 +40,7 @@ from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
     EMA_FSDP, clip_grad_norm_while_handling_failing_dtensor_cases,
     get_scheduler, load_distillation_checkpoint, save_distillation_checkpoint,
-    shift_timestep)
+    shift_timestep, compute_density_for_timestep_sampling, get_sigmas)
 from fastvideo.utils import (is_vsa_available, maybe_download_model,
                              set_random_seed, verify_model_config_and_directory)
 
@@ -91,6 +91,9 @@ class DistillationPipeline(TrainingPipeline):
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
             shift=self.timestep_shift)
 
+        self.transformer_2 = self.get_module("transformer_2", None)
+        self.boundary_timestep = self.training_args.boundary_ratio * self.noise_scheduler.num_train_timesteps
+        
         if training_args.real_score_model_path:
             logger.info(
                 f"Loading real score transformer from: {training_args.real_score_model_path}"
@@ -127,6 +130,39 @@ class DistillationPipeline(TrainingPipeline):
                 self.real_score_transformer,
                 checkpointing_type=training_args.
                 enable_gradient_checkpointing_type)
+            if self.transformer_2 is not None:
+                self.transformer_2 = apply_activation_checkpointing(
+                    self.transformer_2,
+                    checkpointing_type=training_args.
+                    enable_gradient_checkpointing_type)
+
+        if self.transformer_2 is not None:
+            self.transformer_2.train()
+            self.transformer_2.requires_grad_(True)
+            params_to_optimize_2 = self.transformer_2.parameters()
+            params_to_optimize_2 = list(
+                filter(lambda p: p.requires_grad, params_to_optimize_2))
+            
+            betas_str = training_args.betas
+            betas = tuple(float(x.strip()) for x in betas_str.split(","))
+            
+            self.optimizer_2 = torch.optim.AdamW(
+                params_to_optimize_2,
+                lr=training_args.learning_rate,
+                betas=betas,
+                weight_decay=training_args.weight_decay,
+                eps=1e-8,
+            )
+            self.lr_scheduler_2 = get_scheduler(
+                training_args.lr_scheduler,
+                optimizer=self.optimizer_2,
+                num_warmup_steps=training_args.lr_warmup_steps,
+                num_training_steps=training_args.max_train_steps,
+                num_cycles=training_args.lr_num_cycles,
+                power=training_args.lr_power,
+                min_lr_ratio=training_args.min_lr_ratio,
+                last_epoch=self.init_steps - 1,
+            )
 
         # Initialize optimizers
         fake_score_params = list(
@@ -281,6 +317,9 @@ class DistillationPipeline(TrainingPipeline):
         """Prepare training environment for distillation."""
         self.transformer.requires_grad_(True)
         self.transformer.train()
+        if self.transformer_2 is not None:
+            self.transformer_2.requires_grad_(True)
+            self.transformer_2.train()
         self.fake_score_transformer.requires_grad_(True)
         self.fake_score_transformer.train()
 
@@ -436,7 +475,9 @@ class DistillationPipeline(TrainingPipeline):
         training_batch = self._build_distill_input_kwargs(
             noisy_latent, timestep, training_batch.conditional_dict,
             training_batch)
-        pred_noise = self.transformer(**training_batch.input_kwargs).permute(
+        
+        current_model = self.transformer_2 if self.train_transformer_2 else self.transformer
+        pred_noise = current_model(**training_batch.input_kwargs).permute(
             0, 2, 1, 3, 4)
         pred_video = pred_noise_to_pred_video(
             pred_noise=pred_noise.flatten(0, 1),
@@ -478,6 +519,7 @@ class DistillationPipeline(TrainingPipeline):
         max_target_idx = len(self.denoising_step_list) - 1
         noise_latents = []
         noise_latent_index = target_timestep_idx_int - 1
+        current_model = self.transformer_2 if self.train_transformer_2 else self.transformer
         if max_target_idx > 0:
             # Run student model for all steps before the target timestep
             with torch.no_grad():
@@ -489,7 +531,7 @@ class DistillationPipeline(TrainingPipeline):
                     training_batch_temp = self._build_distill_input_kwargs(
                         current_noise_latents, current_timestep_tensor,
                         training_batch.conditional_dict, training_batch)
-                    pred_flow = self.transformer(
+                    pred_flow = current_model(
                         **training_batch_temp.input_kwargs).permute(
                             0, 2, 1, 3, 4)
                     pred_clean = pred_noise_to_pred_video(
@@ -532,7 +574,7 @@ class DistillationPipeline(TrainingPipeline):
         training_batch = self._build_distill_input_kwargs(
             noisy_input, target_timestep, training_batch.conditional_dict,
             training_batch)
-        pred_noise = self.transformer(**training_batch.input_kwargs).permute(
+        pred_noise = current_model(**training_batch.input_kwargs).permute(
             0, 2, 1, 3, 4)
         pred_video = pred_noise_to_pred_video(
             pred_noise=pred_noise.flatten(0, 1),
@@ -774,6 +816,9 @@ class DistillationPipeline(TrainingPipeline):
             batches.append(batch)
 
         self.optimizer.zero_grad()
+        # TODO: confirm this
+        if self.transformer_2 is not None:
+            self.optimizer_2.zero_grad()
         total_dmd_loss = 0.0
         dmd_latent_vis_dict = {}
         fake_score_latent_vis_dict = {}
@@ -802,15 +847,31 @@ class DistillationPipeline(TrainingPipeline):
                         attn_metadata=batch_gen.attn_metadata_vsa):
                     (dmd_loss / gradient_accumulation_steps).backward()
                 total_dmd_loss += dmd_loss.detach().item()
-            self._clip_model_grad_norm_(batch_gen, self.transformer)
-            for param in self.transformer.parameters():
-                # check if the gradient is not None and not zero
-                assert param.grad is not None and param.grad.abs().sum() > 0
-            self.optimizer.step()
-            self.optimizer.zero_grad(set_to_none=True)
+            
+            # Only clip gradients for the model that is currently training
+            if self.train_transformer_2 and self.transformer_2 is not None:
+                self._clip_model_grad_norm_(batch_gen, self.transformer_2)
+                for param in self.transformer_2.parameters():
+                    # check if the gradient is not None and not zero
+                    assert param.grad is not None and param.grad.abs().sum() > 0
+                self.optimizer_2.step()
+                self.optimizer_2.zero_grad(set_to_none=True)
+            else:
+                self._clip_model_grad_norm_(batch_gen, self.transformer)
+                for param in self.transformer.parameters():
+                    # check if the gradient is not None and not zero
+                    assert param.grad is not None and param.grad.abs().sum() > 0
+                self.optimizer.step()
+                self.optimizer.zero_grad(set_to_none=True)
 
             if self.generator_ema is not None:
-                self.generator_ema.update(self.transformer)
+                # TODO: support EMA for transformer_2?
+                if self.train_transformer_2 and self.transformer_2 is not None:
+                    # Note: EMA currently only supports the main transformer
+                    # Could be extended to support transformer_2 in the future
+                    pass
+                else:
+                    self.generator_ema.update(self.transformer)
 
             avg_dmd_loss = torch.tensor(total_dmd_loss /
                                         gradient_accumulation_steps,
@@ -840,7 +901,13 @@ class DistillationPipeline(TrainingPipeline):
             assert param.grad is not None and param.grad.abs().sum() > 0
         self.fake_score_optimizer.step()
         self.fake_score_lr_scheduler.step()
-        self.lr_scheduler.step()
+        
+        # Step the appropriate scheduler
+        if self.train_transformer_2 and self.transformer_2 is not None:
+            self.lr_scheduler_2.step()
+        else:
+            self.lr_scheduler.step()
+            
         self.fake_score_optimizer.zero_grad(set_to_none=True)
         avg_fake_score_loss = torch.tensor(total_fake_score_loss /
                                            gradient_accumulation_steps,

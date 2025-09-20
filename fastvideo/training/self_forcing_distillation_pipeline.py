@@ -180,10 +180,13 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             noisy_latent, timestep, training_batch.conditional_dict,
             training_batch)
 
+        # Use the appropriate transformer
+        current_model = self.transformer_2 if self.train_transformer_2 else self.transformer
+
         # Step 5: Forward pass with KV cache if available
-        if hasattr(self.transformer, '_forward_inference'):
+        if hasattr(current_model, '_forward_inference'):
             # Use causal inference forward with KV cache
-            pred_noise = self.transformer(
+            pred_noise = current_model(
                 hidden_states=training_batch.input_kwargs['hidden_states'],
                 encoder_hidden_states=training_batch.
                 input_kwargs['encoder_hidden_states'],
@@ -196,7 +199,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 cache_start=0).permute(0, 2, 1, 3, 4)
         else:
             # Fallback to regular forward
-            pred_noise = self.transformer(
+            pred_noise = current_model(
                 **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
         # Step 6: Convert noise prediction to video prediction
@@ -209,6 +212,19 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         self._reset_simulation_caches(kv_cache, crossattn_cache)
 
         return pred_video
+    
+    def _enable_training(self, model: torch.nn.Module, optimizer: torch.optim.Optimizer) -> None:
+        """Enable training mode and gradients for the specified model."""
+        for param in model.parameters():
+            param.requires_grad = True
+        model.train()
+        optimizer.zero_grad()
+
+    def _disable_training(self, model: torch.nn.Module, optimizer: torch.optim.Optimizer) -> None:
+        """Disable training mode and gradients for the specified model."""
+        for param in model.parameters():
+            param.requires_grad = False
+        optimizer.zero_grad(set_to_none=True)
 
     def _generator_multi_step_simulation_forward(
             self,
@@ -305,8 +321,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 training_batch_temp = self._build_distill_input_kwargs(
                     initial_latent, timestep * 0,
                     training_batch.conditional_dict, training_batch)
-
-                self.transformer(
+            # we process the image latent with self.transformer_2 (low-noise expert)
+                current_model = self.transformer_2 if self.transformer_2 is not None else self.transformer
+                current_model(
                     hidden_states=training_batch_temp.
                     input_kwargs['hidden_states'],
                     encoder_hidden_states=training_batch_temp.
@@ -345,6 +362,16 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 timestep = torch.ones([batch_size, current_num_frames],
                                       device=noise.device,
                                       dtype=torch.int64) * current_timestep
+                
+                if current_timestep <= self.boundary_timestep and self.transformer_2 is not None:
+                    current_model = self.transformer_2
+                    self._enable_training(self.transformer_2, self.optimizer_2)
+                    self._disable_training(self.transformer, self.optimizer)
+                else:
+                    current_model = self.transformer
+                    self._enable_training(self.transformer, self.optimizer)
+                    if self.transformer_2 is not None:
+                        self._disable_training(self.transformer_2, self.optimizer_2)
 
                 if not exit_flag:
                     with torch.no_grad():
@@ -353,7 +380,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             noisy_input, timestep,
                             training_batch.conditional_dict, training_batch)
 
-                        pred_flow = self.transformer(
+                        pred_flow = current_model(
                             hidden_states=training_batch_temp.
                             input_kwargs['hidden_states'],
                             encoder_hidden_states=training_batch_temp.
@@ -393,7 +420,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                 noisy_input, timestep,
                                 training_batch.conditional_dict, training_batch)
 
-                            pred_flow = self.transformer(
+                            pred_flow = current_model(
                                 hidden_states=training_batch_temp.
                                 input_kwargs['hidden_states'],
                                 encoder_hidden_states=training_batch_temp.
@@ -413,7 +440,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             noisy_input, timestep,
                             training_batch.conditional_dict, training_batch)
 
-                        pred_flow = self.transformer(
+                        pred_flow = current_model(
                             hidden_states=training_batch_temp.
                             input_kwargs['hidden_states'],
                             encoder_hidden_states=training_batch_temp.
@@ -453,7 +480,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     denoised_pred, context_timestep,
                     training_batch.conditional_dict, training_batch)
 
-                self.transformer(
+                # context_timestep is 0 so we use transformer_2
+                current_model = self.transformer_2 if self.transformer_2 is not None else self.transformer
+                current_model(
                     hidden_states=training_batch_temp.
                     input_kwargs['hidden_states'],
                     encoder_hidden_states=training_batch_temp.
@@ -775,6 +804,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         if train_generator:
             logger.debug(f"Training generator at step {self.current_trainstep}")
             self.optimizer.zero_grad()
+            if self.transformer_2 is not None:
+                self.optimizer_2.zero_grad()
             total_generator_loss = 0.0
             generator_log_dict = {}
 
@@ -806,12 +837,23 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     training_batch.dmd_latent_vis_dict.update(
                         batch_gen.dmd_latent_vis_dict)
 
-            self._clip_model_grad_norm_(batch_gen, self.transformer)
-            self.optimizer.step()
-            self.lr_scheduler.step()
+            # Only clip gradients and step optimizer for the model that is currently training
+            if hasattr(self, 'train_transformer_2') and self.train_transformer_2 and self.transformer_2 is not None:
+                self._clip_model_grad_norm_(batch_gen, self.transformer_2)
+                self.optimizer_2.step()
+                self.lr_scheduler_2.step()
+            else:
+                self._clip_model_grad_norm_(batch_gen, self.transformer)
+                self.optimizer.step()
+                self.lr_scheduler.step()
 
             if self.generator_ema is not None:
-                self.generator_ema.update(self.transformer)
+                if hasattr(self, 'train_transformer_2') and self.train_transformer_2 and self.transformer_2 is not None:
+                    # Note: EMA currently only supports the main transformer
+                    # Could be extended to support transformer_2 in the future
+                    pass
+                else:
+                    self.generator_ema.update(self.transformer)
 
             avg_generator_loss = torch.tensor(total_generator_loss /
                                               gradient_accumulation_steps,
