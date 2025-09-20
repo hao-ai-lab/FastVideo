@@ -173,7 +173,7 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         #     device, dtype=torch.bfloat16), trajectory_timesteps.to(device)
 
         ## TEMP
-        path = "/mnt/weka/home/hao.zhang/wl/Self-Forcing/ode_single_full/00000.pt"
+        path = "/mnt/weka/home/hao.zhang/wei/FastVideo/data/ode_vidprom_1_fv/00000.pt"
         b = torch.load(path)
         for k, v in b.items():
             logger.info(f"b[{k}]: {type(v)}")
@@ -255,11 +255,12 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         # Select the K indexes from traj_latents using self._cached_closest_idx_per_dmd
         # traj_latents: [B, S, C, T, H, W], self._cached_closest_idx_per_dmd: [K]
         # Output: [B, K, C, T, H, W]
-        relevant_traj_latents = torch.index_select(
-            traj_latents,
-            dim=1,
-            index=self._cached_closest_idx_per_dmd.to(traj_latents.device))
-        logger.info(f"relevant_traj_latents: {relevant_traj_latents.shape}")
+        # relevant_traj_latents = torch.index_select(
+        #     traj_latents,
+        #     dim=1,
+        #     index=self._cached_closest_idx_per_dmd.to(traj_latents.device))
+        relevant_traj_latents = traj_latents
+        logger.info(f"relevant_traj_latents sum: {relevant_traj_latents.float().sum().item()}, relevant_traj_latents: {relevant_traj_latents.shape}")
         # assert relevant_traj_latents.shape[0] == 1
 
         indexes = self._get_timestep(  # [B, num_frames]
@@ -408,7 +409,6 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             logger.info("blocks[0].to_q param sum before backprop: %s", self.transformer.blocks[0].to_q.weight.float().sum().item())
             logger.info("blocks[0].to_q param grad sum: %s", self.transformer.blocks[0].to_q.weight.grad.float().sum().item())
             logger.info("Transformer grad dtype: %s", set(p.grad.dtype for p in self.transformer.parameters()))
-            logger.info(self.transformer.blocks[0].to_q.weight.grad)
             logger.info("Transformer param dtype before backprop: %s", set(p.dtype for p in self.transformer.parameters()))
             avg_loss = loss.detach().clone()
             training_batch.total_loss += avg_loss.item()
