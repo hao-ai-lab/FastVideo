@@ -464,6 +464,7 @@ class TransformerLoader(ComponentLoader):
             device=get_local_torch_device(),
             hsdp_replicate_dim=fastvideo_args.hsdp_replicate_dim,
             hsdp_shard_dim=fastvideo_args.hsdp_shard_dim,
+            default_dtype=default_dtype,
             cpu_offload=fastvideo_args.dit_cpu_offload,
             pin_cpu_memory=fastvideo_args.pin_cpu_memory,
             fsdp_inference=fastvideo_args.use_fsdp_inference,
@@ -476,6 +477,8 @@ class TransformerLoader(ComponentLoader):
 
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)
+        for param in model.parameters():
+            logger.info("Param dtype: %s", param.dtype)
 
         logger.info("Converting model to dtype: %s", default_dtype)
         model = model.to(default_dtype)

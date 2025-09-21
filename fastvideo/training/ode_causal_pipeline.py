@@ -101,6 +101,7 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         # self.max_timestep = int(self.training_args.max_timestep_ratio *
         #                         self.num_train_timestep)
         # self.real_score_guidance_scale = self.training_args.real_score_guidance_scale
+        self.manual_idx = 0
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing validation pipeline...")
@@ -163,12 +164,35 @@ class ODEInitTrainingPipeline(TrainingPipeline):
 
         # Move to device
         device = get_local_torch_device()
-        training_batch.encoder_hidden_states = encoder_hidden_states.to(
-            device, dtype=torch.bfloat16)
-        training_batch.encoder_attention_mask = encoder_attention_mask.to(
-            device, dtype=torch.bfloat16)
-        training_batch.infos = infos
+        # training_batch.encoder_hidden_states = encoder_hidden_states.to(
+        #     device, dtype=torch.bfloat16)
+        # training_batch.encoder_attention_mask = encoder_attention_mask.to(
+        #     device, dtype=torch.bfloat16)
+        # training_batch.infos = infos
 
+        # return training_batch, trajectory_latents.to(
+        #     device, dtype=torch.bfloat16), trajectory_timesteps.to(device)
+
+        ## TEMP
+        self.manual_idx = self.manual_idx % 55
+        path = f"/mnt/weka/home/hao.zhang/wl/Self-Forcing/ode_pt_vidprom_1000/{self.manual_idx:05d}.pt"
+        logger.info(f"path: {path}")
+        self.manual_idx += 1
+        # path = "/mnt/weka/home/hao.zhang/wl/Self-Forcing/ode_single_full/00000.pt"
+        b = torch.load(path)
+        for k, v in b.items():
+            logger.info(f"b[{k}]: {type(v)}")
+            if isinstance(v, torch.Tensor):
+                logger.info(f"b[{k}]: {v.shape}")
+            else:
+                logger.info(f"b[{k}]: {v}")
+        training_batch.encoder_hidden_states = b["text_embedding"][0].unsqueeze(
+            0).to(device, dtype=torch.bfloat16)
+        trajectory_latents = b["ode_latent"].to(device, dtype=torch.bfloat16)
+        logger.info(f"trajectory_latents: {trajectory_latents.shape}")
+        logger.info(
+            f"encoder_hidden_states: {training_batch.encoder_hidden_states.shape}"
+        )
         return training_batch, trajectory_latents.to(
             device, dtype=torch.bfloat16), trajectory_timesteps.to(device)
 
@@ -223,7 +247,8 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             # distances_ks = (s_steps.unsqueeze(0) - dmd.unsqueeze(1)).abs()
             # self._cached_closest_idx_per_dmd = distances_ks.argmin(dim=1).to(torch.long).cpu()  # [K]
             self._cached_closest_idx_per_dmd = torch.tensor(
-                [0, 12, 24, 36], dtype=torch.long).cpu()
+                # [0, 12, 24, 36], dtype=torch.long).cpu()
+                [0, 1, 2, 3], dtype=torch.long).cpu()
             logger.info(
                 f"self._cached_closest_idx_per_dmd: {self._cached_closest_idx_per_dmd}"
             )
@@ -320,6 +345,8 @@ class ODEInitTrainingPipeline(TrainingPipeline):
 
     def train_one_step(self, training_batch):  # type: ignore[override]
         self.transformer.train()
+        for name, param in self.transformer.named_parameters():
+            assert param.requires_grad, "FUBAR"
         self.optimizer.zero_grad()
         training_batch.total_loss = 0.0
         args = cast(TrainingArgs, self.training_args)
