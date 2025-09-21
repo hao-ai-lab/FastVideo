@@ -29,15 +29,6 @@ from fastvideo.utils import current_stream
 
 logger = init_logger(__name__)
 
-# from vllm.distributed.utils import StatelessProcessGroup
-# from vllm.logger import logger
-
-# from vllm_ascend.distributed.device_communicators.pyhccl_wrapper import (
-#     HCCLLibrary, aclrtStream_t, buffer_type, hcclComm_t, hcclDataTypeEnum,
-#     hcclRedOpTypeEnum, hcclUniqueId)
-# from vllm_ascend.utils import current_stream
-
-
 class PyHcclCommunicator:
 
     def __init__(
@@ -59,12 +50,10 @@ class PyHcclCommunicator:
         """
 
         if not isinstance(group, StatelessProcessGroup):
-            ###存疑
             assert dist.is_initialized()
             assert dist.get_backend(group) != dist.Backend.HCCL, (
                 "PyHcclCommunicator should be attached to a non-HCCL group.")
             # note: this rank is the rank in the group
-            print(f'dist.get_backend(group) {dist.get_backend(group) }')
             self.rank = dist.get_rank(group)
             self.world_size = dist.get_world_size(group)
         else:

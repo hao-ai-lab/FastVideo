@@ -26,9 +26,6 @@ from fastvideo.logger import init_logger
 from fastvideo.utils import find_hccl_library
 
 logger = init_logger(__name__)
-# from vllm.logger import logger
-
-# from vllm_ascend.utils import find_hccl_library
 
 # export types and functions from hccl to Python ===
 # for the original hccl definition, please check
@@ -133,10 +130,6 @@ class HCCLLibrary:
             ctypes.POINTER(hcclComm_t),
         ]),
 
-        # HcclResult HcclAllReduce(
-        #   void *sendBuf, void *recvBuf, uint64_t count,
-        #   HcclDataType dataType, HcclReduceOp op, HcclComm comm,
-        #   aclrtStream stream);
         Function("HcclAllReduce", hcclResult_t, [
             buffer_type,
             buffer_type,

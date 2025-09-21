@@ -65,6 +65,7 @@ class ComposedPipelineBase(ABC):
         if self._required_config_modules is None:
             raise NotImplementedError(
                 "Subclass must set _required_config_modules")
+
         maybe_init_distributed_environment_and_model_parallel(
             fastvideo_args.tp_size, fastvideo_args.sp_size)
 
@@ -151,6 +152,7 @@ class ComposedPipelineBase(ABC):
             assert fastvideo_args.pipeline_config.dit_precision == 'fp32', 'only fp32 is supported for training'
 
         logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)
+
         pipe = cls(model_path,
                    fastvideo_args,
                    required_config_modules=required_config_modules,

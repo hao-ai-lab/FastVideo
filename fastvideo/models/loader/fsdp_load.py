@@ -104,6 +104,7 @@ def maybe_load_fsdp_model(
         if not training_mode and not fsdp_inference:
             hsdp_replicate_dim = world_size
             hsdp_shard_dim = 1
+        
         if current_platform.is_npu():
             with torch.device("cpu"):
                 device_mesh = init_device_mesh(
@@ -118,7 +119,7 @@ def maybe_load_fsdp_model(
             # (Replicate(), Shard(dim=0))
             mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
             mesh_dim_names=("replicate", "shard"),
-            )
+        )
         shard_model(model,
                     cpu_offload=cpu_offload,
                     reshard_after_forward=True,

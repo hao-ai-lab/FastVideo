@@ -273,6 +273,7 @@ class TextEncoderLoader(ComponentLoader):
 
             # Explicitly move model to target device after loading weights
             model = model.to(target_device)
+
             if use_cpu_offload:
                 # Disable FSDP for MPS as it's not compatible
                 if current_platform.is_mps():

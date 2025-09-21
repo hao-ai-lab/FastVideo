@@ -13,7 +13,6 @@ from fastvideo.platforms import current_platform
 if current_platform.is_npu():
     import torch_npu
     from torch_npu.contrib import transfer_to_npu
-from msprobe.pytorch import PrecisionDebugger, seed_all
 
 vsa_available = is_vsa_available()
 
@@ -59,7 +58,7 @@ class WanTrainingPipeline(TrainingPipeline):
 
 def main(args) -> None:
     logger.info("Starting training pipeline...")
-    breakpoint()
+
     pipeline = WanTrainingPipeline.from_pretrained(
         args.pretrained_model_name_or_path, args=args)
     args = pipeline.training_args
@@ -69,7 +68,6 @@ def main(args) -> None:
 
 if __name__ == "__main__":
     argv = sys.argv
-    seed_all(seed=42, mode=True)
     from fastvideo.fastvideo_args import TrainingArgs
     from fastvideo.utils import FlexibleArgumentParser
     parser = FlexibleArgumentParser()

@@ -1,31 +1,11 @@
-#
-# Copyright (c) 2025 Huawei Technologies Co., Ltd. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# This file is a part of the vllm-ascend project.
-#
-
 import gc
 import os
 from datetime import timedelta
 from typing import TYPE_CHECKING, Optional, Tuple
 
 import torch
-# import vllm.envs as envs
 from torch.distributed import ProcessGroup
 from torch.distributed.distributed_c10d import PrefixStore
-# from vllm.logger import logger
-# from vllm.platforms import Platform, PlatformEnum
 
 import os
 from collections.abc import Callable
@@ -41,21 +21,6 @@ from fastvideo.platforms.interface import (AttentionBackendEnum,
                                            DeviceCapability, Platform,
                                            PlatformEnum)
 from fastvideo.utils import import_pynvml
-
-# import vllm_ascend.envs as envs_ascend
-# from vllm_ascend.ascend_config import check_ascend_config, init_ascend_config
-# from vllm_ascend.utils import (ASCEND_QUATIZATION_METHOD,
-#                                check_torchair_cache_exist,
-#                                delete_torchair_cache_file,
-#                                update_aclgraph_sizes)
-
-# if TYPE_CHECKING:
-#     from vllm.config import ModelConfig, VllmConfig
-#     from vllm.utils import FlexibleArgumentParser
-# else:
-#     ModelConfig = None
-#     VllmConfig = None
-#     FlexibleArgumentParser = None
 
 logger = init_logger(__name__)
 
@@ -115,8 +80,8 @@ class NPUPlatform(Platform):
     @classmethod
     def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None,
                              head_size: int, dtype: torch.dtype) -> str:
-        # TODO(will): maybe come up with a more general interface for local attention
-        # if distributed is False, we always try to use Flash attn
+        # the NPU only supports Flash Attention
+        # TODO(will): Other tasks will be synchronized in subsequent updates.
 
         logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s",
                     envs.FASTVIDEO_ATTENTION_BACKEND)
@@ -216,9 +181,6 @@ class NPUPlatform(Platform):
 
         return "fastvideo.attention.backends.flash_attn.FlashAttentionBackend"
 
-    @classmethod
-    def get_punica_wrapper(cls) -> str:
-        return "vllm_ascend.lora.punica_wrapper.punica_npu.PunicaWrapperNPU"
 
     @classmethod
     def get_current_memory_usage(cls,
@@ -235,19 +197,6 @@ class NPUPlatform(Platform):
     def is_pin_memory_available(cls):
         return True
 
-    # @classmethod
-    # def supports_v1(cls, model_config: ModelConfig) -> bool:
-    #     """Returns whether the current platform can support v1 for the supplied
-    #     model configuration.
-    #     """
-    #     return True
-
-    # @classmethod
-    # def get_piecewise_backend_cls(cls) -> str:
-    #     """
-    #     Get piecewise backend class for piecewise graph.
-    #     """
-    #     return "vllm_ascend.compilation.piecewise_backend.NPUPiecewiseBackend"  # noqa
 
     @classmethod
     def stateless_init_device_torch_dist_pg(
@@ -276,10 +225,6 @@ class NPUPlatform(Platform):
         backend_class = ProcessGroupHCCL(prefix_store, group_rank, group_size,
                                          backend_options)
         device = torch.device("npu")
-        # TODO(Yizhou): Like we mentioned above, _set_default_backend is not
-        # implemented in the 2.5.1 version of PyTorch. But we need to set it
-        # after the latest version is released.
-        # pg._set_default_backend(backend_type)
         backend_class._set_sequence_number_for_group()
         backend_type = ProcessGroup.BackendType.CUSTOM
 
