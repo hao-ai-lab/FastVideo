@@ -92,11 +92,16 @@ class DecodingStage(PipelineStage):
             vae_autocast_enabled = (vae_dtype != torch.float32
                                     ) and not fastvideo_args.disable_autocast
 
-            if isinstance(self.vae.scaling_factor, torch.Tensor):
-                latents = latents / self.vae.scaling_factor.to(
-                    latents.device, latents.dtype)
-            else:
-                latents = latents / self.vae.scaling_factor
+            # TEMPORARY: Handle diffusers VAE compatibility
+            if hasattr(self.vae, 'scaling_factor'):
+                if isinstance(self.vae.scaling_factor, torch.Tensor):
+                    latents = latents / self.vae.scaling_factor.to(
+                        latents.device, latents.dtype)
+                else:
+                    latents = latents / self.vae.scaling_factor
+            elif hasattr(self.vae, 'config') and hasattr(self.vae.config, 'scaling_factor'):
+                # Fallback to config scaling factor for diffusers VAE
+                latents = latents / self.vae.config.scaling_factor
 
             # Apply shifting if needed
             if (hasattr(self.vae, "shift_factor")
@@ -117,7 +122,15 @@ class DecodingStage(PipelineStage):
                 #     self.vae.enable_parallel()
                 if not vae_autocast_enabled:
                     latents = latents.to(vae_dtype)
-                image = self.vae.decode(latents)
+                decode_output = self.vae.decode(latents)
+
+                # TEMPORARY: Handle diffusers VAE decode output compatibility
+                if hasattr(decode_output, 'sample'):
+                    # Diffusers VAE returns DecoderOutput with .sample attribute
+                    image = decode_output.sample
+                else:
+                    # FastVideo VAE returns tensor directly
+                    image = decode_output
 
         # Normalize image to [0, 1] range
         image = (image / 2 + 0.5).clamp(0, 1)

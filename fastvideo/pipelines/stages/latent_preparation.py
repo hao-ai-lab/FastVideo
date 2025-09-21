@@ -246,6 +246,9 @@ class CosmosLatentPreparationStage(PipelineStage):
                 # Create VideoProcessor with same parameters as diffusers Cosmos pipeline
                 vae_scale_factor_spatial = 8  # Same as diffusers
                 video_processor = VideoProcessor(vae_scale_factor=vae_scale_factor_spatial)
+                import numpy as np
+                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                    f.write(f"FastVideo image sum: {np.array(batch.pil_image).sum():.6f}\n")
                 
                 # Use exact same method as diffusers: preprocess image then unsqueeze for time dimension
                 processed_image = video_processor.preprocess(batch.pil_image, height, width)
@@ -254,15 +257,19 @@ class CosmosLatentPreparationStage(PipelineStage):
                 # Add time dimension exactly like diffusers: unsqueeze(2)  
                 video = processed_image.unsqueeze(2)
                 logger.info(f"CosmosLatentPreparationStage - After unsqueeze(2): shape={video.shape}, dtype={video.dtype}, device={video.device}")
+
+                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                    f.write(f"FastVideo processed video sum: {video.float().sum().item():.6f}\n")
                 
                 # Exactly match diffusers' device/dtype handling: to(device=device, dtype=vae_dtype)
-                # Get VAE dtype exactly like diffusers
+                # Get VAE dtype exactly like diffusers - but force bfloat16 to match diffusers
                 if self.vae is not None:
                     vae_dtype = next(self.vae.parameters()).dtype  # Get VAE's parameter dtype
                 else:
                     vae_dtype = dtype
-                
-                video = video.to(device=device, dtype=vae_dtype)
+
+                # Force bfloat16 to match diffusers exactly
+                video = video.to(device=device, dtype=torch.bfloat16)
                 logger.info(f"CosmosLatentPreparationStage - After to(device, dtype): shape={video.shape}, dtype={video.dtype}, device={video.device}, vae_dtype={vae_dtype}")
         elif hasattr(batch, 'preprocessed_image') and batch.preprocessed_image is not None:
             logger.info(f"CosmosLatentPreparationStage - Found preprocessed_image of type: {type(batch.preprocessed_image)}")
@@ -292,7 +299,16 @@ class CosmosLatentPreparationStage(PipelineStage):
                 num_cond_latent_frames = (num_cond_frames - 1) // vae_scale_factor_temporal + 1
                 num_padding_frames = num_frames - num_cond_frames
                 last_frame = video[:, :, -1:]
+                print(f"[FASTVIDEO PADDING DEBUG] last_frame dtype: {last_frame.dtype}, shape: {last_frame.shape}")
+                print(f"[FASTVIDEO PADDING DEBUG] num_padding_frames: {num_padding_frames}")
+                print(f"[FASTVIDEO PADDING DEBUG] last_frame sum: {last_frame.float().sum().item():.6f}")
                 padding = last_frame.repeat(1, 1, num_padding_frames, 1, 1)
+                print(f"[FASTVIDEO PADDING DEBUG] padding dtype: {padding.dtype}, shape: {padding.shape}")
+
+                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                    f.write(f"FastVideo padding: {padding.float().sum().item():.6f}\n")
+                    f.write(f"FastVideo padding debug: last_frame_dtype={last_frame.dtype}, padding_dtype={padding.dtype}, num_padding_frames={num_padding_frames}\n")
+                    f.write(f"FastVideo padding debug: last_frame_sum={last_frame.float().sum().item():.6f}\n")
                 video = torch.cat([video, padding], dim=2)
                 logger.info(f"CosmosLatentPreparationStage - Padding {num_cond_frames} conditioning frames with {num_padding_frames} repeated frames")
             
@@ -312,51 +328,45 @@ class CosmosLatentPreparationStage(PipelineStage):
                     f.write(f"FastVideo VAE: input_video_shape = {video.shape}\n")
                     f.write(f"FastVideo VAE: input_video_sum = {video.float().sum().item():.6f}\n")
                 
+                # Convert VAE to video dtype instead of video to VAE dtype
+                vae_dtype_for_encoding = next(self.vae.parameters()).dtype
+                print(f"[FASTVIDEO VAE DEBUG] Original: video dtype={video.dtype}, VAE dtype={vae_dtype_for_encoding}")
+                print(f"[FASTVIDEO VAE DEBUG] Converting VAE from {vae_dtype_for_encoding} to {video.dtype} to match diffusers")
+
+                # Convert VAE to bfloat16 to match diffusers exactly
+                self.vae = self.vae.to(dtype=video.dtype)
+                new_vae_dtype = next(self.vae.parameters()).dtype
+                print(f"[FASTVIDEO VAE DEBUG] VAE converted to: {new_vae_dtype}")
+                print(f"[FASTVIDEO VAE DEBUG] Video input sum: {video.float().sum().item():.6f}")
+
+                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                    f.write(f"FastVideo VAE dtype conversion: VAE {vae_dtype_for_encoding} -> {new_vae_dtype} (to match video {video.dtype})\n")
+                    f.write(f"FastVideo VAE video_input_sum: {video.float().sum().item():.6f}\n")
+
+                # Use exact same logic as diffusers to eliminate VAE differences
+                def retrieve_latents(encoder_output, generator=None):
+                    if hasattr(encoder_output, "latent_dist"):
+                        return encoder_output.latent_dist.sample(generator)
+                    elif hasattr(encoder_output, "latents"):
+                        return encoder_output.latents
+                    elif hasattr(encoder_output, "sample"):
+                        return encoder_output.sample(generator)
+                    elif isinstance(encoder_output, torch.Tensor):
+                        return encoder_output
+                    else:
+                        # Debug what attributes are available
+                        attrs = [attr for attr in dir(encoder_output) if not attr.startswith('_')]
+                        print(f"[FASTVIDEO VAE DEBUG] VAE output attributes: {attrs}")
+                        print(f"[FASTVIDEO VAE DEBUG] VAE output type: {type(encoder_output)}")
+                        raise AttributeError(f"Could not access latents of provided encoder_output. Available attributes: {attrs}")
+
                 if isinstance(generator, list):
-                    init_latents = []
-                    for i in range(batch_size):
-                        vae_output = self.vae.encode(video[i].unsqueeze(0))
-                        logger.info(f"CosmosLatentPreparationStage - VAE output type: {type(vae_output)}, attributes: {dir(vae_output)}")
-                        
-                        # Handle different VAE output types with fresh generator for VAE operations
-                        vae_generator = torch.Generator(device="cpu").manual_seed(100)
-                        if hasattr(vae_output, 'latent_dist'):
-                            init_latents.append(vae_output.latent_dist.sample(vae_generator))
-                        elif hasattr(vae_output, 'latents'):
-                            init_latents.append(vae_output.latents)
-                        elif hasattr(vae_output, 'sample'):
-                            init_latents.append(vae_output.sample(vae_generator))
-                        elif isinstance(vae_output, torch.Tensor):
-                            # Direct tensor output
-                            init_latents.append(vae_output)
-                        else:
-                            # Try to get the first attribute that looks like latents
-                            attrs = [attr for attr in dir(vae_output) if not attr.startswith('_')]
-                            logger.info(f"CosmosLatentPreparationStage - Available attributes: {attrs}")
-                            raise AttributeError(f"Could not access latents from VAE output. Available attributes: {attrs}")
+                    init_latents = [
+                        retrieve_latents(self.vae.encode(video[i].unsqueeze(0)), generator=torch.Generator(device="cpu").manual_seed(100))
+                        for i in range(batch_size)
+                    ]
                 else:
-                    init_latents_list = []
-                    for vid in video:
-                        vae_output = self.vae.encode(vid.unsqueeze(0))
-                        logger.info(f"CosmosLatentPreparationStage - VAE output type: {type(vae_output)}, attributes: {dir(vae_output)}")
-                        
-                        # Handle different VAE output types with fresh generator for VAE operations
-                        vae_generator = torch.Generator(device="cpu").manual_seed(100)
-                        if hasattr(vae_output, 'latent_dist'):
-                            init_latents_list.append(vae_output.latent_dist.sample(vae_generator))
-                        elif hasattr(vae_output, 'latents'):
-                            init_latents_list.append(vae_output.latents)
-                        elif hasattr(vae_output, 'sample'):
-                            init_latents_list.append(vae_output.sample(vae_generator))
-                        elif isinstance(vae_output, torch.Tensor):
-                            # Direct tensor output
-                            init_latents_list.append(vae_output)
-                        else:
-                            # Try to get the first attribute that looks like latents
-                            attrs = [attr for attr in dir(vae_output) if not attr.startswith('_')]
-                            logger.info(f"CosmosLatentPreparationStage - Available attributes: {attrs}")
-                            raise AttributeError(f"Could not access latents from VAE output. Available attributes: {attrs}")
-                    init_latents = init_latents_list
+                    init_latents = [retrieve_latents(self.vae.encode(vid.unsqueeze(0)), torch.Generator(device="cpu").manual_seed(100)) for vid in video]
                 
                 init_latents = torch.cat(init_latents, dim=0).to(dtype)
                 print(f"[FASTVIDEO CONDITIONING DEBUG] Raw VAE latents sum = {init_latents.float().sum().item()}")

@@ -815,8 +815,9 @@ class CosmosDenoisingStage(DenoisingStage):
                                 f.write(f"  DTYPES: hidden_states={cond_latent.dtype}, timestep={cond_timestep.dtype}, encoder_hidden_states={batch.prompt_embeds[0].dtype}\n")
                                 f.write(f"  hidden_states first 5 values: {cond_latent.flatten()[:5].float()}\n")
                                 f.write(f"  encoder_hidden_states first 5 values: {batch.prompt_embeds[0].flatten()[:5].float()}\n")
-                        
+                                f.write(f"  [FASTVIDEO DENOISING] About to call transformer with hidden_states sum = {cond_latent.float().sum().item()}\n")
                         print(f"[FASTVIDEO DENOISING] About to call transformer with hidden_states sum = {cond_latent.float().sum().item()}")
+
                         noise_pred = self.transformer(
                             hidden_states=cond_latent,  # Already converted to target_dtype above
                             timestep=cond_timestep.to(target_dtype),

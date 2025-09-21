@@ -76,8 +76,14 @@ class CosmosEmbedding(nn.Module):
     def forward(self, hidden_states: torch.Tensor,
                 timestep: torch.LongTensor) -> torch.Tensor:
         timesteps_proj = self.time_proj(timestep).type_as(hidden_states)
+        print(f"[FASTVIDEO] timesteps_proj before norm: {timesteps_proj.float().sum().item()}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO] timesteps_proj before norm: {timesteps_proj.float().sum().item()}\n")
         temb = self.t_embedder(timesteps_proj)
         embedded_timestep = self.norm(timesteps_proj)
+        print(f"[FASTVIDEO] embedded_timestep after norm: {embedded_timestep.float().sum().item()}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO] embedded_timestep after norm: {embedded_timestep.float().sum().item()}\n")
         return temb, embedded_timestep
 
 
@@ -133,10 +139,7 @@ class CosmosAdaLayerNormZero(nn.Module):
         else:
             self.linear_1 = nn.Linear(in_features, hidden_features, bias=False)
 
-        self.linear_2 = nn.Linear(
-            hidden_features if hidden_features is not None else in_features,
-            3 * in_features,
-            bias=False)
+        self.linear_2 = nn.Linear(hidden_features, 3 * in_features, bias=False)
 
     def forward(
         self,
@@ -197,10 +200,16 @@ class CosmosSelfAttention(nn.Module):
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
 
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO SELF-ATTN] INIT hidden_states: Q={hidden_states.float().sum().item()}\n")
+
         # Get QKV
         query = self.to_q(hidden_states)
         key = self.to_k(encoder_hidden_states)
         value = self.to_v(encoder_hidden_states)
+        print(f"[FASTVIDEO SELF-ATTN] QKV sums: Q={query.float().sum().item()}, K={key.float().sum().item()}, V={value.float().sum().item()}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO SELF-ATTN] QKV sums: Q={query.float().sum().item()}, K={key.float().sum().item()}, V={value.float().sum().item()}\n")
 
         # Reshape for multi-head attention
         query = query.unflatten(2, (self.num_heads, -1)).transpose(1, 2)
@@ -209,9 +218,9 @@ class CosmosSelfAttention(nn.Module):
 
         # Apply normalization
         if self.norm_q is not None:
-            query = self.norm_q.forward_native(query)
+            query = self.norm_q(query)
         if self.norm_k is not None:
-            key = self.norm_k.forward_native(key)
+            key = self.norm_k(key)
 
         # Apply RoPE if provided
         if image_rotary_emb is not None:
@@ -224,12 +233,28 @@ class CosmosSelfAttention(nn.Module):
                                    use_real=True,
                                    use_real_unbind_dim=-2)
 
+        # Prepare for GQA (Grouped Query Attention)
+        if torch.onnx.is_in_onnx_export():
+            query_idx = torch.tensor(query.size(3), device=query.device)
+            key_idx = torch.tensor(key.size(3), device=key.device)
+            value_idx = torch.tensor(value.size(3), device=value.device)
+        else:
+            query_idx = query.size(3)
+            key_idx = key.size(3)
+            value_idx = value.size(3)
+        key = key.repeat_interleave(query_idx // key_idx, dim=3)
+        value = value.repeat_interleave(query_idx // value_idx, dim=3)
+
         # Attention computation
         # Use standard PyTorch scaled dot product attention
         attn_output = torch.nn.functional.scaled_dot_product_attention(
-            query, key, value, attn_mask=attention_mask, dropout_p=0.0
+            query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
         )
         attn_output = attn_output.transpose(1, 2).flatten(2, 3).type_as(query)
+        print(f"[FASTVIDEO TRANSFORMER] hidden_states: {attn_output.float().sum().item()}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO TRANSFORMER] hidden_states: {attn_output.float().sum().item()}\n")
+            f.write(f"self.to_out: {self.to_out}")
 
         # Output projection
         attn_output = self.to_out(attn_output)
@@ -275,6 +300,9 @@ class CosmosCrossAttention(nn.Module):
         query = self.to_q(hidden_states)
         key = self.to_k(encoder_hidden_states)
         value = self.to_v(encoder_hidden_states)
+        # print(f"[FASTVIDEO CROSS-ATTN] QKV sums: Q={query.float().sum().item()}, K={key.float().sum().item()}, V={value.float().sum().item()}")
+        # with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+        #     f.write(f"[FASTVIDEO CROSS-ATTN] QKV sums: Q={query.float().sum().item()}, K={key.float().sum().item()}, V={value.float().sum().item()}\n")
 
         # Reshape for multi-head attention
             # Standard PyTorch attention expects [batch, num_heads, seq_len, head_dim]
@@ -284,13 +312,25 @@ class CosmosCrossAttention(nn.Module):
 
         # Apply normalization
         if self.norm_q is not None:
-            query = self.norm_q.forward_native(query)
+            query = self.norm_q(query)
         if self.norm_k is not None:
-            key = self.norm_k.forward_native(key)
+            key = self.norm_k(key)
+
+        # Prepare for GQA (Grouped Query Attention)
+        if torch.onnx.is_in_onnx_export():
+            query_idx = torch.tensor(query.size(3), device=query.device)
+            key_idx = torch.tensor(key.size(3), device=key.device)
+            value_idx = torch.tensor(value.size(3), device=value.device)
+        else:
+            query_idx = query.size(3)
+            key_idx = key.size(3)
+            value_idx = value.size(3)
+        key = key.repeat_interleave(query_idx // key_idx, dim=3)
+        value = value.repeat_interleave(query_idx // value_idx, dim=3)
 
         # Attention computation
         attn_output = torch.nn.functional.scaled_dot_product_attention(
-            query, key, value, attn_mask=attention_mask, dropout_p=0.0
+            query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
         )
         attn_output = attn_output.transpose(1, 2).flatten(2, 3).type_as(query)
 
@@ -316,6 +356,11 @@ class CosmosTransformerBlock(nn.Module):
         super().__init__()
 
         hidden_size = num_attention_heads * attention_head_dim
+
+        print(f"[FASTVIDEO TRANSFORMER] hidden_size: Q={hidden_size}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO TRANSFORMER] hidden_size: Q={hidden_size}\n")
+
 
         self.norm1 = CosmosAdaLayerNormZero(in_features=hidden_size,
                                             hidden_features=adaln_lora_dim)
@@ -355,18 +400,51 @@ class CosmosTransformerBlock(nn.Module):
             hidden_states = hidden_states + extra_pos_emb
 
         # 1. Self Attention
+        print(f"[FASTVIDEO DEBUG] Before norm1: hidden_states={hidden_states.float().sum().item()}")
+        print(f"[FASTVIDEO DEBUG] Before norm1: embedded_timestep={embedded_timestep.float().sum().item()}")
+        print(f"[FASTVIDEO DEBUG] Before norm1: temb={temb.float().sum().item() if temb is not None else 'None'}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO DEBUG] Before norm1: hidden_states={hidden_states.float().sum().item()}\n")
+            f.write(f"[FASTVIDEO DEBUG] Before norm1: embedded_timestep={embedded_timestep.float().sum().item()}\n")
+            f.write(f"[FASTVIDEO DEBUG] Before norm1: temb={temb.float().sum().item() if temb is not None else 'None'}\n")
+        # Debug norm1 weights
+        print(f"[FASTVIDEO DEBUG] norm1.linear_1.weight sum: {self.norm1.linear_1.weight.float().sum().item()}")
+        print(f"[FASTVIDEO DEBUG] norm1.linear_2.weight sum: {self.norm1.linear_2.weight.float().sum().item()}")
+        print(f"[FASTVIDEO DEBUG] hidden_states dtype: {hidden_states.dtype}")
+        print(f"[FASTVIDEO DEBUG] embedded_timestep dtype: {embedded_timestep.dtype}")
+        print(f"[FASTVIDEO DEBUG] temb dtype: {temb.dtype if temb is not None else 'None'}")
+        print(f"[FASTVIDEO DEBUG] norm1.linear_1.weight dtype: {self.norm1.linear_1.weight.dtype}")
+        print(f"[FASTVIDEO DEBUG] norm1.linear_2.weight dtype: {self.norm1.linear_2.weight.dtype}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO DEBUG] norm1.linear_1.weight sum: {self.norm1.linear_1.weight.float().sum().item()}\n")
+            f.write(f"[FASTVIDEO DEBUG] norm1.linear_2.weight sum: {self.norm1.linear_2.weight.float().sum().item()}\n")
+            f.write(f"[FASTVIDEO DEBUG] hidden_states dtype: {hidden_states.dtype}\n")
+            f.write(f"[FASTVIDEO DEBUG] embedded_timestep dtype: {embedded_timestep.dtype}\n")
+            f.write(f"[FASTVIDEO DEBUG] temb dtype: {temb.dtype if temb is not None else 'None'}\n")
+            f.write(f"[FASTVIDEO DEBUG] norm1.linear_1.weight dtype: {self.norm1.linear_1.weight.dtype}\n")
+            f.write(f"[FASTVIDEO DEBUG] norm1.linear_2.weight dtype: {self.norm1.linear_2.weight.dtype}\n")
+
         norm_hidden_states, gate = self.norm1(hidden_states, embedded_timestep,
                                               temb)
+        print(f"[FASTVIDEO DEBUG] After norm1: norm_hidden_states={norm_hidden_states.float().sum().item()}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO DEBUG] After norm1: norm_hidden_states={norm_hidden_states.float().sum().item()}\n")
         attn_output = self.attn1(norm_hidden_states,
                                  image_rotary_emb=image_rotary_emb)
         hidden_states = hidden_states + gate * attn_output
 
         # 2. Cross Attention
+        # print(f"[FASTVIDEO] About to call cross-attention")
+        # with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+        #     f.write(f"[FASTVIDEO] About to call cross-attention\n")
         norm_hidden_states, gate = self.norm2(hidden_states, embedded_timestep,
                                               temb)
         attn_output = self.attn2(norm_hidden_states,
                                  encoder_hidden_states=encoder_hidden_states,
                                  attention_mask=attention_mask)
+        # print(f"[FASTVIDEO] Cross-attention completed")
+        # with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+        #     f.write(f"[FASTVIDEO] Cross-attention completed\n")
         hidden_states = hidden_states + gate * attn_output
 
         # 3. Feed Forward
@@ -604,6 +682,8 @@ class CosmosTransformer3DModel(BaseDiT):
                 padding_mask: torch.Tensor | None = None,
                 **kwargs) -> torch.Tensor:
         print(f"[FASTVIDEO TRANSFORMER] Input hidden_states sum = {hidden_states.float().sum().item()}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO TRANSFORMER] Input hidden_states sum = {hidden_states.float().sum().item()}\n")
         forward_batch = get_forward_context().forward_batch
         enable_teacache = forward_batch is not None and forward_batch.enable_teacache
 
@@ -676,9 +756,19 @@ class CosmosTransformer3DModel(BaseDiT):
         else:
             raise ValueError(f"Unsupported timestep shape: {timestep.shape}")
 
+        print(f"[FASTVIDEO] After patch_embed: {hidden_states.float().sum().item()}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO] After patch_embed: {hidden_states.float().sum().item()}\n")
+        print(f"[FASTVIDEO] After time_embed temb: {temb.float().sum().item()}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO] After time_embed temb: {temb.float().sum().item()}\n")
+        print(f"[FASTVIDEO] After time_embed embedded_timestep: {embedded_timestep.float().sum().item()}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO] After time_embed embedded_timestep: {embedded_timestep.float().sum().item()}\n")
+
         # 6. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
-            for block in self.transformer_blocks:
+            for i, block in enumerate(self.transformer_blocks):
                 hidden_states = self._gradient_checkpointing_func(
                     block,
                     hidden_states,
@@ -689,8 +779,12 @@ class CosmosTransformer3DModel(BaseDiT):
                     extra_pos_emb,
                     attention_mask,
                 )
+                if i < 3:  # Log first 3 blocks
+                    print(f"[FASTVIDEO] After block {i}: {hidden_states.float().sum().item()}")
+                    with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                        f.write(f"[FASTVIDEO] After block {i}: {hidden_states.float().sum().item()}\n")
         else:
-            for block in self.transformer_blocks:
+            for i, block in enumerate(self.transformer_blocks):
                 hidden_states = block(
                     hidden_states=hidden_states,
                     encoder_hidden_states=encoder_hidden_states,
@@ -700,10 +794,20 @@ class CosmosTransformer3DModel(BaseDiT):
                     extra_pos_emb=extra_pos_emb,
                     attention_mask=attention_mask,
                 )
+                if i < 3:  # Log first 3 blocks
+                    print(f"[FASTVIDEO] After block! {i}: {hidden_states.float().sum().item()}")
+                    with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                        f.write(f"[FASTVIDEO] After block! {i}: {hidden_states.float().sum().item()}\n")
 
         # 7. Output norm & projection & unpatchify
         hidden_states = self.norm_out(hidden_states, embedded_timestep, temb)
+        print(f"[FASTVIDEO] After norm_out: {hidden_states.float().sum().item()}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO] After norm_out: {hidden_states.float().sum().item()}\n")
         hidden_states = self.proj_out(hidden_states)
+        print(f"[FASTVIDEO] After proj_out: {hidden_states.float().sum().item()}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO] After proj_out: {hidden_states.float().sum().item()}\n")
         hidden_states = hidden_states.unflatten(2, (p_h, p_w, p_t, -1))
         hidden_states = hidden_states.unflatten(
             1, (post_patch_num_frames, post_patch_height, post_patch_width))
@@ -713,4 +817,6 @@ class CosmosTransformer3DModel(BaseDiT):
         hidden_states = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
 
         print(f"[FASTVIDEO TRANSFORMER] Output hidden_states sum = {hidden_states.float().sum().item()}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO TRANSFORMER] Output hidden_states sum = {hidden_states.float().sum().item()}\n")
         return hidden_states
