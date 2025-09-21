@@ -88,6 +88,7 @@ def maybe_load_fsdp_model(
         mp_policy=mp_policy,
     )
 
+    logger.info("Loading model with default_dtype: %s", default_dtype)
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
 
