@@ -147,8 +147,8 @@ class CausalWanSelfAttention(nn.Module):
                 # Assign new keys/values directly up to current_end
                 local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
                 local_start_index = local_end_index - num_new_tokens
-                # kv_cache["k"] = kv_cache["k"].detach()
-                # kv_cache["v"] = kv_cache["v"].detach()
+                kv_cache["k"] = kv_cache["k"].detach()
+                kv_cache["v"] = kv_cache["v"].detach()
                 # logger.info("kv_cache['k'] is in comp graph: %s", kv_cache["k"].requires_grad or kv_cache["k"].grad_fn is not None)
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
@@ -262,14 +262,9 @@ class CausalWanTransformerBlock(nn.Module):
         # *_msa.shape: [batch_size, num_frames, 1, inner_dim]
         # assert shift_msa.dtype == torch.float32
 
-        # logger.info("temb sum: %s, dtype: %s", temb.float().sum().item(), temb.dtype)
-        # logger.info("scale_msa sum: %s, dtype: %s", scale_msa.float().sum().item(), scale_msa.dtype)
-        # logger.info("shift_msa sum: %s, dtype: %s", shift_msa.float().sum().item(), shift_msa.dtype)
-
         # 1. Self-attention
         norm_hidden_states = (self.norm1(hidden_states).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) *
                         (1 + scale_msa) + shift_msa).flatten(1, 2)
-        # logger.info("norm_hidden_states sum: %s, shape: %s", norm_hidden_states.float().sum().item(), norm_hidden_states.shape)
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)

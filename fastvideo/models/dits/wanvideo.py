@@ -283,16 +283,16 @@ class WanTransformerBlock(nn.Module):
         # 2. Cross-attention
         if added_kv_proj_dim is not None:
             # I2V
-            self.attn2 = WanI2VCrossAttention(dim, 
-                                              num_heads, 
-                                              qk_norm=qk_norm, 
+            self.attn2 = WanI2VCrossAttention(dim,
+                                              num_heads,
+                                              qk_norm=qk_norm,
                                               eps=eps)
 
         else:
             # T2V
-            self.attn2 = WanT2VCrossAttention(dim, 
-                                              num_heads, 
-                                              qk_norm=qk_norm, 
+            self.attn2 = WanT2VCrossAttention(dim,
+                                              num_heads,
+                                              qk_norm=qk_norm,
                                               eps=eps)
 
         self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(
@@ -836,3 +836,4 @@ class WanTransformer3DModel(CachableDiT):
             return hidden_states + self.previous_residual_even
         else:
             return hidden_states + self.previous_residual_odd
+            
