@@ -95,11 +95,6 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         # Cache for nearest trajectory index per DMD step (computed lazily on first batch)
         self._cached_closest_idx_per_dmd = None
         self.num_train_timestep = self.noise_scheduler.num_train_timesteps
-        # self.min_timestep = int(self.training_args.min_timestep_ratio *
-        #                         self.num_train_timestep)
-        # self.max_timestep = int(self.training_args.max_timestep_ratio *
-        #                         self.num_train_timestep)
-        # self.real_score_guidance_scale = self.training_args.real_score_guidance_scale
         self.manual_idx = 0
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
@@ -226,20 +221,11 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         device = get_local_torch_device()
         target_latent = traj_latents[:, -1]
 
-        # logger.info(f"traj_latents: {traj_latents.shape}")
-        # logger.info(f"traj_timesteps: {traj_timesteps.shape}")
-
         # Shapes: traj_latents [B, S, C, T, H, W], traj_timesteps [B, S]
         B, S, num_frames, num_channels, height, width = traj_latents.shape
 
         # Lazily cache nearest trajectory index per DMD step based on the (fixed) S timesteps
         if self._cached_closest_idx_per_dmd is None:
-            # Use the first sample's trajectory timesteps; assumed identical across batches
-            # s_steps = traj_timesteps[0].to(torch.long)  # [S]
-            # dmd = cast(torch.Tensor, self.dmd_denoising_steps).to(s_steps.device)  # [K]
-            # distances_ks: [K, S] = |s_steps - dmd|
-            # distances_ks = (s_steps.unsqueeze(0) - dmd.unsqueeze(1)).abs()
-            # self._cached_closest_idx_per_dmd = distances_ks.argmin(dim=1).to(torch.long).cpu()  # [K]
             self._cached_closest_idx_per_dmd = torch.tensor(
                 # [0, 12, 24, 36], dtype=torch.long).cpu()
                 [0, 1, 2, 3],
@@ -250,7 +236,6 @@ class ODEInitTrainingPipeline(TrainingPipeline):
                 "corresponding timesteps: %s", self.noise_scheduler.timesteps[
                     self._cached_closest_idx_per_dmd])
 
-        # logger.info(f"traj_latents: {traj_latents.shape}")
         # Select the K indexes from traj_latents using self._cached_closest_idx_per_dmd
         # traj_latents: [B, S, C, T, H, W], self._cached_closest_idx_per_dmd: [K]
         # Output: [B, K, C, T, H, W]
@@ -333,22 +318,6 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             if S < 2:
                 raise ValueError("Trajectory must contain at least 2 steps")
 
-            # Sample per-sample current step i in [0, S-2]
-
-            # idx = torch.randint(low=0, high=S - 1, size=(B, ),
-            #                     device=traj_latents.device)
-
-            # Gather current latents and next latents
-            # batch_indices = torch.arange(B, device=traj_latents.device)
-            # current_latents = traj_latents[batch_indices, idx]  # [B, C, T,H,W]
-            # current_latent = traj_timesteps[:, -1, :, :, :, :]
-            # target_latents = traj_latents[:, -1, :, :, :, :]
-
-            # Corresponding timesteps t (long) -> cast per sample
-            # t = traj_timesteps[:, -1, :, :, :, :]
-            # if t.dtype != torch.long:
-            #     t = t.long()
-
             # Forward to predict next latent by stepping scheduler with predicted noise
             noise_pred, target_latent, t, latent_vis_dict = self._step_predict_next_latent(
                 traj_latents, traj_timesteps, text_embeds, text_attention_mask)
@@ -415,11 +384,6 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         # Log to wandb
         if self.global_rank == 0:
             wandb.log(wandb_loss_dict, step=step)
-
-        # dmd_latents_vis_dict = training_batch.dmd_latent_vis_dict
-        # fake_score_latents_vis_dict = training_batch.fake_score_latent_vis_dict
-        # fake_score_log_keys = ['generator_pred_video']
-        # dmd_log_keys = ['faker_score_pred_video', 'real_score_pred_video']
 
 
 def main(args) -> None:
