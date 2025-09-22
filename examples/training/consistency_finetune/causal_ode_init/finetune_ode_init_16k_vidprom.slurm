@@ -28,7 +28,6 @@ export MASTER_ADDR=${nodes[0]}
 export CUDA_VISIBLE_DEVICES=$SLURM_LOCALID
 export TOKENIZERS_PARALLELISM=false
 export WANDB_BASE_URL="https://api.wandb.ai"
-export WANDB_MODE=online
 export WANDB_API_KEY=your-wandb-api-key
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 

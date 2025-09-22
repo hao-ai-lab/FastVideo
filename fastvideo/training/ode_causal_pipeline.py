@@ -64,13 +64,11 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         self.noise_scheduler.set_timesteps(num_inference_steps=1000,
                                            training=True)
 
-        # logger.info(f"ARG dmd_denoising_steps: {training_args.pipeline_config.dmd_denoising_steps}")
         logger.info("dmd_denoising_steps: %s",
                     self.training_args.pipeline_config.dmd_denoising_steps)
         self.dmd_denoising_steps = torch.tensor([1000, 750, 500, 250],
                                                 dtype=torch.long,
                                                 device=get_local_torch_device())
-        # self.dmd_denoising_steps = torch.tensor([1000, 750, 500, 250], dtype=torch.long, device=get_local_torch_device())
         if training_args.warp_denoising_step:  # Warp the denoising step according to the scheduler time shift
             timesteps = torch.cat((self.noise_scheduler.timesteps.cpu(),
                                    torch.tensor([0],
@@ -80,7 +78,6 @@ class ODEInitTrainingPipeline(TrainingPipeline):
                                                  self.dmd_denoising_steps]
             logger.info("warped self.dmd_denoising_steps: %s",
                         self.dmd_denoising_steps)
-            # assert False, "warp_denoising_step must be false"
         else:
             raise ValueError("warp_denoising_step must be true")
 
@@ -103,8 +100,7 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         args_copy.inference_mode = True
         # Warm start validation with current transformer
         self.validation_pipeline = WanCausalDMDPipeline.from_pretrained(
-            # training_args.model_path,
-            "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers",
+            training_args.model_path,
             args=args_copy,  # type: ignore
             inference_mode=True,
             loaded_modules={
@@ -169,8 +165,9 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         return training_batch, trajectory_latents.to(
             device, dtype=torch.bfloat16), trajectory_timesteps.to(device)
 
-        ## TEMP
-        self.manual_idx = self.manual_idx % 55
+        ## TEMP Used for loading the sf .pt files directly
+        """
+        self.manual_idx = self.manual_idx % 155
         path = f"/mnt/weka/home/hao.zhang/wl/Self-Forcing/ode_pt_vidprom_1000/{self.manual_idx:05d}.pt"
         logger.info("path: %s", path)
         self.manual_idx += 1
@@ -182,8 +179,10 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         logger.info("trajectory_latents: %s", trajectory_latents.shape)
         logger.info("encoder_hidden_states: %s",
                     training_batch.encoder_hidden_states.shape)
+        assert trajectory_latents.shape[1] <= 10, "trajectory_latents.shape[1] must be <= 10"
         return training_batch, trajectory_latents.to(
             device, dtype=torch.bfloat16), trajectory_timesteps.to(device)
+        """
 
     def _get_timestep(self,
                       min_timestep: int,
@@ -227,9 +226,8 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         # Lazily cache nearest trajectory index per DMD step based on the (fixed) S timesteps
         if self._cached_closest_idx_per_dmd is None:
             self._cached_closest_idx_per_dmd = torch.tensor(
-                # [0, 12, 24, 36], dtype=torch.long).cpu()
-                [0, 1, 2, 3],
-                dtype=torch.long).cpu()
+                [0, 12, 24, 36], dtype=torch.long).cpu()
+            # [0, 1, 2, 3], dtype=torch.long).cpu()
             logger.info("self._cached_closest_idx_per_dmd: %s",
                         self._cached_closest_idx_per_dmd)
             logger.info(
@@ -264,6 +262,10 @@ class ODEInitTrainingPipeline(TrainingPipeline):
                                   1).expand(-1, -1, -1, num_channels, height,
                                             width).to(self.device)).squeeze(1)
         timestep = self.dmd_denoising_steps[indexes]
+        logger.info("selected timestep for rank %s: %s",
+                    self.global_rank,
+                    timestep,
+                    local_main_process_only=False)
 
         # Prepare inputs for transformer
         latent_vis_dict["noisy_input"] = noisy_input.permute(
