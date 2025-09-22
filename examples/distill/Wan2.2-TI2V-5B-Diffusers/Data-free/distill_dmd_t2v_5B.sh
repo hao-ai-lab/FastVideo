@@ -42,13 +42,14 @@ NUM_GPUS=8
 MODEL_PATH="Wan-AI/Wan2.2-TI2V-5B-Diffusers"
 DATA_DIR=your_data_dir
 VALIDATION_DIR=your_validation_path  #(example:validation_64.json)
+OUTPUT_DIR="checkpoints/wan_t2v_finetune"
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
   --tracker_project_name Wan_distillation
-  --output_dir "your_output_dir"
+  --output_dir "$OUTPUT_DIR"
   --max_train_steps 4000
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -92,11 +93,11 @@ validation_args=(
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 2e-5
+  --learning_rate 4e-6
   --lr_scheduler "cosine_with_min_lr"
   --min_lr_ratio 0.5
   --lr_warmup_steps 100
-  --fake_score_learning_rate 1e-5
+  --fake_score_learning_rate 2e-6
   --fake_score_lr_scheduler "cosine_with_min_lr"
   --mixed_precision "bf16"
   --training_state_checkpointing_steps 500

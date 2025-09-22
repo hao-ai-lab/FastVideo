@@ -92,11 +92,11 @@ validation_args=(
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 2e-5
+  --learning_rate 4e-6
   --lr_scheduler "cosine_with_min_lr"
   --min_lr_ratio 0.5
   --lr_warmup_steps 100
-  --fake_score_learning_rate 1e-5
+  --fake_score_learning_rate 2e-6
   --fake_score_lr_scheduler "cosine_with_min_lr"
   --mixed_precision "bf16"
   --training_state_checkpointing_steps 500
