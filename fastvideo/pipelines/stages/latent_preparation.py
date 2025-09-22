@@ -3,6 +3,7 @@
 Latent preparation stage for diffusion pipelines.
 """
 
+import torch
 from diffusers.utils.torch_utils import randn_tensor
 
 from fastvideo.distributed import get_local_torch_device
@@ -93,7 +94,7 @@ class LatentPreparationStage(PipelineStage):
         # Generate or use provided latents
         if latents is None:
             latents = randn_tensor(shape,
-                                   generator=generator,
+                                   generator=torch.Generator(device="cuda").manual_seed(1024),
                                    device=device,
                                    dtype=dtype)
         else:

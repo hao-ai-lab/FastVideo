@@ -128,6 +128,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     ]
 
                 batch_captions = valid_data["text"]
+                self.prompt_encoding_stage.text_encoders[0] = self.prompt_encoding_stage.text_encoders[0].to(dtype=torch.bfloat16).to(dtype=torch.float32)
                 # Encode text using the standalone TextEncodingStage API
                 prompt_embeds_list, prompt_masks_list = self.prompt_encoding_stage.encode_text(
                     batch_captions,
@@ -136,6 +137,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     return_attention_mask=True,
                 )
                 prompt_embeds = prompt_embeds_list[0]
+                logger.info("prompt_embeds sum: %s, prompt_embeds shape: %s, prompt_embeds dtype: %s", prompt_embeds.float().sum(), prompt_embeds.shape, prompt_embeds.dtype)
                 prompt_attention_masks = prompt_masks_list[0]
                 assert prompt_embeds.shape[0] == prompt_attention_masks.shape[0]
 
@@ -149,9 +151,9 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                         encoder_index=[0],
                         return_attention_mask=True,
                     )
-                    negative_prompt_embed = negative_prompt_embeds_list[0][0]
+                    negative_prompt_embed = negative_prompt_embeds_list[0]
                     negative_prompt_attention_mask = negative_prompt_masks_list[
-                        0][0]
+                        0]
                 else:
                     negative_prompt_embed = None
                     negative_prompt_attention_mask = None
@@ -182,7 +184,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     batch.height = args.max_height
                     batch.width = args.max_width
                     batch.fps = args.train_fps
-                    batch.guidance_scale = 6.0
+                    batch.guidance_scale = 3.0
                     batch.do_classifier_free_guidance = True
 
                     result_batch = self.input_validation_stage(
@@ -193,13 +195,18 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                         result_batch, fastvideo_args)
                     result_batch = self.denoising_stage(result_batch,
                                                         fastvideo_args)
-                    result_batch = self.decoding_stage(result_batch,
-                                                       fastvideo_args)
+                    # result_batch = self.decoding_stage(result_batch,
+                    #                                    fastvideo_args)
                     trajectory_latents.append(
                         result_batch.trajectory_latents.cpu())
                     trajectory_timesteps.append(
                         result_batch.trajectory_timesteps.cpu())
-                    trajectory_decoded.append(result_batch.trajectory_decoded)
+                    # trajectory_decoded.append(result_batch.trajectory_decoded)
+
+                trajectory_latents = torch.stack(trajectory_latents, dim=0).squeeze(0)
+                trajecotry_latents = trajectory_latents[:, [0, 12, 24, 36, -1]]
+                logger.info("trajecotry_latents sum: %s, trajecotry_latents shape: %s, trajecotry_latents dtype: %s", trajecotry_latents.float().sum(), trajecotry_latents.shape, trajecotry_latents.dtype)
+                assert False
 
                 # Prepare extra features for text-only processing
                 extra_features = {

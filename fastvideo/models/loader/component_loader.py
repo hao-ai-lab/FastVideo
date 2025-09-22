@@ -238,6 +238,7 @@ class TextEncoderLoader(ComponentLoader):
                 1]
 
         target_device = get_local_torch_device()
+        logger.info("Loading text encoder in %s precision", encoder_precision)
         # TODO(will): add support for other dtypes
         return self.load_model(model_path, encoder_config, target_device,
                                fastvideo_args, encoder_precision)
