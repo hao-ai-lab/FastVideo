@@ -158,6 +158,7 @@ class FastVideoArgs:
         "transformer": True,
         "vae": True,
     })
+    override_transformer_cls_name: str | None = None
 
     # # DMD parameters
     # dmd_denoising_steps: List[int] | None = field(default=None)
@@ -395,6 +396,12 @@ class FastVideoArgs:
             action=StoreBoolean,
             default=FastVideoArgs.enable_stage_verification,
             help="Enable input/output verification for pipeline stages",
+        )
+        parser.add_argument(
+            "--override-transformer-cls-name",
+            type=str,
+            default=FastVideoArgs.override_transformer_cls_name,
+            help="Override transformer cls name",
         )
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)

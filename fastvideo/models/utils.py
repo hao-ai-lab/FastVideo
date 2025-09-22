@@ -171,10 +171,10 @@ def pred_noise_to_pred_video(pred_noise: torch.Tensor,
     # timestep shape should be [B]
     dtype = pred_noise.dtype
     device = pred_noise.device
-    pred_noise = pred_noise.float().to(device)
-    noise_input_latent = noise_input_latent.float().to(device)
-    sigmas = scheduler.sigmas.float().to(device)
-    timesteps = scheduler.timesteps.float().to(device)
+    pred_noise = pred_noise.double().to(device)
+    noise_input_latent = noise_input_latent.double().to(device)
+    sigmas = scheduler.sigmas.double().to(device)
+    timesteps = scheduler.timesteps.double().to(device)
     timestep_id = torch.argmin(
         (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
     sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)

@@ -520,6 +520,10 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 self.transformer.train()
                 self.sp_group.barrier()
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
+                if self.training_args.log_visualization:
+                    self.visualize_intermediate_latents(training_batch,
+                                                        self.training_args,
+                                                        step)
                 self._log_validation(self.transformer, self.training_args, step)
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                 trainable_params = round(
@@ -720,3 +724,10 @@ class TrainingPipeline(LoRAPipeline, ABC):
         # Re-enable gradients for training
         training_args.inference_mode = False
         transformer.train()
+
+    def visualize_intermediate_latents(self, training_batch: TrainingBatch,
+                                       training_args: TrainingArgs, step: int):
+        """Add visualization data to wandb logging and save frames to disk."""
+        raise NotImplementedError(
+            "Visualize intermediate latents is not implemented for training pipeline"
+        )
