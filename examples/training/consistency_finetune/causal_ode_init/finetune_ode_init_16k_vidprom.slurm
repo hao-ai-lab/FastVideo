@@ -14,7 +14,7 @@ set -e -x
 
 # Environment Setup
 source ~/conda/miniconda/bin/activate
-conda activate will-fv
+conda activate your-conda-env
 
 export WANDB_MODE="online"
 export NCCL_P2P_DISABLE=1
@@ -29,7 +29,7 @@ export CUDA_VISIBLE_DEVICES=$SLURM_LOCALID
 export TOKENIZERS_PARALLELISM=false
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
-export WANDB_API_KEY='8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde'
+export WANDB_API_KEY=your-wandb-api-key
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 echo "MASTER_ADDR: $MASTER_ADDR"
@@ -37,9 +37,10 @@ echo "NODE_RANK: $NODE_RANK"
 
 
 MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
-# MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-DATA_DIR="/mnt/sharefs/users/hao.zhang/klin/preproc/data/test-ode-preprocessing-16k-t2v-1-3b-81-new/"
+DATA_DIR="your-data-dir"
 VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_ode_init/validation.json"
+OUTPUT_DIR="your-output-dir"
+INIT_WEIGHTS_FROM_SAFETENSORS="your-init-weights-from-safetensors" # bidirectional weights from Wan2.1-T2V-1.3B-Diffusers
 NUM_GPUS=8
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
@@ -47,7 +48,7 @@ NUM_GPUS=8
 # Training arguments
 training_args=(
   --tracker_project_name "wan_ode_init"
-  --output_dir "vidprom_8b16k_2e-6"
+  --output_dir $OUTPUT_DIR
   --override_transformer_cls_name "CausalWanTransformer3DModel"
   --wandb_run_name "vidprom_8b16k_ode_init_2e-6"
   # --resume_from_checkpoint "ode_init_diffusers/"
@@ -93,7 +94,7 @@ validation_args=(
   --validation_steps 50
   --validation_sampling_steps "50"
   --validation_guidance_scale "6.0"
-  --init_weights_from_safetensors "/mnt/weka/home/hao.zhang/wl/.cache/huggingface/hub/models--Wan-AI--Wan2.1-T2V-1.3B-Diffusers/snapshots/0fad780a534b6463e45facd96134c9f345acfa5b/transformer"
+  --init_weights_from_safetensors $INIT_WEIGHTS_FROM_SAFETENSORS
 )
 
 # Optimizer arguments
