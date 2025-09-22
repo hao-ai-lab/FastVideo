@@ -300,8 +300,6 @@ class ODEInitTrainingPipeline(TrainingPipeline):
 
     def train_one_step(self, training_batch):  # type: ignore[override]
         self.transformer.train()
-        for name, param in self.transformer.named_parameters():
-            assert param.requires_grad, "FUBAR"
         self.optimizer.zero_grad()
         training_batch.total_loss = 0.0
         args = cast(TrainingArgs, self.training_args)
