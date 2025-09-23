@@ -273,11 +273,10 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         latent_vis_dict["x0"] = target_latent.permute(0, 2, 1, 3,
                                                       4).detach().clone().cpu()
 
-        model_dtype = next(self.transformer.parameters()).dtype
         input_kwargs = {
             "hidden_states": noisy_input.permute(0, 2, 1, 3, 4),
             "encoder_hidden_states": encoder_hidden_states,
-            "timestep": timestep.to(device, dtype=model_dtype),
+            "timestep": timestep.to(device, dtype=torch.bfloat16),
             "return_dict": False,
         }
         # Predict noise and step the scheduler to obtain next latent
@@ -290,7 +289,7 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         pred_video = pred_noise_to_pred_video(
             pred_noise=noise_pred.flatten(0, 1),
             noise_input_latent=noisy_input.flatten(0, 1),
-            timestep=timestep.to(dtype=model_dtype).flatten(0, 1),
+            timestep=timestep.to(dtype=torch.bfloat16).flatten(0, 1),
             scheduler=self.modules["scheduler"]).unflatten(
                 0, noise_pred.shape[:2])
         latent_vis_dict["pred_video"] = pred_video.permute(
