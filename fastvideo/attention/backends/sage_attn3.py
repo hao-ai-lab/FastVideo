@@ -35,6 +35,7 @@ class SageAttention3Backend(AttentionBackend):
     @staticmethod
     def get_builder_cls() -> type["AttentionMetadataBuilder"]:
         raise NotImplementedError
+
     # @staticmethod
     # def get_metadata_cls() -> Type["AttentionMetadata"]:
     #     return FlashAttentionMetadata
@@ -64,12 +65,8 @@ class SageAttention3Impl(AttentionImpl):
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         query = query.transpose(1, 2)
-        key = key.transpose(1, 2) 
+        key = key.transpose(1, 2)
         value = value.transpose(1, 2)
-        output = sageattn_blackwell(
-            query,
-            key,
-            value,
-            is_causal=self.causal)
+        output = sageattn_blackwell(query, key, value, is_causal=self.causal)
         output = output.transpose(1, 2)
         return output
