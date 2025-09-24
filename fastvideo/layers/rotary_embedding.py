@@ -64,8 +64,9 @@ def apply_rotary_emb(
     """
     if use_real:
         cos, sin = freqs_cis  # [S, D]
-        cos = cos[None, None]
-        sin = sin[None, None]
+        # Match Diffusers exact broadcasting (sequence_dim=2 case)
+        cos = cos[None, None, :, :]
+        sin = sin[None, None, :, :]
         cos, sin = cos.to(x.device), sin.to(x.device)
 
         if use_real_unbind_dim == -1:
