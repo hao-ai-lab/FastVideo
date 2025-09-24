@@ -23,7 +23,7 @@ logger = init_logger(__name__)
 class WanCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
 
     _required_config_modules = [
-        "text_encoder", "tokenizer", "vae", "transformer", "scheduler"
+        "text_encoder", "tokenizer", "vae", "transformer", "transformer_2", "scheduler"
     ]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
@@ -49,6 +49,7 @@ class WanCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         self.add_stage(stage_name="denoising_stage",
                        stage=CausalDMDDenosingStage(
                            transformer=self.get_module("transformer"),
+                           transformer_2=self.get_module("transformer_2", None),
                            scheduler=self.get_module("scheduler")))
 
         self.add_stage(stage_name="decoding_stage",

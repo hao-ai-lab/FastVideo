@@ -34,9 +34,11 @@ class CausalDMDDenosingStage(DenoisingStage):
     Denoising stage for causal diffusion.
     """
 
-    def __init__(self, transformer, scheduler) -> None:
-        super().__init__(transformer, scheduler)
+    def __init__(self, transformer, scheduler, transformer_2=None) -> None:
+        super().__init__(transformer, scheduler, transformer_2)
         # KV and cross-attention cache state (initialized on first forward)
+        self.tranformer = transformer
+        self.transformer_2 = transformer_2
         self.kv_cache1: list | None = None
         self.crossattn_cache: list | None = None
         # Model-dependent constants (aligned with causal_inference.py assumptions)
@@ -229,6 +231,10 @@ class CausalDMDDenosingStage(DenoisingStage):
                 video_raw_latent_shape = noise_latents_btchw.shape
 
                 for i, t_cur in enumerate(timesteps):
+                    if t_cur > fastvideo_args.pipeline_config.dit_config.boundary_ratio * self.scheduler.num_train_timesteps:
+                        current_model = self.transformer
+                    else:
+                        current_model = self.transformer_2
                     # Copy for pred conversion
                     noise_latents = noise_latents_btchw.clone()
                     latent_model_input = current_latents.to(target_dtype)
@@ -279,7 +285,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                             (latent_model_input.shape[0], 1),
                             device=latent_model_input.device,
                             dtype=torch.long)
-                        pred_noise_btchw = self.transformer(
+                        pred_noise_btchw = current_model(
                             latent_model_input,
                             prompt_embeds,
                             t_expanded_noise,
@@ -344,7 +350,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                                         attn_metadata=attn_metadata,
                                         forward_batch=batch):
                     t_expanded_context = t_context.unsqueeze(1)
-                    _ = self.transformer(
+                    _ = current_model(
                         context_bcthw,
                         prompt_embeds,
                         t_expanded_context,
