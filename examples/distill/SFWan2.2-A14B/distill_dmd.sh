@@ -1,14 +1,14 @@
 #!/bin/bash
 #SBATCH --job-name=t2v
 #SBATCH --partition=main
-#SBATCH --nodes=4
-#SBATCH --ntasks=4
+#SBATCH --nodes=8
+#SBATCH --ntasks=8
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
-#SBATCH --output=dmd_t2v_output/t2v_%j.out
-#SBATCH --error=dmd_t2v_output/t2v_%j.err
+#SBATCH --output=dmd_t2v_output/t2v.out
+#SBATCH --error=dmd_t2v_output/t2v.err
 #SBATCH --exclusive
 
 # Basic Info
@@ -24,7 +24,8 @@ export NODE_RANK=$SLURM_PROCID
 nodes=( $(scontrol show hostnames $SLURM_JOB_NODELIST) )
 export MASTER_ADDR=${nodes[0]}
 export TOKENIZERS_PARALLELISM=false
-export WANDB_API_KEY="2f25ad37933894dbf0966c838c0b8494987f9f2f"
+# export WANDB_API_KEY="2f25ad37933894dbf0966c838c0b8494987f9f2f"
+export WANDB_API_KEY='8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde'
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
@@ -37,10 +38,13 @@ GENERATOR_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers"  # Updated to Wan2.2
 REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers" # Teacher model
 FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers" # Critic model
 
-DATA_DIR="data/test-text-preprocessing/Node_0_GPU_1_File_1/combined_parquet_dataset/"
+# DATA_DIR="data/test-text-preprocessing/Node_0_GPU_1_File_1/combined_parquet_dataset/"
+DATA_DIR="/mnt/weka/home/hao.zhang/matthew/FastVideo/data/test-text-preprocessing"
 # DATA_DIR=data/crush-smol_processed_t2v/combined_parquet_dataset
 # DATA_DIR="/mnt/sharefs/users/hao.zhang/Vchitect-2M/Wan-Syn-upload/latents_i2v/train/"
-VALIDATION_DATASET_FILE="data/crush-smol-single_processed_t2v/validation.json"
+# VALIDATION_DATASET_FILE="data/crush-smol-single_processed_t2v/validation.json"
+VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/wl/FastVideo/examples/distill/Wan2.2-TI2V-5B-Diffusers/Data-free/validation_64.json"
+
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
@@ -66,11 +70,11 @@ training_args=(
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 32 # 64
+  --num_gpus 64 # 64
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1 # 64
-  --hsdp_shard_dim 32
+  --hsdp_shard_dim 64
 )
 
 # Model arguments
@@ -85,7 +89,7 @@ model_args=(
 # Dataset arguments
 dataset_args=(
   --data_path "$DATA_DIR"
-  --dataloader_num_workers 4
+  --dataloader_num_workers 64
 )
 
 # Validation arguments
