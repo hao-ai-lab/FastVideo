@@ -1,22 +1,20 @@
 #!/bin/bash
 #SBATCH --job-name=t2v
 #SBATCH --partition=main
-#SBATCH --nodes=8
-#SBATCH --ntasks=8
+#SBATCH --nodes=4
+#SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
-#SBATCH --output=dmd_t2v_output/t2v.out
-#SBATCH --error=dmd_t2v_output/t2v.err
+#SBATCH --output=dmd_t2v_output/t2v_%j.out
+#SBATCH --error=dmd_t2v_output/t2v_%j.err
 #SBATCH --exclusive
 
 # Basic Info
 export NCCL_P2P_DISABLE=1
-# export TORCH_NCCL_ENABLE_MONITORING=1
-# export NCCL_DEBUG=INFO
-# export NCCL_DEBUG_SUBSYS=INIT,NET
-# CUDA_LAUNCH_BLOCKING=1
+export TORCH_NCCL_ENABLE_MONITORING=0
+export NCCL_DEBUG_SUBSYS=INIT,NET
 # different cache dir for different processes
 export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
 export MASTER_PORT=29500
@@ -24,8 +22,8 @@ export NODE_RANK=$SLURM_PROCID
 nodes=( $(scontrol show hostnames $SLURM_JOB_NODELIST) )
 export MASTER_ADDR=${nodes[0]}
 export TOKENIZERS_PARALLELISM=false
-# export WANDB_API_KEY="2f25ad37933894dbf0966c838c0b8494987f9f2f"
-export WANDB_API_KEY='8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde'
+export WANDB_API_KEY="2f25ad37933894dbf0966c838c0b8494987f9f2f"
+# export WANDB_API_KEY='8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde'
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
@@ -71,11 +69,11 @@ training_args=(
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 64 # 64
+  --num_gpus 32 # 64
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1 # 64
-  --hsdp_shard_dim 64
+  --hsdp_shard_dim 32
 )
 
 # Model arguments
@@ -90,7 +88,7 @@ model_args=(
 # Dataset arguments
 dataset_args=(
   --data_path "$DATA_DIR"
-  --dataloader_num_workers 64
+  --dataloader_num_workers 32
 )
 
 # Validation arguments

@@ -129,16 +129,21 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 current_timestep=training_batch.timesteps,
                 attn_metadata=training_batch.attn_metadata_vsa):
             if self.training_args.simulate_generator_forward:
+                logger.info(f"rank: {self.global_rank}, entering generator_multi_step_simulation_forward in generator_loss", local_main_process_only=False)
                 generator_pred_video = self._generator_multi_step_simulation_forward(
                     training_batch)
+                logger.info(f"rank: {self.global_rank}, waiting at barrier in generator_loss", local_main_process_only=False)
             else:
                 generator_pred_video = self._generator_forward(training_batch)
-
+        
+        logger.info(f"rank: {self.global_rank}, passed barrier in generator_loss", local_main_process_only=False)
         with set_forward_context(current_timestep=training_batch.timesteps,
                                  attn_metadata=training_batch.attn_metadata):
+            logger.info(f"rank: {self.global_rank}, entering dmd_forward in generator_loss", local_main_process_only=False)
             dmd_loss = self._dmd_forward(
                 generator_pred_video=generator_pred_video,
                 training_batch=training_batch)
+            logger.info(f"rank: {self.global_rank}, completed dmd_forward in generator_loss", local_main_process_only=False)
 
         log_dict = {
             "dmdtrain_gradient_norm": torch.tensor(0.0, device=self.device)
@@ -201,8 +206,13 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         training_batch.dmd_latent_vis_dict["generator_timestep"] = timestep
 
         # Step 2: Initialize KV cache and cross-attention cache for causal generation
+        max_cache_frames = getattr(self.training_args, 'num_latent_t',
+                                   latents.shape[1])
         kv_cache, crossattn_cache = self._initialize_simulation_caches(
-            batch_size, dtype, self.device)
+            batch_size,
+            dtype,
+            self.device,
+            max_num_frames=max_cache_frames)
 
         if getattr(self.training_args, 'validate_cache_structure', False):
             self._validate_cache_structure(kv_cache, crossattn_cache,
@@ -303,18 +313,23 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         min_num_blocks = min_num_frames // self.num_frame_per_block
 
         # Sample number of blocks and sync across processes
+        logger.info(f"rank: {self.global_rank}, starting block sampling and sync", local_main_process_only=False)
         num_generated_blocks = torch.randint(min_num_blocks,
                                              max_num_blocks + 1, (1, ),
                                              device=self.device)
         if dist.is_initialized():
+            logger.info(f"rank: {self.global_rank}, broadcasting num_generated_blocks", local_main_process_only=False)
             dist.broadcast(num_generated_blocks, src=0)
+            logger.info(f"rank: {self.global_rank}, completed broadcast num_generated_blocks", local_main_process_only=False)
         num_generated_blocks = num_generated_blocks.item()
         num_generated_frames = num_generated_blocks * self.num_frame_per_block
         if self.independent_first_frame and initial_latent is None:
             num_generated_frames += 1
             min_num_frames += 1
+        logger.info(f"rank: {self.global_rank}, completed block sampling, num_generated_frames: {num_generated_frames}", local_main_process_only=False)
 
         # Create noise with dynamic shape
+        logger.info(f"rank: {self.global_rank}, creating noise with dynamic shape", local_main_process_only=False)
         if initial_latent is not None:
             noise_shape = [
                 batch_size, num_generated_frames - 1,
@@ -327,14 +342,17 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         noise = torch.randn(noise_shape, device=self.device, dtype=dtype)
         if self.sp_world_size > 1:
+            logger.info(f"rank: {self.global_rank}, applying sequence parallel rearrangement", local_main_process_only=False)
             noise = rearrange(noise,
                               "b (n t) c h w -> b n t c h w",
                               n=self.sp_world_size).contiguous()
             noise = noise[:, self.rank_in_sp_group, :, :, :, :]
 
         batch_size, num_frames, num_channels, height, width = noise.shape
+        logger.info(f"rank: {self.global_rank}, completed noise creation, shape: {noise.shape}", local_main_process_only=False)
 
         # Block size calculation
+        logger.info(f"rank: {self.global_rank}, calculating block sizes", local_main_process_only=False)
         if not self.independent_first_frame or (self.independent_first_frame
                                                 and initial_latent is not None):
             assert num_frames % self.num_frame_per_block == 0
@@ -350,6 +368,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             [batch_size, num_output_frames, num_channels, height, width],
             device=noise.device,
             dtype=noise.dtype)
+        logger.info(f"rank: {self.global_rank}, completed block calculation, num_blocks: {num_blocks}, output_shape: {output.shape}", local_main_process_only=False)
 
         # Get device from model parameters (FSDP models don't have .device attribute)
         def get_model_device(model):
@@ -363,25 +382,34 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         # offload real and fake score transformers
         
         
-        logger.info(f"self.transformer device: {get_model_device(self.transformer)}")
-        logger.info(f"self.transformer_2 device: {get_model_device(self.transformer_2)}")
-        logger.info(f"self.real_score_transformer device: {get_model_device(self.real_score_transformer)}")
-        logger.info(f"self.real_score_transformer_2 device: {get_model_device(self.real_score_transformer_2)}")
-        logger.info(f"self.fake_score_transformer device: {get_model_device(self.fake_score_transformer)}")
-        logger.info(f"self.fake_score_transformer_2 device: {get_model_device(self.fake_score_transformer_2)}")
+        logger.info(f"rank: {self.global_rank}, self.transformer device: {get_model_device(self.transformer)}", local_main_process_only=False)
+        logger.info(f"rank: {self.global_rank}, self.transformer_2 device: {get_model_device(self.transformer_2)}", local_main_process_only=False)
+        logger.info(f"rank: {self.global_rank}, self.real_score_transformer device: {get_model_device(self.real_score_transformer)}", local_main_process_only=False)
+        logger.info(f"rank: {self.global_rank}, self.real_score_transformer_2 device: {get_model_device(self.real_score_transformer_2)}", local_main_process_only=False)
+        logger.info(f"rank: {self.global_rank}, self.fake_score_transformer device: {get_model_device(self.fake_score_transformer)}", local_main_process_only=False)
+        logger.info(f"rank: {self.global_rank}, self.fake_score_transformer_2 device: {get_model_device(self.fake_score_transformer_2)}", local_main_process_only=False)
+        
         # Step 1: Initialize KV cache to all zeros
+        logger.info(f"rank: {self.global_rank}, initializing simulation caches", local_main_process_only=False)
+        cache_frames = num_generated_frames + num_input_frames
         self.kv_cache1, self.crossattn_cache = self._initialize_simulation_caches(
-            batch_size, dtype, self.device)
+            batch_size,
+            dtype,
+            self.device,
+            max_num_frames=cache_frames)
+        logger.info(f"rank: {self.global_rank}, completed cache initialization", local_main_process_only=False)
 
         # Validate cache structure (can be disabled in production)
         if getattr(self.training_args, 'validate_cache_structure', False):
+            logger.info(f"rank: {self.global_rank}, validating cache structure", local_main_process_only=False)
             self._validate_cache_structure(self.kv_cache1, self.crossattn_cache,
                                            batch_size)
-        logger.info(f"RANK: %s, loc 1", self.global_rank, local_main_process_only=False)
+            logger.info(f"rank: {self.global_rank}, completed cache validation", local_main_process_only=False)
 
         # Step 2: Cache context feature
         current_start_frame = 0
         if initial_latent is not None:
+            logger.info(f"rank: {self.global_rank}, processing initial latent", local_main_process_only=False)
             timestep = torch.ones(
                 [batch_size, 1], device=noise.device, dtype=torch.int64) * 0
             output[:, :1] = initial_latent
@@ -392,6 +420,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     training_batch.conditional_dict, training_batch)
             # we process the image latent with self.transformer_2 (low-noise expert)
                 current_model = self.transformer_2 if self.transformer_2 is not None else self.transformer
+                logger.info(f"rank: {self.global_rank}, running initial latent through transformer", local_main_process_only=False)
                 current_model(
                     hidden_states=training_batch_temp.
                     input_kwargs['hidden_states'],
@@ -404,27 +433,29 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     crossattn_cache=self.crossattn_cache,
                     current_start=current_start_frame * self.frame_seq_length,
                     start_frame=current_start_frame)
+                logger.info(f"rank: {self.global_rank}, completed initial latent processing", local_main_process_only=False)
             current_start_frame += 1
 
         logger.info(f"RANK: %s, loc 2", self.global_rank, local_main_process_only=False)
         # Step 3: Temporal denoising loop
+        logger.info(f"rank: {self.global_rank}, setting up temporal denoising loop", local_main_process_only=False)
         all_num_frames = [self.num_frame_per_block] * num_blocks
         if self.independent_first_frame and initial_latent is None:
             all_num_frames = [1] + all_num_frames
         num_denoising_steps = len(self.denoising_step_list)
+        logger.info(f"rank: {self.global_rank}, entering generate_and_sync_list", local_main_process_only=False)
         exit_flags = self.generate_and_sync_list(len(all_num_frames),
                                                  num_denoising_steps,
                                                  device=noise.device)
         start_gradient_frame_index = max(0, num_output_frames - 21)
 
-        logger.info(f"RANK: %s, loc 3", self.global_rank, local_main_process_only=False)
         for block_index, current_num_frames in enumerate(all_num_frames):
-            logger.info(f"RANK: %s, block %s of %s, current_num_frames=%s start_frame=%s",
-                        self.global_rank, block_index + 1, len(all_num_frames), current_num_frames, current_start_frame, local_main_process_only=False)
+            logger.info(f"rank: {self.global_rank}, processing block {block_index}/{len(all_num_frames)}", local_main_process_only=False)
             noisy_input = noise[:, current_start_frame -
                                 num_input_frames:current_start_frame +
                                 current_num_frames - num_input_frames]
 
+            logger.info(f"rank: {self.global_rank}, entering spatial denoising loop for block {block_index}", local_main_process_only=False)    
             # Step 3.1: Spatial denoising loop
             for index, current_timestep in enumerate(self.denoising_step_list):
                 logger.info(f"RANK: %s, loc 4 %s, %s", self.global_rank, index, current_timestep, local_main_process_only=False)
@@ -437,16 +468,18 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                       device=noise.device,
                                       dtype=torch.int64) * current_timestep
                 
+                logger.info(f"rank: {self.global_rank}, choosing expert for timestep {current_timestep}", local_main_process_only=False)
                 if self.boundary_timestep is not None and current_timestep <= self.boundary_timestep and self.transformer_2 is not None:
                     current_model = self.transformer_2
                     self._enable_training(self.transformer_2, self.optimizer_2)
                     self._disable_training(self.transformer, self.optimizer)
-
+                    logger.info(f"rank: {self.global_rank}, selected transformer_2 (low-noise expert)", local_main_process_only=False)
                 else:
                     current_model = self.transformer
                     self._enable_training(self.transformer, self.optimizer)
                     if self.boundary_timestep is not None and self.transformer_2 is not None:
                         self._disable_training(self.transformer_2, self.optimizer_2)
+                    logger.info(f"rank: {self.global_rank}, selected transformer (high-noise expert)", local_main_process_only=False)
 
                 if not exit_flag:
                     logger.info(f"RANK: %s, loc 5 not exit flag", self.global_rank, local_main_process_only=False)
@@ -456,6 +489,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             noisy_input, timestep,
                             training_batch.conditional_dict, training_batch)
 
+                        logger.info(f"rank: {self.global_rank}, entering DiT forward", local_main_process_only=False)
                         pred_flow = current_model(
                             hidden_states=training_batch_temp.
                             input_kwargs['hidden_states'],
@@ -472,6 +506,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             start_frame=current_start_frame).permute(
                                 0, 2, 1, 3, 4)
 
+                        logger.info(f"rank: {self.global_rank}, completed DiT forward", local_main_process_only=False)
                         denoised_pred = pred_noise_to_pred_video(
                             pred_noise=pred_flow.flatten(0, 1),
                             noise_input_latent=noisy_input.flatten(0, 1),
@@ -479,6 +514,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             scheduler=self.noise_scheduler).unflatten(
                                 0, pred_flow.shape[:2])
 
+                        logger.info(f"rank: {self.global_rank}, completed pred_noise_to_pred_video", local_main_process_only=False)
                         next_timestep = self.denoising_step_list[index + 1]
                         noisy_input = self.noise_scheduler.add_noise(
                             denoised_pred.flatten(0, 1),
@@ -539,9 +575,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                         timestep=timestep,
                         scheduler=self.noise_scheduler).unflatten(
                             0, pred_flow.shape[:2])
+                    logger.info(f"rank: {self.global_rank}, completed final prediction for block {block_index}", local_main_process_only=False)
                     break
 
             # Step 3.2: record the model's output
+            logger.info(f"rank: {self.global_rank}, recording model output for block {block_index}", local_main_process_only=False)
             output[:, current_start_frame:current_start_frame +
                    current_num_frames] = denoised_pred
             logger.info(f"RANK: %s, wrote output frames [%s:%s] out_shape=%s",
@@ -549,6 +587,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                         tuple(output.shape), local_main_process_only=False)
 
             # Step 3.3: rerun with timestep zero to update the cache
+            logger.info(f"rank: {self.global_rank}, updating cache for block {block_index}", local_main_process_only=False)
             context_timestep = torch.ones_like(timestep) * self.context_noise
             denoised_pred = self.noise_scheduler.add_noise(
                 denoised_pred.flatten(0, 1),
@@ -576,9 +615,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     start_frame=current_start_frame)
 
             # Step 3.4: update the start and end frame indices
+            logger.info(f"rank: {self.global_rank}, completed block {block_index}, updating frame indices", local_main_process_only=False)
             current_start_frame += current_num_frames
 
         # Handle last 21 frames logic
+        logger.info(f"rank: {self.global_rank}, starting final frame processing", local_main_process_only=False)
         pred_image_or_video = output
         if num_input_frames > 0:
             pred_image_or_video = output[:, num_input_frames:]
@@ -586,8 +627,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         # Slice last 21 frames if we generated more
         gradient_mask = None
         if pred_image_or_video.shape[1] > 21:
-            logger.info(f"RANK: %s, slicing last 21 frames from %s",
-                        self.global_rank, pred_image_or_video.shape[1], local_main_process_only=False)
+            logger.info(f"rank: {self.global_rank}, processing frames > 21, doing VAE encode/decode", local_main_process_only=False)
             with torch.no_grad():
                 # Re-encode to get image latent
                 latent_to_decode = pred_image_or_video[:, :-20, ...]
@@ -612,22 +652,26 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                         latent_to_decode += self.vae.shift_factor
 
                 # Decode to pixels
+                logger.info(f"rank: {self.global_rank}, running VAE decode", local_main_process_only=False)
                 pixels = self.vae.decode(latent_to_decode)
                 frame = pixels[:, :, -1:, :, :].to(
                     dtype)  # Last frame [B, C, 1, H, W]
 
                 # Encode frame back to get image latent
+                logger.info(f"rank: {self.global_rank}, running VAE encode", local_main_process_only=False)
                 image_latent = self.vae.encode(frame).to(dtype)
                 image_latent = image_latent.permute(0, 2, 1, 3,
                                                     4)  # [B, F, C, H, W]
 
             pred_image_or_video_last_21 = torch.cat(
                 [image_latent, pred_image_or_video[:, -20:, ...]], dim=1)
+            logger.info(f"rank: {self.global_rank}, completed VAE encode/decode", local_main_process_only=False)
         else:
             pred_image_or_video_last_21 = pred_image_or_video
 
         # Set up gradient mask if we generated more than minimum frames
         if num_generated_frames != min_num_frames:
+            logger.info(f"rank: {self.global_rank}, setting up gradient mask", local_main_process_only=False)
             # Currently, we do not use gradient for the first chunk, since it contains image latents
             gradient_mask = torch.ones_like(pred_image_or_video_last_21,
                                             dtype=torch.bool)
@@ -637,6 +681,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 gradient_mask[:, :self.num_frame_per_block] = False
 
         # Apply gradient masking if needed
+        logger.info(f"rank: {self.global_rank}, applying gradient masking", local_main_process_only=False)
         final_output = pred_image_or_video_last_21.to(dtype)
         if gradient_mask is not None:
             logger.info(f"RANK: %s, applying gradient mask with shape=%s",
@@ -650,7 +695,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             )
 
         # Store visualization data
-        training_batch.dmd_latent_vis_dict["generator_timestep"] = self.denoising_step_list[exit_flags[0]].detach().clone()
+        logger.info(f"rank: {self.global_rank}, storing visualization data", local_main_process_only=False)
+        training_batch.dmd_latent_vis_dict["generator_timestep"] = torch.tensor(
+            self.denoising_step_list[exit_flags[0]],
+            dtype=torch.float32,
+            device=self.device)
 
         # Store gradient mask information for debugging
         if gradient_mask is not None:
@@ -663,16 +712,22 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             training_batch.dmd_latent_vis_dict["min_num_frames"] = torch.tensor(
                 min_num_frames, dtype=torch.float32, device=self.device)
 
+        # Clean up caches
+        logger.info(f"rank: {self.global_rank}, resetting simulation caches", local_main_process_only=False)
         assert self.kv_cache1 is not None
         assert self.crossattn_cache is not None
         self._reset_simulation_caches(self.kv_cache1, self.crossattn_cache)
-        out_tensor = final_output if gradient_mask is not None else pred_image_or_video
-        logger.info(f"RANK: %s, exit _generator_multi_step_simulation_forward output=%s",
-                    self.global_rank, tuple(out_tensor.shape), local_main_process_only=False)
-        return out_tensor
+
+        logger.info(f"rank: {self.global_rank}, completed _generator_multi_step_simulation_forward", local_main_process_only=False)
+        return final_output if gradient_mask is not None else pred_image_or_video
 
     def _initialize_simulation_caches(
-        self, batch_size: int, dtype: torch.dtype, device: torch.device
+        self,
+        batch_size: int,
+        dtype: torch.dtype,
+        device: torch.device,
+        *,
+        max_num_frames: int | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Initialize KV cache and cross-attention cache for multi-step simulation."""
         logger.info(f"RANK: %s, enter _initialize_simulation_caches bs=%s dtype=%s device=%s",
@@ -711,7 +766,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                          128)
             text_len = getattr(self.transformer, 'text_len', 512)
 
-        num_max_frames = getattr(self.training_args, "num_frames", num_frames)
+        if max_num_frames is None:
+            max_num_frames = num_frames
+        num_max_frames = max(max_num_frames, num_frames)
         kv_cache_size = num_max_frames * frame_seq_length
         logger.info(f"RANK: %s, cache sizes: blocks=%s kv_cache_size=%s text_len=%s heads=%s head_dim=%s",
                     self.global_rank, num_transformer_blocks, kv_cache_size, text_len, num_attention_heads, attention_head_dim, local_main_process_only=False)
@@ -898,14 +955,22 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                               'gradient_accumulation_steps', 1)
         train_generator = (self.current_trainstep %
                            self.dfake_gen_update_ratio == 0)
+        
+        logger.info(f"rank: {self.global_rank}, train_generator: {train_generator}", local_main_process_only=False)
 
         batches = []
         for _ in range(gradient_accumulation_steps):
+            logger.info(f"rank: {self.global_rank}, entering prepare_distillation", local_main_process_only=False)
             batch = self._prepare_distillation(training_batch)
+            logger.info(f"rank: {self.global_rank}, entering get_next_batch", local_main_process_only=False)
             batch = self._get_next_batch(batch)
+            logger.info(f"rank: {self.global_rank}, entering normalize_dit_input", local_main_process_only=False)
             batch = self._normalize_dit_input(batch)
+            logger.info(f"rank: {self.global_rank}, entering prepare_dit_inputs", local_main_process_only=False)
             batch = self._prepare_dit_inputs(batch)
+            logger.info(f"rank: {self.global_rank}, entering build_attention_metadata", local_main_process_only=False)
             batch = self._build_attention_metadata(batch)
+            logger.info(f"rank: {self.global_rank}, entering copy_attention_metadata", local_main_process_only=False)
             batch.attn_metadata_vsa = copy.deepcopy(batch.attn_metadata)
             if batch.attn_metadata is not None:
                 batch.attn_metadata.VSA_sparsity = 0.0
@@ -939,7 +1004,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     else:
                         setattr(batch_gen, key, copy.deepcopy(value))
 
+                logger.info(f"rank: {self.global_rank}, entering generator_loss", local_main_process_only=False)
                 generator_loss, gen_log_dict = self.generator_loss(batch_gen)
+                logger.info(f"rank: {self.global_rank}, entering backward", local_main_process_only=False)
                 with set_forward_context(current_timestep=batch_gen.timesteps,
                                          attn_metadata=batch_gen.attn_metadata):
                     (generator_loss / gradient_accumulation_steps).backward()
