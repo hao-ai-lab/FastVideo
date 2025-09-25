@@ -57,15 +57,16 @@ class DistillationPipeline(TrainingPipeline):
     """
     _required_config_modules = [
         "scheduler", "transformer", "transformer_2"
-        "vae", "real_score_transformer", "fake_score_transformer",
-        "real_score_transformer_2", "fake_score_transformer_2"
+        "vae", 
+        # "real_score_transformer", "fake_score_transformer",
+        # "real_score_transformer_2", "fake_score_transformer_2"
     ]
-    _extra_config_module_map = {
-        "real_score_transformer": "transformer",
-        "fake_score_transformer": "transformer",
-        "real_score_transformer_2": "transformer_2",
-        "fake_score_transformer_2": "transformer_2"
-    }
+    # _extra_config_module_map = {
+    #     "real_score_transformer": "transformer",
+    #     "fake_score_transformer": "transformer",
+    #     "real_score_transformer_2": "transformer_2",
+    #     "fake_score_transformer_2": "transformer_2"
+    # }
     validation_pipeline: ComposedPipelineBase
     train_dataloader: StatefulDataLoader
     train_loader_iter: Iterator[dict[str, Any]]
@@ -99,8 +100,8 @@ class DistillationPipeline(TrainingPipeline):
         else:
             self.boundary_timestep = None
 
-        # if training_args.real_score_model_path:
-        if False:
+        if training_args.real_score_model_path:
+        # if False:
             logger.info(
                 f"Loading real score transformer from: {training_args.real_score_model_path}"
             )
@@ -124,8 +125,8 @@ class DistillationPipeline(TrainingPipeline):
             self.real_score_transformer_2 = self.get_module(
                 "real_score_transformer_2")
 
-        # if training_args.fake_score_model_path:
-        if False:
+        if training_args.fake_score_model_path:
+        # if False:
             logger.info(
                 f"Loading fake score transformer from: {training_args.fake_score_model_path}"
             )

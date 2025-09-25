@@ -52,6 +52,7 @@ VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/wl/FastVideo/examples/distill/
 training_args=(
   --tracker_project_name SFwan2.2_t2v_distill_self_forcing_dmd  # Updated for Wan2.2
   --output_dir "/mnt/sharefs/users/hao.zhang/SFwan2.2_t2v_finetune"
+  --override_transformer_cls_name "CausalWanTransformer3DModel"
   --max_train_steps 4000
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -61,7 +62,7 @@ training_args=(
   --num_width 832   # Updated to match Wan2.2 config
   --num_frames 81  # Must be divisible by num_frame_per_block (81 % 3 = 0 ✓)
   --enable_gradient_checkpointing_type "full"
-  --log_visualization
+  # --log_visualization
   --simulate_generator_forward
   --num_frame_per_block 3  # Frame generation block size for self-forcing
   --enable_gradient_masking

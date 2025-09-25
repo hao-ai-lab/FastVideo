@@ -50,6 +50,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         self.generator_ema: EMA_FSDP | None = None
 
         super().initialize_training_pipeline(training_args)
+        try:
+            logger.info(f"RANK: %s, entered initialize_training_pipeline", self.global_rank, local_main_process_only=False)
+        except Exception:
+            logger.info("Entered initialize_training_pipeline (rank unknown)")
         self.noise_scheduler = SelfForcingFlowMatchScheduler(
             num_inference_steps=1000,
             shift=5.0,
@@ -78,10 +82,13 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         logger.info("Self-forcing generator update ratio: %s",
                     self.dfake_gen_update_ratio)
+        logger.info(f"RANK: %s, exiting initialize_training_pipeline", self.global_rank, local_main_process_only=False)
 
     def generate_and_sync_list(self, num_blocks: int, num_denoising_steps: int,
                                device: torch.device) -> list[int]:
         """Generate and synchronize random exit flags across distributed processes."""
+        logger.info(f"RANK: %s, enter generate_and_sync_list blocks=%s steps=%s device=%s",
+                    self.global_rank, num_blocks, num_denoising_steps, str(device), local_main_process_only=False)
         rank = dist.get_rank() if dist.is_initialized() else 0
 
         if rank == 0:
@@ -98,7 +105,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         if dist.is_initialized():
             dist.broadcast(indices,
                            src=0)  # Broadcast the random indices to all ranks
-        return indices.tolist()
+        flags = indices.tolist()
+        logger.info(f"RANK: %s, exit generate_and_sync_list flags_len=%s first=%s",
+                    self.global_rank, len(flags), flags[0] if len(flags) > 0 else None, local_main_process_only=False)
+        return flags
 
     def generator_loss(
             self, training_batch: TrainingBatch
@@ -107,6 +117,14 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         Compute generator loss using DMD-style approach.
         The generator tries to fool the critic (fake_score_transformer).
         """
+        try:
+            logger.info(f"RANK: %s, enter generator_loss latents=%s timesteps=%s",
+                        self.global_rank,
+                        tuple(training_batch.latents.shape) if hasattr(training_batch, 'latents') and training_batch.latents is not None else None,
+                        tuple(training_batch.timesteps.shape) if hasattr(training_batch, 'timesteps') and training_batch.timesteps is not None else None,
+                        local_main_process_only=False)
+        except Exception:
+            logger.info("enter generator_loss")
         with set_forward_context(
                 current_timestep=training_batch.timesteps,
                 attn_metadata=training_batch.attn_metadata_vsa):
@@ -126,6 +144,13 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             "dmdtrain_gradient_norm": torch.tensor(0.0, device=self.device)
         }
 
+        try:
+            logger.info(f"RANK: %s, exit generator_loss loss=%s pred_video=%s",
+                        self.global_rank, float(dmd_loss.detach().item()),
+                        tuple(generator_pred_video.shape) if isinstance(generator_pred_video, torch.Tensor) else None,
+                        local_main_process_only=False)
+        except Exception:
+            logger.info("exit generator_loss")
         return dmd_loss, log_dict
 
     def critic_loss(
@@ -135,15 +160,34 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         Compute critic loss using flow matching between noise and generator output.
         The critic learns to predict the flow from noise to the generator's output.
         """
+        try:
+            logger.info(f"RANK: %s, enter critic_loss latents=%s",
+                        self.global_rank,
+                        tuple(training_batch.latents.shape) if hasattr(training_batch, 'latents') and training_batch.latents is not None else None,
+                        local_main_process_only=False)
+        except Exception:
+            logger.info("enter critic_loss")
         updated_batch, flow_matching_loss = self.faker_score_forward(
             training_batch)
         training_batch.fake_score_latent_vis_dict = updated_batch.fake_score_latent_vis_dict
         log_dict: dict[str, Any] = {}
 
+        try:
+            logger.info(f"RANK: %s, exit critic_loss loss=%s",
+                        self.global_rank, float(flow_matching_loss.detach().item()), local_main_process_only=False)
+        except Exception:
+            logger.info("exit critic_loss")
         return flow_matching_loss, log_dict
 
     def _generator_forward(self, training_batch: TrainingBatch) -> torch.Tensor:
         """Forward pass through generator with KV cache support for causal generation."""
+        try:
+            logger.info(f"RANK: %s, enter _generator_forward latents=%s",
+                        self.global_rank,
+                        tuple(training_batch.latents.shape) if hasattr(training_batch, 'latents') and training_batch.latents is not None else None,
+                        local_main_process_only=False)
+        except Exception:
+            logger.info("enter _generator_forward")
         latents = training_batch.latents
         dtype = latents.dtype
         batch_size = latents.shape[0]
@@ -213,8 +257,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             timestep=torch.tensor([timestep], device=noisy_latent.device),
             scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
 
+        logger.info(f"RANK: %s, _generator_forward pred_video=%s",
+                    self.global_rank, tuple(pred_video.shape), local_main_process_only=False)
         self._reset_simulation_caches(kv_cache, crossattn_cache)
 
+        logger.info(f"RANK: %s, exit _generator_forward", self.global_rank, local_main_process_only=False)
         return pred_video
 
     def _generator_multi_step_simulation_forward(
@@ -226,10 +273,22 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         This function is adapted from the reference self-forcing implementation's inference_with_trajectory
         and includes gradient masking logic for dynamic frame generation.
         """
+        try:
+            logger.info(f"RANK: %s, enter _generator_multi_step_simulation_forward",
+                        self.global_rank, local_main_process_only=False)
+        except Exception:
+            logger.info("enter _generator_multi_step_simulation_forward")
         latents = training_batch.latents
         dtype = latents.dtype
         batch_size = latents.shape[0]
         initial_latent = getattr(training_batch, 'image_latent', None)
+        logger.info(f"RANK: %s, sim_forward latents=%s initial_latent=%s num_frame_per_block=%s independent_first_frame=%s",
+                    self.global_rank,
+                    tuple(latents.shape) if isinstance(latents, torch.Tensor) else None,
+                    tuple(initial_latent.shape) if isinstance(initial_latent, torch.Tensor) else None,
+                    self.num_frame_per_block,
+                    self.independent_first_frame,
+                    local_main_process_only=False)
 
         # Dynamic frame generation logic (adapted from _run_generator)
         num_training_frames = getattr(self.training_args, 'num_latent_t', 21)
@@ -318,6 +377,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         if getattr(self.training_args, 'validate_cache_structure', False):
             self._validate_cache_structure(self.kv_cache1, self.crossattn_cache,
                                            batch_size)
+        logger.info(f"RANK: %s, loc 1", self.global_rank, local_main_process_only=False)
 
         # Step 2: Cache context feature
         current_start_frame = 0
@@ -346,6 +406,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     start_frame=current_start_frame)
             current_start_frame += 1
 
+        logger.info(f"RANK: %s, loc 2", self.global_rank, local_main_process_only=False)
         # Step 3: Temporal denoising loop
         all_num_frames = [self.num_frame_per_block] * num_blocks
         if self.independent_first_frame and initial_latent is None:
@@ -356,13 +417,17 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                                  device=noise.device)
         start_gradient_frame_index = max(0, num_output_frames - 21)
 
+        logger.info(f"RANK: %s, loc 3", self.global_rank, local_main_process_only=False)
         for block_index, current_num_frames in enumerate(all_num_frames):
+            logger.info(f"RANK: %s, block %s of %s, current_num_frames=%s start_frame=%s",
+                        self.global_rank, block_index + 1, len(all_num_frames), current_num_frames, current_start_frame, local_main_process_only=False)
             noisy_input = noise[:, current_start_frame -
                                 num_input_frames:current_start_frame +
                                 current_num_frames - num_input_frames]
 
             # Step 3.1: Spatial denoising loop
             for index, current_timestep in enumerate(self.denoising_step_list):
+                logger.info(f"RANK: %s, loc 4 %s, %s", self.global_rank, index, current_timestep, local_main_process_only=False)
                 if self.same_step_across_blocks:
                     exit_flag = (index == exit_flags[0])
                 else:
@@ -384,6 +449,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                         self._disable_training(self.transformer_2, self.optimizer_2)
 
                 if not exit_flag:
+                    logger.info(f"RANK: %s, loc 5 not exit flag", self.global_rank, local_main_process_only=False)
                     with torch.no_grad():
                         # Build input kwargs
                         training_batch_temp = self._build_distill_input_kwargs(
@@ -423,6 +489,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                        dtype=torch.long)).unflatten(
                                            0, denoised_pred.shape[:2])
                 else:
+                    logger.info(f"RANK: %s, loc 6 not exit flag", self.global_rank, local_main_process_only=False)
                     # Final prediction with gradient control
                     if current_start_frame < start_gradient_frame_index:
                         with torch.no_grad():
@@ -477,6 +544,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             # Step 3.2: record the model's output
             output[:, current_start_frame:current_start_frame +
                    current_num_frames] = denoised_pred
+            logger.info(f"RANK: %s, wrote output frames [%s:%s] out_shape=%s",
+                        self.global_rank, current_start_frame, current_start_frame + current_num_frames,
+                        tuple(output.shape), local_main_process_only=False)
 
             # Step 3.3: rerun with timestep zero to update the cache
             context_timestep = torch.ones_like(timestep) * self.context_noise
@@ -516,6 +586,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         # Slice last 21 frames if we generated more
         gradient_mask = None
         if pred_image_or_video.shape[1] > 21:
+            logger.info(f"RANK: %s, slicing last 21 frames from %s",
+                        self.global_rank, pred_image_or_video.shape[1], local_main_process_only=False)
             with torch.no_grad():
                 # Re-encode to get image latent
                 latent_to_decode = pred_image_or_video[:, :-20, ...]
@@ -567,6 +639,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         # Apply gradient masking if needed
         final_output = pred_image_or_video_last_21.to(dtype)
         if gradient_mask is not None:
+            logger.info(f"RANK: %s, applying gradient mask with shape=%s",
+                        self.global_rank, tuple(gradient_mask.shape), local_main_process_only=False)
             # Apply gradient masking: detach frames that shouldn't contribute gradients
             final_output = torch.where(
                 gradient_mask,
@@ -576,10 +650,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             )
 
         # Store visualization data
-        training_batch.dmd_latent_vis_dict["generator_timestep"] = torch.tensor(
-            self.denoising_step_list[exit_flags[0]],
-            dtype=torch.float32,
-            device=self.device)
+        training_batch.dmd_latent_vis_dict["generator_timestep"] = self.denoising_step_list[exit_flags[0]].detach().clone()
 
         # Store gradient mask information for debugging
         if gradient_mask is not None:
@@ -595,13 +666,17 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         assert self.kv_cache1 is not None
         assert self.crossattn_cache is not None
         self._reset_simulation_caches(self.kv_cache1, self.crossattn_cache)
-
-        return final_output if gradient_mask is not None else pred_image_or_video
+        out_tensor = final_output if gradient_mask is not None else pred_image_or_video
+        logger.info(f"RANK: %s, exit _generator_multi_step_simulation_forward output=%s",
+                    self.global_rank, tuple(out_tensor.shape), local_main_process_only=False)
+        return out_tensor
 
     def _initialize_simulation_caches(
         self, batch_size: int, dtype: torch.dtype, device: torch.device
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Initialize KV cache and cross-attention cache for multi-step simulation."""
+        logger.info(f"RANK: %s, enter _initialize_simulation_caches bs=%s dtype=%s device=%s",
+                    self.global_rank, batch_size, str(dtype), str(device), local_main_process_only=False)
         num_transformer_blocks = len(self.transformer.blocks)
 
         # Calculate frame sequence length based on input dimensions and patch size
@@ -616,6 +691,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         # Frame sequence length is the spatial sequence length per frame
         frame_seq_length = post_patch_height * post_patch_width
+        logger.info(f"RANK: %s, cache frame_seq_length=%s post_patch=(%s,%s)",
+                    self.global_rank, frame_seq_length, post_patch_height, post_patch_width, local_main_process_only=False)
 
         # Get local attention size from transformer config
         # local_attn_size = getattr(self.transformer, 'local_attn_size', -1)
@@ -636,6 +713,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         num_max_frames = getattr(self.training_args, "num_frames", num_frames)
         kv_cache_size = num_max_frames * frame_seq_length
+        logger.info(f"RANK: %s, cache sizes: blocks=%s kv_cache_size=%s text_len=%s heads=%s head_dim=%s",
+                    self.global_rank, num_transformer_blocks, kv_cache_size, text_len, num_attention_heads, attention_head_dim, local_main_process_only=False)
 
         kv_cache = []
         for _ in range(num_transformer_blocks):
@@ -682,11 +761,17 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 False
             })
 
+        logger.info(f"RANK: %s, exit _initialize_simulation_caches", self.global_rank, local_main_process_only=False)
         return kv_cache, crossattn_cache
 
     def _reset_simulation_caches(self, kv_cache: list[dict[str, Any]],
                                  crossattn_cache: list[dict[str, Any]]) -> None:
         """Reset KV cache and cross-attention cache to clean state."""
+        logger.info(f"RANK: %s, enter _reset_simulation_caches kv=%s cross=%s",
+                    self.global_rank,
+                    len(kv_cache) if kv_cache is not None else 0,
+                    len(crossattn_cache) if crossattn_cache is not None else 0,
+                    local_main_process_only=False)
         if kv_cache is not None:
             for cache_dict in kv_cache:
                 cache_dict["global_end_index"].fill_(0)
@@ -699,10 +784,13 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 cache_dict["is_init"] = False
                 cache_dict["k"].zero_()
                 cache_dict["v"].zero_()
+        logger.info(f"RANK: %s, exit _reset_simulation_caches", self.global_rank, local_main_process_only=False)
 
     def _validate_cache_structure(self, kv_cache, crossattn_cache,
                                   batch_size: int):
         """Validate that cache structures are correctly initialized."""
+        logger.info(f"RANK: %s, enter _validate_cache_structure bs=%s",
+                    self.global_rank, batch_size, local_main_process_only=False)
         num_transformer_blocks = len(self.transformer.blocks)
 
         # Get model configuration parameters - handle FSDP wrapping
@@ -752,8 +840,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     2] == num_attention_heads, f"Attention heads mismatch in crossattn_cache block {i}"
                 assert cache_dict["k"].shape[
                     3] == attention_head_dim, f"Attention head dim mismatch in crossattn_cache block {i}"
+        logger.info(f"RANK: %s, exit _validate_cache_structure", self.global_rank, local_main_process_only=False)
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
+        logger.info(f"RANK: %s, enter _get_next_batch", self.global_rank, local_main_process_only=False)
         batch = next(self.train_loader_iter, None)  # type: ignore
         if batch is None:
             self.current_epoch += 1
@@ -788,13 +878,22 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         training_batch.encoder_attention_mask = encoder_attention_mask.to(
             get_local_torch_device(), dtype=torch.bfloat16)
         training_batch.infos = infos
-
+        try:
+            logger.info(f"RANK: %s, exit _get_next_batch latents=%s ehs=%s",
+                        self.global_rank,
+                        tuple(training_batch.latents.shape),
+                        tuple(training_batch.encoder_hidden_states.shape),
+                        local_main_process_only=False)
+        except Exception:
+            logger.info("exit _get_next_batch")
         return training_batch
 
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
         """
         Self-forcing training step that alternates between generator and critic training.
         """
+        logger.info(f"RANK: %s, enter train_one_step step=%s",
+                    self.global_rank, self.current_trainstep, local_main_process_only=False)
         gradient_accumulation_steps = getattr(self.training_args,
                                               'gradient_accumulation_steps', 1)
         train_generator = (self.current_trainstep %
@@ -930,18 +1029,25 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         training_batch.fake_score_loss = avg_critic_loss.item()
 
         training_batch.total_loss = training_batch.generator_loss + training_batch.fake_score_loss
-
+        logger.info(f"RANK: %s, exit train_one_step gen_loss=%s fake_loss=%s total=%s",
+                    self.global_rank, training_batch.generator_loss,
+                    training_batch.fake_score_loss, training_batch.total_loss,
+                    local_main_process_only=False)
         return training_batch
 
     def _log_training_info(self) -> None:
         """Log self-forcing specific training information."""
+        logger.info(f"RANK: %s, enter _log_training_info", self.global_rank, local_main_process_only=False)
         super()._log_training_info()
         logger.info("Self-forcing specific settings:")
         logger.info("  Generator update ratio: %s", self.dfake_gen_update_ratio)
+        logger.info(f"RANK: %s, exit _log_training_info", self.global_rank, local_main_process_only=False)
 
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,
                                        training_args: TrainingArgs, step: int):
         """Add visualization data to wandb logging and save frames to disk."""
+        logger.info(f"RANK: %s, enter visualize_intermediate_latents step=%s",
+                    self.global_rank, step, local_main_process_only=False)
         wandb_loss_dict = {}
 
         # Debug logging
@@ -1079,9 +1185,12 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         if self.global_rank == 0:
             wandb.log(wandb_loss_dict, step=step)
+        logger.info(f"RANK: %s, exit visualize_intermediate_latents keys=%s",
+                    self.global_rank, list(wandb_loss_dict.keys()), local_main_process_only=False)
 
     def train(self) -> None:
         """Main training loop with self-forcing specific logging."""
+        logger.info(f"RANK: %s, enter train", self.global_rank, local_main_process_only=False)
         assert self.training_args.seed is not None, "seed must be set"
         seed = self.training_args.seed
 
@@ -1129,6 +1238,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         use_vsa = vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN"
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
+            logger.info(f"RANK: %s, step=%s begin", self.global_rank, step, local_main_process_only=False)
             start_time = time.perf_counter()
             if use_vsa:
                 vsa_sparsity = self.training_args.VSA_sparsity
@@ -1182,6 +1292,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 else "✗",
             })
             progress_bar.update(1)
+            logger.info(f"RANK: %s, step=%s end total_loss=%.4f gen=%.4f fake=%.4f time=%.2fs",
+                        self.global_rank, step, float(total_loss), float(generator_loss), float(fake_score_loss), float(step_time), local_main_process_only=False)
 
             if self.global_rank == 0:
                 log_data = {
@@ -1293,3 +1405,4 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         if get_sp_group():
             cleanup_dist_env_and_memory()
+        logger.info(f"RANK: %s, exit train", self.global_rank, local_main_process_only=False)
