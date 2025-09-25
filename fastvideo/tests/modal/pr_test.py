@@ -102,6 +102,14 @@ def run_precision_tests_STA():
 def run_precision_tests_VSA():
     run_test("python csrc/attn/tests/test_vsa.py")
 
+@app.function(gpu="L40S:1", image=image, timeout=900)
+def run_precision_tests_vmoba():
+    run_test("pytest csrc/attn/vmoba_attn/tests/test_vmoba_attn.py")
+
+@app.function(gpu="L40S:1", image=image, timeout=900)
+def run_inference_tests_vmoba():
+    run_test('python fastvideo/tests/inference/vmoba/test_vmoba_inference.py')
+
 @app.function(gpu="L40S:1", image=image, timeout=3600)
 def run_inference_lora_tests():
     run_test("pytest ./fastvideo/tests/inference/lora/test_lora_inference_similarity.py -vs")
@@ -109,3 +117,7 @@ def run_inference_lora_tests():
 @app.function(gpu="L40S:2", image=image, timeout=900)
 def run_distill_dmd_tests():
     run_test("pytest ./fastvideo/tests/training/distill/test_distill_dmd.py -vs")
+
+@app.function(gpu="L40S:1", image=image, timeout=900)
+def run_unit_test():
+    run_test("pytest ./fastvideo/tests/dataset/ ./fastvideo/tests/workflow/ -vs")

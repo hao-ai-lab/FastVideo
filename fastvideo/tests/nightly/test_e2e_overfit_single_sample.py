@@ -62,6 +62,11 @@ def download_data():
 
 
 def run_preprocessing():
+    # remove the local_preprocessed_data_dir if it exists
+    if LOCAL_PREPROCESSED_DATA_DIR.exists():
+        print(f"Removing local_preprocessed_data_dir: {LOCAL_PREPROCESSED_DATA_DIR}")
+        shutil.rmtree(LOCAL_PREPROCESSED_DATA_DIR)
+
     # Run torchrun command
     cmd = [
         "torchrun",

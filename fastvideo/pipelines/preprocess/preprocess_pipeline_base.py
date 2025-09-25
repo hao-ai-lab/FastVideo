@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-import multiprocessing
 import os
-from concurrent.futures import ProcessPoolExecutor
 from typing import Any
 
 import numpy as np
@@ -12,6 +10,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from fastvideo.dataset import getdataset
+from fastvideo.dataset.dataloader.parquet_io import (ParquetDatasetWriter,
+                                                     records_to_table)
 from fastvideo.dataset.preprocessing_datasets import PreprocessBatch
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -54,9 +54,13 @@ class BasePreprocessPipeline(ComposedPipelineBase):
         """Get additional features specific to the pipeline type. Override in subclasses."""
         return {}
 
-    def get_schema_fields(self) -> list[str]:
-        """Get the schema fields for the pipeline type. Override in subclasses."""
+    def get_pyarrow_schema(self) -> pa.Schema:
+        """Return the PyArrow schema for this pipeline. Must be overridden."""
         raise NotImplementedError
+
+    def get_schema_fields(self) -> list[str]:
+        """Get the schema fields for the pipeline type."""
+        return [f.name for f in self.get_pyarrow_schema()]
 
     def create_record_for_schema(self,
                                  preprocess_batch: PreprocessBatch,
@@ -400,166 +404,22 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 batch_data.append(record)
 
             if batch_data:
-                # Add progress bar for writing to Parquet dataset
                 write_pbar = tqdm(total=1,
                                   desc="Writing to Parquet dataset",
                                   unit="batch")
-                # Convert batch data to PyArrow arrays
-                arrays = []
-                for field in self.get_schema_fields():
-                    if field.endswith('_bytes'):
-                        arrays.append(
-                            pa.array([record[field] for record in batch_data],
-                                     type=pa.binary()))
-                    elif field.endswith('_shape'):
-                        arrays.append(
-                            pa.array([record[field] for record in batch_data],
-                                     type=pa.list_(pa.int32())))
-                    elif field in ['width', 'height', 'num_frames']:
-                        arrays.append(
-                            pa.array([record[field] for record in batch_data],
-                                     type=pa.int32()))
-                    elif field in ['duration_sec', 'fps']:
-                        arrays.append(
-                            pa.array([record[field] for record in batch_data],
-                                     type=pa.float32()))
-                    else:
-                        arrays.append(
-                            pa.array([record[field] for record in batch_data]))
-
-                table = pa.Table.from_arrays(arrays,
-                                             names=self.get_schema_fields())
+                table = records_to_table(batch_data, self.get_pyarrow_schema())
                 write_pbar.update(1)
                 write_pbar.close()
 
-                # Store the table in a list for later processing
-                if not hasattr(self, 'all_tables'):
-                    self.all_tables = []
-                self.all_tables.append(table)
-
+                if not hasattr(self, 'dataset_writer'):
+                    self.dataset_writer = ParquetDatasetWriter(
+                        out_dir=combined_parquet_dir,
+                        samples_per_file=args.samples_per_file,
+                    )
+                self.dataset_writer.append_table(table)
                 logger.info("Collected batch with %s samples", len(table))
 
             if num_processed_samples >= args.flush_frequency:
-                self._flush_tables(num_processed_samples, args,
-                                   combined_parquet_dir)
+                written = self.dataset_writer.flush()
+                logger.info("Flushed %s samples to parquet", written)
                 num_processed_samples = 0
-                self.all_tables = []
-
-    def _flush_tables(self, num_processed_samples: int, args,
-                      combined_parquet_dir: str):
-        """Flush collected tables to disk."""
-        assert hasattr(self, 'all_tables') and self.all_tables
-        print(f"Combining {len(self.all_tables)} batches...")
-        combined_table = pa.concat_tables(self.all_tables)
-        assert len(combined_table) == num_processed_samples
-        print(f"Total samples collected: {len(combined_table)}")
-
-        # Calculate total number of chunks needed, discarding remainder
-        total_chunks = max(num_processed_samples // args.samples_per_file, 1)
-
-        print(f"Fixed samples per parquet file: {args.samples_per_file}")
-        print(f"Total number of parquet files: {total_chunks}")
-        print(
-            f"Total samples to be processed: {total_chunks * args.samples_per_file} (discarding {num_processed_samples % args.samples_per_file} samples)"
-        )
-
-        # Split work among processes
-        num_workers = int(min(multiprocessing.cpu_count(), total_chunks))
-        chunks_per_worker = (total_chunks + num_workers - 1) // num_workers
-
-        print(f"Using {num_workers} workers to process {total_chunks} chunks")
-        logger.info("Chunks per worker: %s", chunks_per_worker)
-
-        # Prepare work ranges
-        work_ranges = []
-        for i in range(num_workers):
-            start_idx = i * chunks_per_worker
-            end_idx = min((i + 1) * chunks_per_worker, total_chunks)
-            if start_idx < total_chunks:
-                work_ranges.append(
-                    (start_idx, end_idx, combined_table, i,
-                     combined_parquet_dir, args.samples_per_file))
-
-        total_written = 0
-        failed_ranges = []
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            futures = {
-                executor.submit(self.process_chunk_range, work_range):
-                work_range
-                for work_range in work_ranges
-            }
-            for future in tqdm(futures, desc="Processing chunks"):
-                try:
-                    written = future.result()
-                    total_written += written
-                    logger.info("Processed chunk with %s samples", written)
-                except Exception as e:
-                    work_range = futures[future]
-                    failed_ranges.append(work_range)
-                    logger.error("Failed to process range %s-%s: %s",
-                                 work_range[0], work_range[1], str(e))
-
-        # Retry failed ranges sequentially
-        if failed_ranges:
-            logger.warning("Retrying %s failed ranges sequentially",
-                           len(failed_ranges))
-            for work_range in failed_ranges:
-                try:
-                    total_written += self.process_chunk_range(work_range)
-                except Exception as e:
-                    logger.error(
-                        "Failed to process range %s-%s after retry: %s",
-                        work_range[0], work_range[1], str(e))
-
-        logger.info("Total samples written: %s", total_written)
-
-    @staticmethod
-    def process_chunk_range(args: Any) -> int:
-        start_idx, end_idx, table, worker_id, output_dir, samples_per_file = args
-        try:
-            total_written = 0
-            num_samples = len(table)
-
-            # Create worker-specific subdirectory
-            worker_dir = os.path.join(output_dir, f"worker_{worker_id}")
-            os.makedirs(worker_dir, exist_ok=True)
-
-            # Check how many files there are already in the dir, and update i accordingly
-            num_parquets = 0
-            for root, _, files in os.walk(worker_dir):
-                for file in files:
-                    if file.endswith('.parquet'):
-                        num_parquets += 1
-
-            for i in range(start_idx, end_idx):
-                start_sample = i * samples_per_file
-                end_sample = min((i + 1) * samples_per_file, num_samples)
-                chunk = table.slice(start_sample, end_sample - start_sample)
-
-                # Create chunk file in worker's directory
-                chunk_path = os.path.join(
-                    worker_dir, f"data_chunk_{i + num_parquets}.parquet")
-                temp_path = chunk_path + '.tmp'
-
-                try:
-                    # Write to temporary file
-                    pq.write_table(chunk, temp_path, compression='zstd')
-
-                    # Rename temporary file to final file
-                    if os.path.exists(chunk_path):
-                        os.remove(
-                            chunk_path)  # Remove existing file if it exists
-                    os.rename(temp_path, chunk_path)
-
-                    total_written += len(chunk)
-                except Exception as e:
-                    # Clean up temporary file if it exists
-                    if os.path.exists(temp_path):
-                        os.remove(temp_path)
-                    raise e
-
-            return total_written
-        except Exception as e:
-            logger.error("Error processing chunks %s-%s for worker %s: %s",
-                         start_idx, end_idx, worker_id, str(e))
-            raise

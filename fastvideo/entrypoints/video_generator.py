@@ -344,6 +344,9 @@ class VideoGenerator:
                 "size": (target_height, target_width, batch.num_frames),
                 "generation_time": gen_time,
                 "logging_info": logging_info,
+                "trajectory": output_batch.trajectory_latents,
+                "trajectory_timesteps": output_batch.trajectory_timesteps,
+                "trajectory_decoded": output_batch.trajectory_decoded,
             }
 
     def set_lora_adapter(self,

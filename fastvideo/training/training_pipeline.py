@@ -22,6 +22,7 @@ from tqdm.auto import tqdm
 import fastvideo.envs as envs
 from fastvideo.attention.backends.video_sparse_attn import (
     VideoSparseAttentionMetadataBuilder)
+from fastvideo.attention.backends.vmoba import VideoMobaAttentionMetadataBuilder
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset import build_parquet_map_style_dataloader
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
@@ -38,20 +39,18 @@ from fastvideo.training.activation_checkpoint import (
     apply_activation_checkpointing)
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
-    compute_density_for_timestep_sampling, get_scheduler, get_sigmas,
-    load_checkpoint, normalize_dit_input, save_checkpoint,
+    compute_density_for_timestep_sampling, count_trainable, get_scheduler,
+    get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint,
     shard_latents_across_sp)
-from fastvideo.utils import is_vsa_available, set_random_seed, shallow_asdict
+from fastvideo.utils import (is_vmoba_available, is_vsa_available,
+                             set_random_seed, shallow_asdict)
 
 import wandb  # isort: skip
 
 vsa_available = is_vsa_available()
+vmoba_available = is_vmoba_available()
 
 logger = init_logger(__name__)
-
-
-def _get_trainable_params(model: torch.nn.Module) -> int:
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
 class TrainingPipeline(LoRAPipeline, ABC):
@@ -113,6 +112,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 enable_gradient_checkpointing_type)
 
         noise_scheduler = self.modules["scheduler"]
+        # Set grads for proper modules based on the training mode (Distill, LoRA, etc.)
         self.set_trainable()
         params_to_optimize = self.transformer.parameters()
         params_to_optimize = list(
@@ -272,6 +272,20 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 patch_size=patch_size,
                 VSA_sparsity=current_vsa_sparsity,
                 device=get_local_torch_device())
+        elif vmoba_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN":
+            moba_params = self.training_args.moba_config.copy()
+            moba_params.update({
+                "current_timestep":
+                training_batch.timesteps,
+                "raw_latent_shape":
+                training_batch.raw_latent_shape[2:5],
+                "patch_size":
+                self.training_args.pipeline_config.dit_config.patch_size,
+                "device":
+                get_local_torch_device(),
+            })
+            training_batch.attn_metadata = VideoMobaAttentionMetadataBuilder(
+            ).build(**moba_params)
         else:
             training_batch.attn_metadata = None
 
@@ -296,7 +310,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
     def _transformer_forward_and_compute_loss(
             self, training_batch: TrainingBatch) -> TrainingBatch:
-        if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
+        if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN" or vmoba_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN":
             assert training_batch.attn_metadata is not None
         else:
             assert training_batch.attn_metadata is None
@@ -417,7 +431,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     local_main_process_only=False)
         if not self.post_init_called:
             self.post_init()
-        num_trainable_params = _get_trainable_params(self.transformer)
+        num_trainable_params = count_trainable(self.transformer)
         logger.info("Starting training with %s B trainable parameters",
                     round(num_trainable_params / 1e9, 3))
 
@@ -462,6 +476,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 current_decay_times = min(step // vsa_decay_interval_steps,
                                           vsa_sparsity // vsa_decay_rate)
                 current_vsa_sparsity = current_decay_times * vsa_decay_rate
+            elif vmoba_available:
+                # TODO: add vmoba sparsity scheduling here
+                current_vsa_sparsity = 0.0
             else:
                 current_vsa_sparsity = 0.0
 
@@ -503,10 +520,14 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 self.transformer.train()
                 self.sp_group.barrier()
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
+                if self.training_args.log_visualization:
+                    self.visualize_intermediate_latents(training_batch,
+                                                        self.training_args,
+                                                        step)
                 self._log_validation(self.transformer, self.training_args, step)
                 gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                 trainable_params = round(
-                    _get_trainable_params(self.transformer) / 1e9, 3)
+                    count_trainable(self.transformer) / 1e9, 3)
                 logger.info(
                     "GPU memory usage after validation: %s MB, trainable params: %sB",
                     gpu_memory_usage, trainable_params)
@@ -542,7 +563,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         logger.info("  Total optimization steps = %s",
                     self.training_args.max_train_steps)
         logger.info("  Total training parameters per FSDP shard = %s B",
-                    round(_get_trainable_params(self.transformer) / 1e9, 3))
+                    round(count_trainable(self.transformer) / 1e9, 3))
         # print dtype
         logger.info("  Master weight dtype: %s",
                     self.transformer.parameters().__next__().dtype)
@@ -610,7 +631,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         validation_dataloader = DataLoader(validation_dataset,
                                            batch_size=None,
                                            num_workers=0)
-
         transformer.eval()
 
         validation_steps = training_args.validation_sampling_steps.split(",")
@@ -704,3 +724,10 @@ class TrainingPipeline(LoRAPipeline, ABC):
         # Re-enable gradients for training
         training_args.inference_mode = False
         transformer.train()
+
+    def visualize_intermediate_latents(self, training_batch: TrainingBatch,
+                                       training_args: TrainingArgs, step: int):
+        """Add visualization data to wandb logging and save frames to disk."""
+        raise NotImplementedError(
+            "Visualize intermediate latents is not implemented for training pipeline"
+        )

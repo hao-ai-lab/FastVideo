@@ -17,12 +17,14 @@ class DiTArchConfig(ArchConfig):
     _supported_attention_backends: tuple[AttentionBackendEnum, ...] = (
         AttentionBackendEnum.SLIDING_TILE_ATTN, AttentionBackendEnum.SAGE_ATTN,
         AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA,
-        AttentionBackendEnum.VIDEO_SPARSE_ATTN)
+        AttentionBackendEnum.VIDEO_SPARSE_ATTN, AttentionBackendEnum.VMOBA_ATTN,
+        AttentionBackendEnum.SAGE_ATTN_THREE)
 
     hidden_size: int = 0
     num_attention_heads: int = 0
     num_channels_latents: int = 0
     exclude_lora_layers: list[str] = field(default_factory=list)
+    boundary_ratio: float | None = None
 
     def __post_init__(self) -> None:
         if not self._compile_conditions:

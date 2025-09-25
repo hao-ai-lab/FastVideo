@@ -40,6 +40,7 @@ class SamplingParam:
     num_inference_steps: int = 50
     guidance_scale: float = 1.0
     guidance_rescale: float = 0.0
+    boundary_ratio: float | None = None
 
     # TeaCache parameters
     enable_teacache: bool = False
@@ -47,6 +48,8 @@ class SamplingParam:
     # Misc
     save_video: bool = True
     return_frames: bool = False
+    return_trajectory_latents: bool = False  # returns all latents for each timestep
+    return_trajectory_decoded: bool = False  # returns decoded latents for each timestep
 
     def __post_init__(self) -> None:
         self.data_type = "video" if self.num_frames > 1 else "image"
@@ -168,6 +171,12 @@ class SamplingParam:
             help="Guidance rescale factor",
         )
         parser.add_argument(
+            "--boundary-ratio",
+            type=float,
+            default=SamplingParam.boundary_ratio,
+            help="Boundary timestep ratio",
+        )
+        parser.add_argument(
             "--save-video",
             action="store_true",
             default=SamplingParam.save_video,
@@ -190,6 +199,25 @@ class SamplingParam:
             type=str,
             default=SamplingParam.image_path,
             help="Path to input image for image-to-video generation",
+        )
+        parser.add_argument(
+            "--moba-config-path",
+            type=str,
+            default=None,
+            help=
+            "Path to a JSON file containing V-MoBA specific configurations.",
+        )
+        parser.add_argument(
+            "--return-trajectory-latents",
+            action="store_true",
+            default=SamplingParam.return_trajectory_latents,
+            help="Whether to return the trajectory",
+        )
+        parser.add_argument(
+            "--return-trajectory-decoded",
+            action="store_true",
+            default=SamplingParam.return_trajectory_decoded,
+            help="Whether to return the decoded trajectory",
         )
         return parser
 

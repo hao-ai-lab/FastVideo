@@ -61,6 +61,9 @@ _SCHEDULERS = {
      "FlowMatchEulerDiscreteScheduler"),
     "UniPCMultistepScheduler":
     ("schedulers", "scheduling_unipc_multistep", "UniPCMultistepScheduler"),
+    "SelfForcingFlowMatchScheduler":
+    ("schedulers", "scheduling_self_forcing_flow_match",
+     "SelfForcingFlowMatchScheduler"),
 }
 
 _FAST_VIDEO_MODELS = {

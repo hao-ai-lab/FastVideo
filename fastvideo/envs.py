@@ -175,6 +175,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # - "SLIDING_TILE_ATTN" : use Sliding Tile Attention
     # - "VIDEO_SPARSE_ATTN": use Video Sparse Attention
     # - "SAGE_ATTN": use Sage Attention
+    # - "SAGE_ATTN_THREE": use Sage Attention 3
     "FASTVIDEO_ATTENTION_BACKEND":
     lambda: os.getenv("FASTVIDEO_ATTENTION_BACKEND", None),
 

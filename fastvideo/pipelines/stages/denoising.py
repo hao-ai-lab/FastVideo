@@ -41,6 +41,13 @@ except ImportError:
     st_attn_available = False
 
 try:
+    from fastvideo.attention.backends.vmoba import VMOBAAttentionBackend
+    from fastvideo.utils import is_vmoba_available
+    vmoba_attn_available = is_vmoba_available()
+except ImportError:
+    vmoba_attn_available = False
+
+try:
     from fastvideo.attention.backends.video_sparse_attn import (
         VideoSparseAttentionBackend)
     vsa_available = True
@@ -77,8 +84,10 @@ class DenoisingStage(PipelineStage):
             supported_attention_backends=(
                 AttentionBackendEnum.SLIDING_TILE_ATTN,
                 AttentionBackendEnum.VIDEO_SPARSE_ATTN,
-                AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA
-            )  # hack
+                AttentionBackendEnum.VMOBA_ATTN,
+                AttentionBackendEnum.FLASH_ATTN,
+                AttentionBackendEnum.TORCH_SDPA,
+                AttentionBackendEnum.SAGE_ATTN_THREE)  # hack
         )
 
     def forward(
@@ -149,7 +158,8 @@ class DenoisingStage(PipelineStage):
         # Prepare image latents and embeddings for I2V generation
         image_embeds = batch.image_embeds
         if len(image_embeds) > 0:
-            assert torch.isnan(image_embeds[0]).sum() == 0
+            assert not torch.isnan(
+                image_embeds[0]).any(), "image_embeds contains nan"
             image_embeds = [
                 image_embed.to(target_dtype) for image_embed in image_embeds
             ]
@@ -186,15 +196,23 @@ class DenoisingStage(PipelineStage):
         # Get latents and embeddings
         latents = batch.latents
         prompt_embeds = batch.prompt_embeds
-        assert torch.isnan(prompt_embeds[0]).sum() == 0
+        assert not torch.isnan(
+            prompt_embeds[0]).any(), "prompt_embeds contains nan"
         if batch.do_classifier_free_guidance:
             neg_prompt_embeds = batch.negative_prompt_embeds
             assert neg_prompt_embeds is not None
-            assert torch.isnan(neg_prompt_embeds[0]).sum() == 0
+            assert not torch.isnan(
+                neg_prompt_embeds[0]).any(), "neg_prompt_embeds contains nan"
 
         # (Wan2.2) Calculate timestep to switch from high noise expert to low noise expert
-        if fastvideo_args.boundary_ratio is not None:
-            boundary_timestep = fastvideo_args.boundary_ratio * self.scheduler.num_train_timesteps
+        boundary_ratio = fastvideo_args.pipeline_config.dit_config.boundary_ratio
+        if batch.boundary_ratio is not None:
+            logger.info("Overriding boundary ratio from %s to %s",
+                        boundary_ratio, batch.boundary_ratio)
+            boundary_ratio = batch.boundary_ratio
+
+        if boundary_ratio is not None:
+            boundary_timestep = boundary_ratio * self.scheduler.num_train_timesteps
         else:
             boundary_timestep = None
         latent_model_input = latents.to(target_dtype)
@@ -236,6 +254,10 @@ class DenoisingStage(PipelineStage):
                                                              patch_size[2])
             seq_len = int(math.ceil(seq_len / sp_world_size)) * sp_world_size
 
+        # Initialize lists for ODE trajectory
+        trajectory_timesteps: list[torch.Tensor] = []
+        trajectory_latents: list[torch.Tensor] = []
+
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -268,6 +290,9 @@ class DenoisingStage(PipelineStage):
                     latent_model_input = torch.cat(
                         [latent_model_input, batch.image_latent],
                         dim=1).to(target_dtype)
+
+                assert not torch.isnan(
+                    latent_model_input).any(), "latent_model_input contains nan"
                 if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
                     timestep = torch.stack([t]).to(get_local_torch_device())
                     temp_ts = (mask2[0][0][:, ::2, ::2] * timestep).flatten()
@@ -280,7 +305,6 @@ class DenoisingStage(PipelineStage):
                 else:
                     t_expand = t.repeat(latent_model_input.shape[0])
 
-                assert torch.isnan(latent_model_input).sum() == 0
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)
 
@@ -322,6 +346,31 @@ class DenoisingStage(PipelineStage):
                                 VSA_sparsity,  # type: ignore
                                 device=get_local_torch_device(),
                             )
+                            assert attn_metadata is not None, "attn_metadata cannot be None"
+                        else:
+                            attn_metadata = None
+                    elif (vmoba_attn_available
+                          and self.attn_backend == VMOBAAttentionBackend):
+                        self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
+                        )
+                        if self.attn_metadata_builder_cls is not None:
+                            self.attn_metadata_builder = self.attn_metadata_builder_cls(
+                            )
+                            # Prepare V-MoBA parameters from config
+                            moba_params = fastvideo_args.moba_config.copy()
+                            moba_params.update({
+                                "current_timestep":
+                                i,
+                                "raw_latent_shape":
+                                batch.raw_latent_shape[2:5],
+                                "patch_size":
+                                fastvideo_args.pipeline_config.dit_config.
+                                patch_size,
+                                "device":
+                                get_local_torch_device(),
+                            })
+                            attn_metadata = self.attn_metadata_builder.build(
+                                **moba_params)
                             assert attn_metadata is not None, "attn_metadata cannot be None"
                         else:
                             attn_metadata = None
@@ -389,6 +438,11 @@ class DenoisingStage(PipelineStage):
                         latents = (1. - mask2[0]) * z + mask2[0] * latents
                         # latents = latents.unsqueeze(0)
 
+                # save trajectory latents if needed
+                if batch.return_trajectory_latents:
+                    trajectory_timesteps.append(t)
+                    trajectory_latents.append(latents)
+
                 # Update progress bar
                 if i == len(timesteps) - 1 or (
                     (i + 1) > num_warmup_steps and
@@ -397,8 +451,27 @@ class DenoisingStage(PipelineStage):
                     progress_bar.update()
 
         # Gather results if using sequence parallelism
+        trajectory_tensor: torch.Tensor | None = None
+        if trajectory_latents:
+            trajectory_tensor = torch.stack(trajectory_latents, dim=1)
+            trajectory_timesteps_tensor = torch.stack(trajectory_timesteps,
+                                                      dim=0)
+        else:
+            trajectory_tensor = None
+            trajectory_timesteps_tensor = None
+
+        # Gather results if using sequence parallelism
         if sp_group:
             latents = sequence_model_parallel_all_gather(latents, dim=2)
+            if batch.return_trajectory_latents:
+                trajectory_tensor = trajectory_tensor.to(
+                    get_local_torch_device())
+                trajectory_tensor = sequence_model_parallel_all_gather(
+                    trajectory_tensor, dim=3)
+
+        if trajectory_tensor is not None and trajectory_timesteps_tensor is not None:
+            batch.trajectory_timesteps = trajectory_timesteps_tensor.cpu()
+            batch.trajectory_latents = trajectory_tensor.cpu()
 
         # Update batch with final latents
         batch.latents = latents
@@ -737,7 +810,8 @@ class DmdDenoisingStage(DenoisingStage):
 
         video_raw_latent_shape = latents.shape
         prompt_embeds = batch.prompt_embeds
-        assert torch.isnan(prompt_embeds[0]).sum() == 0
+        assert not torch.isnan(
+            prompt_embeds[0]).any(), "prompt_embeds contains nan"
         timesteps = torch.tensor(
             fastvideo_args.pipeline_config.dmd_denoising_steps,
             dtype=torch.long,
@@ -776,7 +850,8 @@ class DmdDenoisingStage(DenoisingStage):
                         batch.image_latent.permute(0, 2, 1, 3, 4)
                     ],
                                                    dim=2).to(target_dtype)
-                assert torch.isnan(latent_model_input).sum() == 0
+                assert not torch.isnan(
+                    latent_model_input).any(), "latent_model_input contains nan"
 
                 # Prepare inputs for transformer
                 t_expand = t.repeat(latent_model_input.shape[0])

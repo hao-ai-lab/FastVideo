@@ -1,20 +1,19 @@
 import dataclasses
 import gc
-import multiprocessing
 import os
 import random
 from collections.abc import Callable
-from concurrent.futures import ProcessPoolExecutor
 from typing import Any
 
 import numpy as np
 import pyarrow as pa
-import pyarrow.parquet as pq
 import torch
 from datasets import Dataset, Video, load_dataset
 
 from fastvideo.configs.configs import (DatasetType, PreprocessConfig,
                                        VideoLoaderType)
+from fastvideo.dataset.dataloader.parquet_io import (ParquetDatasetWriter,
+                                                     records_to_table)
 from fastvideo.distributed.parallel_state import get_world_rank, get_world_size
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import PreprocessBatch
@@ -155,31 +154,17 @@ class VideoForwardBatchBuilder:
 
 
 class ParquetDatasetSaver:
-    """Component for saving and writing Parquet datasets"""
+    """Component for saving and writing Parquet datasets using shared parquet_io."""
 
-    def __init__(self,
-                 flush_frequency: int,
-                 samples_per_file: int,
-                 schema_fields: list[str],
-                 record_creator: Callable[..., list[dict[str, Any]]],
-                 file_writer_fn: Callable | None = None):
-        """
-        Initialize ParquetDatasetSaver
-        
-        Args:
-            schema_fields: schema fields list
-            record_creator: Function for creating records
-            file_writer_fn: Function for writing records to files, uses default implementation if None
-        """
+    def __init__(self, flush_frequency: int, samples_per_file: int,
+                 schema: pa.Schema,
+                 record_creator: Callable[..., list[dict[str, Any]]]):
         self.flush_frequency = flush_frequency
         self.samples_per_file = samples_per_file
-        self.schema_fields = schema_fields
+        self.schema = schema
         self.create_records_from_batch = record_creator
-        self.file_writer_fn: Callable[
-            [tuple], int] = file_writer_fn or self._default_file_writer_fn
-        self.all_tables: list[pa.Table] = []
         self.num_processed_samples: int = 0
-        self.num_saved_files: int = 0
+        self._writer: ParquetDatasetWriter | None = None
 
     def save_and_write_parquet_batch(
             self,
@@ -227,16 +212,17 @@ class ParquetDatasetSaver:
 
         if batch_data:
             self.num_processed_samples += len(batch_data)
-            # Convert batch data to PyArrow arrays
-            table = self._convert_batch_to_pyarrow_table(batch_data)
-
-            # Store the table in a list for later processing
-            self.all_tables.append(table)
+            table = records_to_table(batch_data, self.schema)
+            if self._writer is None:
+                os.makedirs(output_dir, exist_ok=True)
+                self._writer = ParquetDatasetWriter(
+                    out_dir=output_dir, samples_per_file=self.samples_per_file)
+            self._writer.append_table(table)
             logger.debug("Collected batch with %s samples", len(table))
 
         # If flush is needed
         if self.num_processed_samples >= self.flush_frequency:
-            self.flush_tables(output_dir)
+            self.flush_tables()
 
     def _process_non_padded_embeddings(
             self, prompt_embeds: torch.Tensor,
@@ -259,146 +245,31 @@ class ParquetDatasetSaver:
 
         return non_padded_embeds
 
-    def _convert_batch_to_pyarrow_table(self,
-                                        batch_data: list[dict]) -> pa.Table:
-        """Convert batch data to PyArrow table"""
-        arrays = []
+    def flush_tables(self, write_remainder: bool = False):
+        """Flush buffered records to disk.
 
-        for field in self.schema_fields:
-            if field.endswith('_bytes'):
-                arrays.append(
-                    pa.array([record[field] for record in batch_data],
-                             type=pa.binary()))
-            elif field.endswith('_shape'):
-                arrays.append(
-                    pa.array([record[field] for record in batch_data],
-                             type=pa.list_(pa.int32())))
-            elif field in ['width', 'height', 'num_frames']:
-                arrays.append(
-                    pa.array([record[field] for record in batch_data],
-                             type=pa.int32()))
-            elif field in ['duration_sec', 'fps']:
-                arrays.append(
-                    pa.array([record[field] for record in batch_data],
-                             type=pa.float32()))
-            else:
-                arrays.append(pa.array([record[field]
-                                        for record in batch_data]))
-
-        return pa.Table.from_arrays(arrays, names=self.schema_fields)
-
-    def flush_tables(self, output_dir: str):
-        """Flush collected tables to disk"""
-        if not hasattr(self, 'all_tables') or not self.all_tables:
+        Args:
+            output_dir: Directory where parquet files are written. Kept for API
+                symmetry (writer already configured with this path).
+            write_remainder: If True, also write any leftover rows smaller than
+                ``samples_per_file`` as a final small file. Useful for the last flush.
+        """
+        if self._writer is None:
             return
-
-        logger.debug("Combining %d batches...", len(self.all_tables))
-        combined_table = pa.concat_tables(self.all_tables)
-        assert len(combined_table) == self.num_processed_samples
-        logger.debug("Total samples collected: %d", len(combined_table))
-
-        # Calculate total number of chunks needed, putting remainder into self.all_tables
-        total_files = max(self.num_processed_samples // self.samples_per_file,
-                          1)
-
-        logger.debug("Fixed samples per parquet file: %d",
-                     self.samples_per_file)
-        logger.debug("Total number of parquet files: %d", total_files)
-        logger.debug(
-            "Total samples to be processed: %d (putting %d samples into self.all_tables)",
-            total_files * self.samples_per_file,
-            self.num_processed_samples % self.samples_per_file)
-
-        # Split work among processes
-        num_workers = int(min(multiprocessing.cpu_count(), total_files))
-        files_per_worker = (total_files + num_workers - 1) // num_workers
-
-        logger.debug("Using %d workers to process %d files", num_workers,
-                     total_files)
-        logger.debug("Files per worker: %s", files_per_worker)
-
-        # Prepare work ranges
-        work_ranges = []
-        for i in range(num_workers):
-            start_idx = i * files_per_worker
-            end_idx = min((i + 1) * files_per_worker, total_files)
-            if start_idx < total_files:
-                work_ranges.append((start_idx, end_idx, combined_table, i,
-                                    output_dir, self.samples_per_file))
-
-        total_written = 0
-        failed_ranges = []
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            futures = {
-                executor.submit(self.file_writer_fn, work_range): work_range
-                for work_range in work_ranges
-            }
-            for future in futures:
-                try:
-                    written = future.result()
-                    total_written += written
-                    logger.info("Processed file with %s samples", written)
-                except Exception as e:
-                    work_range = futures[future]
-                    failed_ranges.append(work_range)
-                    logger.error("Failed to process range %s-%s: %s",
-                                 work_range[0], work_range[1], str(e))
-
-        # Retry failed ranges sequentially
-        if failed_ranges:
-            logger.warning("Retrying %s failed ranges sequentially",
-                           len(failed_ranges))
-            for work_range in failed_ranges:
-                try:
-                    total_written += self.file_writer_fn(work_range)
-                except Exception as e:
-                    logger.error(
-                        "Failed to process range %s-%s after retry: %s",
-                        work_range[0], work_range[1], str(e))
-
-        self.num_saved_files += total_files
-
-        # Clear tables list
-        self.all_tables = []
-        if self.num_processed_samples > self.samples_per_file:
-            saved_samples = total_files * self.samples_per_file
-            self.all_tables.append(combined_table.slice(saved_samples))
-            self.num_processed_samples -= saved_samples
-        else:
-            self.num_processed_samples = 0
-
-        del combined_table
-        gc.collect()
+        _ = self._writer.flush(write_remainder=write_remainder)
+        # Reset processed sample count modulo samples_per_file
+        remainder = self.num_processed_samples % self.samples_per_file
+        self.num_processed_samples = 0 if write_remainder else remainder
 
     def clean_up(self) -> None:
         """Clean up all tables"""
-        self.all_tables = []
+        self.flush_tables(write_remainder=True)
+        self._writer = None
         self.num_processed_samples = 0
-        self.num_saved_files = 0
         gc.collect()
 
-    def _default_file_writer_fn(self, args_tuple: tuple) -> int:
-        """Default chunk processing implementation"""
-        start_idx, end_idx, combined_table, worker_id, output_dir, samples_per_file = args_tuple
-
-        written_count = 0
-        for file_idx in range(start_idx, end_idx):
-            start_row = file_idx * samples_per_file
-            end_row = min(start_row + samples_per_file, len(combined_table))
-
-            if start_row >= len(combined_table):
-                break
-
-            chunk_table = combined_table.slice(start_row, end_row - start_row)
-
-            # Write to file
-            output_file = os.path.join(
-                output_dir,
-                f"chunk_{file_idx + self.num_saved_files:06d}.parquet")
-            pq.write_table(chunk_table, output_file)
-            written_count += len(chunk_table)
-
-        return written_count
+    def __del__(self):
+        self.clean_up()
 
 
 def build_dataset(preprocess_config: PreprocessConfig, split: str,

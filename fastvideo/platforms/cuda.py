@@ -115,6 +115,7 @@ class CudaPlatformBase(Platform):
 
         logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s",
                     envs.FASTVIDEO_ATTENTION_BACKEND)
+        logger.info("Selected backend: %s", selected_backend)
         if selected_backend == AttentionBackendEnum.SLIDING_TILE_ATTN:
             try:
                 from st_attn import sliding_tile_attention  # noqa: F401
@@ -144,6 +145,20 @@ class CudaPlatformBase(Platform):
                 logger.info(
                     "Sage Attention backend is not installed. Fall back to Flash Attention."
                 )
+        elif selected_backend == AttentionBackendEnum.SAGE_ATTN_THREE:
+            try:
+                from fastvideo.attention.backends.sageattn.api import sageattn_blackwell  # noqa: F401
+
+                from fastvideo.attention.backends.sage_attn3 import (  # noqa: F401
+                    SageAttention3Backend)
+                logger.info("Using Sage Attention 3 backend.")
+
+                return "fastvideo.attention.backends.sage_attn3.SageAttention3Backend"
+            except ImportError as e:
+                logger.info(e)
+                logger.info(
+                    "Sage Attention 3 backend is not installed. Fall back to Flash Attention."
+                )
         elif selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
             try:
                 from vsa import block_sparse_attn  # noqa: F401
@@ -159,6 +174,20 @@ class CudaPlatformBase(Platform):
                     str(e))
                 raise ImportError(
                     "Video Sparse Attention backend is not installed. ") from e
+        elif selected_backend == AttentionBackendEnum.VMOBA_ATTN:
+            try:
+                from csrc.attn.vmoba_attn.vmoba import (  # noqa: F401
+                    moba_attn_varlen)
+                from fastvideo.attention.backends.vmoba import (  # noqa: F401
+                    VMOBAAttentionBackend)
+                logger.info("Using Video MOBA Attention backend.")
+
+                return "fastvideo.attention.backends.vmoba.VMOBAAttentionBackend"
+            except ImportError as e:
+                logger.error(
+                    "Failed to import Video MoBA Attention backend: %s", str(e))
+                raise ImportError(
+                    "Video MoBA Attention backend is not installed. ") from e
         elif selected_backend == AttentionBackendEnum.TORCH_SDPA:
             logger.info("Using Torch SDPA backend.")
             return "fastvideo.attention.backends.sdpa.SDPABackend"

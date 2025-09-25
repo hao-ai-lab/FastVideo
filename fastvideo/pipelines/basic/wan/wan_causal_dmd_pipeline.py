@@ -7,8 +7,6 @@ This module wires the causal DMD denoising stage into the modular pipeline.
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler)
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 
 # isort: off
@@ -16,8 +14,7 @@ from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
                                         CausalDMDDenosingStage,
                                         InputValidationStage,
                                         LatentPreparationStage,
-                                        TextEncodingStage,
-                                        TimestepPreparationStage)
+                                        TextEncodingStage)
 # isort: on
 
 logger = init_logger(__name__)
@@ -28,10 +25,6 @@ class WanCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
     _required_config_modules = [
         "text_encoder", "tokenizer", "vae", "transformer", "scheduler"
     ]
-
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
-            shift=fastvideo_args.pipeline_config.flow_shift)
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""
@@ -47,10 +40,6 @@ class WanCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
 
         self.add_stage(stage_name="conditioning_stage",
                        stage=ConditioningStage())
-
-        self.add_stage(stage_name="timestep_preparation_stage",
-                       stage=TimestepPreparationStage(
-                           scheduler=self.get_module("scheduler")))
 
         self.add_stage(stage_name="latent_preparation_stage",
                        stage=LatentPreparationStage(

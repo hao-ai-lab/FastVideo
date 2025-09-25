@@ -4,11 +4,11 @@ from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler)
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.denoising import DenoisingStage
+from fastvideo.pipelines.stages.validators import StageValidators as V
+from fastvideo.pipelines.stages.validators import VerificationResult
 
 try:
     from fastvideo.attention.backends.sliding_tile_attn import (
@@ -36,7 +36,6 @@ class CausalDMDDenosingStage(DenoisingStage):
 
     def __init__(self, transformer, scheduler) -> None:
         super().__init__(transformer, scheduler)
-        self.scheduler = FlowMatchEulerDiscreteScheduler(shift=8.0)
         # KV and cross-attention cache state (initialized on first forward)
         self.kv_cache1: list | None = None
         self.crossattn_cache: list | None = None
@@ -71,8 +70,16 @@ class CausalDMDDenosingStage(DenoisingStage):
         # Timesteps for DMD
         timesteps = torch.tensor(
             fastvideo_args.pipeline_config.dmd_denoising_steps,
-            dtype=torch.long,
-            device=get_local_torch_device())
+            dtype=torch.long).cpu()
+
+        if fastvideo_args.pipeline_config.warp_denoising_step:
+            logger.info("Warping timesteps...")
+            scheduler_timesteps = torch.cat((self.scheduler.timesteps.cpu(),
+                                             torch.tensor([0],
+                                                          dtype=torch.float32)))
+            timesteps = scheduler_timesteps[1000 - timesteps]
+        timesteps = timesteps.to(get_local_torch_device())
+        logger.info("Using timesteps: %s", timesteps)
 
         # Image kwargs (kept empty unless caller provides compatible args)
         image_kwargs: dict = {}
@@ -262,10 +269,14 @@ class CausalDMDDenosingStage(DenoisingStage):
                                             attn_metadata=attn_metadata,
                                             forward_batch=batch):
                         # Run transformer; follow DMD stage pattern
+                        t_expanded_noise = t_cur * torch.ones(
+                            (latent_model_input.shape[0], 1),
+                            device=latent_model_input.device,
+                            dtype=torch.long)
                         pred_noise_btchw = self.transformer(
                             latent_model_input,
                             prompt_embeds,
-                            t_expand,
+                            t_expanded_noise,
                             kv_cache=self.kv_cache1,
                             crossattn_cache=self.crossattn_cache,
                             current_start=(pos_start_base + start_index) *
@@ -326,10 +337,11 @@ class CausalDMDDenosingStage(DenoisingStage):
                     set_forward_context(current_timestep=0,
                                         attn_metadata=attn_metadata,
                                         forward_batch=batch):
+                    t_expanded_context = t_context.unsqueeze(1)
                     _ = self.transformer(
                         context_bcthw,
                         prompt_embeds,
-                        t_context,
+                        t_expanded_context,
                         kv_cache=self.kv_cache1,
                         crossattn_cache=self.crossattn_cache,
                         current_start=(pos_start_base + start_index) *
@@ -407,3 +419,27 @@ class CausalDMDDenosingStage(DenoisingStage):
                 False,
             })
         self.crossattn_cache = crossattn_cache
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify denoising stage inputs."""
+        result = VerificationResult()
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(5)])
+        result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
+        result.add_check("image_embeds", batch.image_embeds, V.is_list)
+        result.add_check("image_latent", batch.image_latent,
+                         V.none_or_tensor_with_dims(5))
+        result.add_check("num_inference_steps", batch.num_inference_steps,
+                         V.positive_int)
+        result.add_check("guidance_scale", batch.guidance_scale,
+                         V.positive_float)
+        result.add_check("eta", batch.eta, V.non_negative_float)
+        result.add_check("generator", batch.generator,
+                         V.generator_or_list_generators)
+        result.add_check("do_classifier_free_guidance",
+                         batch.do_classifier_free_guidance, V.bool_value)
+        result.add_check(
+            "negative_prompt_embeds", batch.negative_prompt_embeds, lambda x:
+            not batch.do_classifier_free_guidance or V.list_not_empty(x))
+        return result

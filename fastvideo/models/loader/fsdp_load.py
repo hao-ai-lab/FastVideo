@@ -62,6 +62,7 @@ def maybe_load_fsdp_model(
     device: torch.device,
     hsdp_replicate_dim: int,
     hsdp_shard_dim: int,
+    default_dtype: torch.dtype,
     param_dtype: torch.dtype,
     reduce_dtype: torch.dtype,
     cpu_offload: bool = False,
@@ -87,7 +88,8 @@ def maybe_load_fsdp_model(
         mp_policy=mp_policy,
     )
 
-    with set_default_dtype(param_dtype), torch.device("meta"):
+    logger.info("Loading model with default_dtype: %s", default_dtype)
+    with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
 
     # Check if we should use FSDP
@@ -125,7 +127,7 @@ def maybe_load_fsdp_model(
         model,
         weight_iterator,
         device,
-        param_dtype,
+        default_dtype,
         strict=True,
         cpu_offload=cpu_offload,
         param_names_mapping=param_names_mapping_fn,

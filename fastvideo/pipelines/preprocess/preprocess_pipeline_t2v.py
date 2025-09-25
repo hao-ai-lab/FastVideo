@@ -15,9 +15,9 @@ class PreprocessPipeline_T2V(BasePreprocessPipeline):
 
     _required_config_modules = ["text_encoder", "tokenizer", "vae"]
 
-    def get_schema_fields(self):
-        """Get the schema fields for T2V pipeline."""
-        return [f.name for f in pyarrow_schema_t2v]
+    def get_pyarrow_schema(self):
+        """Return the PyArrow schema for T2V pipeline."""
+        return pyarrow_schema_t2v
 
 
 EntryClass = PreprocessPipeline_T2V

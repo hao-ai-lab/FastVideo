@@ -35,8 +35,7 @@ class PreprocessWorkflowT2V(PreprocessWorkflow):
             self.processed_dataset_saver.save_and_write_parquet_batch(
                 forward_batch, self.training_dataset_output_dir)
 
-        self.processed_dataset_saver.flush_tables(
-            self.training_dataset_output_dir)
+        self.processed_dataset_saver.flush_tables()
         self.processed_dataset_saver.clean_up()
 
         # Validation dataset preprocessing
@@ -51,6 +50,5 @@ class PreprocessWorkflowT2V(PreprocessWorkflow):
 
                 self.processed_dataset_saver.save_and_write_parquet_batch(
                     forward_batch, self.validation_dataset_output_dir)
-            self.processed_dataset_saver.flush_tables(
-                self.validation_dataset_output_dir)
+            self.processed_dataset_saver.flush_tables()
             self.processed_dataset_saver.clean_up()

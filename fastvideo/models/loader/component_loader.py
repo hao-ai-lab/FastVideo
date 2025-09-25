@@ -416,6 +416,11 @@ class TransformerLoader(ComponentLoader):
                 "Model config does not contain a _class_name attribute. "
                 "Only diffusers format is supported.")
 
+        logger.info("transformer cls_name: %s", cls_name)
+        if fastvideo_args.override_transformer_cls_name is not None:
+            cls_name = fastvideo_args.override_transformer_cls_name
+            logger.info("Overriding transformer cls_name to %s", cls_name)
+
         fastvideo_args.model_paths["transformer"] = model_path
 
         # Config from Diffusers supersedes fastvideo's model config
@@ -430,8 +435,24 @@ class TransformerLoader(ComponentLoader):
         if not safetensors_list:
             raise ValueError(f"No safetensors files found in {model_path}")
 
-        logger.info("Loading model from %s safetensors files in %s",
-                    len(safetensors_list), model_path)
+        # Check if we should use custom initialization weights
+        custom_weights_path = getattr(fastvideo_args, 'init_weights_from_safetensors', None)
+        use_custom_weights = (custom_weights_path and os.path.exists(custom_weights_path) and 
+                            fastvideo_args.training_mode and 
+                            not hasattr(fastvideo_args, '_loading_teacher_critic_model'))
+
+        if use_custom_weights:
+            logger.info("Using custom initialization weights from: %s", custom_weights_path)
+            assert custom_weights_path is not None, "Custom initialization weights must be provided"
+            if os.path.isdir(custom_weights_path):
+                safetensors_list = glob.glob(
+                    os.path.join(str(custom_weights_path), "*.safetensors"))
+            else:
+                assert custom_weights_path.endswith(".safetensors"), "Custom initialization weights must be a safetensors file"
+                safetensors_list = [custom_weights_path]
+
+        logger.info("Loading model from %s safetensors files: %s",
+                    len(safetensors_list), safetensors_list)
 
         default_dtype = PRECISION_TO_TYPE[
             fastvideo_args.pipeline_config.dit_precision]
@@ -454,6 +475,7 @@ class TransformerLoader(ComponentLoader):
             pin_cpu_memory=fastvideo_args.pin_cpu_memory,
             fsdp_inference=fastvideo_args.use_fsdp_inference,
             # TODO(will): make these configurable
+            default_dtype=default_dtype,
             param_dtype=torch.bfloat16,
             reduce_dtype=torch.float32,
             output_dtype=None,
@@ -463,9 +485,8 @@ class TransformerLoader(ComponentLoader):
         total_params = sum(p.numel() for p in model.parameters())
         logger.info("Loaded model with %.2fB parameters", total_params / 1e9)
 
-        dtypes = set(param.dtype for param in model.parameters())
-        if len(dtypes) > 1:
-            model = model.to(default_dtype)
+        assert next(model.parameters()).dtype == default_dtype, "Model dtype does not match default dtype"
+
         model = model.eval()
         return model
 

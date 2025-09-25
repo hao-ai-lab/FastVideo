@@ -176,3 +176,37 @@ steps:
                   - TEST_TYPE=precision_vsa
                 agents:
                   queue: "default"
+            - path:
+                - "csrc/attn/vmoba_attn/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: "Precision Tests VMoBA"
+                env:
+                  - TEST_TYPE=precision_vmoba
+                agents:
+                  queue: "default"
+            - path:
+                - "csrc/attn/vmoba_attn/vmoba/**"
+                - "fastvideo/attention/backends/vmoba.py"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: "Inference Tests VMoBA"
+                env:  
+                  - TEST_TYPE=inference_vmoba
+                agents:
+                  queue: "default"
+            - path:
+                - "fastvideo/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: "Unit Tests"
+                env:
+                  - TEST_TYPE=unit_test
+                agents:
+                  queue: "default"

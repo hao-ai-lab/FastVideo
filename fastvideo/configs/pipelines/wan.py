@@ -12,13 +12,13 @@ from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 
 
-def t5_postprocess_text(outputs: BaseEncoderOutput) -> torch.tensor:
-    mask: torch.tensor = outputs.attention_mask
-    hidden_state: torch.tensor = outputs.last_hidden_state
+def t5_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
+    mask: torch.Tensor = outputs.attention_mask
+    hidden_state: torch.Tensor = outputs.last_hidden_state
     seq_lens = mask.gt(0).sum(dim=1).long()
     assert torch.isnan(hidden_state).sum() == 0
     prompt_embeds = [u[:v] for u, v in zip(hidden_state, seq_lens, strict=True)]
-    prompt_embeds_tensor: torch.tensor = torch.stack([
+    prompt_embeds_tensor: torch.Tensor = torch.stack([
         torch.cat([u, u.new_zeros(512 - u.size(0), u.size(1))])
         for u in prompt_embeds
     ],
@@ -39,12 +39,12 @@ class WanT2V480PConfig(PipelineConfig):
     vae_sp: bool = False
 
     # Denoising stage
-    flow_shift: int = 3
+    flow_shift: float | None = 3.0
 
     # Text encoding stage
     text_encoder_configs: tuple[EncoderConfig, ...] = field(
         default_factory=lambda: (T5Config(), ))
-    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.tensor],
+    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
                                   ...] = field(default_factory=lambda:
                                                (t5_postprocess_text, ))
 
@@ -68,7 +68,7 @@ class WanT2V720PConfig(WanT2V480PConfig):
     # WanConfig-specific parameters with defaults
 
     # Denoising stage
-    flow_shift: int = 5
+    flow_shift: float | None = 5.0
 
 
 @dataclass
@@ -82,7 +82,7 @@ class WanI2V480PConfig(WanT2V480PConfig):
         default_factory=CLIPVisionConfig)
     image_encoder_precision: str = "fp32"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
 
@@ -94,7 +94,7 @@ class WanI2V720PConfig(WanI2V480PConfig):
     # WanConfig-specific parameters with defaults
 
     # Denoising stage
-    flow_shift: int = 5
+    flow_shift: float | None = 5.0
 
 
 @dataclass
@@ -104,40 +104,47 @@ class FastWan2_1_T2V_480P_Config(WanT2V480PConfig):
     # WanConfig-specific parameters with defaults
 
     # Denoising stage
-    flow_shift: int = 8
+    flow_shift: float | None = 8.0
     dmd_denoising_steps: list[int] | None = field(
         default_factory=lambda: [1000, 757, 522])
-
-    def __post_init__(self) -> None:
-        self.vae_config.load_encoder = True
-        self.vae_config.load_decoder = True
 
 
 @dataclass
 class Wan2_2_TI2V_5B_Config(WanT2V480PConfig):
-    flow_shift: int = 5
+    flow_shift: float | None = 5.0
     ti2v_task: bool = True
+    expand_timesteps: bool = True
 
     def __post_init__(self) -> None:
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
+        self.dit_config.expand_timesteps = self.expand_timesteps
 
 
 @dataclass
 class FastWan2_2_TI2V_5B_Config(Wan2_2_TI2V_5B_Config):
-    flow_shift: int = 5
+    flow_shift: float | None = 5.0
     dmd_denoising_steps: list[int] | None = field(
         default_factory=lambda: [1000, 757, 522])
 
 
 @dataclass
 class Wan2_2_T2V_A14B_Config(WanT2V480PConfig):
-    pass
+    flow_shift: float | None = 12.0
+    boundary_ratio: float | None = 0.875
+
+    def __post_init__(self) -> None:
+        self.dit_config.boundary_ratio = self.boundary_ratio
 
 
 @dataclass
-class Wan2_2_I2V_A14B_Config(WanT2V480PConfig):
-    pass
+class Wan2_2_I2V_A14B_Config(WanI2V480PConfig):
+    flow_shift: float | None = 5.0
+    boundary_ratio: float | None = 0.900
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.dit_config.boundary_ratio = self.boundary_ratio
 
 
 # =============================================
@@ -146,5 +153,7 @@ class Wan2_2_I2V_A14B_Config(WanT2V480PConfig):
 @dataclass
 class SelfForcingWanT2V480PConfig(WanT2V480PConfig):
     is_causal: bool = True
+    flow_shift: float | None = 5.0
     dmd_denoising_steps: list[int] | None = field(
         default_factory=lambda: [1000, 750, 500, 250])
+    warp_denoising_step: bool = True

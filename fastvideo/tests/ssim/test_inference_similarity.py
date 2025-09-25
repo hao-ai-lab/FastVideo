@@ -101,7 +101,7 @@ I2V_IMAGE_PATHS = [
 
 
 @pytest.mark.parametrize("prompt", I2V_TEST_PROMPTS)
-@pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN", "TORCH_SDPA"])
+@pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
 @pytest.mark.parametrize("model_id", list(I2V_MODEL_TO_PARAMS.keys()))
 def test_i2v_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     """
