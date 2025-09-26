@@ -56,7 +56,7 @@ class DistillationPipeline(TrainingPipeline):
     Inherits from TrainingPipeline to reuse training infrastructure.
     """
     _required_config_modules = [
-        "scheduler", "transformer", "transformer_2"
+        "scheduler", "transformer",
         "vae", 
         # "real_score_transformer", "fake_score_transformer",
         # "real_score_transformer_2", "fake_score_transformer_2"
@@ -105,6 +105,7 @@ class DistillationPipeline(TrainingPipeline):
             logger.info(
                 f"Loading real score transformer from: {training_args.real_score_model_path}"
             )
+            training_args.override_transformer_cls_name = "WanTransformer3DModel"
             self.real_score_transformer = self.load_module_from_path(
                 training_args.real_score_model_path, "transformer",
                 training_args)
@@ -130,6 +131,7 @@ class DistillationPipeline(TrainingPipeline):
             logger.info(
                 f"Loading fake score transformer from: {training_args.fake_score_model_path}"
             )
+            training_args.override_transformer_cls_name = "WanTransformer3DModel"
             self.fake_score_transformer = self.load_module_from_path(
                 training_args.fake_score_model_path, "transformer",
                 training_args)
@@ -479,7 +481,7 @@ class DistillationPipeline(TrainingPipeline):
         Get the appropriate real score transformer based on timestep and boundary logic.
         """
         if self.real_score_transformer_2 is not None and self.boundary_timestep is not None:
-            if timestep.item() <= self.boundary_timestep:
+            if timestep.item() < self.boundary_timestep:
                 return self.real_score_transformer_2  # Low noise expert
             else:
                 return self.real_score_transformer  # High noise expert
@@ -491,7 +493,7 @@ class DistillationPipeline(TrainingPipeline):
         Get the appropriate fake score transformer based on timestep and boundary logic.
         """
         if self.fake_score_transformer_2 is not None and self.boundary_timestep is not None:
-            if timestep.item() <= self.boundary_timestep:
+            if timestep.item() < self.boundary_timestep:
                 self.train_fake_score_transformer_2 = True
                 return self.fake_score_transformer_2  # Low noise expert
             else:

@@ -122,42 +122,69 @@ class CausalWanSelfAttention(nn.Module):
         else:
             frame_seqlen = q.shape[1]
             current_end = current_start + roped_query.shape[1]
-            sink_tokens = self.sink_size * frame_seqlen
-            # If we are using local attention and the current KV cache size is larger than the local attention size, we need to truncate the KV cache
             kv_cache_size = kv_cache["k"].shape[1]
-            num_new_tokens = roped_query.shape[1]
-            if self.local_attn_size != -1 and (current_end > kv_cache["global_end_index"].item()) and (
-                    num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size):
-                # Calculate the number of new tokens added in this step
-                # Shift existing cache content left to discard oldest tokens
-                # Clone the source slice to avoid overlapping memory error
-                num_evicted_tokens = num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
-                num_rolled_tokens = kv_cache["local_end_index"].item() - num_evicted_tokens - sink_tokens
-                kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                    kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-                kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                    kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-                # Insert the new keys/values at the end
-                local_end_index = kv_cache["local_end_index"].item() + current_end - \
-                    kv_cache["global_end_index"].item() - num_evicted_tokens
-                local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
-            else:
-                # Assign new keys/values directly up to current_end
-                local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
-                local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"] = kv_cache["k"].detach()
-                kv_cache["v"] = kv_cache["v"].detach()
-                # logger.info("kv_cache['k'] is in comp graph: %s", kv_cache["k"].requires_grad or kv_cache["k"].grad_fn is not None)
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
+            cache_end = kv_cache["global_end_index"].item()
+            cache_len = kv_cache["local_end_index"].item()
+            chunk_len = roped_query.shape[1]
+
+            # Only cache the portion of this chunk that extends beyond what we already have.
+            new_token_count = max(0, current_end - cache_end)
+            new_token_count = min(new_token_count, chunk_len)
+            new_token_offset = chunk_len - new_token_count
+            sink_tokens = self.sink_size * frame_seqlen
+
+            if new_token_count > 0:
+                new_keys = roped_key[:, new_token_offset:]
+                new_values = v[:, new_token_offset:]
+
+                if self.local_attn_size != -1:
+                    required_len = cache_len + new_token_count
+                    if required_len > kv_cache_size:
+                        num_evicted_tokens = required_len - kv_cache_size
+                        if cache_len > sink_tokens:
+                            max_evictable = cache_len - sink_tokens
+                            num_evicted_tokens = min(num_evicted_tokens,
+                                                     max_evictable)
+                        else:
+                            num_evicted_tokens = 0
+                        if num_evicted_tokens > 0:
+                            retain_len = cache_len - num_evicted_tokens
+                            if retain_len > 0:
+                                kv_cache["k"][:, sink_tokens:sink_tokens + retain_len] = \
+                                    kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + retain_len].clone()
+                                kv_cache["v"][:, sink_tokens:sink_tokens + retain_len] = \
+                                    kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + retain_len].clone()
+                            cache_len = retain_len + sink_tokens
+
+                local_start_index = cache_len
+                local_end_index = local_start_index + new_token_count
+                if local_end_index > kv_cache_size:
+                    overflow = local_end_index - kv_cache_size
+                    if overflow >= new_token_count:
+                        new_token_count = 0
+                    else:
+                        new_keys = new_keys[:, overflow:]
+                        new_values = new_values[:, overflow:]
+                        new_token_count -= overflow
+                        new_token_offset += overflow
+                        local_end_index = kv_cache_size
+                        local_start_index = local_end_index - new_token_count
+
+                if new_token_count > 0:
+                    kv_cache["k"] = kv_cache["k"].detach()
+                    kv_cache["v"] = kv_cache["v"].detach()
+                    kv_cache["k"][:, local_start_index:local_end_index] = new_keys
+                    kv_cache["v"][:, local_start_index:local_end_index] = new_values
+                    cache_len = local_end_index
+
+            local_end_index = cache_len
+            cache_end = max(cache_end, current_end)
             x = self.attn(
                 roped_query,
                 kv_cache["k"][:, max(0, local_end_index - self.max_attention_size):local_end_index],
                 kv_cache["v"][:, max(0, local_end_index - self.max_attention_size):local_end_index]
             )
-            kv_cache["global_end_index"].fill_(current_end)
+            kv_cache["global_end_index"].fill_(cache_end)
             kv_cache["local_end_index"].fill_(local_end_index)
 
         return x
@@ -254,8 +281,11 @@ class CausalWanTransformerBlock(nn.Module):
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
         # assert orig_dtype != torch.float32
-        e = self.scale_shift_table + temb
+        logger.info("temb.shape: %s", temb.shape)
+        logger.info("self.scale_shift_table.shape: %s", self.scale_shift_table.shape)
+        e = self.scale_shift_table.unsqueeze(0) + temb
         # e.shape: [batch_size, num_frames, 6, inner_dim]
+        logger.info("e.shape: %s", e.shape)
         assert e.shape == (bs, num_frames, 6, self.hidden_dim)
         shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
             6, dim=2)

@@ -21,7 +21,7 @@ class WanSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
     with DMD for video generation.
     """
     _required_config_modules = [
-        "scheduler", "transformer", "transformer_2", "vae", 
+        "scheduler", "transformer", "vae", 
         # "real_score_transformer",
         # "fake_score_transformer", "fake_score_transformer_2", "real_score_transformer_2"
     ]
