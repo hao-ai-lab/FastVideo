@@ -22,8 +22,6 @@ class WanSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
     """
     _required_config_modules = [
         "scheduler", "transformer", "vae", 
-        # "real_score_transformer",
-        # "fake_score_transformer", "fake_score_transformer_2", "real_score_transformer_2"
     ]
 
     def create_training_stages(self, training_args: TrainingArgs):
