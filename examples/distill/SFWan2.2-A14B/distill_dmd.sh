@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=t2v
 #SBATCH --partition=main
-#SBATCH --nodes=4
-#SBATCH --ntasks=4
+#SBATCH --nodes=8
+#SBATCH --ntasks=8
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -62,7 +62,7 @@ training_args=(
   --num_height 448  # Updated to match Wan2.2 config
   --num_width 832   # Updated to match Wan2.2 config
   --num_frames 81  # Must be divisible by num_frame_per_block (81 % 3 = 0 ✓)
-  --enable_gradient_checkpointing_type "full"
+  # --enable_gradient_checkpointing_type "full"
   # --log_visualization
   --simulate_generator_forward
   --num_frame_per_block 3  # Frame generation block size for self-forcing
@@ -72,11 +72,11 @@ training_args=(
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 32 # 64
+  --num_gpus 64 # 64
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1 # 64
-  --hsdp_shard_dim 32
+  --hsdp_shard_dim 64
 )
 
 # Model arguments
@@ -91,7 +91,7 @@ model_args=(
 # Dataset arguments
 dataset_args=(
   --data_path "$DATA_DIR"
-  --dataloader_num_workers 32
+  --dataloader_num_workers 4
 )
 
 # Validation arguments

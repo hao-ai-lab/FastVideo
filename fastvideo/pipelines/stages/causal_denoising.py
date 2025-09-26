@@ -231,10 +231,10 @@ class CausalDMDDenosingStage(DenoisingStage):
                 video_raw_latent_shape = noise_latents_btchw.shape
 
                 for i, t_cur in enumerate(timesteps):
-                    if t_cur > fastvideo_args.pipeline_config.dit_config.boundary_ratio * self.scheduler.num_train_timesteps:
-                        current_model = self.transformer
-                    else:
+                    if fastvideo_args.pipeline_config.dit_config.boundary_ratio is not None and t_cur < fastvideo_args.pipeline_config.dit_config.boundary_ratio * self.scheduler.num_train_timesteps:
                         current_model = self.transformer_2
+                    else:
+                        current_model = self.transformer
                     # Copy for pred conversion
                     noise_latents = noise_latents_btchw.clone()
                     latent_model_input = current_latents.to(target_dtype)

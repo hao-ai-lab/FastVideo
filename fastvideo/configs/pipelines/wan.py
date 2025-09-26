@@ -54,6 +54,8 @@ class WanT2V480PConfig(PipelineConfig):
     text_encoder_precisions: tuple[str, ...] = field(
         default_factory=lambda: ("fp32", ))
 
+    # self-forcing params
+    warp_denoising_step: bool = True
     # WanConfig-specific added parameters
 
     def __post_init__(self):
