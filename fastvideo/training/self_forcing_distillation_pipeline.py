@@ -48,6 +48,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         logger.info("Initializing self-forcing distillation pipeline...")
 
         self.generator_ema: EMA_FSDP | None = None
+        self.generator_ema_2: EMA_FSDP | None = None
 
         super().initialize_training_pipeline(training_args)
         try:
@@ -748,39 +749,12 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         # local_attn_size = getattr(self.transformer, 'local_attn_size', -1)
 
         # Get model configuration parameters - handle FSDP wrapping
-        config = getattr(self.transformer, 'config', None)
-        num_attention_heads = getattr(config, 'num_attention_heads', None)
-        logger.info(f"RANK: {self.global_rank}, config num_attention_heads={num_attention_heads}", local_main_process_only=False)
-        attention_head_dim = getattr(config, 'attention_head_dim', None)
-        logger.info(f"RANK: {self.global_rank}, config attention_head_dim={attention_head_dim}", local_main_process_only=False)
-        text_len = getattr(config, 'text_len', None)
-        logger.info(f"RANK: {self.global_rank}, config text_len={text_len}", local_main_process_only=False)
-
-        if num_attention_heads is None:
-            num_attention_heads = getattr(self.transformer, 'num_attention_heads', None)
-            logger.info(f"RANK: {self.global_rank}, if statement num_attention_heads={num_attention_heads}", local_main_process_only=False)
-        if attention_head_dim is None:
-            attention_head_dim = getattr(self.transformer, 'attention_head_dim', None)
-            logger.info(f"RANK: {self.global_rank}, if statement attention_head_dim={attention_head_dim}", local_main_process_only=False)
-        if text_len is None:
-            text_len = getattr(self.transformer, 'text_len', None)
-            logger.info(f"RANK: {self.global_rank}, if statement text_len={text_len}", local_main_process_only=False)
-
-        blocks = getattr(self.transformer, 'blocks', None)
-        if blocks and len(blocks) > 0:
-            attn1 = getattr(blocks[0], 'attn1', None)
-            if attn1 is not None:
-                num_attention_heads = getattr(attn1, 'num_heads', num_attention_heads)
-                logger.info(f"RANK: {self.global_rank}, if statement 2 num_attention_heads={num_attention_heads}", local_main_process_only=False)
-                attention_head_dim = getattr(attn1, 'head_dim', attention_head_dim)
-                logger.info(f"RANK: {self.global_rank}, if statement 2 attention_head_dim={attention_head_dim}", local_main_process_only=False)
-
-        if num_attention_heads is None:
-            num_attention_heads = 40
-        if attention_head_dim is None:
-            attention_head_dim = 128
-        if text_len is None:
-            text_len = 512
+        num_attention_heads = getattr(self.transformer, 'num_attention_heads', None)
+        logger.info(f"RANK: {self.global_rank}, if statement num_attention_heads={num_attention_heads}", local_main_process_only=False)
+        attention_head_dim = getattr(self.transformer, 'attention_head_dim', None)
+        logger.info(f"RANK: {self.global_rank}, if statement attention_head_dim={attention_head_dim}", local_main_process_only=False)
+        text_len = getattr(self.transformer, 'text_len', None)
+        logger.info(f"RANK: {self.global_rank}, if statement text_len={text_len}", local_main_process_only=False)
 
         if max_num_frames is None:
             max_num_frames = num_frames
@@ -1044,9 +1018,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
             if self.generator_ema is not None:
                 if hasattr(self, 'train_transformer_2') and self.train_transformer_2 and self.transformer_2 is not None:
-                    # Note: EMA currently only supports the main transformer
-                    # Could be extended to support transformer_2 in the future
-                    pass
+                    # Update EMA for transformer_2 when training it
+                    if self.generator_ema_2 is not None:
+                        self.generator_ema_2.update(self.transformer_2)
                 else:
                     self.generator_ema.update(self.transformer)
 
@@ -1345,6 +1319,13 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     self.transformer, decay=self.training_args.ema_decay)
                 logger.info("Created generator EMA at step %s with decay=%s",
                             step, self.training_args.ema_decay)
+                
+                # Create EMA for transformer_2 if it exists
+                if self.transformer_2 is not None and self.generator_ema_2 is None:
+                    self.generator_ema_2 = EMA_FSDP(
+                        self.transformer_2, decay=self.training_args.ema_decay)
+                    logger.info("Created generator EMA_2 at step %s with decay=%s",
+                               step, self.training_args.ema_decay)
 
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 training_batch = self.train_one_step(training_batch)
@@ -1371,6 +1352,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 grad_norm,
                 "ema":
                 "✓" if (self.generator_ema is not None and self.is_ema_ready())
+                else "✗",
+                "ema2":
+                "✓" if (self.generator_ema_2 is not None and self.is_ema_ready())
                 else "✗",
             })
             progress_bar.update(1)
@@ -1399,11 +1383,13 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 if use_vsa:
                     log_data["VSA_train_sparsity"] = current_vsa_sparsity
 
-                if self.generator_ema is not None:
-                    log_data["ema_enabled"] = True
+                if self.generator_ema is not None or self.generator_ema_2 is not None:
+                    log_data["ema_enabled"] = self.generator_ema is not None
+                    log_data["ema_2_enabled"] = self.generator_ema_2 is not None
                     log_data["ema_decay"] = self.training_args.ema_decay
                 else:
                     log_data["ema_enabled"] = False
+                    log_data["ema_2_enabled"] = False
 
                 ema_stats = self.get_ema_stats()
                 log_data.update(ema_stats)
@@ -1444,7 +1430,16 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     self.optimizer, self.fake_score_optimizer,
                     self.train_dataloader, self.lr_scheduler,
                     self.fake_score_lr_scheduler, self.noise_random_generator,
-                    self.generator_ema)
+                    self.generator_ema,
+                    # MoE support
+                    generator_transformer_2=getattr(self, 'transformer_2', None),
+                    real_score_transformer_2=getattr(self, 'real_score_transformer_2', None),
+                    fake_score_transformer_2=getattr(self, 'fake_score_transformer_2', None),
+                    generator_optimizer_2=getattr(self, 'optimizer_2', None),
+                    fake_score_optimizer_2=getattr(self, 'fake_score_optimizer_2', None),
+                    generator_scheduler_2=getattr(self, 'lr_scheduler_2', None),
+                    fake_score_scheduler_2=getattr(self, 'fake_score_lr_scheduler_2', None),
+                    generator_ema_2=getattr(self, 'generator_ema_2', None))
 
                 if self.transformer:
                     self.transformer.train()
@@ -1461,7 +1456,16 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                              self.training_args.output_dir,
                                              f"{step}_weight_only",
                                              only_save_generator_weight=True,
-                                             generator_ema=self.generator_ema)
+                                             generator_ema=self.generator_ema,
+                                             # MoE support
+                                             generator_transformer_2=getattr(self, 'transformer_2', None),
+                                             real_score_transformer_2=getattr(self, 'real_score_transformer_2', None),
+                                             fake_score_transformer_2=getattr(self, 'fake_score_transformer_2', None),
+                                             generator_optimizer_2=getattr(self, 'optimizer_2', None),
+                                             fake_score_optimizer_2=getattr(self, 'fake_score_optimizer_2', None),
+                                             generator_scheduler_2=getattr(self, 'lr_scheduler_2', None),
+                                             fake_score_scheduler_2=getattr(self, 'fake_score_lr_scheduler_2', None),
+                                             generator_ema_2=getattr(self, 'generator_ema_2', None))
 
                 if self.training_args.use_ema and self.is_ema_ready():
                     self.save_ema_weights(self.training_args.output_dir, step)
@@ -1479,7 +1483,16 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             self.training_args.output_dir, self.training_args.max_train_steps,
             self.optimizer, self.fake_score_optimizer, self.train_dataloader,
             self.lr_scheduler, self.fake_score_lr_scheduler,
-            self.noise_random_generator, self.generator_ema)
+            self.noise_random_generator, self.generator_ema,
+            # MoE support
+            generator_transformer_2=getattr(self, 'transformer_2', None),
+            real_score_transformer_2=getattr(self, 'real_score_transformer_2', None),
+            fake_score_transformer_2=getattr(self, 'fake_score_transformer_2', None),
+            generator_optimizer_2=getattr(self, 'optimizer_2', None),
+            fake_score_optimizer_2=getattr(self, 'fake_score_optimizer_2', None),
+            generator_scheduler_2=getattr(self, 'lr_scheduler_2', None),
+            fake_score_scheduler_2=getattr(self, 'fake_score_lr_scheduler_2', None),
+            generator_ema_2=getattr(self, 'generator_ema_2', None))
 
         if self.training_args.use_ema and self.is_ema_ready():
             self.save_ema_weights(self.training_args.output_dir,
