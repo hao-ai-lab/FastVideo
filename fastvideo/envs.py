@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     FASTVIDEO_LOGGING_PREFIX: str = ""
     FASTVIDEO_LOGGING_CONFIG_PATH: str | None = None
     FASTVIDEO_TRACE_FUNCTION: int = 0
+    FASTVIDEO_FORCE_ATTN_BF16: bool = False
     FASTVIDEO_ATTENTION_BACKEND: str | None = None
     FASTVIDEO_ATTENTION_CONFIG: str | None = None
     FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "fork"
@@ -167,6 +168,10 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Useful for debugging
     "FASTVIDEO_TRACE_FUNCTION":
     lambda: int(os.getenv("FASTVIDEO_TRACE_FUNCTION", "0")),
+
+    # if set, fastvideo will force attention to be computed in bfloat16
+    "FASTVIDEO_FORCE_ATTN_BF16":
+    lambda: bool(int(os.getenv("FASTVIDEO_FORCE_ATTN_BF16", "0"))),
 
     # Backend for attention computation
     # Available options:

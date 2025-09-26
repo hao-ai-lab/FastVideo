@@ -172,8 +172,13 @@ class WanT2VCrossAttention(WanSelfAttention):
             k = self.norm_k.forward_native(self.to_k(context)[0]).view(b, -1, n, d)
             v = self.to_v(context)[0].view(b, -1, n, d)
 
-        # compute attention
-        x = self.attn(q, k, v)
+        if envs.FASTVIDEO_FORCE_ATTN_BF16:
+            out_dtype = v.dtype
+            # compute attention
+            x = self.attn(q.to(torch.bfloat16), k.to(torch.bfloat16), v.to(torch.bfloat16)).to(out_dtype)
+        else:
+            # compute attention
+            x = self.attn(q, k, v)
 
         # output
         x = x.flatten(2)
@@ -359,7 +364,12 @@ class WanTransformerBlock(nn.Module):
                                        is_neox_style=False), _apply_rotary_emb(
                                            key, cos, sin, is_neox_style=False)
 
-        attn_output, _ = self.attn1(query, key, value)
+        if envs.FASTVIDEO_FORCE_ATTN_BF16:
+            out_dtype = value.dtype
+            attn_output, _ = self.attn1(query.to(torch.bfloat16), key.to(torch.bfloat16), value.to(torch.bfloat16))
+            attn_output = attn_output.to(out_dtype)
+        else:
+            attn_output, _ = self.attn1(query, key, value)
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)

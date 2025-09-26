@@ -51,6 +51,7 @@ class PipelineConfig:
     # Model configuration
     dit_config: DiTConfig = field(default_factory=DiTConfig)
     dit_precision: str = "bf16"
+    dit_forward_precision: str = "bf16"
 
     # VAE configuration
     vae_config: VAEConfig = field(default_factory=VAEConfig)

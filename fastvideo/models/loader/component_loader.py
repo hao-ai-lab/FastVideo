@@ -450,6 +450,8 @@ class TransformerLoader(ComponentLoader):
 
         default_dtype = PRECISION_TO_TYPE[
             fastvideo_args.pipeline_config.dit_precision]
+        param_dtype = PRECISION_TO_TYPE[
+            fastvideo_args.pipeline_config.dit_forward_precision]
 
         # Load the model using FSDP loader
         logger.info("Loading model from %s, default_dtype: %s", cls_name,
@@ -469,7 +471,8 @@ class TransformerLoader(ComponentLoader):
             pin_cpu_memory=fastvideo_args.pin_cpu_memory,
             fsdp_inference=fastvideo_args.use_fsdp_inference,
             # TODO(will): make these configurable
-            param_dtype=torch.bfloat16,
+            default_dtype=default_dtype,
+            param_dtype=param_dtype,
             reduce_dtype=torch.float32,
             output_dtype=None,
             training_mode=fastvideo_args.training_mode)

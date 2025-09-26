@@ -180,3 +180,25 @@ def pred_noise_to_pred_video(pred_noise: torch.Tensor,
     sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
     pred_video = noise_input_latent - sigma_t * pred_noise
     return pred_video.to(dtype)
+
+def pred_video_to_pred_noise(x0_pred: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor, scheduler: Any) -> torch.Tensor:
+    """
+    Convert x0 prediction to flow matching's prediction.
+    x0_pred: the x0 prediction with shape [B, C, H, W]
+    xt: the input noisy data with shape [B, C, H, W]
+    timestep: the timestep with shape [B]
+
+    pred = (x_t - x_0) / sigma_t
+    """
+    # use higher precision for calculations
+    original_dtype = x0_pred.dtype
+    x0_pred, xt, sigmas, timesteps = map(
+        lambda x: x.double().to(x0_pred.device), [x0_pred, xt,
+                                                    scheduler.sigmas,
+                                                    scheduler.timesteps]
+    )
+    timestep_id = torch.argmin(
+        (timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
+    sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
+    flow_pred = (xt - x0_pred) / sigma_t
+    return flow_pred.to(original_dtype)

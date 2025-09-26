@@ -42,6 +42,11 @@ from fastvideo.pipelines.stages import (DecodingStage, DenoisingStage,
                                         TimestepPreparationStage)
 from fastvideo.utils import save_decoded_latents_as_video, shallow_asdict
 
+from fastvideo.forward_context import set_forward_context
+from fastvideo.models.utils import pred_noise_to_pred_video, pred_video_to_pred_noise
+from fastvideo.models.loader.component_loader import TransformerLoader
+from fastvideo.distributed import get_local_torch_device
+
 logger = init_logger(__name__)
 
 
@@ -69,6 +74,15 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
             extra_one_step=True)
         self.modules["scheduler"].set_timesteps(num_inference_steps=48,
                                                 denoising_strength=1.0)
+
+        fastvideo_args.model_loaded["transformer"] = False
+        loader = TransformerLoader()
+        fastvideo_args.pipeline_config.dit_precision = "fp32" # Overwrite the precision to fp32 for transformer
+        fastvideo_args.pipeline_config.dit_forward_precision = "fp32"
+        self.transformer = loader.load(
+            fastvideo_args.model_paths["transformer"], fastvideo_args)
+        self.add_module("transformer", self.transformer)
+        fastvideo_args.model_loaded["transformer"] = True
 
         self.add_stage(stage_name="input_validation_stage",
                        stage=InputValidationStage())
@@ -98,6 +112,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
         """Preprocess text-only data and generate trajectory information."""
 
         for batch_idx, data in enumerate(self.pbar):
+            # logger.info("transformer weight sum: %s", sum(p.float().sum().item() for p in self.transformer.parameters()))
             if data is None:
                 continue
 
@@ -143,10 +158,12 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
 
                 sampling_params = SamplingParam.from_pretrained(args.model_path)
 
+                negative_prompt = '色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走'
+
                 # encode negative prompt for trajectory collection
                 if sampling_params.guidance_scale > 1 and sampling_params.negative_prompt is not None:
                     negative_prompt_embeds_list, negative_prompt_masks_list = self.prompt_encoding_stage.encode_text(
-                        sampling_params.negative_prompt,
+                        negative_prompt,
                         fastvideo_args,
                         encoder_index=[0],
                         return_attention_mask=True,
@@ -180,7 +197,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                     batch.return_trajectory_latents = True
                     # Enabling this will save the decoded trajectory videos.
                     # Used for debugging.
-                    batch.return_trajectory_decoded = False
+                    batch.return_trajectory_decoded = True
                     batch.height = args.max_height
                     batch.width = args.max_width
                     batch.fps = args.train_fps
@@ -191,22 +208,117 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                         batch, fastvideo_args)
                     result_batch = self.timestep_preparation_stage(
                         batch, fastvideo_args)
-                    result_batch = self.latent_preparation_stage(
-                        result_batch, fastvideo_args)
-                    result_batch = self.denoising_stage(result_batch,
-                                                        fastvideo_args)
-                    # result_batch = self.decoding_stage(result_batch,
-                    #                                    fastvideo_args)
+                    # result_batch = self.latent_preparation_stage(
+                    #     result_batch, fastvideo_args)
+                    # result_batch = self.denoising_stage(result_batch,
+                    #                                     fastvideo_args)
+                    noisy_input = []
+                    # latents = result_batch.latents.permute(0, 2, 1, 3, 4)
+                    latents = torch.randn(
+                        [1, 21, 16, 60, 104], dtype=torch.float32, device=get_local_torch_device()
+                    )
+                    # logger.info("transformer weight sum: %s", sum(p.float().sum().item() for p in self.transformer.parameters()))
+                    logger.info("latents sum: %s, latents shape: %s, latents dtype: %s", latents.float().sum(), latents.shape, latents.dtype)
+
+                    logger.info("scheduler timesteps: %s", self.get_module("scheduler").timesteps)
+                    for progress_id, t in enumerate(tqdm(self.get_module("scheduler").timesteps)):
+                        timestep = t * \
+                            torch.ones([1, 21], device=latents.device, dtype=torch.float32)
+
+                        noisy_input.append(latents)
+
+                        with set_forward_context(
+                            current_timestep=0,
+                            attn_metadata=None,
+                            forward_batch=None,
+                        ):
+                            # logger.info("prompt_embed sum: %s, prompt_embed shape: %s, prompt_embed dtype: %s", prompt_embed.float().sum(), prompt_embed.shape, prompt_embed.dtype)
+                            # logger.info("timestep: %s", timestep[:, 0])
+                            # Run transformer
+                            cond_pred_noise_btchw = self.transformer(
+                                hidden_states=latents.permute(0, 2, 1, 3, 4),
+                                encoder_hidden_states=prompt_embed,
+                                timestep=timestep[:, 0]
+                            ).permute(0, 2, 1, 3, 4)
+
+                        # logger.info("cond_pred_noise_btchw sum: %s, cond_pred_noise_btchw shape: %s, cond_pred_noise_btchw dtype: %s", cond_pred_noise_btchw.float().sum(), cond_pred_noise_btchw.shape, cond_pred_noise_btchw.dtype)
+
+                        cond_pred_video_btchw = pred_noise_to_pred_video(
+                            pred_noise=cond_pred_noise_btchw.flatten(0, 1),
+                            noise_input_latent=latents.flatten(0, 1),
+                            timestep=timestep.flatten(0, 1),
+                            scheduler=self.get_module("scheduler")).unflatten(
+                                0, cond_pred_noise_btchw.shape[:2])
+
+                        # logger.info("cond_pred_video_btchw sum: %s, cond_pred_video_btchw shape: %s, cond_pred_video_btchw dtype: %s", cond_pred_video_btchw.float().sum(), cond_pred_video_btchw.shape, cond_pred_video_btchw.dtype)
+
+                        with set_forward_context(
+                            current_timestep=t,
+                            attn_metadata=None,
+                            forward_batch=result_batch,
+                        ):
+                            # logger.info("latents sum: %s, latents shape: %s, latents dtype: %s", latents.float().sum(), latents.shape, latents.dtype)
+                            # Run transformer
+                            uncond_pred_noise_btchw = self.transformer(
+                                latents.permute(0, 2, 1, 3, 4),
+                                negative_prompt_embed,
+                                timestep[:, 0]
+                            ).permute(0, 2, 1, 3, 4)
+
+                        # logger.info("uncond_pred_noise_btchw sum: %s, uncond_pred_noise_btchw shape: %s, uncond_pred_noise_btchw dtype: %s", uncond_pred_noise_btchw.float().sum(), uncond_pred_noise_btchw.shape, uncond_pred_noise_btchw.dtype)
+
+                        uncond_pred_video_btchw = pred_noise_to_pred_video(
+                            pred_noise=uncond_pred_noise_btchw.flatten(0, 1),
+                            noise_input_latent=latents.flatten(0, 1),
+                            timestep=timestep.flatten(0, 1),
+                            scheduler=self.get_module("scheduler")).unflatten(
+                                0, uncond_pred_noise_btchw.shape[:2])
+
+                        pred_video_btchw = uncond_pred_video_btchw + batch.guidance_scale * (
+                            cond_pred_video_btchw - uncond_pred_video_btchw
+                        )
+
+                        # logger.info("pred_video_btchw sum: %s, pred_video_btchw shape: %s, pred_video_btchw dtype: %s", pred_video_btchw.float().sum(), pred_video_btchw.shape, pred_video_btchw.dtype)
+
+                        pred_noise_btchw = pred_video_to_pred_noise(
+                            x0_pred=pred_video_btchw.flatten(0, 1),
+                            xt=latents.flatten(0, 1),
+                            timestep=timestep.flatten(0, 1),
+                            scheduler=self.get_module("scheduler")).unflatten(
+                                0, pred_video_btchw.shape[:2])
+
+                        # logger.info("pred_noise_btchw sum: %s, pred_noise_btchw shape: %s, pred_noise_btchw dtype: %s", pred_noise_btchw.float().sum(), pred_noise_btchw.shape, pred_noise_btchw.dtype)
+
+                        latents = self.get_module("scheduler").step(
+                            pred_noise_btchw.flatten(0, 1),
+                            self.get_module("scheduler").timesteps[progress_id] * torch.ones(
+                                [1, 21], device=latents.device, dtype=torch.long).flatten(0, 1),
+                            latents.flatten(0, 1)
+                        )[0].unflatten(dim=0, sizes=pred_noise_btchw.shape[:2])
+
+                        # logger.info("latents sum: %s, latents shape: %s, latents dtype: %s", latents.float().sum(), latents.shape, latents.dtype)
+
+                    noisy_input.append(latents)
+
+                    noisy_inputs = torch.stack(noisy_input, dim=1)
+
+                    noisy_inputs = noisy_inputs[:, [0, 12, 24, 36, -1]].half()
+
+                    logger.info("noisy inputs sum: %s, noisy inputs shape: %s, noisy inputs dtype: %s", noisy_inputs.float().sum(), noisy_inputs.shape, noisy_inputs.dtype)
+
+                    result_batch.trajectory_latents = noisy_inputs.permute(0, 1, 3, 2, 4, 5)
+                    result_batch.trajectory_timesteps = torch.tensor([self.get_module("scheduler").timesteps[i] for i in [0, 12, 24, 36, -1]])
+                    result_batch.latents = latents.permute(0, 2, 1, 3, 4)
+                    result_batch = self.decoding_stage(result_batch,
+                                                       fastvideo_args)
                     trajectory_latents.append(
                         result_batch.trajectory_latents.cpu())
                     trajectory_timesteps.append(
                         result_batch.trajectory_timesteps.cpu())
-                    # trajectory_decoded.append(result_batch.trajectory_decoded)
+                    trajectory_decoded.append(result_batch.trajectory_decoded)
 
                 trajectory_latents = torch.stack(trajectory_latents, dim=0).squeeze(0)
-                trajecotry_latents = trajectory_latents[:, [0, 12, 24, 36, -1]]
-                logger.info("trajecotry_latents sum: %s, trajecotry_latents shape: %s, trajecotry_latents dtype: %s", trajecotry_latents.float().sum(), trajecotry_latents.shape, trajecotry_latents.dtype)
-                assert False
+                # trajecotry_latents = trajectory_latents[:, [0, 12, 24, 36, -1]]
 
                 # Prepare extra features for text-only processing
                 extra_features = {

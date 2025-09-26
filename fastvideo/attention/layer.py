@@ -3,6 +3,7 @@
 import torch
 import torch.nn as nn
 
+import fastvideo.envs as envs
 from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather, sequence_model_parallel_all_to_all_4D)
@@ -36,7 +37,7 @@ class DistributedAttention(nn.Module):
         if num_kv_heads is None:
             num_kv_heads = num_heads
 
-        dtype = get_compute_dtype()
+        dtype = torch.bfloat16 if envs.FASTVIDEO_FORCE_ATTN_BF16 else get_compute_dtype()
         attn_backend = get_attn_backend(
             head_size,
             dtype,
@@ -221,7 +222,7 @@ class LocalAttention(nn.Module):
         if num_kv_heads is None:
             num_kv_heads = num_heads
 
-        dtype = get_compute_dtype()
+        dtype = torch.bfloat16 if envs.FASTVIDEO_FORCE_ATTN_BF16 else get_compute_dtype()
         attn_backend = get_attn_backend(
             head_size,
             dtype,
