@@ -1192,7 +1192,10 @@ class DistillationPipeline(TrainingPipeline):
                                            batch_size=None,
                                            num_workers=0)
 
+        # Set both transformers to eval mode
         transformer.eval()
+        if hasattr(self, 'transformer_2') and self.transformer_2 is not None:
+            self.transformer_2.eval()
 
         # Optionally use EMA model for validation if available and ready
         use_ema_for_validation = (self.training_args.use_ema
@@ -1202,6 +1205,7 @@ class DistillationPipeline(TrainingPipeline):
         
         if use_ema_for_validation:
             logger.info("Using EMA model for validation")
+            # Use self.transformer for consistency (the passed transformer should be self.transformer anyway)
             validation_transformer = self.transformer
             if self.generator_ema is not None:
                 ema_context = self.generator_ema.apply_to_model(validation_transformer)
@@ -1211,7 +1215,8 @@ class DistillationPipeline(TrainingPipeline):
                 ema_2_context = self.generator_ema_2.apply_to_model(self.transformer_2)
                 logger.info("Using EMA_2 model for transformer_2 validation")
         else:
-            validation_transformer = transformer
+            # Use self.transformer for consistency, but the passed transformer should be the same
+            validation_transformer = self.transformer
 
         validation_steps = training_args.validation_sampling_steps.split(",")
         validation_steps = [int(step) for step in validation_steps]
@@ -1333,8 +1338,10 @@ class DistillationPipeline(TrainingPipeline):
                     world_group.send_object(step_videos, dst=0)
                     world_group.send_object(step_captions, dst=0)
 
-        # Re-enable gradients for training
+        # Re-enable gradients for training - set both transformers back to train mode
         transformer.train()
+        if hasattr(self, 'transformer_2') and self.transformer_2 is not None:
+            self.transformer_2.train()
         gc.collect()
 
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,

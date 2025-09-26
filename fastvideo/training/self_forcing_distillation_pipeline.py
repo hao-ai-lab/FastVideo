@@ -74,9 +74,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         self.last_step_only = getattr(training_args, 'last_step_only', False)
         self.context_noise = getattr(training_args, 'context_noise', 0)
 
-        # Calculate frame sequence length - this will be set properly in _prepare_dit_inputs
-        self.frame_seq_length = 1560  # TODO: Calculate this dynamically based on patch size
-
         # Cache references (will be initialized per forward pass)
         self.kv_cache1: list[dict[str, Any]] | None = None
         self.crossattn_cache: list[dict[str, Any]] | None = None
@@ -744,9 +741,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         self.frame_seq_length = frame_seq_length
         logger.info(f"RANK: {self.global_rank}, cache frame_seq_length={frame_seq_length} post_patch=({post_patch_height},{post_patch_width})",
                     local_main_process_only=False)
-
-        # Get local attention size from transformer config
-        # local_attn_size = getattr(self.transformer, 'local_attn_size', -1)
 
         # Get model configuration parameters - handle FSDP wrapping
         num_attention_heads = getattr(self.transformer, 'num_attention_heads', None)
