@@ -84,7 +84,7 @@ class CosmosArchConfig(DiTArchConfig):
     adaln_lora_dim: int = 256
     max_size: tuple[int, int, int] = (128, 240, 240)
     patch_size: tuple[int, int, int] = (1, 2, 2)
-    rope_scale: tuple[float, float, float] = (1.0, 4.0, 4.0)
+    rope_scale: tuple[float, float, float] = (1.0, 3.0, 3.0)
     concat_padding_mask: bool = True
     extra_pos_embed_type: str | None = None
     qk_norm: str = "rms_norm"

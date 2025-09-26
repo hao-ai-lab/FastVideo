@@ -545,6 +545,11 @@ class CosmosRotaryPosEmbed(nn.Module):
     ) -> None:
         super().__init__()
 
+        # Log RoPE parameters
+        print(f"[FASTVIDEO ROPE INIT] hidden_size={hidden_size}, max_size={max_size}, patch_size={patch_size}, base_fps={base_fps}, rope_scale={rope_scale}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO ROPE INIT] hidden_size={hidden_size}, max_size={max_size}, patch_size={patch_size}, base_fps={base_fps}, rope_scale={rope_scale}\n")
+
         self.max_size = [
             size // patch
             for size, patch in zip(max_size, patch_size, strict=False)
@@ -560,9 +565,16 @@ class CosmosRotaryPosEmbed(nn.Module):
         self.w_ntk_factor = rope_scale[2]**(self.dim_w / (self.dim_w - 2))
         self.t_ntk_factor = rope_scale[0]**(self.dim_t / (self.dim_t - 2))
 
+        print(f"[FASTVIDEO ROPE INIT] dim_h={self.dim_h}, dim_w={self.dim_w}, dim_t={self.dim_t}")
+        print(f"[FASTVIDEO ROPE INIT] h_ntk_factor={self.h_ntk_factor}, w_ntk_factor={self.w_ntk_factor}, t_ntk_factor={self.t_ntk_factor}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO ROPE INIT] dim_h={self.dim_h}, dim_w={self.dim_w}, dim_t={self.dim_t}\n")
+            f.write(f"[FASTVIDEO ROPE INIT] h_ntk_factor={self.h_ntk_factor}, w_ntk_factor={self.w_ntk_factor}, t_ntk_factor={self.t_ntk_factor}\n")
+
     def forward(self,
                 hidden_states: torch.Tensor,
                 fps: int | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+        fps = 16
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         pe_size = [
             num_frames // self.patch_size[0], height // self.patch_size[1],
@@ -570,9 +582,21 @@ class CosmosRotaryPosEmbed(nn.Module):
         ]
         device = hidden_states.device
 
+        print(f"[FASTVIDEO ROPE FORWARD] fps={fps}, base_fps={self.base_fps}")
+        print(f"[FASTVIDEO ROPE FORWARD] pe_size={pe_size}, patch_size={self.patch_size}")
+        print(f"[FASTVIDEO ROPE FORWARD] hidden_states.shape={hidden_states.shape}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO ROPE FORWARD] fps={fps}, base_fps={self.base_fps}\n")
+            f.write(f"[FASTVIDEO ROPE FORWARD] pe_size={pe_size}, patch_size={self.patch_size}\n")
+            f.write(f"[FASTVIDEO ROPE FORWARD] hidden_states.shape={hidden_states.shape}\n")
+
         h_theta = 10000.0 * self.h_ntk_factor
         w_theta = 10000.0 * self.w_ntk_factor
         t_theta = 10000.0 * self.t_ntk_factor
+
+        print(f"[FASTVIDEO ROPE FORWARD] h_theta={h_theta}, w_theta={w_theta}, t_theta={t_theta}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO ROPE FORWARD] h_theta={h_theta}, w_theta={w_theta}, t_theta={t_theta}\n")
 
         seq = torch.arange(max(self.max_size),
                            device=device,
@@ -586,9 +610,19 @@ class CosmosRotaryPosEmbed(nn.Module):
         dim_t_range = (
             torch.arange(0, self.dim_t, 2, device=device,
                          dtype=torch.float32)[:(self.dim_t // 2)] / self.dim_t)
+        print(f"[FASTVIDEO ROPE FORWARD] max_size={self.max_size}, seq.shape={seq.shape}")
+        print(f"[FASTVIDEO ROPE FORWARD] dim_h_range.shape={dim_h_range.shape}, dim_w_range.shape={dim_w_range.shape}, dim_t_range.shape={dim_t_range.shape}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO ROPE FORWARD] max_size={self.max_size}, seq.shape={seq.shape}\n")
+            f.write(f"[FASTVIDEO ROPE FORWARD] dim_h_range.shape={dim_h_range.shape}, dim_w_range.shape={dim_w_range.shape}, dim_t_range.shape={dim_t_range.shape}\n")
+
         h_spatial_freqs = 1.0 / (h_theta**dim_h_range)
         w_spatial_freqs = 1.0 / (w_theta**dim_w_range)
         temporal_freqs = 1.0 / (t_theta**dim_t_range)
+
+        print(f"[FASTVIDEO ROPE FORWARD] h_spatial_freqs.shape={h_spatial_freqs.shape}, w_spatial_freqs.shape={w_spatial_freqs.shape}, temporal_freqs.shape={temporal_freqs.shape}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO ROPE FORWARD] h_spatial_freqs.shape={h_spatial_freqs.shape}, w_spatial_freqs.shape={w_spatial_freqs.shape}, temporal_freqs.shape={temporal_freqs.shape}\n")
 
         emb_h = torch.outer(seq[:pe_size[1]],
                             h_spatial_freqs)[None, :, None, :].repeat(
@@ -600,10 +634,16 @@ class CosmosRotaryPosEmbed(nn.Module):
         # Apply sequence scaling in temporal dimension
         if fps is None:
             # Images
+            print(f"[FASTVIDEO ROPE FORWARD] Using image mode (fps=None)")
             emb_t = torch.outer(seq[:pe_size[0]], temporal_freqs)
+            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                f.write(f"[FASTVIDEO ROPE FORWARD] Using image mode (fps=None)\n")
         else:
             # Videos
-            emb_t = torch.outer(seq[:pe_size[0]] / fps * self.base_fps,
+            print(f"[FASTVIDEO ROPE FORWARD] Using video mode (fps={fps})")
+            temporal_scale = seq[:pe_size[0]] / fps * self.base_fps
+            print(f"[FASTVIDEO ROPE FORWARD] temporal_scale range: {temporal_scale.min().item():.6f} to {temporal_scale.max().item():.6f}")
+            emb_t = torch.outer(temporal_scale,
                                 temporal_freqs)
 
         emb_t = emb_t[:, None, None, :].repeat(1, pe_size[1], pe_size[2], 1)
