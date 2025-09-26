@@ -370,7 +370,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             dtype=noise.dtype)
         logger.info(f"rank: {self.global_rank}, completed block calculation, num_blocks: {num_blocks}, output_shape: {output.shape}", local_main_process_only=False)
 
-        # Get device from model parameters (FSDP models don't have .device attribute)
         def get_model_device(model):
             if model is None:
                 return "None"
@@ -378,9 +377,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 return next(model.parameters()).device
             except (StopIteration, AttributeError):
                 return "Unknown"
-        
-        # offload real and fake score transformers
-        
         
         logger.info(f"rank: {self.global_rank}, self.transformer device: {get_model_device(self.transformer)}", local_main_process_only=False)
         logger.info(f"rank: {self.global_rank}, self.transformer_2 device: {get_model_device(self.transformer_2)}", local_main_process_only=False)
@@ -735,10 +731,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         # Calculate frame sequence length based on input dimensions and patch size
         # From the training batch, we can get the actual latent dimensions
         latent_shape = self.video_latent_shape_sp  # This is set in _prepare_dit_inputs
-        batch_size_actual, num_frames, num_channels, height, width = latent_shape
+        _, num_frames, _, height, width = latent_shape
 
         # Get patch size from transformer config
-        p_t, p_h, p_w = self.transformer.patch_size
+        _, p_h, p_w = self.transformer.patch_size
         post_patch_height = height // p_h
         post_patch_width = width // p_w
 
@@ -752,18 +748,39 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         # local_attn_size = getattr(self.transformer, 'local_attn_size', -1)
 
         # Get model configuration parameters - handle FSDP wrapping
-        if hasattr(self.transformer, 'config'):
-            config = self.transformer.config
-            num_attention_heads = config.num_attention_heads
-            attention_head_dim = config.attention_head_dim
-            text_len = config.text_len
-        else:
-            # Fallback to direct attribute access for non-FSDP models
-            num_attention_heads = getattr(self.transformer,
-                                          'num_attention_heads', 40)
-            attention_head_dim = getattr(self.transformer, 'attention_head_dim',
-                                         128)
-            text_len = getattr(self.transformer, 'text_len', 512)
+        config = getattr(self.transformer, 'config', None)
+        num_attention_heads = getattr(config, 'num_attention_heads', None)
+        logger.info(f"RANK: {self.global_rank}, config num_attention_heads={num_attention_heads}", local_main_process_only=False)
+        attention_head_dim = getattr(config, 'attention_head_dim', None)
+        logger.info(f"RANK: {self.global_rank}, config attention_head_dim={attention_head_dim}", local_main_process_only=False)
+        text_len = getattr(config, 'text_len', None)
+        logger.info(f"RANK: {self.global_rank}, config text_len={text_len}", local_main_process_only=False)
+
+        if num_attention_heads is None:
+            num_attention_heads = getattr(self.transformer, 'num_attention_heads', None)
+            logger.info(f"RANK: {self.global_rank}, if statement num_attention_heads={num_attention_heads}", local_main_process_only=False)
+        if attention_head_dim is None:
+            attention_head_dim = getattr(self.transformer, 'attention_head_dim', None)
+            logger.info(f"RANK: {self.global_rank}, if statement attention_head_dim={attention_head_dim}", local_main_process_only=False)
+        if text_len is None:
+            text_len = getattr(self.transformer, 'text_len', None)
+            logger.info(f"RANK: {self.global_rank}, if statement text_len={text_len}", local_main_process_only=False)
+
+        blocks = getattr(self.transformer, 'blocks', None)
+        if blocks and len(blocks) > 0:
+            attn1 = getattr(blocks[0], 'attn1', None)
+            if attn1 is not None:
+                num_attention_heads = getattr(attn1, 'num_heads', num_attention_heads)
+                logger.info(f"RANK: {self.global_rank}, if statement 2 num_attention_heads={num_attention_heads}", local_main_process_only=False)
+                attention_head_dim = getattr(attn1, 'head_dim', attention_head_dim)
+                logger.info(f"RANK: {self.global_rank}, if statement 2 attention_head_dim={attention_head_dim}", local_main_process_only=False)
+
+        if num_attention_heads is None:
+            num_attention_heads = 40
+        if attention_head_dim is None:
+            attention_head_dim = 128
+        if text_len is None:
+            text_len = 512
 
         if max_num_frames is None:
             max_num_frames = num_frames

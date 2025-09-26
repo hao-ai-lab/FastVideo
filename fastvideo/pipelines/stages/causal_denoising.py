@@ -42,7 +42,8 @@ class CausalDMDDenosingStage(DenoisingStage):
         self.kv_cache1: list | None = None
         self.crossattn_cache: list | None = None
         # Model-dependent constants (aligned with causal_inference.py assumptions)
-        self.num_transformer_blocks = self.transformer.config.arch_config.num_layers
+        self.num_transformer_blocks = len(self.transformer.blocks)
+        logger.info("num_transformer_blocks (from model.blocks): %s", self.num_transformer_blocks, local_main_process_only=False)
         self.num_frames_per_block = self.transformer.config.arch_config.num_frames_per_block
         self.sliding_window_num_frames = self.transformer.config.arch_config.sliding_window_num_frames
 

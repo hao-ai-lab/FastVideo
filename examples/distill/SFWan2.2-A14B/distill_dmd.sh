@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=t2v
 #SBATCH --partition=main
-#SBATCH --nodes=8
-#SBATCH --ntasks=8
+#SBATCH --nodes=4
+#SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -33,11 +33,11 @@ NUM_GPUS=8
 
 # Model paths for Self-Forcing DMD distillation with Wan2.2:
 GENERATOR_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers"  # Updated to Wan2.2
-REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers" # Teacher model
-FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers" # Critic model
+# REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers" # Teacher model
+# FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers" # Critic model
 # GENERATOR_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Updated to Wan2.2
-# REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Teacher model
-# FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers" # Critic model
+REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Teacher model
+FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers" # Critic model
 
 # DATA_DIR="data/test-text-preprocessing/Node_0_GPU_1_File_1/combined_parquet_dataset/"
 DATA_DIR="/mnt/weka/home/hao.zhang/matthew/FastVideo/data/test-text-preprocessing"
@@ -62,7 +62,7 @@ training_args=(
   --num_height 448  # Updated to match Wan2.2 config
   --num_width 832   # Updated to match Wan2.2 config
   --num_frames 81  # Must be divisible by num_frame_per_block (81 % 3 = 0 ✓)
-  # --enable_gradient_checkpointing_type "full"
+  --enable_gradient_checkpointing_type "full"
   # --log_visualization
   --simulate_generator_forward
   --num_frame_per_block 3  # Frame generation block size for self-forcing
@@ -72,11 +72,11 @@ training_args=(
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 64 # 64
+  --num_gpus 32 # 64
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1 # 64
-  --hsdp_shard_dim 64
+  --hsdp_shard_dim 32
 )
 
 # Model arguments
