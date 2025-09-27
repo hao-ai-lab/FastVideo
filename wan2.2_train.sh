@@ -17,13 +17,13 @@ CHECKPOINT_PATH="outputs_train_test/wan_finetune/checkpoint-10"
 torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     fastvideo/training/wan_training_pipeline.py \
     --model_path Wan-AI/Wan2.2-T2V-A14B-Diffusers \
-    --inference_mode False\
+    --inference_mode False \
     --pretrained_model_name_or_path Wan-AI/Wan2.2-T2V-A14B-Diffusers \
     --cache_dir "/home/ray/.cache" \
     --data_path "$DATA_DIR" \
     --validation_dataset_file  "$VALIDATION_DIR" \
     --train_batch_size 1 \
-    --num_latent_t 16\
+    --num_latent_t 16 \
     --sp_size 4 \
     --tp_size 1 \
     --num_gpus $NUM_GPUS \

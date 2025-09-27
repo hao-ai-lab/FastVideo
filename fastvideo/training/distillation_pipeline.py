@@ -101,7 +101,6 @@ class DistillationPipeline(TrainingPipeline):
             self.boundary_timestep = None
 
         if training_args.real_score_model_path:
-        # if False:
             logger.info(
                 f"Loading real score transformer from: {training_args.real_score_model_path}"
             )
@@ -122,12 +121,10 @@ class DistillationPipeline(TrainingPipeline):
         else:
             self.real_score_transformer = self.get_module(
                 "real_score_transformer")
-            # self.real_score_transformer_2 = None
             self.real_score_transformer_2 = self.get_module(
                 "real_score_transformer_2")
 
         if training_args.fake_score_model_path:
-        # if False:
             logger.info(
                 f"Loading fake score transformer from: {training_args.fake_score_model_path}"
             )
@@ -148,7 +145,6 @@ class DistillationPipeline(TrainingPipeline):
         else:
             self.fake_score_transformer = self.get_module(
                 "fake_score_transformer")
-            # self.fake_score_transformer_2 = None
             self.fake_score_transformer_2 = self.get_module(
                 "fake_score_transformer_2")
 

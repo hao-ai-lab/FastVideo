@@ -133,6 +133,7 @@ class FastVideoArgs:
 
     # Compilation
     enable_torch_compile: bool = False
+    torch_compile_kwargs: dict[str, Any] = field(default_factory=dict)
 
     disable_autocast: bool = False
 
@@ -330,6 +331,12 @@ class FastVideoArgs:
             help="Use torch.compile to speed up DiT inference." +
             "However, will likely cause precision drifts. See (https://github.com/pytorch/pytorch/issues/145213)",
         )
+        parser.add_argument(
+            "--torch-compile-kwargs",
+            type=str,
+            default=None,
+            help="JSON string of kwargs to pass to torch.compile. Example: '{\"backend\":\"inductor\",\"mode\":\"reduce-overhead\"}'",
+        )
 
         parser.add_argument(
             "--dit-cpu-offload",
@@ -431,6 +438,17 @@ class FastVideoArgs:
                 mode_value = getattr(args, attr, FastVideoArgs.mode.value)
                 kwargs['mode'] = ExecutionMode.from_string(
                     mode_value) if isinstance(mode_value, str) else mode_value
+            elif attr == 'torch_compile_kwargs':
+                # Parse JSON string for torch.compile kwargs
+                torch_compile_kwargs_str = getattr(args, 'torch_compile_kwargs', None)
+                if torch_compile_kwargs_str:
+                    try:
+                        import json
+                        kwargs['torch_compile_kwargs'] = json.loads(torch_compile_kwargs_str)
+                    except json.JSONDecodeError as e:
+                        raise ValueError(f"Invalid JSON for torch_compile_kwargs: {e}")
+                else:
+                    kwargs['torch_compile_kwargs'] = {}
             elif attr == 'workload_type':
                 # Convert string to WorkloadType enum
                 workload_type_value = getattr(args, 'workload_type',
@@ -712,7 +730,6 @@ class TrainingArgs(FastVideoArgs):
     independent_first_frame: bool = False
     enable_gradient_masking: bool = True
     gradient_mask_last_n_frames: int = 21
-    validate_cache_structure: bool = False  # Debug flag for cache validation
     same_step_across_blocks: bool = False  # Use same exit timestep for all blocks
     last_step_only: bool = False  # Only use the last timestep for training
     context_noise: int = 0  # Context noise level for cache updates
@@ -734,6 +751,17 @@ class TrainingArgs(FastVideoArgs):
                 mode_value = getattr(args, attr, ExecutionMode.FINETUNING.value)
                 kwargs[attr] = ExecutionMode.from_string(
                     mode_value) if isinstance(mode_value, str) else mode_value
+            elif attr == 'torch_compile_kwargs':
+                # Parse JSON string for torch.compile kwargs
+                torch_compile_kwargs_str = getattr(args, 'torch_compile_kwargs', None)
+                if torch_compile_kwargs_str:
+                    try:
+                        import json
+                        kwargs['torch_compile_kwargs'] = json.loads(torch_compile_kwargs_str)
+                    except json.JSONDecodeError as e:
+                        raise ValueError(f"Invalid JSON for torch_compile_kwargs: {e}")
+                else:
+                    kwargs['torch_compile_kwargs'] = {}
             elif attr == 'workload_type':
                 # Convert string to WorkloadType enum
                 workload_type_value = getattr(args, 'workload_type',

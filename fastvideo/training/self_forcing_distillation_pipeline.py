@@ -55,6 +55,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             logger.info("RANK: %s, entered initialize_training_pipeline", self.global_rank, local_main_process_only=False)
         except Exception:
             logger.info("Entered initialize_training_pipeline (rank unknown)")
+
         self.noise_scheduler = SelfForcingFlowMatchScheduler(
             num_inference_steps=1000,
             shift=5.0,
@@ -64,7 +65,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         self.dfake_gen_update_ratio = getattr(training_args,
                                               'dfake_gen_update_ratio', 5)
 
-        # Self-forcing specific properties
         self.num_frame_per_block = getattr(training_args, 'num_frame_per_block',
                                            3)
         self.independent_first_frame = getattr(training_args,
@@ -74,7 +74,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         self.last_step_only = getattr(training_args, 'last_step_only', False)
         self.context_noise = getattr(training_args, 'context_noise', 0)
 
-        # Cache references (will be initialized per forward pass)
         self.kv_cache1: list[dict[str, Any]] | None = None
         self.crossattn_cache: list[dict[str, Any]] | None = None
 
@@ -126,13 +125,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         with set_forward_context(
                 current_timestep=training_batch.timesteps,
                 attn_metadata=training_batch.attn_metadata_vsa):
-            if self.training_args.simulate_generator_forward:
-                logger.info(f"rank: {self.global_rank}, entering generator_multi_step_simulation_forward in generator_loss", local_main_process_only=False)
-                generator_pred_video = self._generator_multi_step_simulation_forward(
-                    training_batch)
-                logger.info(f"rank: {self.global_rank}, waiting at barrier in generator_loss", local_main_process_only=False)
-            else:
-                generator_pred_video = self._generator_forward(training_batch)
+            logger.info(f"rank: {self.global_rank}, entering generator_multi_step_simulation_forward in generator_loss", local_main_process_only=False)
+            generator_pred_video = self._generator_multi_step_simulation_forward(
+                training_batch)
+            logger.info(f"rank: {self.global_rank}, waiting at barrier in generator_loss", local_main_process_only=False)
         
         logger.info(f"rank: {self.global_rank}, passed barrier in generator_loss", local_main_process_only=False)
         with set_forward_context(current_timestep=training_batch.timesteps,
@@ -181,96 +177,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         except Exception:
             logger.info("exit critic_loss")
         return flow_matching_loss, log_dict
-
-    def _generator_forward(self, training_batch: TrainingBatch) -> torch.Tensor:
-        """Forward pass through generator with KV cache support for causal generation."""
-        try:
-            logger.info("RANK: %s, enter _generator_forward latents=%s",
-                        self.global_rank,
-                        tuple(training_batch.latents.shape) if hasattr(training_batch, 'latents') and training_batch.latents is not None else None,
-                        local_main_process_only=False)
-        except Exception:
-            logger.info("enter _generator_forward")
-        latents = training_batch.latents
-        dtype = latents.dtype
-        batch_size = latents.shape[0]
-
-        # Step 1: Sample a timestep from denoising_step_list
-        index = torch.randint(0,
-                              len(self.denoising_step_list), [1],
-                              device=self.device,
-                              dtype=torch.long)
-        timestep = self.denoising_step_list[index]
-        training_batch.dmd_latent_vis_dict["generator_timestep"] = timestep
-
-        # Step 2: Initialize KV cache and cross-attention cache for causal generation
-        max_cache_frames = getattr(self.training_args, 'num_latent_t',
-                                   latents.shape[1])
-        kv_cache, crossattn_cache = self._initialize_simulation_caches(
-            batch_size,
-            dtype,
-            self.device,
-            max_num_frames=max_cache_frames)
-
-        if getattr(self.training_args, 'validate_cache_structure', False):
-            self._validate_cache_structure(kv_cache, crossattn_cache,
-                                           batch_size)
-
-        # Step 3: Add noise to latents
-        noise = torch.randn(self.video_latent_shape,
-                            device=self.device,
-                            dtype=dtype)
-        if self.sp_world_size > 1:
-            noise = rearrange(noise,
-                              "b (n t) c h w -> b n t c h w",
-                              n=self.sp_world_size).contiguous()
-            noise = noise[:, self.rank_in_sp_group, :, :, :, :]
-        noisy_latent = self.noise_scheduler.add_noise(
-            latents.flatten(0, 1), noise.flatten(0, 1),
-            timestep * torch.ones([latents.shape[0] * latents.shape[1]],
-                                  device=noise.device,
-                                  dtype=torch.long))
-
-        # Step 4: Build input kwargs with KV cache support
-        training_batch = self._build_distill_input_kwargs(
-            noisy_latent, timestep, training_batch.conditional_dict,
-            training_batch)
-
-        # Use the appropriate transformer
-        current_model = self.transformer_2 if self.train_transformer_2 else self.transformer
-
-        # Step 5: Forward pass with KV cache if available
-        if hasattr(current_model, '_forward_inference'):
-            # Use causal inference forward with KV cache
-            pred_noise = current_model(
-                hidden_states=training_batch.input_kwargs['hidden_states'],
-                encoder_hidden_states=training_batch.
-                input_kwargs['encoder_hidden_states'],
-                timestep=training_batch.input_kwargs['timestep'],
-                encoder_hidden_states_image=training_batch.input_kwargs.get(
-                    'encoder_hidden_states_image'),
-                kv_cache=kv_cache,
-                crossattn_cache=crossattn_cache,
-                current_start=0,  # Start from beginning for single-step
-                cache_start=0).permute(0, 2, 1, 3, 4)
-        else:
-            # Fallback to regular forward
-            pred_noise = current_model(
-                **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
-
-        # Step 6: Convert noise prediction to video prediction
-        pred_video = pred_noise_to_pred_video(
-            pred_noise=pred_noise.flatten(0, 1),
-            noise_input_latent=noisy_latent.flatten(0, 1),
-            timestep=torch.tensor([timestep], device=noisy_latent.device),
-            scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
-
-        logger.info("RANK: %s, _generator_forward pred_video=%s",
-                    self.global_rank, tuple(pred_video.shape), local_main_process_only=False)
-        self._reset_simulation_caches(kv_cache, crossattn_cache)
-
-        logger.info("RANK: %s, exit _generator_forward", self.global_rank, local_main_process_only=False)
-        return pred_video
 
     def _generator_multi_step_simulation_forward(
             self,
@@ -392,13 +298,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             self.device,
             max_num_frames=cache_frames)
         logger.info(f"rank: {self.global_rank}, completed cache initialization", local_main_process_only=False)
-
-        # Validate cache structure (can be disabled in production)
-        if getattr(self.training_args, 'validate_cache_structure', False):
-            logger.info(f"rank: {self.global_rank}, validating cache structure", local_main_process_only=False)
-            self._validate_cache_structure(self.kv_cache1, self.crossattn_cache,
-                                           batch_size)
-            logger.info(f"rank: {self.global_rank}, completed cache validation", local_main_process_only=False)
 
         # Step 2: Cache context feature
         current_start_frame = 0
@@ -725,18 +624,13 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Initialize KV cache and cross-attention cache for multi-step simulation."""
         num_transformer_blocks = len(self.transformer.blocks)
-
-        # Calculate frame sequence length based on input dimensions and patch size
-        # From the training batch, we can get the actual latent dimensions
-        latent_shape = self.video_latent_shape_sp  # This is set in _prepare_dit_inputs
+        latent_shape = self.video_latent_shape_sp  
         _, num_frames, _, height, width = latent_shape
 
-        # Get patch size from transformer config
         _, p_h, p_w = self.transformer.patch_size
         post_patch_height = height // p_h
         post_patch_width = width // p_w
 
-        # Frame sequence length is the spatial sequence length per frame
         frame_seq_length = post_patch_height * post_patch_width
         self.frame_seq_length = frame_seq_length
         logger.info(f"RANK: {self.global_rank}, cache frame_seq_length={frame_seq_length} post_patch=({post_patch_height},{post_patch_width})",
@@ -826,62 +720,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 cache_dict["k"].zero_()
                 cache_dict["v"].zero_()
         logger.info(f"RANK: {self.global_rank}, exit _reset_simulation_caches", local_main_process_only=False)
-
-    def _validate_cache_structure(self, kv_cache, crossattn_cache,
-                                  batch_size: int):
-        """Validate that cache structures are correctly initialized."""
-        logger.info(f"RANK: {self.global_rank}, enter _validate_cache_structure bs={batch_size}",
-                    local_main_process_only=False)
-        num_transformer_blocks = len(self.transformer.blocks)
-
-        # Get model configuration parameters - handle FSDP wrapping
-        if hasattr(self.transformer, 'config'):
-            config = self.transformer.config
-            num_attention_heads = config.num_attention_heads
-            attention_head_dim = config.attention_head_dim
-            text_len = config.text_len
-        else:
-            # Fallback to direct attribute access for non-FSDP models
-            num_attention_heads = getattr(self.transformer,
-                                          'num_attention_heads', 40)
-            attention_head_dim = getattr(self.transformer, 'attention_head_dim',
-                                         128)
-            text_len = getattr(self.transformer, 'text_len', 512)
-
-        if kv_cache is not None:
-            assert len(
-                kv_cache
-            ) == num_transformer_blocks, f"Expected {num_transformer_blocks} transformer blocks, got {len(kv_cache)}"
-            for i, cache_dict in enumerate(kv_cache):
-                assert "k" in cache_dict and "v" in cache_dict, f"Missing k/v in kv_cache block {i}"
-                assert "global_end_index" in cache_dict and "local_end_index" in cache_dict, f"Missing indices in kv_cache block {i}"
-                assert cache_dict["k"].shape[
-                    0] == batch_size, f"Batch size mismatch in kv_cache block {i}"
-                assert cache_dict["v"].shape[
-                    0] == batch_size, f"Batch size mismatch in kv_cache block {i}"
-                assert cache_dict["k"].shape[
-                    2] == num_attention_heads, f"Attention heads mismatch in kv_cache block {i}"
-                assert cache_dict["k"].shape[
-                    3] == attention_head_dim, f"Attention head dim mismatch in kv_cache block {i}"
-
-        if crossattn_cache is not None:
-            assert len(
-                crossattn_cache
-            ) == num_transformer_blocks, f"Expected {num_transformer_blocks} transformer blocks, got {len(crossattn_cache)}"
-            for i, cache_dict in enumerate(crossattn_cache):
-                assert "k" in cache_dict and "v" in cache_dict, f"Missing k/v in crossattn_cache block {i}"
-                assert "is_init" in cache_dict, f"Missing is_init in crossattn_cache block {i}"
-                assert cache_dict["k"].shape[
-                    0] == batch_size, f"Batch size mismatch in crossattn_cache block {i}"
-                assert cache_dict["v"].shape[
-                    0] == batch_size, f"Batch size mismatch in crossattn_cache block {i}"
-                assert cache_dict["k"].shape[
-                    1] == text_len, f"Text length mismatch in crossattn_cache block {i}"
-                assert cache_dict["k"].shape[
-                    2] == num_attention_heads, f"Attention heads mismatch in crossattn_cache block {i}"
-                assert cache_dict["k"].shape[
-                    3] == attention_head_dim, f"Attention head dim mismatch in crossattn_cache block {i}"
-        logger.info(f"RANK: {self.global_rank}, exit _validate_cache_structure", local_main_process_only=False)
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         logger.info(f"RANK: {self.global_rank}, enter _get_next_batch", local_main_process_only=False)

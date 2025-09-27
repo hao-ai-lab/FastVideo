@@ -54,7 +54,7 @@ def set_default_dtype(dtype: torch.dtype) -> Generator[None, None, None]:
         torch.set_default_dtype(old_dtype)
 
 
-# TODO(PY): add compile option
+# Supports optional torch.compile for FSDP-wrapped models during training
 def maybe_load_fsdp_model(
     model_cls: type[nn.Module],
     init_params: dict[str, Any],
@@ -70,6 +70,8 @@ def maybe_load_fsdp_model(
     output_dtype: torch.dtype | None = None,
     training_mode: bool = True,
     pin_cpu_memory: bool = True,
+    enable_torch_compile: bool = False,
+    torch_compile_kwargs: dict[str, Any] | None = None,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -139,6 +141,14 @@ def maybe_load_fsdp_model(
         # Avoid unintended computation graph accumulation during inference
         if isinstance(p, torch.nn.Parameter):
             p.requires_grad = False
+
+    compile_in_loader = enable_torch_compile and training_mode
+    if compile_in_loader:
+        compile_kwargs = torch_compile_kwargs or {}
+        logger.info("Enabling torch.compile for FSDP training module with kwargs=%s",
+                    compile_kwargs)
+        model = torch.compile(model, **compile_kwargs)
+        logger.info("torch.compile enabled for %s", type(model).__name__)
     return model
 
 

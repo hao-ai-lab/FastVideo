@@ -49,7 +49,6 @@ VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/wl/FastVideo/examples/distill/
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
-# Training arguments
 training_args=(
   --tracker_project_name SFwan2.2_t2v_distill_self_forcing_dmd  # Updated for Wan2.2
   --output_dir "/mnt/sharefs/users/hao.zhang/SFwan2.2_t2v_finetune"
@@ -61,10 +60,8 @@ training_args=(
   --num_latent_t 21
   --num_height 448  # Updated to match Wan2.2 config
   --num_width 832   # Updated to match Wan2.2 config
-  --num_frames 81  # Must be divisible by num_frame_per_block (81 % 3 = 0 ✓)
   --enable_gradient_checkpointing_type "full"
   # --log_visualization
-  --simulate_generator_forward
   --num_frame_per_block 3  # Frame generation block size for self-forcing
   --enable_gradient_masking
   --gradient_mask_last_n_frames 21
@@ -72,7 +69,6 @@ training_args=(
   --init_weights_from_safetensors_2 /mnt/sharefs/users/hao.zhang/wl/models/sf_ode_init_wan22_checkpoints/low/3k/
 )
 
-# Parallel arguments
 parallel_args=(
   --num_gpus 32 # 64
   --sp_size 1
@@ -81,7 +77,6 @@ parallel_args=(
   --hsdp_shard_dim 32
 )
 
-# Model arguments
 model_args=(
   --model_path $GENERATOR_MODEL_PATH  # TODO: check if you can remove this in this script
   --pretrained_model_name_or_path $GENERATOR_MODEL_PATH
@@ -90,13 +85,11 @@ model_args=(
   --fake_score_model_path $FAKE_SCORE_MODEL_PATH
 )
 
-# Dataset arguments
 dataset_args=(
   --data_path "$DATA_DIR"
   --dataloader_num_workers 4
 )
 
-# Validation arguments
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
@@ -105,7 +98,6 @@ validation_args=(
   --validation_guidance_scale "6.0" # not used for dmd inference
 )
 
-# Optimizer arguments
 optimizer_args=(
   --learning_rate 1e-5
   --mixed_precision "bf16"
@@ -116,7 +108,6 @@ optimizer_args=(
   --max_grad_norm 1.0
 )
 
-# Miscellaneous arguments
 miscellaneous_args=(
   --inference_mode False
   --checkpoints_total_limit 3
@@ -129,7 +120,6 @@ miscellaneous_args=(
   --ema_start_step 100
 )
 
-# Self-forcing DMD arguments
 dmd_args=(
   --dmd_denoising_steps '1000,750,500,250'
   --min_timestep_ratio 0.02
@@ -141,13 +131,11 @@ dmd_args=(
   --warp_denoising_step
 )
 
-# Self-forcing specific arguments
 self_forcing_args=(
   --independent_first_frame False  # Whether to treat first frame independently
   --same_step_across_blocks True  # Whether to use same denoising step across all blocks
   --last_step_only False  # Whether to only use the last denoising step
   --context_noise 0  # Amount of noise to add during context caching (0 = no noise)
-  --validate_cache_structure False  # Set to True for debugging KV cache issues
 )
 
 srun torchrun \

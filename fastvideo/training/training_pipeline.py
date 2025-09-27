@@ -556,7 +556,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         self._log_training_info()
 
-        self._log_validation(self.training_args,
+        self._log_validation(self.transformer, self.training_args,
                              self.init_steps)
 
         # Train!
@@ -703,7 +703,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         return batch
 
     @torch.no_grad()
-    def _log_validation(self, training_args, global_step) -> None:
+    def _log_validation(self, transformer, training_args, global_step) -> None:
         """
         Generate a validation video and log it to wandb to check the quality during training.
         """
