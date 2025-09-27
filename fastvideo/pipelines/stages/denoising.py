@@ -741,13 +741,21 @@ class CosmosDenoisingStage(DenoisingStage):
                     
                     # CRITICAL: Apply conditioning frame injection like diffusers
                     print(f"[FASTVIDEO DEBUG] Step {i}: Conditioning check - cond_indicator exists: {hasattr(batch, 'cond_indicator')}, is not None: {batch.cond_indicator is not None if hasattr(batch, 'cond_indicator') else 'N/A'}, conditioning_latents is not None: {conditioning_latents is not None}")
+                    with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                        f.write(f"[FASTVIDEO DEBUG] Step {i}: Conditioning check - cond_indicator exists: {hasattr(batch, 'cond_indicator')}, is not None: {batch.cond_indicator is not None if hasattr(batch, 'cond_indicator') else 'N/A'}, conditioning_latents is not None: {conditioning_latents is not None}\n")
                     if hasattr(batch, 'cond_indicator') and batch.cond_indicator is not None and conditioning_latents is not None:
                         print(f"[FASTVIDEO DEBUG] Step {i}: Before conditioning - cond_latent sum: {cond_latent.float().sum().item()}, conditioning_latents sum: {conditioning_latents.float().sum().item()}")
+                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                            f.write(f"[FASTVIDEO DEBUG] Step {i}: Before conditioning - cond_latent sum: {cond_latent.float().sum().item()}, conditioning_latents sum: {conditioning_latents.float().sum().item()}\n")
                         cond_latent = batch.cond_indicator * conditioning_latents + (1 - batch.cond_indicator) * cond_latent
                         print(f"[FASTVIDEO DEBUG] Step {i}: After conditioning - cond_latent sum: {cond_latent.float().sum().item()}")
+                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                            f.write(f"[FASTVIDEO DEBUG] Step {i}: After conditioning - cond_latent sum: {cond_latent.float().sum().item()}\n")
                         logger.info(f"Step {i}: Applied conditioning frame injection - cond_latent sum: {cond_latent.float().sum().item():.6f}")
                     else:
                         print(f"[FASTVIDEO DEBUG] Step {i}: SKIPPING conditioning frame injection!")
+                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                            f.write(f"[FASTVIDEO DEBUG] Step {i}: SKIPPING conditioning frame injection!\n")
                         logger.warning(f"Step {i}: Missing conditioning data - cond_indicator: {hasattr(batch, 'cond_indicator')}, conditioning_latents: {conditioning_latents is not None}")
                     
                     # Convert cond_latent to target dtype BEFORE debug logging to match Diffusers
@@ -833,14 +841,40 @@ class CosmosDenoisingStage(DenoisingStage):
                         with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
                             f.write(f"CosmosDenoisingStage: step {i}, noise_pred sum = {sum_value:.6f}\n")
                     
-                    # Apply preconditioning exactly like diffusers
+                    print(f"[FASTVIDEO DEBUG] Step {i}: Preconditioning - c_skip={c_skip:.6f}, c_out={c_out:.6f}, latents_sum={latents.float().sum().item():.6f}")
+                    with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                        f.write(f"[FASTVIDEO DEBUG] Step {i}: Preconditioning - c_skip={c_skip:.6f}, c_out={c_out:.6f}, latents_sum={latents.float().sum().item():.6f}\n")
                     cond_pred = (c_skip * latents + c_out * noise_pred.float()).to(target_dtype)
+
+                    if hasattr(batch, 'cond_indicator') and batch.cond_indicator is not None and conditioning_latents is not None:
+                        cond_pred = batch.cond_indicator * conditioning_latents + (1 - batch.cond_indicator) * cond_pred
+                        print(f"[FASTVIDEO DEBUG] Step {i}: Applied post-preconditioning conditioning - cond_pred sum: {cond_pred.float().sum().item()}")
+                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                            f.write(f"[FASTVIDEO DEBUG] Step {i}: Applied post-preconditioning conditioning - cond_pred sum: {cond_pred.float().sum().item()}\n")
+                    else:
+                        print(f"[FASTVIDEO DEBUG] Step {i}: SKIPPING post-preconditioning conditioning")
+                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                            f.write(f"[FASTVIDEO DEBUG] Step {i}: SKIPPING post-preconditioning conditioning\n")
                     
                     # NOTE: Conditioning frame injection is applied to cond_latent BEFORE transformer call (line 746), not after                    
                     # Classifier-free guidance
                     if batch.do_classifier_free_guidance and batch.negative_prompt_embeds is not None:
                         # Unconditional pass - match diffusers logic (lines 755-759)
                         uncond_latent = latents * c_in
+
+                        print(f"[FASTVIDEO DEBUG] Step {i}: Before unconditional conditioning - uncond_latent sum: {uncond_latent.float().sum().item()}")
+                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                            f.write(f"[FASTVIDEO DEBUG] Step {i}: Before unconditional conditioning - uncond_latent sum: {uncond_latent.float().sum().item()}\n")
+
+                        if hasattr(batch, 'uncond_indicator') and batch.uncond_indicator is not None and unconditioning_latents is not None:
+                            uncond_latent = batch.uncond_indicator * unconditioning_latents + (1 - batch.uncond_indicator) * uncond_latent
+                            print(f"[FASTVIDEO DEBUG] Step {i}: Applied unconditional conditioning - uncond_latent sum: {uncond_latent.float().sum().item()}")
+                            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                                f.write(f"[FASTVIDEO DEBUG] Step {i}: Applied unconditional conditioning - uncond_latent sum: {uncond_latent.float().sum().item()}\n")
+                        else:
+                            print(f"[FASTVIDEO DEBUG] Step {i}: SKIPPING unconditional conditioning - uncond_indicator: {hasattr(batch, 'uncond_indicator')}, unconditioning_latents: {unconditioning_latents is not None}")
+                            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                                f.write(f"[FASTVIDEO DEBUG] Step {i}: SKIPPING unconditional conditioning - uncond_indicator: {hasattr(batch, 'uncond_indicator')}, unconditioning_latents: {unconditioning_latents is not None}\n")
                         
                         with set_forward_context(
                             current_timestep=i,
@@ -886,8 +920,12 @@ class CosmosDenoisingStage(DenoisingStage):
                         if hasattr(batch, 'uncond_indicator') and batch.uncond_indicator is not None and unconditioning_latents is not None:
                             uncond_pred = batch.uncond_indicator * unconditioning_latents + (1 - batch.uncond_indicator) * uncond_pred
                         
-                        # Apply guidance exactly like diffusers  
                         guidance_diff = cond_pred - uncond_pred
+                        print(f"[FASTVIDEO DEBUG] Step {i}: CFG calculation - guidance_scale = {guidance_scale}")
+                        print(f"[FASTVIDEO DEBUG] Step {i}: CFG values - cond_pred: {cond_pred.float().sum().item():.6f}, uncond_pred: {uncond_pred.float().sum().item():.6f}, guidance_diff: {guidance_diff.float().sum().item():.6f}")
+                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                            f.write(f"[FASTVIDEO DEBUG] Step {i}: CFG calculation - guidance_scale = {guidance_scale}\n")
+                            f.write(f"[FASTVIDEO DEBUG] Step {i}: CFG values - cond_pred: {cond_pred.float().sum().item():.6f}, uncond_pred: {uncond_pred.float().sum().item():.6f}, guidance_diff: {guidance_diff.float().sum().item():.6f}\n")
                         final_pred = cond_pred + guidance_scale * guidance_diff
                         
                         # Debug guidance computation
