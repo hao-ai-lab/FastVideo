@@ -1,6 +1,3 @@
-# SPDX-License-Identifier: Apache-2.0
-# Adapted from https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/distributed/device_communicators/cuda_communicator.py
-
 import torch
 from torch.distributed import ProcessGroup
 
@@ -29,7 +26,7 @@ class NpuCommunicator(DeviceCommunicatorBase):
 
     def all_reduce(self, input_, op: torch.distributed.ReduceOp | None = None):
         pyhccl_comm = self.pyhccl_comm
-        assert pyhccl_comm is not None
+        assert pyhccl_comm is not None, "pyhccl_comm should not be None"
         out = pyhccl_comm.all_reduce(input_, op=op)
         if out is None:
             # fall back to the default all-reduce using PyTorch.

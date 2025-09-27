@@ -1,25 +1,8 @@
-#
-# Copyright (c) 2025 Huawei Technologies Co., Ltd. All Rights Reserved.
-# This file is a part of the vllm-ascend project.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#
-
-from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
 from torch.distributed import ProcessGroup, ReduceOp
+
 from fastvideo.distributed.device_communicators.pyhccl_wrapper import (
     HCCLLibrary, aclrtStream_t, buffer_type, hcclComm_t, hcclDataTypeEnum,
     hcclRedOpTypeEnum, hcclUniqueId)
@@ -29,13 +12,14 @@ from fastvideo.utils import current_stream
 
 logger = init_logger(__name__)
 
+
 class PyHcclCommunicator:
 
     def __init__(
         self,
-        group: Union[ProcessGroup, StatelessProcessGroup],
-        device: Union[int, str, torch.device],
-        library_path: Optional[str] = None,
+        group: ProcessGroup | StatelessProcessGroup,
+        device: int | str | torch.device,
+        library_path: str | None = None,
     ):
         """
         Args:
@@ -71,6 +55,7 @@ class PyHcclCommunicator:
         try:
             self.hccl = HCCLLibrary(library_path)
         except Exception:
+            print("disable hccl because of missing HCCL library")
             # disable because of missing HCCL library
             # e.g. in a non-NPU environment
             self.available = False
@@ -156,10 +141,7 @@ class PyHcclCommunicator:
             f"but the input tensor is on {tensor.device}")
         if stream is None:
             stream = current_stream()
-        if src == self.rank:
-            buffer = buffer_type(tensor.data_ptr())
-        else:
-            buffer = buffer_type(tensor.data_ptr())
+        buffer = buffer_type(tensor.data_ptr())
         self.hccl.hcclBroadcast(buffer, tensor.numel(),
                                 hcclDataTypeEnum.from_torch(tensor.dtype), src,
                                 self.comm, aclrtStream_t(stream.npu_stream))

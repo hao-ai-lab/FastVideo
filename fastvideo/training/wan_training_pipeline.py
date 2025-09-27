@@ -7,12 +7,12 @@ from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler)
 from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
+from fastvideo.platforms import current_platform
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.utils import is_vsa_available
-from fastvideo.platforms import current_platform
+
 if current_platform.is_npu():
-    import torch_npu
-    from torch_npu.contrib import transfer_to_npu
+    pass
 
 vsa_available = is_vsa_available()
 

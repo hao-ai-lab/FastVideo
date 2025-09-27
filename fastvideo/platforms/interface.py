@@ -97,7 +97,7 @@ class Platform:
 
     def is_mps(self) -> bool:
         return self._enum == PlatformEnum.MPS
-    
+
     def is_npu(self) -> bool:
         return self._enum == PlatformEnum.NPU
 

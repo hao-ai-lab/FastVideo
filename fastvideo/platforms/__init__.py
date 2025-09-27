@@ -131,7 +131,7 @@ def resolve_current_platform_cls_qualname() -> str:
     platform_cls_qualname = cuda_platform_plugin()
     if platform_cls_qualname is not None:
         return platform_cls_qualname
-    
+
     # Fall back to NPU
     platform_cls_qualname = npu_platform_plugin()
     if platform_cls_qualname is not None:

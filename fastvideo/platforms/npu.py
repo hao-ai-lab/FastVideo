@@ -1,28 +1,17 @@
 import gc
-import os
 from datetime import timedelta
-from typing import TYPE_CHECKING, Optional, Tuple
 
 import torch
 from torch.distributed import ProcessGroup
 from torch.distributed.distributed_c10d import PrefixStore
 
-import os
-from collections.abc import Callable
-from functools import lru_cache, wraps
-from typing import TypeVar
-
-import torch
-from typing_extensions import ParamSpec
-
 import fastvideo.envs as envs
 from fastvideo.logger import init_logger
-from fastvideo.platforms.interface import (AttentionBackendEnum,
-                                           DeviceCapability, Platform,
+from fastvideo.platforms.interface import (AttentionBackendEnum, Platform,
                                            PlatformEnum)
-from fastvideo.utils import import_pynvml
 
 logger = init_logger(__name__)
+
 
 class NPUPlatform(Platform):
 
@@ -48,7 +37,7 @@ class NPUPlatform(Platform):
         return torch.npu.get_device_name(device_id)
 
     @classmethod
-    def is_async_output_supported(cls, enforce_eager: Optional[bool]) -> bool:
+    def is_async_output_supported(cls, enforce_eager: bool | None) -> bool:
         return True
 
     @classmethod
@@ -68,7 +57,7 @@ class NPUPlatform(Platform):
         torch.npu.synchronize()
 
     @classmethod
-    def mem_get_info(cls) -> Tuple[int, int]:
+    def mem_get_info(cls) -> tuple[int, int]:
         return torch.npu.mem_get_info()
 
     @classmethod
@@ -181,10 +170,9 @@ class NPUPlatform(Platform):
 
         return "fastvideo.attention.backends.flash_attn.FlashAttentionBackend"
 
-
     @classmethod
     def get_current_memory_usage(cls,
-                                 device: Optional[torch.types.Device] = None
+                                 device: torch.types.Device | None = None
                                  ) -> float:
         torch.npu.reset_peak_memory_stats(device)
         return torch.npu.max_memory_allocated(device)
@@ -196,7 +184,6 @@ class NPUPlatform(Platform):
     @classmethod
     def is_pin_memory_available(cls):
         return True
-
 
     @classmethod
     def stateless_init_device_torch_dist_pg(
