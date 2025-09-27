@@ -1,9 +1,6 @@
-# SPDX-License-Identifier: Apache-2.0
-# Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/platforms/interface.py
-
 import enum
 import random
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import numpy as np
 import torch
@@ -62,16 +59,8 @@ class Platform:
     device_name: str
     device_type: str
 
-    # available dispatch keys:
-    # check https://github.com/pytorch/pytorch/blob/313dac6c1ca0fa0cde32477509cce32089f8532a/torchgen/model.py#L134 # noqa
-    # use "CPU" as a fallback for platforms not registered in PyTorch
     dispatch_key: str = "CPU"
 
-    # The torch.compile backend for compiling simple and
-    # standalone functions. The default value is "inductor" to keep
-    # the same behavior as PyTorch.
-    # NOTE: for the forward part of the model, vLLM has another separate
-    # compilation strategy.
     simple_compile_backend: str = "inductor"
 
     supported_quantization: list[str] = []
@@ -157,6 +146,13 @@ class Platform:
     def is_async_output_supported(cls, enforce_eager: bool | None) -> bool:
         """
         Check if the current platform supports async output.
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def get_torch_device(cls) -> Any:
+        """
+        Check if the current platform supports torch device.
         """
         raise NotImplementedError
 

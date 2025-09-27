@@ -7,7 +7,7 @@ pynvml. However, it should not initialize cuda context.
 import os
 from collections.abc import Callable
 from functools import lru_cache, wraps
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import torch
 from typing_extensions import ParamSpec
@@ -106,6 +106,13 @@ class CudaPlatformBase(Platform):
                                  ) -> float:
         torch.cuda.reset_peak_memory_stats(device)
         return float(torch.cuda.max_memory_allocated(device))
+
+    @classmethod
+    def get_torch_device(cls) -> Any:
+        """
+        Return torch.cuda
+        """
+        return torch.cuda
 
     @classmethod
     def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None,

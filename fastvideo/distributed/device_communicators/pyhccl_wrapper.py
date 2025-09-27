@@ -11,11 +11,6 @@ from fastvideo.utils import find_hccl_library
 
 logger = init_logger(__name__)
 
-# export types and functions from hccl to Python ===
-# for the original hccl definition, please check
-# https://github.com/EternalLied/cann-hccl-new/blob/64ec6ce2923319caa5df8c3c531e06bdc148ce9c/inc/hccl/hccl.h#L90
-# https://github.com/EternalLied/cann-hccl-new/blob/64ec6ce2923319caa5df8c3c531e06bdc148ce9c/inc/hccl/hccl_types.h#L48
-
 hcclResult_t = ctypes.c_int
 hcclComm_t = ctypes.c_void_p
 
@@ -97,16 +92,9 @@ class Function:
 
 class HCCLLibrary:
     exported_functions = [
-        # const char* HcclGetErrorString(HcclResult code);
         Function("HcclGetErrorString", ctypes.c_char_p, [hcclResult_t]),
-
-        # HcclResult HcclGetRootInfo(HcclRootInfo *rootInfo);
         Function("HcclGetRootInfo", hcclResult_t,
                  [ctypes.POINTER(hcclUniqueId)]),
-
-        # HcclResult HcclCommInitRootInfo(
-        #   uint32_t nRanks, const HcclRootInfo *rootInfo, uint32_t rank, HcclComm *comm);
-        # note that HcclComm is a pointer type, so the last argument is a pointer to a pointer
         Function("HcclCommInitRootInfo", hcclResult_t, [
             ctypes.c_int,
             ctypes.POINTER(hcclUniqueId),
@@ -122,11 +110,6 @@ class HCCLLibrary:
             hcclComm_t,
             aclrtStream_t,
         ]),
-
-        # HcclResult HcclBroadcast(
-        #   void *buf, uint64_t count,
-        #   HcclDataType dataType, uint32_t root,
-        #   HcclComm comm, aclrtStream stream);
         Function("HcclBroadcast", hcclResult_t, [
             buffer_type,
             ctypes.c_size_t,
@@ -135,8 +118,6 @@ class HCCLLibrary:
             hcclComm_t,
             aclrtStream_t,
         ]),
-
-        # HcclResult HcclCommDestroy(HcclComm comm);
         Function("HcclCommDestroy", hcclResult_t, [hcclComm_t]),
     ]
 
@@ -202,11 +183,6 @@ class HCCLLibrary:
     def hcclAllReduce(self, sendbuff: buffer_type, recvbuff: buffer_type,
                       count: int, datatype: int, op: int, comm: hcclComm_t,
                       stream: aclrtStream_t) -> None:
-        # `datatype` actually should be `hcclDataType_t`
-        # and `op` should be `hcclRedOp_t`
-        # both are aliases of `ctypes.c_int`
-        # when we pass int to a function, it will be converted to `ctypes.c_int`
-        # by ctypes automatically
         self.HCCL_CHECK(self._funcs["HcclAllReduce"](sendbuff, recvbuff, count,
                                                      datatype, op, comm,
                                                      stream))

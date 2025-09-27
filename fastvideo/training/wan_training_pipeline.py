@@ -12,8 +12,7 @@ from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.utils import is_vsa_available
 
 if current_platform.is_npu():
-    pass
-
+    import torch_npu
 vsa_available = is_vsa_available()
 
 logger = init_logger(__name__)

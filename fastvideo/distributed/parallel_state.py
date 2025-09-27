@@ -785,17 +785,16 @@ def init_distributed_environment(
 ):
     # Determine the appropriate backend based on the platform
     from fastvideo.platforms import current_platform
-    if backend == "nccl":
-        if current_platform.is_npu():
-            backend = "hccl"
-            logger.info("Using hccl backend for NPU platform")
-        elif current_platform.is_cuda_alike():
-            backend = "nccl"
-            logger.info("Using nccl backend for CUDA platform")
-        else:
-            backend = "gloo"
-            logger.info("Using gloo backend for %s platform",
-                        current_platform.device_name)
+    backend = "nccl"
+    if current_platform.is_cuda_alike():
+        logger.info("Using nccl backend for CUDA platform")
+    elif current_platform.is_npu():
+        backend = "hccl"
+        logger.info("Using hccl backend for NPU platform")
+    else:
+        backend = "gloo"
+        logger.info("Using gloo backend for %s platform",
+                    current_platform.device_name)
 
     logger.debug(
         "world_size=%d rank=%d local_rank=%d "
@@ -963,15 +962,13 @@ def get_dp_rank() -> int:
 
 def get_local_torch_device() -> torch.device:
     """Return the torch device for the current rank."""
-    device = torch.device(f"npu:{envs.LOCAL_RANK}") \
-        if current_platform.is_npu() \
-        else torch.device(f"cuda:{envs.LOCAL_RANK}") \
-        if current_platform.is_cuda_alike() \
-        else torch.device("mps")
+    if current_platform.is_npu():
+        device = torch.device(f"npu:{envs.LOCAL_RANK}")
+    elif current_platform.is_cuda_alike() or current_platform.is_cuda():
+        torch.device(f"cuda:{envs.LOCAL_RANK}")
+    else:
+        torch.device("mps")
     return device
-    # return torch.device(f"cuda:{envs.LOCAL_RANK}"
-    #                     ) if current_platform.is_cuda_alike() else torch.device(
-    #                         "mps")
 
 
 def maybe_init_distributed_environment_and_model_parallel(
@@ -1000,13 +997,10 @@ def maybe_init_distributed_environment_and_model_parallel(
     initialize_model_parallel(tensor_model_parallel_size=tp_size,
                               sequence_model_parallel_size=sp_size)
 
-    # Only set CUDA device if we're on a CUDA platform
-    if current_platform.is_cuda_alike():
-        device = torch.device(f"cuda:{local_rank}")
-        torch.cuda.set_device(device)
-    if current_platform.is_npu():
-        device = torch.device(f"npu:{local_rank}")
-        torch.npu.set_device(device)
+    # set device if we're on a CUDA/NPU platform
+    device_type = "npu" if current_platform.is_npu() else "cuda"
+    device = torch.device(f"{device_type}:{local_rank}")
+    current_platform.get_torch_device().set_device(device)
 
 
 def model_parallel_is_initialized() -> bool:
