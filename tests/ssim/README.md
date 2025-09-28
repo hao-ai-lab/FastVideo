@@ -2,7 +2,7 @@ The reference videos in the `*_reference_videos` directory are used as part of a
 
 `A40_reference_videos` are generated on A40s and so on.
 
-run `bash update_reference_videos.sh` from inside the `fastvideo/tests/ssim/` directory after running `test_inference_similarity.py` to update reference videos. Note: make sure to update the path to the corresponding device.
+run `bash update_reference_videos.sh` from inside the `tests/ssim/` directory after running `test_inference_similarity.py` to update reference videos. Note: make sure to update the path to the corresponding device.
 
 reference videos were generated on commit `4aeabbc629e0edf91477e80e795e7bb1823c71cb`
 causal videos were generated on commit b318063c0a4618f1d5d99ea82ca67a06aad0d19d

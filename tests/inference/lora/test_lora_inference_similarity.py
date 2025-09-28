@@ -6,7 +6,7 @@ import pytest
 
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
-from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results
+from tests.utils import compute_video_ssim_torchvision, write_ssim_results
 from diffusers import DiffusionPipeline
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines import build_pipeline
@@ -189,7 +189,6 @@ def test_lora_inference_similarity(ATTENTION_BACKEND, model_id):
 
         min_acceptable_ssim = lora_config["ssim_threshold"]
         assert mean_ssim >= min_acceptable_ssim, f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} for adapter {lora_config['lora_path']}" 
-
 
 
 

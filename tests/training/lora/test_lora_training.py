@@ -9,7 +9,8 @@ import json
 from huggingface_hub import snapshot_download
 
 wandb_name = "test_lora_training"
-l40s_reference_wandb_summary_file = "fastvideo/tests/training/lora/l40s_reference_lora_wandb_summary.json"
+_REFERENCE_DIR = Path(__file__).resolve().parent
+l40s_reference_wandb_summary_file = str(_REFERENCE_DIR / "l40s_reference_lora_wandb_summary.json")
 
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "2"

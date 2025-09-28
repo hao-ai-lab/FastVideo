@@ -18,7 +18,8 @@ steps:
             - path: 
                 - "fastvideo/models/encoders/**"
                 - "fastvideo/models/loader/**"
-                - "fastvideo/tests/encoders/**"
+                - "tests/encoders/**"
+                - "tests/utils.py"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -31,7 +32,8 @@ steps:
             - path:
                 - "fastvideo/models/vaes/**"
                 - "fastvideo/models/loader/**"
-                - "fastvideo/tests/vaes/**"
+                - "tests/vaes/**"
+                - "tests/utils.py"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -44,7 +46,8 @@ steps:
             - path:
                 - "fastvideo/models/dits/**"
                 - "fastvideo/models/loader/**"
-                - "fastvideo/tests/transformers/**"
+                - "tests/transformers/**"
+                - "tests/utils.py"
                 - "fastvideo/layers/**"
                 - "fastvideo/attention/**"
                 - "pyproject.toml"
@@ -58,6 +61,8 @@ steps:
                   queue: "default"
             - path: 
                 - "fastvideo/**/*.py"
+                - "tests/ssim/**"
+                - "tests/utils.py"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -68,9 +73,10 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "fastvideo/tests/lora/**"
+                - "tests/inference/lora/**"
                 - "fastvideo/models/loader/**"
-                - "fastvideo/tests/transformers/**"
+                - "tests/transformers/**"
+                - "tests/utils.py"
                 - "fastvideo/pipelines/**"
                 - "fastvideo/layers/lora/**"
                 - "pyproject.toml"
@@ -84,6 +90,7 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/**"
+                - "tests/training/Vanilla/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -95,6 +102,7 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/training/*distillation_pipeline.py"
+                - "tests/training/distill/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -106,6 +114,7 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/**"
+                - "tests/training/lora/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -117,6 +126,7 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/**"
+                - "tests/training/VSA/**"
                 - "csrc/attn/video_sparse_attn/**"
                 - "csrc/attn/video_sparse_attn/tk/**"
                 - "csrc/attn/video_sparse_attn/setup.py"
@@ -133,6 +143,7 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/**"
+                - "tests/inference/STA/**"
                 - "csrc/attn/sliding_tile_attn/**"
                 - "csrc/attn/sliding_tile_attn/setup.py"
                 - "csrc/attn/sliding_tile_attn/config_sta.py"
@@ -190,6 +201,7 @@ steps:
             - path:
                 - "csrc/attn/vmoba_attn/vmoba/**"
                 - "fastvideo/attention/backends/vmoba.py"
+                - "tests/inference/vmoba/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -201,6 +213,8 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/**"
+                - "tests/dataset/**"
+                - "tests/workflow/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:

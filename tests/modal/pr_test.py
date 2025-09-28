@@ -64,35 +64,35 @@ def run_test(pytest_command: str):
 
 @app.function(gpu="L40S:1", image=image, timeout=900)
 def run_encoder_tests():
-    run_test("pytest ./fastvideo/tests/encoders -vs")
+    run_test("pytest ./tests/encoders -vs")
 
 @app.function(gpu="L40S:1", image=image, timeout=900)
 def run_vae_tests():
-    run_test("pytest ./fastvideo/tests/vaes -vs")
+    run_test("pytest ./tests/vaes -vs")
 
 @app.function(gpu="L40S:1", image=image, timeout=900)
 def run_transformer_tests():
-    run_test("pytest ./fastvideo/tests/transformers -vs")
+    run_test("pytest ./tests/transformers -vs")
 
 @app.function(gpu="L40S:2", image=image, timeout=2700)
 def run_ssim_tests():
-    run_test("pytest ./fastvideo/tests/ssim -vs")
+    run_test("pytest ./tests/ssim -vs")
 
 @app.function(gpu="L40S:4", image=image, timeout=900, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
 def run_training_tests():
-    run_test("wandb login $WANDB_API_KEY && pytest ./fastvideo/tests/training/Vanilla -srP")
+    run_test("wandb login $WANDB_API_KEY && pytest ./tests/training/Vanilla -srP")
 
 @app.function(gpu="L40S:2", image=image, timeout=900, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
 def run_training_lora_tests():
-    run_test("wandb login $WANDB_API_KEY && pytest ./fastvideo/tests/training/lora/test_lora_training.py -srP")
+    run_test("wandb login $WANDB_API_KEY && pytest ./tests/training/lora/test_lora_training.py -srP")
 
 @app.function(gpu="H100:2", image=image, timeout=900, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
 def run_training_tests_VSA():
-    run_test("wandb login $WANDB_API_KEY && pytest ./fastvideo/tests/training/VSA -srP")
+    run_test("wandb login $WANDB_API_KEY && pytest ./tests/training/VSA -srP")
 
 @app.function(gpu="H100:2", image=image, timeout=900)
 def run_inference_tests_STA():
-    run_test("pytest ./fastvideo/tests/inference/STA -srP")
+    run_test("pytest ./tests/inference/STA -srP")
 
 @app.function(gpu="H100:1", image=image, timeout=900)
 def run_precision_tests_STA():
@@ -108,16 +108,16 @@ def run_precision_tests_vmoba():
 
 @app.function(gpu="L40S:1", image=image, timeout=900)
 def run_inference_tests_vmoba():
-    run_test('python fastvideo/tests/inference/vmoba/test_vmoba_inference.py')
+    run_test('python tests/inference/vmoba/test_vmoba_inference.py')
 
 @app.function(gpu="L40S:1", image=image, timeout=3600)
 def run_inference_lora_tests():
-    run_test("pytest ./fastvideo/tests/inference/lora/test_lora_inference_similarity.py -vs")
+    run_test("pytest ./tests/inference/lora/test_lora_inference_similarity.py -vs")
 
 @app.function(gpu="L40S:2", image=image, timeout=900)
 def run_distill_dmd_tests():
-    run_test("pytest ./fastvideo/tests/training/distill/test_distill_dmd.py -vs")
+    run_test("pytest ./tests/training/distill/test_distill_dmd.py -vs")
 
 @app.function(gpu="L40S:1", image=image, timeout=900)
 def run_unit_test():
-    run_test("pytest ./fastvideo/tests/dataset/ ./fastvideo/tests/workflow/ -vs")
+    run_test("pytest ./tests/dataset/ ./tests/workflow/ -vs")

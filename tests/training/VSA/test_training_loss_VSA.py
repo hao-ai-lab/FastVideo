@@ -1,27 +1,24 @@
 import os
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29512"
 import sys
 import subprocess
 from pathlib import Path
-import torch
 import json
 from huggingface_hub import snapshot_download
-from fastvideo.utils import logger
+
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
 from fastvideo.training.wan_training_pipeline import main
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.utils import FlexibleArgumentParser
-from fastvideo.training.wan_training_pipeline import WanTrainingPipeline
 
-wandb_name = "test_training_loss"
-a40_reference_wandb_summary_file = "fastvideo/tests/training/Vanilla/a40_reference_wandb_summary.json"
-l40s_reference_wandb_summary_file = "fastvideo/tests/training/Vanilla/l40s_reference_wandb_summary.json"
+wandb_name = "test_training_loss_VSA"
+_REFERENCE_DIR = Path(__file__).resolve().parent
+reference_wandb_summary_file = str(_REFERENCE_DIR / "reference_wandb_summary_VSA.json")
 
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "2"
 
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
 
 def run_worker():
     """Worker function that will be run on each GPU"""
@@ -35,9 +32,9 @@ def run_worker():
         "--model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         "--inference_mode", "False",
         "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-        "--data_path", "data/crush-smol_processed_t2v/combined_parquet_dataset",
+        "--data_path", "data/mini_dataset_i2v_VSA/combined_parquet_dataset",
         "--validation_dataset_file", "examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json",
-        "--train_batch_size", "2",
+        "--train_batch_size", "1",
         "--num_latent_t", "4",
         "--num_gpus", "2",
         "--sp_size", "2",
@@ -45,55 +42,53 @@ def run_worker():
         "--hsdp_replicate_dim", "1",
         "--hsdp_shard_dim", "2",
         "--train_sp_batch_size", "1",
-        "--dataloader_num_workers", "1",
+        "--dataloader_num_workers", "4",
         "--gradient_accumulation_steps", "2",
         "--max_train_steps", "5",
-        "--learning_rate", "1e-6",
+        "--learning_rate", "1e-5",
         "--mixed_precision", "bf16",
         "--checkpointing_steps", "30",
         "--validation_steps", "10",
-        "--validation_sampling_steps", "8",
+        "--validation_sampling_steps", "50",
         "--log_validation",
         "--checkpoints_total_limit", "3",
         "--ema_start_step", "0",
         "--training_cfg_rate", "0.0",
-        "--output_dir", "data/wan_finetune_test",
-        "--tracker_project_name", "wan_finetune_ci",
+        "--output_dir", "data/wan_finetune_test_VSA",
+        "--tracker_project_name", "wan_finetune_ci_VSA",
         "--wandb_run_name", wandb_name,
-        "--num_height", "480",
-        "--num_width", "832",
-        "--num_frames", "81",
+        "--num_height", "384",
+        "--num_width", "512",
+        "--num_frames", "13",
         "--flow_shift", "3",
         "--validation_guidance_scale", "1.0",
         "--num_euler_timesteps", "50",
-        "--multi_phased_distill_schedule", "4000-1",
         "--weight_decay", "0.01",
-        "--not_apply_cfg_solver",
         "--dit_precision", "fp32",
-        "--max_grad_norm", "1.0"
+        "--max_grad_norm", "1.0",
+        "--VSA_decay_rate", "0.01",
+        "--VSA_decay_interval_steps", "1",
+        "--VSA_sparsity", "0.9"
     ])
+    
     # Call the main training function
-    pipeline = WanTrainingPipeline.from_pretrained(
-        args.pretrained_model_name_or_path, args=args)
-    args = pipeline.training_args
-    pipeline.train()
-    logger.info("Training pipeline done")
+    main(args)
 
 def test_distributed_training():
     """Test the distributed training setup"""
     os.environ["WANDB_MODE"] = "online"
 
-    data_dir = Path("data/crush-smol_processed_t2v")
+    data_dir = Path("data/mini_dataset_i2v_VSA")
     
     if not data_dir.exists():
         print(f"Downloading test dataset to {data_dir}...")
         snapshot_download(
-            repo_id="wlsaidhi/crush-smol_processed_t2v",
+            repo_id="BrianChen1129/mini_dataset_i2v_VSA",
             local_dir=str(data_dir),
             repo_type="dataset",
             local_dir_use_symlinks=False
         )
-    
+
     # Get the current file path
     current_file = Path(__file__).resolve()
     
@@ -102,40 +97,21 @@ def test_distributed_training():
         "torchrun",
         "--nnodes", NUM_NODES,
         "--nproc_per_node", NUM_GPUS_PER_NODE,
-        "--master_port", os.environ["MASTER_PORT"],
         str(current_file)
     ]
-    process = subprocess.run(cmd, capture_output=True, text=True)
     
-    # Print stdout and stderr for debugging
-    if process.stdout:
-        print("STDOUT:", process.stdout)
-    if process.stderr:
-        print("STDERR:", process.stderr)
-    
-    # Check if the process failed
-    if process.returncode != 0:
-        print(f"Process failed with return code: {process.returncode}")
-        raise subprocess.CalledProcessError(process.returncode, cmd, process.stdout, process.stderr)
+    process = subprocess.run(cmd, check=True)
 
     summary_file = 'wandb/latest-run/files/wandb-summary.json'
-
-    device_name = torch.cuda.get_device_name()
-    if "A40" in device_name:
-        reference_wandb_summary_file = a40_reference_wandb_summary_file
-    elif "L40S" in device_name:
-        reference_wandb_summary_file = l40s_reference_wandb_summary_file
-    else:
-        raise ValueError(f"Unknown device: {device_name}")
 
     reference_wandb_summary = json.load(open(reference_wandb_summary_file))
     wandb_summary = json.load(open(summary_file))
 
     fields_and_thresholds = {
-        'avg_step_time': 6.0,
-        'grad_norm': 0.3,
-        'step_time': 6.0,
-        'train_loss': 0.0025
+        'avg_step_time': 1.0,
+        'grad_norm': 0.1,
+        'step_time': 1.0,
+        'train_loss': 0.005
     }
 
     failures = []

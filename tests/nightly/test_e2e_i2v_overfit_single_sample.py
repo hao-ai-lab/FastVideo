@@ -4,13 +4,13 @@ from huggingface_hub import snapshot_download
 import shutil
 import subprocess
 import sys
-from fastvideo.tests.ssim.test_inference_similarity import compute_video_ssim_torchvision
+from tests.ssim.test_inference_similarity import compute_video_ssim_torchvision
 
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
 
 NUM_NODES = "1"
-MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+MODEL_PATH = "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers"
 
 # preprocessing
 DATA_DIR = "data"
@@ -18,14 +18,14 @@ LOCAL_RAW_DATA_DIR = Path(os.path.join(DATA_DIR, "cats"))
 NUM_GPUS_PER_NODE_PREPROCESSING = "1"
 PREPROCESSING_ENTRY_FILE_PATH = "fastvideo/pipelines/preprocess/v1_preprocess.py"
 
-LOCAL_PREPROCESSED_DATA_DIR = Path(os.path.join(DATA_DIR, "cats_preprocessed_data"))
+LOCAL_PREPROCESSED_DATA_DIR = Path(os.path.join(DATA_DIR, "cats_preprocessed_data_i2v"))
 
 
 # training
 NUM_GPUS_PER_NODE_TRAINING = "4"
-TRAINING_ENTRY_FILE_PATH = "fastvideo/training/wan_training_pipeline.py"
+TRAINING_ENTRY_FILE_PATH = "fastvideo/training/wan_i2v_training_pipeline.py"
 LOCAL_TRAINING_DATA_DIR = os.path.join(LOCAL_PREPROCESSED_DATA_DIR, "combined_parquet_dataset")
-LOCAL_VALIDATION_DATASET_FILE = os.path.join(LOCAL_RAW_DATA_DIR, "validation_prompt_1_sample.json")
+LOCAL_VALIDATION_DATASET_FILE = os.path.join(LOCAL_RAW_DATA_DIR, "validation_i2v_prompt_1_sample.json")
 LOCAL_OUTPUT_DIR = Path(os.path.join(DATA_DIR, "outputs"))
 
 def download_data():
@@ -62,11 +62,6 @@ def download_data():
 
 
 def run_preprocessing():
-    # remove the local_preprocessed_data_dir if it exists
-    if LOCAL_PREPROCESSED_DATA_DIR.exists():
-        print(f"Removing local_preprocessed_data_dir: {LOCAL_PREPROCESSED_DATA_DIR}")
-        shutil.rmtree(LOCAL_PREPROCESSED_DATA_DIR)
-
     # Run torchrun command
     cmd = [
         "torchrun",
@@ -85,7 +80,7 @@ def run_preprocessing():
         "--samples_per_file", "1",
         "--flush_frequency", "1",
         "--video_length_tolerance_range", "5",
-        "--preprocess_task", "t2v",
+        "--preprocess_task", "i2v",
     ]
 
     process = subprocess.run(cmd, check=True)
@@ -122,9 +117,9 @@ def run_training():
         "--log_validation",
         "--checkpoints_total_limit", "3",
         "--ema_start_step", "0",
-        "--training_cfg_rate", "0.0",
+        "--training_cfg_rate", "0.1",
         "--output_dir", LOCAL_OUTPUT_DIR,
-        "--tracker_project_name", "wan_finetune_overfit_ci",
+        "--tracker_project_name", "wan_i2v_finetune_overfit_ci",
         "--num_height", "480",
         "--num_width", "832",
         "--num_frames", "81",
@@ -144,8 +139,8 @@ def run_training():
 def test_e2e_overfit_single_sample():
     os.environ["WANDB_MODE"] = "online"
 
-    download_data()
-    run_preprocessing()
+    # download_data()
+    # run_preprocessing()
     run_training()
 
     reference_video_file = os.path.join(os.path.dirname(__file__), "reference_video_1_sample_v0.mp4")
