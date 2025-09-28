@@ -54,7 +54,7 @@ class PyHcclCommunicator:
         try:
             self.hccl = HCCLLibrary(library_path)
         except Exception:
-            print("disable hccl because of missing HCCL library")
+            logger.warning("disable hccl because of missing HCCL library")
             # disable because of missing HCCL library
             # e.g. in a non-NPU environment
             self.available = False

@@ -343,7 +343,7 @@ def build_parquet_map_style_dataloader(
         collate_fn=passthrough,
         num_workers=num_data_workers,
         pin_memory=True,
-        pin_memory_device = current_platform.device_name,
+        pin_memory_device=current_platform.device_name,
         persistent_workers=num_data_workers > 0,
     )
     return dataset, loader
