@@ -1297,9 +1297,13 @@ def get_scheduler(
                          num_training_steps=num_training_steps,
                          last_epoch=last_epoch)
 
+def _local_numel(p):
+    if hasattr(p, "to_local"):
+        return p.to_local().numel()
+    return p.numel()
 
 def count_trainable(model: torch.nn.Module) -> int:
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return sum(_local_numel(p) for p in model.parameters() if p.requires_grad)
 
 
 class EMA_FSDP:
