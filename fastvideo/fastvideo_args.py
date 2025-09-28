@@ -749,6 +749,7 @@ class TrainingArgs(FastVideoArgs):
     # simulate generator forward to match inference
     simulate_generator_forward: bool = False
     warp_denoising_step: bool = False
+    generator_4bit_attn: bool = False
 
     # Self-forcing specific arguments
     num_frame_per_block: int = 3
@@ -1144,6 +1145,10 @@ class TrainingArgs(FastVideoArgs):
             help=
             "Whether to warp denoising step according to the scheduler time shift"
         )
+        parser.add_argument(
+            "--generator-4bit-attn",
+            action=StoreBoolean,
+            help="Whether to use 4bit attention in generator in DMD distillation")
 
         # Self-forcing specific arguments
         parser.add_argument(

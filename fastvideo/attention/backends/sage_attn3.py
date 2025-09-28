@@ -25,7 +25,6 @@ class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
         Returns: out in  [B, L, H, D]
         """
         # Save originals for backward (we'll recompute FA in 16-bit there)
-        ctx.save_for_backward(q_BLHD, k_BLHD, v_BLHD)
         ctx.is_causal = bool(is_causal)
 
         # Convert to BHLD for your sageattn forward
@@ -43,13 +42,13 @@ class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
 
         # Back to BLHD; keep for FA bwd
         out_BLHD = out_BHLD.permute(0, 2, 1, 3).contiguous()
-        ctx.out_BLHD = out_BLHD
+        ctx.save_for_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD)
+
         return out_BLHD
 
     @staticmethod
     def backward(ctx, grad_out_BLHD):
-        q_BLHD, k_BLHD, v_BLHD = ctx.saved_tensors
-        out_sage_BLHD = ctx.out_BLHD
+        q_BLHD, k_BLHD, v_BLHD, out_BLHD = ctx.saved_tensors
         is_causal = ctx.is_causal
 
         D = q_BLHD.shape[-1]
@@ -75,7 +74,7 @@ class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
         _wrapped_flash_attn_backward(
             grad_out_BLHD,          # dout (BLHD, 16-bit)
             q_BLHD, k_BLHD, v_BLHD,
-            out_sage_BLHD,    # use SAGE forward output here
+            out_BLHD,    # use SAGE forward output here
             softmax_lse,
             dq_BLHD, dk_BLHD, dv_BLHD,
             0.0,               # dropout_p
@@ -90,7 +89,7 @@ class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
         return dq_BLHD, dk_BLHD, dv_BLHD, None, None
 
 
-def sageattn_blackwell_with_16bit_bwd(q_BLHD, k_BLHD, v_BLHD, *, is_causal=False, per_block_mean=True):
+def sageattn_blackwell_with_16bit_bwd(q_BLHD, k_BLHD, v_BLHD, is_causal=False, per_block_mean=True):
     """
     Forward: uses sageattn_blackwell under the hood.
     Backward: recomputes FlashAttention fwd+bwd in 16bit directly.

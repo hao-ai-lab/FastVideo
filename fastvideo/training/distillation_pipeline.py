@@ -42,12 +42,55 @@ from fastvideo.training.training_utils import (
     shift_timestep)
 from fastvideo.utils import (is_vsa_available, maybe_download_model,
                              set_random_seed, verify_model_config_and_directory)
+from fastvideo.training.training_utils import traverse_swap_module
+from fastvideo.attention.backends.sage_attn3 import SageAttention3Impl
+import wandb  # isort: skip
 
 vsa_available = is_vsa_available()
 
 logger = init_logger(__name__)
 
+# ---------- Specific swapper for SageAttention3Impl ----------
 
+def swap_sage_attn3(obj: Any, obj_path: str) -> int:
+    """
+    If `obj` has an attribute named `attn_impl`, replace it with SageAttention3Impl,
+    carrying over `.causal` and `.softmax_scale`. Everything else set to None.
+    Returns number of swaps performed (0 or 1).
+    """
+    # Quick reject: no attribute
+    if not hasattr(obj, "attn_impl"):
+        return 0
+
+    # Access may raise if it's a property; guard it.
+    try:
+        old_impl = getattr(obj, "attn_impl")
+    except Exception:
+        return 0
+
+    # Already None or already of the desired type => skip
+    if old_impl is None or isinstance(old_impl, SageAttention3Impl):
+        return 0
+
+    # Extract fields with sensible defaults
+    causal = getattr(old_impl, "causal", False)
+    softmax_scale = getattr(old_impl, "softmax_scale", 1.0)
+
+    try:
+        new_impl = SageAttention3Impl(
+            num_heads=None,
+            head_size=None,
+            causal=causal,
+            softmax_scale=softmax_scale,
+            num_kv_heads=None,
+            prefix="",
+        )
+        setattr(obj, "attn_impl", new_impl)
+        return 1
+    except Exception:
+        # If assignment fails (frozen dataclass/property), skip
+        return 0
+    
 class DistillationPipeline(TrainingPipeline):
     """
     A distillation pipeline for training a 3 step model.
@@ -161,6 +204,9 @@ class DistillationPipeline(TrainingPipeline):
             self.real_score_transformer_2.requires_grad_(False)
             self.real_score_transformer_2.eval()
 
+        if training_args.generator_4bit_attn:
+            num_swaps = traverse_swap_module(self.transformer, swap_fn=swap_sage_attn3)
+            logger.info(f"Swapped {num_swaps} attn_impl to SageAttention3Impl instances in self.transformer")
         if training_args.enable_gradient_checkpointing_type is not None:
             self.fake_score_transformer = apply_activation_checkpointing(
                 self.fake_score_transformer,
