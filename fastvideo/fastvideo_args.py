@@ -1150,6 +1150,10 @@ class TrainingArgs(FastVideoArgs):
             "--generator-4bit-attn",
             action=StoreBoolean,
             help="Whether to use 4bit attention in generator in DMD distillation")
+        parser.add_argument(
+            "--generator-4bit-linear",
+            action=StoreBoolean,
+            help="Whether to use nvfp4 in generator in DMD distillation")
 
         # Self-forcing specific arguments
         parser.add_argument(

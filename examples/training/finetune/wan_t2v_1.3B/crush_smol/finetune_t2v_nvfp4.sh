@@ -25,6 +25,7 @@ training_args=(
   --num_width 832
   --num_frames 77
   --enable_gradient_checkpointing_type "full"
+  --generator_4bit_linear True
 )
 
 # Parallel arguments
@@ -54,15 +55,14 @@ validation_args=(
   --validation_dataset_file $VALIDATION_DATASET_FILE
   --validation_steps 100
   --validation_sampling_steps "50" 
-  --validation_guidance_scale "3.0"
+  --validation_guidance_scale "6.0"
 )
 
 # Optimizer arguments
 optimizer_args=(
   --learning_rate 5e-5
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 1000
-  --training_state_checkpointing_steps 1000
+  --checkpointing_steps 2000
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )
