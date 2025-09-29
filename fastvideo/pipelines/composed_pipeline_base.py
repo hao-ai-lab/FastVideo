@@ -14,12 +14,13 @@ import torch
 
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.distributed import (
-    maybe_init_distributed_environment_and_model_parallel)
+    maybe_init_distributed_environment_and_model_parallel, get_world_group)
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages import PipelineStage
+import fastvideo.envs as envs
 from fastvideo.utils import (maybe_download_model,
                              verify_model_config_and_directory)
 
@@ -68,6 +69,41 @@ class ComposedPipelineBase(ABC):
 
         maybe_init_distributed_environment_and_model_parallel(
             fastvideo_args.tp_size, fastvideo_args.sp_size)
+
+        # Torch profiler. Enabled and configured through env vars:
+        # FASTVIDEO_TORCH_PROFILER_DIR=/path/to/save/trace
+        if envs.FASTVIDEO_TORCH_PROFILER_DIR:
+            torch_profiler_trace_dir = envs.FASTVIDEO_TORCH_PROFILER_DIR
+            logger.info("Profiling enabled. Traces will be saved to: %s",
+                        torch_profiler_trace_dir)
+            logger.info(
+                "Profiler config: record_shapes=%s,"
+                "profile_memory=%s,with_stack=%s,with_flops=%s",
+                envs.FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES,
+                envs.FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY,
+                envs.FASTVIDEO_TORCH_PROFILER_WITH_STACK,
+                envs.FASTVIDEO_TORCH_PROFILER_WITH_FLOPS,
+            )
+            self.profiler = torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ],
+                record_shapes=envs.FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES,
+                profile_memory=envs.
+                FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY,
+                with_stack=envs.FASTVIDEO_TORCH_PROFILER_WITH_STACK,
+                with_flops=envs.FASTVIDEO_TORCH_PROFILER_WITH_FLOPS,
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                    torch_profiler_trace_dir, use_gzip=True))
+        else:
+            self.profiler = None
+
+        self.local_rank = get_world_group().local_rank
+
+        if self.fastvideo_args.profile:
+            logger.info("Starting profiler...")
+            self.profile(is_start=True)
 
         # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
@@ -351,6 +387,18 @@ class ComposedPipelineBase(ABC):
         self._stages.append(stage)
         self._stage_name_mapping[stage_name] = stage
         setattr(self, stage_name, stage)
+
+    def profile(self, is_start: bool = True):
+        if self.profiler is None:
+            raise RuntimeError("Profiler is not enabled.")
+        if is_start:
+            self.profiler.start()
+        else:
+            self.profiler.stop()
+            # only print profiler results on rank 0
+            if self.local_rank == 0:
+                print(self.profiler.key_averages().table(
+                    sort_by="self_cuda_time_total"))
 
     # TODO(will): don't hardcode no_grad
     @torch.no_grad()

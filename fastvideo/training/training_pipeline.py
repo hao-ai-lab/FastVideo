@@ -281,6 +281,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
     def _prepare_dit_inputs(self,
                             training_batch: TrainingBatch) -> TrainingBatch:
+        assert self.training_args is not None, "training_args must be set"
         latents = training_batch.latents
         batch_size = latents.shape[0]
         noise = torch.randn(latents.shape,
@@ -538,6 +539,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
     def train(self) -> None:
         assert self.seed is not None, "seed must be set"
+        assert self.training_args is not None, "training_args must be set"
         set_random_seed(self.seed + self.global_rank)
         logger.info('rank: %s: start training',
                     self.global_rank,
@@ -658,10 +660,16 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         self.train_dataloader, self.lr_scheduler,
                         self.noise_random_generator)
 
+        if self.training_args.profile:
+            logger.info("Stopping profiler...")
+            self.profile(is_start=False)
+            logger.info("Profiler stopped.")
+
         if get_sp_group():
             cleanup_dist_env_and_memory()
 
     def _log_training_info(self) -> None:
+        assert self.training_args is not None, "training_args must be set"
         total_batch_size = (self.world_size *
                             self.training_args.gradient_accumulation_steps /
                             self.training_args.sp_size *
