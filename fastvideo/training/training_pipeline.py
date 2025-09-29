@@ -512,7 +512,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     },
                     step=step,
                 )
-            if step % self.training_args.checkpointing_steps == 0:
+            if step % self.training_args.training_state_checkpointing_steps == 0:
                 save_checkpoint(self.transformer, self.global_rank,
                                 self.training_args.output_dir, step,
                                 self.optimizer, self.train_dataloader,

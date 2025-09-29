@@ -637,7 +637,6 @@ class TrainingArgs(FastVideoArgs):
     # output
     output_dir: str = ""
     checkpoints_total_limit: int = 0
-    checkpointing_steps: int = 0
     resume_from_checkpoint: str = ""  # specify the checkpoint folder to resume from
     init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
 
@@ -885,9 +884,6 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--checkpoints-total-limit",
                             type=int,
                             help="Maximum number of checkpoints to keep")
-        parser.add_argument("--checkpointing-steps",
-                            type=int,
-                            help="Steps between checkpoints")
         parser.add_argument(
             "--training-state-checkpointing-steps",
             type=int,
