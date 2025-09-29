@@ -115,6 +115,7 @@ design/overview
 
 contributing/overview
 contributing/developer_env/index
+contributing/profiling
 :::
 
 :::{toctree}
