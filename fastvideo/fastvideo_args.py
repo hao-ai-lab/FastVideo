@@ -750,6 +750,7 @@ class TrainingArgs(FastVideoArgs):
     simulate_generator_forward: bool = False
     warp_denoising_step: bool = False
     generator_4bit_attn: bool = False
+    generator_4bit_linear: bool = False
 
     # Self-forcing specific arguments
     num_frame_per_block: int = 3

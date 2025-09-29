@@ -98,7 +98,7 @@ dmd_args=(
   --dmd_denoising_steps '1000,757,522'
   --min_timestep_ratio 0.02
   --max_timestep_ratio 0.98
-  --generator_update_interval 5
+  --generator_update_interval 3
   --real_score_guidance_scale 3.5
   --generator_4bit_attn True
 )

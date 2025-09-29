@@ -47,6 +47,10 @@ from fastvideo.training.training_utils import (
     shard_latents_across_sp)
 from fastvideo.utils import (is_vmoba_available, is_vsa_available,
                              set_random_seed, shallow_asdict)
+from fastvideo.training.training_utils import traverse_swap_module
+from fastvideo.attention.backends.sage_attn3 import SageAttention3Impl
+
+import wandb  # isort: skip
 
 vsa_available = is_vsa_available()
 vmoba_available = is_vmoba_available()
@@ -54,6 +58,119 @@ vmoba_available = is_vmoba_available()
 logger = init_logger(__name__)
 
 
+def swap_sage_attn3(obj: Any, obj_path: str) -> int:
+    """
+    If `obj` has an attribute named `attn_impl`, replace it with SageAttention3Impl,
+    carrying over `.causal` and `.softmax_scale`. Everything else set to None.
+    Returns number of swaps performed (0 or 1).
+    """
+    # Quick reject: no attribute
+    if not hasattr(obj, "attn_impl"):
+        return 0
+
+    # Access may raise if it's a property; guard it.
+    try:
+        old_impl = getattr(obj, "attn_impl")
+    except Exception:
+        return 0
+
+    # Already None or already of the desired type => skip
+    if old_impl is None or isinstance(old_impl, SageAttention3Impl):
+        return 0
+
+    # Extract fields with sensible defaults
+    causal = getattr(old_impl, "causal", False)
+    softmax_scale = getattr(old_impl, "softmax_scale", 1.0)
+
+    try:
+        new_impl = SageAttention3Impl(
+            num_heads=None,
+            head_size=None,
+            causal=causal,
+            softmax_scale=softmax_scale,
+            num_kv_heads=None,
+            prefix="",
+        )
+        setattr(obj, "attn_impl", new_impl)
+        return 1
+    except Exception:
+        # If assignment fails (frozen dataclass/property), skip
+        return 0
+
+def swap_fp4_linear(obj: Any, obj_path: str) -> int:
+    """
+    Replace torch.nn.Linear and ReplicatedLinear layers with LinearFWD4BWD16,
+    preserving the input/output dimensions and bias setting.
+    Returns number of swaps performed.
+    """
+    from fastvideo.layers.fp4linear import LinearFWD4BWD16
+    from fastvideo.layers.linear import ReplicatedLinear
+
+    swaps_performed = 0
+
+    # Find all Linear-like attributes in the object
+    for attr_name in dir(obj):
+        if attr_name.startswith('_'):
+            continue
+
+        try:
+            attr_value = getattr(obj, attr_name)
+        except Exception:
+            continue
+
+        # Check if it's a linear layer we want to replace
+        should_replace = False
+        in_features = None
+        out_features = None
+        bias = None
+
+        if isinstance(attr_value, torch.nn.Linear):
+            should_replace = True
+            in_features = attr_value.in_features
+            out_features = attr_value.out_features
+            bias = attr_value.bias is not None
+
+        elif isinstance(attr_value, ReplicatedLinear):
+            should_replace = True
+            in_features = attr_value.input_size
+            out_features = attr_value.output_size
+            # For ReplicatedLinear, check if bias exists
+            bias = hasattr(attr_value, 'bias') and attr_value.bias is not None
+
+        # Skip if already LinearFWD4BWD16
+        if isinstance(attr_value, LinearFWD4BWD16):
+            should_replace = False
+
+        if should_replace and in_features is not None and out_features is not None:
+            try:
+                # Create new LinearFWD4BWD16 layer with same dimensions
+                new_layer = LinearFWD4BWD16(
+                    in_features=in_features,
+                    out_features=out_features,
+                    bias=bias,
+                    backend="cutlass",  # Default backend
+                    block_size=16,      # Default block size
+                    use_128x4_sf_layout=True  # Default layout
+                )
+
+                # Copy weights if possible
+                if hasattr(attr_value, 'weight') and attr_value.weight is not None:
+                    with torch.no_grad():
+                        new_layer.weight.copy_(attr_value.weight.data.float())
+
+                if bias and hasattr(attr_value, 'bias') and attr_value.bias is not None:
+                    with torch.no_grad():
+                        new_layer.bias.copy_(attr_value.bias.data.float())
+
+                # Replace the attribute
+                setattr(obj, attr_name, new_layer)
+                swaps_performed += 1
+
+            except Exception:
+                # If replacement fails (frozen object/property), skip
+                continue
+
+    return swaps_performed
 class TrainingPipeline(LoRAPipeline, ABC):
     """
     A pipeline for training a model. All training pipelines should inherit from this class.
@@ -120,7 +237,14 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     self.transformer_2,
                     checkpointing_type=training_args.
                     enable_gradient_checkpointing_type)
-
+            
+        
+        if training_args.generator_4bit_attn:
+            num_swaps = traverse_swap_module(self.transformer, swap_fn=swap_sage_attn3)
+            logger.info(f"Swapped {num_swaps} attn_impl to SageAttention3Impl instances in self.transformer")
+        if training_args.generator_4bit_linear:
+            num_swaps = traverse_swap_module(self.transformer, swap_fn=swap_fp4_linear)
+            logger.info(f"Swapped {num_swaps} linear layers to LinearFWD4BWD16 instances in self.transformer")
         noise_scheduler = self.modules["scheduler"]
         self.set_trainable()
         params_to_optimize = self.transformer.parameters()
