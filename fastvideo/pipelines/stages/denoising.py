@@ -660,6 +660,21 @@ class CosmosDenoisingStage(DenoisingStage):
                 pipeline.add_module("transformer", self.transformer)
             fastvideo_args.model_loaded["transformer"] = True
 
+        # Prepare extra step kwargs for scheduler
+        extra_step_kwargs = self.prepare_extra_func_kwargs(
+            self.scheduler.step,
+            {
+                "generator": batch.generator,
+                "eta": batch.eta
+            },
+        )
+
+        # Log the extra step kwargs
+        print(f"[FASTVIDEO DEBUG] Extra step kwargs: {extra_step_kwargs}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO DEBUG] Extra step kwargs: {extra_step_kwargs}\n")
+
+
         # Setup precision to match diffusers exactly
         # Diffusers uses transformer.dtype (bfloat16) and converts inputs before transformer calls
         # For FSDP wrapped models, we need to access the underlying module
@@ -682,11 +697,43 @@ class CosmosDenoisingStage(DenoisingStage):
             f.write(f"Denoising init: latents sum = {sum_value:.6f}, shape = {latents.shape}\n")
         
         
+        # Configure scheduler to match Diffusers exactly (MUST be before set_timesteps)
+        sigma_max = 80.0
+        sigma_min = 0.002
+        sigma_data = 1.0
+        final_sigmas_type = "sigma_min"
+
+        print(f"[FASTVIDEO DEBUG] BEFORE config - scheduler.config: {self.scheduler.config}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO DEBUG] BEFORE config - scheduler.config: {self.scheduler.config}\n")
+
+        if self.scheduler is not None:
+            self.scheduler.register_to_config(
+                sigma_max=sigma_max,
+                sigma_min=sigma_min,
+                sigma_data=sigma_data,
+                final_sigmas_type=final_sigmas_type,
+            )
+            print(f"[FASTVIDEO DEBUG] Applied scheduler config: sigma_max={sigma_max}, sigma_min={sigma_min}, sigma_data={sigma_data}, final_sigmas_type={final_sigmas_type}")
+            print(f"[FASTVIDEO DEBUG] AFTER config - scheduler.config: {self.scheduler.config}")
+            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                f.write(f"[FASTVIDEO DEBUG] Applied scheduler config: sigma_max={sigma_max}, sigma_min={sigma_min}, sigma_data={sigma_data}, final_sigmas_type={final_sigmas_type}\n")
+                f.write(f"[FASTVIDEO DEBUG] AFTER config - scheduler.config: {self.scheduler.config}\n")
+
         # Setup scheduler timesteps - use default scheduler sigma generation
         # The torch.linspace(0, 1, num_inference_steps) approach was incorrect for FlowMatchEulerDiscreteScheduler
         # Let the scheduler generate its own sigmas using the configured sigma_max, sigma_min, etc.
         self.scheduler.set_timesteps(num_inference_steps, device=latents.device)
         timesteps = self.scheduler.timesteps
+
+        # Debug what sigmas were actually generated
+        print(f"[FASTVIDEO DEBUG] Generated sigmas - length: {len(self.scheduler.sigmas)}, first few: {self.scheduler.sigmas[:3]}")
+        print(f"[FASTVIDEO DEBUG] Scheduler config after set_timesteps: sigma_max={getattr(self.scheduler.config, 'sigma_max', 'NOT_SET')}, sigma_min={getattr(self.scheduler.config, 'sigma_min', 'NOT_SET')}")
+        print(f"[FASTVIDEO DEBUG] Scheduler properties: self.sigma_max={getattr(self.scheduler, 'sigma_max', 'NOT_SET')}, self.sigma_min={getattr(self.scheduler, 'sigma_min', 'NOT_SET')}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO DEBUG] Generated sigmas - length: {len(self.scheduler.sigmas)}, first few: {self.scheduler.sigmas[:3]}\n")
+            f.write(f"[FASTVIDEO DEBUG] Scheduler config after set_timesteps: sigma_max={getattr(self.scheduler.config, 'sigma_max', 'NOT_SET')}, sigma_min={getattr(self.scheduler.config, 'sigma_min', 'NOT_SET')}\n")
+            f.write(f"[FASTVIDEO DEBUG] Scheduler properties: self.sigma_max={getattr(self.scheduler, 'sigma_max', 'NOT_SET')}, self.sigma_min={getattr(self.scheduler, 'sigma_min', 'NOT_SET')}\n")
         
         # Handle final sigmas like diffusers
         if hasattr(self.scheduler.config, 'final_sigmas_type') and self.scheduler.config.final_sigmas_type == "sigma_min":
@@ -844,6 +891,18 @@ class CosmosDenoisingStage(DenoisingStage):
                     print(f"[FASTVIDEO DEBUG] Step {i}: Preconditioning - c_skip={c_skip:.6f}, c_out={c_out:.6f}, latents_sum={latents.float().sum().item():.6f}")
                     with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
                         f.write(f"[FASTVIDEO DEBUG] Step {i}: Preconditioning - c_skip={c_skip:.6f}, c_out={c_out:.6f}, latents_sum={latents.float().sum().item():.6f}\n")
+
+                    # PRECONDITIONING DTYPE VERIFICATION
+                    print(f"[FASTVIDEO DTYPE DEBUG] Step {i}: Preconditioning dtypes")
+                    print(f"[FASTVIDEO DTYPE DEBUG]   noise_pred dtype: {noise_pred.dtype}, latents dtype: {latents.dtype}")
+                    print(f"[FASTVIDEO DTYPE DEBUG]   c_skip: {c_skip:.10f} (type: {type(c_skip)}), c_out: {c_out:.10f} (type: {type(c_out)})")
+                    print(f"[FASTVIDEO DTYPE DEBUG]   target_dtype: {target_dtype}")
+                    with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                        f.write(f"[FASTVIDEO DTYPE DEBUG] Step {i}: Preconditioning dtypes\n")
+                        f.write(f"[FASTVIDEO DTYPE DEBUG]   noise_pred dtype: {noise_pred.dtype}, latents dtype: {latents.dtype}\n")
+                        f.write(f"[FASTVIDEO DTYPE DEBUG]   c_skip: {c_skip:.10f} (type: {type(c_skip)}), c_out: {c_out:.10f} (type: {type(c_out)})\n")
+                        f.write(f"[FASTVIDEO DTYPE DEBUG]   target_dtype: {target_dtype}\n")
+
                     cond_pred = (c_skip * latents + c_out * noise_pred.float()).to(target_dtype)
 
                     if hasattr(batch, 'cond_indicator') and batch.cond_indicator is not None and conditioning_latents is not None:
@@ -954,14 +1013,34 @@ class CosmosDenoisingStage(DenoisingStage):
                 else:
                     logger.warning(f"Step {i}: current_sigma too small ({current_sigma}), using final_pred directly")
                     noise_for_scheduler = final_pred
-                
+
                 # Debug: Check for NaN values before scheduler step
                 if torch.isnan(noise_for_scheduler).sum() > 0:
                     logger.error(f"Step {i}: NaN detected in noise_for_scheduler, sum: {noise_for_scheduler.float().sum().item()}")
                     logger.error(f"Step {i}: latents sum: {latents.float().sum().item()}, final_pred sum: {final_pred.float().sum().item()}, current_sigma: {current_sigma}")
-                
+
+                # DTYPE VERIFICATION LOGS
+                print(f"[FASTVIDEO DTYPE DEBUG] Step {i}: Before scheduler step")
+                print(f"[FASTVIDEO DTYPE DEBUG]   latents dtype: {latents.dtype}, sum: {latents.float().sum().item():.6f}")
+                print(f"[FASTVIDEO DTYPE DEBUG]   final_pred dtype: {final_pred.dtype}, sum: {final_pred.float().sum().item():.6f}")
+                print(f"[FASTVIDEO DTYPE DEBUG]   noise_for_scheduler dtype: {noise_for_scheduler.dtype}, sum: {noise_for_scheduler.float().sum().item():.6f}")
+                print(f"[FASTVIDEO DTYPE DEBUG]   current_sigma: {current_sigma:.10f} (type: {type(current_sigma)})")
+                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                    f.write(f"[FASTVIDEO DTYPE DEBUG] Step {i}: Before scheduler step\n")
+                    f.write(f"[FASTVIDEO DTYPE DEBUG]   latents dtype: {latents.dtype}, sum: {latents.float().sum().item():.6f}\n")
+                    f.write(f"[FASTVIDEO DTYPE DEBUG]   final_pred dtype: {final_pred.dtype}, sum: {final_pred.float().sum().item():.6f}\n")
+                    f.write(f"[FASTVIDEO DTYPE DEBUG]   noise_for_scheduler dtype: {noise_for_scheduler.dtype}, sum: {noise_for_scheduler.float().sum().item():.6f}\n")
+                    f.write(f"[FASTVIDEO DTYPE DEBUG]   current_sigma: {current_sigma:.10f} (type: {type(current_sigma)})\n")
+
                 # Standard scheduler step like diffusers
-                latents = self.scheduler.step(noise_for_scheduler, t, latents, return_dict=False)[0]
+                latents = self.scheduler.step(noise_for_scheduler, t, latents, **extra_step_kwargs, return_dict=False)[0]
+
+                # DTYPE VERIFICATION LOGS AFTER SCHEDULER
+                print(f"[FASTVIDEO DTYPE DEBUG] Step {i}: After scheduler step")
+                print(f"[FASTVIDEO DTYPE DEBUG]   latents dtype: {latents.dtype}, sum: {latents.float().sum().item():.6f}")
+                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                    f.write(f"[FASTVIDEO DTYPE DEBUG] Step {i}: After scheduler step\n")
+                    f.write(f"[FASTVIDEO DTYPE DEBUG]   latents dtype: {latents.dtype}, sum: {latents.float().sum().item():.6f}\n")
                 sum_value = latents.float().sum().item()
                 logger.info(f"CosmosDenoisingStage: step {i}, updated latents sum = {sum_value:.6f}")
                 # Write to output file

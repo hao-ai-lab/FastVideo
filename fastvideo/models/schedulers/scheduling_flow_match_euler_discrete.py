@@ -348,10 +348,20 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
         sigmas_array: np.ndarray
         if sigmas is None:
             if timesteps_array is None:
-                timesteps_array = np.linspace(self._sigma_to_t(self.sigma_max),
-                                              self._sigma_to_t(self.sigma_min),
-                                              num_inference_steps)
+                t_max = self._sigma_to_t(self.sigma_max)
+                t_min = self._sigma_to_t(self.sigma_min)
+                print(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] sigma_max={self.sigma_max}, sigma_min={self.sigma_min}")
+                print(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] t_max={t_max}, t_min={t_min}, num_inference_steps={num_inference_steps}")
+                timesteps_array = np.linspace(t_max, t_min, num_inference_steps)
+                print(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] timesteps_array first few: {timesteps_array[:3]}")
+                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                    f.write(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] sigma_max={self.sigma_max}, sigma_min={self.sigma_min}\n")
+                    f.write(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] t_max={t_max}, t_min={t_min}, num_inference_steps={num_inference_steps}\n")
+                    f.write(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] timesteps_array first few: {timesteps_array[:3]}\n")
             sigmas_array = timesteps_array / self.config.num_train_timesteps
+            print(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] sigmas_array before shifting first few: {sigmas_array[:3]}")
+            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                f.write(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] sigmas_array before shifting first few: {sigmas_array[:3]}\n")
         else:
             sigmas_array = np.array(sigmas).astype(np.float32)
             num_inference_steps = len(sigmas_array)
@@ -362,8 +372,14 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             assert mu is not None, "mu cannot be None when use_dynamic_shifting is True"
             sigmas_array = self.time_shift(mu, 1.0, sigmas_array)
         else:
+            print(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] Before shifting - self.shift={self.shift}, sigmas_array first few: {sigmas_array[:3]}")
+            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                f.write(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] Before shifting - self.shift={self.shift}, sigmas_array first few: {sigmas_array[:3]}\n")
             sigmas_array = self.shift * sigmas_array / (
                 1 + (self.shift - 1) * sigmas_array)
+            print(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] After shifting - sigmas_array first few: {sigmas_array[:3]}")
+            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                f.write(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] After shifting - sigmas_array first few: {sigmas_array[:3]}\n")
 
         # 3. If required, stretch the sigmas schedule to terminate at the configured `shift_terminal` value
         if self.config.shift_terminal:
@@ -415,14 +431,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
                 [sigmas_tensor,
                  torch.ones(1, device=sigmas_tensor.device)])
         else:
-            # Handle final_sigmas_type parameter
-            if self.config.final_sigmas_type == "sigma_min":
-                # Use sigma_min instead of zero for final sigma
-                final_sigma = torch.tensor([self.sigma_min], device=sigmas_tensor.device)
-            else:  # "zero" or default
-                final_sigma = torch.zeros(1, device=sigmas_tensor.device)
-            
-            sigmas_tensor = torch.cat([sigmas_tensor, final_sigma])
+            sigmas_tensor = torch.cat([sigmas_tensor, torch.zeros(1, device=sigmas_tensor.device)])
 
         self.timesteps = timesteps_tensor
         self.sigmas = sigmas_tensor
@@ -522,14 +531,31 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             next_sigma = lower_sigmas[..., None]
             dt = current_sigma - next_sigma
         else:
-            assert self.step_index is not None, "step_index should not be None"
+            if self.step_index is None:
+                self._init_step_index(timestep)
+
             sigma_idx = self.step_index
             sigma = self.sigmas[sigma_idx]
             sigma_next = self.sigmas[sigma_idx + 1]
 
+            # DETAILED SCHEDULER DEBUG LOGGING
+            print(f"[FASTVIDEO SCHEDULER DEBUG] step_index: {self.step_index}, sigma_idx: {sigma_idx}")
+            print(f"[FASTVIDEO SCHEDULER DEBUG] sigma: {sigma:.10f}, sigma_next: {sigma_next:.10f}")
+            print(f"[FASTVIDEO SCHEDULER DEBUG] sigmas array length: {len(self.sigmas)}, first few: {self.sigmas[:3]}")
+            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                f.write(f"[FASTVIDEO SCHEDULER DEBUG] step_index: {self.step_index}, sigma_idx: {sigma_idx}\n")
+                f.write(f"[FASTVIDEO SCHEDULER DEBUG] sigma: {sigma:.10f}, sigma_next: {sigma_next:.10f}\n")
+                f.write(f"[FASTVIDEO SCHEDULER DEBUG] sigmas array length: {len(self.sigmas)}, first few: {self.sigmas[:3]}\n")
+
             current_sigma = sigma
             next_sigma = sigma_next
             dt = sigma_next - sigma
+
+            print(f"[FASTVIDEO SCHEDULER DEBUG] dt: {dt:.10f}, current_sigma: {current_sigma:.10f}, next_sigma: {next_sigma:.10f}")
+            print(f"[FASTVIDEO SCHEDULER DEBUG] sample sum before step: {sample.float().sum().item():.6f}, model_output sum: {model_output.float().sum().item():.6f}")
+            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                f.write(f"[FASTVIDEO SCHEDULER DEBUG] dt: {dt:.10f}, current_sigma: {current_sigma:.10f}, next_sigma: {next_sigma:.10f}\n")
+                f.write(f"[FASTVIDEO SCHEDULER DEBUG] sample sum before step: {sample.float().sum().item():.6f}, model_output sum: {model_output.float().sum().item():.6f}\n")
 
         if self.config.stochastic_sampling:
             x0 = sample - current_sigma * model_output
@@ -537,9 +563,11 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             prev_sample = (1.0 - next_sigma) * x0 + next_sigma * noise
         else:
             prev_sample = sample + dt * model_output
+            print(f"[FASTVIDEO SCHEDULER DEBUG] final prev_sample sum: {prev_sample.float().sum().item():.6f}")
+            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                f.write(f"[FASTVIDEO SCHEDULER DEBUG] final prev_sample sum: {prev_sample.float().sum().item():.6f}\n")
 
         # upon completion increase step index by one
-        assert self._step_index is not None, "_step_index should not be None"
         self._step_index += 1
         if per_token_timesteps is None:
             # Cast sample back to model compatible dtype
@@ -575,7 +603,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
         min_inv_rho = sigma_min**(1 / rho)
         max_inv_rho = sigma_max**(1 / rho)
         sigmas = (max_inv_rho + ramp * (min_inv_rho - max_inv_rho))**rho
-        return sigmas
+        return torch.from_numpy(sigmas).to(dtype=in_sigmas.dtype, device=in_sigmas.device)
 
     # Copied from diffusers.schedulers.scheduling_euler_discrete.EulerDiscreteScheduler._convert_to_exponential
     def _convert_to_exponential(self, in_sigmas: torch.Tensor,
@@ -600,7 +628,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
         sigmas = np.exp(
             np.linspace(math.log(sigma_max), math.log(sigma_min),
                         num_inference_steps))
-        return sigmas
+        return torch.from_numpy(sigmas).to(dtype=in_sigmas.dtype, device=in_sigmas.device)
 
     # Copied from diffusers.schedulers.scheduling_euler_discrete.EulerDiscreteScheduler._convert_to_beta
     def _convert_to_beta(self,
@@ -631,7 +659,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
                 for timestep in 1 - np.linspace(0, 1, num_inference_steps)
             ]
         ])
-        return sigmas
+        return torch.from_numpy(sigmas).to(dtype=in_sigmas.dtype, device=in_sigmas.device)
 
     def _time_shift_exponential(
             self, mu: float, sigma: float,

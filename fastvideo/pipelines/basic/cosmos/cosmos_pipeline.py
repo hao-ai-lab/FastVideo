@@ -56,7 +56,8 @@ class Cosmos2VideoToWorldPipeline(ComposedPipelineBase):
         print("[TEMPORARY] VAE replacement complete!")
 
         self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
-            shift=fastvideo_args.pipeline_config.flow_shift)
+            shift=fastvideo_args.pipeline_config.flow_shift,
+            use_karras_sigmas=True)
         
         # Configure Cosmos-specific scheduler parameters (matching diffusers)
         # Source: /workspace/diffusers/src/diffusers/pipelines/cosmos/pipeline_cosmos2_video2world.py:209-219
