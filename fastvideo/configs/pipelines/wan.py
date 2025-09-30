@@ -7,7 +7,8 @@ import torch
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.configs.models.encoders import (BaseEncoderOutput,
-                                               CLIPVisionConfig, T5Config)
+                                               CLIPVisionConfig, T5Config,
+                                               WAN2_1ControlCLIPVisionConfig)
 from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 
@@ -95,6 +96,16 @@ class WanI2V720PConfig(WanI2V480PConfig):
 
     # Denoising stage
     flow_shift: float | None = 5.0
+
+
+@dataclass
+class WANV2VConfig(WanI2V480PConfig):
+    """Configuration for WAN2.1 1.3B Control pipeline."""
+
+    image_encoder_config: EncoderConfig = field(
+        default_factory=WAN2_1ControlCLIPVisionConfig)
+    # CLIP encoder precision
+    image_encoder_precision = 'bf16'
 
 
 @dataclass

@@ -18,6 +18,9 @@ class SamplingParam:
     # Image inputs
     image_path: str | None = None
 
+    # Video inputs
+    video_path: str | None = None
+
     # Text inputs
     prompt: str | list[str] | None = None
     negative_prompt: str = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
@@ -199,6 +202,12 @@ class SamplingParam:
             type=str,
             default=SamplingParam.image_path,
             help="Path to input image for image-to-video generation",
+        )
+        parser.add_argument(
+            "--video_path",
+            type=str,
+            default=SamplingParam.video_path,
+            help="Path to input video for video-to-video generation",
         )
         parser.add_argument(
             "--moba-config-path",

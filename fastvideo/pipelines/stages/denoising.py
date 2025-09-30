@@ -283,9 +283,13 @@ class DenoisingStage(PipelineStage):
                     current_guidance_scale = batch.guidance_scale_2
                 assert current_model is not None, "current_model is None"
 
-                # Expand latents for I2V
+                # Expand latents for V2V/I2V
                 latent_model_input = latents.to(target_dtype)
-                if batch.image_latent is not None:
+                if batch.video_latent is not None:
+                    latent_model_input = torch.cat(
+                        [latent_model_input, batch.video_latent, torch.zeros_like(latents)],
+                        dim=1).to(target_dtype)
+                elif batch.image_latent is not None:
                     assert not fastvideo_args.pipeline_config.ti2v_task, "image latents should not be provided for TI2V task"
                     latent_model_input = torch.cat(
                         [latent_model_input, batch.image_latent],

@@ -9,7 +9,7 @@ from PIL import Image
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.vision_utils import load_image, load_video
+from fastvideo.models.vision_utils import load_image, load_video, pil_to_numpy, numpy_to_pt, normalize, resize, process_control_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import (StageValidators,
@@ -134,6 +134,46 @@ class InputValidationStage(PipelineStage):
             batch.height = oh
             batch.width = ow
             batch.pil_image = img
+
+        # for v2v, get control video from video path
+        if batch.video_path is not None:
+            pil_images, original_fps = load_video(batch.video_path)
+            logger.info(f"Loaded video with {len(pil_images)} frames, original FPS: {original_fps}")
+
+            # Get target parameters from batch
+            target_fps = batch.fps
+            target_num_frames = batch.num_frames
+            target_height = batch.height
+            target_width = batch.width
+
+            if target_fps is not None and original_fps is not None:
+                frame_skip = max(1, int(original_fps // target_fps))
+                if frame_skip > 1:
+                    pil_images = pil_images[::frame_skip]
+                    effective_fps = original_fps / frame_skip
+                    logger.info(
+                            f"Resampled video from {original_fps:.1f} fps to {effective_fps:.1f} fps (skip={frame_skip})")
+
+            # Limit to target number of frames
+            if target_num_frames is not None and len(pil_images) > target_num_frames:
+                pil_images = pil_images[:target_num_frames]
+                logger.info(f"Limited video to {target_num_frames} frames (from {len(pil_images)} total)")
+
+            # Resize each PIL image to target dimensions
+            resized_images = []
+            for pil_img in pil_images:
+                resized_img = resize(pil_img, target_height, target_width, resize_mode="default", resample="lanczos")
+                resized_images.append(resized_img)
+
+            # Convert PIL images to numpy array
+            video_numpy = pil_to_numpy(resized_images)
+            video_numpy = normalize(video_numpy)
+            video_tensor = numpy_to_pt(video_numpy)
+
+            # Rearrange to [C, T, H, W] and add batch dimension -> [B, C, T, H, W]
+            input_video = video_tensor.permute(1, 0, 2, 3).unsqueeze(0)
+
+            batch.video_latents = input_video
 
         return batch
 

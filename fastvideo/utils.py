@@ -26,7 +26,9 @@ import filelock
 import imageio
 import numpy as np
 import torch
-import torchvision
+import torchvision.utils.make_grid as make_grid
+import torchvision.io as io
+import torchvision.transforms.v2 as transforms
 import yaml
 from diffusers.loaders.lora_base import (
     _best_guess_weight_name)  # watch out for potetential removal from diffusers
@@ -898,9 +900,37 @@ def save_decoded_latents_as_video(decoded_latents: list[torch.Tensor],
     videos = rearrange(decoded_latents, "b c t h w -> t b c h w")
     frames = []
     for x in videos:
-        x = torchvision.utils.make_grid(x, nrow=6)
+        x = make_grid(x, nrow=6)
         x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
         frames.append((x * 255).numpy().astype(np.uint8))
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     imageio.mimsave(output_path, frames, fps=fps, format="mp4")
+
+def get_video_to_video_latent_torch(input_video_path, video_length, sample_size, fps=None):
+    assert input_video_path is not None, f"Video path cannot be None"
+    # Read video using torchvision
+    video, _, info = io.read_video(input_video_path, pts_unit='sec')
+
+    # Handle FPS sampling
+    if fps is not None:
+        original_fps = info['video_fps']
+        frame_skip = max(1, int(original_fps // fps))
+        video = video[::frame_skip]  # Sample frames
+
+    # Limit to video_length
+    video = video[:video_length]
+
+    # Create transform pipeline
+    transform = transforms.Compose([
+        transforms.ToPILImage(),  # Convert to PIL for resize
+        transforms.Resize((sample_size[0], sample_size[1])),
+        transforms.ToTensor(),  # Convert back to tensor and normalize
+    ])
+
+    # Apply transforms to each frame and stack
+    processed_frames = torch.stack([transform(frame) for frame in video])
+    # Result: [T, C, H, W] -> permute to [C, T, H, W] -> unsqueeze batch dim
+    input_video = processed_frames.permute(1, 0, 2, 3).unsqueeze(0)
+
+    return input_video
