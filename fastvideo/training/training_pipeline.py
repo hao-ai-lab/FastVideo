@@ -48,7 +48,10 @@ from fastvideo.training.training_utils import (
 from fastvideo.utils import (is_vmoba_available, is_vsa_available,
                              set_random_seed, shallow_asdict)
 from fastvideo.training.training_utils import traverse_swap_module
-from fastvideo.attention.backends.sage_attn3 import SageAttention3Impl
+try:
+    from fastvideo.attention.backends.sage_attn3 import SageAttention3Impl
+except ImportError:
+    SageAttention3Impl = None
 
 import wandb  # isort: skip
 
@@ -124,13 +127,13 @@ def swap_fp4_linear(obj: Any, obj_path: str) -> int:
         out_features = None
         bias = None
 
-        if isinstance(attr_value, torch.nn.Linear):
-            should_replace = True
-            in_features = attr_value.in_features
-            out_features = attr_value.out_features
-            bias = attr_value.bias is not None
+        # if isinstance(attr_value, torch.nn.Linear):
+        #     should_replace = True
+        #     in_features = attr_value.in_features
+        #     out_features = attr_value.out_features
+        #     bias = attr_value.bias is not None
 
-        elif isinstance(attr_value, ReplicatedLinear):
+        if isinstance(attr_value, ReplicatedLinear):
             should_replace = True
             in_features = attr_value.input_size
             out_features = attr_value.output_size
@@ -142,33 +145,33 @@ def swap_fp4_linear(obj: Any, obj_path: str) -> int:
             should_replace = False
 
         if should_replace and in_features is not None and out_features is not None:
-            try:
-                # Create new LinearFWD4BWD16 layer with same dimensions
-                new_layer = LinearFWD4BWD16(
-                    in_features=in_features,
-                    out_features=out_features,
-                    bias=bias,
-                    backend="cutlass",  # Default backend
-                    block_size=16,      # Default block size
-                    use_128x4_sf_layout=True  # Default layout
-                )
+            # Create new LinearFWD4BWD16 layer with same dimensions
+            new_layer = LinearFWD4BWD16(
+                in_features=in_features,
+                out_features=out_features,
+                bias=bias,
+                backend="cutlass",  # Default backend
+                block_size=16,      # Default block size
+                use_128x4_sf_layout=True  # Default layout
+            )
 
-                # Copy weights if possible
-                if hasattr(attr_value, 'weight') and attr_value.weight is not None:
-                    with torch.no_grad():
-                        new_layer.weight.copy_(attr_value.weight.data.float())
+            # Copy weights if possible
+            # if hasattr(attr_value, 'weight') and attr_value.weight is not None:
+            #     with torch.no_grad():
+            #         new_layer.weight.copy_(attr_value.weight.data.float())
 
-                if bias and hasattr(attr_value, 'bias') and attr_value.bias is not None:
-                    with torch.no_grad():
-                        new_layer.bias.copy_(attr_value.bias.data.float())
+            # if bias and hasattr(attr_value, 'bias') and attr_value.bias is not None:
+            #     with torch.no_grad():
+            #         new_layer.bias.copy_(attr_value.bias.data.float())
+            old_layer = getattr(obj, attr_name)
+            # Replace the attribute
+            setattr(obj, attr_name, new_layer)
+            setattr(new_layer, "weight", old_layer.weight)
+            setattr(new_layer, "bias", old_layer.bias)
+            swaps_performed += 1
 
-                # Replace the attribute
-                setattr(obj, attr_name, new_layer)
-                swaps_performed += 1
 
-            except Exception:
-                # If replacement fails (frozen object/property), skip
-                continue
+
 
     return swaps_performed
 class TrainingPipeline(LoRAPipeline, ABC):

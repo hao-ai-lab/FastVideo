@@ -8,7 +8,7 @@ class _LinearFWD4BWD16Fn(torch.autograd.Function):
     def forward(ctx, x, weight, bias, backend="cutlass", block_size=16, use_128x4_sf_layout=True):
         # assert activation dtype
         if x.dtype not in (torch.float16, torch.bfloat16):
-            raise AssertionError(f"Input dtype must be fp16/bf16, got {x.dtype}")
+            x = x.to(dtype=torch.bfloat16)
 
         # cast params (can be fp32) to activation dtype for quantization
         weight_cast = weight.to(dtype=x.dtype)
@@ -96,10 +96,5 @@ class LinearFWD4BWD16(nn.Module):
             self.bias = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if x.dtype not in (torch.float16, torch.bfloat16):
-            raise AssertionError(f"Input dtype must be fp16/bf16, got {x.dtype}")
         # pass config **positionally**; autograd.Function.apply ignores kwargs
-        return _LinearFWD4BWD16Fn.apply(
-            x, self.weight, self.bias,
-            self.backend, self.block_size, self.use_128x4_sf_layout
-        )
+        return _LinearFWD4BWD16Fn.apply(x, self.weight, self.bias,self.backend, self.block_size, self.use_128x4_sf_layout)

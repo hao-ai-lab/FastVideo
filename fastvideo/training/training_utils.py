@@ -1834,11 +1834,8 @@ def traverse_swap_module(
 
         swaps = 0
         # First, try to swap on the current object
-        try:
-            swaps += swap_fn(obj, obj_path)
-        except Exception as e:
-            if verbose:
-                print(f"[warn] swap_fn failed at {obj_path}: {e}")
+        swaps += swap_fn(obj, obj_path)
+
 
         # Then, traverse children
         # 1) PyTorch modules: prefer named_children() for proper module graph traversal
