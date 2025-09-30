@@ -82,6 +82,10 @@ class DecodingStage(PipelineStage):
         if latents is None:
             raise ValueError("Latents must be provided")
 
+        print(f"[FASTVIDEO VAE DEBUG] Before scaling/shifting - latents sum: {latents.float().sum().item():.6f}, shape: {latents.shape}, dtype: {latents.dtype}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO VAE DEBUG] Before scaling/shifting - latents sum: {latents.float().sum().item():.6f}, shape: {latents.shape}, dtype: {latents.dtype}\n")
+
         # Skip decoding if output type is latent
         if fastvideo_args.output_type == "latent":
             image = latents
@@ -92,18 +96,40 @@ class DecodingStage(PipelineStage):
             vae_autocast_enabled = (vae_dtype != torch.float32
                                     ) and not fastvideo_args.disable_autocast
 
-            # TEMPORARY: Handle diffusers VAE compatibility
-            if hasattr(self.vae, 'scaling_factor'):
+            # Apply latents normalization for Cosmos VAE (matching diffusers implementation)
+            # Source: /workspace/diffusers/src/diffusers/pipelines/cosmos/pipeline_cosmos2_video2world.py:1000-1010
+            if hasattr(self.vae, 'config') and hasattr(self.vae.config, 'latents_mean') and hasattr(self.vae.config, 'latents_std'):
+                # Get scheduler for sigma_data
+                pipeline = self.pipeline() if self.pipeline else None
+                sigma_data = 1.0  # default
+                if pipeline and hasattr(pipeline, 'modules') and 'scheduler' in pipeline.modules:
+                    scheduler = pipeline.modules['scheduler']
+                    if hasattr(scheduler, 'config') and hasattr(scheduler.config, 'sigma_data'):
+                        sigma_data = scheduler.config.sigma_data
+
+                latents_mean = (
+                    torch.tensor(self.vae.config.latents_mean)
+                    .view(1, self.vae.config.z_dim, 1, 1, 1)
+                    .to(latents.device, latents.dtype)
+                )
+                latents_std = (
+                    torch.tensor(self.vae.config.latents_std)
+                    .view(1, self.vae.config.z_dim, 1, 1, 1)
+                    .to(latents.device, latents.dtype)
+                )
+                latents = latents * latents_std / sigma_data + latents_mean
+            # Fallback to scaling_factor for other VAE types
+            elif hasattr(self.vae, 'scaling_factor'):
                 if isinstance(self.vae.scaling_factor, torch.Tensor):
                     latents = latents / self.vae.scaling_factor.to(
                         latents.device, latents.dtype)
                 else:
                     latents = latents / self.vae.scaling_factor
             elif hasattr(self.vae, 'config') and hasattr(self.vae.config, 'scaling_factor'):
-                # Fallback to config scaling factor for diffusers VAE
+                # Fallback to config scaling factor for other diffusers VAEs
                 latents = latents / self.vae.config.scaling_factor
 
-            # Apply shifting if needed
+            # Apply shifting if needed (for other VAE types)
             if (hasattr(self.vae, "shift_factor")
                     and self.vae.shift_factor is not None):
                 if isinstance(self.vae.shift_factor, torch.Tensor):
@@ -111,6 +137,10 @@ class DecodingStage(PipelineStage):
                                                         latents.dtype)
                 else:
                     latents += self.vae.shift_factor
+
+            print(f"[FASTVIDEO VAE DEBUG] After scaling/shifting - latents sum: {latents.float().sum().item():.6f}")
+            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                f.write(f"[FASTVIDEO VAE DEBUG] After scaling/shifting - latents sum: {latents.float().sum().item():.6f}\n")
 
             # Decode latents
             with torch.autocast(device_type="cuda",
@@ -132,8 +162,16 @@ class DecodingStage(PipelineStage):
                     # FastVideo VAE returns tensor directly
                     image = decode_output
 
+                print(f"[FASTVIDEO VAE DEBUG] After decode - image sum: {image.float().sum().item():.6f}, shape: {image.shape}")
+                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+                    f.write(f"[FASTVIDEO VAE DEBUG] After decode - image sum: {image.float().sum().item():.6f}, shape: {image.shape}\n")
+
         # Normalize image to [0, 1] range
         image = (image / 2 + 0.5).clamp(0, 1)
+
+        print(f"[FASTVIDEO VAE DEBUG] After normalization - image sum: {image.float().sum().item():.6f}")
+        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
+            f.write(f"[FASTVIDEO VAE DEBUG] After normalization - image sum: {image.float().sum().item():.6f}\n")
 
         # Convert to CPU float32 for compatibility
         image = image.cpu().float()
