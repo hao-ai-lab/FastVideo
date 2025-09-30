@@ -90,7 +90,9 @@ class VideoGenerator:
         # Initialize distributed environment if needed
         # initialize_distributed_and_parallelism(fastvideo_args)
 
+        print(f"fastvideo_args {fastvideo_args}")
         executor_class = Executor.get_class(fastvideo_args)
+        print(f"executor_class {executor_class}")
         return cls(
             fastvideo_args=fastvideo_args,
             executor_class=executor_class,

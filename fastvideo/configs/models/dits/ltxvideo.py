@@ -4,11 +4,13 @@ from dataclasses import dataclass, field
 from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
 
 
+def is_blocks(n: str, m) -> bool:
+    return "blocks" in n and str.isdigit(n.split(".")[-1])
+
+
 @dataclass
 class LTXVideoArchConfig(DiTArchConfig):
-    fsdp_shard_conditions: list = field(
-        default_factory=lambda:
-        [lambda n, m: "transformer_blocks" in n and n.split(".")[-1].isdigit()])
+    _fsdp_shard_conditions: list = field(default_factory=lambda: [is_blocks])
 
     # Parameter name mappings for loading pretrained weights from HuggingFace/Diffusers
     # Maps from source model parameter names to FastVideo LTX implementation names
@@ -82,4 +84,4 @@ class LTXVideoArchConfig(DiTArchConfig):
 @dataclass
 class LTXVideoConfig(DiTConfig):
     arch_config: DiTArchConfig = field(default_factory=LTXVideoArchConfig)
-    prefix: str = "LTXVideo"
+    prefix: str = "LTX"

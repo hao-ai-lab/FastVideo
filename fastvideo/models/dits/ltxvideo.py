@@ -660,9 +660,13 @@ class LTXVideoTransformer3DModel(CachableDiT):
     _skip_layerwise_casting_patterns = ["norm"]
     _repeated_blocks = ["FastVideoLTXTransformerBlock"]
 
+    _fsdp_shard_conditions = LTXVideoConfig()._fsdp_shard_conditions
+    param_names_mapping = LTXVideoConfig().param_names_mapping
+
+
     def __init__(
         self,
-        config: Optional[LTXVideoConfig] = None,
+        config: LTXVideoConfig,
         hf_config: Optional[Dict] = None,
         **kwargs
     ) -> None:

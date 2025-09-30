@@ -20,7 +20,7 @@ logger = init_logger(__name__)
 
 class LTXPipeline(ComposedPipelineBase):
     """
-    LTX video diffusion pipeline with LoRA support.
+    LTX video diffusion pipeline
     """
 
     _required_config_modules = [
