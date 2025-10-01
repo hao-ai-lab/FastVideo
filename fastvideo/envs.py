@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY: bool = False
     FASTVIDEO_TORCH_PROFILER_WITH_STACK: bool = True
     FASTVIDEO_TORCH_PROFILER_WITH_FLOPS: bool = False
+    FASTVIDEO_TORCH_PROFILE_REGIONS: str = ""
     FASTVIDEO_SERVER_DEV_MODE: bool = False
     FASTVIDEO_STAGE_LOGGING: bool = False
 
@@ -227,6 +228,8 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # not profile flops.
     "FASTVIDEO_TORCH_PROFILER_WITH_FLOPS":
     lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_FLOPS", "0") != "0"),
+    "FASTVIDEO_TORCH_PROFILE_REGIONS":
+    lambda: os.getenv("FASTVIDEO_TORCH_PROFILE_REGIONS", ""),
 
     # If set, fastvideo will run in development mode, which will enable
     # some additional endpoints for developing and debugging,

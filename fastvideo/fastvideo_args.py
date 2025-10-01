@@ -421,6 +421,7 @@ class FastVideoArgs:
             "--init-weights-from-safetensors-2",
             type=str,
             help="Path to safetensors file for initial weight loading")
+
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)
 
