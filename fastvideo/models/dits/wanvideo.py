@@ -719,9 +719,7 @@ class WanTransformer3DModel(CachableDiT):
             encoder_hidden_states = torch.concat(
                 [encoder_hidden_states_image, encoder_hidden_states], dim=1)
 
-        encoder_hidden_states = encoder_hidden_states.to(
-            orig_dtype) if current_platform.is_mps(
-            ) else encoder_hidden_states  # cast to orig_dtype for MPS
+        encoder_hidden_states = encoder_hidden_states.to(orig_dtype)
 
         assert encoder_hidden_states.dtype == orig_dtype
 

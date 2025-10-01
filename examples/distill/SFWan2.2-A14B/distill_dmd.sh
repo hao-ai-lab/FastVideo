@@ -62,6 +62,7 @@ training_args=(
   --num_width 832   # Updated to match Wan2.2 config
   --enable_gradient_checkpointing_type "full"
   # --log_visualization
+  --num_frames 81
   --num_frame_per_block 3  # Frame generation block size for self-forcing
   --enable_gradient_masking
   --gradient_mask_last_n_frames 21
