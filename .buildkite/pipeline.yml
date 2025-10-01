@@ -106,6 +106,7 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/training/self_forcing_distillation_pipeline.py"
+                - "fastvideo/tests/training/self-forcing/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
