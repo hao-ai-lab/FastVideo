@@ -161,9 +161,6 @@ class FastVideoArgs:
     })
     override_transformer_cls_name: str | None = None
 
-    # Torch profiler
-    profile: bool = False
-
     # # DMD parameters
     # dmd_denoising_steps: List[int] | None = field(default=None)
 
@@ -413,13 +410,6 @@ class FastVideoArgs:
             type=str,
             default=FastVideoArgs.override_transformer_cls_name,
             help="Override transformer cls name",
-        )
-
-        parser.add_argument(
-            "--profile",
-            action=StoreBoolean,
-            help="Use Torch Profiler. The endpoint must be launched with "
-            "FASTVIDEO_TORCH_PROFILER_DIR to enable profiler.",
         )
 
         # Add pipeline configuration arguments

@@ -660,9 +660,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         self.train_dataloader, self.lr_scheduler,
                         self.noise_random_generator)
 
-        if self.training_args.profile:
+        if envs.FASTVIDEO_TORCH_PROFILER_DIR:
             logger.info("Stopping profiler...")
-            self.profile(is_start=False)
+            self.profiler_controller.stop()
             logger.info("Profiler stopped.")
 
         if get_sp_group():

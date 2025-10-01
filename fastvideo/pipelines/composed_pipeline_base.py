@@ -17,6 +17,7 @@ from fastvideo.distributed import (
     maybe_init_distributed_environment_and_model_parallel, get_world_group)
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
+from fastvideo.profiler import get_or_create_profiler
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages import PipelineStage
@@ -72,42 +73,18 @@ class ComposedPipelineBase(ABC):
 
         # Torch profiler. Enabled and configured through env vars:
         # FASTVIDEO_TORCH_PROFILER_DIR=/path/to/save/trace
-        if envs.FASTVIDEO_TORCH_PROFILER_DIR:
-            torch_profiler_trace_dir = envs.FASTVIDEO_TORCH_PROFILER_DIR
-            logger.info("Profiling enabled. Traces will be saved to: %s",
-                        torch_profiler_trace_dir)
-            logger.info(
-                "Profiler config: record_shapes=%s,"
-                "profile_memory=%s,with_stack=%s,with_flops=%s",
-                envs.FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES,
-                envs.FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY,
-                envs.FASTVIDEO_TORCH_PROFILER_WITH_STACK,
-                envs.FASTVIDEO_TORCH_PROFILER_WITH_FLOPS,
-            )
-            self.profiler = torch.profiler.profile(
-                activities=[
-                    torch.profiler.ProfilerActivity.CPU,
-                    torch.profiler.ProfilerActivity.CUDA,
-                ],
-                record_shapes=envs.FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES,
-                profile_memory=envs.
-                FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY,
-                with_stack=envs.FASTVIDEO_TORCH_PROFILER_WITH_STACK,
-                with_flops=envs.FASTVIDEO_TORCH_PROFILER_WITH_FLOPS,
-                on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                    torch_profiler_trace_dir, use_gzip=True))
-        else:
-            self.profiler = None
+        trace_dir = envs.FASTVIDEO_TORCH_PROFILER_DIR
+        self.profiler_controller = get_or_create_profiler(trace_dir)
+        self.profiler = self.profiler_controller.profiler
+        self.profiler_activities = list(self.profiler_controller.activities)
 
         self.local_rank = get_world_group().local_rank
-
-        if self.fastvideo_args.profile:
-            logger.info("Starting profiler...")
-            self.profile(is_start=True)
+        logger.info("Local rank WTF: %s", self.local_rank)
 
         # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
-        self.modules = self.load_modules(fastvideo_args, loaded_modules)
+        with self.profiler_controller.region("profiler_region_model_loading"):
+            self.modules = self.load_modules(fastvideo_args, loaded_modules)
 
     def set_trainable(self) -> None:
         # Only train DiT
