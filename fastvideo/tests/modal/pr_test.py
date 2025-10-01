@@ -118,6 +118,10 @@ def run_inference_lora_tests():
 def run_distill_dmd_tests():
     run_test("pytest ./fastvideo/tests/training/distill/test_distill_dmd.py -vs")
 
+@app.function(gpu="L40S:2", image=image, timeout=900, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
+def run_self_forcing_tests():
+    run_test("wandb login $WANDB_API_KEY && pytest ./fastvideo/tests/training/self-forcing/test_self_forcing.py -vs")
+
 @app.function(gpu="L40S:1", image=image, timeout=900)
 def run_unit_test():
     run_test("pytest ./fastvideo/tests/dataset/ ./fastvideo/tests/workflow/ -vs")

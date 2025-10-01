@@ -110,6 +110,10 @@ case "$TEST_TYPE" in
         MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_distill_dmd_tests"
         ;;
         # run_inference_tests_vmoba
+    "self_forcing")
+        log "Running self-forcing tests..."
+        MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_self_forcing_tests"
+        ;;
     "inference_vmoba")
         log "Running V-MoBA inference tests..."
         MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_inference_tests_vmoba"
