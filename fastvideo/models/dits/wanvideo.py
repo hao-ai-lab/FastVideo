@@ -487,11 +487,6 @@ class WanTransformerBlock_VSA(nn.Module):
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
         # assert orig_dtype != torch.float32
-
-        print(f"self.norm1(hidden_states).shape: {self.norm1(hidden_states).shape}")
-        print(f"scale_msa.shape: {scale_msa.shape}")
-        print(f"shift_msa.shape: {shift_msa.shape}")
-        
         if temb.dim() == 4:
             # temb: batch_size, seq_len, 6, inner_dim (wan2.2 ti2v)
             shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (

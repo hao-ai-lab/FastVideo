@@ -444,9 +444,6 @@ class TransformerLoader(ComponentLoader):
         if use_custom_weights:
             if 'transformer_2' in model_path:
                 custom_weights_path = getattr(fastvideo_args, 'init_weights_from_safetensors_2', None)
-                logger.info("Found transformer_2 in model path, using custom initialization weights from: %s", custom_weights_path)
-            assert custom_weights_path is not None, f"Custom initialization weights must be provided for {model_path}"
-            logger.info("Using custom initialization weights from: %s", custom_weights_path)
             assert custom_weights_path is not None, "Custom initialization weights must be provided"
             if os.path.isdir(custom_weights_path):
                 safetensors_list = glob.glob(

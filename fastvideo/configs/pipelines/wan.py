@@ -71,7 +71,6 @@ class WanT2V720PConfig(WanT2V480PConfig):
 
     # Denoising stage
     flow_shift: float | None = 5.0
-    warp_denoising_step: bool = True
 
 
 @dataclass

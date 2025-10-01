@@ -149,12 +149,6 @@ class CausalWanSelfAttention(nn.Module):
                 local_start_index = local_end_index - num_new_tokens
                 kv_cache["k"] = kv_cache["k"].detach()
                 kv_cache["v"] = kv_cache["v"].detach()
-                # logger.info("kv_cache['k'] is in comp graph: %s", kv_cache["k"].requires_grad or kv_cache["k"].grad_fn is not None)
-                logger.info("kv_cache[k][:, local_start_index:local_end_index] shape: %s", kv_cache["k"][:, local_start_index:local_end_index].shape)
-                logger.info("kv_cache[v][:, local_start_index:local_end_index] shape: %s", kv_cache["v"][:, local_start_index:local_end_index].shape)
-                logger.info("roped_key shape: %s", roped_key.shape)
-                logger.info("v shape: %s", v.shape)
-                
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
             x = self.attn(

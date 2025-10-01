@@ -751,17 +751,6 @@ class TrainingArgs(FastVideoArgs):
                 mode_value = getattr(args, attr, ExecutionMode.FINETUNING.value)
                 kwargs[attr] = ExecutionMode.from_string(
                     mode_value) if isinstance(mode_value, str) else mode_value
-            elif attr == 'torch_compile_kwargs':
-                # Parse JSON string for torch.compile kwargs
-                torch_compile_kwargs_str = getattr(args, 'torch_compile_kwargs', None)
-                if torch_compile_kwargs_str:
-                    try:
-                        import json
-                        kwargs['torch_compile_kwargs'] = json.loads(torch_compile_kwargs_str)
-                    except json.JSONDecodeError as e:
-                        raise ValueError(f"Invalid JSON for torch_compile_kwargs: {e}")
-                else:
-                    kwargs['torch_compile_kwargs'] = {}
             elif attr == 'workload_type':
                 # Convert string to WorkloadType enum
                 workload_type_value = getattr(args, 'workload_type',
