@@ -1,6 +1,6 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
-export WANDB_API_KEY='2f25ad37933894dbf0966c838c0b8494987f9f2f'
+export WANDB_API_KEY='your_wandb_api_key_here'
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 export TRITON_CACHE_DIR=/tmp/triton_cache
 # DATA_DIR=/mnt/sharefs/users/hao.zhang/Vchitect-2M/Wan-Syn-upload/latents_i2v/train/
