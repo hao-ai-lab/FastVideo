@@ -56,6 +56,7 @@ class WanT2V480PConfig(PipelineConfig):
 
     # self-forcing params
     warp_denoising_step: bool = True
+
     # WanConfig-specific added parameters
 
     def __post_init__(self):
@@ -137,7 +138,7 @@ class Wan2_2_T2V_A14B_Config(WanT2V480PConfig):
 
     # self-forcing params
     dmd_denoising_steps: list[int] | None = field(
-    default_factory=lambda: [1000, 750, 500, 250])
+        default_factory=lambda: [1000, 750, 500, 250])
     warp_denoising_step: bool = True
 
     def __post_init__(self) -> None:

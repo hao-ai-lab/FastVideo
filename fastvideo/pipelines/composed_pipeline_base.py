@@ -101,7 +101,9 @@ class ComposedPipelineBase(ABC):
         if self.fastvideo_args.enable_torch_compile:
             transformer_module = self.modules["transformer"]
             if self.fastvideo_args.training_mode:
-                logger.info("Torch Compile enabled via FSDP loader for training; skipping additional pipeline compile")
+                logger.info(
+                    "Torch Compile enabled via FSDP loader for training; skipping additional pipeline compile"
+                )
             else:
                 fsdp_module_cls = None
                 try:
@@ -109,12 +111,17 @@ class ComposedPipelineBase(ABC):
                     fsdp_module_cls = FSDPModule
                 except Exception:  # pragma: no cover - FSDP not always available
                     fsdp_module_cls = None
-                if fsdp_module_cls is not None and isinstance(transformer_module, fsdp_module_cls):
-                    logger.info("Transformer is already FSDP-wrapped; skipping torch.compile in pipeline")
+                if fsdp_module_cls is not None and isinstance(
+                        transformer_module, fsdp_module_cls):
+                    logger.info(
+                        "Transformer is already FSDP-wrapped; skipping torch.compile in pipeline"
+                    )
                 else:
                     compile_kwargs = self.fastvideo_args.torch_compile_kwargs or {}
-                    logger.info("Enabling torch.compile for DiT with kwargs=%s", compile_kwargs)
-                    self.modules["transformer"] = torch.compile(transformer_module, **compile_kwargs)
+                    logger.info("Enabling torch.compile for DiT with kwargs=%s",
+                                compile_kwargs)
+                    self.modules["transformer"] = torch.compile(
+                        transformer_module, **compile_kwargs)
                     logger.info("Torch Compile enabled for DiT")
 
         if not self.fastvideo_args.training_mode:

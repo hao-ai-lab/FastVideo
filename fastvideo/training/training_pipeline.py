@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-import gc
 import dataclasses
 import math
 import os
@@ -45,8 +44,7 @@ from fastvideo.training.training_utils import (
     shard_latents_across_sp)
 # from fastvideo.utils import (is_vmoba_available, is_vsa_available,
 #                              set_random_seed, shallow_asdict)
-from fastvideo.utils import (is_vsa_available,
-                             set_random_seed, shallow_asdict)
+from fastvideo.utils import (is_vsa_available, set_random_seed, shallow_asdict)
 
 import wandb  # isort: skip
 
@@ -133,7 +131,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         # Parse betas from string format "beta1,beta2"
         betas_str = training_args.betas
         betas = tuple(float(x.strip()) for x in betas_str.split(","))
-        
+
         self.optimizer = torch.optim.AdamW(
             params_to_optimize,
             lr=training_args.learning_rate,
@@ -198,11 +196,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
         else:
             self.boundary_timestep = None
 
-        
-        logger.info(f"train_dataloader length: {len(self.train_dataloader)}")
-        logger.info(f"train_sp_batch_size: {training_args.train_sp_batch_size}")
-        logger.info(f"gradient_accumulation_steps: {training_args.gradient_accumulation_steps}")
-        logger.info(f"sp_size: {training_args.sp_size}")
+        logger.info("train_dataloader length: %s", len(self.train_dataloader))
+        logger.info("train_sp_batch_size: %s",
+                    training_args.train_sp_batch_size)
+        logger.info("gradient_accumulation_steps: %s",
+                    training_args.gradient_accumulation_steps)
+        logger.info("sp_size: %s", training_args.sp_size)
 
         self.num_update_steps_per_epoch = math.ceil(
             len(self.train_dataloader) /
@@ -235,14 +234,16 @@ class TrainingPipeline(LoRAPipeline, ABC):
         training_batch.total_loss = 0.0
         return training_batch
 
-    def _enable_training(self, model: torch.nn.Module, optimizer: torch.optim.Optimizer) -> None:
+    def _enable_training(self, model: torch.nn.Module,
+                         optimizer: torch.optim.Optimizer) -> None:
         """Enable training mode and gradients for the specified model."""
         for param in model.parameters():
             param.requires_grad = True
         model.train()
         optimizer.zero_grad()
 
-    def _disable_training(self, model: torch.nn.Module, optimizer: torch.optim.Optimizer) -> None:
+    def _disable_training(self, model: torch.nn.Module,
+                          optimizer: torch.optim.Optimizer) -> None:
         """Disable training mode and gradients for the specified model."""
         for param in model.parameters():
             param.requires_grad = False
@@ -324,16 +325,20 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         return training_batch
 
-    def _sample_timesteps(self, batch_size, device):
+    def _sample_timesteps(self, batch_size: int,
+                          device: torch.device) -> torch.Tensor:
         # Determine which model to train based on the boundary timestep
-        if (self.transformer_2 is not None and self.boundary_timestep is not None and
-                torch.rand(1, generator=self.noise_random_generator).item() <= self.training_args.boundary_ratio):
+        if (self.transformer_2 is not None
+                and self.boundary_timestep is not None
+                and torch.rand(1, generator=self.noise_random_generator).item()
+                <= self.training_args.boundary_ratio):
             self.train_transformer_2 = True
         else:
             self.train_transformer_2 = False
 
         # Broadcast the decision to all processes
-        decision = torch.tensor(1.0 if self.train_transformer_2 else 0.0, device=self.device)
+        decision = torch.tensor(1.0 if self.train_transformer_2 else 0.0,
+                                device=self.device)
         dist.broadcast(decision, src=0)
         self.train_transformer_2 = decision.item() == 1.0
 
@@ -349,13 +354,14 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         boundary_ratio = self.training_args.boundary_ratio
         if self.train_transformer_2:
-            u = (1 - boundary_ratio) + u * boundary_ratio # min: 1 - boundary_ratio, max: 1
+            u = (1 - boundary_ratio
+                 ) + u * boundary_ratio  # min: 1 - boundary_ratio, max: 1
         else:
-            u = u * (1 - boundary_ratio) # min: 0, max: 1 - boundary_ratio
+            u = u * (1 - boundary_ratio)  # min: 0, max: 1 - boundary_ratio
 
         indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
         return self.noise_scheduler.timesteps[indices].to(device=device)
-        
+
     def _build_attention_metadata(
             self, training_batch: TrainingBatch) -> TrainingBatch:
         latents_shape = training_batch.raw_latent_shape
@@ -447,7 +453,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 model_parts = [self.transformer_2]
             else:
                 model_parts = [self.transformer]
-            
+
             grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
                 [p for m in model_parts for p in m.parameters()],
                 max_grad_norm,
@@ -499,7 +505,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         else:
             self.optimizer.step()
             self.lr_scheduler.step()
-            
+
         training_batch.total_loss = training_batch.total_loss
         training_batch.grad_norm = training_batch.grad_norm
         return training_batch
@@ -533,8 +539,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         if getattr(self, "transformer_2", None) is not None:
             num_trainable_params = _get_trainable_params(self.transformer_2)
-            logger.info("Transformer 2: Starting training with %s B trainable parameters",
-                        round(num_trainable_params / 1e9, 3))
+            logger.info(
+                "Transformer 2: Starting training with %s B trainable parameters",
+                round(num_trainable_params / 1e9, 3))
 
         # Set random seeds for deterministic training
         self.noise_random_generator = torch.Generator(device="cpu").manual_seed(

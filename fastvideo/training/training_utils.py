@@ -191,28 +191,29 @@ def save_checkpoint(transformer,
         logger.info("--> checkpoint saved at step %s to %s", step, weight_path)
 
 
-def save_distillation_checkpoint(generator_transformer,
-                                 fake_score_transformer,
-                                 rank,
-                                 output_dir,
-                                 step,
-                                 generator_optimizer=None,
-                                 fake_score_optimizer=None,
-                                 dataloader=None,
-                                 generator_scheduler=None,
-                                 fake_score_scheduler=None,
-                                 noise_generator=None,
-                                 generator_ema=None,
-                                 only_save_generator_weight=False,
-                                 # MoE support
-                                 generator_transformer_2=None,
-                                 real_score_transformer_2=None,
-                                 fake_score_transformer_2=None,
-                                 generator_optimizer_2=None,
-                                 fake_score_optimizer_2=None,
-                                 generator_scheduler_2=None,
-                                 fake_score_scheduler_2=None,
-                                 generator_ema_2=None) -> None:
+def save_distillation_checkpoint(
+        generator_transformer,
+        fake_score_transformer,
+        rank,
+        output_dir,
+        step,
+        generator_optimizer=None,
+        fake_score_optimizer=None,
+        dataloader=None,
+        generator_scheduler=None,
+        fake_score_scheduler=None,
+        noise_generator=None,
+        generator_ema=None,
+        only_save_generator_weight=False,
+        # MoE support
+        generator_transformer_2=None,
+        real_score_transformer_2=None,
+        fake_score_transformer_2=None,
+        generator_optimizer_2=None,
+        fake_score_optimizer_2=None,
+        generator_scheduler_2=None,
+        fake_score_scheduler_2=None,
+        generator_ema_2=None) -> None:
     """
     Save distillation checkpoint with both generator and fake_score models.
     Supports MoE (Mixture of Experts) models with transformer_2 variants.
@@ -290,12 +291,14 @@ def save_distillation_checkpoint(generator_transformer,
             if generator_ema_2 is not None:
                 generator_2_states["ema"] = generator_ema_2.state_dict()
 
-            generator_2_dcp_dir = os.path.join(save_dir, "distributed_checkpoint",
-                                             "generator_2")
-            logger.info("rank: %s, saving generator_2 distributed checkpoint to %s",
-                        rank,
-                        generator_2_dcp_dir,
-                        local_main_process_only=False)
+            generator_2_dcp_dir = os.path.join(save_dir,
+                                               "distributed_checkpoint",
+                                               "generator_2")
+            logger.info(
+                "rank: %s, saving generator_2 distributed checkpoint to %s",
+                rank,
+                generator_2_dcp_dir,
+                local_main_process_only=False)
 
             begin_time = time.perf_counter()
             dcp.save(generator_2_states, checkpoint_id=generator_2_dcp_dir)
@@ -347,14 +350,16 @@ def save_distillation_checkpoint(generator_transformer,
             if dataloader is not None:
                 critic_2_states["dataloader"] = dataloader
             if fake_score_scheduler_2 is not None:
-                critic_2_states["scheduler"] = SchedulerWrapper(fake_score_scheduler_2)
+                critic_2_states["scheduler"] = SchedulerWrapper(
+                    fake_score_scheduler_2)
 
             critic_2_dcp_dir = os.path.join(save_dir, "distributed_checkpoint",
-                                          "critic_2")
-            logger.info("rank: %s, saving critic_2 distributed checkpoint to %s",
-                        rank,
-                        critic_2_dcp_dir,
-                        local_main_process_only=False)
+                                            "critic_2")
+            logger.info(
+                "rank: %s, saving critic_2 distributed checkpoint to %s",
+                rank,
+                critic_2_dcp_dir,
+                local_main_process_only=False)
 
             begin_time = time.perf_counter()
             dcp.save(critic_2_states, checkpoint_id=critic_2_dcp_dir)
@@ -376,12 +381,14 @@ def save_distillation_checkpoint(generator_transformer,
             if dataloader is not None:
                 real_score_2_states["dataloader"] = dataloader
 
-            real_score_2_dcp_dir = os.path.join(save_dir, "distributed_checkpoint",
-                                              "real_score_2")
-            logger.info("rank: %s, saving real_score_2 distributed checkpoint to %s",
-                        rank,
-                        real_score_2_dcp_dir,
-                        local_main_process_only=False)
+            real_score_2_dcp_dir = os.path.join(save_dir,
+                                                "distributed_checkpoint",
+                                                "real_score_2")
+            logger.info(
+                "rank: %s, saving real_score_2 distributed checkpoint to %s",
+                rank,
+                real_score_2_dcp_dir,
+                local_main_process_only=False)
 
             begin_time = time.perf_counter()
             dcp.save(real_score_2_states, checkpoint_id=real_score_2_dcp_dir)
@@ -447,13 +454,15 @@ def save_distillation_checkpoint(generator_transformer,
 
         # Save generator_2 model weights (consolidated) for inference (MoE support)
         if generator_transformer_2 is not None:
-            inference_save_dir_2 = os.path.join(save_dir, "generator_2_inference_transformer")
-            cpu_state_2 = gather_state_dict_on_cpu_rank0(generator_transformer_2, device=None)
+            inference_save_dir_2 = os.path.join(
+                save_dir, "generator_2_inference_transformer")
+            cpu_state_2 = gather_state_dict_on_cpu_rank0(
+                generator_transformer_2, device=None)
 
             if rank == 0:
                 os.makedirs(inference_save_dir_2, exist_ok=True)
-                weight_path_2 = os.path.join(inference_save_dir_2,
-                                           "diffusion_pytorch_model.safetensors")
+                weight_path_2 = os.path.join(
+                    inference_save_dir_2, "diffusion_pytorch_model.safetensors")
                 logger.info(
                     "rank: %s, saving consolidated generator_2 inference checkpoint to %s",
                     rank,
@@ -462,7 +471,8 @@ def save_distillation_checkpoint(generator_transformer,
 
                 # Convert training format to diffusers format and save
                 diffusers_state_dict_2 = custom_to_hf_state_dict(
-                    cpu_state_2, generator_transformer_2.reverse_param_names_mapping)
+                    cpu_state_2,
+                    generator_transformer_2.reverse_param_names_mapping)
                 save_file(diffusers_state_dict_2, weight_path_2)
 
                 logger.info(
@@ -475,11 +485,13 @@ def save_distillation_checkpoint(generator_transformer,
                 config_dict_2 = generator_transformer_2.hf_config
                 if "dtype" in config_dict_2:
                     del config_dict_2["dtype"]  # TODO
-                config_path_2 = os.path.join(inference_save_dir_2, "config.json")
+                config_path_2 = os.path.join(inference_save_dir_2,
+                                             "config.json")
                 with open(config_path_2, "w") as f:
                     json.dump(config_dict_2, f, indent=4)
-                logger.info("--> generator_2 distillation checkpoint saved at step %s to %s", 
-                           step, weight_path_2)
+                logger.info(
+                    "--> generator_2 distillation checkpoint saved at step %s to %s",
+                    step, weight_path_2)
 
 
 def load_checkpoint(transformer,
@@ -542,26 +554,27 @@ def load_checkpoint(transformer,
     return step
 
 
-def load_distillation_checkpoint(generator_transformer,
-                                 fake_score_transformer,
-                                 rank,
-                                 checkpoint_path,
-                                 generator_optimizer=None,
-                                 fake_score_optimizer=None,
-                                 dataloader=None,
-                                 generator_scheduler=None,
-                                 fake_score_scheduler=None,
-                                 noise_generator=None,
-                                 generator_ema=None,
-                                 # MoE support
-                                 generator_transformer_2=None,
-                                 real_score_transformer_2=None,
-                                 fake_score_transformer_2=None,
-                                 generator_optimizer_2=None,
-                                 fake_score_optimizer_2=None,
-                                 generator_scheduler_2=None,
-                                 fake_score_scheduler_2=None,
-                                 generator_ema_2=None) -> int:
+def load_distillation_checkpoint(
+        generator_transformer,
+        fake_score_transformer,
+        rank,
+        checkpoint_path,
+        generator_optimizer=None,
+        fake_score_optimizer=None,
+        dataloader=None,
+        generator_scheduler=None,
+        fake_score_scheduler=None,
+        noise_generator=None,
+        generator_ema=None,
+        # MoE support
+        generator_transformer_2=None,
+        real_score_transformer_2=None,
+        fake_score_transformer_2=None,
+        generator_optimizer_2=None,
+        fake_score_optimizer_2=None,
+        generator_scheduler_2=None,
+        fake_score_scheduler_2=None,
+        generator_ema_2=None) -> int:
     """
     Load distillation checkpoint with both generator and fake_score models.
     Supports MoE (Mixture of Experts) models with transformer_2 variants.
@@ -644,8 +657,9 @@ def load_distillation_checkpoint(generator_transformer,
 
     # Load generator_2 distributed checkpoint (MoE support)
     if generator_transformer_2 is not None:
-        generator_2_dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint",
-                                         "generator_2")
+        generator_2_dcp_dir = os.path.join(checkpoint_path,
+                                           "distributed_checkpoint",
+                                           "generator_2")
         if os.path.exists(generator_2_dcp_dir):
             generator_2_states = {
                 "model": ModelWrapper(generator_transformer_2),
@@ -659,12 +673,14 @@ def load_distillation_checkpoint(generator_transformer,
                 generator_2_states["dataloader"] = dataloader
 
             if generator_scheduler_2 is not None:
-                generator_2_states["scheduler"] = SchedulerWrapper(generator_scheduler_2)
+                generator_2_states["scheduler"] = SchedulerWrapper(
+                    generator_scheduler_2)
 
-            logger.info("rank: %s, loading generator_2 distributed checkpoint from %s",
-                        rank,
-                        generator_2_dcp_dir,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, loading generator_2 distributed checkpoint from %s",
+                rank,
+                generator_2_dcp_dir,
+                local_main_process_only=False)
 
             begin_time = time.perf_counter()
             dcp.load(generator_2_states, checkpoint_id=generator_2_dcp_dir)
@@ -682,15 +698,19 @@ def load_distillation_checkpoint(generator_transformer,
                     ema_2_state = generator_2_states.get("ema")
                     if ema_2_state is not None:
                         generator_ema_2.load_state_dict(ema_2_state)
-                        logger.info("rank: %s, generator_2 EMA state loaded successfully",
-                                    rank)
+                        logger.info(
+                            "rank: %s, generator_2 EMA state loaded successfully",
+                            rank)
                     else:
-                        logger.info("rank: %s, no EMA_2 state found in checkpoint", rank)
+                        logger.info(
+                            "rank: %s, no EMA_2 state found in checkpoint",
+                            rank)
                 except Exception as e:
-                    logger.warning("rank: %s, failed to load EMA_2 state: %s", rank,
-                                   str(e))
+                    logger.warning("rank: %s, failed to load EMA_2 state: %s",
+                                   rank, str(e))
         else:
-            logger.info("rank: %s, generator_2 checkpoint not found, skipping", rank)
+            logger.info("rank: %s, generator_2 checkpoint not found, skipping",
+                        rank)
 
     # Load critic distributed checkpoint
     critic_dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint",
@@ -732,27 +752,29 @@ def load_distillation_checkpoint(generator_transformer,
 
     # Load critic_2 distributed checkpoint (MoE support)
     if fake_score_transformer_2 is not None:
-        critic_2_dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint",
-                                      "critic_2")
+        critic_2_dcp_dir = os.path.join(checkpoint_path,
+                                        "distributed_checkpoint", "critic_2")
         if os.path.exists(critic_2_dcp_dir):
             critic_2_states = {
                 "model": ModelWrapper(fake_score_transformer_2),
             }
 
             if fake_score_optimizer_2 is not None:
-                critic_2_states["optimizer"] = OptimizerWrapper(fake_score_transformer_2,
-                                                              fake_score_optimizer_2)
+                critic_2_states["optimizer"] = OptimizerWrapper(
+                    fake_score_transformer_2, fake_score_optimizer_2)
 
             if dataloader is not None:
                 critic_2_states["dataloader"] = dataloader
 
             if fake_score_scheduler_2 is not None:
-                critic_2_states["scheduler"] = SchedulerWrapper(fake_score_scheduler_2)
+                critic_2_states["scheduler"] = SchedulerWrapper(
+                    fake_score_scheduler_2)
 
-            logger.info("rank: %s, loading critic_2 distributed checkpoint from %s",
-                        rank,
-                        critic_2_dcp_dir,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, loading critic_2 distributed checkpoint from %s",
+                rank,
+                critic_2_dcp_dir,
+                local_main_process_only=False)
 
             begin_time = time.perf_counter()
             dcp.load(critic_2_states, checkpoint_id=critic_2_dcp_dir)
@@ -764,12 +786,14 @@ def load_distillation_checkpoint(generator_transformer,
                 end_time - begin_time,
                 local_main_process_only=False)
         else:
-            logger.info("rank: %s, critic_2 checkpoint not found, skipping", rank)
+            logger.info("rank: %s, critic_2 checkpoint not found, skipping",
+                        rank)
 
     # Load real_score_2 distributed checkpoint (MoE support)
     if real_score_transformer_2 is not None:
-        real_score_2_dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint",
-                                          "real_score_2")
+        real_score_2_dcp_dir = os.path.join(checkpoint_path,
+                                            "distributed_checkpoint",
+                                            "real_score_2")
         if os.path.exists(real_score_2_dcp_dir):
             real_score_2_states = {
                 "model": ModelWrapper(real_score_transformer_2),
@@ -778,10 +802,11 @@ def load_distillation_checkpoint(generator_transformer,
             if dataloader is not None:
                 real_score_2_states["dataloader"] = dataloader
 
-            logger.info("rank: %s, loading real_score_2 distributed checkpoint from %s",
-                        rank,
-                        real_score_2_dcp_dir,
-                        local_main_process_only=False)
+            logger.info(
+                "rank: %s, loading real_score_2 distributed checkpoint from %s",
+                rank,
+                real_score_2_dcp_dir,
+                local_main_process_only=False)
 
             begin_time = time.perf_counter()
             dcp.load(real_score_2_states, checkpoint_id=real_score_2_dcp_dir)
@@ -793,7 +818,8 @@ def load_distillation_checkpoint(generator_transformer,
                 end_time - begin_time,
                 local_main_process_only=False)
         else:
-            logger.info("rank: %s, real_score_2 checkpoint not found, skipping", rank)
+            logger.info("rank: %s, real_score_2 checkpoint not found, skipping",
+                        rank)
 
     # Load shared random state
     shared_dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint",

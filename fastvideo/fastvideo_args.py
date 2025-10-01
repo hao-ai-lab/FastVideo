@@ -335,7 +335,8 @@ class FastVideoArgs:
             "--torch-compile-kwargs",
             type=str,
             default=None,
-            help="JSON string of kwargs to pass to torch.compile. Example: '{\"backend\":\"inductor\",\"mode\":\"reduce-overhead\"}'",
+            help=
+            "JSON string of kwargs to pass to torch.compile. Example: '{\"backend\":\"inductor\",\"mode\":\"reduce-overhead\"}'",
         )
 
         parser.add_argument(
@@ -440,13 +441,17 @@ class FastVideoArgs:
                     mode_value) if isinstance(mode_value, str) else mode_value
             elif attr == 'torch_compile_kwargs':
                 # Parse JSON string for torch.compile kwargs
-                torch_compile_kwargs_str = getattr(args, 'torch_compile_kwargs', None)
+                torch_compile_kwargs_str = getattr(args, 'torch_compile_kwargs',
+                                                   None)
                 if torch_compile_kwargs_str:
                     try:
                         import json
-                        kwargs['torch_compile_kwargs'] = json.loads(torch_compile_kwargs_str)
+                        kwargs['torch_compile_kwargs'] = json.loads(
+                            torch_compile_kwargs_str)
                     except json.JSONDecodeError as e:
-                        raise ValueError(f"Invalid JSON for torch_compile_kwargs: {e}")
+                        raise ValueError(
+                            f"Invalid JSON for torch_compile_kwargs: {e}"
+                        ) from e
                 else:
                     kwargs['torch_compile_kwargs'] = {}
             elif attr == 'workload_type':

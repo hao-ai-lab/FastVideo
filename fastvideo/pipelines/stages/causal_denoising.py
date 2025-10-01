@@ -37,7 +37,7 @@ class CausalDMDDenosingStage(DenoisingStage):
     def __init__(self, transformer, scheduler, transformer_2=None) -> None:
         super().__init__(transformer, scheduler, transformer_2)
         # KV and cross-attention cache state (initialized on first forward)
-        self.tranformer = transformer
+        self.transformer = transformer
         self.transformer_2 = transformer_2
         self.kv_cache1: list | None = None
         self.crossattn_cache: list | None = None
@@ -67,7 +67,8 @@ class CausalDMDDenosingStage(DenoisingStage):
             -1] * self.transformer.config.arch_config.patch_size[-2]
         self.frame_seq_length = latent_seq_length // patch_ratio
         # TODO(will): make this a parameter once we add i2v support
-        independent_first_frame = self.transformer.independent_first_frame if hasattr(self.transformer, 'independent_first_frame') else False
+        independent_first_frame = self.transformer.independent_first_frame if hasattr(
+            self.transformer, 'independent_first_frame') else False
         # Timesteps for DMD
         timesteps = torch.tensor(
             fastvideo_args.pipeline_config.dmd_denoising_steps,

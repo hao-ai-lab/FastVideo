@@ -52,7 +52,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         super().initialize_training_pipeline(training_args)
         try:
-            logger.info("RANK: %s, entered initialize_training_pipeline", self.global_rank, local_main_process_only=False)
+            logger.info("RANK: %s, entered initialize_training_pipeline",
+                        self.global_rank,
+                        local_main_process_only=False)
         except Exception:
             logger.info("Entered initialize_training_pipeline (rank unknown)")
 
@@ -79,13 +81,20 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         logger.info("Self-forcing generator update ratio: %s",
                     self.dfake_gen_update_ratio)
-        logger.info("RANK: %s, exiting initialize_training_pipeline", self.global_rank, local_main_process_only=False)
+        logger.info("RANK: %s, exiting initialize_training_pipeline",
+                    self.global_rank,
+                    local_main_process_only=False)
 
     def generate_and_sync_list(self, num_blocks: int, num_denoising_steps: int,
                                device: torch.device) -> list[int]:
         """Generate and synchronize random exit flags across distributed processes."""
-        logger.info("RANK: %s, enter generate_and_sync_list blocks=%s steps=%s device=%s",
-                    self.global_rank, num_blocks, num_denoising_steps, str(device), local_main_process_only=False)
+        logger.info(
+            "RANK: %s, enter generate_and_sync_list blocks=%s steps=%s device=%s",
+            self.global_rank,
+            num_blocks,
+            num_denoising_steps,
+            str(device),
+            local_main_process_only=False)
         rank = dist.get_rank() if dist.is_initialized() else 0
 
         if rank == 0:
@@ -103,8 +112,12 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             dist.broadcast(indices,
                            src=0)  # Broadcast the random indices to all ranks
         flags = indices.tolist()
-        logger.info("RANK: %s, exit generate_and_sync_list flags_len=%s first=%s",
-                    self.global_rank, len(flags), flags[0] if len(flags) > 0 else None, local_main_process_only=False)
+        logger.info(
+            "RANK: %s, exit generate_and_sync_list flags_len=%s first=%s",
+            self.global_rank,
+            len(flags),
+            flags[0] if len(flags) > 0 else None,
+            local_main_process_only=False)
         return flags
 
     def generator_loss(
@@ -119,7 +132,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 attn_metadata=training_batch.attn_metadata_vsa):
             generator_pred_video = self._generator_multi_step_simulation_forward(
                 training_batch)
-        
+
         with set_forward_context(current_timestep=training_batch.timesteps,
                                  attn_metadata=training_batch.attn_metadata):
             dmd_loss = self._dmd_forward(
@@ -228,15 +241,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 return next(model.parameters()).device
             except (StopIteration, AttributeError):
                 return "Unknown"
-        
-        
+
         # Step 1: Initialize KV cache to all zeros
         cache_frames = num_generated_frames + num_input_frames
         self.kv_cache1, self.crossattn_cache = self._initialize_simulation_caches(
-            batch_size,
-            dtype,
-            self.device,
-            max_num_frames=cache_frames)
+            batch_size, dtype, self.device, max_num_frames=cache_frames)
 
         # Step 2: Cache context feature
         current_start_frame = 0
@@ -249,7 +258,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 training_batch_temp = self._build_distill_input_kwargs(
                     initial_latent, timestep * 0,
                     training_batch.conditional_dict, training_batch)
-            # we process the image latent with self.transformer_2 (low-noise expert)
+                # we process the image latent with self.transformer_2 (low-noise expert)
                 current_model = self.transformer_2 if self.transformer_2 is not None else self.transformer
                 current_model(
                     hidden_states=training_batch_temp.
@@ -290,7 +299,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 timestep = torch.ones([batch_size, current_num_frames],
                                       device=noise.device,
                                       dtype=torch.int64) * current_timestep
-                
+
                 if self.boundary_timestep is not None and current_timestep < self.boundary_timestep and self.transformer_2 is not None:
                     current_model = self.transformer_2
                     self._enable_training(self.transformer_2, self.optimizer_2)
@@ -299,7 +308,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     current_model = self.transformer
                     self._enable_training(self.transformer, self.optimizer)
                     if self.boundary_timestep is not None and self.transformer_2 is not None:
-                        self._disable_training(self.transformer_2, self.optimizer_2)
+                        self._disable_training(self.transformer_2,
+                                               self.optimizer_2)
 
                 if not exit_flag:
                     with torch.no_grad():
@@ -527,7 +537,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Initialize KV cache and cross-attention cache for multi-step simulation."""
         num_transformer_blocks = len(self.transformer.blocks)
-        latent_shape = self.video_latent_shape_sp  
+        latent_shape = self.video_latent_shape_sp
         _, num_frames, _, height, width = latent_shape
 
         _, p_h, p_w = self.transformer.patch_size
@@ -538,8 +548,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         self.frame_seq_length = frame_seq_length
 
         # Get model configuration parameters - handle FSDP wrapping
-        num_attention_heads = getattr(self.transformer, 'num_attention_heads', None)
-        attention_head_dim = getattr(self.transformer, 'attention_head_dim', None)
+        num_attention_heads = getattr(self.transformer, 'num_attention_heads',
+                                      None)
+        attention_head_dim = getattr(self.transformer, 'attention_head_dim',
+                                     None)
         text_len = getattr(self.transformer, 'text_len', None)
 
         if max_num_frames is None:
@@ -654,7 +666,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                               'gradient_accumulation_steps', 1)
         train_generator = (self.current_trainstep %
                            self.dfake_gen_update_ratio == 0)
-        
 
         batches = []
         for _ in range(gradient_accumulation_steps):
@@ -672,7 +683,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         training_batch.fake_score_latent_vis_dict = {}
 
         if train_generator:
-            logger.debug(f"Training generator at step {self.current_trainstep}")
+            logger.debug("Training generator at step %s",
+                         self.current_trainstep)
             self.optimizer.zero_grad()
             if self.transformer_2 is not None:
                 self.optimizer_2.zero_grad()
@@ -708,7 +720,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                         batch_gen.dmd_latent_vis_dict)
 
             # Only clip gradients and step optimizer for the model that is currently training
-            if hasattr(self, 'train_transformer_2') and self.train_transformer_2 and self.transformer_2 is not None:
+            if hasattr(
+                    self, 'train_transformer_2'
+            ) and self.train_transformer_2 and self.transformer_2 is not None:
                 self._clip_model_grad_norm_(batch_gen, self.transformer_2)
                 self.optimizer_2.step()
                 self.lr_scheduler_2.step()
@@ -718,7 +732,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 self.lr_scheduler.step()
 
             if self.generator_ema is not None:
-                if hasattr(self, 'train_transformer_2') and self.train_transformer_2 and self.transformer_2 is not None:
+                if hasattr(
+                        self, 'train_transformer_2'
+                ) and self.train_transformer_2 and self.transformer_2 is not None:
                     # Update EMA for transformer_2 when training it
                     if self.generator_ema_2 is not None:
                         self.generator_ema_2.update(self.transformer_2)
@@ -735,7 +751,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         else:
             training_batch.generator_loss = 0.0
 
-        logger.debug(f"Training critic at step {self.current_trainstep}")
+        logger.debug("Training critic at step %s", self.current_trainstep)
         self.fake_score_optimizer.zero_grad()
         total_critic_loss = 0.0
         critic_log_dict = {}
@@ -769,11 +785,13 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     batch_critic.fake_score_latent_vis_dict)
 
         if self.train_fake_score_transformer_2 and self.fake_score_transformer_2 is not None:
-            self._clip_model_grad_norm_(batch_critic, self.fake_score_transformer_2)
+            self._clip_model_grad_norm_(batch_critic,
+                                        self.fake_score_transformer_2)
             self.fake_score_optimizer_2.step()
             self.fake_score_lr_scheduler_2.step()
         else:
-            self._clip_model_grad_norm_(batch_critic, self.fake_score_transformer)
+            self._clip_model_grad_norm_(batch_critic,
+                                        self.fake_score_transformer)
             self.fake_score_optimizer.step()
             self.fake_score_lr_scheduler.step()
 
@@ -993,13 +1011,14 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     self.transformer, decay=self.training_args.ema_decay)
                 logger.info("Created generator EMA at step %s with decay=%s",
                             step, self.training_args.ema_decay)
-                
+
                 # Create EMA for transformer_2 if it exists
                 if self.transformer_2 is not None and self.generator_ema_2 is None:
                     self.generator_ema_2 = EMA_FSDP(
                         self.transformer_2, decay=self.training_args.ema_decay)
-                    logger.info("Created generator EMA_2 at step %s with decay=%s",
-                               step, self.training_args.ema_decay)
+                    logger.info(
+                        "Created generator EMA_2 at step %s with decay=%s",
+                        step, self.training_args.ema_decay)
 
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 training_batch = self.train_one_step(training_batch)
@@ -1028,8 +1047,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 "✓" if (self.generator_ema is not None and self.is_ema_ready())
                 else "✗",
                 "ema2":
-                "✓" if (self.generator_ema_2 is not None and self.is_ema_ready())
-                else "✗",
+                "✓" if (self.generator_ema_2 is not None
+                        and self.is_ema_ready()) else "✗",
             })
             progress_bar.update(1)
 
@@ -1097,20 +1116,33 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 print("rank", self.global_rank,
                       "save training state checkpoint at step", step)
                 save_distillation_checkpoint(
-                    self.transformer, self.fake_score_transformer,
-                    self.global_rank, self.training_args.output_dir, step,
-                    self.optimizer, self.fake_score_optimizer,
-                    self.train_dataloader, self.lr_scheduler,
-                    self.fake_score_lr_scheduler, self.noise_random_generator,
+                    self.transformer,
+                    self.fake_score_transformer,
+                    self.global_rank,
+                    self.training_args.output_dir,
+                    step,
+                    self.optimizer,
+                    self.fake_score_optimizer,
+                    self.train_dataloader,
+                    self.lr_scheduler,
+                    self.fake_score_lr_scheduler,
+                    self.noise_random_generator,
                     self.generator_ema,
                     # MoE support
-                    generator_transformer_2=getattr(self, 'transformer_2', None),
-                    real_score_transformer_2=getattr(self, 'real_score_transformer_2', None),
-                    fake_score_transformer_2=getattr(self, 'fake_score_transformer_2', None),
+                    generator_transformer_2=getattr(self, 'transformer_2',
+                                                    None),
+                    real_score_transformer_2=getattr(
+                        self, 'real_score_transformer_2', None),
+                    fake_score_transformer_2=getattr(
+                        self, 'fake_score_transformer_2', None),
                     generator_optimizer_2=getattr(self, 'optimizer_2', None),
-                    fake_score_optimizer_2=getattr(self, 'fake_score_optimizer_2', None),
+                    fake_score_optimizer_2=getattr(self,
+                                                   'fake_score_optimizer_2',
+                                                   None),
                     generator_scheduler_2=getattr(self, 'lr_scheduler_2', None),
-                    fake_score_scheduler_2=getattr(self, 'fake_score_lr_scheduler_2', None),
+                    fake_score_scheduler_2=getattr(self,
+                                                   'fake_score_lr_scheduler_2',
+                                                   None),
                     generator_ema_2=getattr(self, 'generator_ema_2', None))
 
                 if self.transformer:
@@ -1122,22 +1154,30 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     self.training_args.weight_only_checkpointing_steps == 0):
                 print("rank", self.global_rank,
                       "save weight-only checkpoint at step", step)
-                save_distillation_checkpoint(self.transformer,
-                                             self.fake_score_transformer,
-                                             self.global_rank,
-                                             self.training_args.output_dir,
-                                             f"{step}_weight_only",
-                                             only_save_generator_weight=True,
-                                             generator_ema=self.generator_ema,
-                                             # MoE support
-                                             generator_transformer_2=getattr(self, 'transformer_2', None),
-                                             real_score_transformer_2=getattr(self, 'real_score_transformer_2', None),
-                                             fake_score_transformer_2=getattr(self, 'fake_score_transformer_2', None),
-                                             generator_optimizer_2=getattr(self, 'optimizer_2', None),
-                                             fake_score_optimizer_2=getattr(self, 'fake_score_optimizer_2', None),
-                                             generator_scheduler_2=getattr(self, 'lr_scheduler_2', None),
-                                             fake_score_scheduler_2=getattr(self, 'fake_score_lr_scheduler_2', None),
-                                             generator_ema_2=getattr(self, 'generator_ema_2', None))
+                save_distillation_checkpoint(
+                    self.transformer,
+                    self.fake_score_transformer,
+                    self.global_rank,
+                    self.training_args.output_dir,
+                    f"{step}_weight_only",
+                    only_save_generator_weight=True,
+                    generator_ema=self.generator_ema,
+                    # MoE support
+                    generator_transformer_2=getattr(self, 'transformer_2',
+                                                    None),
+                    real_score_transformer_2=getattr(
+                        self, 'real_score_transformer_2', None),
+                    fake_score_transformer_2=getattr(
+                        self, 'fake_score_transformer_2', None),
+                    generator_optimizer_2=getattr(self, 'optimizer_2', None),
+                    fake_score_optimizer_2=getattr(self,
+                                                   'fake_score_optimizer_2',
+                                                   None),
+                    generator_scheduler_2=getattr(self, 'lr_scheduler_2', None),
+                    fake_score_scheduler_2=getattr(self,
+                                                   'fake_score_lr_scheduler_2',
+                                                   None),
+                    generator_ema_2=getattr(self, 'generator_ema_2', None))
 
                 if self.training_args.use_ema and self.is_ema_ready():
                     self.save_ema_weights(self.training_args.output_dir, step)
@@ -1151,19 +1191,30 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
               "save final training state checkpoint at step",
               self.training_args.max_train_steps)
         save_distillation_checkpoint(
-            self.transformer, self.fake_score_transformer, self.global_rank,
-            self.training_args.output_dir, self.training_args.max_train_steps,
-            self.optimizer, self.fake_score_optimizer, self.train_dataloader,
-            self.lr_scheduler, self.fake_score_lr_scheduler,
-            self.noise_random_generator, self.generator_ema,
+            self.transformer,
+            self.fake_score_transformer,
+            self.global_rank,
+            self.training_args.output_dir,
+            self.training_args.max_train_steps,
+            self.optimizer,
+            self.fake_score_optimizer,
+            self.train_dataloader,
+            self.lr_scheduler,
+            self.fake_score_lr_scheduler,
+            self.noise_random_generator,
+            self.generator_ema,
             # MoE support
             generator_transformer_2=getattr(self, 'transformer_2', None),
-            real_score_transformer_2=getattr(self, 'real_score_transformer_2', None),
-            fake_score_transformer_2=getattr(self, 'fake_score_transformer_2', None),
+            real_score_transformer_2=getattr(self, 'real_score_transformer_2',
+                                             None),
+            fake_score_transformer_2=getattr(self, 'fake_score_transformer_2',
+                                             None),
             generator_optimizer_2=getattr(self, 'optimizer_2', None),
-            fake_score_optimizer_2=getattr(self, 'fake_score_optimizer_2', None),
+            fake_score_optimizer_2=getattr(self, 'fake_score_optimizer_2',
+                                           None),
             generator_scheduler_2=getattr(self, 'lr_scheduler_2', None),
-            fake_score_scheduler_2=getattr(self, 'fake_score_lr_scheduler_2', None),
+            fake_score_scheduler_2=getattr(self, 'fake_score_lr_scheduler_2',
+                                           None),
             generator_ema_2=getattr(self, 'generator_ema_2', None))
 
         if self.training_args.use_ema and self.is_ema_ready():
