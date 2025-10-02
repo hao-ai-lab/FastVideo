@@ -212,9 +212,9 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
             frame_seqlen = normalized.shape[1] // num_frames
             modulated = (
                 normalized.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) *
-                (1 + scale) + shift).flatten(1, 2)
+                (1.0 + scale) + shift).flatten(1, 2)
         else:
-            modulated = normalized * (1 + scale) + shift
+            modulated = normalized * (1.0 + scale) + shift
         return modulated, residual_output
 
 
@@ -267,11 +267,11 @@ class LayerNormScaleShift(nn.Module):
             frame_seqlen = normalized.shape[1] // num_frames
             output = (
                 normalized.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) *
-                (1 + scale) + shift).flatten(1, 2)
+                (1.0 + scale) + shift).flatten(1, 2)
         else:
             # scale.shape: [batch_size, 1, inner_dim]
             # shift.shape: [batch_size, 1, inner_dim]
-            output = normalized * (1 + scale) + shift
+            output = normalized * (1.0 + scale) + shift
 
         if self.compute_dtype == torch.float32:
             output = output.to(x.dtype)
