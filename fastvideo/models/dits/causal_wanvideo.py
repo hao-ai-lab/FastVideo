@@ -256,24 +256,16 @@ class CausalWanTransformerBlock(nn.Module):
         orig_dtype = hidden_states.dtype
 
         if temb.dim() == 4:
-            # temb: batch_size, seq_len, 6, inner_dim (wan2.2 ti2v)
+            # temb: batch_size, seq_len, 6, inner_dim 
             shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
                 self.scale_shift_table.unsqueeze(0) + temb
             ).chunk(6, dim=2)
             # batch_size, seq_len, 1, inner_dim
-            shift_msa = shift_msa.squeeze(2)
-            scale_msa = scale_msa.squeeze(2)
-            gate_msa = gate_msa.squeeze(2)
-            c_shift_msa = c_shift_msa.squeeze(2)
-            c_scale_msa = c_scale_msa.squeeze(2)
-            c_gate_msa = c_gate_msa.squeeze(2)
         else:
-            # temb: batch_size, 6, inner_dim (wan2.1/wan2.2 14B)
-            e = self.scale_shift_table + temb.float()
-            shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
-                6, dim=1)
+            raise ValueError("temb.dim() is not 4")
 
         # 1. Self-attention
+        # ([1, 3, 1560, 1536]) *  [bz, 3, 1, inner_dim]
         norm_hidden_states = (self.norm1(hidden_states.float()).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) *
                         (1 + scale_msa) + shift_msa).flatten(1, 2).to(orig_dtype)
         query, _ = self.to_q(norm_hidden_states)
@@ -648,8 +640,6 @@ class CausalWanTransformer3DModel(BaseDiT):
 
         # 5. Output norm, projection & unpatchify
         temb = temb.unflatten(dim=0, sizes=timestep.shape).unsqueeze(2)
-        logger.info("self.scale_shift_table.unsqueeze(1).shape: %s", self.scale_shift_table.unsqueeze(1).shape)
-        logger.info("temb.shape: %s", temb.shape)
         shift, scale = (self.scale_shift_table.unsqueeze(1) + temb).chunk(2,
                                                                     dim=2)
         hidden_states = self.norm_out(hidden_states, shift, scale)
