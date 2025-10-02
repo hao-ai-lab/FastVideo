@@ -39,7 +39,7 @@ def test_t5_encoder():
     precision_str = "fp32"
     precision = PRECISION_TO_TYPE[precision_str]
     model1 = UMT5EncoderModel.from_pretrained(TEXT_ENCODER_PATH).to(
-        precision).to(device).eval()
+        precision).cpu().eval()
     tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
 
 
