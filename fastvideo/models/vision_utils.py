@@ -178,47 +178,55 @@ def load_video(
             video_data = response.iter_content(chunk_size=8192)
             for chunk in video_data:
                 temp_file.write(chunk)
-
-        video = video_path
+        was_tempfile_created = True
+    else:
+        video_path = video
 
     pil_images = []
-    if video_path.endswith(".gif"):
-        gif = PIL.Image.open(video_path)
-        try:
-            while True:
-                pil_images.append(gif.copy())
-                gif.seek(gif.tell() + 1)
-        except EOFError:
-            pass
+    original_fps = None
 
-        # GIF FPS estimation
-        try:
-            if hasattr(gif, 'info') and 'duration' in gif.info:
-                duration_ms = gif.info['duration']
-                if duration_ms > 0:
-                    original_fps = 1000.0 / duration_ms
-        except:
-            pass
-    else:
-        try:
-            imageio.plugins.ffmpeg.get_exe()
-        except AttributeError:
-            raise AttributeError(
-                "`Unable to find an ffmpeg installation on your machine. Please install via `pip install imageio-ffmpeg"
-            ) from None
-
-        with imageio.get_reader(video_path) as reader:
+    try:
+        if video_path.endswith(".gif"):
+            gif = PIL.Image.open(video_path)
             try:
-                original_fps = reader.get_meta_data().get('fps', None)
-            except:
-                # Fallback: try to get from format-specific metadata
-                try:
-                    original_fps = reader.get_meta_data().get('source_size', {}).get('fps', None)
-                except:
-                    pass
+                # GIF FPS estimation
+                if hasattr(gif, 'info') and 'duration' in gif.info:
+                    duration_ms = gif.info['duration']
+                    if duration_ms > 0:
+                        original_fps = 1000.0 / duration_ms
 
-            for frame in reader:
-                pil_images.append(PIL.Image.fromarray(frame))
+                while True:
+                    pil_images.append(gif.copy())
+                    gif.seek(gif.tell() + 1)
+            except EOFError:
+                pass
+        else:
+            try:
+                imageio.plugins.ffmpeg.get_exe()
+            except AttributeError:
+                raise AttributeError(
+                    "`Unable to find an ffmpeg installation on your machine. Please install via `pip install imageio-ffmpeg"
+                ) from None
+
+            with imageio.get_reader(video_path) as reader:
+                try:
+                    original_fps = reader.get_meta_data().get('fps', None)
+                except:
+                    # Fallback: try to get from format-specific metadata
+                    try:
+                        original_fps = reader.get_meta_data().get('source_size', {}).get('fps', None)
+                    except:
+                        pass
+
+                for frame in reader:
+                    pil_images.append(PIL.Image.fromarray(frame))
+    finally:
+        # Clean up temporary file if it was created
+        if was_tempfile_created and os.path.exists(video_path):
+            os.remove(video_path)
+
+    if convert_method is not None:
+        pil_images = convert_method(pil_images)
 
     return pil_images, original_fps
 
@@ -358,6 +366,5 @@ def preprocess_reference_image_for_clip(image: PIL.Image.Image, device: torch.de
     # Denormalize back to [0, 1] range
     denormalized_tensor = resized_tensor.mul_(0.5).add_(0.5)
 
-    # Convert back to PIL image
-    return TF.to_pil_image(denormalized_tensor)
+    return denormalized_tensor
 

@@ -173,7 +173,7 @@ class InputValidationStage(PipelineStage):
             # Rearrange to [C, T, H, W] and add batch dimension -> [B, C, T, H, W]
             input_video = video_tensor.permute(1, 0, 2, 3).unsqueeze(0)
 
-            batch.video_latents = input_video
+            batch.video_latent = input_video
 
         return batch
 

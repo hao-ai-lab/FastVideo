@@ -88,7 +88,7 @@ class CLIPVisionConfig(ImageEncoderConfig):
     num_hidden_layers_override: int | None = None
     require_post_norm: bool | None = None
     enable_scale: bool = True
-    is_casual: bool = True
+    is_causal: bool = True
     prefix: str = "clip"
 
 
@@ -99,4 +99,4 @@ class WAN2_1ControlCLIPVisionConfig(CLIPVisionConfig):
     require_post_norm = False
     prefix: str = "clip"
     enable_scale = False
-    is_casual = False
+    is_causal = False

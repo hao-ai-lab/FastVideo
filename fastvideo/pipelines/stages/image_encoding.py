@@ -128,10 +128,10 @@ class RefImageEncodingStage(ImageEncodingStage):
         if image is None:
             image = create_default_image()
         # Preprocess reference image for CLIP encoder
-        image = preprocess_reference_image_for_clip(image, get_local_torch_device())
+        image_tensor = preprocess_reference_image_for_clip(image, get_local_torch_device())
 
         image_inputs = self.image_processor(
-            images=image, return_tensors="pt").to(get_local_torch_device())
+            images=image_tensor, return_tensors="pt").to(get_local_torch_device())
         with set_forward_context(current_timestep=0, attn_metadata=None):
             outputs = self.image_encoder(**image_inputs)
             image_embeds = outputs.last_hidden_state

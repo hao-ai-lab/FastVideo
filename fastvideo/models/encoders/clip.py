@@ -166,7 +166,7 @@ class CLIPAttention(nn.Module):
             self.head_dim,
             self.num_heads_per_partition,
             softmax_scale=self.scale,
-            causal=config.is_casual,
+            causal=config.is_causal,
             supported_attention_backends=config._supported_attention_backends)
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
