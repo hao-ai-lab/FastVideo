@@ -62,7 +62,7 @@ def run_test(pytest_command: str):
     
     sys.exit(result.returncode)
 
-@app.function(gpu="L40S:1", image=image, timeout=900)
+@app.function(gpu="H100:1", image=image, timeout=900)
 def run_encoder_tests():
     run_test("pytest ./fastvideo/tests/encoders -vs")
 
