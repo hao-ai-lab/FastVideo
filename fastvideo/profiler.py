@@ -295,15 +295,12 @@ class TorchProfilerController:
             )
         if disabled:
             self._profiler = None
-            self._activities = activities_tuple
-            self._config = TorchProfilerConfig(regions={})
-            self._collection_enabled = False
-            self._active_region_depth = 0
             return
+
         self._profiler = profiler
         self._activities = activities_tuple
         self._config = config or TorchProfilerConfig.from_env()
-        self._collection_enabled: bool = False
+        self._collection_enabled = False
         self._active_region_depth = 0
         logger.info(
             "PROFILER: TorchProfilerController initialized with config: %s",
