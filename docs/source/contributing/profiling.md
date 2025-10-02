@@ -12,10 +12,6 @@ We support tracing FastVideo workers using the `torch.profiler` module. You can 
 - `FASTVIDEO_TORCH_PROFILER_WITH_STACK=1` to enable recording stack information, on by default
 - `FASTVIDEO_TORCH_PROFILER_WITH_FLOPS=1` to enable recording FLOPs, off by default
 
-The OpenAI server also needs to be started with the `FASTVIDEO_TORCH_PROFILER_DIR` environment variable set.
-
-When using `vllm bench serve`, you can enable profiling by passing the `--profile` flag.
-
 Traces can be visualized using <https://ui.perfetto.dev/>.
 
 !!! tip
