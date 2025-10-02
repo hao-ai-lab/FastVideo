@@ -152,6 +152,38 @@ register_profiler_region(
     name="profiler_region_training_validation",
     description="Validation loop during training.",
 )
+register_profiler_region(
+    name="profiler_region_training_epoch",
+    description="High-level epoch orchestration in the training loop.",
+)
+register_profiler_region(
+    name="profiler_region_training_step",
+    description="Single optimizer step including forward/backward passes.",
+)
+register_profiler_region(
+    name="profiler_region_training_backward",
+    description="Backward pass and gradient computations during training.",
+)
+register_profiler_region(
+    name="profiler_region_training_optimizer",
+    description="Optimizer update, gradient clipping, and scheduler steps.",
+)
+register_profiler_region(
+    name="profiler_region_distillation_teacher_forward",
+    description="Teacher model forward pass in distillation pipelines.",
+)
+register_profiler_region(
+    name="profiler_region_distillation_student_forward",
+    description="Student model forward pass in distillation pipelines.",
+)
+register_profiler_region(
+    name="profiler_region_distillation_loss",
+    description="Distillation loss computation and aggregation.",
+)
+register_profiler_region(
+    name="profiler_region_distillation_update",
+    description="Parameter updates specific to distillation workflows.",
+)
 
 
 def get_or_create_profiler(trace_dir: str | None) -> TorchProfilerController:
