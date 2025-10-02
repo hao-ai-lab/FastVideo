@@ -44,7 +44,7 @@ def test_t5_encoder():
         torch.cuda.empty_cache()
     
     model1 = UMT5EncoderModel.from_pretrained(TEXT_ENCODER_PATH).to(
-        precision).eval()
+        precision).to(device).eval()
     tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
 
     # Clear cache after loading first model
@@ -148,3 +148,13 @@ def test_t5_encoder():
                 f"Hidden states differ significantly: mean diff = {mean_diff_hidden.item()}"
             assert max_diff_hidden < 1e-4, \
                 f"Hidden states differ significantly: max diff = {max_diff_hidden.item()}"
+            
+            # Clear outputs to free memory
+            del outputs1, outputs2, last_hidden_state1, last_hidden_state2
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+    
+    # Final cleanup
+    del model1, model2, tokenizer
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
