@@ -39,7 +39,7 @@ def run_worker():
         "--train_batch_size", "1",
         "--num_latent_t", "6", 
         "--num_gpus", "2",
-        "--sp_size", "2",
+        "--sp_size", "1",
         "--tp_size", "1",
         "--hsdp_replicate_dim", "1",
         "--hsdp_shard_dim", "2",
