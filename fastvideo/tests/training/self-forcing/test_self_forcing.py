@@ -62,7 +62,7 @@ def run_worker():
         "--wandb_run_name", wandb_name,
         "--num_height", "480",
         "--num_width", "832",
-        "--num_frames", "12",
+        "--num_frames", "6",
         "--flow_shift", "5",
         "--validation_guidance_scale", "1.0",
         "--weight_decay", "0.01",
