@@ -83,7 +83,7 @@ def run_worker():
         "--simulate_generator_forward",
         "--num_frame_per_block", "3",
         "--enable_gradient_masking",
-        "--gradient_mask_last_n_frames", "21",
+        "--gradient_mask_last_n_frames", "6",
         "--independent_first_frame", "False",
         "--same_step_across_blocks", "True",
         "--last_step_only", "False",
