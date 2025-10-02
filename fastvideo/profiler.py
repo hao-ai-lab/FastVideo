@@ -23,6 +23,8 @@ from __future__ import annotations
 import contextlib
 from dataclasses import dataclass
 from typing import Any
+from collections.abc import Callable
+import functools
 from collections.abc import Iterable
 
 import torch
@@ -328,7 +330,10 @@ class TorchProfilerController:
             return
         if self._collection_enabled == enabled:
             return
-        self._profiler.toggle_collection_dynamic(enabled, self._activities)
+        event = ("fastvideo.profiler.enable_collection"
+                 if enabled else "fastvideo.profiler.disable_collection")
+        with torch.profiler.record_function(event):
+            self._profiler.toggle_collection_dynamic(enabled, self._activities)
         self._collection_enabled = enabled
 
     @contextlib.contextmanager
@@ -343,23 +348,24 @@ class TorchProfilerController:
             yield
             return
 
-        self._active_region_depth += 1
-        if self._active_region_depth == 1:
-            logger.info(
-                "PROFILER: Setting collection to True (depth=%s) for region %s",
-                self._active_region_depth, region)
-            self._set_collection(True)
-        try:
-            yield
-        finally:
-            self._active_region_depth -= 1
-            logger.info("PROFILER: Decreasing active region depth to %s",
-                        self._active_region_depth)
-            if self._active_region_depth == 0:
+        with torch.profiler.record_function(f"fastvideo.region::{region}"):
+            self._active_region_depth += 1
+            if self._active_region_depth == 1:
                 logger.info(
-                    "PROFILER: Setting collection to False upon exiting region %s",
-                    region)
-                self._set_collection(False)
+                    "PROFILER: Setting collection to True (depth=%s) for region %s",
+                    self._active_region_depth, region)
+                self._set_collection(True)
+            try:
+                yield
+            finally:
+                self._active_region_depth -= 1
+                logger.info("PROFILER: Decreasing active region depth to %s",
+                            self._active_region_depth)
+                if self._active_region_depth == 0:
+                    logger.info(
+                        "PROFILER: Setting collection to False upon exiting region %s",
+                        region)
+                    self._set_collection(False)
 
     def start(self) -> None:
         """Start the profiler and pause collection until a region is entered."""
@@ -400,3 +406,22 @@ class TorchProfilerController:
     @property
     def profiler(self) -> torch.profiler.profile | None:
         return self._profiler
+
+
+def profile_region(
+        region: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Wrap a bound method so it runs inside a profiler region if available."""
+
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+
+        @functools.wraps(fn)
+        def wrapped(self, *args, **kwargs):
+            controller = getattr(self, "profiler_controller", None)
+            if controller is None or not controller.has_profiler:
+                return fn(self, *args, **kwargs)
+            with controller.region(region):
+                return fn(self, *args, **kwargs)
+
+        return wrapped
+
+    return decorator
