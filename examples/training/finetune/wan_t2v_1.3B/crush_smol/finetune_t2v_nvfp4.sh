@@ -19,7 +19,7 @@ training_args=(
   --max_train_steps 5000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 2
+  --gradient_accumulation_steps 4
   --num_latent_t 20
   --num_height 480
   --num_width 832
@@ -53,14 +53,14 @@ dataset_args=(
 validation_args=(
   --log_validation 
   --validation_dataset_file $VALIDATION_DATASET_FILE
-  --validation_steps 100
+  --validation_steps 10
   --validation_sampling_steps "50" 
   --validation_guidance_scale "6.0"
 )
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 5e-5
+  --learning_rate 1e-6
   --mixed_precision "bf16"
   --checkpointing_steps 2000
   --weight_decay 1e-4

@@ -25,7 +25,7 @@ echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATA_DIR=data/Wan-Syn_77x448x832_600k/train
 VALIDATION_DATASET_FILE=data/Wan-Syn_77x448x832_600k/validation_6.json
-OUTPUT_DIR="checkpoints/wan_t2v_finetune"
+OUTPUT_DIR="checkpoints/full_disitlle"
 
 # Training arguments
 training_args=(

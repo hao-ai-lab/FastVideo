@@ -2,6 +2,7 @@
 from dataclasses import asdict
 import math
 import os
+import types
 import time
 from abc import ABC, abstractmethod
 from collections import deque
@@ -106,7 +107,7 @@ def swap_fp4_linear(obj: Any, obj_path: str) -> int:
     preserving the input/output dimensions and bias setting.
     Returns number of swaps performed.
     """
-    from fastvideo.layers.fp4linear import LinearFWD4BWD16
+    from fastvideo.layers.fp4linear import fp4_linear_forward
     from fastvideo.layers.linear import ReplicatedLinear
 
     swaps_performed = 0
@@ -140,20 +141,17 @@ def swap_fp4_linear(obj: Any, obj_path: str) -> int:
             # For ReplicatedLinear, check if bias exists
             bias = hasattr(attr_value, 'bias') and attr_value.bias is not None
 
-        # Skip if already LinearFWD4BWD16
-        if isinstance(attr_value, LinearFWD4BWD16):
-            should_replace = False
 
         if should_replace and in_features is not None and out_features is not None:
             # Create new LinearFWD4BWD16 layer with same dimensions
-            new_layer = LinearFWD4BWD16(
-                in_features=in_features,
-                out_features=out_features,
-                bias=bias,
-                backend="cutlass",  # Default backend
-                block_size=16,      # Default block size
-                use_128x4_sf_layout=True  # Default layout
-            )
+            # new_layer = LinearFWD4BWD16(
+            #     in_features=in_features,
+            #     out_features=out_features,
+            #     bias=bias,
+            #     backend="cutlass",  # Default backend
+            #     block_size=16,      # Default block size
+            #     use_128x4_sf_layout=True  # Default layout
+            # )
 
             # Copy weights if possible
             # if hasattr(attr_value, 'weight') and attr_value.weight is not None:
@@ -163,11 +161,13 @@ def swap_fp4_linear(obj: Any, obj_path: str) -> int:
             # if bias and hasattr(attr_value, 'bias') and attr_value.bias is not None:
             #     with torch.no_grad():
             #         new_layer.bias.copy_(attr_value.bias.data.float())
-            old_layer = getattr(obj, attr_name)
-            # Replace the attribute
-            setattr(obj, attr_name, new_layer)
-            setattr(new_layer, "weight", old_layer.weight)
-            setattr(new_layer, "bias", old_layer.bias)
+            layer = getattr(obj, attr_name)            # Replace the attribute
+            layer.forward = types.MethodType(fp4_linear_forward, layer)
+
+            # from fpdb import ForkedPdb; ForkedPdb().set_trace()
+            # setattr(obj, attr_name, new_layer)
+            # setattr(new_layer, "weight", old_layer.weight)
+            # setattr(new_layer, "bias", old_layer.bias)
             swaps_performed += 1
 
 

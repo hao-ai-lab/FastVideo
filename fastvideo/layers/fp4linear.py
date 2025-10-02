@@ -22,7 +22,8 @@ class _LinearFWD4BWD16Fn(torch.autograd.Function):
         M = x2d.shape[0]
 
         out2d = torch.empty((M, n), device=x.device, dtype=x.dtype)
-
+        
+        @torch.compile
         def _global_sf(t: torch.Tensor) -> torch.Tensor:
             maxabs = t.float().abs().nan_to_num().max()
             maxabs = torch.maximum(maxabs, torch.tensor(1e-12, device=t.device, dtype=maxabs.dtype))
@@ -75,26 +76,9 @@ class _LinearFWD4BWD16Fn(torch.autograd.Function):
         return grad_x, grad_w, grad_b, None, None, None
 
 
-class LinearFWD4BWD16(nn.Module):
-    def __init__(self, in_features: int, out_features: int, bias: bool = True,
-                 backend: str = "cutlass", block_size: int = 16, use_128x4_sf_layout: bool = True):
-        super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-        self.backend = backend
-        self.block_size = block_size
-        self.use_128x4_sf_layout = use_128x4_sf_layout
-
-        # store params in fp32; cast on-the-fly
-        self.weight = nn.Parameter(torch.empty(out_features, in_features, dtype=torch.float32))
-        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5.0))
-        if bias:
-            self.bias = nn.Parameter(torch.empty(out_features, dtype=torch.float32))
-            bound = 1 / math.sqrt(in_features)
-            nn.init.uniform_(self.bias, -bound, bound)
-        else:
-            self.bias = None
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # pass config **positionally**; autograd.Function.apply ignores kwargs
-        return _LinearFWD4BWD16Fn.apply(x, self.weight, self.bias,self.backend, self.block_size, self.use_128x4_sf_layout)
+def fp4_linear_forward(self, x: torch.Tensor) -> torch.Tensor:
+    # pass config **positionally**; autograd.Function.apply ignores kwargs
+    return _LinearFWD4BWD16Fn.apply(
+        x, self.weight, self.bias,
+        "cutlass", 16, True
+    ), None 
