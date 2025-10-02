@@ -49,6 +49,7 @@ training_args=(
   --enable_gradient_checkpointing_type "full"
   --log_visualization
   --simulate_generator_forward
+  --num_frames 81
   --num_frame_per_block 3  # Frame generation block size for self-forcing
   --enable_gradient_masking
   --gradient_mask_last_n_frames 21
@@ -65,7 +66,6 @@ parallel_args=(
 model_args=(
   --model_path $GENERATOR_MODEL_PATH  # TODO: check if you can remove this in this script
   --pretrained_model_name_or_path $GENERATOR_MODEL_PATH
-  --generator_model_path $GENERATOR_MODEL_PATH
   --real_score_model_path $REAL_SCORE_MODEL_PATH
   --fake_score_model_path $FAKE_SCORE_MODEL_PATH
 )
