@@ -101,18 +101,22 @@ def test_t5_encoder():
             # filter out padding input_ids
             # tokens.input_ids = tokens.input_ids[tokens.attention_mask==1]
             # tokens.attention_mask = tokens.attention_mask[tokens.attention_mask==1]
+            model1.to(device)
             outputs1 = model1(input_ids=tokens.input_ids,
                               attention_mask=tokens.attention_mask,
                               output_hidden_states=True).last_hidden_state
+            model1.cpu()
             print("--------------------------------")
             logger.info("Testing model2")
 
             # Get outputs from our implementation
             with set_forward_context(current_timestep=0, attn_metadata=None):
+                model2.to(device)
                 outputs2 = model2(
                     input_ids=tokens.input_ids,
                     attention_mask=tokens.attention_mask,
                 ).last_hidden_state
+                model2.cpu()
 
             # Compare last hidden states
             last_hidden_state1 = outputs1[tokens.attention_mask == 1]
