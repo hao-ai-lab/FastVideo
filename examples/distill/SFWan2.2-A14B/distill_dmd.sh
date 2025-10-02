@@ -61,6 +61,7 @@ training_args=(
   --num_height 448  # Updated to match Wan2.2 config
   --num_width 832   # Updated to match Wan2.2 config
   --enable_gradient_checkpointing_type "full"
+  --simulate_generator_forward
   # --log_visualization
   --num_frames 81
   --num_frame_per_block 3  # Frame generation block size for self-forcing
