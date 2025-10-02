@@ -82,7 +82,6 @@ parallel_args=(
 model_args=(
   --model_path $GENERATOR_MODEL_PATH  # TODO: check if you can remove this in this script
   --pretrained_model_name_or_path $GENERATOR_MODEL_PATH
-  --generator_model_path $GENERATOR_MODEL_PATH
   --real_score_model_path $REAL_SCORE_MODEL_PATH
   --fake_score_model_path $FAKE_SCORE_MODEL_PATH
 )

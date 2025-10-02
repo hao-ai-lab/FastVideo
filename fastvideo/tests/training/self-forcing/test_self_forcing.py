@@ -32,7 +32,6 @@ def run_worker():
         "--model_path", "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers",
         "--inference_mode", "False",
         "--pretrained_model_name_or_path", "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers",
-        "--generator_model_path", "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers",
         "--real_score_model_path", "Wan-AI/Wan2.1-T2V-14B-Diffusers",
         "--fake_score_model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         "--data_path", "data/crush-smol_processed_t2v/combined_parquet_dataset",

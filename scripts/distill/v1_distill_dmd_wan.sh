@@ -12,6 +12,8 @@ export TOKENIZERS_PARALLELISM=false
 torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     fastvideo/training/wan_distillation_pipeline.py \
     --model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
+    --real_score_model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
+    --fake_score_model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --inference_mode False\
     --pretrained_model_name_or_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --cache_dir "/home/ray/.cache" \

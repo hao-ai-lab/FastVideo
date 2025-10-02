@@ -633,10 +633,8 @@ class TrainingArgs(FastVideoArgs):
 
     # text encoder & vae & diffusion model
     pretrained_model_name_or_path: str = ""
-    dit_model_name_or_path: str = ""
 
     # DMD model paths - separate paths for each network
-    generator_model_path: str = ""  # path for generator (student) model
     real_score_model_path: str = ""  # path for real score (teacher) model
     fake_score_model_path: str = ""  # path for fake score (critic) model
 

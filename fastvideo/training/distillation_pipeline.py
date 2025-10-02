@@ -59,15 +59,7 @@ class DistillationPipeline(TrainingPipeline):
         "scheduler",
         "transformer",
         "vae",
-        # "real_score_transformer", "fake_score_transformer",
-        # "real_score_transformer_2", "fake_score_transformer_2"
     ]
-    # _extra_config_module_map = {
-    #     "real_score_transformer": "transformer",
-    #     "fake_score_transformer": "transformer",
-    #     "real_score_transformer_2": "transformer_2",
-    #     "fake_score_transformer_2": "transformer_2"
-    # }
     validation_pipeline: ComposedPipelineBase
     train_dataloader: StatefulDataLoader
     train_loader_iter: Iterator[dict[str, Any]]

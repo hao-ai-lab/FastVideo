@@ -39,6 +39,8 @@ echo "NODE_RANK: $NODE_RANK"
 # Configs
 NUM_GPUS=8
 MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"
+REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"
+FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"
 DATA_DIR=your_data_dir
 VALIDATION_DATASET_FILE=your_validation_dataset_file
 OUTPUT_DIR="checkpoints/wan_t2v_finetune"
@@ -73,6 +75,8 @@ parallel_args=(
 model_args=(
   --model_path $MODEL_PATH
   --pretrained_model_name_or_path $MODEL_PATH
+  --real_score_model_path $REAL_SCORE_MODEL_PATH
+  --fake_score_model_path $FAKE_SCORE_MODEL_PATH
 )
 
 # Dataset arguments
