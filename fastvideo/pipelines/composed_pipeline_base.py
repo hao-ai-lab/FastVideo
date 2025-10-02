@@ -79,7 +79,6 @@ class ComposedPipelineBase(ABC):
         self.profiler_activities = list(self.profiler_controller.activities)
 
         self.local_rank = get_world_group().local_rank
-        logger.info("Local rank WTF: %s", self.local_rank)
 
         # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
