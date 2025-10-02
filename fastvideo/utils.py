@@ -26,7 +26,9 @@ import filelock
 import imageio
 import numpy as np
 import torch
-import torchvision
+import torchvision.utils.make_grid as make_grid
+import torchvision.io as io
+import torchvision.transforms.v2 as transforms
 import yaml
 from diffusers.loaders.lora_base import (
     _best_guess_weight_name)  # watch out for potetential removal from diffusers
@@ -898,7 +900,7 @@ def save_decoded_latents_as_video(decoded_latents: list[torch.Tensor],
     videos = rearrange(decoded_latents, "b c t h w -> t b c h w")
     frames = []
     for x in videos:
-        x = torchvision.utils.make_grid(x, nrow=6)
+        x = make_grid(x, nrow=6)
         x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
         frames.append((x * 255).numpy().astype(np.uint8))
 

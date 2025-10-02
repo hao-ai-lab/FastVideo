@@ -86,6 +86,11 @@ class ForwardBatch:
     prompt_path: str | None = None
     output_path: str = "outputs/"
     output_video_name: str | None = None
+
+    # Video inputs
+    video_path: str | None = None
+    video_latent: torch.Tensor | None = None
+
     # Primary encoder embeddings
     prompt_embeds: list[torch.Tensor] = field(default_factory=list)
     negative_prompt_embeds: list[torch.Tensor] | None = None

@@ -298,7 +298,6 @@ class VideoGenerator:
             eta=0.0,
             n_tokens=n_tokens,
             VSA_sparsity=fastvideo_args.VSA_sparsity,
-            extra={},
         )
 
         # Use prompt[:100] for video name

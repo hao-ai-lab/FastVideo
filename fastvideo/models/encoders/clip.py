@@ -140,7 +140,7 @@ class CLIPAttention(nn.Module):
                 "embed_dim must be divisible by num_heads "
                 f"(got `embed_dim`: {self.embed_dim} and `num_heads`:"
                 f" {self.num_heads}).")
-        self.scale = self.head_dim**-0.5
+        self.scale = self.head_dim**-0.5 if config.enable_scale else None
         self.dropout = config.attention_dropout
 
         self.qkv_proj = QKVParallelLinear(
@@ -166,7 +166,7 @@ class CLIPAttention(nn.Module):
             self.head_dim,
             self.num_heads_per_partition,
             softmax_scale=self.scale,
-            causal=True,
+            causal=config.is_causal,
             supported_attention_backends=config._supported_attention_backends)
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):

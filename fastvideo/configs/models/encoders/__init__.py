@@ -3,12 +3,13 @@ from fastvideo.configs.models.encoders.base import (BaseEncoderOutput,
                                                     ImageEncoderConfig,
                                                     TextEncoderConfig)
 from fastvideo.configs.models.encoders.clip import (CLIPTextConfig,
-                                                    CLIPVisionConfig)
+                                                    CLIPVisionConfig,
+                                                    WAN2_1ControlCLIPVisionConfig)
 from fastvideo.configs.models.encoders.llama import LlamaConfig
 from fastvideo.configs.models.encoders.t5 import T5Config
 
 __all__ = [
     "EncoderConfig", "TextEncoderConfig", "ImageEncoderConfig",
-    "BaseEncoderOutput", "CLIPTextConfig", "CLIPVisionConfig", "LlamaConfig",
-    "T5Config"
+    "BaseEncoderOutput", "CLIPTextConfig", "CLIPVisionConfig",
+    "WAN2_1ControlCLIPVisionConfig", "LlamaConfig", "T5Config"
 ]
