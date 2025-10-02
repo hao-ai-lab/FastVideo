@@ -1021,7 +1021,8 @@ class DistillationPipeline(TrainingPipeline):
             training_batch.generator_loss = 0.0
 
         self.fake_score_optimizer.zero_grad()
-        self.fake_score_optimizer_2.zero_grad()
+        if self.fake_score_optimizer_2 is not None:
+            self.fake_score_optimizer_2.zero_grad()
         total_fake_score_loss = 0.0
         for batch in batches:
             batch_fake = copy.deepcopy(batch)
@@ -1060,7 +1061,8 @@ class DistillationPipeline(TrainingPipeline):
         self.lr_scheduler.step()
 
         self.fake_score_optimizer.zero_grad(set_to_none=True)
-        self.fake_score_optimizer_2.zero_grad(set_to_none=True)
+        if self.fake_score_optimizer_2 is not None:
+            self.fake_score_optimizer_2.zero_grad(set_to_none=True)
         avg_fake_score_loss = torch.tensor(total_fake_score_loss /
                                            gradient_accumulation_steps,
                                            device=self.device)
