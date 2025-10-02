@@ -339,25 +339,8 @@ class WanTransformerBlock(nn.Module):
                 6, dim=1)
 
         # 1. Self-attention
-        norm_hidden_states_base = self.norm1(hidden_states)
-        
-        # Handle broadcasting for ti2v case where we have per-frame embeddings
-        if temb.dim() == 4 and scale_msa.shape[1] != norm_hidden_states_base.shape[1]:
-            # For ti2v: scale_msa has shape [batch, num_frames, dim] but we need [batch, seq_len, dim]
-            # We need to repeat each frame's embedding across its corresponding sequence positions
-            seq_len = norm_hidden_states_base.shape[1]
-            num_frames = scale_msa.shape[1]
-            frames_per_seq = seq_len // num_frames
-            
-            # Repeat each frame's embedding across its sequence positions for all embeddings
-            scale_msa = scale_msa.unsqueeze(2).repeat(1, 1, frames_per_seq, 1).view(bs, seq_len, -1)
-            shift_msa = shift_msa.unsqueeze(2).repeat(1, 1, frames_per_seq, 1).view(bs, seq_len, -1)
-            gate_msa = gate_msa.unsqueeze(2).repeat(1, 1, frames_per_seq, 1).view(bs, seq_len, -1)
-            c_shift_msa = c_shift_msa.unsqueeze(2).repeat(1, 1, frames_per_seq, 1).view(bs, seq_len, -1)
-            c_scale_msa = c_scale_msa.unsqueeze(2).repeat(1, 1, frames_per_seq, 1).view(bs, seq_len, -1)
-            c_gate_msa = c_gate_msa.unsqueeze(2).repeat(1, 1, frames_per_seq, 1).view(bs, seq_len, -1)
-        
-        norm_hidden_states = norm_hidden_states_base * (1 + scale_msa) + shift_msa
+        norm_hidden_states = (self.norm1(hidden_states.float()) *
+                              (1 + scale_msa) + shift_msa).to(orig_dtype)
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)
@@ -499,20 +482,6 @@ class WanTransformerBlock_VSA(nn.Module):
             c_shift_msa = c_shift_msa.squeeze(2)
             c_scale_msa = c_scale_msa.squeeze(2)
             c_gate_msa = c_gate_msa.squeeze(2)
-            
-            # Handle broadcasting for ti2v case where we have per-frame embeddings
-            if scale_msa.shape[1] != seq_length:
-                # For ti2v: scale_msa has shape [batch, num_frames, dim] but we need [batch, seq_len, dim]
-                num_frames = scale_msa.shape[1]
-                frames_per_seq = seq_length // num_frames
-                
-                # Repeat each frame's embedding across its sequence positions for all embeddings
-                scale_msa = scale_msa.unsqueeze(2).repeat(1, 1, frames_per_seq, 1).view(bs, seq_length, -1)
-                shift_msa = shift_msa.unsqueeze(2).repeat(1, 1, frames_per_seq, 1).view(bs, seq_length, -1)
-                gate_msa = gate_msa.unsqueeze(2).repeat(1, 1, frames_per_seq, 1).view(bs, seq_length, -1)
-                c_shift_msa = c_shift_msa.unsqueeze(2).repeat(1, 1, frames_per_seq, 1).view(bs, seq_length, -1)
-                c_scale_msa = c_scale_msa.unsqueeze(2).repeat(1, 1, frames_per_seq, 1).view(bs, seq_length, -1)
-                c_gate_msa = c_gate_msa.unsqueeze(2).repeat(1, 1, frames_per_seq, 1).view(bs, seq_length, -1)
         else:
             # temb: batch_size, 6, inner_dim (wan2.1/wan2.2 14B)
             e = self.scale_shift_table + temb
@@ -753,17 +722,6 @@ class WanTransformer3DModel(CachableDiT):
             shift, scale = (self.scale_shift_table.unsqueeze(0) + temb.unsqueeze(2)).chunk(2, dim=2)
             shift = shift.squeeze(2)
             scale = scale.squeeze(2)
-            
-            # Handle broadcasting for ti2v case where we have per-frame embeddings
-            if shift.shape[1] != hidden_states.shape[1]:
-                # For ti2v: shift has shape [batch, num_frames, dim] but we need [batch, seq_len, dim]
-                seq_len = hidden_states.shape[1]
-                num_frames = shift.shape[1]
-                frames_per_seq = seq_len // num_frames
-                
-                # Repeat each frame's embedding across its sequence positions
-                shift = shift.unsqueeze(2).repeat(1, 1, frames_per_seq, 1).view(batch_size, seq_len, -1)
-                scale = scale.unsqueeze(2).repeat(1, 1, frames_per_seq, 1).view(batch_size, seq_len, -1)
         else:
             # batch_size, inner_dim
             shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2, dim=1)
