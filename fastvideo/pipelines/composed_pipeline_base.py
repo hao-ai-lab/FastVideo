@@ -76,7 +76,6 @@ class ComposedPipelineBase(ABC):
         trace_dir = envs.FASTVIDEO_TORCH_PROFILER_DIR
         self.profiler_controller = get_or_create_profiler(trace_dir)
         self.profiler = self.profiler_controller.profiler
-        self.profiler_activities = list(self.profiler_controller.activities)
 
         self.local_rank = get_world_group().local_rank
 
