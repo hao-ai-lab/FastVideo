@@ -9,7 +9,7 @@ import torch.nn.functional as F
 # ---- Import function-under-test ----
 # Make sure this import path matches your project layout.
 # If it's in the same file, remove this import and keep the definition above.
-from fastvideo.attention.backends.sage_attn3 import sageattn_blackwell_with_16bit_bwd
+from fastvideo.attention.backends.sage_attn3 import attn_forward_4bit_fwd_16bit_bwd as sageattn_blackwell_with_16bit_bwd
 
 # ---- Import FlashAttention forward (public) ----
 # We DO NOT use _wrapped_* internals. Prefer the top-level alias; fall back if needed.
@@ -122,7 +122,7 @@ def main():
     # Keep sizes moderate so it runs quickly; adjust as you like.
     cases = [
         {"name": "bf16_noncausal_L16384", "B": 1, "L": 1024, "H": 8,  "D": 128, "dtype": torch.bfloat16, "causal": False},
-        {"name": "bf16_noncausal_L2048", "B": 1, "L": 2048, "H": 8,  "D": 128, "dtype": torch.bfloat16, "causal": False},
+        {"name": "bf16_noncausal_L2048", "B": 1, "L": 9360, "H": 8,  "D": 128, "dtype": torch.bfloat16, "causal": False},
     ]
 
     for case in cases:

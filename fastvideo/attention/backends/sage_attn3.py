@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
+from curses import KEY_B2
 import torch
 from sageattn import sageattn_blackwell
 
@@ -22,6 +23,61 @@ def fp_16_qk(q, k):
     p = torch.softmax(qk, dim=-1)
     return p
 
+
+def matmul_3d_4bit(a, b):
+    H, M, K1 = a.shape
+    H, N, K2 = b.shape
+    assert K1 == K2
+    padded_K = (K2 + 127) // 128 * 128
+    a = torch.nn.functional.pad(a, (0, padded_K - K2))
+    b = torch.nn.functional.pad(b, (0, padded_K - K2))
+    out = torch.empty((H, M, N), device=a.device, dtype=a.dtype)
+    one = torch.ones(1, device=a.device, dtype=torch.float32)
+    for h in range(H):
+        q_fp4, q_inv_s = nvfp4_quantize(a[h], one, sfLayout=SfLayout.layout_128x4, do_shuffle=False)
+        k_fp4, k_inv_s = nvfp4_quantize(b[h], one, sfLayout=SfLayout.layout_128x4, do_shuffle=False)
+        mm_fp4(
+            q_fp4, k_fp4.T, q_inv_s, k_inv_s.T, one,
+            a.dtype, out[h],
+            block_size=16,
+            use_8x4_sf_layout=False,
+            backend="cutlass",
+        )
+    return out
+
+
+class _Matmul3d4bitFWD16bitBWD(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, a, b, scale=None):
+        ctx.save_for_backward(a, b)
+        if scale is not None:
+            a = a / scale
+            return matmul_3d_4bit(a, b) * scale
+        else:
+            return matmul_3d_4bit(a, b)
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        a, b = ctx.saved_tensors
+        grad_a = grad_out.matmul(b)
+        grad_b = grad_out.transpose(1, 2).matmul(a)
+        # None for the three extra forward args
+        return grad_a, grad_b, None
+    
+    
+
+
+def attn_forward_4bit_fwd_16bit_bwd(q, k, v, is_causal=False, per_block_mean=False):
+    assert is_causal == False
+    assert per_block_mean == False
+    q, k, v = q.transpose(1, 2).contiguous(), k.transpose(1, 2).contiguous(), v.transpose(1, 2).contiguous()
+    p = sage_attn_qk_torch(q, k).to(q.dtype)
+    row_max_p = p.max(dim=-1, keepdim=True).values
+    scale_row = row_max_p / (448 * 6)
+    out = _Matmul3d4bitFWD16bitBWD.apply(p.squeeze(0), v.squeeze(0).transpose(1, 2).contiguous(), scale_row.squeeze(0)).unsqueeze(0)
+    return out.transpose(1, 2).contiguous()
+
+
 def sage_attn_qk_torch(q, k, per_block_mean=False):
     """
     Inputs:  q/k/v in [B, H, L, D]
@@ -35,27 +91,13 @@ def sage_attn_qk_torch(q, k, per_block_mean=False):
     qm = q.mean(dim=-2, keepdim=True)  # [H, 1, D]
     q = q - qm  # [B, H, L, D]
     delta_s = torch.matmul(qm, k.transpose(-2, -1)).to(torch.float32).contiguous()  # [H, 1, L]
-
-    alpha = torch.ones(1, device=q.device, dtype=torch.float32)
-    qk = torch.empty((H, qL, kL), device=q.device, dtype=q.dtype)
-    for h in range(H):
-        q_fp4, q_inv_s = nvfp4_quantize(q[h], torch.ones(1, device=q.device, dtype=torch.float32), sfLayout=SfLayout.layout_128x4, do_shuffle=False)
-        k_fp4, k_inv_s = nvfp4_quantize(k[h], torch.ones(1, device=q.device, dtype=torch.float32), sfLayout=SfLayout.layout_128x4, do_shuffle=False)
-        out = torch.empty((qL, kL), device=q.device, dtype=q.dtype)
-        mm_fp4(
-            q_fp4, k_fp4.T, q_inv_s, k_inv_s.T, alpha,
-            q.dtype, out,
-            block_size=16,
-            use_8x4_sf_layout=False,
-            backend="cutlass",
-        )
-        qk[h] = out
+    qk = _Matmul3d4bitFWD16bitBWD.apply(q, k)
     qk = qk + delta_s 
     qk = qk / torch.sqrt(torch.tensor(D, device=q.device, dtype=q.dtype))
     p = torch.softmax(qk, dim=-1)
     return p.unsqueeze(0)
 
-def sage3_torch_16bit_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal=False):
+def attn_backward_16bit(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal=False):
     assert is_causal == False
     q, k, v, o, do = q_BLHD.transpose(1 ,2).contiguous(), k_BLHD.transpose(1 ,2).contiguous(), v_BLHD.transpose(1 ,2).contiguous(), out_BLHD.transpose(1 ,2).contiguous(), grad_out_BLHD.transpose(1 ,2).contiguous()
     B, H, _, D = q.shape
@@ -73,6 +115,16 @@ def sage3_torch_16bit_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, 
 
     # grads w.r.t inputs, None for non-tensor inputs
     return dQ.transpose(1, 2).contiguous(), dK.transpose(1, 2).contiguous(), dV.transpose(1, 2).contiguous(), None, None, None
+    
+def attn_forward_4bit(q_BHLD, k_BHLD, v_BHLD, is_causal=False):
+    assert is_causal == False
+    p = sage_attn_qk_torch(q_BHLD, k_BHLD, per_block_mean=False).to(q_BHLD.dtype)
+    row_max_p = p.max(dim=-1, keepdim=True).values
+    scale_row = row_max_p / (448 * 6)
+    p = p / scale_row
+    out = matmul_3d_4bit(p.squeeze(0), v_BHLD.squeeze(0).transpose(1, 2).contiguous()).unsqueeze(0)
+    out = out * scale_row
+    return out
     
     
 def flash_attn_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal=False):
@@ -112,7 +164,8 @@ def flash_attn_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_caus
         rng_state=rng_state,
     )
     return dq_BLHD, dk_BLHD, dv_BLHD, None, None
-    
+
+USE_TORCH_4BIT_FWD = True
 USE_TORCH_16BIT_BWD = True
 class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
     @staticmethod
@@ -130,12 +183,15 @@ class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
         v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
 
         with torch.no_grad():
-            out_BHLD = sageattn_blackwell(
-                q_BHLD, k_BHLD, v_BHLD,
-                attn_mask=None,
-                is_causal=is_causal,
-                per_block_mean=per_block_mean,
-            )
+            if USE_TORCH_4BIT_FWD:
+                out_BHLD = attn_forward_4bit(q_BHLD, k_BHLD, v_BHLD, is_causal)
+            else:
+                out_BHLD = sageattn_blackwell(
+                    q_BHLD, k_BHLD, v_BHLD,
+                    attn_mask=None,
+                    is_causal=is_causal,
+                    per_block_mean=per_block_mean,
+                )
 
         # Back to BLHD; keep for FA bwd
         out_BLHD = out_BHLD.permute(0, 2, 1, 3).contiguous()
@@ -149,7 +205,7 @@ class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
         is_causal = ctx.is_causal
 
         if USE_TORCH_16BIT_BWD:
-            return sage3_torch_16bit_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal)
+            return attn_backward_16bit(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal)
         else:
             return flash_attn_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal)
 
@@ -214,5 +270,6 @@ class SageAttention3Impl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        output = sageattn_blackwell_with_16bit_bwd(query, key, value, is_causal=self.causal)
+        # output = sageattn_blackwell_with_16bit_bwd(query, key, value, is_causal=self.causal)
+        output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
         return output
