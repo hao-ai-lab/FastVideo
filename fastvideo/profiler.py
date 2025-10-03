@@ -127,47 +127,39 @@ register_profiler_region(
     description="Module/model loading during pipeline initialization.",
     default_enabled=False,
 )
+# register_profiler_region(
+#     name="profiler_region_inference_pre_denoising",
+#     description="Pre-denoising inference steps (conditioning, preprocessing).",
+# )
+# register_profiler_region(
+#     name="profiler_region_inference_denoising",
+#     description="The main inference denoising loop.",
+# )
+# register_profiler_region(
+#     name="profiler_region_inference_post_denoising",
+#     description=
+#     "Post-processing after denoising (decoder, conditioning restores).",
+# )
 register_profiler_region(
-    name="profiler_region_inference_pre_denoising",
-    description="Pre-denoising inference steps (conditioning, preprocessing).",
+    name="profiler_region_training_save_checkpoint",
+    description="Training save checkpoint operations.",
 )
-register_profiler_region(
-    name="profiler_region_inference_denoising",
-    description="The main inference denoising loop.",
-)
-register_profiler_region(
-    name="profiler_region_inference_post_denoising",
-    description=
-    "Post-processing after denoising (decoder, conditioning restores).",
-)
-register_profiler_region(
-    name="profiler_region_training_checkpoint_saving",
-    description="Training checkpoint save operations.",
-)
-register_profiler_region(
-    name="profiler_region_training_dit",
-    description="Training DiT forward/backward step.",
-)
+
+# general training related regions
 register_profiler_region(
     name="profiler_region_training_validation",
     description="Validation loop during training.",
 )
 register_profiler_region(
-    name="profiler_region_training_epoch",
-    description="High-level epoch orchestration in the training loop.",
+    name="profiler_region_training_train_one_step",
+    description="High-level step orchestration in the training loop.",
 )
 register_profiler_region(
-    name="profiler_region_training_step",
+    name="profiler_region_training_train",
     description="Single optimizer step including forward/backward passes.",
 )
-register_profiler_region(
-    name="profiler_region_training_backward",
-    description="Backward pass and gradient computations during training.",
-)
-register_profiler_region(
-    name="profiler_region_training_optimizer",
-    description="Optimizer update, gradient clipping, and scheduler steps.",
-)
+
+# distillation specific regions
 register_profiler_region(
     name="profiler_region_distillation_teacher_forward",
     description="Teacher model forward pass in distillation pipelines.",
