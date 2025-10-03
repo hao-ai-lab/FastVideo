@@ -363,8 +363,17 @@ class CausalDMDDenosingStage(DenoisingStage):
         Initialize a Per-GPU KV cache aligned with the Wan model assumptions.
         """
         kv_cache1 = []
-        num_attention_heads = self.transformer.num_attention_heads
-        attention_head_dim = self.transformer.attention_head_dim
+        # Handle FSDP-wrapped models by using getattr
+        num_attention_heads = getattr(self.transformer, 'num_attention_heads',
+                                      None)
+        attention_head_dim = getattr(self.transformer, 'attention_head_dim',
+                                     None)
+
+        if num_attention_heads is None or attention_head_dim is None:
+            raise AttributeError(
+                f"Could not access num_attention_heads or attention_head_dim from transformer. "
+                f"Model type: {type(self.transformer).__name__}")
+
         if self.local_attn_size != -1:
             kv_cache_size = self.local_attn_size * self.frame_seq_length
         else:
@@ -400,8 +409,17 @@ class CausalDMDDenosingStage(DenoisingStage):
         Initialize a Per-GPU cross-attention cache aligned with the Wan model assumptions.
         """
         crossattn_cache = []
-        num_attention_heads = self.transformer.num_attention_heads
-        attention_head_dim = self.transformer.attention_head_dim
+        # Handle FSDP-wrapped models by using getattr
+        num_attention_heads = getattr(self.transformer, 'num_attention_heads',
+                                      None)
+        attention_head_dim = getattr(self.transformer, 'attention_head_dim',
+                                     None)
+
+        if num_attention_heads is None or attention_head_dim is None:
+            raise AttributeError(
+                f"Could not access num_attention_heads or attention_head_dim from transformer. "
+                f"Model type: {type(self.transformer).__name__}")
+
         for _ in range(self.num_transformer_blocks):
             crossattn_cache.append({
                 "k":

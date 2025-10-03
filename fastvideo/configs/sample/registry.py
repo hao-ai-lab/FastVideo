@@ -55,6 +55,9 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
 
     # Causal Self-Forcing Wan2.1
     "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers": SelfForcingWanT2V480PConfig,
+
+    # Causal Self-Forcing Wan2.2
+    "rand0nmr/SFWan2.2-T2V-A14B-Diffusers": SelfForcingWanT2V480PConfig,
     # Add other specific weight variants
 }
 

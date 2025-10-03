@@ -32,10 +32,10 @@ export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 NUM_GPUS=8
 
 # Model paths for Self-Forcing DMD distillation with Wan2.2:
-# GENERATOR_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers"  # Updated to Wan2.2
+GENERATOR_MODEL_PATH="rand0nmr/SFWan2.2-T2V-A14B-Diffusers"  # Updated to Wan2.2
 # REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers" # Teacher model
 # FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers" # Critic model
-GENERATOR_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Updated to Wan2.2
+# GENERATOR_MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers" # Updated to Wan2.2
 REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Teacher model
 FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers" # Critic model
 
@@ -58,17 +58,18 @@ training_args=(
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
   --num_latent_t 21
-  --num_height 448  # Updated to match Wan2.2 config
+  --num_height 480  # Updated to match Wan2.2 config
   --num_width 832   # Updated to match Wan2.2 config
   --enable_gradient_checkpointing_type "full"
   --simulate_generator_forward
-  # --log_visualization
+  --log_visualization
   --num_frames 81
   --num_frame_per_block 3  # Frame generation block size for self-forcing
   --enable_gradient_masking
   --gradient_mask_last_n_frames 21
-  # --init_weights_from_safetensors /mnt/sharefs/users/hao.zhang/wl/models/sf_ode_init_wan22_checkpoints/high/3k/
-  # --init_weights_from_safetensors_2 /mnt/sharefs/users/hao.zhang/wl/models/sf_ode_init_wan22_checkpoints/low/3k/
+  --init_weights_from_safetensors /mnt/sharefs/users/hao.zhang/wl/models/sf_ode_init_wan22_checkpoints/high/3k/
+  --init_weights_from_safetensors_2 /mnt/sharefs/users/hao.zhang/wl/models/sf_ode_init_wan22_checkpoints/low/3k/
+  # --init_weights_from_safetensors /mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors
 )
 
 parallel_args=(

@@ -351,10 +351,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
         if self.train_transformer_2:
             u = (1 - boundary_ratio
                  ) + u * boundary_ratio  # min: 1 - boundary_ratio, max: 1
-        # elif self.transformer_2 is not None:
-        #     u = u * (1 - boundary_ratio)  # min: 0, max: 1 - boundary_ratio
-        # else:  # patch for now to align with non-MoE timestep logic
-        #     pass
+        elif self.transformer_2 is not None:
+            u = u * (1 - boundary_ratio)  # min: 0, max: 1 - boundary_ratio
 
         indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
         return self.noise_scheduler.timesteps[indices].to(device=device)
