@@ -12,6 +12,7 @@ import tqdm
 # Dataset
 from torch.utils.data import Dataset, Sampler
 from torchdata.stateful_dataloader import StatefulDataLoader
+from fastvideo.platforms import current_platform
 
 from fastvideo.dataset.utils import collate_rows_from_parquet_schema
 from fastvideo.distributed import (get_sp_world_size, get_world_group,
@@ -342,6 +343,7 @@ def build_parquet_map_style_dataloader(
         collate_fn=passthrough,
         num_workers=num_data_workers,
         pin_memory=True,
+        pin_memory_device=current_platform.device_name,
         persistent_workers=num_data_workers > 0,
     )
     return dataset, loader

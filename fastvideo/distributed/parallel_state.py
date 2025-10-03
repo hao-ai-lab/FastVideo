@@ -203,6 +203,15 @@ class GroupCoordinator:
                     device_group=self.device_group,
                     unique_name=self.unique_name,
                 )
+            elif current_platform.is_npu():
+                from fastvideo.distributed.device_communicators.npu_communicator import (
+                    NpuCommunicator)
+                self.device_communicator = NpuCommunicator(
+                    cpu_group=self.cpu_group,
+                    device=self.device,
+                    device_group=self.device_group,
+                    unique_name=self.unique_name,
+                )
             else:
                 # For MPS and CPU, use the CPU communicator
                 self.device_communicator = CpuCommunicator(
@@ -776,8 +785,13 @@ def init_distributed_environment(
 ):
     # Determine the appropriate backend based on the platform
     from fastvideo.platforms import current_platform
-    if backend == "nccl" and not current_platform.is_cuda_alike():
-        # Use gloo backend for non-CUDA platforms (MPS, CPU)
+    backend = "nccl"
+    if current_platform.is_cuda_alike():
+        logger.info("Using nccl backend for CUDA platform")
+    elif current_platform.is_npu():
+        backend = "hccl"
+        logger.info("Using hccl backend for NPU platform")
+    else:
         backend = "gloo"
         logger.info("Using gloo backend for %s platform",
                     current_platform.device_name)
@@ -792,7 +806,7 @@ def init_distributed_environment(
             "distributed environment")
 
         # For MPS, don't pass device_id as it doesn't support device indices
-        if current_platform.is_mps():
+        if current_platform.is_mps() or current_platform.is_npu():
             torch.distributed.init_process_group(
                 backend=backend,
                 init_method=distributed_init_method,
@@ -948,9 +962,13 @@ def get_dp_rank() -> int:
 
 def get_local_torch_device() -> torch.device:
     """Return the torch device for the current rank."""
-    return torch.device(f"cuda:{envs.LOCAL_RANK}"
-                        ) if current_platform.is_cuda_alike() else torch.device(
-                            "mps")
+    if current_platform.is_npu():
+        device = torch.device(f"npu:{envs.LOCAL_RANK}")
+    elif current_platform.is_cuda_alike() or current_platform.is_cuda():
+        torch.device(f"cuda:{envs.LOCAL_RANK}")
+    else:
+        torch.device("mps")
+    return device
 
 
 def maybe_init_distributed_environment_and_model_parallel(
@@ -979,10 +997,10 @@ def maybe_init_distributed_environment_and_model_parallel(
     initialize_model_parallel(tensor_model_parallel_size=tp_size,
                               sequence_model_parallel_size=sp_size)
 
-    # Only set CUDA device if we're on a CUDA platform
-    if current_platform.is_cuda_alike():
-        device = torch.device(f"cuda:{local_rank}")
-        torch.cuda.set_device(device)
+    # set device if we're on a CUDA/NPU platform
+    device_type = "npu" if current_platform.is_npu() else "cuda"
+    device = torch.device(f"{device_type}:{local_rank}")
+    current_platform.get_torch_device().set_device(device)
 
 
 def model_parallel_is_initialized() -> bool:
