@@ -280,23 +280,27 @@ class TrainingPipeline(LoRAPipeline, ABC):
         return training_batch
 
     def _prepare_dit_inputs(self,
-                            training_batch: TrainingBatch) -> TrainingBatch:
+                            training_batch: TrainingBatch,
+                            prepare_timesteps: bool = True) -> TrainingBatch:
         latents = training_batch.latents
         batch_size = latents.shape[0]
         noise = torch.randn(latents.shape,
                             generator=self.noise_gen_cuda,
                             device=latents.device,
                             dtype=latents.dtype)
-        timesteps = self._sample_timesteps(batch_size, latents.device)
+        if prepare_timesteps:
+            timesteps = self._sample_timesteps(batch_size, latents.device)
 
-        # Enable training for the model that will be trained next and disable the other
-        if self.train_transformer_2:
-            self._enable_training(self.transformer_2, self.optimizer_2)
-            self._disable_training(self.transformer, self.optimizer)
+            # Enable training for the model that will be trained next and disable the other
+            if self.train_transformer_2:
+                self._enable_training(self.transformer_2, self.optimizer_2)
+                self._disable_training(self.transformer, self.optimizer)
+            else:
+                self._enable_training(self.transformer, self.optimizer)
+                if self.transformer_2 is not None:
+                    self._disable_training(self.transformer_2, self.optimizer_2)
         else:
-            self._enable_training(self.transformer, self.optimizer)
-            if self.transformer_2 is not None:
-                self._disable_training(self.transformer_2, self.optimizer_2)
+            timesteps = 0 # Fill in a dummy value
 
         if self.training_args.sp_size > 1:
             # Make sure that the timesteps are the same across all sp processes.
