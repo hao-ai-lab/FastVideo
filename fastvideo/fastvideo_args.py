@@ -411,6 +411,7 @@ class FastVideoArgs:
             default=FastVideoArgs.override_transformer_cls_name,
             help="Override transformer cls name",
         )
+
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)
 

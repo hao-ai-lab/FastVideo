@@ -26,6 +26,12 @@ if TYPE_CHECKING:
     NVCC_THREADS: str | None = None
     CMAKE_BUILD_TYPE: str | None = None
     VERBOSE: bool = False
+    FASTVIDEO_TORCH_PROFILER_DIR: str | None = None
+    FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES: bool = False
+    FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY: bool = False
+    FASTVIDEO_TORCH_PROFILER_WITH_STACK: bool = True
+    FASTVIDEO_TORCH_PROFILER_WITH_FLOPS: bool = False
+    FASTVIDEO_TORCH_PROFILE_REGIONS: str = ""
     FASTVIDEO_SERVER_DEV_MODE: bool = False
     FASTVIDEO_STAGE_LOGGING: bool = False
 
@@ -196,6 +202,34 @@ environment_variables: dict[str, Callable[[], Any]] = {
     lambda: (None
              if os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", None) is None else os.
              path.expanduser(os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", "."))),
+
+    # Enable torch profiler to record shapes if set
+    # FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES=1. If not set, torch profiler will
+    # not record shapes.
+    "FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES":
+    lambda: bool(
+        os.getenv("FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES", "0") != "0"),
+
+    # Enable torch profiler to profile memory if set
+    # FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY=1. If not set, torch profiler
+    # will not profile memory.
+    "FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY":
+    lambda: bool(
+        os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY", "0") != "0"),
+
+    # Enable torch profiler to profile stack if set
+    # FASTVIDEO_TORCH_PROFILER_WITH_STACK=1. If not set, torch profiler WILL
+    # profile stack by default.
+    "FASTVIDEO_TORCH_PROFILER_WITH_STACK":
+    lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_STACK", "1") != "0"),
+
+    # Enable torch profiler to profile flops if set
+    # FASTVIDEO_TORCH_PROFILER_WITH_FLOPS=1. If not set, torch profiler will
+    # not profile flops.
+    "FASTVIDEO_TORCH_PROFILER_WITH_FLOPS":
+    lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_FLOPS", "0") != "0"),
+    "FASTVIDEO_TORCH_PROFILE_REGIONS":
+    lambda: os.getenv("FASTVIDEO_TORCH_PROFILE_REGIONS", ""),
 
     # If set, fastvideo will run in development mode, which will enable
     # some additional endpoints for developing and debugging,
