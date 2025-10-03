@@ -15,11 +15,108 @@ from math import sqrt
 
 from flash_attn.flash_attn_interface import _wrapped_flash_attn_forward, _wrapped_flash_attn_backward
 logger = init_logger(__name__)
+from flashinfer import SfLayout, mm_fp4, nvfp4_quantize
+
+def fp_16_qk(q, k):
+    qk = torch.matmul(q, k) / torch.sqrt(torch.tensor(q.shape[-1], device=q.device, dtype=q.dtype))
+    p = torch.softmax(qk, dim=-1)
+    return p
+
+def sage_attn_qk_torch(q, k, per_block_mean=False):
+    """
+    Inputs:  q/k/v in [B, H, L, D]
+    Returns: out in  [B, H, L, D]
+    """
+    B, H, qL, D = q.shape
+    B, H, kL, D = k.shape
+    assert B == 1
+    q, k = q.squeeze(0), k.squeeze(0)
+    k = k - k.mean(dim=-2, keepdim=True)  # [H, L, D]
+    qm = q.mean(dim=-2, keepdim=True)  # [H, 1, D]
+    q = q - qm  # [B, H, L, D]
+    delta_s = torch.matmul(qm, k.transpose(-2, -1)).to(torch.float32).contiguous()  # [H, 1, L]
+
+    alpha = torch.ones(1, device=q.device, dtype=torch.float32)
+    qk = torch.empty((H, qL, kL), device=q.device, dtype=q.dtype)
+    for h in range(H):
+        q_fp4, q_inv_s = nvfp4_quantize(q[h], torch.ones(1, device=q.device, dtype=torch.float32), sfLayout=SfLayout.layout_128x4, do_shuffle=False)
+        k_fp4, k_inv_s = nvfp4_quantize(k[h], torch.ones(1, device=q.device, dtype=torch.float32), sfLayout=SfLayout.layout_128x4, do_shuffle=False)
+        out = torch.empty((qL, kL), device=q.device, dtype=q.dtype)
+        mm_fp4(
+            q_fp4, k_fp4.T, q_inv_s, k_inv_s.T, alpha,
+            q.dtype, out,
+            block_size=16,
+            use_8x4_sf_layout=False,
+            backend="cutlass",
+        )
+        qk[h] = out
+    qk = qk + delta_s 
+    qk = qk / torch.sqrt(torch.tensor(D, device=q.device, dtype=q.dtype))
+    p = torch.softmax(qk, dim=-1)
+    return p.unsqueeze(0)
+
+def sage3_torch_16bit_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal=False):
+    assert is_causal == False
+    q, k, v, o, do = q_BLHD.transpose(1 ,2).contiguous(), k_BLHD.transpose(1 ,2).contiguous(), v_BLHD.transpose(1 ,2).contiguous(), out_BLHD.transpose(1 ,2).contiguous(), grad_out_BLHD.transpose(1 ,2).contiguous()
+    B, H, _, D = q.shape
+    p = sage_attn_qk_torch(q, k, per_block_mean=False).to(do.dtype)
+    dV = p.transpose(-2, -1) @ do  # [B,H,L,D]
+
+    dP = do @ v.transpose(-2, -1)  # [B,H,L,L]
+
+    do_dot_o = (do.float() * o.float()).sum(dim=-1, keepdim=True).to(dP.dtype)  # [B,H,L,1]
+    dS = p * (dP - do_dot_o)  # [B,H,L,L]
 
 
+    dQ = (dS @ k) / torch.sqrt(torch.tensor(D, device=q.device, dtype=q.dtype))            # [B,H,L,D]
+    dK = (dS.transpose(-2, -1) @ q) / torch.sqrt(torch.tensor(D, device=q.device, dtype=q.dtype))  # [B,H,L,D]
+
+    # grads w.r.t inputs, None for non-tensor inputs
+    return dQ.transpose(1, 2).contiguous(), dK.transpose(1, 2).contiguous(), dV.transpose(1, 2).contiguous(), None, None, None
+    
+    
+def flash_attn_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal=False):
+    D = q_BLHD.shape[-1]
+    softmax_scale = 1.0 / sqrt(D)
+
+    # FA forward only to get softmax_lse (rng_state is also returned)
+    _, softmax_lse, _S_dmask, rng_state = _wrapped_flash_attn_forward(
+        q_BLHD, k_BLHD, v_BLHD,
+        0.0,               # dropout_p
+        softmax_scale,     # softmax_scale
+        is_causal,         # causal
+        -1, -1,            # window_size_left/right
+        0.0,               # softcap
+        None,              # alibi_slopes
+        False              # return_softmax
+    )
+
+    # Allocate grads and call FA backward using the SAGE output
+    dq_BLHD = torch.empty_like(q_BLHD)
+    dk_BLHD = torch.empty_like(k_BLHD)
+    dv_BLHD = torch.empty_like(v_BLHD)
+
+    _wrapped_flash_attn_backward(
+        grad_out_BLHD,          # dout (BLHD, 16-bit)
+        q_BLHD, k_BLHD, v_BLHD,
+        out_BLHD,    # use SAGE forward output here
+        softmax_lse,
+        dq_BLHD, dk_BLHD, dv_BLHD,
+        0.0,               # dropout_p
+        softmax_scale,     # softmax_scale
+        is_causal,         # causal
+        -1, -1,            # window_size_left/right
+        0.0,               # softcap
+        None,              # alibi_slopes
+        False,             # deterministic
+        rng_state=rng_state,
+    )
+    return dq_BLHD, dk_BLHD, dv_BLHD, None, None
+    
+USE_TORCH_16BIT_BWD = True
 class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, q_BLHD, k_BLHD, v_BLHD, is_causal=False, per_block_mean=True):
+    def forward(ctx, q_BLHD, k_BLHD, v_BLHD, is_causal=False, per_block_mean=False):
         """
         Inputs:  q/k/v in [B, L, H, D]
         Returns: out in  [B, L, H, D]
@@ -51,45 +148,13 @@ class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
         q_BLHD, k_BLHD, v_BLHD, out_BLHD = ctx.saved_tensors
         is_causal = ctx.is_causal
 
-        D = q_BLHD.shape[-1]
-        softmax_scale = 1.0 / sqrt(D)
-
-        # FA forward only to get softmax_lse (rng_state is also returned)
-        _, softmax_lse, _S_dmask, rng_state = _wrapped_flash_attn_forward(
-            q_BLHD, k_BLHD, v_BLHD,
-            0.0,               # dropout_p
-            softmax_scale,     # softmax_scale
-            is_causal,         # causal
-            -1, -1,            # window_size_left/right
-            0.0,               # softcap
-            None,              # alibi_slopes
-            False              # return_softmax
-        )
-
-        # Allocate grads and call FA backward using the SAGE output
-        dq_BLHD = torch.empty_like(q_BLHD)
-        dk_BLHD = torch.empty_like(k_BLHD)
-        dv_BLHD = torch.empty_like(v_BLHD)
-
-        _wrapped_flash_attn_backward(
-            grad_out_BLHD,          # dout (BLHD, 16-bit)
-            q_BLHD, k_BLHD, v_BLHD,
-            out_BLHD,    # use SAGE forward output here
-            softmax_lse,
-            dq_BLHD, dk_BLHD, dv_BLHD,
-            0.0,               # dropout_p
-            softmax_scale,     # softmax_scale
-            is_causal,         # causal
-            -1, -1,            # window_size_left/right
-            0.0,               # softcap
-            None,              # alibi_slopes
-            False,             # deterministic
-            rng_state=rng_state,
-        )
-        return dq_BLHD, dk_BLHD, dv_BLHD, None, None
+        if USE_TORCH_16BIT_BWD:
+            return sage3_torch_16bit_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal)
+        else:
+            return flash_attn_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal)
 
 
-def sageattn_blackwell_with_16bit_bwd(q_BLHD, k_BLHD, v_BLHD, is_causal=False, per_block_mean=True):
+def sageattn_blackwell_with_16bit_bwd(q_BLHD, k_BLHD, v_BLHD, is_causal=False, per_block_mean=False):
     """
     Forward: uses sageattn_blackwell under the hood.
     Backward: recomputes FlashAttention fwd+bwd in 16bit directly.

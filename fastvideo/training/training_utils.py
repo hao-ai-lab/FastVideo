@@ -1840,12 +1840,11 @@ def traverse_swap_module(
         # Then, traverse children
         # 1) PyTorch modules: prefer named_children() for proper module graph traversal
         if nn is not None and isinstance(obj, nn.Module):
-            try:
-                for name, child in obj.named_children():
-                    if is_traversable(child):
-                        swaps += walk(child, f"{obj_path}.{name}", depth + 1)
-            except Exception:
-                pass  # keep going
+
+            for name, child in obj.named_children():
+                if is_traversable(child):
+                    swaps += walk(child, f"{obj_path}.{name}", depth + 1)
+
 
             # Also traverse non-module attributes living on the module
             d = getattr(obj, "__dict__", None)

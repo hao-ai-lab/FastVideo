@@ -19,11 +19,11 @@ training_args=(
   --max_train_steps 5000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 4
-  --num_latent_t 20
+  --gradient_accumulation_steps 1
+  --num_latent_t 6
   --num_height 480
   --num_width 832
-  --num_frames 77
+  --num_frames 21
   --enable_gradient_checkpointing_type "full"
   --generator_4bit_linear True
 )
@@ -53,7 +53,7 @@ dataset_args=(
 validation_args=(
   --log_validation 
   --validation_dataset_file $VALIDATION_DATASET_FILE
-  --validation_steps 10
+  --validation_steps 50
   --validation_sampling_steps "50" 
   --validation_guidance_scale "6.0"
 )

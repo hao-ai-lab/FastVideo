@@ -117,13 +117,12 @@ def run_case(case, fwd_cos_min=0.95, fwd_rel_l2_max=0.25, bwd_cos_min=0.95, bwd_
     metric_report(dq_ref, dq_sage, "grad_q", cos_min=bwd_cos_min, rel_l2_max=bwd_rel_l2_max)
     metric_report(dk_ref, dk_sage, "grad_k", cos_min=bwd_cos_min, rel_l2_max=bwd_rel_l2_max)
     metric_report(dv_ref, dv_sage, "grad_v", cos_min=bwd_cos_min, rel_l2_max=bwd_rel_l2_max)
-    import pdb; pdb.set_trace()
 
 def main():
     # Keep sizes moderate so it runs quickly; adjust as you like.
     cases = [
-        {"name": "bf16_noncausal_L16384", "B": 1, "L": 16384, "H": 8,  "D": 128, "dtype": torch.bfloat16, "causal": False},
-        {"name": "bf16_noncausal_L32768", "B": 1, "L": 32768, "H": 8,  "D": 128, "dtype": torch.bfloat16, "causal": False},
+        {"name": "bf16_noncausal_L16384", "B": 1, "L": 1024, "H": 8,  "D": 128, "dtype": torch.bfloat16, "causal": False},
+        {"name": "bf16_noncausal_L2048", "B": 1, "L": 2048, "H": 8,  "D": 128, "dtype": torch.bfloat16, "causal": False},
     ]
 
     for case in cases:

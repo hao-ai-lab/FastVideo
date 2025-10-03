@@ -49,10 +49,9 @@ from fastvideo.training.training_utils import (
 from fastvideo.utils import (is_vmoba_available, is_vsa_available,
                              set_random_seed, shallow_asdict)
 from fastvideo.training.training_utils import traverse_swap_module
-try:
-    from fastvideo.attention.backends.sage_attn3 import SageAttention3Impl
-except ImportError:
-    SageAttention3Impl = None
+
+from fastvideo.attention.backends.sage_attn3 import SageAttention3Impl
+
 
 import wandb  # isort: skip
 
@@ -86,20 +85,18 @@ def swap_sage_attn3(obj: Any, obj_path: str) -> int:
     causal = getattr(old_impl, "causal", False)
     softmax_scale = getattr(old_impl, "softmax_scale", 1.0)
 
-    try:
-        new_impl = SageAttention3Impl(
-            num_heads=None,
-            head_size=None,
-            causal=causal,
-            softmax_scale=softmax_scale,
-            num_kv_heads=None,
-            prefix="",
-        )
-        setattr(obj, "attn_impl", new_impl)
-        return 1
-    except Exception:
-        # If assignment fails (frozen dataclass/property), skip
-        return 0
+
+    new_impl = SageAttention3Impl(
+        num_heads=None,
+        head_size=None,
+        causal=causal,
+        softmax_scale=softmax_scale,
+        num_kv_heads=None,
+        prefix="",
+    )
+    setattr(obj, "attn_impl", new_impl)
+    return 1
+
 
 def swap_fp4_linear(obj: Any, obj_path: str) -> int:
     """
