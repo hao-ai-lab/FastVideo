@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Iterator
 from typing import Any
-
+from fastvideo.profiler import profile_region
 import imageio
 import numpy as np
 import torch
@@ -479,6 +479,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         training_batch.grad_norm = grad_norm
         return training_batch
 
+    @profile_region("profiler_region_training_train_one_step")
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
         training_batch = self._prepare_training(training_batch)
 
@@ -537,6 +538,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
             logger.warning("Failed to load checkpoint, starting from step 0")
             self.init_steps = 0
 
+    @profile_region("profiler_region_training_train")
     def train(self) -> None:
         assert self.seed is not None, "seed must be set"
         assert self.training_args is not None, "training_args must be set"
@@ -634,24 +636,29 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     step=step,
                 )
             if step % self.training_args.training_state_checkpointing_steps == 0:
-                save_checkpoint(self.transformer, self.global_rank,
-                                self.training_args.output_dir, step,
-                                self.optimizer, self.train_dataloader,
-                                self.lr_scheduler, self.noise_random_generator)
+                with self.profiler_controller.region(
+                        "profiler_region_training_save_checkpoint"):
+                    save_checkpoint(self.transformer, self.global_rank,
+                                    self.training_args.output_dir, step,
+                                    self.optimizer, self.train_dataloader,
+                                    self.lr_scheduler,
+                                    self.noise_random_generator)
                 self.transformer.train()
                 self.sp_group.barrier()
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
-                if self.training_args.log_visualization:
-                    self.visualize_intermediate_latents(training_batch,
-                                                        self.training_args,
-                                                        step)
-                self._log_validation(self.transformer, self.training_args, step)
-                gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
-                trainable_params = round(
-                    count_trainable(self.transformer) / 1e9, 3)
-                logger.info(
-                    "GPU memory usage after validation: %s MB, trainable params: %sB",
-                    gpu_memory_usage, trainable_params)
+                with self.profiler_controller.region(
+                        "profiler_region_training_validation"):
+                    if self.training_args.log_visualization:
+                        self.visualize_intermediate_latents(
+                            training_batch, self.training_args, step)
+                    self._log_validation(self.transformer, self.training_args,
+                                         step)
+                    gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
+                    trainable_params = round(
+                        count_trainable(self.transformer) / 1e9, 3)
+                    logger.info(
+                        "GPU memory usage after validation: %s MB, trainable params: %sB",
+                        gpu_memory_usage, trainable_params)
 
         wandb.finish()
         save_checkpoint(self.transformer, self.global_rank,
