@@ -76,8 +76,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         self.last_step_only = getattr(training_args, 'last_step_only', False)
         self.context_noise = getattr(training_args, 'context_noise', 0)
 
-        self.kv_cache1: list[dict[str, Any]] | None = None
-        self.crossattn_cache: list[dict[str, Any]] | None = None
+        # self.kv_cache1: list[dict[str, Any]] | None = None
+        # self.crossattn_cache: list[dict[str, Any]] | None = None
 
         logger.info("Self-forcing generator update ratio: %s",
                     self.dfake_gen_update_ratio)
@@ -244,7 +244,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         # Step 1: Initialize KV cache to all zeros
         cache_frames = num_generated_frames + num_input_frames
-        self.kv_cache1, self.crossattn_cache = self._initialize_simulation_caches(
+        kv_cache1, crossattn_cache = self._initialize_simulation_caches(
             batch_size, dtype, self.device, max_num_frames=cache_frames)
 
         # Step 2: Cache context feature
@@ -268,8 +268,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     timestep=training_batch_temp.input_kwargs['timestep'],
                     encoder_hidden_states_image=training_batch_temp.
                     input_kwargs.get('encoder_hidden_states_image'),
-                    kv_cache=self.kv_cache1,
-                    crossattn_cache=self.crossattn_cache,
+                    kv_cache=kv_cache1,
+                    crossattn_cache=crossattn_cache,
                     current_start=current_start_frame * self.frame_seq_length,
                     start_frame=current_start_frame)
             current_start_frame += 1
@@ -327,8 +327,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             input_kwargs['timestep'],
                             encoder_hidden_states_image=training_batch_temp.
                             input_kwargs.get('encoder_hidden_states_image'),
-                            kv_cache=self.kv_cache1,
-                            crossattn_cache=self.crossattn_cache,
+                            kv_cache=kv_cache1,
+                            crossattn_cache=crossattn_cache,
                             current_start=current_start_frame *
                             self.frame_seq_length,
                             start_frame=current_start_frame).permute(
@@ -367,8 +367,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                 input_kwargs['timestep'],
                                 encoder_hidden_states_image=training_batch_temp.
                                 input_kwargs.get('encoder_hidden_states_image'),
-                                kv_cache=self.kv_cache1,
-                                crossattn_cache=self.crossattn_cache,
+                                kv_cache=kv_cache1,
+                                crossattn_cache=crossattn_cache,
                                 current_start=current_start_frame *
                                 self.frame_seq_length,
                                 start_frame=current_start_frame).permute(
@@ -387,8 +387,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             input_kwargs['timestep'],
                             encoder_hidden_states_image=training_batch_temp.
                             input_kwargs.get('encoder_hidden_states_image'),
-                            kv_cache=self.kv_cache1,
-                            crossattn_cache=self.crossattn_cache,
+                            kv_cache=kv_cache1,
+                            crossattn_cache=crossattn_cache,
                             current_start=current_start_frame *
                             self.frame_seq_length,
                             start_frame=current_start_frame).permute(
@@ -428,8 +428,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     timestep=training_batch_temp.input_kwargs['timestep'],
                     encoder_hidden_states_image=training_batch_temp.
                     input_kwargs.get('encoder_hidden_states_image'),
-                    kv_cache=self.kv_cache1,
-                    crossattn_cache=self.crossattn_cache,
+                    kv_cache=kv_cache1,
+                    crossattn_cache=crossattn_cache,
                     current_start=current_start_frame * self.frame_seq_length,
                     start_frame=current_start_frame)
 
@@ -521,12 +521,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 min_num_frames, dtype=torch.float32, device=self.device)
 
         # Clean up caches
-        assert self.kv_cache1 is not None
-        assert self.crossattn_cache is not None
-        self._reset_simulation_caches(self.kv_cache1, self.crossattn_cache)
+        assert kv_cache1 is not None
+        assert crossattn_cache is not None
+        # self._reset_simulation_caches(self.kv_cache1, self.crossattn_cache)
 
         return final_output if gradient_mask is not None else pred_image_or_video
-
     def _initialize_simulation_caches(
         self,
         batch_size: int,
@@ -1223,3 +1222,4 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         if get_sp_group():
             cleanup_dist_env_and_memory()
+
