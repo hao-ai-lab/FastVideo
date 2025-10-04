@@ -80,7 +80,7 @@ def _info(logger: Logger,
           msg: object,
           *args: Any,
           main_process_only: bool = False,
-          local_main_process_only: bool = True,
+          local_main_process_only: bool = False,
           **kwargs: Any) -> None:
     """Process-aware INFO level logging function.
     
@@ -165,7 +165,7 @@ class _FastvideoLogger(Logger):
             msg: object,
             *args: Any,
             main_process_only: bool = False,
-            local_main_process_only: bool = True,
+            local_main_process_only: bool = False,
             **kwargs: Any) -> None:
         _info(self,
               msg,

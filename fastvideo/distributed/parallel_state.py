@@ -796,7 +796,12 @@ def init_distributed_environment(
         logger.info("Using gloo backend for %s platform",
                     current_platform.device_name)
 
-    logger.debug(
+    logger.info(f"xxx-gpu-available={torch.cuda.is_available()}")
+    # logger.info(f"xxx-current-device={torch.cuda.current_device()}")
+    logger.info(f"xxx-device-count={torch.cuda.device_count()}")
+    logger.info(f"xxx-here-os.environ={os.environ["CUDA_VISIBLE_DEVICES"]}")
+    logger.info(f"xxx-here-device={device_id}")
+    logger.info(
         "world_size=%d rank=%d local_rank=%d "
         "distributed_init_method=%s backend=%s", world_size, rank, local_rank,
         distributed_init_method, backend)
@@ -986,7 +991,7 @@ def maybe_init_distributed_environment_and_model_parallel(
     device = get_local_torch_device()
     logger.info(
         "Initializing distributed environment with world_size=%d, device=%s",
-        world_size, device)
+        world_size, device, local_main_process_only=False)
 
     init_distributed_environment(
         world_size=world_size,

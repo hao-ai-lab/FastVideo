@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    FASTVIDEO_HOST_IP: str = ""
     FASTVIDEO_RINGBUFFER_WARNING_INTERVAL: int = 60
     FASTVIDEO_NCCL_SO_PATH: str | None = None
     LD_LIBRARY_PATH: str | None = None
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
     FASTVIDEO_CACHE_ROOT: str = os.path.expanduser("~/.cache/fastvideo")
     FASTVIDEO_CONFIG_ROOT: str = os.path.expanduser("~/.config/fastvideo")
     FASTVIDEO_CONFIGURE_LOGGING: int = 1
+    FASTVIDEO_RAY_PER_WORKER_GPUS: float = 1.0
     FASTVIDEO_LOGGING_LEVEL: str = "INFO"
     FASTVIDEO_LOGGING_PREFIX: str = ""
     FASTVIDEO_LOGGING_CONFIG_PATH: str | None = None
@@ -118,6 +120,19 @@ environment_variables: dict[str, Callable[[], Any]] = {
             "FASTVIDEO_CACHE_ROOT",
             os.path.join(get_default_cache_root(), "fastvideo"),
         )),
+
+    # used in distributed environment to determine the ip address
+    # of the current node, when the node has multiple network interfaces.
+    # If you are using multi-node inference, you should set this differently
+    # on each node.
+    "FASTVIDEO_HOST_IP":
+    lambda: os.getenv("FASTVIDEO_HOST_IP", ""),
+
+    # Number of GPUs per worker in Ray, if it is set to be a fraction,
+    # it allows ray to schedule multiple actors on a single GPU,
+    # so that users can colocate other actors on the same GPUs as FastVideo.
+    "FASTVIDEO_RAY_PER_WORKER_GPUS":
+    lambda: float(os.getenv("FASTVIDEO_RAY_PER_WORKER_GPUS", "1.0")),
 
     # Interval in seconds to log a warning message when the ring buffer is full
     "FASTVIDEO_RINGBUFFER_WARNING_INTERVAL":

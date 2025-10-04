@@ -7,6 +7,7 @@ import hashlib
 import importlib
 import importlib.util
 import inspect
+import ipaddress
 import json
 import math
 import os
@@ -14,6 +15,7 @@ import signal
 import socket
 import sys
 import tempfile
+import warnings
 import threading
 import traceback
 from collections.abc import Callable
@@ -997,3 +999,80 @@ def _append_to_memory_trace(
     except Exception:  # noqa: BLE001
         # Avoid raising/logging recursively if writing to the file fails.
         pass
+
+
+# TODO(xingyu): add adopted message for this
+def get_ip() -> str:
+    host_ip = envs.FASTVIDEO_HOST_IP
+    if host_ip:
+        return host_ip
+
+    # IP is not set, try to get it from the network interface
+
+    # try ipv4
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))  # Doesn't need to be reachable
+        return s.getsockname()[0]
+    except Exception:
+        pass
+
+    # try ipv6
+    try:
+        s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+        # Google's public DNS server, see
+        # https://developers.google.com/speed/public-dns/docs/using#addresses
+        s.connect(("2001:4860:4860::8888", 80))  # Doesn't need to be reachable
+        return s.getsockname()[0]
+    except Exception:
+        pass
+
+    warnings.warn(
+        "Failed to get the IP address, using 0.0.0.0 by default."
+        "The value can be set by the environment variable FASTVIDEO_HOST_IP.",
+        stacklevel=2)
+    return "0.0.0.0"
+
+
+def is_valid_ipv6_address(address: str) -> bool:
+    try:
+        ipaddress.IPv6Address(address)
+        return True
+    except ValueError:
+        return False
+
+
+def get_distributed_init_method(ip: str, port: int) -> str:
+    return get_tcp_uri(ip, port)
+
+
+def get_tcp_uri(ip: str, port: int) -> str:
+    if is_valid_ipv6_address(ip):
+        return f"tcp://[{ip}]:{port}"
+    else:
+        return f"tcp://{ip}:{port}"
+
+
+def get_open_port() -> int:
+    # port = envs.FASTVIDEO_PORT
+    port = None
+    if port is not None:
+        while True:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(("", port))
+                    return port
+            except OSError:
+                port += 1  # Increment port number if already in use
+                logger.info("Port %d is already in use, trying port %d",
+                            port - 1, port)
+    # try ipv4
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("", 0))
+            return s.getsockname()[1]
+    except OSError:
+        # try ipv6
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
+            s.bind(("", 0))
+            return s.getsockname()[1]
