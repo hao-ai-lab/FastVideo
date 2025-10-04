@@ -39,8 +39,8 @@ class CausalDMDDenosingStage(DenoisingStage):
         # KV and cross-attention cache state (initialized on first forward)
         self.transformer = transformer
         self.transformer_2 = transformer_2
-        self.kv_cache1: list | None = None
-        self.crossattn_cache: list | None = None
+        # self.kv_cache1: list | None = None
+        # self.crossattn_cache: list | None = None
         # Model-dependent constants (aligned with causal_inference.py assumptions)
         self.num_transformer_blocks = len(self.transformer.blocks)
         self.num_frames_per_block = self.transformer.config.arch_config.num_frames_per_block
@@ -103,34 +103,43 @@ class CausalDMDDenosingStage(DenoisingStage):
         assert torch.isnan(prompt_embeds[0]).sum() == 0
 
         # Initialize or reset caches
-        if self.kv_cache1 is None:
-            self._initialize_kv_cache(batch_size=latents.shape[0],
+        kv_cache1 = self._initialize_kv_cache(batch_size=latents.shape[0],
                                       dtype=target_dtype,
                                       device=latents.device)
-            self._initialize_crossattn_cache(
+        crossattn_cache = self._initialize_crossattn_cache(
                 batch_size=latents.shape[0],
                 max_text_len=fastvideo_args.pipeline_config.
                 text_encoder_configs[0].arch_config.text_len,
                 dtype=target_dtype,
                 device=latents.device)
-        else:
-            assert self.crossattn_cache is not None
-            # reset cross-attention cache
-            for block_index in range(self.num_transformer_blocks):
-                self.crossattn_cache[block_index][
-                    "is_init"] = False  # type: ignore
-            # reset kv cache pointers
-            for block_index in range(len(self.kv_cache1)):
-                self.kv_cache1[block_index][
-                    "global_end_index"] = torch.tensor(  # type: ignore
-                        [0],
-                        dtype=torch.long,
-                        device=latents.device)
-                self.kv_cache1[block_index][
-                    "local_end_index"] = torch.tensor(  # type: ignore
-                        [0],
-                        dtype=torch.long,
-                        device=latents.device)
+        # if self.kv_cache1 is None:
+        #     self._initialize_kv_cache(batch_size=latents.shape[0],
+        #                               dtype=target_dtype,
+        #                               device=latents.device)
+        #     self._initialize_crossattn_cache(
+        #         batch_size=latents.shape[0],
+        #         max_text_len=fastvideo_args.pipeline_config.
+        #         text_encoder_configs[0].arch_config.text_len,
+        #         dtype=target_dtype,
+        #         device=latents.device)
+        # else:
+        #     assert self.crossattn_cache is not None
+        #     # reset cross-attention cache
+        #     for block_index in range(self.num_transformer_blocks):
+        #         self.crossattn_cache[block_index][
+        #             "is_init"] = False  # type: ignore
+        #     # reset kv cache pointers
+        #     for block_index in range(len(self.kv_cache1)):
+        #         self.kv_cache1[block_index][
+        #             "global_end_index"] = torch.tensor(  # type: ignore
+        #                 [0],
+        #                 dtype=torch.long,
+        #                 device=latents.device)
+        #         self.kv_cache1[block_index][
+        #             "local_end_index"] = torch.tensor(  # type: ignore
+        #                 [0],
+        #                 dtype=torch.long,
+        #                 device=latents.device)
 
         # Optional: cache context features from provided image latents prior to generation
         current_start_frame = 0
@@ -153,8 +162,8 @@ class CausalDMDDenosingStage(DenoisingStage):
                         image_first_btchw,
                         prompt_embeds,
                         t_zero,
-                        kv_cache=self.kv_cache1,
-                        crossattn_cache=self.crossattn_cache,
+                        kv_cache=kv_cache1,
+                        crossattn_cache=crossattn_cache,
                         current_start=current_start_frame *
                         self.frame_seq_length,
                         **image_kwargs,
@@ -179,8 +188,8 @@ class CausalDMDDenosingStage(DenoisingStage):
                         ref_btchw,
                         prompt_embeds,
                         t_zero,
-                        kv_cache=self.kv_cache1,
-                        crossattn_cache=self.crossattn_cache,
+                        kv_cache=kv_cache1,
+                        crossattn_cache=crossattn_cache,
                         current_start=current_start_frame *
                         self.frame_seq_length,
                         **image_kwargs,
@@ -280,8 +289,8 @@ class CausalDMDDenosingStage(DenoisingStage):
                             latent_model_input,
                             prompt_embeds,
                             t_expanded_noise,
-                            kv_cache=self.kv_cache1,
-                            crossattn_cache=self.crossattn_cache,
+                            kv_cache=kv_cache1,
+                            crossattn_cache=crossattn_cache,
                             current_start=(pos_start_base + start_index) *
                             self.frame_seq_length,
                             start_frame=start_index,
@@ -345,8 +354,8 @@ class CausalDMDDenosingStage(DenoisingStage):
                         context_bcthw,
                         prompt_embeds,
                         t_expanded_context,
-                        kv_cache=self.kv_cache1,
-                        crossattn_cache=self.crossattn_cache,
+                        kv_cache=kv_cache1,
+                        crossattn_cache=crossattn_cache,
                         current_start=(pos_start_base + start_index) *
                         self.frame_seq_length,
                         start_frame=start_index,
@@ -392,7 +401,8 @@ class CausalDMDDenosingStage(DenoisingStage):
                 torch.tensor([0], dtype=torch.long, device=device),
             })
 
-        self.kv_cache1 = kv_cache1
+        # self.kv_cache1 = kv_cache1
+        return kv_cache1
 
     def _initialize_crossattn_cache(self, batch_size, max_text_len, dtype,
                                     device) -> None:
@@ -421,7 +431,8 @@ class CausalDMDDenosingStage(DenoisingStage):
                 "is_init":
                 False,
             })
-        self.crossattn_cache = crossattn_cache
+        # self.crossattn_cache = crossattn_cache
+        return crossattn_cache
 
     def verify_input(self, batch: ForwardBatch,
                      fastvideo_args: FastVideoArgs) -> VerificationResult:

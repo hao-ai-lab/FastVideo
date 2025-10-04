@@ -615,7 +615,11 @@ class DistillationPipeline(TrainingPipeline):
             noisy_latent, timestep, training_batch.conditional_dict,
             training_batch)
 
-        pred_noise = self.transformer(**training_batch.input_kwargs).permute(
+        if self.transformer_2 is not None and self.train_transformer_2:
+            current_transformer = self.transformer_2
+        else:
+            current_transformer = self.transformer
+        pred_noise = current_transformer(**training_batch.input_kwargs).permute(
             0, 2, 1, 3, 4)
         pred_video = pred_noise_to_pred_video(
             pred_noise=pred_noise.flatten(0, 1),
@@ -662,13 +666,17 @@ class DistillationPipeline(TrainingPipeline):
             with torch.no_grad():
                 for step_idx in range(max_target_idx):
                     current_timestep = self.denoising_step_list[step_idx]
+                    if self.transformer_2 is not None and current_timestep < self.boundary_timestep:
+                        current_transformer = self.transformer_2
+                    else:
+                        current_transformer = self.transformer
                     current_timestep_tensor = current_timestep * torch.ones(
                         1, device=self.device, dtype=torch.long)
                     # Run student model to get flow prediction
                     training_batch_temp = self._build_distill_input_kwargs(
                         current_noise_latents, current_timestep_tensor,
                         training_batch.conditional_dict, training_batch)
-                    pred_flow = self.transformer(
+                    pred_flow = current_transformer(
                         **training_batch_temp.input_kwargs).permute(
                             0, 2, 1, 3, 4)
                     pred_clean = pred_noise_to_pred_video(
@@ -711,8 +719,12 @@ class DistillationPipeline(TrainingPipeline):
         training_batch = self._build_distill_input_kwargs(
             noisy_input, target_timestep, training_batch.conditional_dict,
             training_batch)
-        pred_noise = self.transformer(**training_batch.input_kwargs).permute(
-            0, 2, 1, 3, 4)
+        if self.transformer_2 is not None:
+            pred_noise = self.transformer_2(**training_batch.input_kwargs).permute(
+                0, 2, 1, 3, 4)
+        else:
+            pred_noise = self.transformer(**training_batch.input_kwargs).permute(
+                0, 2, 1, 3, 4)
         pred_video = pred_noise_to_pred_video(
             pred_noise=pred_noise.flatten(0, 1),
             noise_input_latent=noisy_input.flatten(0, 1),
@@ -967,6 +979,8 @@ class DistillationPipeline(TrainingPipeline):
             batches.append(batch)
 
         self.optimizer.zero_grad()
+        if self.transformer_2 is not None:
+            self.optimizer_2.zero_grad()
         total_dmd_loss = 0.0
         dmd_latent_vis_dict = {}
         fake_score_latent_vis_dict = {}
@@ -997,12 +1011,20 @@ class DistillationPipeline(TrainingPipeline):
                 total_dmd_loss += dmd_loss.detach().item()
 
             # Only clip gradients for the model that is currently training
-            self._clip_model_grad_norm_(batch_gen, self.transformer)
-            for param in self.transformer.parameters():
-                # check if the gradient is not None and not zero
-                assert param.grad is not None and param.grad.abs().sum() > 0
-            self.optimizer.step()
-            self.optimizer.zero_grad(set_to_none=True)
+            if self.transformer_2 is not None and self.train_transformer_2:
+                self._clip_model_grad_norm_(batch_gen, self.transformer_2)
+                for param in self.transformer_2.parameters():
+                    # check if the gradient is not None and not zero
+                    assert param.grad is not None and param.grad.abs().sum() > 0
+                self.optimizer_2.step()
+                self.optimizer_2.zero_grad(set_to_none=True)
+            else:
+                self._clip_model_grad_norm_(batch_gen, self.transformer)
+                for param in self.transformer.parameters():
+                    # check if the gradient is not None and not zero
+                    assert param.grad is not None and param.grad.abs().sum() > 0
+                self.optimizer.step()
+                self.optimizer.zero_grad(set_to_none=True)
 
             if self.generator_ema is not None:
                 self.generator_ema.update(self.transformer)
