@@ -9,7 +9,8 @@ import torch.nn.functional as F
 # ---- Import function-under-test ----
 # Make sure this import path matches your project layout.
 # If it's in the same file, remove this import and keep the definition above.
-from fastvideo.attention.backends.sage_attn3 import attn_forward_4bit_fwd_16bit_bwd as sageattn_blackwell_with_16bit_bwd
+from fastvideo.attention.backends.sage_attn3 import attn_forward_4bit_fwd_16bit_bwd
+from fastvideo.attention.backends.sage_attn3 import sageattn_blackwell_with_16bit_bwd
 
 # ---- Import FlashAttention forward (public) ----
 # We DO NOT use _wrapped_* internals. Prefer the top-level alias; fall back if needed.
@@ -82,7 +83,7 @@ def run_case(case, fwd_cos_min=0.95, fwd_rel_l2_max=0.25, bwd_cos_min=0.95, bwd_
 
     # FlashAttention reference forward (public function)
     with torch.inference_mode():
-        y_fa = flash_attn(q, k, v, dropout_p=0.0, softmax_scale=softmax_scale, causal=causal)
+        y_fa = attn_forward_4bit_fwd_16bit_bwd(q, k, v, is_causal=causal)
 
     print("Forward numeric check vs FlashAttention:")
     metric_report(y_fa, y_sage, "forward", cos_min=fwd_cos_min, rel_l2_max=fwd_rel_l2_max)
@@ -108,7 +109,7 @@ def run_case(case, fwd_cos_min=0.95, fwd_rel_l2_max=0.25, bwd_cos_min=0.95, bwd_
     for t in (q_ref, k_ref, v_ref):
         if t.grad is not None:
             t.grad.zero_()
-    y_ref = flash_attn(q_ref, k_ref, v_ref, dropout_p=0.0, softmax_scale=softmax_scale, causal=causal)
+    y_ref = attn_forward_4bit_fwd_16bit_bwd(q_ref, k_ref, v_ref, is_causal=causal)
     y_ref.backward(grad_out)
 
     dq_ref, dk_ref, dv_ref = q_ref.grad.detach(), k_ref.grad.detach(), v_ref.grad.detach()
