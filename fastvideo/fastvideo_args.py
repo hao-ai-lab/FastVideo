@@ -160,6 +160,8 @@ class FastVideoArgs:
         "vae": True,
     })
     override_transformer_cls_name: str | None = None
+    init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
+    init_weights_from_safetensors_2: str = ""  # path to safetensors file for initial weight loading for transformer_2
 
     # # DMD parameters
     # dmd_denoising_steps: List[int] | None = field(default=None)
@@ -411,6 +413,14 @@ class FastVideoArgs:
             default=FastVideoArgs.override_transformer_cls_name,
             help="Override transformer cls name",
         )
+        parser.add_argument(
+            "--init-weights-from-safetensors",
+            type=str,
+            help="Path to safetensors file for initial weight loading")
+        parser.add_argument(
+            "--init-weights-from-safetensors-2",
+            type=str,
+            help="Path to safetensors file for initial weight loading")
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)
 
@@ -659,8 +669,6 @@ class TrainingArgs(FastVideoArgs):
     output_dir: str = ""
     checkpoints_total_limit: int = 0
     resume_from_checkpoint: str = ""  # specify the checkpoint folder to resume from
-    init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
-    init_weights_from_safetensors_2: str = ""  # path to safetensors file for initial weight loading for transformer_2
 
     # optimizer & scheduler
     num_train_epochs: int = 0
@@ -917,14 +925,6 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--resume-from-checkpoint",
                             type=str,
                             help="Path to checkpoint to resume from")
-        parser.add_argument(
-            "--init-weights-from-safetensors",
-            type=str,
-            help="Path to safetensors file for initial weight loading")
-        parser.add_argument(
-            "--init-weights-from-safetensors-2",
-            type=str,
-            help="Path to safetensors file for initial weight loading")
         parser.add_argument("--logging-dir",
                             type=str,
                             help="Directory for logging")

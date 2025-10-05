@@ -438,7 +438,6 @@ class TransformerLoader(ComponentLoader):
         # Check if we should use custom initialization weights
         custom_weights_path = getattr(fastvideo_args, 'init_weights_from_safetensors', None)
         use_custom_weights = (custom_weights_path and os.path.exists(custom_weights_path) and 
-                            fastvideo_args.training_mode and 
                             not hasattr(fastvideo_args, '_loading_teacher_critic_model'))
 
         if use_custom_weights:
