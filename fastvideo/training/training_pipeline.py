@@ -107,6 +107,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         assert self.seed is not None, "seed must be set"
         set_random_seed(self.seed)
         self.transformer.train()
+        self.transformer.requires_grad_(True)
         if training_args.enable_gradient_checkpointing_type is not None:
             self.transformer = apply_activation_checkpointing(
                 self.transformer,
@@ -242,6 +243,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         """Disable training mode and gradients for the specified model."""
         for param in model.parameters():
             param.requires_grad = False
+        model.eval()
         optimizer.zero_grad(set_to_none=True)
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
@@ -357,6 +359,20 @@ class TrainingPipeline(LoRAPipeline, ABC):
         #     pass
 
         indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
+        # timestep = self.noise_scheduler.timesteps[indices].to(device=device)
+
+        # if timestep < self.training_args.boundary_ratio * self.noise_scheduler.config.num_train_timesteps:
+        #     self.train_transformer_2 = True
+        # else:
+        #     self.train_transformer_2 = False
+
+        # # Broadcast the decision to all processes
+        # decision = torch.tensor(1.0 if self.train_transformer_2 else 0.0,
+        #                         device=self.device)
+        # dist.broadcast(decision, src=0)
+        # dist.broadcast(timestep, src=0)
+        # self.train_transformer_2 = decision.item() == 1.0
+
         return self.noise_scheduler.timesteps[indices].to(device=device)
 
     def _build_attention_metadata(
