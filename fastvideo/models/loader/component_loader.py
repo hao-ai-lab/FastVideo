@@ -462,6 +462,7 @@ class TransformerLoader(ComponentLoader):
         logger.info("Loading model from %s, default_dtype: %s", cls_name,
                     default_dtype)
         assert fastvideo_args.hsdp_shard_dim is not None
+        logger.info("Loading model with dit_cpu_offload: %s", fastvideo_args.dit_cpu_offload)
         model = maybe_load_fsdp_model(
             model_cls=model_cls,
             init_params={

@@ -274,7 +274,7 @@ class DenoisingStage(PipelineStage):
                     current_guidance_scale = batch.guidance_scale
                 else:
                     # low-noise stage in wan2.2
-                    if fastvideo_args.dit_cpu_offload and next(
+                    if fastvideo_args.dit_cpu_offload and self.transformer_2 is not None and next(
                             self.transformer.parameters(
                             )).device.type == 'cuda':
                         self.transformer.to('cpu')

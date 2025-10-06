@@ -107,6 +107,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         assert self.seed is not None, "seed must be set"
         set_random_seed(self.seed)
         self.transformer.train()
+        self.transformer.requires_grad_(True)
         if training_args.enable_gradient_checkpointing_type is not None:
             self.transformer = apply_activation_checkpointing(
                 self.transformer,
@@ -242,7 +243,14 @@ class TrainingPipeline(LoRAPipeline, ABC):
         """Disable training mode and gradients for the specified model."""
         for param in model.parameters():
             param.requires_grad = False
+        model.eval()
         optimizer.zero_grad(set_to_none=True)
+
+    def _get_moe_timestep_type(self, timestep: torch.Tensor) -> str:
+        if timestep.item() < self.boundary_timestep:
+            return "low"  # low noise
+        else:
+            return "high"  # high noise
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         batch = next(self.train_loader_iter, None)  # type: ignore
@@ -355,10 +363,26 @@ class TrainingPipeline(LoRAPipeline, ABC):
         if self.train_transformer_2:
             u = (1 - boundary_ratio
                  ) + u * boundary_ratio  # min: 1 - boundary_ratio, max: 1
-        elif self.transformer_2 is not None:
-            u = u * (1 - boundary_ratio)  # min: 0, max: 1 - boundary_ratio
+        # elif self.transformer_2 is not None:
+        #     u = u * (1 - boundary_ratio)  # min: 0, max: 1 - boundary_ratio
+        # else:  # patch for now to align with non-MoE timestep logic
+        #     pass
 
         indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
+        # timestep = self.noise_scheduler.timesteps[indices].to(device=device)
+
+        # if timestep < self.training_args.boundary_ratio * self.noise_scheduler.config.num_train_timesteps:
+        #     self.train_transformer_2 = True
+        # else:
+        #     self.train_transformer_2 = False
+
+        # # Broadcast the decision to all processes
+        # decision = torch.tensor(1.0 if self.train_transformer_2 else 0.0,
+        #                         device=self.device)
+        # dist.broadcast(decision, src=0)
+        # dist.broadcast(timestep, src=0)
+        # self.train_transformer_2 = decision.item() == 1.0
+
         return self.noise_scheduler.timesteps[indices].to(device=device)
 
     def _build_attention_metadata(
@@ -633,7 +657,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     },
                     step=step,
                 )
-            if step % self.training_args.checkpointing_steps == 0:
+            if step % self.training_args.training_state_checkpointing_steps == 0:
                 save_checkpoint(self.transformer, self.global_rank,
                                 self.training_args.output_dir, step,
                                 self.optimizer, self.train_dataloader,

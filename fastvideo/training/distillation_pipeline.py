@@ -615,7 +615,11 @@ class DistillationPipeline(TrainingPipeline):
             noisy_latent, timestep, training_batch.conditional_dict,
             training_batch)
 
-        pred_noise = self.transformer(**training_batch.input_kwargs).permute(
+        if self.transformer_2 is not None and self.train_transformer_2:
+            current_transformer = self.transformer_2
+        else:
+            current_transformer = self.transformer
+        pred_noise = current_transformer(**training_batch.input_kwargs).permute(
             0, 2, 1, 3, 4)
         pred_video = pred_noise_to_pred_video(
             pred_noise=pred_noise.flatten(0, 1),
@@ -662,13 +666,17 @@ class DistillationPipeline(TrainingPipeline):
             with torch.no_grad():
                 for step_idx in range(max_target_idx):
                     current_timestep = self.denoising_step_list[step_idx]
+                    if self.transformer_2 is not None and current_timestep < self.boundary_timestep:
+                        current_transformer = self.transformer_2
+                    else:
+                        current_transformer = self.transformer
                     current_timestep_tensor = current_timestep * torch.ones(
                         1, device=self.device, dtype=torch.long)
                     # Run student model to get flow prediction
                     training_batch_temp = self._build_distill_input_kwargs(
                         current_noise_latents, current_timestep_tensor,
                         training_batch.conditional_dict, training_batch)
-                    pred_flow = self.transformer(
+                    pred_flow = current_transformer(
                         **training_batch_temp.input_kwargs).permute(
                             0, 2, 1, 3, 4)
                     pred_clean = pred_noise_to_pred_video(
@@ -711,8 +719,12 @@ class DistillationPipeline(TrainingPipeline):
         training_batch = self._build_distill_input_kwargs(
             noisy_input, target_timestep, training_batch.conditional_dict,
             training_batch)
-        pred_noise = self.transformer(**training_batch.input_kwargs).permute(
-            0, 2, 1, 3, 4)
+        if self.transformer_2 is not None:
+            pred_noise = self.transformer_2(
+                **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
+        else:
+            pred_noise = self.transformer(
+                **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
         pred_video = pred_noise_to_pred_video(
             pred_noise=pred_noise.flatten(0, 1),
             noise_input_latent=noisy_input.flatten(0, 1),
@@ -722,8 +734,10 @@ class DistillationPipeline(TrainingPipeline):
             "generator_timestep"] = target_timestep.float().detach()
         return pred_video
 
-    def _dmd_forward(self, generator_pred_video: torch.Tensor,
-                     training_batch: TrainingBatch) -> torch.Tensor:
+    def _dmd_forward(self,
+                     generator_pred_video: torch.Tensor,
+                     training_batch: TrainingBatch,
+                     exit_timestep: int | None = None) -> torch.Tensor:
         """Compute DMD (Diffusion Model Distillation) loss."""
         original_latent = generator_pred_video
         with torch.no_grad():
@@ -741,6 +755,11 @@ class DistillationPipeline(TrainingPipeline):
                 self.num_train_timestep)
 
             timestep = timestep.clamp(self.min_timestep, self.max_timestep)
+
+            timestep_type = self._get_moe_timestep_type(timestep)
+            exit_timestep_type = self._get_moe_timestep_type(exit_timestep)
+            if timestep_type != exit_timestep_type:
+                return 0.0
 
             noise = torch.randn(self.video_latent_shape,
                                 device=self.device,
@@ -918,7 +937,7 @@ class DistillationPipeline(TrainingPipeline):
 
     def _prepare_dit_inputs(self,
                             training_batch: TrainingBatch) -> TrainingBatch:
-        super()._prepare_dit_inputs(training_batch)
+        # super()._prepare_dit_inputs(training_batch, prepare_timesteps=prepare_timesteps)
         conditional_dict = {
             "encoder_hidden_states": training_batch.encoder_hidden_states,
             "encoder_attention_mask": training_batch.encoder_attention_mask,
@@ -929,10 +948,17 @@ class DistillationPipeline(TrainingPipeline):
                 "encoder_attention_mask": self.negative_prompt_attention_mask,
             }
             training_batch.unconditional_dict = unconditional_dict
+        else:
+            unconditional_dict = {
+                "encoder_hidden_states": training_batch.encoder_hidden_states,
+                "encoder_attention_mask": training_batch.encoder_attention_mask,
+            }
+            training_batch.unconditional_dict = unconditional_dict
 
         training_batch.dmd_latent_vis_dict = {}
         training_batch.fake_score_latent_vis_dict = {}
 
+        training_batch.timesteps = 0
         training_batch.conditional_dict = conditional_dict
         training_batch.raw_latent_shape = training_batch.latents.shape
         training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
@@ -967,6 +993,8 @@ class DistillationPipeline(TrainingPipeline):
             batches.append(batch)
 
         self.optimizer.zero_grad()
+        if self.transformer_2 is not None:
+            self.optimizer_2.zero_grad()
         total_dmd_loss = 0.0
         dmd_latent_vis_dict = {}
         fake_score_latent_vis_dict = {}
@@ -997,12 +1025,20 @@ class DistillationPipeline(TrainingPipeline):
                 total_dmd_loss += dmd_loss.detach().item()
 
             # Only clip gradients for the model that is currently training
-            self._clip_model_grad_norm_(batch_gen, self.transformer)
-            for param in self.transformer.parameters():
-                # check if the gradient is not None and not zero
-                assert param.grad is not None and param.grad.abs().sum() > 0
-            self.optimizer.step()
-            self.optimizer.zero_grad(set_to_none=True)
+            if self.transformer_2 is not None and self.train_transformer_2:
+                self._clip_model_grad_norm_(batch_gen, self.transformer_2)
+                for param in self.transformer_2.parameters():
+                    # check if the gradient is not None and not zero
+                    assert param.grad is not None and param.grad.abs().sum() > 0
+                self.optimizer_2.step()
+                self.optimizer_2.zero_grad(set_to_none=True)
+            else:
+                self._clip_model_grad_norm_(batch_gen, self.transformer)
+                for param in self.transformer.parameters():
+                    # check if the gradient is not None and not zero
+                    assert param.grad is not None and param.grad.abs().sum() > 0
+                self.optimizer.step()
+                self.optimizer.zero_grad(set_to_none=True)
 
             if self.generator_ema is not None:
                 self.generator_ema.update(self.transformer)

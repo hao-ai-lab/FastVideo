@@ -22,6 +22,7 @@ export NODE_RANK=$SLURM_PROCID
 nodes=( $(scontrol show hostnames $SLURM_JOB_NODELIST) )
 export MASTER_ADDR=${nodes[0]}
 export TOKENIZERS_PARALLELISM=false
+# export WANDB_API_KEY="8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde"
 export WANDB_API_KEY="2f25ad37933894dbf0966c838c0b8494987f9f2f"
 # export WANDB_API_KEY='your_wandb_api_key_here'
 export WANDB_BASE_URL="https://api.wandb.ai"
@@ -67,8 +68,8 @@ training_args=(
   --num_frame_per_block 3  # Frame generation block size for self-forcing
   --enable_gradient_masking
   --gradient_mask_last_n_frames 21
-  --init_weights_from_safetensors /mnt/sharefs/users/hao.zhang/wl/models/sf_ode_init_wan22_checkpoints/high/3k/
-  --init_weights_from_safetensors_2 /mnt/sharefs/users/hao.zhang/wl/models/sf_ode_init_wan22_checkpoints/low/3k/
+  # --init_weights_from_safetensors /mnt/sharefs/users/hao.zhang/wl/models/sf_ode_init_wan22_checkpoints/high/3k/
+  # --init_weights_from_safetensors_2 /mnt/sharefs/users/hao.zhang/wl/models/sf_ode_init_wan22_checkpoints/low/3k/
   # --init_weights_from_safetensors /mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors
 )
 
