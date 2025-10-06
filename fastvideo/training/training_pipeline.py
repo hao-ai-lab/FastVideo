@@ -308,7 +308,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 if self.transformer_2 is not None:
                     self._disable_training(self.transformer_2, self.optimizer_2)
         else:
-            timesteps = 0 # Fill in a dummy value
+            timesteps = 0  # Fill in a dummy value
 
         if self.training_args.sp_size > 1:
             # Make sure that the timesteps are the same across all sp processes.

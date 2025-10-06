@@ -741,8 +741,22 @@ class DistillationPipeline(TrainingPipeline):
         """Compute DMD (Diffusion Model Distillation) loss."""
         original_latent = generator_pred_video
         with torch.no_grad():
-            timestep = torch.randint(0,
-                                     self.num_train_timestep, [1],
+            # MoE logic
+            if exit_timestep is not None and self.boundary_timestep is not None:
+                exit_timestep_type = self._get_moe_timestep_type(exit_timestep)
+                if exit_timestep_type == "low":
+                    start_timestep = 0
+                    end_timestep = self.boundary_timestep
+                else:
+                    start_timestep = self.boundary_timestep
+                    end_timestep = self.num_train_timestep
+            # non-MoE logic
+            else:
+                start_timestep = 0
+                end_timestep = self.num_train_timestep
+
+            timestep = torch.randint(start_timestep,
+                                     end_timestep, [1],
                                      device=self.device,
                                      dtype=torch.long)
             world_group = get_world_group()
@@ -754,12 +768,11 @@ class DistillationPipeline(TrainingPipeline):
                 self.timestep_shift,  # type: ignore
                 self.num_train_timestep)
 
-            timestep = timestep.clamp(self.min_timestep, self.max_timestep)
+            # Ensure shifted timestep stays within the selected MoE noise range
+            if exit_timestep is not None and self.boundary_timestep is not None:
+                timestep = timestep.clamp(start_timestep, end_timestep - 1)
 
-            timestep_type = self._get_moe_timestep_type(timestep)
-            exit_timestep_type = self._get_moe_timestep_type(exit_timestep)
-            if timestep_type != exit_timestep_type:
-                return 0.0
+            timestep = timestep.clamp(self.min_timestep, self.max_timestep)
 
             noise = torch.randn(self.video_latent_shape,
                                 device=self.device,

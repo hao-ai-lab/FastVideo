@@ -842,9 +842,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             world_group.all_reduce(avg_generator_loss,
                                    op=torch.distributed.ReduceOp.AVG)
             training_batch.generator_loss = avg_generator_loss.item()
-            # training_batch.fake_score_loss = 0
-            # training_batch.total_loss = training_batch.generator_loss
-            # return training_batch
         else:
             training_batch.generator_loss = 0.0
 
