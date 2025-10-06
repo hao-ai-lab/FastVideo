@@ -260,6 +260,7 @@ class DistillationPipeline(TrainingPipeline):
                                 self.num_train_timestep)
 
         self.real_score_guidance_scale = self.training_args.real_score_guidance_scale
+        self.real_score_guidance_scale_2 = self.training_args.real_score_guidance_scale_2
 
         self.generator_ema: EMA_FSDP | None = None
         self.generator_ema_2: EMA_FSDP | None = None
@@ -541,6 +542,15 @@ class DistillationPipeline(TrainingPipeline):
             self.generator_ema_2.decay = original_decay_2
             logger.info("EMA_2 reset completed")
 
+    def _get_real_score_guidance_scale(self, timestep: torch.Tensor):
+        """
+        Get the appropriate real score guidance scale based on timestep and boundary logic.
+        """
+        if self.boundary_timestep is not None:
+            if timestep.item() < self.boundary_timestep:
+                return self.real_score_guidance_scale_2
+        return self.real_score_guidance_scale
+
     def _get_real_score_transformer(self, timestep: torch.Tensor):
         """
         Get the appropriate real score transformer based on timestep and boundary logic.
@@ -732,15 +742,28 @@ class DistillationPipeline(TrainingPipeline):
             scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
         training_batch.dmd_latent_vis_dict[
             "generator_timestep"] = target_timestep.float().detach()
-        return pred_video
+        return pred_video, target_timestep
 
     def _dmd_forward(self, generator_pred_video: torch.Tensor,
-                     training_batch: TrainingBatch) -> torch.Tensor:
+                     training_batch: TrainingBatch,
+                     exit_timestep: int) -> torch.Tensor:
         """Compute DMD (Diffusion Model Distillation) loss."""
         original_latent = generator_pred_video
         with torch.no_grad():
-            timestep = torch.randint(0,
-                                     self.num_train_timestep, [1],
+            # Detect whether we're doing MoE DMD
+            if self.boundary_timestep is not None:
+                if exit_timestep < self.boundary_timestep:
+                    start_timestep = 0
+                    end_timestep = self.boundary_timestep
+                else:
+                    start_timestep = self.boundary_timestep
+                    end_timestep = self.num_train_timestep
+            else:
+                start_timestep = 0
+                end_timestep = self.num_train_timestep
+
+            timestep = torch.randint(start_timestep,
+                                     end_timestep, [1],
                                      device=self.device,
                                      dtype=torch.long)
             world_group = get_world_group()
@@ -750,7 +773,8 @@ class DistillationPipeline(TrainingPipeline):
             timestep = shift_timestep(
                 timestep,
                 self.timestep_shift,  # type: ignore
-                self.num_train_timestep)
+                min_timestep=start_timestep,
+                max_timestep=end_timestep)
 
             timestep = timestep.clamp(self.min_timestep, self.max_timestep)
 
@@ -817,7 +841,7 @@ class DistillationPipeline(TrainingPipeline):
 
             real_score_pred_video = pred_real_video_cond + (
                 pred_real_video_cond -
-                pred_real_video_uncond) * self.real_score_guidance_scale
+                pred_real_video_uncond) * self._get_real_score_guidance_scale(timestep)
 
             grad = (faker_score_pred_video - real_score_pred_video) / torch.abs(
                 original_latent - real_score_pred_video).mean()
@@ -849,13 +873,26 @@ class DistillationPipeline(TrainingPipeline):
                 current_timestep=training_batch.timesteps,
                 attn_metadata=training_batch.attn_metadata_vsa):
             if self.training_args.simulate_generator_forward:
-                generator_pred_video = self._generator_multi_step_simulation_forward(
+                generator_pred_video, exit_timestep = self._generator_multi_step_simulation_forward(
                     training_batch)
             else:
                 generator_pred_video = self._generator_forward(training_batch)
 
-        fake_score_timestep = torch.randint(0,
-                                            self.num_train_timestep, [1],
+        # Detect whether we're doing MoE DMD
+        # If yes, then we need to use the appropriate timestep range
+        if self.boundary_timestep is not None:
+            if exit_timestep < self.boundary_timestep:
+                start_timestep = 0
+                end_timestep = self.boundary_timestep
+            else:
+                start_timestep = self.boundary_timestep
+                end_timestep = self.num_train_timestep
+        else:
+            start_timestep = 0
+            end_timestep = self.num_train_timestep
+
+        fake_score_timestep = torch.randint(start_timestep,
+                                            end_timestep, [1],
                                             device=self.device,
                                             dtype=torch.long)
         world_group = get_world_group()
@@ -865,7 +902,8 @@ class DistillationPipeline(TrainingPipeline):
         fake_score_timestep = shift_timestep(
             fake_score_timestep,
             self.timestep_shift,  # type: ignore
-            self.num_train_timestep)
+            min_timestep=start_timestep,
+            max_timestep=end_timestep)
 
         fake_score_timestep = fake_score_timestep.clamp(self.min_timestep,
                                                         self.max_timestep)
