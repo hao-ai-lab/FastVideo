@@ -19,6 +19,7 @@ import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, fields, is_dataclass
 from functools import lru_cache, partial, wraps
+from pathlib import Path
 from typing import Any, TypeVar, cast
 
 import cloudpickle
@@ -904,3 +905,73 @@ def save_decoded_latents_as_video(decoded_latents: list[torch.Tensor],
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     imageio.mimsave(output_path, frames, fps=fps, format="mp4")
+
+
+def _format_bytes(num_bytes: int | float | None) -> str:
+    if num_bytes is None:
+        return "N/A"
+    return f"{num_bytes / (1024 ** 3):.2f} GB"
+
+
+def log_torch_cuda_memory(
+        tag: str | None = None,
+        *,
+        log_fn: Callable[[str], None] | None = None,
+        log_file_path: str | os.PathLike[str] | None = "memory_trace.txt"
+) -> None:
+    """Log CUDA memory statistics via logger and append to a trace file."""
+
+    log_fn = log_fn or logger.info
+    prefix = f"[{tag}] " if tag else ""
+
+    if not torch.cuda.is_available():
+        message = f"{prefix}CUDA not available on this host."
+        log_fn(message)
+        _append_to_memory_trace(message, log_file_path)
+        return
+
+    try:
+        device_index = torch.cuda.current_device()
+        device_name = torch.cuda.get_device_name(device_index)
+        allocated = torch.cuda.memory_allocated(device_index)
+        reserved = torch.cuda.memory_reserved(device_index)
+        max_allocated = torch.cuda.max_memory_allocated(device_index)
+        max_reserved = torch.cuda.max_memory_reserved(device_index)
+        free_mem, total_mem = torch.cuda.mem_get_info(device_index)
+    except Exception as exc:  # noqa: BLE001
+        message = f"{prefix}Unable to query CUDA memory stats: {exc}"
+        log_fn(message)
+        _append_to_memory_trace(message, log_file_path)
+        return
+
+    used_mem = total_mem - free_mem
+
+    stats = [
+        f"device={device_name} (index={device_index})",
+        f"allocated={_format_bytes(allocated)}",
+        f"reserved={_format_bytes(reserved)}",
+        f"max_allocated={_format_bytes(max_allocated)}",
+        f"max_reserved={_format_bytes(max_reserved)}",
+        f"used={_format_bytes(used_mem)}",
+        f"free={_format_bytes(free_mem)}",
+        f"total={_format_bytes(total_mem)}",
+    ]
+
+    message = f"{prefix}CUDA memory stats: {' | '.join(stats)}"
+    log_fn(message)
+    _append_to_memory_trace(message, log_file_path)
+
+
+def _append_to_memory_trace(
+        message: str, log_file_path: str | os.PathLike[str] | None) -> None:
+    if not log_file_path:
+        return
+
+    try:
+        path = Path(log_file_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as outfile:
+            outfile.write(message + "\n")
+    except Exception:  # noqa: BLE001
+        # Avoid raising/logging recursively if writing to the file fails.
+        pass

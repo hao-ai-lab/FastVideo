@@ -1725,5 +1725,10 @@ class DistillationPipeline(TrainingPipeline):
             self.save_ema_weights(self.training_args.output_dir,
                                   self.training_args.max_train_steps)
 
+        if envs.FASTVIDEO_TORCH_PROFILER_DIR:
+            logger.info("Stopping profiler...")
+            self.profiler_controller.stop()
+            logger.info("Profiler stopped.")
+
         if get_sp_group():
             cleanup_dist_env_and_memory()

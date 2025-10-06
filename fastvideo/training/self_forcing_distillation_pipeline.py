@@ -26,6 +26,7 @@ from fastvideo.training.distillation_pipeline import DistillationPipeline
 from fastvideo.training.training_utils import (EMA_FSDP,
                                                save_distillation_checkpoint)
 from fastvideo.utils import is_vsa_available, set_random_seed
+from fastvideo.profiler import profile_region
 
 logger = init_logger(__name__)
 
@@ -940,6 +941,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         if self.global_rank == 0:
             wandb.log(wandb_loss_dict, step=step)
 
+    @profile_region("profiler_region_training_train")
     def train(self) -> None:
         """Main training loop with self-forcing specific logging."""
         assert self.training_args.seed is not None, "seed must be set"
@@ -1220,6 +1222,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         if self.training_args.use_ema and self.is_ema_ready():
             self.save_ema_weights(self.training_args.output_dir,
                                   self.training_args.max_train_steps)
+
+        if envs.FASTVIDEO_TORCH_PROFILER_DIR:
+            logger.info("Stopping profiler...")
+            self.profiler_controller.stop()
+            logger.info("Profiler stopped.")
 
         if get_sp_group():
             cleanup_dist_env_and_memory()
