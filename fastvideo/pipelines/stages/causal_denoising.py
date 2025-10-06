@@ -1,4 +1,5 @@
 import torch  # type: ignore
+import gc
 
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -363,6 +364,11 @@ class CausalDMDDenosingStage(DenoisingStage):
                         **pos_cond_kwargs,
                     )
                 start_index += current_num_frames
+
+        del kv_cache1
+        del crossattn_cache
+        gc.collect()
+        torch.cuda.empty_cache()
 
         batch.latents = latents
         return batch

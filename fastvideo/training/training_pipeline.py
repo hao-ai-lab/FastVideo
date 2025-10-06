@@ -236,7 +236,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         for param in model.parameters():
             param.requires_grad = True
         model.train()
-        optimizer.zero_grad()
+        # optimizer.zero_grad()
 
     def _disable_training(self, model: torch.nn.Module,
                           optimizer: torch.optim.Optimizer) -> None:
@@ -244,7 +244,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         for param in model.parameters():
             param.requires_grad = False
         model.eval()
-        optimizer.zero_grad(set_to_none=True)
+        # optimizer.zero_grad(set_to_none=True)
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         batch = next(self.train_loader_iter, None)  # type: ignore

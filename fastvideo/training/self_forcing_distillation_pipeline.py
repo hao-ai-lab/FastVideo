@@ -155,14 +155,15 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         with set_forward_context(
                 current_timestep=training_batch.timesteps,
                 attn_metadata=training_batch.attn_metadata_vsa):
-            generator_pred_video = self._generator_multi_step_simulation_forward(
+            generator_pred_video, exit_timestep = self._generator_multi_step_simulation_forward(
                 training_batch, exit_flags=exit_flags)
 
         with set_forward_context(current_timestep=training_batch.timesteps,
                                  attn_metadata=training_batch.attn_metadata):
             dmd_loss = self._dmd_forward(
                 generator_pred_video=generator_pred_video,
-                training_batch=training_batch)
+                training_batch=training_batch,
+                exit_timestep=exit_timestep)
 
         log_dict = {
             "dmdtrain_gradient_norm": torch.tensor(0.0, device=self.device)
@@ -320,6 +321,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             exit_flags = self.generate_and_sync_list(len(all_num_frames),
                                                  num_denoising_steps,
                                                  device=noise.device)
+        exit_timestep = self.denoising_step_list[exit_flags[0]]
+
         start_gradient_frame_index = max(0, num_output_frames - 21)
 
         for block_index, current_num_frames in enumerate(all_num_frames):
@@ -561,7 +564,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         # assert crossattn_cache is not None
         # self._reset_simulation_caches(self.kv_cache1, self.crossattn_cache)
 
-        return final_output if gradient_mask is not None else pred_image_or_video
+        return final_output, exit_timestep if gradient_mask is not None else pred_image_or_video, exit_timestep
     def _initialize_simulation_caches(
         self,
         batch_size: int,
@@ -784,7 +787,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             grad_sum += p.grad.sum().item()
                         else:
                             raise ValueError("Transformer 2 param %s has no gradient", n)
-                    logger.info("Transformer 2 gradient sum for all params %s", grad_sum)
+                    assert grad_sum != 0, "Transformer 2 did not receive gradients"
                 else:
                     assert all(p.grad is None for p in self.transformer_2.parameters())
                     grad_sum = 0
@@ -793,7 +796,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             grad_sum += p.grad.sum().item()
                         else:
                             raise ValueError("Transformer param %s has no gradient", n)
-                    logger.info("Transformer gradient sum for all params %s", grad_sum)
+                    assert grad_sum != 0, "Transformer did not receive gradients"
 
                 total_generator_loss += generator_loss.detach().item()
                 generator_log_dict.update(gen_log_dict)
@@ -839,6 +842,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         logger.debug("Training critic at step %s", self.current_trainstep)
         self.fake_score_optimizer.zero_grad()
+        if self.fake_score_transformer_2 is not None:
+            self.fake_score_optimizer_2.zero_grad()
         total_critic_loss = 0.0
         critic_log_dict = {}
 
@@ -863,6 +868,26 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             with set_forward_context(current_timestep=batch_critic.timesteps,
                                      attn_metadata=batch_critic.attn_metadata):
                 (critic_loss / gradient_accumulation_steps).backward()
+
+            if self.train_fake_score_transformer_2:
+                assert all(p.grad is None for p in self.fake_score_transformer.parameters())
+                grad_sum = 0
+                for n, p in self.fake_score_transformer_2.named_parameters():
+                    if p.grad is not None:
+                        grad_sum += p.grad.sum().item()
+                    else:
+                        raise ValueError("Fake score transformer 2 param %s has no gradient", n)
+                assert grad_sum != 0, "Fake score transformer 2 did not receive gradients"
+            else:
+                assert all(p.grad is None for p in self.fake_score_transformer_2.parameters())
+                grad_sum = 0
+                for n, p in self.fake_score_transformer.named_parameters():
+                    if p.grad is not None:
+                        grad_sum += p.grad.sum().item()
+                    else:
+                        raise ValueError("Fake score transformer param %s has no gradient", n)
+                assert grad_sum != 0, "Fake score transformer did not receive gradients"
+
             total_critic_loss += critic_loss.detach().item()
             critic_log_dict.update(crit_log_dict)
             # Store visualization data from critic training

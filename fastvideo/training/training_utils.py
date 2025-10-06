@@ -1152,14 +1152,14 @@ def custom_to_hf_state_dict(
 
     return new_state_dict
 
-
+# More generalized version of shift_timestep
 def shift_timestep(timestep: torch.Tensor, shift: float,
-                   num_train_timestep: float) -> torch.Tensor:
+                   min_timestep: int = 0, max_timestep: int = 1000) -> torch.Tensor:
     if shift == 1:
         return timestep
-    t = timestep / num_train_timestep
+    t = (timestep - min_timestep) / (max_timestep - min_timestep)
     denominator = 1 + (shift - 1) * t
-    return num_train_timestep * (shift * t / denominator)
+    return min_timestep + (max_timestep - min_timestep) * (shift * t / denominator)
 
 
 # coding=utf-8

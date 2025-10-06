@@ -717,6 +717,7 @@ class TrainingArgs(FastVideoArgs):
     min_timestep_ratio: float = 0.2
     max_timestep_ratio: float = 0.98
     real_score_guidance_scale: float = 3.5
+    real_score_guidance_scale_2: float = 3.5
     fake_score_learning_rate: float = 0.0  # separate learning rate for fake_score_transformer, if 0.0, use learning_rate
     fake_score_lr_scheduler: str = "constant"  # separate lr scheduler for fake_score_transformer, if not set, use lr_scheduler
     fake_score_betas: str = "0.9,0.999"  # betas for fake score optimizer, format: "beta1,beta2"
@@ -1101,6 +1102,10 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--real-score-guidance-scale",
                             type=float,
                             default=TrainingArgs.real_score_guidance_scale,
+                            help="Teacher guidance scale")
+        parser.add_argument("--real-score-guidance-scale-2",
+                            type=float,
+                            default=TrainingArgs.real_score_guidance_scale_2,
                             help="Teacher guidance scale")
         parser.add_argument("--fake-score-learning-rate",
                             type=float,

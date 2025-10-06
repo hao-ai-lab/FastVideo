@@ -1,14 +1,14 @@
 #!/bin/bash
-#SBATCH --job-name=moe_sf_distill
+#SBATCH --job-name=moe_4n_sf_distill
 #SBATCH --partition=main
-#SBATCH --nodes=2
-#SBATCH --ntasks=2
+#SBATCH --nodes=4
+#SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
-#SBATCH --output=moe_sf_distill_output/moe_sf_distill_%j.out
-#SBATCH --error=moe_sf_distill_output/moe_sf_distill_%j.err
+#SBATCH --output=moe_4n_sf_distill_output/moe_sf_distill_%j.out
+#SBATCH --error=moe_4n_sf_distill_output/moe_sf_distill_%j.err
 #SBATCH --exclusive
 
 # Basic Info
@@ -35,16 +35,16 @@ export HOME="/mnt/weka/home/hao.zhang/wei"
 
 # Configs
 NUM_GPUS=8
-NUM_TOTAL_GPUS=16
+NUM_TOTAL_GPUS=32
 
 # Model paths for Self-Forcing DMD distillation with Wan2.2:
 # GENERATOR_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers"
 GENERATOR_MODEL_PATH="rand0nmr/SFWan2.2-T2V-A14B-Diffusers"  # Updated to Wan2.2
-# REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers" # Teacher model
-# FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers" # Critic model
+REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers" # Teacher model
+FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers" # Critic model
 # GENERATOR_MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers" # Updated to Wan2.2
-REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Teacher model
-FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers" # Critic model
+# REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Teacher model
+# FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers" # Critic model
 
 # DATA_DIR="data/test-text-preprocessing/Node_0_GPU_1_File_1/combined_parquet_dataset/"
 DATA_DIR="/mnt/weka/home/hao.zhang/matthew/FastVideo/data/test-text-preprocessing"
@@ -62,7 +62,7 @@ training_args=(
   --max_train_steps 4000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
+  --gradient_accumulation_steps 2
   --num_latent_t 21
   --num_height 448  # Updated to match Wan2.2 config
   --num_width 832   # Updated to match Wan2.2 config
@@ -73,8 +73,8 @@ training_args=(
   --num_frame_per_block 3  # Frame generation block size for self-forcing
   --enable_gradient_masking
   --gradient_mask_last_n_frames 21
-  # --init_weights_from_safetensors /mnt/sharefs/users/hao.zhang/wl/models/sf_ode_init_wan22_checkpoints/high/3k/
-  # --init_weights_from_safetensors_2 /mnt/sharefs/users/hao.zhang/wl/models/sf_ode_init_wan22_checkpoints/low/3k/
+  --init_weights_from_safetensors /mnt/sharefs/users/hao.zhang/wl/models/sf_ode_init_wan22_checkpoints/high/3k/
+  --init_weights_from_safetensors_2 /mnt/sharefs/users/hao.zhang/wl/models/sf_ode_init_wan22_checkpoints/low/3k/
   # --init_weights_from_safetensors /mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors
 )
 
@@ -99,21 +99,21 @@ dataset_args=(
 )
 
 validation_args=(
-  # --log_validation
+  --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 20
-  --validation_sampling_steps "4"
+  --validation_steps 40
+  --validation_sampling_steps "8"
   --validation_guidance_scale "6.0" # not used for dmd inference
 )
 
 optimizer_args=(
-  --learning_rate 1e-5
+  --learning_rate 2e-6
   --mixed_precision "bf16"
   --training_state_checkpointing_steps 500
   --weight_only_checkpointing_steps 500
   --weight_decay 0.01
   --betas '0.0,0.999'
-  --max_grad_norm 1.0
+  --max_grad_norm 10.0
 )
 
 miscellaneous_args=(
@@ -121,20 +121,21 @@ miscellaneous_args=(
   --checkpoints_total_limit 3
   --training_cfg_rate 0.0
   --dit_precision "fp32"
-  --flow_shift 5
+  --flow_shift 12
   --seed 1000
   --use_ema True
   --ema_decay 0.99
-  --ema_start_step 20
+  --ema_start_step 200
 )
 
 dmd_args=(
-  --dmd_denoising_steps '1000,750,500,250'
+  --dmd_denoising_steps '1000,850,700,550,350,275,200,125'
   --min_timestep_ratio 0.02
   --max_timestep_ratio 0.98
   --dfake_gen_update_ratio 5
-  --real_score_guidance_scale 3.0
-  --fake_score_learning_rate 8e-6
+  --real_score_guidance_scale 4.0
+  --real_score_guidance_scale_2 3.0
+  --fake_score_learning_rate 4e-7
   --fake_score_betas '0.0,0.999'
   --warp_denoising_step
 )
