@@ -7,7 +7,7 @@ import time
 from abc import abstractmethod
 from collections import deque
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, Tuple
 
 import imageio
 import numpy as np
@@ -640,7 +640,9 @@ class DistillationPipeline(TrainingPipeline):
         return pred_video
 
     def _generator_multi_step_simulation_forward(
-            self, training_batch: TrainingBatch) -> torch.Tensor:
+            self,
+            training_batch: TrainingBatch,
+            exit_flags: list[int] | None = None) -> Tuple[torch.Tensor, float]:
         """Forward pass through student transformer matching inference procedure."""
         latents = training_batch.latents
         dtype = latents.dtype
@@ -742,11 +744,11 @@ class DistillationPipeline(TrainingPipeline):
             scheduler=self.noise_scheduler).unflatten(0, pred_noise.shape[:2])
         training_batch.dmd_latent_vis_dict[
             "generator_timestep"] = target_timestep.float().detach()
-        return pred_video, target_timestep
+        return pred_video, target_timestep.item()
 
     def _dmd_forward(self, generator_pred_video: torch.Tensor,
                      training_batch: TrainingBatch,
-                     exit_timestep: int) -> torch.Tensor:
+                     exit_timestep: float) -> torch.Tensor:
         """Compute DMD (Diffusion Model Distillation) loss."""
         original_latent = generator_pred_video
         with torch.no_grad():
@@ -754,9 +756,9 @@ class DistillationPipeline(TrainingPipeline):
             if self.boundary_timestep is not None:
                 if exit_timestep < self.boundary_timestep:
                     start_timestep = 0
-                    end_timestep = self.boundary_timestep
+                    end_timestep = int(self.boundary_timestep)
                 else:
-                    start_timestep = self.boundary_timestep
+                    start_timestep = int(self.boundary_timestep)
                     end_timestep = self.num_train_timestep
             else:
                 start_timestep = 0
@@ -883,9 +885,9 @@ class DistillationPipeline(TrainingPipeline):
         if self.boundary_timestep is not None:
             if exit_timestep < self.boundary_timestep:
                 start_timestep = 0
-                end_timestep = self.boundary_timestep
+                end_timestep = int(self.boundary_timestep)
             else:
-                start_timestep = self.boundary_timestep
+                start_timestep = int(self.boundary_timestep)
                 end_timestep = self.num_train_timestep
         else:
             start_timestep = 0
@@ -1037,7 +1039,7 @@ class DistillationPipeline(TrainingPipeline):
                         current_timestep=batch_gen.timesteps,
                         attn_metadata=batch_gen.attn_metadata_vsa):
                     if self.training_args.simulate_generator_forward:
-                        generator_pred_video = self._generator_multi_step_simulation_forward(
+                        generator_pred_video, exit_timestep = self._generator_multi_step_simulation_forward(
                             batch_gen)
                     else:
                         generator_pred_video = self._generator_forward(
@@ -1047,7 +1049,8 @@ class DistillationPipeline(TrainingPipeline):
                                          attn_metadata=batch_gen.attn_metadata):
                     dmd_loss = self._dmd_forward(
                         generator_pred_video=generator_pred_video,
-                        training_batch=batch_gen)
+                        training_batch=batch_gen,
+                        exit_timestep=exit_timestep)
 
                 with set_forward_context(
                         current_timestep=batch_gen.timesteps,

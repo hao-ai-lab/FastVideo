@@ -2,7 +2,7 @@
 import copy
 import time
 from collections import deque
-from typing import Any
+from typing import Any, Tuple
 import gc
 
 import numpy as np
@@ -133,8 +133,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         if self.boundary_timestep is not None and self.transformer_2 is not None:
             assert self.same_step_across_blocks, "same_step_across_blocks must be True for MoE generator. Otherwise we might need to train both transformers which will cause OOM"
             exit_flags = self.generate_and_sync_list(1, len(self.denoising_step_list), training_batch.latents.device)
-            exit_timestep = self.denoising_step_list[exit_flags[0]]
-            logger.info("Exit timestep in generator_loss(): %s", exit_timestep)
+            exit_timestep = self.denoising_step_list[exit_flags[0]].item()
+            # logger.info("Exit timestep in generator_loss(): %s", exit_timestep)
             if exit_timestep < self.boundary_timestep:
                 self.train_transformer_2 = True
                 self._enable_training(self.transformer_2, self.optimizer_2)
@@ -198,8 +198,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
     def _generator_multi_step_simulation_forward(
             self,
             training_batch: TrainingBatch,
-            return_sim_steps: bool = False,
-            exit_flags: list[int] | None = None) -> torch.Tensor:
+            exit_flags: list[int] | None = None) -> Tuple[torch.Tensor, float]:
         """Forward pass through student transformer matching inference procedure with KV cache management.
         
         This function is adapted from the reference self-forcing implementation's inference_with_trajectory
@@ -321,7 +320,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             exit_flags = self.generate_and_sync_list(len(all_num_frames),
                                                  num_denoising_steps,
                                                  device=noise.device)
-        exit_timestep = self.denoising_step_list[exit_flags[0]]
+        exit_timestep = self.denoising_step_list[exit_flags[0]].item()
 
         start_gradient_frame_index = max(0, num_output_frames - 21)
 
@@ -564,7 +563,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         # assert crossattn_cache is not None
         # self._reset_simulation_caches(self.kv_cache1, self.crossattn_cache)
 
-        return final_output, exit_timestep if gradient_mask is not None else pred_image_or_video, exit_timestep
+        if gradient_mask is not None:
+            return final_output, exit_timestep
+        else:
+            return pred_image_or_video, exit_timestep
+
     def _initialize_simulation_caches(
         self,
         batch_size: int,
