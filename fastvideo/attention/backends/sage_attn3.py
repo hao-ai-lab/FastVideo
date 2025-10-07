@@ -116,18 +116,19 @@ def sage_attn_qk_torch(q, k, per_block_mean=False):
     p = torch.softmax(qk, dim=-1)
     return p.unsqueeze(0)
 
-def attn_backward_16bit(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, p, is_causal=False):
+def attn_backward_16bit(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal=False):
     assert is_causal == False
     q, k, v, o, do = q_BLHD.transpose(1 ,2).contiguous(), k_BLHD.transpose(1 ,2).contiguous(), v_BLHD.transpose(1 ,2).contiguous(), out_BLHD.transpose(1 ,2).contiguous(), grad_out_BLHD.transpose(1 ,2).contiguous()
     B, H, _, D = q.shape
-    # p = sage_attn_qk_torch(q, k, per_block_mean=False).to(do.dtype)
+    p = sage_attn_qk_torch(q, k, per_block_mean=False).to(do.dtype)
     dV = p.transpose(-2, -1) @ do  # [B,H,L,D]
 
     dP = do @ v.transpose(-2, -1)  # [B,H,L,L]
 
     # do_dot_o = (do.float() * o.float()).sum(dim=-1, keepdim=True).to(dP.dtype)  # [B,H,L,1]
-    do_dot_o = (do * o).sum(dim=-1, keepdim=True)  # [B,H,L,1]
-    dS = p * (dP - do_dot_o)  # [B,H,L,L]
+    # do_dot_o = (do * o).sum(dim=-1, keepdim=True)  # [B,H,L,1]
+    dp_dot_p = (dP * p).sum(dim=-1, keepdim=True)  # [B,H,L,1]
+    dS = p * (dP - dp_dot_p)  # [B,H,L,L]
 
 
     dQ = (dS @ k) / torch.sqrt(torch.tensor(D, device=q.device, dtype=q.dtype))            # [B,H,L,D]
@@ -185,7 +186,7 @@ def flash_attn_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_caus
     )
     return dq_BLHD, dk_BLHD, dv_BLHD, None, None
 
-USE_TORCH_4BIT_FWD = True
+USE_TORCH_4BIT_FWD = False
 USE_TORCH_16BIT_BWD = True
 class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
     @staticmethod
@@ -215,17 +216,17 @@ class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
 
         # Back to BLHD; keep for FA bwd
         out_BLHD = out_BHLD.permute(0, 2, 1, 3).contiguous()
-        ctx.save_for_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, p)
+        ctx.save_for_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD)
 
         return out_BLHD
 
     @staticmethod
     def backward(ctx, grad_out_BLHD):
-        q_BLHD, k_BLHD, v_BLHD, out_BLHD, p = ctx.saved_tensors
+        q_BLHD, k_BLHD, v_BLHD, out_BLHD = ctx.saved_tensors
         is_causal = ctx.is_causal
 
         if USE_TORCH_16BIT_BWD:
-            return attn_backward_16bit(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, p, is_causal)
+            return attn_backward_16bit(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal)
         else:
             return flash_attn_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal)
 
@@ -291,6 +292,6 @@ class SageAttention3Impl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        # output = sageattn_blackwell_with_16bit_bwd(query, key, value, is_causal=self.causal)
-        output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
+        output = sageattn_blackwell_with_16bit_bwd(query, key, value, is_causal=self.causal)
+        # output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
         return output

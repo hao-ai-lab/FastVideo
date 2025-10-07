@@ -928,91 +928,85 @@ class TrainingPipeline(LoRAPipeline, ABC):
         num_sp_groups = world_group.world_size // self.sp_group.world_size
 
         # Process each validation prompt for each validation step
-        for num_inference_steps in validation_steps:
-            logger.info("rank: %s: num_inference_steps: %s",
-                        self.global_rank,
-                        num_inference_steps,
-                        local_main_process_only=False)
-            step_videos: list[np.ndarray] = []
-            step_captions: list[str] = []
+        # for num_inference_steps in validation_steps:
+        #     logger.info("rank: %s: num_inference_steps: %s",
+        #                 self.global_rank,
+        #                 num_inference_steps,
+        #                 local_main_process_only=False)
+        #     step_videos: list[np.ndarray] = []
+        #     step_captions: list[str] = []
 
-            for validation_batch in validation_dataloader:
-                batch = self._prepare_validation_batch(sampling_param,
-                                                       training_args,
-                                                       validation_batch,
-                                                       num_inference_steps)
-                logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
-                            self.global_rank,
-                            self.rank_in_sp_group,
-                            batch.prompt,
-                            local_main_process_only=False)
+        #     for validation_batch in validation_dataloader:
+        #         batch = self._prepare_validation_batch(sampling_param,
+        #                                                training_args,
+        #                                                validation_batch,
+        #                                                num_inference_steps)
+        #         logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
+        #                     self.global_rank,
+        #                     self.rank_in_sp_group,
+        #                     batch.prompt,
+        #                     local_main_process_only=False)
 
-                assert batch.prompt is not None and isinstance(
-                    batch.prompt, str)
-                step_captions.append(batch.prompt)
+        #         assert batch.prompt is not None and isinstance(
+        #             batch.prompt, str)
+        #         step_captions.append(batch.prompt)
 
-                # Run validation inference
-                output_batch = self.validation_pipeline.forward(
-                    batch, training_args)
-                samples = output_batch.output
+        #         # Run validation inference
+        #         output_batch = self.validation_pipeline.forward(
+        #             batch, training_args)
+        #         samples = output_batch.output
 
-                if self.rank_in_sp_group != 0:
-                    continue
+        #         if self.rank_in_sp_group != 0:
+        #             continue
 
-                # Process outputs
-                video = rearrange(samples, "b c t h w -> t b c h w")
-                frames = []
-                for x in video:
-                    x = torchvision.utils.make_grid(x, nrow=6)
-                    x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-                    frames.append((x * 255).numpy().astype(np.uint8))
-                step_videos.append(frames)
+        #         # Process outputs
+        #         video = rearrange(samples, "b c t h w -> t b c h w")
+        #         frames = []
+        #         for x in video:
+        #             x = torchvision.utils.make_grid(x, nrow=6)
+        #             x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+        #             frames.append((x * 255).numpy().astype(np.uint8))
+        #         step_videos.append(frames)
 
-            # Only sp_group leaders (rank_in_sp_group == 0) need to send their
-            # results to global rank 0
-            if self.rank_in_sp_group == 0:
-                if self.global_rank == 0:
-                    # Global rank 0 collects results from all sp_group leaders
-                    all_videos = step_videos  # Start with own results
-                    all_captions = step_captions
+        #     # Only sp_group leaders (rank_in_sp_group == 0) need to send their
+        #     # results to global rank 0
+        #     if self.rank_in_sp_group == 0:
+        #         if self.global_rank == 0:
+        #             # Global rank 0 collects results from all sp_group leaders
+        #             all_videos = step_videos  # Start with own results
+        #             all_captions = step_captions
 
-                    # Receive from other sp_group leaders
-                    for sp_group_idx in range(1, num_sp_groups):
-                        src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
-                        recv_videos = world_group.recv_object(src=src_rank)
-                        recv_captions = world_group.recv_object(src=src_rank)
-                        all_videos.extend(recv_videos)
-                        all_captions.extend(recv_captions)
+        #             # Receive from other sp_group leaders
+        #             for sp_group_idx in range(1, num_sp_groups):
+        #                 src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
+        #                 recv_videos = world_group.recv_object(src=src_rank)
+        #                 recv_captions = world_group.recv_object(src=src_rank)
+        #                 all_videos.extend(recv_videos)
+        #                 all_captions.extend(recv_captions)
 
-                    video_filenames = []
-                    for i, (video, caption) in enumerate(
-                            zip(all_videos, all_captions, strict=True)):
-                        os.makedirs(training_args.output_dir, exist_ok=True)
-                        filename = os.path.join(
-                            training_args.output_dir,
-                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
-                        )
-                        imageio.mimsave(filename, video, fps=sampling_param.fps)
-                        video_filenames.append(filename)
+        #             video_filenames = []
+        #             for i, (video, caption) in enumerate(
+        #                     zip(all_videos, all_captions, strict=True)):
+        #                 os.makedirs(training_args.output_dir, exist_ok=True)
+        #                 filename = os.path.join(
+        #                     training_args.output_dir,
+        #                     f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
+        #                 )
+        #                 imageio.mimsave(filename, video, fps=sampling_param.fps)
+        #                 video_filenames.append(filename)
 
-                    artifacts = []
-                    for filename, caption in zip(video_filenames,
-                                                 all_captions,
-                                                 strict=True):
-                        video_artifact = self.tracker.video(filename,
-                                                            caption=caption)
-                        if video_artifact is not None:
-                            artifacts.append(video_artifact)
-                    if artifacts:
-                        logs = {
-                            f"validation_videos_{num_inference_steps}_steps":
-                            artifacts
-                        }
-                        self.tracker.log_artifacts(logs, global_step)
-                else:
-                    # Other sp_group leaders send their results to global rank 0
-                    world_group.send_object(step_videos, dst=0)
-                    world_group.send_object(step_captions, dst=0)
+        #             logs = {
+        #                 f"validation_videos_{num_inference_steps}_steps": [
+        #                     wandb.Video(filename, caption=caption)
+        #                     for filename, caption in zip(
+        #                         video_filenames, all_captions, strict=True)
+        #                 ]
+        #             }
+        #             wandb.log(logs, step=global_step)
+        #         else:
+        #             # Other sp_group leaders send their results to global rank 0
+        #             world_group.send_object(step_videos, dst=0)
+        #             world_group.send_object(step_captions, dst=0)
 
         # Re-enable gradients for training
         training_args.inference_mode = False
