@@ -105,7 +105,7 @@ class WANV2VConfig(WanI2V480PConfig):
     image_encoder_config: EncoderConfig = field(
         default_factory=WAN2_1ControlCLIPVisionConfig)
     # CLIP encoder precision
-    image_encoder_precision = 'bf16'
+    image_encoder_precision: str = 'bf16'
 
 
 @dataclass

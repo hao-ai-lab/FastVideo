@@ -366,5 +366,5 @@ def preprocess_reference_image_for_clip(image: PIL.Image.Image, device: torch.de
     # Denormalize back to [0, 1] range
     denormalized_tensor = resized_tensor.mul_(0.5).add_(0.5)
 
-    return denormalized_tensor
+    return TF.to_pil_image(denormalized_tensor)
 

@@ -26,7 +26,7 @@ import filelock
 import imageio
 import numpy as np
 import torch
-import torchvision.utils.make_grid as make_grid
+import torchvision.utils as make_grid
 import torchvision.io as io
 import torchvision.transforms.v2 as transforms
 import yaml

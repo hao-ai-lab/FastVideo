@@ -177,7 +177,7 @@ class Wan2_2_I2V_A14B_SamplingParam(Wan2_2_Base_SamplingParam):
 
 @dataclass
 class Wan2_2_Fun_A14B_Control_SamplingParam(Wan2_1_Fun_1_3B_Control_SamplingParam):
-    num_frames = 81
+    num_frames: int = 81
 
 # =============================================
 # ============= Causal Self-Forcing =============

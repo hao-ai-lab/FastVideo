@@ -3,6 +3,7 @@ from fastvideo import VideoGenerator
 # from fastvideo.configs.sample import SamplingParam
 
 OUTPUT_PATH = "video_samples_wan2_1_Fun"
+OUTPUT_NAME = "wan2.1_test"
 def main():
     # FastVideo will automatically use the optimal default arguments for the
     # model.
@@ -26,10 +27,10 @@ def main():
     negative_prompt = "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
     # prompt                  = "A young woman with beautiful, clear eyes and blonde hair stands in the forest, wearing a white dress and a crown. Her expression is serene, reminiscent of a movie star, with fair and youthful skin. Her brown long hair flows in the wind. The video quality is very high, with a clear view. High quality, masterpiece, best quality, high resolution, ultra-fine, fantastical."
     # negative_prompt         = "Twisted body, limb deformities, text captions, comic, static, ugly, error, messy code."
-    image_path = "https://github.com/aigc-apps/VideoX-Fun/blob/main/asset/6.png"
+    image_path = "https://pai-aigc-photog.oss-cn-hangzhou.aliyuncs.com/wan_fun/asset_Wan2_2/v1.0/8.png"
     control_video_path = "https://pai-aigc-photog.oss-cn-hangzhou.aliyuncs.com/wan_fun/asset_Wan2_2/v1.0/pose.mp4"
 
-    video = generator.generate_video(prompt, negative_prompt=negative_prompt, image_path=image_path, control_video=control_video_path, output_path=OUTPUT_PATH, save_video=True, height=832, width=480, num_frames=81)
+    video = generator.generate_video(prompt, negative_prompt=negative_prompt, image_path=image_path, video_path=control_video_path, output_path=OUTPUT_PATH, output_video_name=OUTPUT_NAME, save_video=True)
 
 if __name__ == "__main__":
     main()
