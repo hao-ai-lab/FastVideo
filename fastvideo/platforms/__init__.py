@@ -69,13 +69,20 @@ def npu_platform_plugin() -> str | None:
 
     try:
         import torch
+        # 导入 torch_npu 以初始化 NPU 后端
+        import torch_npu  # noqa: F401
         if torch.npu.is_available():
             is_npu = True
             logger.info("NPU is available")
-        else:
-            logger.info("NPU is not available")
+    except ImportError:
+        logger.error(
+            "NPU detection failed: PyTorch or PyTorch_NPU is not installed")
+    except AttributeError:
+        logger.error(
+            "NPU detection failed: PyTorch has no 'npu' attribute (use Ascend-adapted PyTorch)"
+        )
     except Exception as e:
-        logger.info("NPU detection failed: %s", e)
+        logger.error("NPU detection failed: unknown error - %s", str(e))
 
     return "fastvideo.platforms.npu.NPUPlatform" if is_npu else None
 

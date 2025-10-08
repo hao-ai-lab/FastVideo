@@ -7,7 +7,7 @@ pynvml. However, it should not initialize cuda context.
 import os
 from collections.abc import Callable
 from functools import lru_cache, wraps
-from typing import Any, TypeVar
+from typing import TypeVar
 
 import torch
 from typing_extensions import ParamSpec
@@ -108,7 +108,7 @@ class CudaPlatformBase(Platform):
         return float(torch.cuda.max_memory_allocated(device))
 
     @classmethod
-    def get_torch_device(cls) -> Any:
+    def get_torch_device(cls):
         """
         Return torch.cuda
         """

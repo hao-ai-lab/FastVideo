@@ -1,6 +1,5 @@
 import gc
 from datetime import timedelta
-from typing import Any
 
 import torch
 from torch.distributed import ProcessGroup
@@ -92,7 +91,7 @@ class NPUPlatform(Platform):
         return True
 
     @classmethod
-    def get_torch_device(cls) -> Any:
+    def get_torch_device(cls):
         """
         Return torch.npu
         """
