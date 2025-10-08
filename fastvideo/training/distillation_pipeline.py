@@ -885,7 +885,8 @@ class DistillationPipeline(TrainingPipeline):
         if self.boundary_timestep is not None:
             if exit_timestep < self.boundary_timestep:
                 start_timestep = 0
-                end_timestep = int(self.boundary_timestep)
+                end_timestep = self.num_train_timestep
+                # end_timestep = int(self.boundary_timestep)
             else:
                 start_timestep = int(self.boundary_timestep)
                 end_timestep = self.num_train_timestep

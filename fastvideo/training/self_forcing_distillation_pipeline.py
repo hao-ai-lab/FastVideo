@@ -442,7 +442,18 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                    current_num_frames] = denoised_pred
 
             # Step 3.3: rerun with timestep zero to update the cache
-            context_timestep = torch.ones_like(timestep) * self.context_noise
+            if self.boundary_timestep is not None:
+                if exit_timestep < self.boundary_timestep:
+                    context_timestep = torch.ones_like(timestep) * self.context_noise
+                    current_model = self.transformer_2
+                else:
+                    # For high noise expert, the context timestep should be the boundary timestep
+                    context_timestep = torch.ones_like(timestep) * self.boundary_timestep
+                    current_model = self.transformer
+            else:
+                context_timestep = torch.ones_like(timestep) * self.context_noise
+                current_model = self.transformer
+
             denoised_pred = self.noise_scheduler.add_noise(
                 denoised_pred.flatten(0, 1),
                 torch.randn_like(denoised_pred.flatten(0, 1)),
@@ -454,7 +465,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     training_batch.conditional_dict, training_batch)
 
                 # context_timestep is 0 so we use transformer_2
-                current_model = self.transformer_2 if self.transformer_2 is not None else self.transformer
+                # current_model = self.transformer_2 if self.transformer_2 is not None else self.transformer
                 current_model(
                     hidden_states=training_batch_temp.
                     input_kwargs['hidden_states'],
@@ -556,9 +567,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 min_num_frames, dtype=torch.float32, device=self.device)
 
         # Clean up caches - properly free GPU memory
-        self._cleanup_simulation_caches(kv_cache1, crossattn_cache)
-        gc.collect()
-        torch.cuda.empty_cache()
+        # self._cleanup_simulation_caches(kv_cache1, crossattn_cache)
+        # gc.collect()
+        # torch.cuda.empty_cache()
         # assert kv_cache1 is not None
         # assert crossattn_cache is not None
         # self._reset_simulation_caches(self.kv_cache1, self.crossattn_cache)
