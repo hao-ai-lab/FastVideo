@@ -246,6 +246,7 @@ class TrainingBatch:
     fake_score_loss: float = 0.0
 
     dmd_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
+    latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     fake_score_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
 
 

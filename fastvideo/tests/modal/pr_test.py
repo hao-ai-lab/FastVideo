@@ -62,7 +62,7 @@ def run_test(pytest_command: str):
     
     sys.exit(result.returncode)
 
-@app.function(gpu="L40S:1", image=image, timeout=900)
+@app.function(gpu="H100:1", image=image, timeout=900)
 def run_encoder_tests():
     run_test("pytest ./fastvideo/tests/encoders -vs")
 
@@ -117,6 +117,10 @@ def run_inference_lora_tests():
 @app.function(gpu="L40S:2", image=image, timeout=900)
 def run_distill_dmd_tests():
     run_test("pytest ./fastvideo/tests/training/distill/test_distill_dmd.py -vs")
+
+@app.function(gpu="L40S:2", image=image, timeout=900, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
+def run_self_forcing_tests():
+    run_test("wandb login $WANDB_API_KEY && pytest ./fastvideo/tests/training/self-forcing/test_self_forcing.py -vs")
 
 @app.function(gpu="L40S:1", image=image, timeout=900)
 def run_unit_test():

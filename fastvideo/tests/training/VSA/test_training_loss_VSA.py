@@ -46,7 +46,8 @@ def run_worker():
         "--max_train_steps", "5",
         "--learning_rate", "1e-5",
         "--mixed_precision", "bf16",
-        "--checkpointing_steps", "30",
+        "--weight_only_checkpointing_steps", "30",
+        "--training_state_checkpointing_steps", "30",
         "--validation_steps", "10",
         "--validation_sampling_steps", "50",
         "--log_validation",
@@ -110,7 +111,7 @@ def test_distributed_training():
         'avg_step_time': 1.0,
         'grad_norm': 0.1,
         'step_time': 1.0,
-        'train_loss': 0.001
+        'train_loss': 0.005
     }
 
     failures = []

@@ -39,15 +39,18 @@ echo "NODE_RANK: $NODE_RANK"
 # Configs
 NUM_GPUS=8
 MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"
+REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"
+FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"
 DATA_DIR=your_data_dir
 VALIDATION_DATASET_FILE=your_validation_dataset_file
+OUTPUT_DIR="checkpoints/wan_t2v_finetune"
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
   --tracker_project_name wan_t2v_distill_dmd_VSA
-  --output_dir "checkpoints/wan_t2v_finetune"
+  --output_dir "$OUTPUT_DIR"
   --max_train_steps 4000
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -72,6 +75,8 @@ parallel_args=(
 model_args=(
   --model_path $MODEL_PATH
   --pretrained_model_name_or_path $MODEL_PATH
+  --real_score_model_path $REAL_SCORE_MODEL_PATH
+  --fake_score_model_path $FAKE_SCORE_MODEL_PATH
 )
 
 # Dataset arguments
@@ -91,7 +96,7 @@ validation_args=(
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 1e-5
+  --learning_rate 2e-6
   --mixed_precision "bf16"
   --training_state_checkpointing_steps 500
   --weight_only_checkpointing_steps 500

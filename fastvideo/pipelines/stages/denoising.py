@@ -85,8 +85,9 @@ class DenoisingStage(PipelineStage):
                 AttentionBackendEnum.SLIDING_TILE_ATTN,
                 AttentionBackendEnum.VIDEO_SPARSE_ATTN,
                 AttentionBackendEnum.VMOBA_ATTN,
-                AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA
-            )  # hack
+                AttentionBackendEnum.FLASH_ATTN,
+                AttentionBackendEnum.TORCH_SDPA,
+                AttentionBackendEnum.SAGE_ATTN_THREE)  # hack
         )
 
     def forward(
