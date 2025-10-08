@@ -202,12 +202,20 @@ def get_or_create_profiler(trace_dir: str | None) -> TorchProfilerController:
     logger.info("FASTVIDEO_TORCH_PROFILE_REGIONS=%s",
                 envs.FASTVIDEO_TORCH_PROFILE_REGIONS)
 
+    def trace_handler(prof):
+    # print(prof.key_averages().table(
+    #     sort_by="self_cuda_time_total", row_limit=-1))
+        logger.info("Profiling trace saved to: %s", "test_trace_" + str(prof.step_num) + ".json")
+        prof.export_chrome_trace("test2_trace_" + str(prof.step_num) + ".json")
+
     profiler = torch.profiler.profile(
         activities=_DEFAULT_ACTIVITIES,
         record_shapes=envs.FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES,
         profile_memory=envs.FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY,
         with_stack=envs.FASTVIDEO_TORCH_PROFILER_WITH_STACK,
         with_flops=envs.FASTVIDEO_TORCH_PROFILER_WITH_FLOPS,
+        schedule=torch.profiler.schedule(wait=2, warmup=1, active=2),
+        # on_trace_ready=trace_handler,
         on_trace_ready=torch.profiler.tensorboard_trace_handler(trace_dir,
                                                                 use_gzip=True),
     )

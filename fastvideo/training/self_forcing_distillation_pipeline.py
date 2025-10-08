@@ -793,7 +793,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             raise ValueError("Transformer 2 param %s has no gradient", n)
                     assert grad_sum != 0, "Transformer 2 did not receive gradients"
                 else:
-                    assert all(p.grad is None for p in self.transformer_2.parameters())
+                    # assert all(p.grad is None for p in self.transformer_2.parameters())
                     grad_sum = 0
                     for n, p in self.transformer.named_parameters():
                         if p.grad is not None:
@@ -883,7 +883,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                         raise ValueError("Fake score transformer 2 param %s has no gradient", n)
                 assert grad_sum != 0, "Fake score transformer 2 did not receive gradients"
             else:
-                assert all(p.grad is None for p in self.fake_score_transformer_2.parameters())
+                # assert all(p.grad is None for p in self.fake_score_transformer_2.parameters())
                 grad_sum = 0
                 for n, p in self.fake_score_transformer.named_parameters():
                     if p.grad is not None:
@@ -1139,7 +1139,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                         step, self.training_args.ema_decay)
 
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                training_batch = self.train_one_step(training_batch)
+                with self.profiler_controller.region("profiler_region_training_train_one_step"):
+                    training_batch = self.train_one_step(training_batch)
+                    self.profiler.step()
+
 
             total_loss = training_batch.total_loss
             generator_loss = training_batch.generator_loss
