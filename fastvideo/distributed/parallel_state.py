@@ -965,9 +965,9 @@ def get_local_torch_device() -> torch.device:
     if current_platform.is_npu():
         device = torch.device(f"npu:{envs.LOCAL_RANK}")
     elif current_platform.is_cuda_alike() or current_platform.is_cuda():
-        torch.device(f"cuda:{envs.LOCAL_RANK}")
+        device = torch.device(f"cuda:{envs.LOCAL_RANK}")
     else:
-        torch.device("mps")
+        device = torch.device("mps")
     return device
 
 
