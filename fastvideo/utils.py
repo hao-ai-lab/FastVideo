@@ -10,6 +10,7 @@ import inspect
 import ipaddress
 import json
 import math
+import multiprocessing
 import os
 import signal
 import socket
@@ -22,7 +23,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, fields, is_dataclass
 from functools import lru_cache, partial, wraps
 from pathlib import Path
-from typing import Any, TypeVar, cast
+from typing import Any, Optional, TextIO, TypeVar, cast
 
 import cloudpickle
 import filelock
@@ -40,6 +41,7 @@ from torch.distributed.fsdp import MixedPrecisionPolicy
 
 import fastvideo.envs as envs
 from fastvideo.logger import init_logger
+from fastvideo.worker.ray_utils import is_in_ray_actor
 
 logger = init_logger(__name__)
 
@@ -59,7 +61,7 @@ STR_ATTN_CONFIG_ENV_VAR: str = "FASTVIDEO_ATTENTION_CONFIG"
 
 def find_nccl_library() -> str:
     """
-    We either use the library file specified by the `VLLM_NCCL_SO_PATH`
+    We either use the library file specified by the `FASTVIDEO_NCCL_SO_PATH`
     environment variable, or we find the library file brought by PyTorch.
     After importing `torch`, `libnccl.so.2` or `librccl.so.1` can be
     found by `ctypes` automatically.
@@ -1034,6 +1036,33 @@ def get_ip() -> str:
     return "0.0.0.0"
 
 
+def test_loopback_bind(address, family):
+    try:
+        s = socket.socket(family, socket.SOCK_DGRAM)
+        s.bind((address, 0))  # Port 0 = auto assign
+        s.close()
+        return True
+    except OSError:
+        return False
+
+
+def get_loopback_ip() -> str:
+    loopback_ip = envs.FASTVIDEO_LOOPBACK_IP
+    if loopback_ip:
+        return loopback_ip
+
+    # VLLM_LOOPBACK_IP is not set, try to get it based on network interface
+
+    if test_loopback_bind("127.0.0.1", socket.AF_INET):
+        return "127.0.0.1"
+    elif test_loopback_bind("::1", socket.AF_INET6):
+        return "::1"
+    else:
+        raise RuntimeError(
+            "Neither 127.0.0.1 nor ::1 are bound to a local interface. "
+            "Set the VLLM_LOOPBACK_IP environment variable explicitly.")
+
+
 def is_valid_ipv6_address(address: str) -> bool:
     try:
         ipaddress.IPv6Address(address)
@@ -1053,9 +1082,7 @@ def get_tcp_uri(ip: str, port: int) -> str:
         return f"tcp://{ip}:{port}"
 
 
-def get_open_port() -> int:
-    # port = envs.FASTVIDEO_PORT
-    port = None
+def get_open_port(port: int | None = None) -> int:
     if port is not None:
         while True:
             try:
@@ -1076,3 +1103,102 @@ def get_open_port() -> int:
         with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
             s.bind(("", 0))
             return s.getsockname()[1]
+
+def cuda_is_initialized() -> bool:
+    """Check if CUDA is initialized."""
+    if not torch.cuda._is_compiled():
+        return False
+    return torch.cuda.is_initialized()
+
+
+def xpu_is_initialized() -> bool:
+    """Check if XPU is initialized."""
+    if not torch.xpu._is_compiled():
+        return False
+    return torch.xpu.is_initialized()
+
+def maybe_force_spawn():
+    """Check if we need to force the use of the `spawn` multiprocessing start
+    method.
+    """
+    if os.environ.get("FASTVIDEO_WORKER_MULTIPROC_METHOD") == "spawn":
+        return
+
+    reasons = []
+    if is_in_ray_actor():
+        # even if we choose to spawn, we need to pass the ray address
+        # to the subprocess so that it knows how to connect to the ray cluster.
+        # env vars are inherited by subprocesses, even if we use spawn.
+        import ray
+        os.environ["RAY_ADDRESS"] = ray.get_runtime_context().gcs_address
+        reasons.append("In a Ray actor and can only be spawned")
+
+    if cuda_is_initialized():
+        reasons.append("CUDA is initialized")
+    elif xpu_is_initialized():
+        reasons.append("XPU is initialized")
+
+    if reasons:
+        logger.warning(
+            "We must use the `spawn` multiprocessing start method. "
+            "Overriding FASTVIDEO_WORKER_MULTIPROC_METHOD to 'spawn'. "
+            "Reasons: %s", "; ".join(reasons))
+        os.environ["FASTVIDEO_WORKER_MULTIPROC_METHOD"] = "spawn"
+
+
+def get_mp_context():
+    """Get a multiprocessing context with a particular method (spawn or fork).
+    By default we follow the value of the FASTVIDEO_WORKER_MULTIPROC_METHOD to
+    determine the multiprocessing method (default is fork). However, under
+    certain conditions, we may enforce spawn and override the value of
+    FASTVIDEO_WORKER_MULTIPROC_METHOD.
+    """
+    maybe_force_spawn()
+    mp_method = envs.FASTVIDEO_WORKER_MULTIPROC_METHOD
+    return multiprocessing.get_context(mp_method)
+
+# ANSI color codes
+CYAN = '\033[1;36m'
+RESET = '\033[0;0m'
+
+def _add_prefix(file: TextIO, worker_name: str, pid: int) -> None:
+    """Prepend each output line with process-specific prefix"""
+
+    prefix = f"{CYAN}({worker_name} pid={pid}){RESET} "
+    file_write = file.write
+
+    def write_with_prefix(s: str):
+        if not s:
+            return
+        if file.start_new_line:  # type: ignore[attr-defined]
+            file_write(prefix)
+        idx = 0
+        while (next_idx := s.find('\n', idx)) != -1:
+            next_idx += 1
+            file_write(s[idx:next_idx])
+            if next_idx == len(s):
+                file.start_new_line = True  # type: ignore[attr-defined]
+                return
+            file_write(prefix)
+            idx = next_idx
+        file_write(s[idx:])
+        file.start_new_line = False  # type: ignore[attr-defined]
+
+    file.start_new_line = True  # type: ignore[attr-defined]
+    file.write = write_with_prefix  # type: ignore[method-assign]
+
+def decorate_logs(process_name: Optional[str] = None) -> None:
+    """
+    Adds a process-specific prefix to each line of output written to stdout and
+    stderr.
+
+    Args:
+        process_name: Optional; the name of the process to use in the prefix.
+            If not provided, the current process name from the multiprocessing
+            context is used.
+    """
+    if process_name is None:
+        process_name = get_mp_context().current_process().name
+    pid = os.getpid()
+    _add_prefix(sys.stdout, process_name, pid)
+    _add_prefix(sys.stderr, process_name, pid)

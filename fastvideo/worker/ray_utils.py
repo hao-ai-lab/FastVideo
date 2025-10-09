@@ -1,8 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+# Adapt from https://github.com/vllm-project/vllm/blob/releases/v0.11.0/vllm/executor/ray_utils.py
+
 from collections import defaultdict
 import os
 import time
 
-from fastvideo.configs.parallel import ParallelConfig
+from fastvideo.platforms import current_platform
 from fastvideo.utils import get_ip
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.worker.gpu_worker import WorkerWrapperBase
@@ -23,9 +26,8 @@ try:
         from ray._private.state import state as _state
         available_resources_per_node = _state._available_resources_per_node
 
-    # TODO(xingyu): START FROM HERE!!!
     class RayWorkerWrapper(WorkerWrapperBase):
-        """Ray wrapper for vllm.worker.Worker, allowing Worker to be
+        """Ray wrapper for fastvideo.worker.Worker, allowing Worker to be
         lazily initialized after Ray sets CUDA_VISIBLE_DEVICES."""
 
         def __init__(self, *args, **kwargs) -> None:
@@ -42,8 +44,10 @@ try:
 
         def get_node_and_gpu_ids(self) -> tuple[str, list[int]]:
             node_id = ray.get_runtime_context().get_node_id()
-            # TODO(xingyu): hardcode this for now
-            device_key = "GPU"
+            device_key = current_platform.ray_device_key
+            if not device_key:
+                raise RuntimeError("current platform %s does not support ray.",
+                                   current_platform.device_name)
             gpu_ids = ray.get_runtime_context().get_accelerator_ids(
             )[device_key]
             return node_id, gpu_ids
@@ -92,7 +96,7 @@ def _verify_bundles(placement_group: "PlacementGroup",
             f"{node_id_to_bundle}. "
             "You don't have enough GPUs available in a current node. Check "
             "`ray status` and `ray list nodes` to see if you have available "
-            "GPUs in a node `{driver_node_id}` before starting an vLLM engine."
+            "GPUs in a node `{driver_node_id}` before starting an FastVideo engine."
         )
 
     for node_id, bundles in node_id_to_bundle.items():
@@ -135,7 +139,7 @@ def _wait_until_pg_ready(current_placement_group: "PlacementGroup"):
             "%d seconds. specs=%s. Check `ray status` and "
             "`ray list nodes` to see if you have enough resources,"
             " and make sure the IP addresses used by ray cluster"
-            " are the same as VLLM_HOST_IP environment variable"
+            " are the same as FASTVIDEO_HOST_IP environment variable"
             " specified in each node if you are running on a multi-node.",
             int(time.time() - s), placement_group_specs)
 
@@ -150,7 +154,6 @@ def _wait_until_pg_ready(current_placement_group: "PlacementGroup"):
 
 def initialize_ray_cluster(
     fastvideo_args: FastVideoArgs,
-    parallel_config: ParallelConfig,
     ray_address: str | None = None,
 ):
     """Initialize the distributed cluster with Ray.
@@ -191,9 +194,8 @@ def initialize_ray_cluster(
             "support ray.")
 
     # Create or get the placement group for worker processes
-    # TODO(xingyu): do we need the parallel_config?
-    if parallel_config.placement_group:
-        current_placement_group = parallel_config.placement_group 
+    if fastvideo_args.ray_placement_group:
+        current_placement_group = fastvideo_args.ray_placement_group 
     else:
         current_placement_group = ray.util.get_current_placement_group()
 
@@ -235,7 +237,7 @@ def initialize_ray_cluster(
             device_str: 1.0
         } for _ in range(fastvideo_args.num_gpus)])
 
-        # vLLM engine is also a worker to execute model with an accelerator,
+        # FastVideo engine is also a worker to execute model with an accelerator,
         # so it requires to have the device in a current node. Check if
         # the current node has at least one device.
         current_ip = get_ip()
@@ -258,6 +260,16 @@ def initialize_ray_cluster(
 
     assert current_placement_group is not None
     _verify_bundles(current_placement_group, fastvideo_args, device_str)
-    # Set the placement group in the parallel config
-    # TODO(xingyu): figure this out later
-    parallel_config.placement_group = current_placement_group
+    # Set the placement group in the fastvideo args
+    fastvideo_args.ray_placement_group = current_placement_group
+
+
+def is_in_ray_actor():
+    """Check if we are in a Ray actor."""
+
+    try:
+        import ray
+        return (ray.is_initialized()
+                and ray.get_runtime_context().get_actor_id() is not None)
+    except ImportError:
+        return False

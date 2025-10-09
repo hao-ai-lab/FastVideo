@@ -19,6 +19,7 @@ dependencies = [
     "six==1.16.0",
     "h5py==3.12.1",
     "requests>=2.32.2",
+
     # Machine Learning & Transformers
     "transformers>=4.46.1",
     "tokenizers>=0.20.1",
@@ -28,14 +29,17 @@ dependencies = [
     "diffusers>=0.33.1",
     "torch==2.7.1",
     "torchvision",
+
     # Acceleration & Optimization
     "accelerate==1.0.1",
+
     # Computer Vision & Image Processing
     "opencv-python==4.10.0.84",
     "pillow>=10.3.0",
     "imageio==2.36.0",
     "imageio-ffmpeg==0.5.1",
     "einops",
+
     # Experiment Tracking & Logging
     "wandb>=0.21.0",
     "loguru",
@@ -52,17 +56,21 @@ dependencies = [
     "aiohttp",
     "huggingface_hub",
     "cloudpickle",
+
     # System & Monitoring Tools
     "gpustat",
     "watch",
     "remote-pdb",
+
     # Kernel & Packaging
     "wheel",
+
     # Training Dependencies
     "torchdata",
     "pyarrow",
     "datasets==4.0.0",
     "av",
+
     # Preprocessing Dependencies
     "torchcodec==0.5.0",
     "ray>=2.49.1",

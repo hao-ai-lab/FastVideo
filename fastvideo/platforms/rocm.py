@@ -22,6 +22,7 @@ class RocmPlatform(Platform):
     device_name: str = "rocm"
     device_type: str = "cuda"  # torch uses 'cuda' backend string
     dispatch_key: str = "CUDA"
+    ray_device_key: str = "GPU"
     device_control_env_var: str = "CUDA_VISIBLE_DEVICES"
 
     @classmethod

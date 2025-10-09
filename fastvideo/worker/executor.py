@@ -16,7 +16,6 @@ class Executor(ABC):
 
     def __init__(self, fastvideo_args: FastVideoArgs):
         self.fastvideo_args = fastvideo_args
-        self.parallel_config = self.fastvideo_args.parallel_config
 
         self._init_executor()
 
@@ -24,8 +23,8 @@ class Executor(ABC):
     def _init_executor(self) -> None:
         raise NotImplementedError
 
-    @classmethod
-    def get_class(cls, fastvideo_args: FastVideoArgs) -> type["Executor"]:
+    @staticmethod
+    def get_class(fastvideo_args: FastVideoArgs) -> type["Executor"]:
         if fastvideo_args.distributed_executor_backend == "mp":
             from fastvideo.worker.multiproc_executor import MultiprocExecutor
             return cast(type["Executor"], MultiprocExecutor)
@@ -112,62 +111,62 @@ class Executor(ABC):
         """
         raise NotImplementedError
 
-class DistributedExecutorBase(Executor):
-    """Abstract superclass of distributed executor implementations."""
+# class DistributedExecutorBase(Executor):
+#     """Abstract superclass of distributed executor implementations."""
 
-    def __init__(self, *args, **kwargs):
-        # This is non-None when the execute model loop is running
-        # TODO(xingyu): check if we need the async
-        self.parallel_worker_tasks: Any | None = None
+#     def __init__(self, *args, **kwargs):
+#         # This is non-None when the execute model loop is running
+#         # TODO(xingyu): check if we need the async
+#         self.parallel_worker_tasks: Any | None = None
 
-        super().__init__(*args, **kwargs)
+#         super().__init__(*args, **kwargs)
 
-    def execute_forward(
-        self,
-        forward_batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
-    ) -> ForwardBatch:
-        ...
+#     def execute_forward(
+#         self,
+#         forward_batch: ForwardBatch,
+#         fastvideo_args: FastVideoArgs,
+#     ) -> ForwardBatch:
+#         ...
 
 
-    # @abstractmethod
-    # def _driver_execute_foward(
-    #     self, 
-    #     forward_batch: ForwardBatch,
-    #     fastvideo_args: FastVideoArgs,
-    # ) -> list[ForwardBatch]:
-    #     """Run execute_forward in the driver worker.
-    #
-    #     Passing None will cause the driver to stop the model execution loop
-    #     running in each of the remote workers. In this case, this method
-    #     returns None. Otherwise, this method returns the forward_batch.
-    #     """
-    #     raise NotImplementedError
+#     # @abstractmethod
+#     # def _driver_execute_foward(
+#     #     self, 
+#     #     forward_batch: ForwardBatch,
+#     #     fastvideo_args: FastVideoArgs,
+#     # ) -> list[ForwardBatch]:
+#     #     """Run execute_forward in the driver worker.
+#     #
+#     #     Passing None will cause the driver to stop the model execution loop
+#     #     running in each of the remote workers. In this case, this method
+#     #     returns None. Otherwise, this method returns the forward_batch.
+#     #     """
+#     #     raise NotImplementedError
 
-    def collective_rpc(self,
-                       method: str | Callable,
-                       timeout: float | None = None,
-                       args: tuple = (),
-                       kwargs: dict | None = None) -> list[Any]:
-        return self._run_workers(method, *args, **(kwargs or {}))
-        # if method == "set_lora_adapter":
-        #   return {"status": "lora_adapter_set"}
+#     def collective_rpc(self,
+#                        method: str | Callable,
+#                        timeout: float | None = None,
+#                        args: tuple = (),
+#                        kwargs: dict | None = None) -> list[Any]:
+#         return self._run_workers(method, *args, **(kwargs or {}))
+#         # if method == "set_lora_adapter":
+#         #   return {"status": "lora_adapter_set"}
 
-    @abstractmethod
-    def _run_workers(
-        self,
-        method: str | Callable,
-        *args,
-        async_run_tensor_parallel_workers_only: bool = False,
-        max_concurrent_workers: int | None = None,
-        **kwargs,
-    ) -> Any:
-        """Runs the given method on all workers."""
-        raise NotImplementedError
+#     @abstractmethod
+#     def _run_workers(
+#         self,
+#         method: str | Callable,
+#         *args,
+#         async_run_tensor_parallel_workers_only: bool = False,
+#         max_concurrent_workers: int | None = None,
+#         **kwargs,
+#     ) -> Any:
+#         """Runs the given method on all workers."""
+#         raise NotImplementedError
 
-    # @abstractmethod
-    # def _wait_for_tasks_completion(self, parallel_worker_tasks: Any) -> None:
-    #     """Wait for futures returned from _run_workers() with
-    #     async_run_remote_workers_only to complete."""
-    #     raise NotImplementedError
+#     # @abstractmethod
+#     # def _wait_for_tasks_completion(self, parallel_worker_tasks: Any) -> None:
+#     #     """Wait for futures returned from _run_workers() with
+#     #     async_run_remote_workers_only to complete."""
+#     #     raise NotImplementedError
 

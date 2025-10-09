@@ -96,7 +96,6 @@ class FastVideoArgs:
     # Cache strategy
     cache_strategy: str = "none"
 
-    parallel_config: ParallelConfig = field(default_factory=ParallelConfig)
     # Distributed executor backend
     distributed_executor_backend: str = "mp"
 

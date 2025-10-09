@@ -12,7 +12,7 @@ from collections.abc import Callable
 from fastvideo.utils import get_ip, get_distributed_init_method, get_open_port
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.worker.executor import DistributedExecutorBase
+from fastvideo.worker.executor import Executor
 from fastvideo.worker.ray_utils import (
     initialize_ray_cluster,
     RayWorkerWrapper,
@@ -29,7 +29,7 @@ else:
     ActorHandle = None
 
 if TYPE_CHECKING:
-    from ray.utils.placement_group import PlacementGroup
+    from ray.util.placement_group import PlacementGroup
 
 logger = init_logger(__name__)
 
@@ -48,14 +48,13 @@ class RayWorkerMetaData:
     ip: str = ""
 
 
-class RayDistributedExecutor(DistributedExecutorBase):
+class RayDistributedExecutor(Executor):
     """Ray-based distributed executor"""
 
     # These env vars are worker-specific, therefore are NOT copied
     # from the driver to the workers
     WORKER_SPECIFIC_ENV_VARS = {
         "FASTVIDEO_HOST_IP",
-        # "VLLM_HOST_PORT",
         "LOCAL_RANK",
         "CUDA_VISIBLE_DEVICES",
     }
@@ -64,8 +63,7 @@ class RayDistributedExecutor(DistributedExecutorBase):
     ADDITIONAL_ENV_VARS = {"HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"}
 
     def _init_executor(self) -> None:
-        self.parallel_config.world_size = self.fastvideo_args.num_gpus
-        initialize_ray_cluster(self.fastvideo_args, self.parallel_config)
+        initialize_ray_cluster(self.fastvideo_args)
         placement_group = self.parallel_config.placement_group
 
         # Disable Ray usage stats collection.
@@ -98,17 +96,12 @@ class RayDistributedExecutor(DistributedExecutorBase):
     ):
         num_gpus = envs.FASTVIDEO_RAY_PER_WORKER_GPUS
 
-        # The driver dummy worker does not actually use any resources.
-        # It holds the resource for the driver worker.
-        self.driver_dummy_worker: RayWorkerWrapper | None = None
         # The remaining workers are the actual ray actors.
         self.workers: list[RayWorkerWrapper] = []
 
         # Create the workers.
-        bundle_indices: list[int]
-        # TODO(xingyu): should we use bundle_indices from the user?
         # use the first N bundles that have GPU resources.
-        bundle_indices = []
+        bundle_indices: list[int] = []
         for bundle_id, bundle in enumerate(placement_group.bundle_specs):
             if bundle.get(current_platform.ray_device_key, 0):
                 bundle_indices.append(bundle_id)
@@ -158,30 +151,7 @@ class RayDistributedExecutor(DistributedExecutorBase):
         for each, ip in zip(worker_metadata, worker_ips, strict=False):
             each.ip = ip
 
-        # TODO(xingyu): assume we use all workers 
-        # for i, each in enumerate(worker_metadata):
-        #     # find and remove the dummy worker from the list
-        #     worker = each.worker
-        #     worker_ip = each.ip
-        #     if self.driver_dummy_worker is None and worker_ip == driver_ip:
-        #         # If the worker is on the same node as the driver, we use it
-        #         # as the resource holder for the driver process.
-        #         self.driver_dummy_worker = worker
-        #         self.driver_worker = RayWorkerWrapper(
-        #             fastvideo_args=self.fastvideo_args, rpc_rank=0
-        #         )
-        #         worker_metadata.pop(i)
-        #         break
-
-        logger.info("workers: %s", worker_metadata)
-        logger.info("driver_dummy_worker: %s", self.driver_dummy_worker)
-        # if self.driver_dummy_worker is None:
-        #     raise ValueError(
-        #         "Ray does not allocate any GPUs on the driver node."
-        #         f"Driver IP: {driver_ip}, worker IPs: {worker_ips}."
-        #         "Consider adjusting the Ray placement group or running "
-        #         "the driver on a GPU node."
-        #     )
+        logger.debug("workers: %s", worker_metadata)
 
         ip_counts: dict[str, int] = {}
         for ip in worker_ips:
@@ -216,17 +186,10 @@ class RayDistributedExecutor(DistributedExecutorBase):
             for item in sorted_worker_metadata
         }
         logger.info(f"xxx-reranking-mapping={rerank_mapping}")
-        self._run_workers("adjust_rank", rerank_mapping)
+        self._run_ray_workers("adjust_rank", rerank_mapping)
 
         # Get the set of GPU IDs used on each node.
-        worker_node_and_gpu_ids = []
-        for worker in [self.driver_dummy_worker] + self.workers:
-            if worker is None:
-                # driver_dummy_worker can be None when using ray spmd worker.
-                continue
-            worker_node_and_gpu_ids.append(
-                ray.get(worker.get_node_and_gpu_ids.remote())
-            )  # type: ignore
+        worker_node_and_gpu_ids = self._run_ray_workers("get_node_and_gpu_ids")
 
         node_workers = defaultdict(list)  # node id -> list of worker ranks
         node_gpus = defaultdict(list)  # node id -> list of gpu ids
@@ -290,7 +253,7 @@ class RayDistributedExecutor(DistributedExecutorBase):
         )
         logger.info(f"xxx-all_args_env: {self._env_vars_for_all_workers}")
 
-        self._run_workers(
+        self._run_ray_workers(
             "update_environment_variables", self._get_env_vars_to_be_updated()
         )
 
@@ -322,9 +285,7 @@ class RayDistributedExecutor(DistributedExecutorBase):
             )
             all_kwargs.append(kwargs)
         print(f"xxx-all_kwargs={all_kwargs}")
-        self._run_workers("init_worker", all_kwargs)
-
-        self._run_workers("init_device")
+        self._run_ray_workers("init_worker", all_kwargs)
 
         # This is the list of workers that are rank 0 of each TP group EXCEPT
         # global rank 0. These are the workers that will broadcast to the
@@ -339,7 +300,7 @@ class RayDistributedExecutor(DistributedExecutorBase):
         for index, worker in enumerate(self.workers):
             # The driver worker is rank 0 and not in self.workers.
             rank = index + 1
-            if rank % self.fastvideo_args.tensor_parallel_size == 0:
+            if rank % self.fastvideo_args.tp_size == 0:
                 self.tp_driver_workers.append(worker)
             else:
                 self.non_driver_workers.append(worker)
@@ -355,11 +316,11 @@ class RayDistributedExecutor(DistributedExecutorBase):
             },
         )
         # TODO(xingyu): need to figure out how to pass return parameters
-        output = responses[0].output
+        output = responses[0]["output_batch"]
 
         logging_info = None
         if envs.FASTVIDEO_STAGE_LOGGING:
-            logging_info = responses[0].logging_info
+            logging_info = responses[0]["logging_info"]
 
         result_batch = ForwardBatch(
             data_type=forward_batch.data_type,
@@ -368,7 +329,6 @@ class RayDistributedExecutor(DistributedExecutorBase):
         )
         return result_batch
 
-    # TODO(xingyu): check how to pass status
     def set_lora_adapter(self,
                          lora_nickname: str,
                          lora_path: str | None = None) -> None:
@@ -394,12 +354,17 @@ class RayDistributedExecutor(DistributedExecutorBase):
             if response["status"] != "lora_adapter_merged":
                 raise RuntimeError(f"Worker {i} failed to merge LoRA weights")
 
-    def _run_workers(
+    def collective_rpc(self,
+                       method: str | Callable,
+                       timeout: float | None = None,
+                       args: tuple = (),
+                       kwargs: dict | None = None) -> list[Any]:
+        return self._run_ray_workers(method, *args, **(kwargs or {}))
+
+    def _run_ray_workers(
         self,
         method: str | Callable,
         *args,
-        async_run_tensor_parallel_workers_only: bool = False,
-        max_concurrent_workers: int | None = None,
         **kwargs,
     ) -> Any:
         if isinstance(method, str):
@@ -408,10 +373,6 @@ class RayDistributedExecutor(DistributedExecutorBase):
             sent_method = cloudpickle.dumps(method)
         del method
 
-        if max_concurrent_workers:
-            raise NotImplementedError(
-                "max_concurrent_workers is not supported yet.")
-
         # Start the ray workers first.
         ray_workers = self.workers
         ray_worker_outputs = [
@@ -419,14 +380,7 @@ class RayDistributedExecutor(DistributedExecutorBase):
             for worker in ray_workers
         ]
 
-        driver_worker_output = []
-        # Start the driver worker after all the ray workers.
-        # driver_worker_output = [
-        #     self.driver_worker.execute_method(sent_method, *args, **kwargs)
-        # ]
-
         # Get the results of the ray workers.
-        if self.workers:
-            ray_worker_outputs = ray.get(ray_worker_outputs)
+        ray_worker_outputs = ray.get(ray_worker_outputs)
 
-        return driver_worker_output + ray_worker_outputs
+        return ray_worker_outputs

@@ -6,7 +6,6 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    FASTVIDEO_HOST_IP: str = ""
     FASTVIDEO_RINGBUFFER_WARNING_INTERVAL: int = 60
     FASTVIDEO_NCCL_SO_PATH: str | None = None
     LD_LIBRARY_PATH: str | None = None
@@ -36,6 +35,8 @@ if TYPE_CHECKING:
     FASTVIDEO_TORCH_PROFILE_REGIONS: str = ""
     FASTVIDEO_SERVER_DEV_MODE: bool = False
     FASTVIDEO_STAGE_LOGGING: bool = False
+    FASTVIDEO_HOST_IP: str = ""
+    FASTVIDEO_LOOPBACK_IP: str = ""
 
 
 def get_default_cache_root() -> str:
@@ -127,6 +128,10 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # on each node.
     "FASTVIDEO_HOST_IP":
     lambda: os.getenv("FASTVIDEO_HOST_IP", ""),
+
+    # Used to force set up loopback IP
+    "FASTVIDEO_LOOPBACK_IP":
+    lambda: os.getenv("FASTVIDEO_LOOPBACK_IP", ""),
 
     # Number of GPUs per worker in Ray, if it is set to be a fraction,
     # it allows ray to schedule multiple actors on a single GPU,
