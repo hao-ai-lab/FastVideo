@@ -77,6 +77,8 @@ class CLIPTextConfig(TextEncoderConfig):
 
     num_hidden_layers_override: int | None = None
     require_post_norm: bool | None = None
+    enable_scale: bool = True
+    is_causal: bool = True
     prefix: str = "clip"
 
 
