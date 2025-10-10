@@ -19,7 +19,8 @@ from fastvideo.logger import init_logger
 from fastvideo.models.vaes.common import ParallelTiledVAE
 from fastvideo.models.vision_utils import (get_default_height_width, normalize,
                                            numpy_to_pt, pil_to_numpy, resize,
-                                           create_default_image, preprocess_reference_image_for_clip)
+                                           create_default_image,
+                                           preprocess_reference_image_for_clip)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
@@ -108,9 +109,9 @@ class RefImageEncodingStage(ImageEncodingStage):
 
     @torch.no_grad()
     def forward(
-            self,
-            batch: ForwardBatch,
-            fastvideo_args: FastVideoArgs,
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
         """
         Encode the prompt into image encoder hidden states.
@@ -128,17 +129,21 @@ class RefImageEncodingStage(ImageEncodingStage):
         if image is None:
             image = create_default_image()
         # Preprocess reference image for CLIP encoder
-        image_tensor = preprocess_reference_image_for_clip(image, get_local_torch_device())
+        image_tensor = preprocess_reference_image_for_clip(
+            image, get_local_torch_device())
 
-        image_inputs = self.image_processor(
-            images=image_tensor, return_tensors="pt").to(get_local_torch_device())
+        image_inputs = self.image_processor(images=image_tensor,
+                                            return_tensors="pt").to(
+                                                get_local_torch_device())
         with set_forward_context(current_timestep=0, attn_metadata=None):
             outputs = self.image_encoder(**image_inputs)
             image_embeds = outputs.last_hidden_state
         batch.image_embeds.append(image_embeds)
 
         if batch.pil_image is None:
-            batch.image_embeds = [torch.zeros_like(x) for x in batch.image_embeds]
+            batch.image_embeds = [
+                torch.zeros_like(x) for x in batch.image_embeds
+            ]
 
         return batch
 
@@ -211,14 +216,15 @@ class ImageVAEEncodingStage(PipelineStage):
             image.new_zeros(image.shape[0], image.shape[1], num_frames - 1,
                             image.shape[3], image.shape[4])
         ],
-            dim=2)
+                                    dim=2)
         video_condition = video_condition.to(device=get_local_torch_device(),
                                              dtype=torch.float32)
 
         # Setup VAE precision
         vae_dtype = PRECISION_TO_TYPE[
             fastvideo_args.pipeline_config.vae_precision]
-        vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        vae_autocast_enabled = (
+            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         # Encode Image
         with torch.autocast(device_type="cuda",
@@ -392,13 +398,14 @@ class VideoVAEEncodingStage(ImageVAEEncodingStage):
 
         # Prepare video tensor from control video
         video_condition = self._prepare_control_video_tensor(
-            batch.video_latent, num_frames, height, width
-        ).to(get_local_torch_device(), dtype=torch.float32)
+            batch.video_latent, num_frames, height,
+            width).to(get_local_torch_device(), dtype=torch.float32)
 
         # Setup VAE precision
         vae_dtype = PRECISION_TO_TYPE[
             fastvideo_args.pipeline_config.vae_precision]
-        vae_autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        vae_autocast_enabled = (
+            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         # Encode control video
         with torch.autocast(device_type="cuda",
@@ -439,13 +446,8 @@ class VideoVAEEncodingStage(ImageVAEEncodingStage):
 
         return batch
 
-    def _prepare_control_video_tensor(
-            self,
-            control_video,
-            num_frames: int,
-            height: int,
-            width: int
-    ) -> torch.Tensor:
+    def _prepare_control_video_tensor(self, control_video, num_frames: int,
+                                      height: int, width: int) -> torch.Tensor:
         """
         Prepare video tensor from control video input.
         """
@@ -458,38 +460,47 @@ class VideoVAEEncodingStage(ImageVAEEncodingStage):
                     frame,
                     vae_scale_factor=self.vae.spatial_compression_ratio,
                     height=height,
-                    width=width
-                ).to(get_local_torch_device(), dtype=torch.float32)
+                    width=width).to(get_local_torch_device(),
+                                    dtype=torch.float32)
                 processed_frames.append(processed_frame)
 
             if processed_frames:
-                video_tensor = torch.cat([f.unsqueeze(2) for f in processed_frames], dim=2)
+                video_tensor = torch.cat(
+                    [f.unsqueeze(2) for f in processed_frames], dim=2)
             else:
-                video_tensor = torch.zeros(1, 3, 0, height, width,
-                                           device=get_local_torch_device(), dtype=torch.float32)
+                video_tensor = torch.zeros(1,
+                                           3,
+                                           0,
+                                           height,
+                                           width,
+                                           device=get_local_torch_device(),
+                                           dtype=torch.float32)
         elif isinstance(control_video, torch.Tensor):
             # Handle tensor input [batch, channels, frames, height, width]
-            video_tensor = control_video.to(get_local_torch_device(), dtype=torch.float32)
+            video_tensor = control_video.to(get_local_torch_device(),
+                                            dtype=torch.float32)
 
             if video_tensor.shape[2] > num_frames:
                 video_tensor = video_tensor[:, :, :num_frames]
         else:
-            raise ValueError(f"Unsupported control_video type: {type(control_video)}. "
-                             "Expected list of PIL Images or torch.Tensor.")
+            raise ValueError(
+                f"Unsupported control_video type: {type(control_video)}. "
+                "Expected list of PIL Images or torch.Tensor.")
 
         # Pad with zeros if we have fewer frames than required
         current_frames = video_tensor.shape[2]
         if current_frames < num_frames:
             padding_frames = num_frames - current_frames
-            zero_padding = torch.zeros(
-                video_tensor.shape[0], video_tensor.shape[1],
-                padding_frames, height, width,
-                device=video_tensor.device, dtype=video_tensor.dtype
-            )
+            zero_padding = torch.zeros(video_tensor.shape[0],
+                                       video_tensor.shape[1],
+                                       padding_frames,
+                                       height,
+                                       width,
+                                       device=video_tensor.device,
+                                       dtype=video_tensor.dtype)
             video_tensor = torch.cat([video_tensor, zero_padding], dim=2)
 
         return video_tensor
-
 
     def verify_input(self, batch: ForwardBatch,
                      fastvideo_args: FastVideoArgs) -> VerificationResult:

@@ -138,7 +138,8 @@ class InputValidationStage(PipelineStage):
         # for v2v, get control video from video path
         if batch.video_path is not None:
             pil_images, original_fps = load_video(batch.video_path)
-            logger.info(f"Loaded video with {len(pil_images)} frames, original FPS: {original_fps}")
+            logger.info("Loaded video with %s frames, original FPS: %s",
+                        len(pil_images), original_fps)
 
             # Get target parameters from batch
             target_fps = batch.fps
@@ -152,17 +153,24 @@ class InputValidationStage(PipelineStage):
                     pil_images = pil_images[::frame_skip]
                     effective_fps = original_fps / frame_skip
                     logger.info(
-                            f"Resampled video from {original_fps:.1f} fps to {effective_fps:.1f} fps (skip={frame_skip})")
+                        "Resampled video from %.1f fps to %.1f fps (skip=%s)",
+                        original_fps, effective_fps, frame_skip)
 
             # Limit to target number of frames
-            if target_num_frames is not None and len(pil_images) > target_num_frames:
+            if target_num_frames is not None and len(
+                    pil_images) > target_num_frames:
                 pil_images = pil_images[:target_num_frames]
-                logger.info(f"Limited video to {target_num_frames} frames (from {len(pil_images)} total)")
+                logger.info("Limited video to %s frames (from %s total)",
+                            target_num_frames, len(pil_images))
 
             # Resize each PIL image to target dimensions
             resized_images = []
             for pil_img in pil_images:
-                resized_img = resize(pil_img, target_height, target_width, resize_mode="default", resample="lanczos")
+                resized_img = resize(pil_img,
+                                     target_height,
+                                     target_width,
+                                     resize_mode="default",
+                                     resample="lanczos")
                 resized_images.append(resized_img)
 
             # Convert PIL images to numpy array

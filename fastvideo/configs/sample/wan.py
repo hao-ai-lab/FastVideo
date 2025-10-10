@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
 
-from fastvideo.configs.pipelines.wan import WANV2VConfig
 from fastvideo.configs.sample.base import SamplingParam
 from fastvideo.configs.sample.teacache import WanTeaCacheParams
 
@@ -131,10 +130,8 @@ class Wan2_1_Fun_1_3B_Control_SamplingParam(SamplingParam):
     width: int = 480
     guidance_scale: float = 6.0
     teacache_params: WanTeaCacheParams = field(
-        default_factory= lambda : WanTeaCacheParams(
-            teacache_thresh = 0.1,
-        )
-    )
+        default_factory=lambda: WanTeaCacheParams(teacache_thresh=0.1, ))
+
 
 # =============================================
 # ============= Wan2.2 TI2V Models =============
@@ -175,9 +172,12 @@ class Wan2_2_I2V_A14B_SamplingParam(Wan2_2_Base_SamplingParam):
     # NOTE(will): default boundary timestep is tracked by PipelineConfig, but
     # can be overridden during sampling
 
+
 @dataclass
-class Wan2_2_Fun_A14B_Control_SamplingParam(Wan2_1_Fun_1_3B_Control_SamplingParam):
+class Wan2_2_Fun_A14B_Control_SamplingParam(
+        Wan2_1_Fun_1_3B_Control_SamplingParam):
     num_frames: int = 81
+
 
 # =============================================
 # ============= Causal Self-Forcing =============

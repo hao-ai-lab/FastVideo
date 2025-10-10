@@ -27,8 +27,6 @@ import imageio
 import numpy as np
 import torch
 import torchvision.utils as make_grid
-import torchvision.io as io
-import torchvision.transforms.v2 as transforms
 import yaml
 from diffusers.loaders.lora_base import (
     _best_guess_weight_name)  # watch out for potetential removal from diffusers

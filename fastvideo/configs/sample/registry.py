@@ -18,7 +18,6 @@ from fastvideo.configs.sample.wan import (
     WanI2V_14B_720P_SamplingParam,
     WanT2V_1_3B_SamplingParam,
     WanT2V_14B_SamplingParam,
-    Wan2_2_Fun_A14B_Control_SamplingParam,
     Wan2_1_Fun_1_3B_Control_SamplingParam,
     SelfForcingWanT2V480PConfig,
 )
@@ -41,7 +40,8 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V_14B_720P_SamplingParam,
     "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers":
     Wan2_1_Fun_1_3B_InP_SamplingParam,
-    "IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers": Wan2_1_Fun_1_3B_Control_SamplingParam,
+    "IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers":
+    Wan2_1_Fun_1_3B_Control_SamplingParam,
 
     # Wan2.2
     "Wan-AI/Wan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_SamplingParam,

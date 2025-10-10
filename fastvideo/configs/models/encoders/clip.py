@@ -92,7 +92,6 @@ class CLIPVisionConfig(ImageEncoderConfig):
     prefix: str = "clip"
 
 
-
 @dataclass
 class WAN2_1ControlCLIPVisionConfig(CLIPVisionConfig):
     num_hidden_layers_override: int | None = 31
