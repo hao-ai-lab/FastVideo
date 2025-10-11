@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=1.3B_moe_4n_sf_distill
+#SBATCH --job-name=1.3B_moe_4n_sf_distill_no_2nd_update
 #SBATCH --partition=main
 #SBATCH --nodes=4
 #SBATCH --ntasks=4
@@ -7,16 +7,16 @@
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
-#SBATCH --output=1.3B_moe_4n_sf_distill_output/moe_sf_distill_2e-6_4e-7_4n.out
-#SBATCH --error=1.3B_moe_4n_sf_distill_output/moe_sf_distill_2e-6_4e-7_4n.err
+#SBATCH --output=1.3B_moe_4n_sf_distill_output/moe_sf_distill_no_2nd_update.out
+#SBATCH --error=1.3B_moe_4n_sf_distill_output/moe_sf_distill_no_2nd_update.err
 #SBATCH --exclusive
 set -e -x
 
 
 # Environment Setup
-source ~/conda/miniconda/bin/activate
-conda activate wei-fv
-export HOME="/mnt/weka/home/hao.zhang/wei"
+# source ~/conda/miniconda/bin/activate
+# conda activate wei-fv
+# export HOME="/mnt/weka/home/hao.zhang/wei"
 
 # Basic Info
 export NCCL_P2P_DISABLE=1
@@ -42,9 +42,12 @@ NUM_GPUS=8
 NUM_TOTAL_GPUS=32
 
 # Model paths for Self-Forcing DMD distillation:
+# GENERATOR_MODEL_PATH="wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
 GENERATOR_MODEL_PATH="rand0nmr/SFWan2.1-T2V-A1.3B-Diffusers"
-REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers"  # Teacher model
-FAKE_SCORE_MODEL_PATH="rand0nmr/SFWan2.1-T2V-A1.3B-Diffusers"  # Critic model
+REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"  # Teacher model
+FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"  # Critic model
+# REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers"  # Teacher model
+# FAKE_SCORE_MODEL_PATH="rand0nmr/SFWan2.1-T2V-A1.3B-Diffusers"  # Critic model
 
 # DATA_DIR="data/test-text-preprocessing/Node_0_GPU_1_File_1/combined_parquet_dataset/"
 DATA_DIR="/mnt/weka/home/hao.zhang/matthew/FastVideo/data/test-text-preprocessing"

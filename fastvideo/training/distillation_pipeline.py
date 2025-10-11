@@ -546,7 +546,7 @@ class DistillationPipeline(TrainingPipeline):
         """
         Get the appropriate real score guidance scale based on timestep and boundary logic.
         """
-        if self.boundary_timestep is not None:
+        if self.boundary_timestep is not None and self.real_score_transformer_2 is not None:
             if timestep.item() < self.boundary_timestep:
                 return self.real_score_guidance_scale_2
         return self.real_score_guidance_scale
@@ -753,16 +753,18 @@ class DistillationPipeline(TrainingPipeline):
         original_latent = generator_pred_video
         with torch.no_grad():
             # Detect whether we're doing MoE DMD
-            if self.boundary_timestep is not None:
-                if exit_timestep < self.boundary_timestep:
-                    start_timestep = 0
-                    end_timestep = int(self.boundary_timestep)
-                else:
-                    start_timestep = int(self.boundary_timestep)
-                    end_timestep = self.num_train_timestep
-            else:
-                start_timestep = 0
-                end_timestep = self.num_train_timestep
+            # if self.boundary_timestep is not None and self.transformer_2 is not None:
+            #     if exit_timestep < self.boundary_timestep:  # low noise
+            #         start_timestep = 0
+            #         end_timestep = int(self.boundary_timestep)
+            #     else:  # high noise
+            #         start_timestep = int(self.boundary_timestep)
+            #         end_timestep = self.num_train_timestep
+            # else:
+            #     start_timestep = 0
+            #     end_timestep = self.num_train_timestep
+            start_timestep = 0
+            end_timestep = self.num_train_timestep
 
             timestep = torch.randint(start_timestep,
                                      end_timestep, [1],
@@ -882,17 +884,19 @@ class DistillationPipeline(TrainingPipeline):
 
         # Detect whether we're doing MoE DMD
         # If yes, then we need to use the appropriate timestep range
-        if self.boundary_timestep is not None:
-            if exit_timestep < self.boundary_timestep:
-                start_timestep = 0
-                end_timestep = self.num_train_timestep
-                # end_timestep = int(self.boundary_timestep)
-            else:
-                start_timestep = int(self.boundary_timestep)
-                end_timestep = self.num_train_timestep
-        else:
-            start_timestep = 0
-            end_timestep = self.num_train_timestep
+        # if self.boundary_timestep is not None and self.transformer_2 is not None:
+        #     if exit_timestep < self.boundary_timestep:
+        #         start_timestep = 0
+        #         end_timestep = self.num_train_timestep
+        #         # end_timestep = int(self.boundary_timestep)
+        #     else:
+        #         start_timestep = int(self.boundary_timestep)
+        #         end_timestep = self.num_train_timestep
+        # else:
+        #     start_timestep = 0
+        #     end_timestep = self.num_train_timestep
+        start_timestep = 0
+        end_timestep = self.num_train_timestep
 
         fake_score_timestep = torch.randint(start_timestep,
                                             end_timestep, [1],
@@ -1466,7 +1470,7 @@ class DistillationPipeline(TrainingPipeline):
                 video = video.permute(0, 2, 1, 3, 4)
                 video = (video * 255).numpy().astype(np.uint8)
                 wandb_loss_dict[latent_key] = wandb.Video(
-                    video, fps=24, format="mp4")  # change to 16 for Wan2.1
+                    video, fps=16, format="mp4")  # change to 16 for Wan2.1 (change to 24 for wan 2.2)
                 # Clean up references
                 del video, latents
 
@@ -1497,7 +1501,7 @@ class DistillationPipeline(TrainingPipeline):
                 video = video.permute(0, 2, 1, 3, 4)
                 video = (video * 255).numpy().astype(np.uint8)
                 wandb_loss_dict[latent_key] = wandb.Video(
-                    video, fps=24, format="mp4")  # change to 16 for Wan2.1
+                    video, fps=16, format="mp4")  # change to 16 for Wan2.1
                 # Clean up references
                 del video, latents
 

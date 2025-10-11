@@ -77,9 +77,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         self.last_step_only = getattr(training_args, 'last_step_only', False)
         self.context_noise = getattr(training_args, 'context_noise', 0)
 
-        # self.kv_cache1: list[dict[str, Any]] | None = None
-        # self.crossattn_cache: list[dict[str, Any]] | None = None
-
         logger.info("Self-forcing generator update ratio: %s",
                     self.dfake_gen_update_ratio)
         logger.info("RANK: %s, exiting initialize_training_pipeline",
@@ -442,13 +439,14 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                    current_num_frames] = denoised_pred
 
             # Step 3.3: rerun with timestep zero to update the cache
-            if self.boundary_timestep is not None:
+            if self.boundary_timestep is not None and self.transformer_2 is not None:
                 if exit_timestep < self.boundary_timestep:
                     context_timestep = torch.ones_like(timestep) * self.context_noise
                     current_model = self.transformer_2
                 else:
                     # For high noise expert, the context timestep should be the boundary timestep
-                    context_timestep = torch.ones_like(timestep) * self.boundary_timestep
+                    # context_timestep = torch.ones_like(timestep) * self.boundary_timestep
+                    context_timestep = torch.ones_like(timestep) * self.context_noise
                     current_model = self.transformer
             else:
                 context_timestep = torch.ones_like(timestep) * self.context_noise
@@ -478,6 +476,31 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     crossattn_cache=crossattn_cache,
                     current_start=current_start_frame * self.frame_seq_length,
                     start_frame=current_start_frame)
+                # update the high noise model kv cache to match the low noise kv cache
+                # if current_model is self.transformer_2:
+                #     # TODO: which timestep to use?
+                #     context_timestep = torch.ones_like(timestep) * self.context_noise
+                #     denoised_pred = self.noise_scheduler.add_noise(
+                #         denoised_pred.flatten(0, 1),
+                #         torch.randn_like(denoised_pred.flatten(0, 1)),
+                #         context_timestep).unflatten(0, denoised_pred.shape[:2])
+
+                #     training_batch_temp = self._build_distill_input_kwargs(
+                #         denoised_pred, context_timestep,
+                #         training_batch.conditional_dict, training_batch)
+
+                #     self.transformer(
+                #         hidden_states=training_batch_temp.
+                #         input_kwargs['hidden_states'],
+                #         encoder_hidden_states=training_batch_temp.
+                #         input_kwargs['encoder_hidden_states'],
+                #         timestep=training_batch_temp.input_kwargs['timestep'],
+                #         encoder_hidden_states_image=training_batch_temp.
+                #         input_kwargs.get('encoder_hidden_states_image'),
+                #         kv_cache=kv_cache1,
+                #         crossattn_cache=crossattn_cache,
+                #         current_start=current_start_frame * self.frame_seq_length,
+                #         start_frame=current_start_frame)
 
             # Step 3.4: update the start and end frame indices
             current_start_frame += current_num_frames
@@ -566,14 +589,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             training_batch.dmd_latent_vis_dict["min_num_frames"] = torch.tensor(
                 min_num_frames, dtype=torch.float32, device=self.device)
 
-        # Clean up caches - properly free GPU memory
-        # self._cleanup_simulation_caches(kv_cache1, crossattn_cache)
-        # gc.collect()
-        # torch.cuda.empty_cache()
-        # assert kv_cache1 is not None
-        # assert crossattn_cache is not None
-        # self._reset_simulation_caches(self.kv_cache1, self.crossattn_cache)
-
         if gradient_mask is not None:
             return final_output, exit_timestep
         else:
@@ -657,46 +672,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             })
 
         return kv_cache, crossattn_cache
-
-    def _reset_simulation_caches(self, kv_cache: list[dict[str, Any]],
-                                 crossattn_cache: list[dict[str, Any]]) -> None:
-        """Reset KV cache and cross-attention cache to clean state."""
-        if kv_cache is not None:
-            for cache_dict in kv_cache:
-                cache_dict["global_end_index"].fill_(0)
-                cache_dict["local_end_index"].fill_(0)
-                cache_dict["k"].zero_()
-                cache_dict["v"].zero_()
-
-        if crossattn_cache is not None:
-            for cache_dict in crossattn_cache:
-                cache_dict["is_init"] = False
-                cache_dict["k"].zero_()
-                cache_dict["v"].zero_()
-
-    def _cleanup_simulation_caches(self, kv_cache: list[dict[str, Any]],
-                                  crossattn_cache: list[dict[str, Any]]) -> None:
-        """Properly clean up KV cache and cross-attention cache GPU memory."""
-        if kv_cache is not None:
-            for cache_dict in kv_cache:
-                # Clear tensor references to free GPU memory
-                if "k" in cache_dict and cache_dict["k"] is not None:
-                    cache_dict["k"] = None
-                if "v" in cache_dict and cache_dict["v"] is not None:
-                    cache_dict["v"] = None
-                if "global_end_index" in cache_dict and cache_dict["global_end_index"] is not None:
-                    cache_dict["global_end_index"] = None
-                if "local_end_index" in cache_dict and cache_dict["local_end_index"] is not None:
-                    cache_dict["local_end_index"] = None
-
-        if crossattn_cache is not None:
-            for cache_dict in crossattn_cache:
-                # Clear tensor references to free GPU memory
-                if "k" in cache_dict and cache_dict["k"] is not None:
-                    cache_dict["k"] = None
-                if "v" in cache_dict and cache_dict["v"] is not None:
-                    cache_dict["v"] = None
-                cache_dict["is_init"] = False
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         batch = next(self.train_loader_iter, None)  # type: ignore
@@ -848,9 +823,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             world_group.all_reduce(avg_generator_loss,
                                    op=torch.distributed.ReduceOp.AVG)
             training_batch.generator_loss = avg_generator_loss.item()
-            # training_batch.fake_score_loss = 0
-            # training_batch.total_loss = training_batch.generator_loss
-            # return training_batch
         else:
             training_batch.generator_loss = 0.0
 
@@ -883,24 +855,24 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                      attn_metadata=batch_critic.attn_metadata):
                 (critic_loss / gradient_accumulation_steps).backward()
 
-            if self.train_fake_score_transformer_2:
-                assert all(p.grad is None for p in self.fake_score_transformer.parameters())
-                grad_sum = 0
-                for n, p in self.fake_score_transformer_2.named_parameters():
-                    if p.grad is not None:
-                        grad_sum += p.grad.sum().item()
-                    else:
-                        raise ValueError("Fake score transformer 2 param %s has no gradient", n)
-                assert grad_sum != 0, "Fake score transformer 2 did not receive gradients"
-            else:
-                assert all(p.grad is None for p in self.fake_score_transformer_2.parameters())
-                grad_sum = 0
-                for n, p in self.fake_score_transformer.named_parameters():
-                    if p.grad is not None:
-                        grad_sum += p.grad.sum().item()
-                    else:
-                        raise ValueError("Fake score transformer param %s has no gradient", n)
-                assert grad_sum != 0, "Fake score transformer did not receive gradients"
+            # if self.train_fake_score_transformer_2:
+            #     assert all(p.grad is None for p in self.fake_score_transformer.parameters())
+            #     grad_sum = 0
+            #     for n, p in self.fake_score_transformer_2.named_parameters():
+            #         if p.grad is not None:
+            #             grad_sum += p.grad.sum().item()
+            #         else:
+            #             raise ValueError("Fake score transformer 2 param %s has no gradient", n)
+            #     assert grad_sum != 0, "Fake score transformer 2 did not receive gradients"
+            # else:
+            #     assert all(p.grad is None for p in self.fake_score_transformer_2.parameters())
+            #     grad_sum = 0
+            #     for n, p in self.fake_score_transformer.named_parameters():
+            #         if p.grad is not None:
+            #             grad_sum += p.grad.sum().item()
+            #         else:
+            #             raise ValueError("Fake score transformer param %s has no gradient", n)
+            #     assert grad_sum != 0, "Fake score transformer did not receive gradients"
 
             total_critic_loss += critic_loss.detach().item()
             critic_log_dict.update(crit_log_dict)
@@ -993,7 +965,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     video = video.permute(0, 2, 1, 3, 4)
                     video = (video * 255).numpy().astype(np.uint8)
                     wandb_loss_dict[f"dmd_{latent_key}"] = wandb.Video(
-                        video, fps=24, format="mp4")
+                        video, fps=16, format="mp4")
                     del video, latents
 
         # Process critic predictions
@@ -1035,7 +1007,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     video = video.permute(0, 2, 1, 3, 4)
                     video = (video * 255).numpy().astype(np.uint8)
                     wandb_loss_dict[f"critic_{latent_key}"] = wandb.Video(
-                        video, fps=24, format="mp4")
+                        video, fps=16, format="mp4")
                     del video, latents
 
         # Log metadata
@@ -1101,8 +1073,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         self._log_training_info()
         self._log_validation(self.transformer, self.training_args,
                              self.init_steps)
-        gc.collect()
-        torch.cuda.empty_cache()
+        # gc.collect()
+        # torch.cuda.empty_cache()
 
         progress_bar = tqdm(
             range(0, self.training_args.max_train_steps),
@@ -1311,8 +1283,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 self._log_validation(self.transformer, self.training_args, step)
-                gc.collect()
-                torch.cuda.empty_cache()
+                # gc.collect()
+                # torch.cuda.empty_cache()
 
         wandb.finish()
 

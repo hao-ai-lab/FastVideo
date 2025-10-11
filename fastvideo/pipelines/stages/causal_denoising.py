@@ -365,10 +365,10 @@ class CausalDMDDenosingStage(DenoisingStage):
                     )
                 start_index += current_num_frames
 
-        del kv_cache1
-        del crossattn_cache
-        gc.collect()
-        torch.cuda.empty_cache()
+        # del kv_cache1
+        # del crossattn_cache
+        # gc.collect()
+        # torch.cuda.empty_cache()
 
         batch.latents = latents
         return batch

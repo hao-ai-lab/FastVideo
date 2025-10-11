@@ -165,3 +165,10 @@ class SelfForcingWanT2V480PConfig(WanT2V480PConfig):
     dmd_denoising_steps: list[int] | None = field(
         default_factory=lambda: [1000, 750, 500, 250])
     warp_denoising_step: bool = True
+
+@dataclass
+class SelfForcingMoEWanT2V480PConfig(SelfForcingWanT2V480PConfig):
+    boundary_ratio: float | None = 0.875
+
+    def __post_init__(self) -> None:
+        self.dit_config.boundary_ratio = self.boundary_ratio
