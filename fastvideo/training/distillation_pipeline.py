@@ -30,7 +30,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
-from fastvideo.models.utils import pred_noise_to_pred_video
+from fastvideo.models.utils import pred_noise_to_pred_video, pred_noise_to_x_bound
 from fastvideo.pipelines import (ComposedPipelineBase, ForwardBatch,
                                  TrainingBatch)
 from fastvideo.training.activation_checkpoint import (
@@ -789,10 +789,17 @@ class DistillationPipeline(TrainingPipeline):
                                   n=self.sp_world_size).contiguous()
                 noise = noise[:, self.rank_in_sp_group, :, :, :, :]
 
-            noisy_latent = self.noise_scheduler.add_noise(
-                generator_pred_video.flatten(0, 1), noise.flatten(0, 1),
-                timestep).detach().unflatten(0,
-                                             (1, generator_pred_video.shape[1]))
+            if self.boundary_timestep is not None and self.transformer_2 is not None and exit_timestep >= self.boundary_timestep:
+                noisy_latent = self.noise_scheduler.add_noise_high(
+                    generator_pred_video.flatten(0, 1), noise.flatten(0, 1),
+                    timestep,
+                    self.boundary_timestep * torch.ones_like(timestep)).detach().unflatten(0,
+                                                                                          (1, generator_pred_video.shape[1]))
+            else:
+                noisy_latent = self.noise_scheduler.add_noise(
+                    generator_pred_video.flatten(0, 1), noise.flatten(0, 1),
+                    timestep).detach().unflatten(0,
+                                                (1, generator_pred_video.shape[1]))
 
             # fake_score_transformer forward
             training_batch = self._build_distill_input_kwargs(
@@ -803,12 +810,20 @@ class DistillationPipeline(TrainingPipeline):
             fake_score_pred_noise = current_fake_score_transformer(
                 **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
-            faker_score_pred_video = pred_noise_to_pred_video(
-                pred_noise=fake_score_pred_noise.flatten(0, 1),
-                noise_input_latent=noisy_latent.flatten(0, 1),
-                timestep=timestep,
-                scheduler=self.noise_scheduler).unflatten(
-                    0, fake_score_pred_noise.shape[:2])
+            if self.boundary_timestep is not None and self.transformer_2 is not None and exit_timestep >= self.boundary_timestep:
+                faker_score_pred_video = pred_noise_to_x_bound(
+                    pred_noise=fake_score_pred_noise.flatten(0, 1),
+                    noise_input_latent=noisy_latent.flatten(0, 1),
+                    timestep=timestep,
+                    boundary_timestep=torch.ones_like(timestep) * self.boundary_timestep,
+                    scheduler=self.noise_scheduler).unflatten(0, fake_score_pred_noise.shape[:2])
+            else:
+                faker_score_pred_video = pred_noise_to_pred_video(
+                    pred_noise=fake_score_pred_noise.flatten(0, 1),
+                    noise_input_latent=noisy_latent.flatten(0, 1),
+                    timestep=timestep,
+                    scheduler=self.noise_scheduler).unflatten(
+                        0, fake_score_pred_noise.shape[:2])
 
             # real_score_transformer cond forward
             training_batch = self._build_distill_input_kwargs(
@@ -819,12 +834,20 @@ class DistillationPipeline(TrainingPipeline):
             real_score_pred_noise_cond = current_real_score_transformer(
                 **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
-            pred_real_video_cond = pred_noise_to_pred_video(
-                pred_noise=real_score_pred_noise_cond.flatten(0, 1),
-                noise_input_latent=noisy_latent.flatten(0, 1),
-                timestep=timestep,
-                scheduler=self.noise_scheduler).unflatten(
-                    0, real_score_pred_noise_cond.shape[:2])
+            if self.boundary_timestep is not None and self.transformer_2 is not None and exit_timestep >= self.boundary_timestep:
+                pred_real_video_cond = pred_noise_to_x_bound(
+                    pred_noise=real_score_pred_noise_cond.flatten(0, 1),
+                    noise_input_latent=noisy_latent.flatten(0, 1),
+                    timestep=timestep,
+                    boundary_timestep=torch.ones_like(timestep) * self.boundary_timestep,
+                    scheduler=self.noise_scheduler).unflatten(0, real_score_pred_noise_cond.shape[:2])
+            else:
+                pred_real_video_cond = pred_noise_to_pred_video(
+                    pred_noise=real_score_pred_noise_cond.flatten(0, 1),
+                    noise_input_latent=noisy_latent.flatten(0, 1),
+                    timestep=timestep,
+                    scheduler=self.noise_scheduler).unflatten(
+                        0, real_score_pred_noise_cond.shape[:2])
 
             # real_score_transformer uncond forward
             training_batch = self._build_distill_input_kwargs(
@@ -834,12 +857,20 @@ class DistillationPipeline(TrainingPipeline):
             real_score_pred_noise_uncond = current_real_score_transformer(
                 **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
-            pred_real_video_uncond = pred_noise_to_pred_video(
-                pred_noise=real_score_pred_noise_uncond.flatten(0, 1),
-                noise_input_latent=noisy_latent.flatten(0, 1),
-                timestep=timestep,
-                scheduler=self.noise_scheduler).unflatten(
-                    0, real_score_pred_noise_uncond.shape[:2])
+            if self.boundary_timestep is not None and self.transformer_2 is not None and exit_timestep >= self.boundary_timestep:
+                pred_real_video_uncond = pred_noise_to_x_bound(
+                    pred_noise=real_score_pred_noise_uncond.flatten(0, 1),
+                    noise_input_latent=noisy_latent.flatten(0, 1),
+                    timestep=timestep,
+                    boundary_timestep=torch.ones_like(timestep) * self.boundary_timestep,
+                    scheduler=self.noise_scheduler).unflatten(0, real_score_pred_noise_uncond.shape[:2])
+            else:
+                pred_real_video_uncond = pred_noise_to_pred_video(
+                    pred_noise=real_score_pred_noise_uncond.flatten(0, 1),
+                    noise_input_latent=noisy_latent.flatten(0, 1),
+                    timestep=timestep,
+                    scheduler=self.noise_scheduler).unflatten(
+                        0, real_score_pred_noise_uncond.shape[:2])
 
             real_score_pred_video = pred_real_video_cond + (
                 pred_real_video_cond -
@@ -921,10 +952,17 @@ class DistillationPipeline(TrainingPipeline):
             fake_score_noise = fake_score_noise[:, self.
                                                 rank_in_sp_group, :, :, :, :]
 
-        noisy_generator_pred_video = self.noise_scheduler.add_noise(
-            generator_pred_video.flatten(0, 1), fake_score_noise.flatten(0, 1),
-            fake_score_timestep).unflatten(0,
-                                           (1, generator_pred_video.shape[1]))
+        if self.boundary_timestep is not None and self.transformer_2 is not None and exit_timestep >= self.boundary_timestep:
+            noisy_generator_pred_video = self.noise_scheduler.add_noise_high(
+                generator_pred_video.flatten(0, 1), fake_score_noise.flatten(0, 1),
+                fake_score_timestep,
+                self.boundary_timestep * torch.ones_like(fake_score_timestep)).unflatten(0,
+                                                                                       (1, generator_pred_video.shape[1]))
+        else:
+            noisy_generator_pred_video = self.noise_scheduler.add_noise(
+                generator_pred_video.flatten(0, 1), fake_score_noise.flatten(0, 1),
+                fake_score_timestep).unflatten(0,
+                                            (1, generator_pred_video.shape[1]))
 
         with set_forward_context(current_timestep=training_batch.timesteps,
                                  attn_metadata=training_batch.attn_metadata):
@@ -937,8 +975,25 @@ class DistillationPipeline(TrainingPipeline):
             fake_score_pred_noise = current_fake_score_transformer(
                 **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
 
-        target = fake_score_noise - generator_pred_video
-        flow_matching_loss = torch.mean((fake_score_pred_noise - target)**2)
+        if self.boundary_timestep is not None and self.transformer_2 is not None and exit_timestep >= self.boundary_timestep:
+            pred_video = pred_noise_to_x_bound(
+                pred_noise=fake_score_pred_noise.flatten(0, 1),
+                noise_input_latent=noisy_generator_pred_video.flatten(0, 1),
+                timestep=fake_score_timestep,
+                boundary_timestep=torch.ones_like(fake_score_timestep) * self.boundary_timestep,
+                scheduler=self.noise_scheduler).unflatten(0, fake_score_pred_noise.shape[:2])
+            flow_matching_loss = torch.mean((pred_video - generator_pred_video)**2)
+        else:
+            pred_video = pred_noise_to_pred_video(
+                pred_noise=fake_score_pred_noise.flatten(0, 1),
+                noise_input_latent=noisy_generator_pred_video.flatten(0, 1),
+                timestep=fake_score_timestep,
+                scheduler=self.noise_scheduler).unflatten(0, fake_score_pred_noise.shape[:2])
+            flow_matching_loss = torch.mean((pred_video - generator_pred_video)**2)
+
+        # This is mathematically equivalent to pred_video - generator_pred_video for the low noise case
+        # target = fake_score_noise - generator_pred_video
+        # flow_matching_loss = torch.mean((fake_score_pred_noise - target)**2)
 
         training_batch.fake_score_latent_vis_dict = {
             "training_batch_fakerscore_fwd_clean_latent":

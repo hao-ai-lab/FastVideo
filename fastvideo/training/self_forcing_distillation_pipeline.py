@@ -155,6 +155,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         with set_forward_context(
                 current_timestep=training_batch.timesteps,
                 attn_metadata=training_batch.attn_metadata_vsa):
+            # If the exit timestep is in the high noise region, the generator_pred_video is x_boundary, otherwise it's x_0
             generator_pred_video, exit_timestep = self._generator_multi_step_simulation_forward(
                 training_batch, exit_flags=exit_flags)
 
@@ -460,12 +461,20 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             start_frame=current_start_frame).permute(
                                 0, 2, 1, 3, 4)
 
-                    denoised_pred = pred_noise_to_pred_video(
-                        pred_noise=pred_flow.flatten(0, 1),
-                        noise_input_latent=noisy_input.flatten(0, 1),
-                        timestep=timestep,
-                        scheduler=self.noise_scheduler).unflatten(
-                            0, pred_flow.shape[:2])
+                    if self.boundary_timestep is not None and self.transformer_2 is not None and current_timestep >= self.boundary_timestep:
+                        denoised_pred = pred_noise_to_x_bound(
+                            pred_noise=pred_flow.flatten(0, 1),
+                            noise_input_latent=noisy_input.flatten(0, 1),
+                            timestep=timestep,
+                            boundary_timestep=torch.ones_like(timestep).flatten(0, 1) * self.boundary_timestep,
+                            scheduler=self.noise_scheduler).unflatten(0, pred_flow.shape[:2])
+                    else:
+                        denoised_pred = pred_noise_to_pred_video(
+                            pred_noise=pred_flow.flatten(0, 1),
+                            noise_input_latent=noisy_input.flatten(0, 1),
+                            timestep=timestep,
+                            scheduler=self.noise_scheduler).unflatten(
+                                0, pred_flow.shape[:2])
                     break
 
             # Step 3.2: record the model's output
@@ -485,10 +494,18 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 context_timestep = torch.ones_like(timestep) * self.context_noise
                 current_model = self.transformer
 
-            denoised_pred = self.noise_scheduler.add_noise(
-                denoised_pred.flatten(0, 1),
-                torch.randn_like(denoised_pred.flatten(0, 1)),
-                context_timestep).unflatten(0, denoised_pred.shape[:2])
+            if self.boundary_timestep is not None and self.transformer_2 is not None and current_timestep >= self.boundary_timestep:
+                # raise ValueError("Exit timestep is greater than boundary timestep")
+                denoised_pred = self.noise_scheduler.add_noise_high(
+                    denoised_pred.flatten(0, 1),
+                    torch.randn_like(denoised_pred.flatten(0, 1)),
+                    context_timestep,
+                    self.boundary_timestep * torch.ones_like(context_timestep)).unflatten(0, denoised_pred.shape[:2])
+            else:
+                denoised_pred = self.noise_scheduler.add_noise(
+                    denoised_pred.flatten(0, 1),
+                    torch.randn_like(denoised_pred.flatten(0, 1)),
+                    context_timestep).unflatten(0, denoised_pred.shape[:2])
 
             with torch.no_grad():
                 training_batch_temp = self._build_distill_input_kwargs(
