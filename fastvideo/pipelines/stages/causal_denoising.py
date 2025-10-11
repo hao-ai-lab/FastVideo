@@ -5,7 +5,7 @@ from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.models.utils import pred_noise_to_pred_video
+from fastvideo.models.utils import pred_noise_to_pred_video, pred_noise_to_x_bound
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.denoising import DenoisingStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
@@ -221,6 +221,13 @@ class CausalDMDDenosingStage(DenoisingStage):
             block_sizes = [1] + [self.num_frames_per_block] * num_blocks
             start_index = 0
 
+        if fastvideo_args.pipeline_config.dit_config.boundary_ratio is not None:
+            boundary_timestep = fastvideo_args.pipeline_config.dit_config.boundary_ratio * self.scheduler.num_train_timesteps
+        else:
+            boundary_timestep = None
+
+        high_noise_timesteps = timesteps[timesteps >= boundary_timestep]
+
         # DMD loop in causal blocks
         with self.progress_bar(total=len(block_sizes) *
                                len(timesteps)) as progress_bar:
@@ -232,7 +239,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                 video_raw_latent_shape = noise_latents_btchw.shape
 
                 for i, t_cur in enumerate(timesteps):
-                    if self.transformer_2 is not None and fastvideo_args.pipeline_config.dit_config.boundary_ratio is not None and t_cur < fastvideo_args.pipeline_config.dit_config.boundary_ratio * self.scheduler.num_train_timesteps:
+                    if boundary_timestep is not None and t_cur < boundary_timestep:
                         current_model = self.transformer_2
                     else:
                         current_model = self.transformer
@@ -300,12 +307,21 @@ class CausalDMDDenosingStage(DenoisingStage):
                         ).permute(0, 2, 1, 3, 4)
 
                     # Convert pred noise to pred video with FM Euler scheduler utilities
-                    pred_video_btchw = pred_noise_to_pred_video(
-                        pred_noise=pred_noise_btchw.flatten(0, 1),
-                        noise_input_latent=noise_latents.flatten(0, 1),
-                        timestep=t_expand,
-                        scheduler=self.scheduler).unflatten(
-                            0, pred_noise_btchw.shape[:2])
+                    if boundary_timestep is not None and t_cur >= boundary_timestep:
+                        pred_video_btchw = pred_noise_to_x_bound(
+                            pred_noise=pred_noise_btchw.flatten(0, 1),
+                            noise_input_latent=noise_latents.flatten(0, 1),
+                            timestep=t_expand,
+                            boundary_timestep=torch.ones_like(t_expand) * boundary_timestep,
+                            scheduler=self.scheduler).unflatten(0, pred_noise_btchw.shape[:2])
+                        logger.info("contains any NaN: %s", torch.isnan(pred_video_btchw).any())
+                    else:
+                        pred_video_btchw = pred_noise_to_pred_video(
+                            pred_noise=pred_noise_btchw.flatten(0, 1),
+                            noise_input_latent=noise_latents.flatten(0, 1),
+                            timestep=t_expand,
+                            scheduler=self.scheduler).unflatten(
+                                0, pred_noise_btchw.shape[:2])
 
                     if i < len(timesteps) - 1:
                         next_timestep = timesteps[i + 1] * torch.ones(
@@ -319,11 +335,20 @@ class CausalDMDDenosingStage(DenoisingStage):
                                 batch.generator, list) else
                                        batch.generator)).to(self.device)
                         noise_btchw = noise
-                        noise_latents_btchw = self.scheduler.add_noise(
-                            pred_video_btchw.flatten(0, 1),
-                            noise_btchw.flatten(0, 1),
-                            next_timestep).unflatten(0,
-                                                     pred_video_btchw.shape[:2])
+                        if boundary_timestep is not None and i < len(high_noise_timesteps) - 1:
+                            noise_latents_btchw = self.scheduler.add_noise_high(
+                                pred_video_btchw.flatten(0, 1),
+                                noise_btchw.flatten(0, 1),
+                                next_timestep,
+                                torch.ones_like(next_timestep) * boundary_timestep).unflatten(0, pred_video_btchw.shape[:2])
+                        elif boundary_timestep is not None and i == len(high_noise_timesteps) - 1:
+                            noise_latents_btchw = pred_video_btchw
+                        else:
+                            noise_latents_btchw = self.scheduler.add_noise(
+                                pred_video_btchw.flatten(0, 1),
+                                noise_btchw.flatten(0, 1),
+                                next_timestep).unflatten(0,
+                                                        pred_video_btchw.shape[:2])
                         current_latents = noise_latents_btchw.permute(
                             0, 2, 1, 3, 4)
                     else:
@@ -365,10 +390,10 @@ class CausalDMDDenosingStage(DenoisingStage):
                     )
                 start_index += current_num_frames
 
-        del kv_cache1
-        del crossattn_cache
-        gc.collect()
-        torch.cuda.empty_cache()
+        # del kv_cache1
+        # del crossattn_cache
+        # gc.collect()
+        # torch.cuda.empty_cache()
 
         batch.latents = latents
         return batch

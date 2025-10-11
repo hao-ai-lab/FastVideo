@@ -21,7 +21,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import SelfForcingFlowMatchScheduler
-from fastvideo.models.utils import pred_noise_to_pred_video
+from fastvideo.models.utils import pred_noise_to_pred_video, pred_noise_to_x_bound
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.training.distillation_pipeline import DistillationPipeline
 from fastvideo.training.training_utils import (EMA_FSDP,
@@ -316,13 +316,18 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             all_num_frames = [1] + all_num_frames
         num_denoising_steps = len(self.denoising_step_list)
 
+        # if exit_flags is None:
+        #     exit_flags = self.generate_and_sync_list(len(all_num_frames),
+        #                                          num_denoising_steps,
+        #                                          device=noise.device)
         if exit_flags is None:
-            exit_flags = self.generate_and_sync_list(len(all_num_frames),
-                                                 num_denoising_steps,
-                                                 device=noise.device)
+            exit_flags = self.generate_and_sync_list(len(all_num_frames), 2, device=noise.device)
+            exit_flags[0] += 2
         exit_timestep = self.denoising_step_list[exit_flags[0]].item()
 
         start_gradient_frame_index = max(0, num_output_frames - 21)
+
+        high_noise_timesteps = self.denoising_step_list[self.denoising_step_list >= self.boundary_timestep]
 
         for block_index, current_num_frames in enumerate(all_num_frames):
             noisy_input = noise[:, current_start_frame -
@@ -368,22 +373,48 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             start_frame=current_start_frame).permute(
                                 0, 2, 1, 3, 4)
 
-                        denoised_pred = pred_noise_to_pred_video(
-                            pred_noise=pred_flow.flatten(0, 1),
-                            noise_input_latent=noisy_input.flatten(0, 1),
-                            timestep=timestep,
-                            scheduler=self.noise_scheduler).unflatten(
-                                0, pred_flow.shape[:2])
+                        if self.boundary_timestep is not None and current_timestep >= self.boundary_timestep:
+                            denoised_pred = pred_noise_to_x_bound(
+                                pred_noise=pred_flow.flatten(0, 1),
+                                noise_input_latent=noisy_input.flatten(0, 1),
+                                timestep=timestep,
+                                boundary_timestep=torch.ones_like(timestep).flatten(0, 1) * self.boundary_timestep,
+                                scheduler=self.noise_scheduler).unflatten(
+                                    0, pred_flow.shape[:2])
+                        else:
+                            denoised_pred = pred_noise_to_pred_video(
+                                pred_noise=pred_flow.flatten(0, 1),
+                                noise_input_latent=noisy_input.flatten(0, 1),
+                                timestep=timestep,
+                                scheduler=self.noise_scheduler).unflatten(
+                                    0, pred_flow.shape[:2])
 
                         next_timestep = self.denoising_step_list[index + 1]
-                        noisy_input = self.noise_scheduler.add_noise(
-                            denoised_pred.flatten(0, 1),
-                            torch.randn_like(denoised_pred.flatten(0, 1)),
-                            next_timestep *
-                            torch.ones([batch_size * current_num_frames],
-                                       device=noise.device,
-                                       dtype=torch.long)).unflatten(
-                                           0, denoised_pred.shape[:2])
+
+                        if self.boundary_timestep is not None and index < len(high_noise_timesteps) - 1:
+                            noisy_input = self.noise_scheduler.add_noise_high(
+                                denoised_pred.flatten(0, 1),
+                                torch.randn_like(denoised_pred.flatten(0, 1)),
+                                next_timestep *
+                                torch.ones([batch_size * current_num_frames],
+                                           device=noise.device,
+                                           dtype=torch.long),
+                                self.boundary_timestep *
+                                torch.ones([batch_size * current_num_frames],
+                                           device=noise.device,
+                                           dtype=torch.long)).unflatten(
+                                    0, denoised_pred.shape[:2])
+                        elif self.boundary_timestep is not None and index == len(high_noise_timesteps) - 1:
+                            noisy_input = denoised_pred
+                        else:
+                            noisy_input = self.noise_scheduler.add_noise(
+                                denoised_pred.flatten(0, 1),
+                                torch.randn_like(denoised_pred.flatten(0, 1)),
+                                next_timestep *
+                                torch.ones([batch_size * current_num_frames],
+                                        device=noise.device,
+                                        dtype=torch.long)).unflatten(
+                                            0, denoised_pred.shape[:2])
                 else:
                     logger.info("Exit timestep in _generator_multi_step_simulation_forward(): %s", current_timestep)
                     # Final prediction with gradient control
