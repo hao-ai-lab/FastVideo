@@ -122,6 +122,8 @@ class SelfForcingFlowMatchScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
         """
         if timestep.ndim == 2:
             timestep = timestep.flatten(0, 1)
+        if boundary_timestep.ndim == 2:
+            boundary_timestep = boundary_timestep.flatten(0, 1)
         self.sigmas = self.sigmas.to(noise.device)
         self.timesteps = self.timesteps.to(noise.device)
         timestep_id = torch.argmin(
