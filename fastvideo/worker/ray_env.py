@@ -13,8 +13,7 @@ CONFIG_HOME = envs.FASTVIDEO_CONFIG_ROOT
 # This file contains a list of env vars that should not be copied
 # from the driver to the Ray workers.
 RAY_NON_CARRY_OVER_ENV_VARS_FILE = os.path.join(
-    CONFIG_HOME, "ray_non_carry_over_env_vars.json"
-)
+    CONFIG_HOME, "ray_non_carry_over_env_vars.json")
 
 try:
     if os.path.exists(RAY_NON_CARRY_OVER_ENV_VARS_FILE):

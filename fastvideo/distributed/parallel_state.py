@@ -963,12 +963,6 @@ def get_local_torch_device(local_rank: int = -1) -> torch.device:
         device = torch.device("mps")
     return device
 
-    
-
-
-    return torch.device(device_str) if current_platform.is_cuda_alike() else torch.device(
-                            "mps")
-
 
 def maybe_init_distributed_environment_and_model_parallel(
         tp_size: int, sp_size: int, distributed_init_method: str = "env://"):
@@ -985,7 +979,9 @@ def maybe_init_distributed_environment_and_model_parallel(
     device = get_local_torch_device()
     logger.info(
         "Initializing distributed environment with world_size=%d, device=%s",
-        world_size, device, local_main_process_only=False)
+        world_size,
+        device,
+        local_main_process_only=False)
 
     init_distributed_environment(
         world_size=world_size,

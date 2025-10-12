@@ -72,27 +72,12 @@ class RayDistributedExecutor(Executor):
 
         self._init_workers_ray(placement_group)
 
-    def shutdown(self) -> None:
-        logger.info(
-            "Shutting down Ray distributed executor. If you see error log "
-            "from logging.cc regarding SIGTERM received, please ignore because "
-            "this is the expected termination process in Ray.")
-        import ray
-        for worker in self.workers:
-            ray.kill(worker)
-
-        self.workers = []
-
-    def __del__(self):
-        self.shutdown()
-
     # child class could overwrite this to return actual env vars.
-    def _get_env_vars_to_be_updated(self):
+    def _get_env_vars_to_be_updated(self) -> list[dict[str, str]]:
         return self._env_vars_for_all_workers
 
-    def _init_workers_ray(
-        self, placement_group: "PlacementGroup", **ray_remote_kwargs
-    ):
+    def _init_workers_ray(self, placement_group: "PlacementGroup",
+                          **ray_remote_kwargs):
         from fastvideo.platforms import current_platform
 
         num_gpus = envs.FASTVIDEO_RAY_PER_WORKER_GPUS
@@ -106,8 +91,7 @@ class RayDistributedExecutor(Executor):
         for bundle_id, bundle in enumerate(placement_group.bundle_specs):
             if bundle.get(current_platform.ray_device_key, 0):
                 bundle_indices.append(bundle_id)
-        bundle_indices = bundle_indices[: self.fastvideo_args.num_gpus]
-        logger.info(f"xxx=bundle_indices={bundle_indices}")
+        bundle_indices = bundle_indices[:self.fastvideo_args.num_gpus]
 
         worker_metadata: list[RayWorkerMetaData] = []
         driver_ip = get_ip()
@@ -125,9 +109,8 @@ class RayDistributedExecutor(Executor):
                     num_gpus=num_gpus,
                     scheduling_strategy=scheduling_strategy,
                     **ray_remote_kwargs,
-                )(RayWorkerWrapper).remote(
-                    fastvideo_args=self.fastvideo_args, rpc_rank=rank
-                )
+                )(RayWorkerWrapper).remote(fastvideo_args=self.fastvideo_args,
+                                           rpc_rank=rank)
             else:
                 worker = ray.remote(
                     num_cpus=0,
@@ -135,19 +118,15 @@ class RayDistributedExecutor(Executor):
                     resources={current_platform.ray_device_key: num_gpus},
                     scheduling_strategy=scheduling_strategy,
                     **ray_remote_kwargs,
-                )(RayWorkerWrapper).remote(
-                    fastvideo_args=self.fastvideo_args, rpc_rank=rank
-                )
+                )(RayWorkerWrapper).remote(fastvideo_args=self.fastvideo_args,
+                                           rpc_rank=rank)
             worker_metadata.append(
-                RayWorkerMetaData(worker=worker, created_rank=rank)
-            )
+                RayWorkerMetaData(worker=worker, created_rank=rank))
 
-        worker_ips = ray.get(
-            [
-                each.worker.get_node_ip.remote()  # type: ignore[attr-defined]
-                for each in worker_metadata
-            ]
-        )
+        worker_ips = ray.get([
+            each.worker.get_node_ip.remote()  # type: ignore[attr-defined]
+            for each in worker_metadata
+        ])
 
         for each, ip in zip(worker_metadata, worker_ips, strict=False):
             each.ip = ip
@@ -174,9 +153,8 @@ class RayDistributedExecutor(Executor):
         # After sorting, the workers on the same node will be
         # close to each other, and the workers on the driver
         # node will be placed first.
-        sorted_worker_metadata = sorted(
-            worker_metadata, key=sort_by_driver_then_worker_ip
-        )
+        sorted_worker_metadata = sorted(worker_metadata,
+                                        key=sort_by_driver_then_worker_ip)
         start_rank = 0
         for i, item in enumerate(sorted_worker_metadata):
             item.adjusted_rank = i + start_rank
@@ -216,25 +194,19 @@ class RayDistributedExecutor(Executor):
                 f"{n_ips} unique IP addresses {all_ips}. Please check your"
                 " network configuration. If you set `FASTVIDEO_HOST_IP`"
                 " environment variable, make sure it is unique for"
-                " each node."
-            )
+                " each node.")
 
         # Set environment variables for the driver and workers.
-        all_args_to_update_environment_variables = [
-            {
-                current_platform.device_control_env_var: ",".join(
-                    map(str, node_gpus[node_id])
-                ),
-            }
-            for (node_id, _) in worker_node_and_gpu_ids
-        ]
+        all_args_to_update_environment_variables: list[dict[str, str]] = [{
+            current_platform.device_control_env_var:
+            ",".join(map(str, node_gpus[node_id])),
+        } for (node_id, _) in worker_node_and_gpu_ids]
 
         # Environment variables to copy from driver to workers
         env_vars_to_copy = get_env_vars_to_copy(
             exclude_vars=self.WORKER_SPECIFIC_ENV_VARS,
             additional_vars=set(current_platform.additional_env_vars).union(
-                self.ADDITIONAL_ENV_VARS
-            ),
+                self.ADDITIONAL_ENV_VARS),
             destination="workers",
         )
 
@@ -245,13 +217,11 @@ class RayDistributedExecutor(Executor):
                 if name in os.environ:
                     args[name] = os.environ[name]
 
-        self._env_vars_for_all_workers = (
-            all_args_to_update_environment_variables
-        )
+        self._env_vars_for_all_workers: list[dict[str, str]] = (
+            all_args_to_update_environment_variables)
 
-        self._run_ray_workers(
-            "update_environment_variables", self._get_env_vars_to_be_updated()
-        )
+        self._run_ray_workers("update_environment_variables",
+                              self._get_env_vars_to_be_updated())
 
         if len(node_gpus) == 1:
             # in single node case, we don't need to get the IP address.
@@ -264,8 +234,7 @@ class RayDistributedExecutor(Executor):
             # the node.
             driver_ip = "127.0.0.1"
         distributed_init_method = get_distributed_init_method(
-            driver_ip, get_open_port()
-        )
+            driver_ip, get_open_port())
 
         # Initialize the actual workers inside worker wrapper.
         all_kwargs = []
@@ -299,9 +268,8 @@ class RayDistributedExecutor(Executor):
             else:
                 self.non_driver_workers.append(worker)
 
-    def execute_forward(
-        self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs
-    ) -> ForwardBatch:
+    def execute_forward(self, forward_batch: ForwardBatch,
+                        fastvideo_args: FastVideoArgs) -> ForwardBatch:
         responses: list[ForwardBatch] = self.collective_rpc(
             "execute_forward",
             kwargs={
@@ -377,3 +345,17 @@ class RayDistributedExecutor(Executor):
         ray_worker_outputs = ray.get(ray_worker_outputs)
 
         return ray_worker_outputs
+
+    def shutdown(self) -> None:
+        logger.info(
+            "Shutting down Ray distributed executor. If you see error log "
+            "from logging.cc regarding SIGTERM received, please ignore because "
+            "this is the expected termination process in Ray.")
+        import ray
+        for worker in self.workers:
+            ray.kill(worker)
+
+        self.workers = []
+
+    def __del__(self):
+        self.shutdown()

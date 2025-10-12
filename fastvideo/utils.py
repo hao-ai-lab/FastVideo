@@ -11,6 +11,7 @@ import ipaddress
 import json
 import math
 import multiprocessing
+from multiprocessing.context import BaseContext
 import os
 import signal
 import socket
@@ -23,7 +24,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, fields, is_dataclass
 from functools import lru_cache, partial, wraps
 from pathlib import Path
-from typing import Any, Optional, TextIO, TypeVar, cast
+from typing import Any, TextIO, TypeVar, cast
 
 import cloudpickle
 import filelock
@@ -542,9 +543,6 @@ def maybe_download_lora(model_name_or_path: str,
         Local path to the model
     """
 
-    from diffusers.loaders.lora_base import (
-        _best_guess_weight_name)  # watch out for potetential removal from diffusers
-
     local_path = maybe_download_model(model_name_or_path, local_dir, download)
     weight_name = _best_guess_weight_name(model_name_or_path,
                                           file_extension=".safetensors")
@@ -1038,7 +1036,7 @@ def get_ip() -> str:
     return "0.0.0.0"
 
 
-def test_loopback_bind(address, family):
+def test_loopback_bind(address: str, family: socket.AddressFamily) -> bool:
     try:
         s = socket.socket(family, socket.SOCK_DGRAM)
         s.bind((address, 0))  # Port 0 = auto assign
@@ -1053,7 +1051,7 @@ def get_loopback_ip() -> str:
     if loopback_ip:
         return loopback_ip
 
-    # VLLM_LOOPBACK_IP is not set, try to get it based on network interface
+    # FASTVIDEO_LOOPBACK_IP is not set, try to get it based on network interface
 
     if test_loopback_bind("127.0.0.1", socket.AF_INET):
         return "127.0.0.1"
@@ -1062,7 +1060,7 @@ def get_loopback_ip() -> str:
     else:
         raise RuntimeError(
             "Neither 127.0.0.1 nor ::1 are bound to a local interface. "
-            "Set the VLLM_LOOPBACK_IP environment variable explicitly.")
+            "Set the FASTVIDEO_LOOPBACK_IP environment variable explicitly.")
 
 
 def is_valid_ipv6_address(address: str) -> bool:
@@ -1106,6 +1104,7 @@ def get_open_port(port: int | None = None) -> int:
             s.bind(("", 0))
             return s.getsockname()[1]
 
+
 def cuda_is_initialized() -> bool:
     """Check if CUDA is initialized."""
     if not torch.cuda._is_compiled():
@@ -1119,7 +1118,8 @@ def xpu_is_initialized() -> bool:
         return False
     return torch.xpu.is_initialized()
 
-def maybe_force_spawn():
+
+def maybe_force_spawn() -> None:
     """Check if we need to force the use of the `spawn` multiprocessing start
     method.
     """
@@ -1150,7 +1150,7 @@ def maybe_force_spawn():
         os.environ["FASTVIDEO_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 
-def get_mp_context():
+def get_mp_context() -> BaseContext:
     """Get a multiprocessing context with a particular method (spawn or fork).
     By default we follow the value of the FASTVIDEO_WORKER_MULTIPROC_METHOD to
     determine the multiprocessing method (default is fork). However, under
@@ -1161,9 +1161,11 @@ def get_mp_context():
     mp_method = envs.FASTVIDEO_WORKER_MULTIPROC_METHOD
     return multiprocessing.get_context(mp_method)
 
+
 # ANSI color codes
 CYAN = '\033[1;36m'
 RESET = '\033[0;0m'
+
 
 def _add_prefix(file: TextIO, worker_name: str, pid: int) -> None:
     """Prepend each output line with process-specific prefix"""
@@ -1191,7 +1193,8 @@ def _add_prefix(file: TextIO, worker_name: str, pid: int) -> None:
     file.start_new_line = True  # type: ignore[attr-defined]
     file.write = write_with_prefix  # type: ignore[method-assign]
 
-def decorate_logs(process_name: Optional[str] = None) -> None:
+
+def decorate_logs(process_name: str | None = None) -> None:
     """
     Adds a process-specific prefix to each line of output written to stdout and
     stderr.

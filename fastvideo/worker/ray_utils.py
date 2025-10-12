@@ -5,11 +5,10 @@ from collections import defaultdict
 import os
 import time
 
-from fastvideo.utils import cuda_is_initialized, get_ip
+from fastvideo.utils import get_ip
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.worker.worker_base import WorkerWrapperBase
 from fastvideo.logger import init_logger
-
 
 logger = init_logger(__name__)
 PG_WAIT_TIMEOUT = 1800
@@ -54,13 +53,14 @@ try:
 except ImportError as e:
     ray = None
     ray_import_err = str(e)
-    RayWorkerWrapper = None
 
-def assert_ray_available():
+
+def assert_ray_available() -> None:
     """Raise an exception if Ray is not available."""
     if ray is None:
         raise ValueError(f"Failed to import Ray: {ray_import_err}."
                          "Please install Ray with `pip install ray`.")
+
 
 def _verify_bundles(placement_group: "PlacementGroup",
                     fastvideo_args: FastVideoArgs, device_str: str):
@@ -103,9 +103,10 @@ def _verify_bundles(placement_group: "PlacementGroup",
                 "spread out to 2+ nodes which can degrade the performance "
                 "unless you have fast interconnect across nodes, like "
                 "Infiniband. To resolve this issue, make sure you have more "
-                "than %d GPUs available at each node.",
-                fastvideo_args.tp_size, device_str, len(bundles),
-                device_str, node_id, fastvideo_args.tp_size)
+                "than %d GPUs available at each node.", fastvideo_args.tp_size,
+                device_str, len(bundles), device_str, node_id,
+                fastvideo_args.tp_size)
+
 
 def _wait_until_pg_ready(current_placement_group: "PlacementGroup"):
     """Wait until a placement group is ready.
@@ -146,6 +147,7 @@ def _wait_until_pg_ready(current_placement_group: "PlacementGroup"):
             f"{placement_group_specs=} within {PG_WAIT_TIMEOUT} seconds. See "
             "`ray status` and `ray list nodes` to make sure the cluster has "
             "enough resources.") from None
+
 
 def initialize_ray_cluster(
     fastvideo_args: FastVideoArgs,
@@ -190,7 +192,7 @@ def initialize_ray_cluster(
 
     # Create or get the placement group for worker processes
     if fastvideo_args.ray_placement_group:
-        current_placement_group = fastvideo_args.ray_placement_group 
+        current_placement_group = fastvideo_args.ray_placement_group
     else:
         current_placement_group = ray.util.get_current_placement_group()
 

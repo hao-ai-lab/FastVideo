@@ -1,15 +1,13 @@
-
 import os
 from typing import Any
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.worker.gpu_worker import Worker
-from fastvideo.utils import (cuda_is_initialized, run_method,
-                             update_environment_variables)
-
+from fastvideo.utils import (run_method, update_environment_variables)
 
 logger = init_logger(__name__)
+
 
 class WorkerWrapperBase:
     """

@@ -67,7 +67,8 @@ class Worker:
 
         # Initialize the distributed environment.
         maybe_init_distributed_environment_and_model_parallel(
-            self.fastvideo_args.tp_size, self.fastvideo_args.sp_size, self.distributed_init_method)
+            self.fastvideo_args.tp_size, self.fastvideo_args.sp_size,
+            self.distributed_init_method)
 
         self.pipeline = build_pipeline(self.fastvideo_args)
 
@@ -96,15 +97,15 @@ class Worker:
 
     def set_lora_adapter(self,
                          lora_nickname: str,
-                         lora_path: str | None = None) -> None:
+                         lora_path: str | None = None) -> dict[str, Any]:
         if isinstance(self.pipeline, LoRAPipeline):
             self.pipeline.set_lora_adapter(lora_nickname, lora_path)
-            logger.info("Worker %d set LoRA adapter %s with path %s",
-                                    self.rank, lora_nickname, lora_path)
+            logger.info("Worker %d set LoRA adapter %s with path %s", self.rank,
+                        lora_nickname, lora_path)
             return {"status": "lora_adapter_set"}
         return {"status": "failed: pipeline is not a LoRAPipeline"}
 
-    def unmerge_lora_weights(self) -> None:
+    def unmerge_lora_weights(self) -> dict[str, Any]:
         if isinstance(self.pipeline, LoRAPipeline):
             self.pipeline.unmerge_lora_weights()
             return {"status": "lora_adapter_unmerged"}

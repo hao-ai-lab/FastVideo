@@ -3,22 +3,18 @@ import atexit
 import contextlib
 from dataclasses import dataclass
 import faulthandler
-from functools import partial
 import multiprocessing as mp
 from multiprocessing.connection import Connection
 import os
 import signal
-import socket
 import time
 from collections.abc import Callable
 from multiprocessing.process import BaseProcess
-import traceback
-from typing import Any, Optional, cast
+from typing import Any, cast
 
-import cloudpickle
 import psutil
 
-from fastvideo.distributed.parallel_state import destroy_distributed_environment, destroy_model_parallel, get_dp_group, get_tp_group
+from fastvideo.distributed.parallel_state import get_dp_group, get_tp_group
 import fastvideo.envs as envs
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -126,7 +122,11 @@ class MultiprocExecutor(Executor):
 
         try:
             for worker in self.workers:
-                worker.pipe.send({"method": method, "args": args, "kwargs": kwargs})
+                worker.pipe.send({
+                    "method": method,
+                    "args": args,
+                    "kwargs": kwargs
+                })
 
             responses = []
             for worker in self.workers:
@@ -141,8 +141,8 @@ class MultiprocExecutor(Executor):
             logger.info(
                 "Received KeyboardInterrupt, sending SIGINT to all workers")
             for worker in self.workers:
-                if worker.pid is not None:
-                    os.kill(worker.pid, signal.SIGINT)
+                if worker.proc.pid is not None:
+                    os.kill(worker.proc.pid, signal.SIGINT)
             raise e
         except Exception as e:
             raise e
@@ -160,7 +160,11 @@ class MultiprocExecutor(Executor):
             # Send termination message to all workers
             for worker in self.workers:
                 with contextlib.suppress(Exception):
-                    worker.pipe.send({"method": "shutdown", "args": (), "kwargs": {}})
+                    worker.pipe.send({
+                        "method": "shutdown",
+                        "args": (),
+                        "kwargs": {}
+                    })
 
             # Give workers some time to exit gracefully
             start_time = time.perf_counter()
@@ -202,14 +206,15 @@ class MultiprocExecutor(Executor):
 
         self.workers = []
         logger.info("MultiprocExecutor shutdown complete")
-    
+
     @staticmethod
     def _ensure_worker_termination(worker_procs: list[BaseProcess]):
         """Ensure that all worker processes are terminated. Assumes workers have
         received termination requests. Waits for processing, then sends
         termination and kill signals if needed."""
 
-        def wait_for_termination(procs, timeout):
+        def wait_for_termination(procs: list[BaseProcess],
+                                 timeout: float) -> bool:
             if not time:
                 # If we are in late stage shutdown, the interpreter may replace
                 # `time` with `None`.
@@ -242,7 +247,6 @@ class MultiprocExecutor(Executor):
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Ensure cleanup when exiting context"""
         self.shutdown()
-
 
 
 @dataclass
@@ -285,11 +289,10 @@ class WorkerMultiprocProc:
     ):
         self.rank = rank
         self.pipe = pipe
-        wrapper = WorkerWrapperBase(fastvideo_args=fastvideo_args, rpc_rank=rank)
+        wrapper = WorkerWrapperBase(fastvideo_args=fastvideo_args,
+                                    rpc_rank=rank)
 
-        all_kwargs: list[dict] = [
-            {} for _ in range(fastvideo_args.num_gpus)
-        ]
+        all_kwargs: list[dict] = [{} for _ in range(fastvideo_args.num_gpus)]
         all_kwargs[rank] = {
             "fastvideo_args": fastvideo_args,
             "local_rank": local_rank,
@@ -366,8 +369,7 @@ class WorkerMultiprocProc:
 
             # Send READY once we know everything is loaded
             ready_pipe.send({
-                "status":
-                WorkerMultiprocProc.READY_STR,
+                "status": WorkerMultiprocProc.READY_STR,
             })
 
             ready_pipe.close()
@@ -406,8 +408,8 @@ class WorkerMultiprocProc:
                       "See stack trace for root cause.")
 
         pipes = {handle.ready_pipe: handle for handle in unready_proc_handles}
-        ready_proc_handles: list[Optional[WorkerProcHandle]] = (
-            [None] * len(unready_proc_handles))
+        ready_proc_handles: list[WorkerProcHandle
+                                 | None] = ([None] * len(unready_proc_handles))
         while pipes:
             ready = mp.connection.wait(pipes.keys())
             for pipe in ready:
@@ -437,11 +439,10 @@ class WorkerMultiprocProc:
     def shutdown(self) -> dict[str, Any]:
         return self.worker.shutdown()
 
-    def worker_busy_loop(self):
+    def worker_busy_loop(self) -> None:
         """Main busy loop for Multiprocessing Workers"""
         while True:
-            logger.info("Worker %d starting event loop...",
-                        self.rank)
+            logger.info("Worker %d starting event loop...", self.rank)
             try:
                 rpc_call = self.pipe.recv()
                 method = rpc_call.get("method")
@@ -457,8 +458,8 @@ class WorkerMultiprocProc:
                     if method == 'execute_forward':
                         forward_batch = kwargs['forward_batch']
                         fastvideo_args = kwargs['fastvideo_args']
-                        output_batch = self.worker.execute_forward(forward_batch,
-                                                            fastvideo_args)
+                        output_batch = self.worker.execute_forward(
+                            forward_batch, fastvideo_args)
                         logging_info = None
                         if envs.FASTVIDEO_STAGE_LOGGING:
                             logging_info = output_batch.logging_info
@@ -497,10 +498,9 @@ class WorkerMultiprocProc:
         decorate_logs(process_name)
 
 
-def set_multiproc_executor_envs():
+def set_multiproc_executor_envs() -> None:
     """ Set up environment variables that should be used when there are workers
     in a multiprocessing environment. This should be called by the parent 
     process before worker processes are created"""
 
     maybe_force_spawn()
-
