@@ -803,21 +803,6 @@ def init_distributed_environment(
             "distributed_init_method must be provided when initializing "
             "distributed environment")
 
-        # For MPS, don't pass device_id as it doesn't support device indices
-        # if current_platform.is_mps():
-        #     torch.distributed.init_process_group(
-        #         backend=backend,
-        #         init_method=distributed_init_method,
-        #         world_size=world_size,
-        #         rank=rank)
-        # else:
-        #     # this backend is used for WORLD
-        #     torch.distributed.init_process_group(
-        #         backend=backend,
-        #         init_method=distributed_init_method,
-        #         world_size=world_size,
-        #         rank=rank,
-        #         device_id=device_id)
         torch.distributed.init_process_group(
             backend=backend,
             init_method=distributed_init_method,
