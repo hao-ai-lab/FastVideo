@@ -134,12 +134,88 @@ def load_image(
     return image
 
 
+def _load_gif(gif_path: str) -> tuple[list[PIL.Image.Image], float | None]:
+    """
+    Load frames from a GIF file.
+
+    Args:
+        gif_path: Path to the GIF file
+
+    Returns:
+        Tuple of (list of PIL images, original FPS or None)
+    """
+    pil_images = []
+    original_fps = None
+
+    with PIL.Image.open(gif_path) as gif:
+        # Extract FPS from GIF metadata
+        if hasattr(gif, 'info') and 'duration' in gif.info:
+            duration_ms = gif.info['duration']
+            if duration_ms > 0:
+                original_fps = 1000.0 / duration_ms
+
+        # Extract all frames
+        try:
+            while True:
+                pil_images.append(gif.copy())
+                gif.seek(gif.tell() + 1)
+        except EOFError:
+            # End of GIF reached
+            pass
+
+    return pil_images, original_fps
+
+
+def _load_video_with_ffmpeg(
+        video_path: str) -> tuple[list[PIL.Image.Image], float | None]:
+    """
+    Load frames from a video file using ffmpeg.
+
+    Args:
+        video_path: Path to the video file
+
+    Returns:
+        Tuple of (list of PIL images, original FPS or None)
+
+    Raises:
+        AttributeError: If ffmpeg is not installed
+    """
+    # Verify ffmpeg is available
+    try:
+        imageio.plugins.ffmpeg.get_exe()
+    except AttributeError as e:
+        raise AttributeError(
+            "Unable to find an ffmpeg installation on your machine. "
+            "Please install via `pip install imageio-ffmpeg`") from e
+
+    pil_images = []
+    original_fps = None
+
+    with imageio.get_reader(video_path) as reader:
+        # Try to extract FPS metadata
+        metadata = reader.get_meta_data()
+        original_fps = metadata.get('fps')
+
+        # Fallback: try format-specific metadata
+        if original_fps is None:
+            source_size = metadata.get('source_size', {})
+            if isinstance(source_size, dict):
+                original_fps = source_size.get('fps')
+
+        # Extract all frames
+        for frame in reader:
+            pil_images.append(PIL.Image.fromarray(frame))
+
+    return pil_images, original_fps
+
+
 # adapted from diffusers.utils import load_video
 def load_video(
     video: str,
     convert_method: Callable[[list[PIL.Image.Image]], list[PIL.Image.Image]]
     | None = None,
-) -> tuple[list[Any], float | Any]:
+    return_fps: bool = False,
+) -> tuple[list[PIL.Image.Image], float | Any] | list[PIL.Image.Image]:
     """
     Loads `video` to a list of PIL Image.
     Args:
@@ -148,9 +224,12 @@ def load_video(
         convert_method (Callable[[List[PIL.Image.Image]], List[PIL.Image.Image]], *optional*):
             A conversion method to apply to the video after loading it. When set to `None` the images will be converted
             to "RGB".
+        return_fps (`bool`, *optional*, defaults to `False`):
+            Whether to return the FPS of the video. If `True`, returns a tuple of (images, fps).
+            If `False`, returns only the list of images.
     Returns:
-        `List[PIL.Image.Image]`:
-            The video as a list of PIL images.
+        `List[PIL.Image.Image]` or `Tuple[List[PIL.Image.Image], float | None]`:
+            The video as a list of PIL images. If `return_fps` is True, also returns the original FPS.
     """
     is_url = video.startswith("http://") or video.startswith("https://")
     is_file = os.path.isfile(video)
@@ -187,39 +266,9 @@ def load_video(
 
     try:
         if video_path.endswith(".gif"):
-            gif = PIL.Image.open(video_path)
-            try:
-                # GIF FPS estimation
-                if hasattr(gif, 'info') and 'duration' in gif.info:
-                    duration_ms = gif.info['duration']
-                    if duration_ms > 0:
-                        original_fps = 1000.0 / duration_ms
-
-                while True:
-                    pil_images.append(gif.copy())
-                    gif.seek(gif.tell() + 1)
-            except EOFError:
-                pass
+            pil_images, original_fps = _load_gif(video_path)
         else:
-            try:
-                imageio.plugins.ffmpeg.get_exe()
-            except AttributeError:
-                raise AttributeError(
-                    "`Unable to find an ffmpeg installation on your machine. Please install via `pip install imageio-ffmpeg"
-                ) from None
-
-            with imageio.get_reader(video_path) as reader:
-                try:
-                    original_fps = reader.get_meta_data().get('fps', None)
-                except:
-                    # Fallback: try to get from format-specific metadata
-                    try:
-                        original_fps = reader.get_meta_data().get('source_size', {}).get('fps', None)
-                    except:
-                        pass
-
-                for frame in reader:
-                    pil_images.append(PIL.Image.fromarray(frame))
+            pil_images, original_fps = _load_video_with_ffmpeg(video_path)
     finally:
         # Clean up temporary file if it was created
         if was_tempfile_created and os.path.exists(video_path):
@@ -228,7 +277,7 @@ def load_video(
     if convert_method is not None:
         pil_images = convert_method(pil_images)
 
-    return pil_images, original_fps
+    return pil_images, original_fps if return_fps else pil_images
 
 
 def get_default_height_width(
@@ -335,7 +384,7 @@ def create_default_image(width: int = 512, height: int = 512, color: tuple[int, 
     return PIL.Image.new("RGB", (width, height), color=color)
 
 
-def preprocess_reference_image_for_clip(image: PIL.Image.Image, device: torch.device | None = None) -> PIL.Image.Image:
+def preprocess_reference_image_for_clip(image: PIL.Image.Image, device: torch.device) -> PIL.Image.Image:
     """
     Preprocess reference image to match CLIP encoder requirements.
 
@@ -349,9 +398,6 @@ def preprocess_reference_image_for_clip(image: PIL.Image.Image, device: torch.de
     Returns:
         Preprocessed PIL image ready for CLIP encoder
     """
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
     # Convert PIL to tensor and normalize to [-1, 1] range
     image_tensor = TF.to_tensor(image).sub_(0.5).div_(0.5).to(device)
 

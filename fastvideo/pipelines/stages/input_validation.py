@@ -137,7 +137,7 @@ class InputValidationStage(PipelineStage):
 
         # for v2v, get control video from video path
         if batch.video_path is not None:
-            pil_images, original_fps = load_video(batch.video_path)
+            pil_images, original_fps = load_video(batch.video_path, return_fps=True)
             logger.info("Loaded video with %s frames, original FPS: %s",
                         len(pil_images), original_fps)
 
