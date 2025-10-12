@@ -33,7 +33,7 @@ from fastvideo.layers.visual_embedding import (PatchEmbed)
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.models.dits.wanvideo import WanT2VCrossAttention, WanTimeTextImageEmbedding
-from fastvideo.platforms import AttentionBackendEnum, current_platform
+from fastvideo.platforms import AttentionBackendEnum
 
 logger = init_logger(__name__)
 class CausalWanSelfAttention(nn.Module):
@@ -452,6 +452,7 @@ class CausalWanTransformer3DModel(BaseDiT):
         This function will be run for num_frame times.
         Process the latent frames one by one (1560 tokens each)
         """
+        from fastvideo.platforms import current_platform
 
         orig_dtype = hidden_states.dtype
         if not isinstance(encoder_hidden_states, torch.Tensor):

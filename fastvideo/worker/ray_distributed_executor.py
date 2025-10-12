@@ -20,7 +20,6 @@ from fastvideo.worker.ray_utils import (
 )
 from fastvideo.worker.ray_env import get_env_vars_to_copy
 from fastvideo.logger import init_logger
-from fastvideo.platforms import current_platform
 
 if ray is not None:
     from ray.actor import ActorHandle
@@ -64,7 +63,7 @@ class RayDistributedExecutor(Executor):
 
     def _init_executor(self) -> None:
         initialize_ray_cluster(self.fastvideo_args)
-        placement_group = self.parallel_config.placement_group
+        placement_group = self.fastvideo_args.ray_placement_group
 
         # Disable Ray usage stats collection.
         ray_usage = os.environ.get("RAY_USAGE_STATS_ENABLED", "0")
@@ -94,6 +93,8 @@ class RayDistributedExecutor(Executor):
     def _init_workers_ray(
         self, placement_group: "PlacementGroup", **ray_remote_kwargs
     ):
+        from fastvideo.platforms import current_platform
+
         num_gpus = envs.FASTVIDEO_RAY_PER_WORKER_GPUS
 
         # The remaining workers are the actual ray actors.
@@ -176,7 +177,6 @@ class RayDistributedExecutor(Executor):
         sorted_worker_metadata = sorted(
             worker_metadata, key=sort_by_driver_then_worker_ip
         )
-        # start_rank = 0 if self.use_ray_spmd_worker else 1
         start_rank = 0
         for i, item in enumerate(sorted_worker_metadata):
             item.adjusted_rank = i + start_rank
@@ -185,7 +185,6 @@ class RayDistributedExecutor(Executor):
             item.created_rank: item.adjusted_rank
             for item in sorted_worker_metadata
         }
-        logger.info(f"xxx-reranking-mapping={rerank_mapping}")
         self._run_ray_workers("adjust_rank", rerank_mapping)
 
         # Get the set of GPU IDs used on each node.
@@ -206,7 +205,6 @@ class RayDistributedExecutor(Executor):
         for node_id, gpu_ids in node_gpus.items():
             node_gpus[node_id] = sorted(gpu_ids)
 
-        logger.info(f"xxx-node_workers={node_workers}, node_gpus={node_gpus}")
         all_ips = set(worker_ips + [driver_ip])
         n_ips = len(all_ips)
         n_nodes = len(node_workers)
@@ -230,7 +228,6 @@ class RayDistributedExecutor(Executor):
             }
             for (node_id, _) in worker_node_and_gpu_ids
         ]
-        logger.info(f"xxx-before-all_args_env: {all_args_to_update_environment_variables}")
 
         # Environment variables to copy from driver to workers
         env_vars_to_copy = get_env_vars_to_copy(
@@ -251,7 +248,6 @@ class RayDistributedExecutor(Executor):
         self._env_vars_for_all_workers = (
             all_args_to_update_environment_variables
         )
-        logger.info(f"xxx-all_args_env: {self._env_vars_for_all_workers}")
 
         self._run_ray_workers(
             "update_environment_variables", self._get_env_vars_to_be_updated()
@@ -280,12 +276,10 @@ class RayDistributedExecutor(Executor):
                 local_rank=local_rank,
                 rank=rank,
                 distributed_init_method=distributed_init_method,
-                is_driver_worker=(not self.fastvideo_args)
-                or (rank % self.fastvideo_args.tensor_parallel_size == 0),
             )
             all_kwargs.append(kwargs)
-        print(f"xxx-all_kwargs={all_kwargs}")
         self._run_ray_workers("init_worker", all_kwargs)
+        self._run_ray_workers("init_device")
 
         # This is the list of workers that are rank 0 of each TP group EXCEPT
         # global rank 0. These are the workers that will broadcast to the
@@ -308,19 +302,18 @@ class RayDistributedExecutor(Executor):
     def execute_forward(
         self, forward_batch: ForwardBatch, fastvideo_args: FastVideoArgs
     ) -> ForwardBatch:
-        responses = self.collective_rpc(
+        responses: list[ForwardBatch] = self.collective_rpc(
             "execute_forward",
             kwargs={
                 "forward_batch": forward_batch,
                 "fastvideo_args": fastvideo_args,
             },
         )
-        # TODO(xingyu): need to figure out how to pass return parameters
-        output = responses[0]["output_batch"]
+        output = responses[0].output.cpu()
 
         logging_info = None
         if envs.FASTVIDEO_STAGE_LOGGING:
-            logging_info = responses[0]["logging_info"]
+            logging_info = responses[0].logging_info
 
         result_batch = ForwardBatch(
             data_type=forward_batch.data_type,

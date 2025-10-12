@@ -29,7 +29,6 @@ from fastvideo.models.loader.weight_utils import (
     filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
     pt_weights_iterator, safetensors_weights_iterator)
 from fastvideo.models.registry import ModelRegistry
-from fastvideo.platforms import current_platform
 from fastvideo.utils import PRECISION_TO_TYPE
 
 logger = init_logger(__name__)
@@ -251,6 +250,8 @@ class TextEncoderLoader(ComponentLoader):
         use_cpu_offload = fastvideo_args.text_encoder_cpu_offload and len(
             getattr(model_config, "_fsdp_shard_conditions", [])) > 0
 
+        from fastvideo.platforms import current_platform
+
         if fastvideo_args.text_encoder_cpu_offload:
             target_device = torch.device(
                 "mps") if current_platform.is_mps() else torch.device("cpu")
@@ -273,6 +274,8 @@ class TextEncoderLoader(ComponentLoader):
 
             # Explicitly move model to target device after loading weights
             model = model.to(target_device)
+
+            from fastvideo.platforms import current_platform
 
             if use_cpu_offload:
                 # Disable FSDP for MPS as it's not compatible
@@ -338,6 +341,8 @@ class ImageEncoderLoader(TextEncoderLoader):
         encoder_config = fastvideo_args.pipeline_config.image_encoder_config
         encoder_config.update_model_arch(model_config)
 
+        from fastvideo.platforms import current_platform
+
         if fastvideo_args.image_encoder_cpu_offload:
             target_device = torch.device("mps") if current_platform.is_mps() else torch.device("cpu")
         else:
@@ -391,6 +396,8 @@ class VAELoader(ComponentLoader):
 
         vae_config = fastvideo_args.pipeline_config.vae_config
         vae_config.update_model_arch(config)
+
+        from fastvideo.platforms import current_platform
 
         if fastvideo_args.vae_cpu_offload:
             target_device = torch.device("mps") if current_platform.is_mps() else torch.device("cpu")

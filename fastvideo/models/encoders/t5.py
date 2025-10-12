@@ -37,7 +37,6 @@ from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.layers.vocab_parallel_embedding import VocabParallelEmbedding
 from fastvideo.models.encoders.base import TextEncoder
 from fastvideo.models.loader.weight_utils import default_weight_loader
-from fastvideo.platforms import current_platform
 
 
 class AttentionType:
@@ -321,6 +320,8 @@ class T5Attention(nn.Module):
         else:
             # Encoder/Decoder Self-Attention Layer, attn bias already cached.
             assert attn_bias is not None
+
+        from fastvideo.platforms import current_platform
 
         if attention_mask is not None:
             attention_mask = attention_mask.view(

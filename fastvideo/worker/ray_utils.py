@@ -5,10 +5,9 @@ from collections import defaultdict
 import os
 import time
 
-from fastvideo.platforms import current_platform
-from fastvideo.utils import get_ip
+from fastvideo.utils import cuda_is_initialized, get_ip
 from fastvideo.fastvideo_args import FastVideoArgs
-from fastvideo.worker.gpu_worker import WorkerWrapperBase
+from fastvideo.worker.worker_base import WorkerWrapperBase
 from fastvideo.logger import init_logger
 
 
@@ -32,17 +31,13 @@ try:
 
         def __init__(self, *args, **kwargs) -> None:
             super().__init__(*args, **kwargs)
-            # Since the compiled DAG runs a main execution
-            # in a different thread that calls cuda.set_device.
-            # The flag indicates is set_device is called on
-            # that thread.
-            self.compiled_dag_cuda_device_set = False
-
 
         def get_node_ip(self) -> str:
             return get_ip()
 
         def get_node_and_gpu_ids(self) -> tuple[str, list[int]]:
+            from fastvideo.platforms import current_platform
+
             node_id = ray.get_runtime_context().get_node_id()
             device_key = current_platform.ray_device_key
             if not device_key:
@@ -100,7 +95,7 @@ def _verify_bundles(placement_group: "PlacementGroup",
         )
 
     for node_id, bundles in node_id_to_bundle.items():
-        if len(bundles) < fastvideo_args.tensor_parallel_size:
+        if len(bundles) < fastvideo_args.tp_size:
             logger.warning(
                 "tensor_parallel_size=%d "
                 "is bigger than a reserved number of %ss (%d "
@@ -109,8 +104,8 @@ def _verify_bundles(placement_group: "PlacementGroup",
                 "unless you have fast interconnect across nodes, like "
                 "Infiniband. To resolve this issue, make sure you have more "
                 "than %d GPUs available at each node.",
-                fastvideo_args.tensor_parallel_size, device_str, len(bundles),
-                device_str, node_id, fastvideo_args.tensor_parallel_size)
+                fastvideo_args.tp_size, device_str, len(bundles),
+                device_str, node_id, fastvideo_args.tp_size)
 
 def _wait_until_pg_ready(current_placement_group: "PlacementGroup"):
     """Wait until a placement group is ready.

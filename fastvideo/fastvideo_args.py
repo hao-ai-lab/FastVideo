@@ -10,11 +10,9 @@ from enum import Enum
 from typing import Any, TYPE_CHECKING
 
 from fastvideo.configs.configs import PreprocessConfig
-from fastvideo.configs.parallel import ParallelConfig
 from fastvideo.configs.pipelines.base import PipelineConfig, STA_Mode
 from fastvideo.configs.utils import clean_cli_args
 from fastvideo.logger import init_logger
-from fastvideo.platforms import current_platform
 from fastvideo.utils import FlexibleArgumentParser, StoreBoolean
 
 if TYPE_CHECKING:
@@ -103,9 +101,6 @@ class FastVideoArgs:
     ray_placement_group: PlacementGroup | None = None
 
     ray_runtime_env: RuntimeEnv | None = None
-
-    """Number of tensor parallel groups."""
-    tensor_parallel_size: int = 1
 
     inference_mode: bool = True  # if False == training mode
 
@@ -522,6 +517,8 @@ class FastVideoArgs:
 
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
+        from fastvideo.platforms import current_platform
+
         if current_platform.is_mps():
             self.use_fsdp_inference = False
 

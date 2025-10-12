@@ -41,7 +41,6 @@ from torch.distributed.fsdp import MixedPrecisionPolicy
 
 import fastvideo.envs as envs
 from fastvideo.logger import init_logger
-from fastvideo.worker.ray_utils import is_in_ray_actor
 
 logger = init_logger(__name__)
 
@@ -542,6 +541,9 @@ def maybe_download_lora(model_name_or_path: str,
     Returns:
         Local path to the model
     """
+
+    from diffusers.loaders.lora_base import (
+        _best_guess_weight_name)  # watch out for potetential removal from diffusers
 
     local_path = maybe_download_model(model_name_or_path, local_dir, download)
     weight_name = _best_guess_weight_name(model_name_or_path,
@@ -1125,6 +1127,8 @@ def maybe_force_spawn():
         return
 
     reasons = []
+
+    from fastvideo.worker.ray_utils import is_in_ray_actor
     if is_in_ray_actor():
         # even if we choose to spawn, we need to pass the ray address
         # to the subprocess so that it knows how to connect to the ray cluster.

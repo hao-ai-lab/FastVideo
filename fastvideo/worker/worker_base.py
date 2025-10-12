@@ -5,7 +5,7 @@ from typing import Any
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.worker.gpu_worker import Worker
-from fastvideo.utils import (run_method,
+from fastvideo.utils import (cuda_is_initialized, run_method,
                              update_environment_variables)
 
 
@@ -54,13 +54,12 @@ class WorkerWrapperBase:
                                                                 str]]) -> None:
         envs = envs_list[self.rpc_rank]
         key = 'CUDA_VISIBLE_DEVICES'
-        logger.info(f"xxx-before-envs={envs}, os.environ={os.environ[key]}")
+        envs["WORLD_SIZE"] = "2"
         if key in envs and key in os.environ:
             # overwriting CUDA_VISIBLE_DEVICES is desired behavior
             # suppress the warning in `update_environment_variables`
             del os.environ[key]
         update_environment_variables(envs)
-        logger.info(f"xxx-after-envs={envs}, os.environ={os.environ[key]}")
 
     def init_worker(self, all_kwargs: list[dict[str, Any]]) -> None:
         """

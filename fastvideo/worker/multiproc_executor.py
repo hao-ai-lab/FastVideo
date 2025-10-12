@@ -25,7 +25,6 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.utils import decorate_logs, get_distributed_init_method, get_exception_traceback, get_loopback_ip, get_mp_context, get_open_port, kill_itself_when_parent_died, maybe_force_spawn
 from fastvideo.worker.executor import Executor
-from fastvideo.worker.gpu_worker import run_worker_process
 from fastvideo.worker.worker_base import WorkerWrapperBase
 
 logger = init_logger(__name__)
@@ -166,27 +165,27 @@ class MultiprocExecutor(Executor):
             # Give workers some time to exit gracefully
             start_time = time.perf_counter()
             while time.perf_counter() - start_time < 5.0:  # 5 seconds timeout
-                if all(not worker.is_alive() for worker in self.workers):
+                if all(not worker.proc.is_alive() for worker in self.workers):
                     break
                 time.sleep(0.1)
 
             # Force terminate any remaining workers
             for worker in self.workers:
-                if worker.is_alive():
-                    worker.terminate()
+                if worker.proc.is_alive():
+                    worker.proc.terminate()
 
             # Final timeout for terminate
             start_time = time.perf_counter()
             while time.perf_counter() - start_time < 2.0:  # 2 seconds timeout
-                if all(not worker.is_alive() for worker in self.workers):
+                if all(not worker.proc.is_alive() for worker in self.workers):
                     break
                 time.sleep(0.1)
 
             # Kill if still alive
             for worker in self.workers:
-                if worker.is_alive():
-                    worker.kill()
-                worker.join(timeout=1.0)
+                if worker.proc.is_alive():
+                    worker.proc.kill()
+                worker.proc.join(timeout=1.0)
 
         except Exception as e:
             logger.error("Error during shutdown: %s", e)
@@ -333,7 +332,7 @@ class WorkerMultiprocProc:
 
         proc.start()
         worker_pipe.close()
-        return UnreadyWorkerProcHandle(proc, rank, executor_pipe, writer)
+        return UnreadyWorkerProcHandle(proc, rank, executor_pipe, reader)
 
     @staticmethod
     def worker_main(*args, **kwargs):
@@ -441,6 +440,8 @@ class WorkerMultiprocProc:
     def worker_busy_loop(self):
         """Main busy loop for Multiprocessing Workers"""
         while True:
+            logger.info("Worker %d starting event loop...",
+                        self.rank)
             try:
                 rpc_call = self.pipe.recv()
                 method = rpc_call.get("method")
