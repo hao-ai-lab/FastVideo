@@ -166,11 +166,10 @@ class WandbTracker(BaseTracker):
         if caption is not None:
             kwargs["caption"] = caption
         if fps is not None:
-            kwargs["fps"] = fps  # Keep as int/float, not string
+            kwargs["fps"] = fps
         if format is not None:
             kwargs["format"] = format
         else:
-            # Default to MP4 for better quality
             kwargs["format"] = "mp4"
         return self._wandb.Video(data, **kwargs)
 

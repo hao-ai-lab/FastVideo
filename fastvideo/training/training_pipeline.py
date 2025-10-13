@@ -35,6 +35,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import (ComposedPipelineBase, ForwardBatch,
                                  LoRAPipeline, TrainingBatch)
+from fastvideo.platforms import current_platform
 from fastvideo.training.activation_checkpoint import (
     apply_activation_checkpointing)
 from fastvideo.training.trackers import (DummyTracker, TrackerType,
@@ -584,8 +585,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
         # Set random seeds for deterministic training
         self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
             self.seed)
-        self.noise_gen_cuda = torch.Generator(device="cuda").manual_seed(
-            self.seed)
+        self.noise_gen_cuda = torch.Generator(
+            device=current_platform.device_name).manual_seed(self.seed)
         self.validation_random_generator = torch.Generator(
             device="cpu").manual_seed(self.seed)
         logger.info("Initialized random seeds with seed: %s", self.seed)
@@ -674,7 +675,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
                             training_batch, self.training_args, step)
                     self._log_validation(self.transformer, self.training_args,
                                          step)
-                    gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
+                    gpu_memory_usage = current_platform.get_torch_device(
+                    ).memory_allocated() / 1024**2
                     trainable_params = round(
                         count_trainable(self.transformer) / 1e9, 3)
                     logger.info(
@@ -723,7 +725,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
         logger.info("  Master weight dtype: %s",
                     self.transformer.parameters().__next__().dtype)
 
-        gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
+        gpu_memory_usage = current_platform.get_torch_device().memory_allocated(
+        ) / 1024**2
         logger.info("GPU memory usage before train_one_step: %s MB",
                     gpu_memory_usage)
         logger.info("VSA validation sparsity: %s",

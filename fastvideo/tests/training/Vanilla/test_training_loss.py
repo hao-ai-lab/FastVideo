@@ -119,7 +119,7 @@ def test_distributed_training():
         print(f"Process failed with return code: {process.returncode}")
         raise subprocess.CalledProcessError(process.returncode, cmd, process.stdout, process.stderr)
 
-    summary_file = 'wandb/latest-run/files/wandb-summary.json'
+    summary_file = 'data/wan_finetune_test/tracker/wandb/latest-run/files/wandb-summary.json'
 
     device_name = torch.cuda.get_device_name()
     if "A40" in device_name:

@@ -83,7 +83,7 @@ def test_lora_training():
     
     process = subprocess.run(cmd, check=True)
 
-    summary_file = 'wandb/latest-run/files/wandb-summary.json'
+    summary_file = '/workspace/tracker/wandb/latest-run/files/wandb-summary.json'
 
     device_name = torch.cuda.get_device_name()
     assert "L40S" in device_name, "Test must be run on L40S"
