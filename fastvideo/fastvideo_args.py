@@ -662,6 +662,7 @@ class TrainingArgs(FastVideoArgs):
     validation_guidance_scale: str = ""
     validation_steps: float = 0.0
     log_validation: bool = False
+    trackers: list[str] = dataclasses.field(default_factory=list)
     tracker_project_name: str = ""
     wandb_run_name: str = ""
     seed: int | None = None

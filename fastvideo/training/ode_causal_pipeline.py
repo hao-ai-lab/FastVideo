@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 import sys
 from copy import deepcopy
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 
-import wandb
 from fastvideo.dataset.dataloader.schema import (
     pyarrow_schema_ode_trajectory_text_only)
 from fastvideo.distributed import get_local_torch_device
@@ -361,8 +360,7 @@ class ODEInitTrainingPipeline(TrainingPipeline):
 
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,
                                        training_args: TrainingArgs, step: int):
-        """Add visualization data to wandb logging and save frames to disk."""
-        wandb_loss_dict = {}
+        tracker_loss_dict: dict[str, Any] = {}
         latents_vis_dict = training_batch.latent_vis_dict
         latent_log_keys = ['noisy_input', 'x0', 'pred_video']
         for latent_key in latent_log_keys:
@@ -375,14 +373,15 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             video = pixel_latent.cpu().float()
             video = video.permute(0, 2, 1, 3, 4)
             video = (video * 255).numpy().astype(np.uint8)
-            wandb_loss_dict[latent_key] = wandb.Video(
+            video_artifact = self.tracker.video(
                 video, fps=16, format="mp4")  # change to 16 for Wan2.1
+            if video_artifact is not None:
+                tracker_loss_dict[latent_key] = video_artifact
             # Clean up references
             del video, pixel_latent, latent
 
-        # Log to wandb
-        if self.global_rank == 0:
-            wandb.log(wandb_loss_dict, step=step)
+        if self.global_rank == 0 and tracker_loss_dict:
+            self.tracker.log_artifacts(tracker_loss_dict, step)
 
 
 def main(args) -> None:

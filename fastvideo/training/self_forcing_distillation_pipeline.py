@@ -11,7 +11,6 @@ from einops import rearrange
 from tqdm.auto import tqdm
 
 import fastvideo.envs as envs
-import wandb
 from fastvideo.distributed import (cleanup_dist_env_and_memory,
                                    get_local_torch_device, get_sp_group,
                                    get_world_group)
@@ -815,8 +814,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,
                                        training_args: TrainingArgs, step: int):
-        """Add visualization data to wandb logging and save frames to disk."""
-        wandb_loss_dict = {}
+        """Add visualization data to tracker logging and save frames to disk."""
+        tracker_loss_dict: dict[str, Any] = {}
 
         # Debug logging
         if hasattr(training_batch, 'dmd_latent_vis_dict'):
@@ -868,8 +867,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     video = video.cpu().float()
                     video = video.permute(0, 2, 1, 3, 4)
                     video = (video * 255).numpy().astype(np.uint8)
-                    wandb_loss_dict[f"dmd_{latent_key}"] = wandb.Video(
-                        video, fps=24, format="mp4")
+                    video_artifact = self.tracker.video(video,
+                                                        fps=24,
+                                                        format="mp4")
+                    if video_artifact is not None:
+                        tracker_loss_dict[f"dmd_{latent_key}"] = video_artifact
                     del video, latents
 
         # Process critic predictions
@@ -910,8 +912,12 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     video = video.cpu().float()
                     video = video.permute(0, 2, 1, 3, 4)
                     video = (video * 255).numpy().astype(np.uint8)
-                    wandb_loss_dict[f"critic_{latent_key}"] = wandb.Video(
-                        video, fps=24, format="mp4")
+                    video_artifact = self.tracker.video(video,
+                                                        fps=24,
+                                                        format="mp4")
+                    if video_artifact is not None:
+                        tracker_loss_dict[
+                            f"critic_{latent_key}"] = video_artifact
                     del video, latents
 
         # Log metadata
@@ -919,27 +925,27 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 training_batch,
                 'dmd_latent_vis_dict') and training_batch.dmd_latent_vis_dict:
             if "generator_timestep" in training_batch.dmd_latent_vis_dict:
-                wandb_loss_dict[
+                tracker_loss_dict[
                     "generator_timestep"] = training_batch.dmd_latent_vis_dict[
                         "generator_timestep"].item()
             if "dmd_timestep" in training_batch.dmd_latent_vis_dict:
-                wandb_loss_dict[
+                tracker_loss_dict[
                     "dmd_timestep"] = training_batch.dmd_latent_vis_dict[
                         "dmd_timestep"].item()
 
         if hasattr(
                 training_batch, 'fake_score_latent_vis_dict'
         ) and training_batch.fake_score_latent_vis_dict and "fake_score_timestep" in training_batch.fake_score_latent_vis_dict:
-            wandb_loss_dict[
+            tracker_loss_dict[
                 "fake_score_timestep"] = training_batch.fake_score_latent_vis_dict[
                     "fake_score_timestep"].item()
 
         # Log final dict contents
-        logger.info("Final wandb_loss_dict keys: %s",
-                    list(wandb_loss_dict.keys()))
+        logger.info("Final tracker_loss_dict keys: %s",
+                    list(tracker_loss_dict.keys()))
 
-        if self.global_rank == 0:
-            wandb.log(wandb_loss_dict, step=step)
+        if self.global_rank == 0 and tracker_loss_dict:
+            self.tracker.log_artifacts(tracker_loss_dict, step)
 
     @profile_region("profiler_region_training_train")
     def train(self) -> None:
@@ -1105,7 +1111,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 }
                 log_data.update(faker_score_additional_logs)
 
-                wandb.log(log_data, step=step)
+                self.tracker.log(log_data, step)
 
                 if self.training_args.log_validation and step % self.training_args.validation_steps == 0 and self.training_args.log_visualization:
                     self.visualize_intermediate_latents(training_batch,
@@ -1187,7 +1193,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 self._log_validation(self.transformer, self.training_args, step)
 
-        wandb.finish()
+        self.tracker.finish()
 
         print("rank", self.global_rank,
               "save final training state checkpoint at step",

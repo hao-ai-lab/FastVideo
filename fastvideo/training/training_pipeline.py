@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-import dataclasses
+from dataclasses import asdict
 import math
 import os
 import time
@@ -35,9 +35,10 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import (ComposedPipelineBase, ForwardBatch,
                                  LoRAPipeline, TrainingBatch)
-from fastvideo.platforms import current_platform
 from fastvideo.training.activation_checkpoint import (
     apply_activation_checkpointing)
+from fastvideo.training.trackers import (DummyTracker, TrackerType,
+                                         initialize_trackers, Trackers)
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, count_trainable, get_scheduler,
@@ -45,8 +46,6 @@ from fastvideo.training.training_utils import (
     shard_latents_across_sp)
 from fastvideo.utils import (is_vmoba_available, is_vsa_available,
                              set_random_seed, shallow_asdict)
-
-import wandb  # isort: skip
 
 vsa_available = is_vsa_available()
 vmoba_available = is_vmoba_available()
@@ -65,6 +64,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
     train_loader_iter: Iterator[dict[str, Any]]
     current_epoch: int = 0
     train_transformer_2: bool = False
+    tracker: TrackerType
 
     def __init__(
             self,
@@ -80,6 +80,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         set_random_seed(fastvideo_args.seed)  # for lora param init
         super().__init__(model_path, fastvideo_args, required_config_modules,
                          loaded_modules)  # type: ignore
+        self.tracker = DummyTracker()
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError(
@@ -209,12 +210,26 @@ class TrainingPipeline(LoRAPipeline, ABC):
         # TODO(will): is there a cleaner way to track epochs?
         self.current_epoch = 0
 
-        if self.global_rank == 0:
-            project = training_args.tracker_project_name or "fastvideo"
-            wandb_config = dataclasses.asdict(training_args)
-            wandb.init(project=project,
-                       config=wandb_config,
-                       name=training_args.wandb_run_name)
+        trackers = list(training_args.trackers)
+        if not trackers and training_args.tracker_project_name:
+            trackers.append(Trackers.WANDB.value)
+        if self.global_rank != 0:
+            trackers = []
+
+        tracker_log_dir = training_args.output_dir or os.getcwd()
+        if trackers:
+            tracker_log_dir = os.path.join(tracker_log_dir, "tracker")
+
+        tracker_config = asdict(training_args) if trackers else None
+        tracker_run_name = training_args.wandb_run_name or None
+        project = training_args.tracker_project_name or "fastvideo"
+        self.tracker = initialize_trackers(
+            trackers,
+            experiment_name=project,
+            config=tracker_config,
+            log_dir=tracker_log_dir,
+            run_name=tracker_run_name,
+        )
 
     @abstractmethod
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
@@ -246,78 +261,83 @@ class TrainingPipeline(LoRAPipeline, ABC):
         optimizer.zero_grad(set_to_none=True)
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
-        batch = next(self.train_loader_iter, None)  # type: ignore
-        if batch is None:
-            self.current_epoch += 1
-            logger.info("Starting epoch %s", self.current_epoch)
-            # Reset iterator for next epoch
-            self.train_loader_iter = iter(self.train_dataloader)
-            # Get first batch of new epoch
-            batch = next(self.train_loader_iter)
+        with self.tracker.timed("timing/get_next_batch"):
+            batch = next(self.train_loader_iter, None)  # type: ignore
+            if batch is None:
+                self.current_epoch += 1
+                logger.info("Starting epoch %s", self.current_epoch)
+                # Reset iterator for next epoch
+                self.train_loader_iter = iter(self.train_dataloader)
+                # Get first batch of new epoch
+                batch = next(self.train_loader_iter)
 
-        # latents, encoder_hidden_states, encoder_attention_mask, infos = batch
-        latents = batch['vae_latent']
-        latents = latents[:, :, :self.training_args.num_latent_t]
-        encoder_hidden_states = batch['text_embedding']
-        encoder_attention_mask = batch['text_attention_mask']
-        infos = batch['info_list']
-        training_batch.latents = latents.to(get_local_torch_device(),
-                                            dtype=torch.bfloat16)
-        training_batch.encoder_hidden_states = encoder_hidden_states.to(
-            get_local_torch_device(), dtype=torch.bfloat16)
-        training_batch.encoder_attention_mask = encoder_attention_mask.to(
-            get_local_torch_device(), dtype=torch.bfloat16)
-        training_batch.infos = infos
+            latents = batch['vae_latent']
+            latents = latents[:, :, :self.training_args.num_latent_t]
+            encoder_hidden_states = batch['text_embedding']
+            encoder_attention_mask = batch['text_attention_mask']
+            infos = batch['info_list']
+
+            training_batch.latents = latents.to(get_local_torch_device(),
+                                                dtype=torch.bfloat16)
+            training_batch.encoder_hidden_states = encoder_hidden_states.to(
+                get_local_torch_device(), dtype=torch.bfloat16)
+            training_batch.encoder_attention_mask = encoder_attention_mask.to(
+                get_local_torch_device(), dtype=torch.bfloat16)
+            training_batch.infos = infos
 
         return training_batch
 
     def _normalize_dit_input(self,
                              training_batch: TrainingBatch) -> TrainingBatch:
         # TODO(will): support other models
-        training_batch.latents = normalize_dit_input('wan',
-                                                     training_batch.latents,
-                                                     self.get_module("vae"))
+        with self.tracker.timed("timing/normalize_input"):
+            training_batch.latents = normalize_dit_input(
+                'wan',
+                training_batch.latents,
+                self.get_module("vae"),
+            )
         return training_batch
 
     def _prepare_dit_inputs(self,
                             training_batch: TrainingBatch) -> TrainingBatch:
         assert self.training_args is not None, "training_args must be set"
-        latents = training_batch.latents
-        batch_size = latents.shape[0]
-        noise = torch.randn(latents.shape,
-                            generator=self.noise_gen_cuda,
-                            device=latents.device,
-                            dtype=latents.dtype)
-        timesteps = self._sample_timesteps(batch_size, latents.device)
+        with self.tracker.timed("timing/prepare_dit_inputs"):
+            latents = training_batch.latents
+            batch_size = latents.shape[0]
+            noise = torch.randn(latents.shape,
+                                generator=self.noise_gen_cuda,
+                                device=latents.device,
+                                dtype=latents.dtype)
+            timesteps = self._sample_timesteps(batch_size, latents.device)
 
-        # Enable training for the model that will be trained next and disable the other
-        if self.train_transformer_2:
-            self._enable_training(self.transformer_2, self.optimizer_2)
-            self._disable_training(self.transformer, self.optimizer)
-        else:
-            self._enable_training(self.transformer, self.optimizer)
-            if self.transformer_2 is not None:
-                self._disable_training(self.transformer_2, self.optimizer_2)
+            # Enable training for the model that will be trained next and disable the other
+            if self.train_transformer_2:
+                self._enable_training(self.transformer_2, self.optimizer_2)
+                self._disable_training(self.transformer, self.optimizer)
+            else:
+                self._enable_training(self.transformer, self.optimizer)
+                if self.transformer_2 is not None:
+                    self._disable_training(self.transformer_2, self.optimizer_2)
 
-        if self.training_args.sp_size > 1:
-            # Make sure that the timesteps are the same across all sp processes.
-            sp_group = get_sp_group()
-            sp_group.broadcast(timesteps, src=0)
-        sigmas = get_sigmas(
-            self.noise_scheduler,
-            latents.device,
-            timesteps,
-            n_dim=latents.ndim,
-            dtype=latents.dtype,
-        )
-        noisy_model_input = (1.0 -
-                             sigmas) * training_batch.latents + sigmas * noise
+            if self.training_args.sp_size > 1:
+                # Make sure that the timesteps are the same across all sp processes.
+                sp_group = get_sp_group()
+                sp_group.broadcast(timesteps, src=0)
+            sigmas = get_sigmas(
+                self.noise_scheduler,
+                latents.device,
+                timesteps,
+                n_dim=latents.ndim,
+                dtype=latents.dtype,
+            )
+            noisy_model_input = (
+                1.0 - sigmas) * training_batch.latents + sigmas * noise
 
-        training_batch.noisy_model_input = noisy_model_input
-        training_batch.timesteps = timesteps
-        training_batch.sigmas = sigmas
-        training_batch.noise = noise
-        training_batch.raw_latent_shape = training_batch.latents.shape
+            training_batch.noisy_model_input = noisy_model_input
+            training_batch.timesteps = timesteps
+            training_batch.sigmas = sigmas
+            training_batch.noise = noise
+            training_batch.raw_latent_shape = training_batch.latents.shape
 
         return training_batch
 
@@ -426,7 +446,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         #         dtype=torch.bfloat16)
         current_model = self.transformer_2 if self.train_transformer_2 else self.transformer
 
-        with set_forward_context(
+        with self.tracker.timed("timing/forward_backward"), set_forward_context(
                 current_timestep=training_batch.current_timestep,
                 attn_metadata=training_batch.attn_metadata):
             model_pred = current_model(**input_kwargs)
@@ -447,8 +467,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
         #             local_main_process_only=False)
-        world_group = get_world_group()
-        world_group.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
+        with self.tracker.timed("timing/reduce_loss"):
+            world_group = get_world_group()
+            world_group.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
         training_batch.total_loss += avg_loss.item()
 
         return training_batch
@@ -460,20 +481,21 @@ class TrainingPipeline(LoRAPipeline, ABC):
         # the following:
         # grad_norm = transformer.clip_grad_norm_(max_grad_norm)
         if max_grad_norm is not None:
-            # Only clip gradients for the model that is currently training
-            if self.train_transformer_2 and self.transformer_2 is not None:
-                model_parts = [self.transformer_2]
-            else:
-                model_parts = [self.transformer]
+            with self.tracker.timed("timing/clip_grad_norm"):
+                # Only clip gradients for the model that is currently training
+                if self.train_transformer_2 and self.transformer_2 is not None:
+                    model_parts = [self.transformer_2]
+                else:
+                    model_parts = [self.transformer]
 
-            grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
-                [p for m in model_parts for p in m.parameters()],
-                max_grad_norm,
-                foreach=None,
-            )
-            assert grad_norm is not float('nan') or grad_norm is not float(
-                'inf')
-            grad_norm = grad_norm.item() if grad_norm is not None else 0.0
+                grad_norm = clip_grad_norm_while_handling_failing_dtensor_cases(
+                    [p for m in model_parts for p in m.parameters()],
+                    max_grad_norm,
+                    foreach=None,
+                )
+                assert grad_norm is not float('nan') or grad_norm is not float(
+                    'inf')
+                grad_norm = grad_norm.item() if grad_norm is not None else 0.0
         else:
             grad_norm = 0.0
         training_batch.grad_norm = grad_norm
@@ -512,12 +534,13 @@ class TrainingPipeline(LoRAPipeline, ABC):
         training_batch = self._clip_grad_norm(training_batch)
 
         # Only step the optimizer and scheduler for the model that is currently training
-        if self.train_transformer_2 and self.transformer_2 is not None:
-            self.optimizer_2.step()
-            self.lr_scheduler_2.step()
-        else:
-            self.optimizer.step()
-            self.lr_scheduler.step()
+        with self.tracker.timed("timing/optimizer_step"):
+            if self.train_transformer_2 and self.transformer_2 is not None:
+                self.optimizer_2.step()
+                self.lr_scheduler_2.step()
+            else:
+                self.optimizer.step()
+                self.lr_scheduler.step()
 
         training_batch.total_loss = training_batch.total_loss
         training_batch.grad_norm = training_batch.grad_norm
@@ -561,8 +584,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
         # Set random seeds for deterministic training
         self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
             self.seed)
-        self.noise_gen_cuda = torch.Generator(
-            device=current_platform.device_name).manual_seed(self.seed)
+        self.noise_gen_cuda = torch.Generator(device="cuda").manual_seed(
+            self.seed)
         self.validation_random_generator = torch.Generator(
             device="cpu").manual_seed(self.seed)
         logger.info("Initialized random seeds with seed: %s", self.seed)
@@ -624,17 +647,15 @@ class TrainingPipeline(LoRAPipeline, ABC):
             })
             progress_bar.update(1)
             if self.global_rank == 0:
-                wandb.log(
-                    {
-                        "train_loss": loss,
-                        "learning_rate": self.lr_scheduler.get_last_lr()[0],
-                        "step_time": step_time,
-                        "avg_step_time": avg_step_time,
-                        "grad_norm": grad_norm,
-                        "vsa_sparsity": current_vsa_sparsity,
-                    },
-                    step=step,
-                )
+                metrics = {
+                    "train_loss": loss,
+                    "learning_rate": self.lr_scheduler.get_last_lr()[0],
+                    "step_time": step_time,
+                    "avg_step_time": avg_step_time,
+                    "grad_norm": grad_norm,
+                    "vsa_sparsity": current_vsa_sparsity,
+                }
+                self.tracker.log(metrics, step)
             if step % self.training_args.training_state_checkpointing_steps == 0:
                 with self.profiler_controller.region(
                         "profiler_region_training_save_checkpoint"):
@@ -653,15 +674,14 @@ class TrainingPipeline(LoRAPipeline, ABC):
                             training_batch, self.training_args, step)
                     self._log_validation(self.transformer, self.training_args,
                                          step)
-                    gpu_memory_usage = current_platform.get_torch_device(
-                    ).memory_allocated() / 1024**2
+                    gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
                     trainable_params = round(
                         count_trainable(self.transformer) / 1e9, 3)
                     logger.info(
                         "GPU memory usage after validation: %s MB, trainable params: %sB",
                         gpu_memory_usage, trainable_params)
 
-        wandb.finish()
+        self.tracker.finish()
         save_checkpoint(self.transformer, self.global_rank,
                         self.training_args.output_dir,
                         self.training_args.max_train_steps, self.optimizer,
@@ -703,8 +723,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         logger.info("  Master weight dtype: %s",
                     self.transformer.parameters().__next__().dtype)
 
-        gpu_memory_usage = current_platform.get_torch_device().memory_allocated(
-        ) / 1024**2
+        gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
         logger.info("GPU memory usage before train_one_step: %s MB",
                     gpu_memory_usage)
         logger.info("VSA validation sparsity: %s",
@@ -743,7 +762,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
         """
-        Generate a validation video and log it to wandb to check the quality during training.
+        Generate a validation video and log it to the configured tracker to check the quality during training.
         """
         training_args.inference_mode = True
         training_args.dit_cpu_offload = False
@@ -847,14 +866,20 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         imageio.mimsave(filename, video, fps=sampling_param.fps)
                         video_filenames.append(filename)
 
-                    logs = {
-                        f"validation_videos_{num_inference_steps}_steps": [
-                            wandb.Video(filename, caption=caption)
-                            for filename, caption in zip(
-                                video_filenames, all_captions, strict=True)
-                        ]
-                    }
-                    wandb.log(logs, step=global_step)
+                    artifacts = []
+                    for filename, caption in zip(video_filenames,
+                                                 all_captions,
+                                                 strict=True):
+                        video_artifact = self.tracker.video(filename,
+                                                            caption=caption)
+                        if video_artifact is not None:
+                            artifacts.append(video_artifact)
+                    if artifacts:
+                        logs = {
+                            f"validation_videos_{num_inference_steps}_steps":
+                            artifacts
+                        }
+                        self.tracker.log_artifacts(logs, global_step)
                 else:
                     # Other sp_group leaders send their results to global rank 0
                     world_group.send_object(step_videos, dst=0)
@@ -868,7 +893,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,
                                        training_args: TrainingArgs, step: int):
-        """Add visualization data to wandb logging and save frames to disk."""
+        """Add visualization data to tracker logging and save frames to disk."""
         raise NotImplementedError(
             "Visualize intermediate latents is not implemented for training pipeline"
         )

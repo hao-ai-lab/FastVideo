@@ -43,8 +43,6 @@ from fastvideo.training.training_utils import (
 from fastvideo.utils import (is_vsa_available, maybe_download_model,
                              set_random_seed, verify_model_config_and_directory)
 
-import wandb  # isort: skip
-
 vsa_available = is_vsa_available()
 
 logger = init_logger(__name__)
@@ -1342,14 +1340,20 @@ class DistillationPipeline(TrainingPipeline):
                         imageio.mimsave(filename, video, fps=sampling_param.fps)
                         video_filenames.append(filename)
 
-                    logs = {
-                        f"validation_videos_{num_inference_steps}_steps": [
-                            wandb.Video(filename, caption=caption)
-                            for filename, caption in zip(
-                                video_filenames, all_captions, strict=True)
-                        ]
-                    }
-                    wandb.log(logs, step=global_step)
+                    artifacts = []
+                    for filename, caption in zip(video_filenames,
+                                                 all_captions,
+                                                 strict=True):
+                        video_artifact = self.tracker.video(filename,
+                                                            caption=caption)
+                        if video_artifact is not None:
+                            artifacts.append(video_artifact)
+                    if artifacts:
+                        logs = {
+                            f"validation_videos_{num_inference_steps}_steps":
+                            artifacts
+                        }
+                        self.tracker.log_artifacts(logs, global_step)
                 else:
                     # Other sp_group leaders send their results to global rank 0
                     world_group.send_object(step_videos, dst=0)
@@ -1363,8 +1367,8 @@ class DistillationPipeline(TrainingPipeline):
 
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,
                                        training_args: TrainingArgs, step: int):
-        """Add visualization data to wandb logging and save frames to disk."""
-        wandb_loss_dict = {}
+        """Add visualization data to tracker logging and save frames to disk."""
+        tracker_loss_dict: dict[str, Any] = {}
         dmd_latents_vis_dict = training_batch.dmd_latent_vis_dict
         fake_score_latents_vis_dict = training_batch.fake_score_latent_vis_dict
         fake_score_log_keys = ['generator_pred_video']
@@ -1394,8 +1398,10 @@ class DistillationPipeline(TrainingPipeline):
                 video = video.cpu().float()
                 video = video.permute(0, 2, 1, 3, 4)
                 video = (video * 255).numpy().astype(np.uint8)
-                wandb_loss_dict[latent_key] = wandb.Video(
+                video_artifact = self.tracker.video(
                     video, fps=24, format="mp4")  # change to 16 for Wan2.1
+                if video_artifact is not None:
+                    tracker_loss_dict[latent_key] = video_artifact
                 # Clean up references
                 del video, latents
 
@@ -1425,14 +1431,16 @@ class DistillationPipeline(TrainingPipeline):
                 video = video.cpu().float()
                 video = video.permute(0, 2, 1, 3, 4)
                 video = (video * 255).numpy().astype(np.uint8)
-                wandb_loss_dict[latent_key] = wandb.Video(
+                video_artifact = self.tracker.video(
                     video, fps=24, format="mp4")  # change to 16 for Wan2.1
+                if video_artifact is not None:
+                    tracker_loss_dict[latent_key] = video_artifact
                 # Clean up references
                 del video, latents
 
-        # Log to wandb
-        if self.global_rank == 0:
-            wandb.log(wandb_loss_dict, step=step)
+        # Log to tracker
+        if self.global_rank == 0 and tracker_loss_dict:
+            self.tracker.log_artifacts(tracker_loss_dict, step)
 
     def train(self) -> None:
         """Main training loop with distillation-specific logging."""
@@ -1605,7 +1613,7 @@ class DistillationPipeline(TrainingPipeline):
                 }
                 log_data.update(faker_score_additional_logs)
 
-                wandb.log(log_data, step=step)
+                self.tracker.log(log_data, step)
 
             # Save training state checkpoint (for resuming training)
             if (self.training_args.training_state_checkpointing_steps > 0
@@ -1688,7 +1696,7 @@ class DistillationPipeline(TrainingPipeline):
                                                         step)
                 self._log_validation(self.transformer, self.training_args, step)
 
-        wandb.finish()
+        self.tracker.finish()
 
         # Save final training state checkpoint
         print("rank", self.global_rank,
