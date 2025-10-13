@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=1.3B_moe_4n_sf_distill
+#SBATCH --job-name=1.3B_high_noise_moe_4n_sf_distill
 #SBATCH --partition=main
 #SBATCH --nodes=4
 #SBATCH --ntasks=4
@@ -43,8 +43,10 @@ NUM_TOTAL_GPUS=32
 
 # Model paths for Self-Forcing DMD distillation:
 GENERATOR_MODEL_PATH="rand0nmr/SFWan2.1-T2V-A1.3B-Diffusers"
-REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers"  # Teacher model
-FAKE_SCORE_MODEL_PATH="rand0nmr/SFWan2.1-T2V-A1.3B-Diffusers"  # Critic model
+# REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.2-T2V-A14B-Diffusers"  # Teacher model
+REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"
+# FAKE_SCORE_MODEL_PATH="rand0nmr/SFWan2.1-T2V-A1.3B-Diffusers"  # Critic model
+FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 
 # DATA_DIR="data/test-text-preprocessing/Node_0_GPU_1_File_1/combined_parquet_dataset/"
 DATA_DIR="/mnt/weka/home/hao.zhang/matthew/FastVideo/data/test-text-preprocessing"
@@ -59,7 +61,7 @@ VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/wl/FastVideo/examples/distill/
 training_args=(
   --tracker_project_name SFwan_t2v_distill_self_forcing_dmd  # Updated for self-forcing DMD
   --output_dir "/mnt/sharefs/users/hao.zhang/wei/1.3B_MoE_SFwan_t2v_finetune"
-  --wandb_run_name "1.3B_moe_sf_distill"
+  --wandb_run_name "1.3B_high_noise_sf_distill"
   # --use_sf_wan
   # --sf_ode_init_path "checkpoints/ode_init.pt"
   --max_train_steps 5000
@@ -134,7 +136,9 @@ miscellaneous_args=(
   --use_ema True
   --ema_decay 0.99
   --ema_start_step 200
+  # --init_weights_from_safetensors "/mnt/weka/home/hao.zhang/wei/FastVideo/diffusers_1.3B_SF/model.safetensors"
   --init_weights_from_safetensors "/mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors"
+  # --init_weights_from_safetensors_2 "/mnt/weka/home/hao.zhang/wei/FastVideo/diffusers_1.3B_SF/model.safetensors"
   --init_weights_from_safetensors_2 "/mnt/weka/home/hao.zhang/wl/Self-Forcing/diffusers_ode_init/model.safetensors"
   # --init_weights_from_safetensors "/mnt/weka/home/hao.zhang/wl/FastVideo2/vidprom_8b16k_1e-5_gn1/checkpoint-3500/transformer/diffusion_pytorch_model.safetensors"
 #   --init_weights_from_safetensors "/mnt/weka/home/hao.zhang/wl/sf2/checkpoint_v3_7k/model.safetensors"
@@ -146,7 +150,7 @@ dmd_args=(
   --min_timestep_ratio 0.02
   --max_timestep_ratio 0.98
   --dfake_gen_update_ratio 5
-  --real_score_guidance_scale 4.0
+  --real_score_guidance_scale 3.0
   --real_score_guidance_scale_2 3.0
   --fake_score_betas '0.0,0.999'
   --warp_denoising_step

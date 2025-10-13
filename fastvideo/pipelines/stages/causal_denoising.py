@@ -225,8 +225,10 @@ class CausalDMDDenosingStage(DenoisingStage):
             boundary_timestep = fastvideo_args.pipeline_config.dit_config.boundary_ratio * self.scheduler.num_train_timesteps
         else:
             boundary_timestep = None
+        boundary_timestep = timesteps[2] + 1 # Hardcode for now
 
         high_noise_timesteps = timesteps[timesteps >= boundary_timestep]
+        assert len(high_noise_timesteps) == 2, "only support two high noise timesteps"
 
         # DMD loop in causal blocks
         with self.progress_bar(total=len(block_sizes) *
@@ -314,7 +316,6 @@ class CausalDMDDenosingStage(DenoisingStage):
                             timestep=t_expand,
                             boundary_timestep=torch.ones_like(t_expand) * boundary_timestep,
                             scheduler=self.scheduler).unflatten(0, pred_noise_btchw.shape[:2])
-                        logger.info("contains any NaN: %s", torch.isnan(pred_video_btchw).any())
                     else:
                         pred_video_btchw = pred_noise_to_pred_video(
                             pred_noise=pred_noise_btchw.flatten(0, 1),
