@@ -62,7 +62,7 @@ VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/wl/FastVideo/examples/distill/
 training_args=(
   --tracker_project_name SFwan_t2v_distill_self_forcing_dmd  # Updated for self-forcing DMD
   --output_dir "/mnt/sharefs/users/hao.zhang/wei/14B_MoE_SFwan_t2v_finetune"
-  --wandb_run_name "14B_moe_sf_distill"
+  --wandb_run_name "14B_moe_sf_distill_low_dmd"
   # --use_sf_wan
   # --sf_ode_init_path "checkpoints/ode_init.pt"
   --max_train_steps 5000
@@ -137,13 +137,13 @@ miscellaneous_args=(
   --use_ema True
   --ema_decay 0.99
   --ema_start_step 200
-  --init_weights_from_safetensors "/mnt/sharefs/users/hao.zhang/wl/release/self_forcing_ode_init_wan22_high_bz128_1e-5/diffusers_2000/"
+  --init_weights_from_safetensors "/mnt/sharefs/users/hao.zhang/wl/release/self_forcing_ode_init_wan22_low_bz128_1e-5/diffusers_2000/"
   --init_weights_from_safetensors_2 "/mnt/sharefs/users/hao.zhang/wl/release/self_forcing_ode_init_wan22_low_bz128_1e-5/diffusers_2000/"
 )
 
 # Self-forcing DMD arguments
 dmd_args=(
-  --dmd_denoising_steps '1000,750,500,250'
+  --dmd_denoising_steps '350,275,200,125'
   --min_timestep_ratio 0.02
   --max_timestep_ratio 0.98
   --dfake_gen_update_ratio 5
@@ -178,3 +178,4 @@ srun torchrun \
     "${miscellaneous_args[@]}" \
     "${dmd_args[@]}" \
     "${self_forcing_args[@]}"
+

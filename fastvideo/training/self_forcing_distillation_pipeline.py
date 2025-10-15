@@ -2,7 +2,7 @@
 import copy
 import time
 from collections import deque
-from typing import Any, Tuple
+from typing import Any
 import gc
 
 import numpy as np
@@ -61,7 +61,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         self.noise_scheduler = SelfForcingFlowMatchScheduler(
             num_inference_steps=1000,
-            shift=5.0,
+            shift=self.timestep_shift,
             sigma_min=0.0,
             extra_one_step=True,
             training=True)
@@ -129,7 +129,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         # If the generator is MoE, randomly sample an exit timestep, and turn on training for one of the dits
         if self.boundary_timestep is not None and self.transformer_2 is not None:
             assert self.same_step_across_blocks, "same_step_across_blocks must be True for MoE generator. Otherwise we might need to train both transformers which will cause OOM"
-            exit_flags = self.generate_and_sync_list(1, len(self.denoising_step_list), training_batch.latents.device)
+            exit_flags = self.generate_and_sync_list(
+                1, len(self.denoising_step_list), training_batch.latents.device)
             exit_timestep = self.denoising_step_list[exit_flags[0]].item()
             # logger.info("Exit timestep in generator_loss(): %s", exit_timestep)
             if exit_timestep < self.boundary_timestep:
@@ -140,14 +141,16 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 self.train_transformer_2 = False
                 self._enable_training(self.transformer, self.optimizer)
                 self._disable_training(self.transformer_2, self.optimizer_2)
-        else: # Default to normal single-dit generator
+        else:  # Default to normal single-dit generator
             self.train_transformer_2 = False
             self._enable_training(self.transformer, self.optimizer)
 
         # Turns off training for fake score transformers
-        self._disable_training(self.fake_score_transformer, self.fake_score_optimizer)
+        self._disable_training(self.fake_score_transformer,
+                               self.fake_score_optimizer)
         if self.fake_score_transformer_2 is not None:
-            self._disable_training(self.fake_score_transformer_2, self.fake_score_optimizer_2)
+            self._disable_training(self.fake_score_transformer_2,
+                                   self.fake_score_optimizer_2)
 
         with set_forward_context(
                 current_timestep=training_batch.timesteps,
@@ -181,9 +184,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             self._disable_training(self.transformer_2, self.optimizer_2)
 
         # Turns on training for fake score transformers
-        self._enable_training(self.fake_score_transformer, self.fake_score_optimizer)
+        self._enable_training(self.fake_score_transformer,
+                              self.fake_score_optimizer)
         if self.fake_score_transformer_2 is not None:
-            self._enable_training(self.fake_score_transformer_2, self.fake_score_optimizer_2)
+            self._enable_training(self.fake_score_transformer_2,
+                                  self.fake_score_optimizer_2)
 
         updated_batch, flow_matching_loss = self.faker_score_forward(
             training_batch)
@@ -195,7 +200,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
     def _generator_multi_step_simulation_forward(
             self,
             training_batch: TrainingBatch,
-            exit_flags: list[int] | None = None) -> Tuple[torch.Tensor, float]:
+            exit_flags: list[int] | None = None) -> tuple[torch.Tensor, float]:
         """Forward pass through student transformer matching inference procedure with KV cache management.
         
         This function is adapted from the reference self-forcing implementation's inference_with_trajectory
@@ -315,8 +320,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         if exit_flags is None:
             exit_flags = self.generate_and_sync_list(len(all_num_frames),
-                                                 num_denoising_steps,
-                                                 device=noise.device)
+                                                     num_denoising_steps,
+                                                     device=noise.device)
         exit_timestep = self.denoising_step_list[exit_flags[0]].item()
 
         start_gradient_frame_index = max(0, num_output_frames - 21)
@@ -382,7 +387,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                        dtype=torch.long)).unflatten(
                                            0, denoised_pred.shape[:2])
                 else:
-                    logger.info("Exit timestep in _generator_multi_step_simulation_forward(): %s", current_timestep)
+                    logger.info(
+                        "Exit timestep in _generator_multi_step_simulation_forward(): %s",
+                        current_timestep)
                     # Final prediction with gradient control
                     if current_start_frame < start_gradient_frame_index:
                         with torch.no_grad():
@@ -441,15 +448,18 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             # Step 3.3: rerun with timestep zero to update the cache
             if self.boundary_timestep is not None and self.transformer_2 is not None:
                 if exit_timestep < self.boundary_timestep:
-                    context_timestep = torch.ones_like(timestep) * self.context_noise
+                    context_timestep = torch.ones_like(
+                        timestep) * self.context_noise
                     current_model = self.transformer_2
                 else:
                     # For high noise expert, the context timestep should be the boundary timestep
                     # context_timestep = torch.ones_like(timestep) * self.boundary_timestep
-                    context_timestep = torch.ones_like(timestep) * self.context_noise
+                    context_timestep = torch.ones_like(
+                        timestep) * self.boundary_timestep
                     current_model = self.transformer
             else:
-                context_timestep = torch.ones_like(timestep) * self.context_noise
+                context_timestep = torch.ones_like(
+                    timestep) * self.context_noise
                 current_model = self.transformer
 
             denoised_pred = self.noise_scheduler.add_noise(
@@ -769,22 +779,26 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 # Ensure that only one of the two transformers have received gradients
                 if self.train_transformer_2:
                     # Assert that all gradients are None for transformer
-                    assert all(p.grad is None for p in self.transformer.parameters())
+                    assert all(p.grad is None
+                               for p in self.transformer.parameters())
                     grad_sum = 0
                     for n, p in self.transformer_2.named_parameters():
                         if p.grad is not None:
                             grad_sum += p.grad.sum().item()
                         else:
-                            raise ValueError("Transformer 2 param %s has no gradient", n)
+                            raise ValueError(
+                                "Transformer 2 param %s has no gradient", n)
                     assert grad_sum != 0, "Transformer 2 did not receive gradients"
                 else:
-                    assert all(p.grad is None for p in self.transformer_2.parameters())
+                    assert all(p.grad is None
+                               for p in self.transformer_2.parameters())
                     grad_sum = 0
                     for n, p in self.transformer.named_parameters():
                         if p.grad is not None:
                             grad_sum += p.grad.sum().item()
                         else:
-                            raise ValueError("Transformer param %s has no gradient", n)
+                            raise ValueError(
+                                "Transformer param %s has no gradient", n)
                     assert grad_sum != 0, "Transformer did not receive gradients"
 
                 total_generator_loss += generator_loss.detach().item()
@@ -1073,8 +1087,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         self._log_training_info()
         self._log_validation(self.transformer, self.training_args,
                              self.init_steps)
-        # gc.collect()
-        # torch.cuda.empty_cache()
+        gc.collect()
+        torch.cuda.empty_cache()
 
         progress_bar = tqdm(
             range(0, self.training_args.max_train_steps),
@@ -1283,8 +1297,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 self._log_validation(self.transformer, self.training_args, step)
-                # gc.collect()
-                # torch.cuda.empty_cache()
+                gc.collect()
+                torch.cuda.empty_cache()
 
         wandb.finish()
 

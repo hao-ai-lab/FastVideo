@@ -445,12 +445,20 @@ class TransformerLoader(ComponentLoader):
             if 'transformer_2' in model_path:
                 custom_weights_path = getattr(fastvideo_args, 'init_weights_from_safetensors_2', None)
             assert custom_weights_path is not None, "Custom initialization weights must be provided"
+            
+            # Handle both directory and single file cases
             if os.path.isdir(custom_weights_path):
+                # Directory: collect all safetensors files
                 safetensors_list = glob.glob(
                     os.path.join(str(custom_weights_path), "*.safetensors"))
-            else:
+                if not safetensors_list:
+                    raise ValueError(f"No safetensors files found in directory {custom_weights_path}")
+            elif os.path.isfile(custom_weights_path):
+                # Single file: verify it's a safetensors file
                 assert custom_weights_path.endswith(".safetensors"), "Custom initialization weights must be a safetensors file"
                 safetensors_list = [custom_weights_path]
+            else:
+                raise ValueError(f"Custom weights path does not exist or is not accessible: {custom_weights_path}")
 
         logger.info("Loading model from %s safetensors files: %s",
                     len(safetensors_list), safetensors_list)

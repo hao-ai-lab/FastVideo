@@ -105,14 +105,14 @@ class CausalDMDDenosingStage(DenoisingStage):
 
         # Initialize or reset caches
         kv_cache1 = self._initialize_kv_cache(batch_size=latents.shape[0],
-                                      dtype=target_dtype,
-                                      device=latents.device)
+                                              dtype=target_dtype,
+                                              device=latents.device)
         crossattn_cache = self._initialize_crossattn_cache(
-                batch_size=latents.shape[0],
-                max_text_len=fastvideo_args.pipeline_config.
-                text_encoder_configs[0].arch_config.text_len,
-                dtype=target_dtype,
-                device=latents.device)
+            batch_size=latents.shape[0],
+            max_text_len=fastvideo_args.pipeline_config.text_encoder_configs[0].
+            arch_config.text_len,
+            dtype=target_dtype,
+            device=latents.device)
         # if self.kv_cache1 is None:
         #     self._initialize_kv_cache(batch_size=latents.shape[0],
         #                               dtype=target_dtype,
@@ -365,10 +365,10 @@ class CausalDMDDenosingStage(DenoisingStage):
                     )
                 start_index += current_num_frames
 
-        # del kv_cache1
-        # del crossattn_cache
-        # gc.collect()
-        # torch.cuda.empty_cache()
+        del kv_cache1
+        del crossattn_cache
+        gc.collect()
+        torch.cuda.empty_cache()
 
         batch.latents = latents
         return batch
