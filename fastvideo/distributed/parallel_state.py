@@ -948,7 +948,7 @@ def get_dp_rank() -> int:
     return get_dp_group().rank_in_group
 
 
-def get_local_torch_device(local_rank: int = -1) -> torch.device:
+def get_local_torch_device() -> torch.device:
     """Return the torch device for the current rank."""
     from fastvideo.platforms import current_platform
     if current_platform.is_npu():
