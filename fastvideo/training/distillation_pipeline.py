@@ -7,7 +7,7 @@ import time
 from abc import abstractmethod
 from collections import deque
 from collections.abc import Iterator
-from typing import Any, Tuple
+from typing import Any
 
 import imageio
 import numpy as np
@@ -88,6 +88,7 @@ class DistillationPipeline(TrainingPipeline):
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
             shift=self.timestep_shift)
 
+        # self.training_args.boundary_ratio = None  # TODO: hardcode for low only
         if self.training_args.boundary_ratio is not None:
             self.boundary_timestep = self.training_args.boundary_ratio * self.noise_scheduler.num_train_timesteps
         else:
@@ -642,7 +643,7 @@ class DistillationPipeline(TrainingPipeline):
     def _generator_multi_step_simulation_forward(
             self,
             training_batch: TrainingBatch,
-            exit_flags: list[int] | None = None) -> Tuple[torch.Tensor, float]:
+            exit_flags: list[int] | None = None) -> tuple[torch.Tensor, float]:
         """Forward pass through student transformer matching inference procedure."""
         latents = training_batch.latents
         dtype = latents.dtype
@@ -732,11 +733,11 @@ class DistillationPipeline(TrainingPipeline):
             noisy_input, target_timestep, training_batch.conditional_dict,
             training_batch)
         if self.transformer_2 is not None:
-            pred_noise = self.transformer_2(**training_batch.input_kwargs).permute(
-                0, 2, 1, 3, 4)
+            pred_noise = self.transformer_2(
+                **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
         else:
-            pred_noise = self.transformer(**training_batch.input_kwargs).permute(
-                0, 2, 1, 3, 4)
+            pred_noise = self.transformer(
+                **training_batch.input_kwargs).permute(0, 2, 1, 3, 4)
         pred_video = pred_noise_to_pred_video(
             pred_noise=pred_noise.flatten(0, 1),
             noise_input_latent=noisy_input.flatten(0, 1),
@@ -842,8 +843,8 @@ class DistillationPipeline(TrainingPipeline):
                     0, real_score_pred_noise_uncond.shape[:2])
 
             real_score_pred_video = pred_real_video_cond + (
-                pred_real_video_cond -
-                pred_real_video_uncond) * self._get_real_score_guidance_scale(timestep)
+                pred_real_video_cond - pred_real_video_uncond
+            ) * self._get_real_score_guidance_scale(timestep)
 
             grad = (faker_score_pred_video - real_score_pred_video) / torch.abs(
                 original_latent - real_score_pred_video).mean()
