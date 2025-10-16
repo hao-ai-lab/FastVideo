@@ -52,7 +52,6 @@ class WorkerWrapperBase:
                                                                 str]]) -> None:
         envs = envs_list[self.rpc_rank]
         key = 'CUDA_VISIBLE_DEVICES'
-        envs["WORLD_SIZE"] = "2"
         if key in envs and key in os.environ:
             # overwriting CUDA_VISIBLE_DEVICES is desired behavior
             # suppress the warning in `update_environment_variables`

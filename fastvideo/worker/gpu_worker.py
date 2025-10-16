@@ -49,7 +49,7 @@ class Worker:
         os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
 
         # Platform-agnostic device initialization
-        self.device = get_local_torch_device(self.local_rank)
+        self.device = get_local_torch_device()
 
         from fastvideo.platforms import current_platform
 

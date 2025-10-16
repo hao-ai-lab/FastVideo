@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Adapt from https://github.com/vllm-project/vllm/blob/releases/v0.11.0/vllm/executor/ray_distributed_executor.py
 
 from collections import defaultdict
 import os

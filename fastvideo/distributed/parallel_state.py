@@ -794,7 +794,7 @@ def init_distributed_environment(
         logger.info("Using gloo backend for %s platform",
                     current_platform.device_name)
 
-    logger.info(
+    logger.debug(
         "world_size=%d rank=%d local_rank=%d "
         "distributed_init_method=%s backend=%s", world_size, rank, local_rank,
         distributed_init_method, backend)
@@ -951,14 +951,10 @@ def get_dp_rank() -> int:
 def get_local_torch_device(local_rank: int = -1) -> torch.device:
     """Return the torch device for the current rank."""
     from fastvideo.platforms import current_platform
-
-    if local_rank == -1:
-        local_rank = envs.LOCAL_RANK
-
     if current_platform.is_npu():
-        device = torch.device(f"npu:{local_rank}")
+        device = torch.device(f"npu:{envs.LOCAL_RANK}")
     elif current_platform.is_cuda_alike() or current_platform.is_cuda():
-        device = torch.device(f"cuda:{local_rank}")
+        device = torch.device(f"cuda:{envs.LOCAL_RANK}")
     else:
         device = torch.device("mps")
     return device

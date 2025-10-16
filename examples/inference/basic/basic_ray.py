@@ -11,18 +11,16 @@ def main():
     generator = VideoGenerator.from_pretrained(
         "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         # FastVideo will automatically handle distributed setup
-        num_gpus=1,
+        num_gpus=2,
         use_fsdp_inference=True,
         dit_cpu_offload=False,
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True, # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
+        distributed_executor_backend="ray",
         # image_encoder_cpu_offload=False,
     )
 
-    # sampling_param = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
-    # sampling_param.num_frames = 45
-    # sampling_param.image_path = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/astronaut.jpg"
     # Generate videos with the same simple API, regardless of GPU count
     prompt = (
         "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
@@ -30,7 +28,6 @@ def main():
         "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
     )
     video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True)
-    # video = generator.generate_video(prompt, sampling_param=sampling_param, output_path="wan_t2v_videos/")
 
     # Generate another video with a different prompt, without reloading the
     # model!
