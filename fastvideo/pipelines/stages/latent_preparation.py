@@ -106,11 +106,6 @@ class LatentPreparationStage(PipelineStage):
         # Update batch with prepared latents
         batch.latents = latents
         batch.raw_latent_shape = latents.shape
-        sum_value = latents.float().sum().item()
-        logger.info(f"LatentPreparationStage: latents sum = {sum_value:.6f}")
-        # Write to output file
-        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-            f.write(f"LatentPreparationStage: latents sum = {sum_value:.6f}\n")
 
         return batch
 
@@ -157,8 +152,8 @@ class CosmosLatentPreparationStage(PipelineStage):
         batch_size *= batch.num_videos_per_prompt
 
         # Get required parameters
-        # Force float32 for latent preparation to match diffusers behavior
-        dtype = torch.float32  # Override to match diffusers
+        # Force float32 for latent preparation
+        dtype = torch.float32
         device = get_local_torch_device()
         generator = batch.generator
         latents = batch.latents
@@ -169,60 +164,29 @@ class CosmosLatentPreparationStage(PipelineStage):
         if height is None or width is None:
             raise ValueError("Height and width must be provided")
 
-        # Calculate Cosmos-specific dimensions to match Diffusers exactly
-        # Based on empirical analysis of Diffusers output shapes
-        # Diffusers: 93 frames -> 7 latent frames, 704x1280 -> 88x160
-        
-        # For spatial: Need 704->88 and 1280->160
-        # 704/88 = 8, 1280/160 = 8, so spatial_scale = 8
         vae_scale_factor_spatial = 8  
-        
-        # For temporal: Use the same scale factor as diffusers Cosmos pipeline
-        # Diffusers uses vae_scale_factor_temporal = 4 as default
-        # For 21 frames: (21-1)//4+1 = 20//4+1 = 5+1 = 6 latent frames (matches diffusers)
         vae_scale_factor_temporal = 4
         
-        # Also check if height needs different scaling
-        # 704 -> 88: 704/8 = 88 ✓
-        # But maybe height uses different factor? 704/90 = 7.82 (not integer)
-        # Let's use 704/88 = 8 exactly
-        latent_height = height // 8  # Force to match Diffusers: 704//8 = 88
+        latent_height = height // 8
         latent_width = width // vae_scale_factor_spatial
         
-        # Use same formula as diffusers cosmos pipeline
         num_latent_frames = (num_frames - 1) // vae_scale_factor_temporal + 1
-        
-        logger.info(f"CosmosLatentPreparationStage - input frames: {num_frames}, latent frames: {num_latent_frames}")
-        logger.info(f"CosmosLatentPreparationStage - VAE scale factors: temporal={vae_scale_factor_temporal}, spatial={vae_scale_factor_spatial}")
-        logger.info(f"CosmosLatentPreparationStage - Frame calculation: {num_frames} -> {num_latent_frames} (using formula: ({num_frames}-1)//{vae_scale_factor_temporal}+1)")
-        logger.info(f"CosmosLatentPreparationStage - Dimensions: height={height} -> {latent_height}, width={width} -> {latent_width}")
-        # latent_height and latent_width already calculated above
         
         # Cosmos transformer expects in_channels - 1 for the latent channels
         num_channels_latents = self.transformer.config.in_channels - 1
         logger.info(f"CosmosLatentPreparationStage - Final shape calculation: ({batch_size}, {num_channels_latents}, {num_latent_frames}, {latent_height}, {latent_width})")
         
         shape = (batch_size, num_channels_latents, num_latent_frames, latent_height, latent_width)
-
-        logger.info(f"CosmosLatentPreparationStage - Target shape: {shape}")
         
-        # Debug: Double-check the calculation manually
         expected_frames = (num_frames - 1) // vae_scale_factor_temporal + 1
         expected_height = height // 8  
         expected_width = width // vae_scale_factor_spatial
-        logger.info(f"CosmosLatentPreparationStage - Manual check: frames={expected_frames}, height={expected_height}, width={expected_width}")
 
         # Handle video input processing like diffusers
         init_latents = None
         conditioning_latents = None
-        
-        # Process input video if provided (video-to-world generation)
-        # Check multiple possible sources for video input
+    
         video = None
-        logger.info(f"CosmosLatentPreparationStage - Checking for video inputs:")
-        logger.info(f"  batch.video: {getattr(batch, 'video', 'Not found')}")
-        logger.info(f"  batch.pil_image: {getattr(batch, 'pil_image', 'Not found')}")
-        logger.info(f"  batch.preprocessed_image: {getattr(batch, 'preprocessed_image', 'Not found')}")
         
         if hasattr(batch, 'video') and batch.video is not None:
             video = batch.video
@@ -246,102 +210,55 @@ class CosmosLatentPreparationStage(PipelineStage):
                 # Create VideoProcessor with same parameters as diffusers Cosmos pipeline
                 vae_scale_factor_spatial = 8  # Same as diffusers
                 video_processor = VideoProcessor(vae_scale_factor=vae_scale_factor_spatial)
-                import numpy as np
-                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                    f.write(f"FastVideo image sum: {np.array(batch.pil_image).sum():.6f}\n")
                 
                 # Use exact same method as diffusers: preprocess image then unsqueeze for time dimension
                 processed_image = video_processor.preprocess(batch.pil_image, height, width)
-                logger.info(f"CosmosLatentPreparationStage - VideoProcessor preprocess result: shape={processed_image.shape}, dtype={processed_image.dtype}, device={processed_image.device}")
                 
                 # Add time dimension exactly like diffusers: unsqueeze(2)  
                 video = processed_image.unsqueeze(2)
-                logger.info(f"CosmosLatentPreparationStage - After unsqueeze(2): shape={video.shape}, dtype={video.dtype}, device={video.device}")
-
-                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                    f.write(f"FastVideo processed video sum: {video.float().sum().item():.6f}\n")
                 
-                # Exactly match diffusers' device/dtype handling: to(device=device, dtype=vae_dtype)
-                # Get VAE dtype exactly like diffusers - but force bfloat16 to match diffusers
+                # bfloat16
                 if self.vae is not None:
                     vae_dtype = next(self.vae.parameters()).dtype  # Get VAE's parameter dtype
                 else:
                     vae_dtype = dtype
 
-                # Force bfloat16 to match diffusers exactly
+                # Force bfloat16
                 video = video.to(device=device, dtype=torch.bfloat16)
-                logger.info(f"CosmosLatentPreparationStage - After to(device, dtype): shape={video.shape}, dtype={video.dtype}, device={video.device}, vae_dtype={vae_dtype}")
         elif hasattr(batch, 'preprocessed_image') and batch.preprocessed_image is not None:
-            logger.info(f"CosmosLatentPreparationStage - Found preprocessed_image of type: {type(batch.preprocessed_image)}")
             # Convert preprocessed image to video format
             if isinstance(batch.preprocessed_image, torch.Tensor):
-                logger.info(f"CosmosLatentPreparationStage - preprocessed_image tensor shape: {batch.preprocessed_image.shape}")
                 if batch.preprocessed_image.dim() == 4:  # [B, C, H, W] -> [B, C, T, H, W]
                     video = batch.preprocessed_image.unsqueeze(2)
-                    logger.info(f"CosmosLatentPreparationStage - Converted 4D to 5D tensor: {video.shape}")
                 elif batch.preprocessed_image.dim() == 5:  # Already [B, C, T, H, W]
                     video = batch.preprocessed_image
-                    logger.info(f"CosmosLatentPreparationStage - Using 5D tensor as-is: {video.shape}")
         else:
             logger.info("CosmosLatentPreparationStage - No video input sources found")
         
         if video is not None:
             num_cond_frames = video.size(2)
             
-            logger.info(f"CosmosLatentPreparationStage - Number of conditioning frames: {num_cond_frames}")
-            
             if num_cond_frames >= num_frames:
                 # Take the last `num_frames` frames for conditioning
                 num_cond_latent_frames = (num_frames - 1) // vae_scale_factor_temporal + 1
                 video = video[:, :, -num_frames:]
-                logger.info(f"CosmosLatentPreparationStage - Using last {num_frames} frames from {num_cond_frames} conditioning frames")
             else:
                 num_cond_latent_frames = (num_cond_frames - 1) // vae_scale_factor_temporal + 1
                 num_padding_frames = num_frames - num_cond_frames
                 last_frame = video[:, :, -1:]
-                print(f"[FASTVIDEO PADDING DEBUG] last_frame dtype: {last_frame.dtype}, shape: {last_frame.shape}")
-                print(f"[FASTVIDEO PADDING DEBUG] num_padding_frames: {num_padding_frames}")
-                print(f"[FASTVIDEO PADDING DEBUG] last_frame sum: {last_frame.float().sum().item():.6f}")
                 padding = last_frame.repeat(1, 1, num_padding_frames, 1, 1)
-                print(f"[FASTVIDEO PADDING DEBUG] padding dtype: {padding.dtype}, shape: {padding.shape}")
-
-                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                    f.write(f"FastVideo padding: {padding.float().sum().item():.6f}\n")
-                    f.write(f"FastVideo padding debug: last_frame_dtype={last_frame.dtype}, padding_dtype={padding.dtype}, num_padding_frames={num_padding_frames}\n")
-                    f.write(f"FastVideo padding debug: last_frame_sum={last_frame.float().sum().item():.6f}\n")
                 video = torch.cat([video, padding], dim=2)
-                logger.info(f"CosmosLatentPreparationStage - Padding {num_cond_frames} conditioning frames with {num_padding_frames} repeated frames")
             
             # Encode video through VAE like diffusers does
             if self.vae is not None:
                 # Move VAE to correct device before encoding
                 self.vae = self.vae.to(device)
                 
-                # Log VAE info and input video stats
-                print(f"[FASTVIDEO VAE DEBUG] VAE model: {type(self.vae).__name__}")
-                print(f"[FASTVIDEO VAE DEBUG] VAE config z_dim: {self.vae.config.z_dim}")
-                print(f"[FASTVIDEO VAE DEBUG] Input video shape: {video.shape}, dtype: {video.dtype}, device: {video.device}")
-                print(f"[FASTVIDEO VAE DEBUG] Input video sum: {video.float().sum().item():.6f}")
-                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                    f.write(f"FastVideo VAE: model_type = {type(self.vae).__name__}\n")
-                    f.write(f"FastVideo VAE: z_dim = {self.vae.config.z_dim}\n")
-                    f.write(f"FastVideo VAE: input_video_shape = {video.shape}\n")
-                    f.write(f"FastVideo VAE: input_video_sum = {video.float().sum().item():.6f}\n")
-                
                 # Convert VAE to video dtype instead of video to VAE dtype
                 vae_dtype_for_encoding = next(self.vae.parameters()).dtype
                 print(f"[FASTVIDEO VAE DEBUG] Original: video dtype={video.dtype}, VAE dtype={vae_dtype_for_encoding}")
-                print(f"[FASTVIDEO VAE DEBUG] Converting VAE from {vae_dtype_for_encoding} to {video.dtype} to match diffusers")
 
-                # Convert VAE to bfloat16 to match diffusers exactly
                 self.vae = self.vae.to(dtype=video.dtype)
-                new_vae_dtype = next(self.vae.parameters()).dtype
-                print(f"[FASTVIDEO VAE DEBUG] VAE converted to: {new_vae_dtype}")
-                print(f"[FASTVIDEO VAE DEBUG] Video input sum: {video.float().sum().item():.6f}")
-
-                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                    f.write(f"FastVideo VAE dtype conversion: VAE {vae_dtype_for_encoding} -> {new_vae_dtype} (to match video {video.dtype})\n")
-                    f.write(f"FastVideo VAE video_input_sum: {video.float().sum().item():.6f}\n")
 
                 # Use exact same logic as diffusers to eliminate VAE differences
                 def retrieve_latents(encoder_output, generator=None):
@@ -356,8 +273,6 @@ class CosmosLatentPreparationStage(PipelineStage):
                     else:
                         # Debug what attributes are available
                         attrs = [attr for attr in dir(encoder_output) if not attr.startswith('_')]
-                        print(f"[FASTVIDEO VAE DEBUG] VAE output attributes: {attrs}")
-                        print(f"[FASTVIDEO VAE DEBUG] VAE output type: {type(encoder_output)}")
                         raise AttributeError(f"Could not access latents of provided encoder_output. Available attributes: {attrs}")
 
                 if isinstance(generator, list):
@@ -371,23 +286,11 @@ class CosmosLatentPreparationStage(PipelineStage):
                 init_latents = torch.cat(init_latents, dim=0).to(dtype)
                 print(f"[FASTVIDEO CONDITIONING DEBUG] Raw VAE latents sum = {init_latents.float().sum().item()}")
                 
-                # Apply latent normalization like diffusers
+                # Apply latent normalization
                 if hasattr(self.vae.config, 'latents_mean') and hasattr(self.vae.config, 'latents_std'):
                     latents_mean = torch.tensor(self.vae.config.latents_mean).view(1, self.vae.config.z_dim, 1, 1, 1).to(device, dtype)
                     latents_std = torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1, 1).to(device, dtype)
-                    print(f"[FASTVIDEO CONDITIONING DEBUG] latents_mean = {self.vae.config.latents_mean}, latents_std = {self.vae.config.latents_std}")
-                    print(f"[FASTVIDEO CONDITIONING DEBUG] scheduler.sigma_data = {self.scheduler.sigma_data}")
-                    with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                        f.write(f"FastVideo Conditioning: scheduler.sigma_data = {self.scheduler.sigma_data}\n")
-                        f.write(f"FastVideo Conditioning: latents_mean = {self.vae.config.latents_mean}\n")
-                        f.write(f"FastVideo Conditioning: latents_std = {self.vae.config.latents_std}\n")
-                    print(f"[FASTVIDEO CONDITIONING DEBUG] Before normalization sum = {init_latents.float().sum().item()}")
-                    with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                        f.write(f"FastVideo Conditioning: before_normalization_sum = {init_latents.float().sum().item():.6f}\n")
                     init_latents = (init_latents - latents_mean) / latents_std * self.scheduler.sigma_data
-                    print(f"[FASTVIDEO CONDITIONING DEBUG] After normalization sum = {init_latents.float().sum().item()}")
-                    with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                        f.write(f"FastVideo Conditioning: after_normalization_sum = {init_latents.float().sum().item():.6f}\n")
                 
                 conditioning_latents = init_latents
                 print(f"[FASTVIDEO CONDITIONING DEBUG] Final conditioning_latents sum = {conditioning_latents.float().sum().item()}")
@@ -401,7 +304,7 @@ class CosmosLatentPreparationStage(PipelineStage):
         # Generate or use provided latents
         if latents is None:
             print(f"[FASTVIDEO DEBUG] Creating latents with randn_tensor, shape={shape}, device={device}, dtype={dtype}")
-            # Use float32 for randn_tensor to match diffusers exactly
+            # Use float32 for randn_tensor
             latents = randn_tensor(shape,
                                  generator=torch.Generator(device="cpu").manual_seed(200),
                                  device=device,
@@ -435,11 +338,6 @@ class CosmosLatentPreparationStage(PipelineStage):
         # Store in batch
         batch.latents = latents
         batch.raw_latent_shape = latents.shape
-        sum_value = latents.float().sum().item()
-        logger.info(f"CosmosLatentPreparationStage: latents sum = {sum_value:.6f}, shape = {latents.shape}, sigma_max = {self.scheduler.sigma_max}")
-        # Write to output file
-        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-            f.write(f"CosmosLatentPreparationStage: latents sum = {sum_value:.6f}, shape = {latents.shape}, sigma_max = {self.scheduler.sigma_max}\n")
         
         # Store Cosmos-specific conditioning data
         batch.conditioning_latents = conditioning_latents
@@ -450,52 +348,6 @@ class CosmosLatentPreparationStage(PipelineStage):
         
         # Final verification that shape is correct
         logger.info(f"CosmosLatentPreparationStage - FINAL latents shape: {latents.shape}")
-        # Compare with Diffusers expected shape for our dimensions
-        # For 21 frames with temporal_scale=4: (21-1)//4+1 = 6 latent frames
-        diffusers_expected = torch.Size([1, 16, 6, 88, 160])
-        if latents.shape != diffusers_expected:
-            logger.warning(f"CosmosLatentPreparationStage - Shape differs from Diffusers: Expected {diffusers_expected}, got {latents.shape}")
-            logger.info(f"CosmosLatentPreparationStage - This may be due to different input dimensions (height={height}, width={width})")
-            logger.info(f"CosmosLatentPreparationStage - Debug values: batch_size={batch_size}, num_channels={num_channels_latents}, frames={num_latent_frames}, h={latent_height}, w={latent_width}")
-            logger.info(f"CosmosLatentPreparationStage - Input values: num_frames={num_frames}, height={height}, width={width}")
-
-        logger.info(f"CosmosLatentPreparationStage - final latents shape: {latents.shape}")
-        logger.info(f"CosmosLatentPreparationStage - conditioning frames: {num_cond_latent_frames}/{num_latent_frames}")
-        logger.info(f"CosmosLatentPreparationStage - cond_mask shape: {cond_mask.shape}")
-        if conditioning_latents is not None:
-            logger.info(f"CosmosLatentPreparationStage - conditioning_latents shape: {conditioning_latents.shape}")
-
-        # Log tensor sums to fastvideo_hidden_states.log
-        sum_value = latents.float().sum().item()
-        print(f"FastVideo LatentPreparation: latents sum = {sum_value:.6f}")
-        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-            f.write(f"FastVideo LatentPreparation: latents sum = {sum_value:.6f}\n")
-        
-        if conditioning_latents is not None:
-            sum_value = conditioning_latents.float().sum().item()
-            print(f"FastVideo LatentPreparation: conditioning_latents sum = {sum_value:.6f}")
-            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                f.write(f"FastVideo LatentPreparation: conditioning_latents sum = {sum_value:.6f}\n")
-        
-        sum_value = cond_indicator.float().sum().item()
-        print(f"FastVideo LatentPreparation: cond_indicator sum = {sum_value:.6f}")
-        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-            f.write(f"FastVideo LatentPreparation: cond_indicator sum = {sum_value:.6f}\n")
-        
-        sum_value = uncond_indicator.float().sum().item()
-        print(f"FastVideo LatentPreparation: uncond_indicator sum = {sum_value:.6f}")
-        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-            f.write(f"FastVideo LatentPreparation: uncond_indicator sum = {sum_value:.6f}\n")
-        
-        sum_value = cond_mask.float().sum().item()
-        print(f"FastVideo LatentPreparation: cond_mask sum = {sum_value:.6f}")
-        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-            f.write(f"FastVideo LatentPreparation: cond_mask sum = {sum_value:.6f}\n")
-        
-        sum_value = uncond_mask.float().sum().item()
-        print(f"FastVideo LatentPreparation: uncond_mask sum = {sum_value:.6f}")
-        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-            f.write(f"FastVideo LatentPreparation: uncond_mask sum = {sum_value:.6f}\n")
 
         return batch
 

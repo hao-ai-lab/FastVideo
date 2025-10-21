@@ -10,10 +10,6 @@ import os
 import numpy as np
 import torch
 
-# TEMPORARY: Import diffusers VAE for comparison
-import sys
-# sys.path.insert(0, '/mnt/fast-disks/nfs/hao_lab/kevin/diffusers/src')
-# from diffusers.models.autoencoders.autoencoder_kl_wan import AutoencoderKLWan as DiffusersAutoencoderKLWan
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -39,22 +35,6 @@ class Cosmos2VideoToWorldPipeline(ComposedPipelineBase):
     ]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-
-        # original_vae = self.modules["vae"]
-
-        # diffusers_vae = DiffusersAutoencoderKLWan.from_pretrained(
-        #     self.model_path,
-        #     subfolder="vae",
-        #     torch_dtype=torch.bfloat16,
-        # )
-
-        # with open("/mnt/fast-disks/nfs/hao_lab/kevin/FastVideo/fastvideo_hidden_states.log", "a") as f:
-        #     f.write(f"[TEMPORARY] Diffusers VAE type: {type(diffusers_vae)}\n")
-
-        # Replace the VAE module
-        # self.modules["vae"] = diffusers_vae
-
-
         self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
             shift=fastvideo_args.pipeline_config.flow_shift,
             use_karras_sigmas=True)

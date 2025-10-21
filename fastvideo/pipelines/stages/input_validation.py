@@ -36,7 +36,6 @@ class InputValidationStage(PipelineStage):
         assert seed is not None
         seeds = [seed + i for i in range(num_videos_per_prompt)]
         batch.seeds = seeds
-        # Use device-specific generators to match diffusers behavior
         # diffusers uses torch.Generator(device=device).manual_seed() 
         from fastvideo.distributed import get_local_torch_device
         device = get_local_torch_device()

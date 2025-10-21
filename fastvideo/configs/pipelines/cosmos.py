@@ -23,90 +23,37 @@ def t5_large_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
     if hidden_state is None:
         raise ValueError("T5 Large outputs missing last_hidden_state")
     
-    # Check for NaN values and provide debugging info
     nan_count = torch.isnan(hidden_state).sum()
     if nan_count > 0:
-        print(f"WARNING: Found {nan_count} NaN values in T5 Large hidden states")
-        print(f"Hidden state shape: {hidden_state.shape}")
-        print(f"Hidden state dtype: {hidden_state.dtype}")
-        print(f"Hidden state device: {hidden_state.device}")
-        # Replace NaN values with zeros to avoid pipeline failure
         hidden_state = hidden_state.masked_fill(torch.isnan(hidden_state), 0.0)
     
-    # Return raw last_hidden_state (no truncation/padding)
     return hidden_state
 
 
 @dataclass
-class CosmosVideoConfigFixed(CosmosVideoConfig):
-    """Fixed Cosmos Video Config that matches original Cosmos2 Video2World configuration."""
-    
-    def update_model_arch(self, config: dict) -> None:
-        """Update model architecture config with HF config, but fix parameters to match original Cosmos2."""
-        # First, apply the standard update
-        super().update_model_arch(config)
-        
-        # CRITICAL FIXES to match original Cosmos2 Video2World configuration:
-        
-        # 1. Fix input channels: should be 16 (VAE) + 1 (condition mask) = 17
-        setattr(self.arch_config, 'in_channels', 17)
-        
-        # 2. Fix output channels: should be 16 (VAE latent dimension)
-        setattr(self.arch_config, 'out_channels', 16)
-        
-        # 3. Fix model architecture to match Cosmos2 2B model
-        setattr(self.arch_config, 'num_attention_heads', 16)
-        setattr(self.arch_config, 'attention_head_dim', 128)  # Fixed: should be 128, not 64
-        setattr(self.arch_config, 'num_layers', 28)
-        setattr(self.arch_config, 'hidden_size', 2048)  # 16 * 128 = 2048
-        
-        # 4. Fix patch size to match original
-        setattr(self.arch_config, 'patch_size', (1, 2, 2))
-        
-        # 5. Fix max size to match original
-        setattr(self.arch_config, 'max_size', (128, 240, 240))
-        
-        # 6. Fix text embedding dimension
-        setattr(self.arch_config, 'text_embed_dim', 1024)
-        
-        # 7. Fix adaln lora dimension
-        setattr(self.arch_config, 'adaln_lora_dim', 256)
-        
-        # 8. Fix rope scale to match original
-        setattr(self.arch_config, 'rope_scale', (1.0, 3.0, 3.0))
-        
-        # 9. Enable concat padding mask
-        setattr(self.arch_config, 'concat_padding_mask', True)
-        
-        # 10. Set num_channels_latents to 16 (VAE output dim)
-        setattr(self.arch_config, 'num_channels_latents', 16)
-
-
-@dataclass
 class CosmosConfig(PipelineConfig):
-    """Configuration for Cosmos2 Video2World pipeline matching original implementation."""
+    """Configuration for Cosmos2 Video2World pipeline matching diffusers."""
 
-    # DiT configuration matching Cosmos2 2B model
-    dit_config: DiTConfig = field(default_factory=CosmosVideoConfigFixed)
+
+    dit_config: DiTConfig = field(default_factory=CosmosVideoConfig)
     
-    # VAE configuration matching Cosmos2
+
     vae_config: VAEConfig = field(default_factory=CosmosVAEConfig)
     
-    # Text encoding configuration
+
     text_encoder_configs: tuple[EncoderConfig, ...] = field(
         default_factory=lambda: (T5LargeConfig(), ))
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor],
                                   ...] = field(default_factory=lambda:
                                                (t5_large_postprocess_text, ))
 
-    # Precision for each component
+
     dit_precision: str = "bf16"
     vae_precision: str = "fp16"
     text_encoder_precisions: tuple[str, ...] = field(
         default_factory=lambda: ("bf16",))
 
-    # Cosmos2 Video2World specific parameters
-    conditioning_strategy: str = "frame_replace"  # Match original ConditioningStrategy.FRAME_REPLACE
+    conditioning_strategy: str = "frame_replace"
     min_num_conditional_frames: int = 1
     max_num_conditional_frames: int = 2
     sigma_conditional: float = 0.0001
@@ -115,13 +62,12 @@ class CosmosConfig(PipelineConfig):
     state_t: int = 24
     text_encoder_class: str = "T5"
     
-    # Denoising parameters
+
     embedded_cfg_scale: int = 6
-    flow_shift: float = 1.0  # Changed to 1.0 to match diffusers (no shift transformation)
+    flow_shift: float = 1.0 
 
     def __post_init__(self):
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
         
-        # Store the VAE's latent dimension to use later
-        self._vae_latent_dim = 16  # From CosmosVAEArchConfig.z_dim
+        self._vae_latent_dim = 16

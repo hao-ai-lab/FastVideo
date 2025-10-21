@@ -39,14 +39,13 @@ class RMSNorm(CustomOp):
         if self.has_weight:
             self.weight = nn.Parameter(self.weight)
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def forward_diffusers(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Forward method that matches Diffusers RMSNorm implementation exactly."""
         input_dtype = hidden_states.dtype
         variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
         hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
 
         if self.has_weight and self.weight is not None:
-            # convert into half-precision if necessary (match Diffusers exactly)
             if self.weight.dtype in [torch.float16, torch.bfloat16]:
                 hidden_states = hidden_states.to(self.weight.dtype)
             hidden_states = hidden_states * self.weight

@@ -8,8 +8,6 @@ from fastvideo.configs.models.vaes.base import VAEArchConfig, VAEConfig
 
 @dataclass
 class CosmosVAEArchConfig(VAEArchConfig):
-    _class_name: str = "AutoencoderKLWan"
-    _diffusers_version: str = "0.34.0.dev0"
     _name_or_path: str = ""
     base_dim: int = 96
     z_dim: int = 16
@@ -76,7 +74,8 @@ class CosmosVAEArchConfig(VAEArchConfig):
 
 @dataclass
 class CosmosVAEConfig(VAEConfig):
-    arch_config: CosmosVAEArchConfig = field(default_factory=CosmosVAEArchConfig)
+    arch_config: CosmosVAEArchConfig = field(
+        default_factory=CosmosVAEArchConfig)
     use_feature_cache: bool = True
 
     use_tiling: bool = False

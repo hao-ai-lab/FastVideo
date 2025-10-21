@@ -82,10 +82,6 @@ class DecodingStage(PipelineStage):
         if latents is None:
             raise ValueError("Latents must be provided")
 
-        print(f"[FASTVIDEO VAE DEBUG] Before scaling/shifting - latents sum: {latents.float().sum().item():.6f}, shape: {latents.shape}, dtype: {latents.dtype}")
-        with open("/mnt/fast-disks/nfs/hao_lab/kevin/FastVideo/fastvideo_hidden_states.log", "a") as f:
-            f.write(f"[FASTVIDEO VAE DEBUG] Before scaling/shifting - latents sum: {latents.float().sum().item():.6f}, shape: {latents.shape}, dtype: {latents.dtype}\n")
-
         # Skip decoding if output type is latent
         if fastvideo_args.output_type == "latent":
             image = latents
@@ -96,8 +92,8 @@ class DecodingStage(PipelineStage):
             vae_autocast_enabled = (vae_dtype != torch.float32
                                     ) and not fastvideo_args.disable_autocast
 
-            # Apply latents normalization for Cosmos VAE (matching diffusers implementation)
-            # Source: /workspace/diffusers/src/diffusers/pipelines/cosmos/pipeline_cosmos2_video2world.py:1000-1010
+            # Apply latents normalization for Cosmos VAE
+            # Source: /diffusers/pipelines/cosmos/pipeline_cosmos2_video2world.py:1000-1010
             if hasattr(self.vae, 'config') and hasattr(self.vae.config, 'latents_mean') and hasattr(self.vae.config, 'latents_std'):
                 # Get scheduler for sigma_data
                 pipeline = self.pipeline() if self.pipeline else None
@@ -106,14 +102,6 @@ class DecodingStage(PipelineStage):
                     scheduler = pipeline.modules['scheduler']
                     if hasattr(scheduler, 'config') and hasattr(scheduler.config, 'sigma_data'):
                         sigma_data = scheduler.config.sigma_data
-
-                print(f"[FASTVIDEO VAE DEBUG] sigma_data = {sigma_data}")
-                print(f"[FASTVIDEO VAE DEBUG] latents_mean config = {self.vae.config.latents_mean}")
-                print(f"[FASTVIDEO VAE DEBUG] latents_std config = {self.vae.config.latents_std}")
-                with open("/mnt/fast-disks/nfs/hao_lab/kevin/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                    f.write(f"[FASTVIDEO VAE DEBUG] sigma_data = {sigma_data}\n")
-                    f.write(f"[FASTVIDEO VAE DEBUG] latents_mean config = {self.vae.config.latents_mean}\n")
-                    f.write(f"[FASTVIDEO VAE DEBUG] latents_std config = {self.vae.config.latents_std}\n")
 
                 latents_mean = (
                     torch.tensor(self.vae.config.latents_mean)
@@ -125,29 +113,10 @@ class DecodingStage(PipelineStage):
                     .view(1, self.vae.config.z_dim, 1, 1, 1)
                     .to(latents.device, latents.dtype)
                 )
-                print(f"[FASTVIDEO VAE DEBUG] latents dtype = {latents.dtype}, latents_mean dtype = {latents_mean.dtype}, latents_std dtype = {latents_std.dtype}")
-                print(f"[FASTVIDEO VAE DEBUG] latents_mean tensor sum = {latents_mean.sum().item():.6f}")
-                print(f"[FASTVIDEO VAE DEBUG] latents_std tensor sum = {latents_std.sum().item():.6f}")
-                with open("/mnt/fast-disks/nfs/hao_lab/kevin/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                    f.write(f"[FASTVIDEO VAE DEBUG] latents dtype = {latents.dtype}, latents_mean dtype = {latents_mean.dtype}, latents_std dtype = {latents_std.dtype}\n")
-                    f.write(f"[FASTVIDEO VAE DEBUG] latents_mean tensor sum = {latents_mean.sum().item():.6f}\n")
-                    f.write(f"[FASTVIDEO VAE DEBUG] latents_std tensor sum = {latents_std.sum().item():.6f}\n")
-
-                print(f"[FASTVIDEO VAE DEBUG] latents shape = {latents.shape}, latents_mean shape = {latents_mean.shape}, latents_std shape = {latents_std.shape}")
-                with open("/mnt/fast-disks/nfs/hao_lab/kevin/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                    f.write(f"[FASTVIDEO VAE DEBUG] latents shape = {latents.shape}, latents_mean shape = {latents_mean.shape}, latents_std shape = {latents_std.shape}\n")
 
                 latents_after_mul = latents * latents_std / sigma_data
-                print(f"[FASTVIDEO VAE DEBUG] After multiply (latents * latents_std / sigma_data) sum = {latents_after_mul.float().sum().item():.6f}")
-                print(f"[FASTVIDEO VAE DEBUG] latents_after_mul shape = {latents_after_mul.shape}")
-                with open("/mnt/fast-disks/nfs/hao_lab/kevin/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                    f.write(f"[FASTVIDEO VAE DEBUG] After multiply sum = {latents_after_mul.float().sum().item():.6f}\n")
-                    f.write(f"[FASTVIDEO VAE DEBUG] latents_after_mul shape = {latents_after_mul.shape}\n")
-
                 latents = latents_after_mul + latents_mean
-                print(f"[FASTVIDEO VAE DEBUG] After adding latents_mean, latents shape = {latents.shape}")
-                with open("/mnt/fast-disks/nfs/hao_lab/kevin/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                    f.write(f"[FASTVIDEO VAE DEBUG] After adding latents_mean shape = {latents.shape}\n")
+
             # Fallback to scaling_factor for other VAE types
             elif hasattr(self.vae, 'scaling_factor'):
                 if isinstance(self.vae.scaling_factor, torch.Tensor):
@@ -166,10 +135,6 @@ class DecodingStage(PipelineStage):
                                                         latents.dtype)
                 else:
                     latents += self.vae.shift_factor
-
-            print(f"[FASTVIDEO VAE DEBUG] After scaling/shifting - latents sum: {latents.float().sum().item():.6f}")
-            with open("/mnt/fast-disks/nfs/hao_lab/kevin/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                f.write(f"[FASTVIDEO VAE DEBUG] After scaling/shifting - latents sum: {latents.float().sum().item():.6f}\n")
 
             # Decode latents
             with torch.autocast(device_type="cuda",
@@ -191,16 +156,8 @@ class DecodingStage(PipelineStage):
                     # FastVideo VAE returns tensor directly
                     image = decode_output
 
-                print(f"[FASTVIDEO VAE DEBUG] After decode - image sum: {image.float().sum().item():.6f}, shape: {image.shape}")
-                with open("/mnt/fast-disks/nfs/hao_lab/kevin/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                    f.write(f"[FASTVIDEO VAE DEBUG] After decode - image sum: {image.float().sum().item():.6f}, shape: {image.shape}\n")
-
         # Normalize image to [0, 1] range
         image = (image / 2 + 0.5).clamp(0, 1)
-
-        print(f"[FASTVIDEO VAE DEBUG] After normalization - image sum: {image.float().sum().item():.6f}")
-        with open("/mnt/fast-disks/nfs/hao_lab/kevin/FastVideo/fastvideo_hidden_states.log", "a") as f:
-            f.write(f"[FASTVIDEO VAE DEBUG] After normalization - image sum: {image.float().sum().item():.6f}\n")
 
         # Convert to CPU float32 for compatibility
         image = image.cpu().float()

@@ -350,18 +350,8 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             if timesteps_array is None:
                 t_max = self._sigma_to_t(self.sigma_max)
                 t_min = self._sigma_to_t(self.sigma_min)
-                print(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] sigma_max={self.sigma_max}, sigma_min={self.sigma_min}")
-                print(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] t_max={t_max}, t_min={t_min}, num_inference_steps={num_inference_steps}")
                 timesteps_array = np.linspace(t_max, t_min, num_inference_steps)
-                print(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] timesteps_array first few: {timesteps_array[:3]}")
-                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                    f.write(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] sigma_max={self.sigma_max}, sigma_min={self.sigma_min}\n")
-                    f.write(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] t_max={t_max}, t_min={t_min}, num_inference_steps={num_inference_steps}\n")
-                    f.write(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] timesteps_array first few: {timesteps_array[:3]}\n")
             sigmas_array = timesteps_array / self.config.num_train_timesteps
-            print(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] sigmas_array before shifting first few: {sigmas_array[:3]}")
-            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                f.write(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] sigmas_array before shifting first few: {sigmas_array[:3]}\n")
         else:
             sigmas_array = np.array(sigmas).astype(np.float32)
             num_inference_steps = len(sigmas_array)
@@ -372,14 +362,8 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             assert mu is not None, "mu cannot be None when use_dynamic_shifting is True"
             sigmas_array = self.time_shift(mu, 1.0, sigmas_array)
         else:
-            print(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] Before shifting - self.shift={self.shift}, sigmas_array first few: {sigmas_array[:3]}")
-            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                f.write(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] Before shifting - self.shift={self.shift}, sigmas_array first few: {sigmas_array[:3]}\n")
             sigmas_array = self.shift * sigmas_array / (
                 1 + (self.shift - 1) * sigmas_array)
-            print(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] After shifting - sigmas_array first few: {sigmas_array[:3]}")
-            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                f.write(f"[FASTVIDEO SCHEDULER SIGMA DEBUG] After shifting - sigmas_array first few: {sigmas_array[:3]}\n")
 
         # 3. If required, stretch the sigmas schedule to terminate at the configured `shift_terminal` value
         if self.config.shift_terminal:
@@ -538,24 +522,9 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             sigma = self.sigmas[sigma_idx]
             sigma_next = self.sigmas[sigma_idx + 1]
 
-            # DETAILED SCHEDULER DEBUG LOGGING
-            print(f"[FASTVIDEO SCHEDULER DEBUG] step_index: {self.step_index}, sigma_idx: {sigma_idx}")
-            print(f"[FASTVIDEO SCHEDULER DEBUG] sigma: {sigma:.10f}, sigma_next: {sigma_next:.10f}")
-            print(f"[FASTVIDEO SCHEDULER DEBUG] sigmas array length: {len(self.sigmas)}, first few: {self.sigmas[:3]}")
-            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                f.write(f"[FASTVIDEO SCHEDULER DEBUG] step_index: {self.step_index}, sigma_idx: {sigma_idx}\n")
-                f.write(f"[FASTVIDEO SCHEDULER DEBUG] sigma: {sigma:.10f}, sigma_next: {sigma_next:.10f}\n")
-                f.write(f"[FASTVIDEO SCHEDULER DEBUG] sigmas array length: {len(self.sigmas)}, first few: {self.sigmas[:3]}\n")
-
             current_sigma = sigma
             next_sigma = sigma_next
             dt = sigma_next - sigma
-
-            print(f"[FASTVIDEO SCHEDULER DEBUG] dt: {dt:.10f}, current_sigma: {current_sigma:.10f}, next_sigma: {next_sigma:.10f}")
-            print(f"[FASTVIDEO SCHEDULER DEBUG] sample sum before step: {sample.float().sum().item():.6f}, model_output sum: {model_output.float().sum().item():.6f}")
-            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                f.write(f"[FASTVIDEO SCHEDULER DEBUG] dt: {dt:.10f}, current_sigma: {current_sigma:.10f}, next_sigma: {next_sigma:.10f}\n")
-                f.write(f"[FASTVIDEO SCHEDULER DEBUG] sample sum before step: {sample.float().sum().item():.6f}, model_output sum: {model_output.float().sum().item():.6f}\n")
 
         if self.config.stochastic_sampling:
             x0 = sample - current_sigma * model_output
@@ -563,9 +532,6 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             prev_sample = (1.0 - next_sigma) * x0 + next_sigma * noise
         else:
             prev_sample = sample + dt * model_output
-            print(f"[FASTVIDEO SCHEDULER DEBUG] final prev_sample sum: {prev_sample.float().sum().item():.6f}")
-            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                f.write(f"[FASTVIDEO SCHEDULER DEBUG] final prev_sample sum: {prev_sample.float().sum().item():.6f}\n")
 
         # upon completion increase step index by one
         self._step_index += 1

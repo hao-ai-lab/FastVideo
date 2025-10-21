@@ -292,22 +292,14 @@ class DenoisingStage(PipelineStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                         )
-                        sum_value = noise_pred.float().sum().item()
-                        logger.info(f"DenoisingStage: step {i}, noise_pred sum = {sum_value:.6f}")
-                        # Write to output file
-                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                            f.write(f"DenoisingStage: step {i}, noise_pred sum = {sum_value:.6f}\n")
 
-                    # Apply guidance
                     if batch.do_classifier_free_guidance:
                         batch.is_cfg_negative = True
                         with set_forward_context(
                                 current_timestep=i,
                                 attn_metadata=attn_metadata,
                                 forward_batch=batch,
-                                # fastvideo_args=fastvideo_args
                         ):
-                            # Run transformer
                             noise_pred_uncond = current_model(
                                 latent_model_input,
                                 neg_prompt_embeds,
@@ -316,19 +308,10 @@ class DenoisingStage(PipelineStage):
                                 **image_kwargs,
                                 **neg_cond_kwargs,
                             )
-                        sum_value = noise_pred_uncond.float().sum().item()
-                        logger.info(f"DenoisingStage: step {i}, noise_pred_uncond sum = {sum_value:.6f}")
-                        # Write to output file
-                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                            f.write(f"DenoisingStage: step {i}, noise_pred_uncond sum = {sum_value:.6f}\n")
+
                         noise_pred_text = noise_pred
                         noise_pred = noise_pred_uncond + current_guidance_scale * (
                             noise_pred_text - noise_pred_uncond)
-                        sum_value = noise_pred.float().sum().item()
-                        logger.info(f"DenoisingStage: step {i}, final noise_pred sum = {sum_value:.6f}")
-                        # Write to output file
-                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                            f.write(f"DenoisingStage: step {i}, final noise_pred sum = {sum_value:.6f}\n")
 
                         # Apply guidance rescale if needed
                         if batch.guidance_rescale > 0.0:
@@ -344,11 +327,7 @@ class DenoisingStage(PipelineStage):
                                                   latents,
                                                   **extra_step_kwargs,
                                                   return_dict=False)[0]
-                    sum_value = latents.float().sum().item()
-                    logger.info(f"DenoisingStage: step {i}, updated latents sum = {sum_value:.6f}")
-                    # Write to output file
-                    with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                        f.write(f"DenoisingStage: step {i}, updated latents sum = {sum_value:.6f}\n")
+
                 # Update progress bar
                 if i == len(timesteps) - 1 or (
                     (i + 1) > num_warmup_steps and
@@ -669,14 +648,6 @@ class CosmosDenoisingStage(DenoisingStage):
             },
         )
 
-        # Log the extra step kwargs
-        print(f"[FASTVIDEO DEBUG] Extra step kwargs: {extra_step_kwargs}")
-        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-            f.write(f"[FASTVIDEO DEBUG] Extra step kwargs: {extra_step_kwargs}\n")
-
-
-        # Setup precision to match diffusers exactly
-        # Diffusers uses transformer.dtype (bfloat16) and converts inputs before transformer calls
         # For FSDP wrapped models, we need to access the underlying module
         if hasattr(self.transformer, 'module'):
             transformer_dtype = next(self.transformer.module.parameters()).dtype
@@ -690,22 +661,11 @@ class CosmosDenoisingStage(DenoisingStage):
         latents = batch.latents
         num_inference_steps = batch.num_inference_steps
         guidance_scale = batch.guidance_scale
-
-        sum_value = latents.float().sum().item()
-        # Write to output file
-        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-            f.write(f"Denoising init: latents sum = {sum_value:.6f}, shape = {latents.shape}\n")
         
-        
-        # Configure scheduler to match Diffusers exactly (MUST be before set_timesteps)
         sigma_max = 80.0
         sigma_min = 0.002
         sigma_data = 1.0
         final_sigmas_type = "sigma_min"
-
-        print(f"[FASTVIDEO DEBUG] BEFORE config - scheduler.config: {self.scheduler.config}")
-        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-            f.write(f"[FASTVIDEO DEBUG] BEFORE config - scheduler.config: {self.scheduler.config}\n")
 
         if self.scheduler is not None:
             self.scheduler.register_to_config(
@@ -714,45 +674,20 @@ class CosmosDenoisingStage(DenoisingStage):
                 sigma_data=sigma_data,
                 final_sigmas_type=final_sigmas_type,
             )
-            print(f"[FASTVIDEO DEBUG] Applied scheduler config: sigma_max={sigma_max}, sigma_min={sigma_min}, sigma_data={sigma_data}, final_sigmas_type={final_sigmas_type}")
-            print(f"[FASTVIDEO DEBUG] AFTER config - scheduler.config: {self.scheduler.config}")
-            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                f.write(f"[FASTVIDEO DEBUG] Applied scheduler config: sigma_max={sigma_max}, sigma_min={sigma_min}, sigma_data={sigma_data}, final_sigmas_type={final_sigmas_type}\n")
-                f.write(f"[FASTVIDEO DEBUG] AFTER config - scheduler.config: {self.scheduler.config}\n")
 
         # Setup scheduler timesteps - use default scheduler sigma generation
         # The torch.linspace(0, 1, num_inference_steps) approach was incorrect for FlowMatchEulerDiscreteScheduler
         # Let the scheduler generate its own sigmas using the configured sigma_max, sigma_min, etc.
         self.scheduler.set_timesteps(num_inference_steps, device=latents.device)
         timesteps = self.scheduler.timesteps
-
-        # Debug what sigmas were actually generated
-        print(f"[FASTVIDEO DEBUG] Generated sigmas - length: {len(self.scheduler.sigmas)}, first few: {self.scheduler.sigmas[:3]}")
-        print(f"[FASTVIDEO DEBUG] Scheduler config after set_timesteps: sigma_max={getattr(self.scheduler.config, 'sigma_max', 'NOT_SET')}, sigma_min={getattr(self.scheduler.config, 'sigma_min', 'NOT_SET')}")
-        print(f"[FASTVIDEO DEBUG] Scheduler properties: self.sigma_max={getattr(self.scheduler, 'sigma_max', 'NOT_SET')}, self.sigma_min={getattr(self.scheduler, 'sigma_min', 'NOT_SET')}")
-        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-            f.write(f"[FASTVIDEO DEBUG] Generated sigmas - length: {len(self.scheduler.sigmas)}, first few: {self.scheduler.sigmas[:3]}\n")
-            f.write(f"[FASTVIDEO DEBUG] Scheduler config after set_timesteps: sigma_max={getattr(self.scheduler.config, 'sigma_max', 'NOT_SET')}, sigma_min={getattr(self.scheduler.config, 'sigma_min', 'NOT_SET')}\n")
-            f.write(f"[FASTVIDEO DEBUG] Scheduler properties: self.sigma_max={getattr(self.scheduler, 'sigma_max', 'NOT_SET')}, self.sigma_min={getattr(self.scheduler, 'sigma_min', 'NOT_SET')}\n")
         
-        # Handle final sigmas like diffusers
         if hasattr(self.scheduler.config, 'final_sigmas_type') and self.scheduler.config.final_sigmas_type == "sigma_min":
             if len(self.scheduler.sigmas) > 1:
                 self.scheduler.sigmas[-1] = self.scheduler.sigmas[-2]
         
-        # Debug: Log sigma information
-        logger.info(f"CosmosDenoisingStage - Scheduler sigmas shape: {self.scheduler.sigmas.shape}")
-        logger.info(f"CosmosDenoisingStage - Sigma range: {self.scheduler.sigmas.min():.6f} to {self.scheduler.sigmas.max():.6f}")
-        logger.info(f"CosmosDenoisingStage - First few sigmas: {self.scheduler.sigmas[:5]}")
-        
         # Get conditioning setup from batch (prepared by CosmosLatentPreparationStage)
         conditioning_latents = getattr(batch, 'conditioning_latents', None)
         unconditioning_latents = conditioning_latents  # Same for cosmos
-        
-        # Add sigma_conditioning logic like diffusers (line 694-695)
-        # sigma_conditioning = 0.0001  # Default value from diffusers
-        # sigma_conditioning_tensor = torch.tensor(sigma_conditioning, dtype=torch.float32, device=latents.device)
-        # t_conditioning = sigma_conditioning_tensor / (sigma_conditioning_tensor + 1)
         
         # Sampling loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
@@ -768,11 +703,6 @@ class CosmosDenoisingStage(DenoisingStage):
                 c_skip = 1 - current_t  
                 c_out = -current_t
                 
-                # Debug: Log sigma and coefficients for first few steps
-                if i < 3:
-                    logger.info(f"Step {i}: current_sigma={current_sigma:.6f}, current_t={current_t:.6f}")
-                    logger.info(f"Step {i}: c_in={c_in:.6f}, c_skip={c_skip:.6f}, c_out={c_out:.6f}")
-                
                 # Prepare timestep tensor like diffusers (lines 713-715)
                 timestep = current_t.view(1, 1, 1, 1, 1).expand(
                     latents.size(0), -1, latents.size(2), -1, -1
@@ -782,43 +712,23 @@ class CosmosDenoisingStage(DenoisingStage):
                                     dtype=target_dtype,
                                     enabled=autocast_enabled):
                     
-                    # Conditional forward pass - match diffusers exactly (lines 717-721)
+                    # Conditional forward pass
                     cond_latent = latents * c_in
-                    print(f"[FASTVIDEO DEBUG] Step {i}: After latents * c_in, cond_latent sum = {cond_latent.float().sum().item()}")
                     
-                    # CRITICAL: Apply conditioning frame injection like diffusers
-                    print(f"[FASTVIDEO DEBUG] Step {i}: Conditioning check - cond_indicator exists: {hasattr(batch, 'cond_indicator')}, is not None: {batch.cond_indicator is not None if hasattr(batch, 'cond_indicator') else 'N/A'}, conditioning_latents is not None: {conditioning_latents is not None}")
-                    with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                        f.write(f"[FASTVIDEO DEBUG] Step {i}: Conditioning check - cond_indicator exists: {hasattr(batch, 'cond_indicator')}, is not None: {batch.cond_indicator is not None if hasattr(batch, 'cond_indicator') else 'N/A'}, conditioning_latents is not None: {conditioning_latents is not None}\n")
                     if hasattr(batch, 'cond_indicator') and batch.cond_indicator is not None and conditioning_latents is not None:
-                        print(f"[FASTVIDEO DEBUG] Step {i}: Before conditioning - cond_latent sum: {cond_latent.float().sum().item()}, conditioning_latents sum: {conditioning_latents.float().sum().item()}")
-                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                            f.write(f"[FASTVIDEO DEBUG] Step {i}: Before conditioning - cond_latent sum: {cond_latent.float().sum().item()}, conditioning_latents sum: {conditioning_latents.float().sum().item()}\n")
                         cond_latent = batch.cond_indicator * conditioning_latents + (1 - batch.cond_indicator) * cond_latent
-                        print(f"[FASTVIDEO DEBUG] Step {i}: After conditioning - cond_latent sum: {cond_latent.float().sum().item()}")
-                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                            f.write(f"[FASTVIDEO DEBUG] Step {i}: After conditioning - cond_latent sum: {cond_latent.float().sum().item()}\n")
-                        logger.info(f"Step {i}: Applied conditioning frame injection - cond_latent sum: {cond_latent.float().sum().item():.6f}")
                     else:
-                        print(f"[FASTVIDEO DEBUG] Step {i}: SKIPPING conditioning frame injection!")
-                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                            f.write(f"[FASTVIDEO DEBUG] Step {i}: SKIPPING conditioning frame injection!\n")
                         logger.warning(f"Step {i}: Missing conditioning data - cond_indicator: {hasattr(batch, 'cond_indicator')}, conditioning_latents: {conditioning_latents is not None}")
                     
-                    # Convert cond_latent to target dtype BEFORE debug logging to match Diffusers
                     cond_latent = cond_latent.to(target_dtype)
                     
-                    # Apply conditional timestep processing like Diffusers (lines 792-793)
+                    # Apply conditional timestep processing
                     cond_timestep = timestep
                     if hasattr(batch, 'cond_indicator') and batch.cond_indicator is not None:
-                        # Exactly match Diffusers: cond_timestep = cond_indicator * t_conditioning + (1 - cond_indicator) * timestep
-                        # First get t_conditioning (sigma_conditioning value from Diffusers)
-                        sigma_conditioning = 0.0001  # Same as Diffusers default
+                        sigma_conditioning = 0.0001
                         t_conditioning = sigma_conditioning / (sigma_conditioning + 1)
                         cond_timestep = batch.cond_indicator * t_conditioning + (1 - batch.cond_indicator) * timestep
                         cond_timestep = cond_timestep.to(target_dtype)
-                        if i < 3:
-                            logger.info(f"Step {i}: Applied conditional timestep - t_conditioning: {t_conditioning:.6f}, cond_timestep sum: {cond_timestep.float().sum().item():.6f}")
                     
                     with set_forward_context(
                         current_timestep=i,
@@ -827,7 +737,6 @@ class CosmosDenoisingStage(DenoisingStage):
                     ):
                         # Use conditioning masks from CosmosLatentPreparationStage
                         condition_mask = batch.cond_mask.to(target_dtype) if hasattr(batch, 'cond_mask') else None
-                        # Padding mask should match original image dimensions like Diffusers (704, 1280)
                         padding_mask = torch.zeros(1, 1, batch.height, batch.width, 
                                                  device=cond_latent.device, dtype=target_dtype)
                         
@@ -836,42 +745,6 @@ class CosmosDenoisingStage(DenoisingStage):
                             batch_size, num_channels, num_frames, height, width = cond_latent.shape
                             condition_mask = torch.zeros(batch_size, 1, num_frames, height, width, 
                                                        device=cond_latent.device, dtype=target_dtype)
-                        
-                        
-                        # Debug transformer inputs for first few steps
-                        if i < 3:
-                            logger.info(f"Step {i}: Transformer inputs:")
-                            logger.info(f"  cond_latent shape: {cond_latent.shape}, sum: {cond_latent.float().sum().item():.6f}")
-                            logger.info(f"  timestep shape: {timestep.shape}, values: {timestep.flatten()[:5]}")
-                            logger.info(f"  prompt_embeds shape: {batch.prompt_embeds[0].shape}")
-                            logger.info(f"  condition_mask shape: {condition_mask.shape if condition_mask is not None else None}")
-                            logger.info(f"  padding_mask shape: {padding_mask.shape}")
-                        
-                        # Log detailed transformer inputs for comparison with Diffusers
-                        if i < 3:
-                            print(f"FASTVIDEO TRANSFORMER INPUTS (step {i}):")
-                            print(f"  hidden_states: shape={cond_latent.shape}, sum={cond_latent.float().sum().item():.6f}, mean={cond_latent.float().mean().item():.6f}")
-                            print(f"  timestep: shape={cond_timestep.shape}, sum={cond_timestep.float().sum().item():.6f}, values={cond_timestep.flatten()[:5].float()}")
-                            print(f"  encoder_hidden_states: shape={batch.prompt_embeds[0].shape}, sum={batch.prompt_embeds[0].float().sum().item():.6f}")
-                            print(f"  condition_mask: shape={condition_mask.shape if condition_mask is not None else None}, sum={condition_mask.float().sum().item() if condition_mask is not None else None}")
-                            print(f"  padding_mask: shape={padding_mask.shape}, sum={padding_mask.float().sum().item():.6f}")
-                            print(f"  fps: {24}, target_dtype: {target_dtype}")
-                            print(f"  DTYPES: hidden_states={cond_latent.dtype}, timestep={cond_timestep.dtype}, encoder_hidden_states={batch.prompt_embeds[0].dtype}")
-                            print(f"  hidden_states first 5 values: {cond_latent.flatten()[:5].float()}")
-                            print(f"  encoder_hidden_states first 5 values: {batch.prompt_embeds[0].flatten()[:5].float()}")
-                            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                                f.write(f"FASTVIDEO TRANSFORMER INPUTS (step {i}):\n")
-                                f.write(f"  hidden_states: shape={cond_latent.shape}, sum={cond_latent.float().sum().item():.6f}, mean={cond_latent.float().mean().item():.6f}\n")
-                                f.write(f"  timestep: shape={cond_timestep.shape}, sum={cond_timestep.float().sum().item():.6f}, values={cond_timestep.flatten()[:5].float()}\n")
-                                f.write(f"  encoder_hidden_states: shape={batch.prompt_embeds[0].shape}, sum={batch.prompt_embeds[0].float().sum().item():.6f}\n")
-                                f.write(f"  condition_mask: shape={condition_mask.shape if condition_mask is not None else None}, sum={condition_mask.float().sum().item() if condition_mask is not None else None}\n")
-                                f.write(f"  padding_mask: shape={padding_mask.shape}, sum={padding_mask.float().sum().item():.6f}\n")
-                                f.write(f"  fps: {24}, target_dtype: {target_dtype}\n")
-                                f.write(f"  DTYPES: hidden_states={cond_latent.dtype}, timestep={cond_timestep.dtype}, encoder_hidden_states={batch.prompt_embeds[0].dtype}\n")
-                                f.write(f"  hidden_states first 5 values: {cond_latent.flatten()[:5].float()}\n")
-                                f.write(f"  encoder_hidden_states first 5 values: {batch.prompt_embeds[0].flatten()[:5].float()}\n")
-                                f.write(f"  [FASTVIDEO DENOISING] About to call transformer with hidden_states sum = {cond_latent.float().sum().item()}\n")
-                        print(f"[FASTVIDEO DENOISING] About to call transformer with hidden_states sum = {cond_latent.float().sum().item()}")
 
                         noise_pred = self.transformer(
                             hidden_states=cond_latent,  # Already converted to target_dtype above
@@ -882,58 +755,17 @@ class CosmosDenoisingStage(DenoisingStage):
                             padding_mask=padding_mask,
                             return_dict=False,
                         )[0]
-                        sum_value = noise_pred.float().sum().item()
-                        logger.info(f"CosmosDenoisingStage: step {i}, noise_pred sum = {sum_value:.6f}")
-                        # Write to output file
-                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                            f.write(f"CosmosDenoisingStage: step {i}, noise_pred sum = {sum_value:.6f}\n")
-                    
-                    print(f"[FASTVIDEO DEBUG] Step {i}: Preconditioning - c_skip={c_skip:.6f}, c_out={c_out:.6f}, latents_sum={latents.float().sum().item():.6f}")
-                    with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                        f.write(f"[FASTVIDEO DEBUG] Step {i}: Preconditioning - c_skip={c_skip:.6f}, c_out={c_out:.6f}, latents_sum={latents.float().sum().item():.6f}\n")
-
-                    # PRECONDITIONING DTYPE VERIFICATION
-                    print(f"[FASTVIDEO DTYPE DEBUG] Step {i}: Preconditioning dtypes")
-                    print(f"[FASTVIDEO DTYPE DEBUG]   noise_pred dtype: {noise_pred.dtype}, latents dtype: {latents.dtype}")
-                    print(f"[FASTVIDEO DTYPE DEBUG]   c_skip: {c_skip:.10f} (type: {type(c_skip)}), c_out: {c_out:.10f} (type: {type(c_out)})")
-                    print(f"[FASTVIDEO DTYPE DEBUG]   target_dtype: {target_dtype}")
-                    with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                        f.write(f"[FASTVIDEO DTYPE DEBUG] Step {i}: Preconditioning dtypes\n")
-                        f.write(f"[FASTVIDEO DTYPE DEBUG]   noise_pred dtype: {noise_pred.dtype}, latents dtype: {latents.dtype}\n")
-                        f.write(f"[FASTVIDEO DTYPE DEBUG]   c_skip: {c_skip:.10f} (type: {type(c_skip)}), c_out: {c_out:.10f} (type: {type(c_out)})\n")
-                        f.write(f"[FASTVIDEO DTYPE DEBUG]   target_dtype: {target_dtype}\n")
 
                     cond_pred = (c_skip * latents + c_out * noise_pred.float()).to(target_dtype)
 
                     if hasattr(batch, 'cond_indicator') and batch.cond_indicator is not None and conditioning_latents is not None:
                         cond_pred = batch.cond_indicator * conditioning_latents + (1 - batch.cond_indicator) * cond_pred
-                        print(f"[FASTVIDEO DEBUG] Step {i}: Applied post-preconditioning conditioning - cond_pred sum: {cond_pred.float().sum().item()}")
-                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                            f.write(f"[FASTVIDEO DEBUG] Step {i}: Applied post-preconditioning conditioning - cond_pred sum: {cond_pred.float().sum().item()}\n")
-                    else:
-                        print(f"[FASTVIDEO DEBUG] Step {i}: SKIPPING post-preconditioning conditioning")
-                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                            f.write(f"[FASTVIDEO DEBUG] Step {i}: SKIPPING post-preconditioning conditioning\n")
                     
-                    # NOTE: Conditioning frame injection is applied to cond_latent BEFORE transformer call (line 746), not after                    
-                    # Classifier-free guidance
                     if batch.do_classifier_free_guidance and batch.negative_prompt_embeds is not None:
-                        # Unconditional pass - match diffusers logic (lines 755-759)
                         uncond_latent = latents * c_in
-
-                        print(f"[FASTVIDEO DEBUG] Step {i}: Before unconditional conditioning - uncond_latent sum: {uncond_latent.float().sum().item()}")
-                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                            f.write(f"[FASTVIDEO DEBUG] Step {i}: Before unconditional conditioning - uncond_latent sum: {uncond_latent.float().sum().item()}\n")
 
                         if hasattr(batch, 'uncond_indicator') and batch.uncond_indicator is not None and unconditioning_latents is not None:
                             uncond_latent = batch.uncond_indicator * unconditioning_latents + (1 - batch.uncond_indicator) * uncond_latent
-                            print(f"[FASTVIDEO DEBUG] Step {i}: Applied unconditional conditioning - uncond_latent sum: {uncond_latent.float().sum().item()}")
-                            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                                f.write(f"[FASTVIDEO DEBUG] Step {i}: Applied unconditional conditioning - uncond_latent sum: {uncond_latent.float().sum().item()}\n")
-                        else:
-                            print(f"[FASTVIDEO DEBUG] Step {i}: SKIPPING unconditional conditioning - uncond_indicator: {hasattr(batch, 'uncond_indicator')}, unconditioning_latents: {unconditioning_latents is not None}")
-                            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                                f.write(f"[FASTVIDEO DEBUG] Step {i}: SKIPPING unconditional conditioning - uncond_indicator: {hasattr(batch, 'uncond_indicator')}, unconditioning_latents: {unconditioning_latents is not None}\n")
                         
                         with set_forward_context(
                             current_timestep=i,
@@ -942,13 +774,6 @@ class CosmosDenoisingStage(DenoisingStage):
                         ):
                             # Use uncond_mask for unconditional pass if available
                             uncond_condition_mask = batch.uncond_mask.to(target_dtype) if hasattr(batch, 'uncond_mask') and batch.uncond_mask is not None else condition_mask
-                            
-                            # Debug unconditional transformer inputs for first few steps
-                            if i < 3:
-                                logger.info(f"Step {i}: Uncond transformer inputs:")
-                                logger.info(f"  uncond_latent sum: {uncond_latent.float().sum().item():.6f}")
-                                logger.info(f"  negative_prompt_embeds shape: {batch.negative_prompt_embeds[0].shape}")
-                                # sum: {uncond_timestep.float().sum().item():.6f}")
                             
                             # Apply same conditional timestep processing for unconditional pass
                             uncond_timestep = timestep
@@ -967,11 +792,6 @@ class CosmosDenoisingStage(DenoisingStage):
                                 padding_mask=padding_mask,
                                 return_dict=False,
                             )[0]
-                            sum_value = noise_pred_uncond.float().sum().item()
-                            logger.info(f"CosmosDenoisingStage: step {i}, noise_pred_uncond sum = {sum_value:.6f}")
-                            # Write to output file
-                            with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                                f.write(f"CosmosDenoisingStage: step {i}, noise_pred_uncond sum = {sum_value:.6f}\n")
                         
                         uncond_pred = (c_skip * latents + c_out * noise_pred_uncond.float()).to(target_dtype)
                         
@@ -980,34 +800,11 @@ class CosmosDenoisingStage(DenoisingStage):
                             uncond_pred = batch.uncond_indicator * unconditioning_latents + (1 - batch.uncond_indicator) * uncond_pred
                         
                         guidance_diff = cond_pred - uncond_pred
-                        print(f"[FASTVIDEO DEBUG] Step {i}: CFG calculation - guidance_scale = {guidance_scale}")
-                        print(f"[FASTVIDEO DEBUG] Step {i}: CFG values - cond_pred: {cond_pred.float().sum().item():.6f}, uncond_pred: {uncond_pred.float().sum().item():.6f}, guidance_diff: {guidance_diff.float().sum().item():.6f}")
-                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                            f.write(f"[FASTVIDEO DEBUG] Step {i}: CFG calculation - guidance_scale = {guidance_scale}\n")
-                            f.write(f"[FASTVIDEO DEBUG] Step {i}: CFG values - cond_pred: {cond_pred.float().sum().item():.6f}, uncond_pred: {uncond_pred.float().sum().item():.6f}, guidance_diff: {guidance_diff.float().sum().item():.6f}\n")
                         final_pred = cond_pred + guidance_scale * guidance_diff
-                        
-                        # Debug guidance computation
-                        if i < 3:  # Log first few steps
-                            logger.info(f"Step {i}: Guidance debug:")
-                            logger.info(f"  cond_pred sum = {cond_pred.float().sum().item():.6f}")
-                            logger.info(f"  uncond_pred sum = {uncond_pred.float().sum().item():.6f}") 
-                            logger.info(f"  guidance_diff sum = {guidance_diff.float().sum().item():.6f}")
-                            logger.info(f"  guidance_scale = {guidance_scale}")
-                            logger.info(f"  final_pred sum = {final_pred.float().sum().item():.6f}")
-                        
-                        sum_value = final_pred.float().sum().item()
-                        logger.info(f"CosmosDenoisingStage: step {i}, final noise_pred sum = {sum_value:.6f}")
-                        # Write to output file
-                        with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                            f.write(f"CosmosDenoisingStage: step {i}, final noise_pred sum = {sum_value:.6f}\n")
                     else:
                         final_pred = cond_pred
-                        if i < 3:
-                            logger.info(f"Step {i}: No CFG, using cond_pred directly: {final_pred.float().sum().item():.6f}")
                 
-                # Convert to noise for scheduler step exactly like diffusers
-                # Add safety check to prevent division by zero
+                # Convert to noise for scheduler step
                 if current_sigma > 1e-8:
                     noise_for_scheduler = (latents - final_pred) / current_sigma
                 else:
@@ -1019,33 +816,7 @@ class CosmosDenoisingStage(DenoisingStage):
                     logger.error(f"Step {i}: NaN detected in noise_for_scheduler, sum: {noise_for_scheduler.float().sum().item()}")
                     logger.error(f"Step {i}: latents sum: {latents.float().sum().item()}, final_pred sum: {final_pred.float().sum().item()}, current_sigma: {current_sigma}")
 
-                # DTYPE VERIFICATION LOGS
-                print(f"[FASTVIDEO DTYPE DEBUG] Step {i}: Before scheduler step")
-                print(f"[FASTVIDEO DTYPE DEBUG]   latents dtype: {latents.dtype}, sum: {latents.float().sum().item():.6f}")
-                print(f"[FASTVIDEO DTYPE DEBUG]   final_pred dtype: {final_pred.dtype}, sum: {final_pred.float().sum().item():.6f}")
-                print(f"[FASTVIDEO DTYPE DEBUG]   noise_for_scheduler dtype: {noise_for_scheduler.dtype}, sum: {noise_for_scheduler.float().sum().item():.6f}")
-                print(f"[FASTVIDEO DTYPE DEBUG]   current_sigma: {current_sigma:.10f} (type: {type(current_sigma)})")
-                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                    f.write(f"[FASTVIDEO DTYPE DEBUG] Step {i}: Before scheduler step\n")
-                    f.write(f"[FASTVIDEO DTYPE DEBUG]   latents dtype: {latents.dtype}, sum: {latents.float().sum().item():.6f}\n")
-                    f.write(f"[FASTVIDEO DTYPE DEBUG]   final_pred dtype: {final_pred.dtype}, sum: {final_pred.float().sum().item():.6f}\n")
-                    f.write(f"[FASTVIDEO DTYPE DEBUG]   noise_for_scheduler dtype: {noise_for_scheduler.dtype}, sum: {noise_for_scheduler.float().sum().item():.6f}\n")
-                    f.write(f"[FASTVIDEO DTYPE DEBUG]   current_sigma: {current_sigma:.10f} (type: {type(current_sigma)})\n")
-
-                # Standard scheduler step like diffusers
                 latents = self.scheduler.step(noise_for_scheduler, t, latents, **extra_step_kwargs, return_dict=False)[0]
-
-                # DTYPE VERIFICATION LOGS AFTER SCHEDULER
-                print(f"[FASTVIDEO DTYPE DEBUG] Step {i}: After scheduler step")
-                print(f"[FASTVIDEO DTYPE DEBUG]   latents dtype: {latents.dtype}, sum: {latents.float().sum().item():.6f}")
-                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                    f.write(f"[FASTVIDEO DTYPE DEBUG] Step {i}: After scheduler step\n")
-                    f.write(f"[FASTVIDEO DTYPE DEBUG]   latents dtype: {latents.dtype}, sum: {latents.float().sum().item():.6f}\n")
-                sum_value = latents.float().sum().item()
-                logger.info(f"CosmosDenoisingStage: step {i}, updated latents sum = {sum_value:.6f}")
-                # Write to output file
-                with open("/workspace/FastVideo/fastvideo_hidden_states.log", "a") as f:
-                    f.write(f"CosmosDenoisingStage: step {i}, updated latents sum = {sum_value:.6f}\n")
                 
                 progress_bar.update()
         
