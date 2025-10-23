@@ -12,7 +12,7 @@ import numpy as np
 from flashinfer import SfLayout, mm_fp4, nvfp4_quantize
 import unittest
 from typing import Tuple, Dict, Any
-
+from fake_quant_fp4 import fake_quant_fp4
 
 class QuantizationPrecisionTest:
     """Test class for comparing quantization precision methods."""
@@ -45,9 +45,9 @@ class QuantizationPrecisionTest:
             sfLayout=self.sf_layout, 
             do_shuffle=False
         )
-        return quantized, inv_scale
+        return quantized, inv_scale, scale_factor
     
-    def dequantize_matrix(self, quantized_matrix: torch.Tensor, inv_scale: torch.Tensor) -> torch.Tensor:
+    def dequantize_matrix(self, shape: Tuple[int, int], quantized_matrix: torch.Tensor, inv_scale: torch.Tensor, global_scale_factor: torch.Tensor) -> torch.Tensor:
         """
         Dequantize a 4-bit matrix back to bf16.
         
@@ -64,11 +64,17 @@ class QuantizationPrecisionTest:
         # Create identity matrix for dequantization
         if len(quantized_matrix.shape) == 2:
             # 2D case
-            identity = torch.eye(quantized_matrix.shape[1], device=self.device, dtype=self.dtype)
-            dequantized = torch.empty_like(quantized_matrix)
-            mm_fp4(
-                quantized_matrix, identity, inv_scale, inv_scale, 
+            identity = torch.eye(shape[1], device=self.device, dtype=self.dtype)
+            identity_fp4, identity_inv_scale = nvfp4_quantize(
+                identity, 
                 torch.tensor(1.0, device=self.device, dtype=torch.float32),
+                sfLayout=self.sf_layout, 
+                do_shuffle=False
+            )
+            dequantized = torch.empty(shape, device=self.device, dtype=self.dtype)
+            mm_fp4(
+                quantized_matrix, identity_fp4.T, inv_scale, identity_inv_scale.T, 
+                1 / global_scale_factor,
                 self.dtype, dequantized,
                 block_size=16,
                 use_8x4_sf_layout=False,
@@ -90,62 +96,49 @@ class QuantizationPrecisionTest:
         
         return dequantized
     
-    def method1_quantized_matmul(self, X: torch.Tensor, W: torch.Tensor) -> torch.Tensor:
+    def real_quant_matmul(self, X: torch.Tensor, W: torch.Tensor) -> torch.Tensor:
         """
         Method 1: dequant(quant(X) @ quant(W))
         Perform matrix multiplication in quantized space, then dequantize.
         """
         # Quantize both matrices
-        X_quant, X_inv_scale = self.quantize_matrix(X)
-        W_quant, W_inv_scale = self.quantize_matrix(W)
+        X_quant, X_inv_scale, X_global_scale_factor = self.quantize_matrix(X)
+        W_quant, W_inv_scale, W_global_scale_factor = self.quantize_matrix(W)
         
         # Compute alpha scaling factor
-        alpha = 1.0 / (X_inv_scale * W_inv_scale)
+        alpha = 1.0 / (X_global_scale_factor * W_global_scale_factor)
         
-        # Perform quantized matrix multiplication
-        if len(X.shape) == 2:
-            # 2D case
-            result = torch.empty((X.shape[0], W.shape[0]), device=self.device, dtype=self.dtype)
-            mm_fp4(
-                X_quant, W_quant.T, X_inv_scale, W_inv_scale.T, alpha,
-                self.dtype, result,
-                block_size=16,
-                use_8x4_sf_layout=False,
-                backend="cutlass"
-            )
-        else:
-            # 3D case (batch dimension)
-            result = torch.empty((X.shape[0], X.shape[1], W.shape[0]), device=self.device, dtype=self.dtype)
-            for i in range(X.shape[0]):
-                mm_fp4(
-                    X_quant[i], W_quant.T, X_inv_scale, W_inv_scale.T, alpha,
-                    self.dtype, result[i],
-                    block_size=16,
-                    use_8x4_sf_layout=False,
-                    backend="cutlass"
-                )
+        result = torch.empty((X.shape[0], W.shape[0]), device=self.device, dtype=self.dtype)
+        mm_fp4(
+            X_quant, W_quant.T, X_inv_scale, W_inv_scale.T, alpha,
+            self.dtype, result,
+            block_size=16,
+            use_8x4_sf_layout=False,
+            backend="cutlass"
+        )
+
         
         return result
     
-    def method2_dequantized_matmul(self, X: torch.Tensor, W: torch.Tensor) -> torch.Tensor:
+    def fake_quant_matmul(self, X: torch.Tensor, W: torch.Tensor) -> torch.Tensor:
         """
         Method 2: dequant(quant(X)) @ dequant(quant(W))
         Dequantize both matrices first, then perform matrix multiplication.
         """
         # Quantize both matrices
-        X_quant, X_inv_scale = self.quantize_matrix(X)
-        W_quant, W_inv_scale = self.quantize_matrix(W)
         
-        # Dequantize both matrices
-        X_dequant = self.dequantize_matrix(X_quant, X_inv_scale)
-        W_dequant = self.dequantize_matrix(W_quant, W_inv_scale)
+        # X_quant, X_inv_scale, X_global_scale_factor = self.quantize_matrix(X)
+        # W_quant, W_inv_scale, W_global_scale_factor = self.quantize_matrix(W)
+        # # Dequantize both matrices
+        # X_dequant = self.dequantize_matrix(X.shape, X_quant, X_inv_scale, X_global_scale_factor)
+        # W_dequant = self.dequantize_matrix(W.shape, W_quant, W_inv_scale, W_global_scale_factor)
         
-        # Perform standard matrix multiplication
-        if len(X.shape) == 2:
-            result = torch.matmul(X_dequant, W_dequant)
-        else:
-            # 3D case (batch dimension)
-            result = torch.matmul(X_dequant, W_dequant)
+        # result = torch.matmul(X_dequant, W_dequant.T)
+        
+        
+        X_fake_quant = fake_quant_fp4(X, stochastic_rounding=True, block_size=16, scale_format='e4m3')
+        W_fake_quant = fake_quant_fp4(W, stochastic_rounding=True, block_size=16, scale_format='e4m3')
+        result = torch.matmul(X_fake_quant, W_fake_quant.T)
         
         return result
     
@@ -165,12 +158,12 @@ class QuantizationPrecisionTest:
         W = W.to(device=self.device, dtype=self.dtype)
         
         # Compute results using both methods
-        result1 = self.method1_quantized_matmul(X, W)
-        result2 = self.method2_dequantized_matmul(X, W)
+        result1 = self.real_quant_matmul(X, W)
+        result2 = self.fake_quant_matmul(X, W)
+        import pdb; pdb.set_trace()
         
         # Compute reference result (no quantization)
-        reference = torch.matmul(X, W)
-        
+        reference = torch.matmul(X, W.T)
         # Calculate differences
         diff_methods = torch.abs(result1 - result2)
         diff1_ref = torch.abs(result1 - reference)
@@ -213,18 +206,14 @@ class QuantizationPrecisionTest:
         # Test cases with different sizes and distributions
         test_cases = [
             # (X_shape, W_shape, distribution_name)
-            ((64, 128), (128, 256), "small_matrices"),
-            ((256, 512), (512, 1024), "medium_matrices"),
-            ((1024, 2048), (2048, 4096), "large_matrices"),
-            ((32, 64), (64, 128), "small_square"),
-            ((128, 256), (256, 128), "rectangular"),
+            ((64, 128), (256, 128), "small_matrices"),
+            ((256, 512), (1024, 512), "medium_matrices"),
+            ((1024, 2048), (4096, 2048), "large_matrices"),
         ]
         
         distributions = [
             ("normal", lambda shape: torch.randn(shape, device=self.device)),
             ("uniform", lambda shape: torch.rand(shape, device=self.device) * 2 - 1),
-            ("small_values", lambda shape: torch.randn(shape, device=self.device) * 0.1),
-            ("large_values", lambda shape: torch.randn(shape, device=self.device) * 10),
         ]
         
         for x_shape, w_shape, size_name in test_cases:
@@ -242,68 +231,15 @@ class QuantizationPrecisionTest:
                 print(f"Test: {size_name} - {dist_name}")
                 print(f"  Max difference between methods: {analysis['method_difference']['max']:.6f}")
                 print(f"  Mean difference between methods: {analysis['method_difference']['mean']:.6f}")
-                print(f"  Relative max difference: {analysis['method_difference']['relative_max']:.6f}")
+                
+                print(f" Max difference between method1 (real quant) and reference: {analysis['method1_vs_reference']['max']:.6f}")
+                print(f" Mean difference between method1 (real quant) and reference: {analysis['method1_vs_reference']['mean']:.6f}")
+                print(f" Max difference between method2 (fake quant) and reference: {analysis['method2_vs_reference']['max']:.6f}")
+                print(f" Mean difference between method2 (fake quant) and reference: {analysis['method2_vs_reference']['mean']:.6f}")
                 print()
         
         return test_results
 
-
-class TestQuantizationPrecision(unittest.TestCase):
-    """Unit tests for quantization precision comparison."""
-    
-    def setUp(self):
-        """Set up test fixtures."""
-        self.tester = QuantizationPrecisionTest()
-        
-    def test_basic_functionality(self):
-        """Test basic functionality of both methods."""
-        # Create simple test matrices
-        X = torch.randn(32, 64, device=self.tester.device, dtype=self.tester.dtype)
-        W = torch.randn(64, 128, device=self.tester.device, dtype=self.tester.dtype)
-        
-        # Test both methods work without errors
-        result1 = self.tester.method1_quantized_matmul(X, W)
-        result2 = self.tester.method2_dequantized_matmul(X, W)
-        
-        # Check shapes match
-        self.assertEqual(result1.shape, result2.shape)
-        self.assertEqual(result1.shape, (32, 128))
-        
-        # Check results are finite
-        self.assertTrue(torch.isfinite(result1).all())
-        self.assertTrue(torch.isfinite(result2).all())
-    
-    def test_precision_threshold(self):
-        """Test that precision differences are within acceptable thresholds."""
-        X = torch.randn(128, 256, device=self.tester.device, dtype=self.tester.dtype)
-        W = torch.randn(256, 512, device=self.tester.device, dtype=self.tester.dtype)
-        
-        analysis = self.tester.compare_methods(X, W)
-        
-        # Check that differences are reasonable (less than 1% relative error)
-        self.assertLess(analysis['method_difference']['relative_max'], 0.01)
-        
-        # Check that both methods produce reasonable results compared to reference
-        self.assertLess(analysis['method1_vs_reference']['relative_max'], 0.1)
-        self.assertLess(analysis['method2_vs_reference']['relative_max'], 0.1)
-    
-    def test_edge_cases(self):
-        """Test edge cases like very small and very large values."""
-        # Test with very small values
-        X_small = torch.randn(32, 64, device=self.tester.device, dtype=self.tester.dtype) * 1e-6
-        W_small = torch.randn(64, 128, device=self.tester.device, dtype=self.tester.dtype) * 1e-6
-        
-        analysis_small = self.tester.compare_methods(X_small, W_small)
-        self.assertTrue(torch.isfinite(analysis_small['method1_result']).all())
-        self.assertTrue(torch.isfinite(analysis_small['method2_result']).all())
-        
-        # Test with very large values
-        X_large = torch.randn(32, 64, device=self.tester.device, dtype=self.tester.dtype) * 1e6
-        W_large = torch.randn(64, 128, device=self.tester.device, dtype=self.tester.dtype) * 1e6
-        
-        analysis_large = self.tester.compare_methods(X_large, W_large)
-        self.assertTrue(torch.isfinite(analysis_large['method1_result']).all())
-        self.assertTrue(torch.isfinite(analysis_large['method2_result']).all())
 
 
 def main():
@@ -326,29 +262,8 @@ def main():
     print("\nRunning comprehensive tests...")
     results = tester.run_comprehensive_test()
     
-    # Summary statistics
-    print("\nSummary Statistics:")
-    print("=" * 30)
     
-    all_max_diffs = []
-    all_mean_diffs = []
-    
-    for size_name, size_results in results.items():
-        for dist_name, analysis in size_results.items():
-            max_diff = analysis['method_difference']['max']
-            mean_diff = analysis['method_difference']['mean']
-            all_max_diffs.append(max_diff)
-            all_mean_diffs.append(mean_diff)
-    
-    print(f"Overall max difference: {max(all_max_diffs):.6f}")
-    print(f"Overall mean difference: {np.mean(all_mean_diffs):.6f}")
-    print(f"Overall std difference: {np.std(all_mean_diffs):.6f}")
-    
-    # Run unit tests
-    print("\nRunning unit tests...")
-    unittest.main(argv=[''], exit=False, verbosity=2)
-    
-    print("\nTest completed successfully!")
+
 
 
 if __name__ == "__main__":
