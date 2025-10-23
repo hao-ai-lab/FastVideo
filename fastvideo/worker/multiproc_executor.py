@@ -19,7 +19,7 @@ import fastvideo.envs as envs
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.utils import decorate_logs, get_distributed_init_method, get_exception_traceback, get_loopback_ip, get_mp_context, get_open_port, kill_itself_when_parent_died, maybe_force_spawn
+from fastvideo.utils import decorate_logs, get_distributed_init_method, get_exception_traceback, get_loopback_ip, get_mp_context, get_open_port, kill_itself_when_parent_died, force_spawn
 from fastvideo.worker.executor import Executor
 from fastvideo.worker.worker_base import WorkerWrapperBase
 
@@ -503,4 +503,4 @@ def set_multiproc_executor_envs() -> None:
     in a multiprocessing environment. This should be called by the parent 
     process before worker processes are created"""
 
-    maybe_force_spawn()
+    force_spawn()

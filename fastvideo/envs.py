@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     FASTVIDEO_TRACE_FUNCTION: int = 0
     FASTVIDEO_ATTENTION_BACKEND: str | None = None
     FASTVIDEO_ATTENTION_CONFIG: str | None = None
-    FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "fork"
+    FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "spawn"
     FASTVIDEO_TARGET_DEVICE: str = "cuda"
     MAX_JOBS: str | None = None
     NVCC_THREADS: str | None = None
@@ -212,9 +212,8 @@ environment_variables: dict[str, Callable[[], Any]] = {
              os.path.expanduser(os.getenv("FASTVIDEO_ATTENTION_CONFIG", "."))),
 
     # Use dedicated multiprocess context for workers.
-    # Both spawn and fork work
     "FASTVIDEO_WORKER_MULTIPROC_METHOD":
-    lambda: os.getenv("FASTVIDEO_WORKER_MULTIPROC_METHOD", "fork"),
+    lambda: os.getenv("FASTVIDEO_WORKER_MULTIPROC_METHOD", "spawn"),
 
     # Enables torch profiler if set. Path to the directory where torch profiler
     # traces are saved. Note that it must be an absolute path.
