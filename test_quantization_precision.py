@@ -12,7 +12,90 @@ import numpy as np
 from flashinfer import SfLayout, mm_fp4, nvfp4_quantize
 import unittest
 from typing import Tuple, Dict, Any
-from fake_quant_fp4 import fake_quant_fp4
+
+import torch
+import triton
+import triton.language as tl
+import triton.profiler as proton
+from triton.tools.tensor_descriptor import TensorDescriptor
+from triton.tools.mxfp import MXFP4Tensor, MXScaleTensor
+
+
+
+def generate_fake_quant(a_f32: torch.Tensor,
+                        b_f32: torch.Tensor,
+                        vec_size: int = 16,
+                        max_mxf4: float = 6.0,
+                        eps: float = 1e-8):
+    """
+    Fake-quantize fp32 A (M,K) and B (K,N) with nvfp4 (E2M1) using FP8 E4M3 (finite-only) block scales.
+    Returns dequantized fp32 tensors (A_qdq, B_qdq). Assumes:
+      - M % 128 == 0, N % 128 == 0, K % (vec_size * 4) == 0
+      - A is (M, K), B is (K, N)
+      - Scales are uniform per 128x64 (A) and 64x128 (B) tiles (matching your kernel’s layout)
+    """
+    assert a_f32.is_cuda and b_f32.is_cuda
+    M, K = a_f32.shape
+    Kb, N = b_f32.shape
+    assert Kb == K, "A and B inner dims must match (A:(M,K), B:(K,N))"
+    assert M % 128 == 0 and N % 128 == 0, "M,N must be multiples of 128"
+    assert K % (vec_size * 4) == 0, f"K must be multiple of {vec_size*4}"
+
+    device = a_f32.device
+
+    # ---- tile-scale helpers (produce FP8 E4M3 scales with shape [*, *, 32, 16]) ----
+    def _tile_scales_A(a_fp32):
+        m_chunks = M // 128
+        k_chunks = K // (vec_size * 4)              # 64-wide tiles along K
+        x = a_fp32.view(m_chunks, 128, k_chunks, 4, vec_size)
+        tile_max = x.abs().amax(dim=(1, 3, 4))      # [m_chunks, k_chunks]
+        scale = torch.clamp(tile_max / max_mxf4, min=eps)  # fp32
+        s = scale[:, :, None, None].expand(m_chunks, k_chunks, 32, 16)
+        return s.to(torch.float8_e4m3fn)            # [m_chunks, k_chunks, 32, 16]
+
+    def _tile_scales_B(b_fp32):
+        k_chunks = K // (vec_size * 4)
+        n_chunks = N // 128
+        x = b_fp32.view(k_chunks, 4, vec_size, n_chunks, 128)
+        tile_max = x.abs().amax(dim=(1, 2, 4))      # [k_chunks, n_chunks]
+        scale = torch.clamp(tile_max / max_mxf4, min=eps).t()  # [n_chunks, k_chunks]
+        s = scale[:, :, None, None].expand(n_chunks, k_chunks, 32, 16)
+        return s.to(torch.float8_e4m3fn)            # [n_chunks, k_chunks, 32, 16]
+
+    # ---- expand tile scales to per-element fp32 ----
+    def _expand_A_scale_full(a_scale_fp8):
+        m_chunks, k_chunks, _, _ = a_scale_fp8.shape
+        base = a_scale_fp8[..., 0, 0].to(a_f32.dtype)          # [m_chunks, k_chunks]
+        tile = base[:, :, None, None].expand(m_chunks, k_chunks, 128, 64)
+        return tile.permute(0, 2, 1, 3).reshape(M, k_chunks * 64).contiguous()  # [M,K]
+
+    def _expand_B_scale_full(b_scale_fp8):
+        n_chunks, k_chunks, _, _ = b_scale_fp8.shape
+        base = b_scale_fp8[..., 0, 0].to(b_f32.dtype)          # [n_chunks, k_chunks]
+        tile = base[:, :, None, None].expand(n_chunks, k_chunks, 64, 128)
+        return tile.permute(1, 2, 0, 3).reshape(k_chunks * 64, n_chunks * 128).contiguous()  # [K,N]
+
+    # ---- 1) compute FP8 E4M3 tile scales from fp32 ----
+    a_scale_fp8 = _tile_scales_A(a_f32)   # [M//128, K//64, 32, 16]
+    b_scale_fp8 = _tile_scales_B(b_f32)   # [N//128, K//64, 32, 16]
+
+    # ---- 2) expand scales to full fp32 for quant/dequant math ----
+    a_scale_full = _expand_A_scale_full(a_scale_fp8)   # [M, K] fp32
+    b_scale_full = _expand_B_scale_full(b_scale_fp8)   # [K, N] fp32
+
+    # ---- 3) quantize to nvfp4 codes (E2M1) ----
+    a_codes = MXFP4Tensor(data=(a_f32 / a_scale_full)).data                   # [M, K] uint8 (low nibble)
+    b_codes = MXFP4Tensor(data=(b_f32 / b_scale_full)).data                   # [K, N] uint8
+
+    # ---- 4) dequantize back to fp32 (fake-quant output) ----
+    a_qdq = MXFP4Tensor(size=(M, K), device=device); a_qdq.data = a_codes
+    b_qdq = MXFP4Tensor(size=(K, N), device=device); b_qdq.data = b_codes
+
+    a_qdq = a_qdq.to(torch.float32).to(a_f32.dtype) * a_scale_full
+    b_qdq = b_qdq.to(torch.float32).to(b_f32.dtype) * b_scale_full
+
+    return a_qdq, b_qdq
+
 
 class QuantizationPrecisionTest:
     """Test class for comparing quantization precision methods."""
@@ -38,7 +121,8 @@ class QuantizationPrecisionTest:
         Returns:
             Tuple of (quantized_matrix, inverse_scale_factor)
         """
-        scale_factor = self._compute_scale_factor(matrix)
+        # scale_factor = self._compute_scale_factor(matrix)
+        scale_factor = torch.tensor(1.0, device=matrix.device, dtype=torch.float32)
         quantized, inv_scale = nvfp4_quantize(
             matrix, 
             scale_factor, 
@@ -127,18 +211,18 @@ class QuantizationPrecisionTest:
         """
         # Quantize both matrices
         
-        # X_quant, X_inv_scale, X_global_scale_factor = self.quantize_matrix(X)
-        # W_quant, W_inv_scale, W_global_scale_factor = self.quantize_matrix(W)
-        # # Dequantize both matrices
-        # X_dequant = self.dequantize_matrix(X.shape, X_quant, X_inv_scale, X_global_scale_factor)
-        # W_dequant = self.dequantize_matrix(W.shape, W_quant, W_inv_scale, W_global_scale_factor)
+        X_quant, X_inv_scale, X_global_scale_factor = self.quantize_matrix(X)
+        W_quant, W_inv_scale, W_global_scale_factor = self.quantize_matrix(W)
+        # Dequantize both matrices
+        X_dequant = self.dequantize_matrix(X.shape, X_quant, X_inv_scale, X_global_scale_factor)
+        W_dequant = self.dequantize_matrix(W.shape, W_quant, W_inv_scale, W_global_scale_factor)
         
-        # result = torch.matmul(X_dequant, W_dequant.T)
+        result = torch.matmul(X_dequant, W_dequant.T)
         
         
-        X_fake_quant = fake_quant_fp4(X, stochastic_rounding=True, block_size=16, scale_format='e4m3')
-        W_fake_quant = fake_quant_fp4(W, stochastic_rounding=True, block_size=16, scale_format='e4m3')
-        result = torch.matmul(X_fake_quant, W_fake_quant.T)
+        # X_fake_quant, W_fake_quant_T = generate_fake_quant(X, W.T.contiguous())
+        # import pdb; pdb.set_trace()
+        # result = torch.matmul(X_fake_quant, W_fake_quant_T)
         
         return result
     
@@ -161,7 +245,6 @@ class QuantizationPrecisionTest:
         result1 = self.real_quant_matmul(X, W)
         result2 = self.fake_quant_matmul(X, W)
         import pdb; pdb.set_trace()
-        
         # Compute reference result (no quantization)
         reference = torch.matmul(X, W.T)
         # Calculate differences
@@ -206,7 +289,7 @@ class QuantizationPrecisionTest:
         # Test cases with different sizes and distributions
         test_cases = [
             # (X_shape, W_shape, distribution_name)
-            ((64, 128), (256, 128), "small_matrices"),
+            ((128, 128), (256, 128), "small_matrices"),
             ((256, 512), (1024, 512), "medium_matrices"),
             ((1024, 2048), (4096, 2048), "large_matrices"),
         ]

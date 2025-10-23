@@ -4,8 +4,8 @@ set -euo pipefail
 ############################################
 # Single node, 6 GPUs
 ############################################
-NUM_GPUS=6
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5
+NUM_GPUS=4
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 
 export WANDB_MODE="online"
@@ -24,7 +24,7 @@ echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 ############################################
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATA_DIR=data/Wan-Syn_77x448x832_600k/train
-VALIDATION_DATASET_FILE=data/Wan-Syn_77x448x832_600k/validation_6.json
+VALIDATION_DATASET_FILE=data/Wan-Syn_77x448x832_600k/validation_4.json
 OUTPUT_DIR="checkpoints/sage3_distill"
 
 # Training arguments
@@ -35,21 +35,21 @@ training_args=(
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 21
+  --num_latent_t 12
   --num_height 480
   --num_width 832
-  --num_frames 81
+  --num_frames 45
   --enable_gradient_checkpointing_type "full"
   --generator_4bit_attn True
 )
 
 # Parallel arguments (adjusted to 6 GPUs)
 parallel_args=(
-  --num_gpus 6
+  --num_gpus 4
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
-  --hsdp_shard_dim 6
+  --hsdp_shard_dim 4
 )
 
 # Model arguments

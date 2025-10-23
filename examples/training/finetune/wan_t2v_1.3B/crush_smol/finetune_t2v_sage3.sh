@@ -7,8 +7,8 @@ export TOKENIZERS_PARALLELISM=false
 
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATA_DIR="data/Wan-Syn_77x448x832_600k/train/"
-VALIDATION_DATASET_FILE="data/Wan-Syn_77x448x832_600k/validation_6.json"
-NUM_GPUS=6
+VALIDATION_DATASET_FILE="data/Wan-Syn_77x448x832_600k/validation_4.json"
+NUM_GPUS=4
 # export CUDA_VISIBLE_DEVICES=4,5
 
 
@@ -20,10 +20,10 @@ training_args=(
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 6
+  --num_latent_t 12
   --num_height 480
   --num_width 832
-  --num_frames 21
+  --num_frames 45
   --enable_gradient_checkpointing_type "full"
   --generator_4bit_attn True
 )
@@ -53,7 +53,7 @@ dataset_args=(
 validation_args=(
   --log_validation 
   --validation_dataset_file $VALIDATION_DATASET_FILE
-  --validation_steps 200
+  --validation_steps 50
   --validation_sampling_steps "50" 
   --validation_guidance_scale "6.0"
 )

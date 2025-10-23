@@ -2,7 +2,10 @@
 
 from curses import KEY_B2
 import torch
-from sageattn import sageattn_blackwell
+try:
+    from sageattn import sageattn_blackwell
+except ImportError:
+    sageattn_blackwell = None
 
 from fastvideo.attention.backends.abstract import (AttentionBackend,
                                                    AttentionImpl,
@@ -13,8 +16,12 @@ from fastvideo.logger import init_logger
 logger = init_logger(__name__)
 
 from math import sqrt
+try:
+    from flash_attn.flash_attn_interface import _wrapped_flash_attn_forward, _wrapped_flash_attn_backward
+except ImportError:
+    _wrapped_flash_attn_forward = None
+    _wrapped_flash_attn_backward = None
 
-from flash_attn.flash_attn_interface import _wrapped_flash_attn_forward, _wrapped_flash_attn_backward
 logger = init_logger(__name__)
 from flashinfer import SfLayout, mm_fp4, nvfp4_quantize
 
@@ -186,7 +193,7 @@ def flash_attn_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_caus
     )
     return dq_BLHD, dk_BLHD, dv_BLHD, None, None
 
-USE_TORCH_4BIT_FWD = False
+USE_TORCH_4BIT_FWD = True
 USE_TORCH_16BIT_BWD = True
 class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
     @staticmethod
