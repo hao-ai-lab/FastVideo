@@ -92,49 +92,21 @@ class DecodingStage(PipelineStage):
             vae_autocast_enabled = (vae_dtype != torch.float32
                                     ) and not fastvideo_args.disable_autocast
 
-            # Apply latents normalization for Cosmos VAE
-            # Source: /diffusers/pipelines/cosmos/pipeline_cosmos2_video2world.py:1000-1010
-            if hasattr(self.vae, 'config') and hasattr(self.vae.config, 'latents_mean') and hasattr(self.vae.config, 'latents_std'):
-                # Get scheduler for sigma_data
-                pipeline = self.pipeline() if self.pipeline else None
-                sigma_data = 1.0  # default
-                if pipeline and hasattr(pipeline, 'modules') and 'scheduler' in pipeline.modules:
-                    scheduler = pipeline.modules['scheduler']
-                    if hasattr(scheduler, 'config') and hasattr(scheduler.config, 'sigma_data'):
-                        sigma_data = scheduler.config.sigma_data
-
-                latents_mean = (
-                    torch.tensor(self.vae.config.latents_mean)
-                    .view(1, self.vae.config.z_dim, 1, 1, 1)
-                    .to(latents.device, latents.dtype)
-                )
-                latents_std = (
-                    torch.tensor(self.vae.config.latents_std)
-                    .view(1, self.vae.config.z_dim, 1, 1, 1)
-                    .to(latents.device, latents.dtype)
-                )
-
-                latents_after_mul = latents * latents_std / sigma_data
-                latents = latents_after_mul + latents_mean
-
-            # Fallback to scaling_factor for other VAE types
-            elif hasattr(self.vae, 'scaling_factor'):
+            if hasattr(self.vae, 'scaling_factor'):
                 if isinstance(self.vae.scaling_factor, torch.Tensor):
                     latents = latents / self.vae.scaling_factor.to(
                         latents.device, latents.dtype)
                 else:
                     latents = latents / self.vae.scaling_factor
-            elif hasattr(self.vae, 'config') and hasattr(self.vae.config, 'scaling_factor'):
-                latents = latents / self.vae.config.scaling_factor
 
-            # NOTE: Skip this if we already applied latents_mean (for Cosmos VAE)
-            elif (hasattr(self.vae, "shift_factor")
-                    and self.vae.shift_factor is not None):
-                if isinstance(self.vae.shift_factor, torch.Tensor):
-                    latents += self.vae.shift_factor.to(latents.device,
-                                                        latents.dtype)
-                else:
-                    latents += self.vae.shift_factor
+                # Apply shifting if needed
+                if (hasattr(self.vae, "shift_factor")
+                        and self.vae.shift_factor is not None):
+                    if isinstance(self.vae.shift_factor, torch.Tensor):
+                        latents += self.vae.shift_factor.to(latents.device,
+                                                            latents.dtype)
+                    else:
+                        latents += self.vae.shift_factor
 
             # Decode latents
             with torch.autocast(device_type="cuda",
@@ -146,15 +118,8 @@ class DecodingStage(PipelineStage):
                 #     self.vae.enable_parallel()
                 if not vae_autocast_enabled:
                     latents = latents.to(vae_dtype)
-                decode_output = self.vae.decode(latents)
 
-                # TEMPORARY: Handle diffusers VAE decode output compatibility
-                if hasattr(decode_output, 'sample'):
-                    # Diffusers VAE returns DecoderOutput with .sample attribute
-                    image = decode_output.sample
-                else:
-                    # FastVideo VAE returns tensor directly
-                    image = decode_output
+                image = self.vae.decode(latents)
 
         # Normalize image to [0, 1] range
         image = (image / 2 + 0.5).clamp(0, 1)

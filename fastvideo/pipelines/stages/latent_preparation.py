@@ -13,6 +13,8 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
+from fastvideo.image_processor import ImageProcessor
+
 
 logger = init_logger(__name__)
 
@@ -128,18 +130,7 @@ class CosmosLatentPreparationStage(PipelineStage):
         self,
         batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
-    ) -> ForwardBatch:
-        """
-        Prepare latents for Cosmos model with proper shapes and conditioning masks.
-        
-        Args:
-            batch: The current batch information.
-            fastvideo_args: The inference arguments.
-            
-        Returns:
-            The batch with prepared latent variables and conditioning masks.
-        """
-        
+    ) -> ForwardBatch:        
         # Determine batch size
         if isinstance(batch.prompt, list):
             batch_size = len(batch.prompt)
@@ -174,15 +165,9 @@ class CosmosLatentPreparationStage(PipelineStage):
         
         # Cosmos transformer expects in_channels - 1 for the latent channels
         num_channels_latents = self.transformer.config.in_channels - 1
-        logger.info(f"CosmosLatentPreparationStage - Final shape calculation: ({batch_size}, {num_channels_latents}, {num_latent_frames}, {latent_height}, {latent_width})")
         
         shape = (batch_size, num_channels_latents, num_latent_frames, latent_height, latent_width)
-        
-        expected_frames = (num_frames - 1) // vae_scale_factor_temporal + 1
-        expected_height = height // 8  
-        expected_width = width // vae_scale_factor_spatial
 
-        # Handle video input processing like diffusers
         init_latents = None
         conditioning_latents = None
     
@@ -190,41 +175,16 @@ class CosmosLatentPreparationStage(PipelineStage):
         
         if hasattr(batch, 'video') and batch.video is not None:
             video = batch.video
-            logger.info("CosmosLatentPreparationStage - Using batch.video")
         elif hasattr(batch, 'pil_image') and batch.pil_image is not None:
-            logger.info(f"CosmosLatentPreparationStage - Found pil_image of type: {type(batch.pil_image)}")
-            # Convert single image to video format if needed
-            if isinstance(batch.pil_image, torch.Tensor):
-                logger.info(f"CosmosLatentPreparationStage - pil_image tensor shape: {batch.pil_image.shape}")
-                if batch.pil_image.dim() == 4:  # [B, C, H, W] -> [B, C, T, H, W]
-                    video = batch.pil_image.unsqueeze(2)
-                    logger.info(f"CosmosLatentPreparationStage - Converted 4D to 5D tensor: {video.shape}")
-                elif batch.pil_image.dim() == 5:  # Already [B, C, T, H, W]
-                    video = batch.pil_image
-                    logger.info(f"CosmosLatentPreparationStage - Using 5D tensor as-is: {video.shape}")
-            else:
-                logger.info("CosmosLatentPreparationStage - pil_image is not a tensor, needs preprocessing")
-                # Use same preprocessing as diffusers VideoProcessor
-                from diffusers.video_processor import VideoProcessor
-                
-                # Create VideoProcessor with same parameters as diffusers Cosmos pipeline
-                vae_scale_factor_spatial = 8  # Same as diffusers
-                video_processor = VideoProcessor(vae_scale_factor=vae_scale_factor_spatial)
-                
-                # Use exact same method as diffusers: preprocess image then unsqueeze for time dimension
-                processed_image = video_processor.preprocess(batch.pil_image, height, width)
-                
-                # Add time dimension exactly like diffusers: unsqueeze(2)  
-                video = processed_image.unsqueeze(2)
-                
-                # bfloat16
-                if self.vae is not None:
-                    vae_dtype = next(self.vae.parameters()).dtype  # Get VAE's parameter dtype
-                else:
-                    vae_dtype = dtype
+            vae_scale_factor_spatial = 8
+            image_processor = ImageProcessor(vae_scale_factor=vae_scale_factor_spatial)
 
-                # Force bfloat16
-                video = video.to(device=device, dtype=torch.bfloat16)
+            processed_image = image_processor.preprocess(batch.pil_image, height, width)
+
+            # Add time dimension
+            video = processed_image.unsqueeze(2)
+
+            video = video.to(device=device, dtype=torch.bfloat16)
         elif hasattr(batch, 'preprocessed_image') and batch.preprocessed_image is not None:
             # Convert preprocessed image to video format
             if isinstance(batch.preprocessed_image, torch.Tensor):
@@ -249,18 +209,11 @@ class CosmosLatentPreparationStage(PipelineStage):
                 padding = last_frame.repeat(1, 1, num_padding_frames, 1, 1)
                 video = torch.cat([video, padding], dim=2)
             
-            # Encode video through VAE like diffusers does
             if self.vae is not None:
                 # Move VAE to correct device before encoding
                 self.vae = self.vae.to(device)
-                
-                # Convert VAE to video dtype instead of video to VAE dtype
-                vae_dtype_for_encoding = next(self.vae.parameters()).dtype
-                print(f"[FASTVIDEO VAE DEBUG] Original: video dtype={video.dtype}, VAE dtype={vae_dtype_for_encoding}")
-
                 self.vae = self.vae.to(dtype=video.dtype)
 
-                # Use exact same logic as diffusers to eliminate VAE differences
                 def retrieve_latents(encoder_output, generator=None):
                     if hasattr(encoder_output, "latent_dist"):
                         return encoder_output.latent_dist.sample(generator)
@@ -271,7 +224,6 @@ class CosmosLatentPreparationStage(PipelineStage):
                     elif isinstance(encoder_output, torch.Tensor):
                         return encoder_output
                     else:
-                        # Debug what attributes are available
                         attrs = [attr for attr in dir(encoder_output) if not attr.startswith('_')]
                         raise AttributeError(f"Could not access latents of provided encoder_output. Available attributes: {attrs}")
 
@@ -284,7 +236,6 @@ class CosmosLatentPreparationStage(PipelineStage):
                     init_latents = [retrieve_latents(self.vae.encode(vid.unsqueeze(0)), torch.Generator(device="cpu").manual_seed(100)) for vid in video]
                 
                 init_latents = torch.cat(init_latents, dim=0).to(dtype)
-                print(f"[FASTVIDEO CONDITIONING DEBUG] Raw VAE latents sum = {init_latents.float().sum().item()}")
                 
                 # Apply latent normalization
                 if hasattr(self.vae.config, 'latents_mean') and hasattr(self.vae.config, 'latents_std'):
@@ -293,41 +244,32 @@ class CosmosLatentPreparationStage(PipelineStage):
                     init_latents = (init_latents - latents_mean) / latents_std * self.scheduler.sigma_data
                 
                 conditioning_latents = init_latents
-                print(f"[FASTVIDEO CONDITIONING DEBUG] Final conditioning_latents sum = {conditioning_latents.float().sum().item()}")
                 
                 # Offload VAE to CPU after encoding to save memory
                 self.vae.to("cpu")
         else:
             num_cond_latent_frames = 0
-            logger.info("CosmosLatentPreparationStage - No conditioning frames detected (no video input)")
         
         # Generate or use provided latents
         if latents is None:
-            print(f"[FASTVIDEO DEBUG] Creating latents with randn_tensor, shape={shape}, device={device}, dtype={dtype}")
             # Use float32 for randn_tensor
             latents = randn_tensor(shape,
                                  generator=torch.Generator(device="cpu").manual_seed(200),
                                  device=device,
                                  dtype=dtype)
-            print(f"[FASTVIDEO DEBUG] Created latents with sum={latents.float().sum().item()}, device={latents.device}, dtype={latents.dtype}")
         else:
-            print(f"[FASTVIDEO DEBUG] Using provided latents, shape={latents.shape}")
             latents = latents.to(device=device, dtype=dtype)
 
-        # Scale latents by sigma_max (Cosmos-specific) - exactly like diffusers
         latents = latents * self.scheduler.sigma_max
 
-        # Create conditioning masks (for video-to-world generation)
         padding_shape = (batch_size, 1, num_latent_frames, latent_height, latent_width)
         ones_padding = latents.new_ones(padding_shape)
         zeros_padding = latents.new_zeros(padding_shape)
 
-        # Create conditioning indicators based on actual conditioning frames
         cond_indicator = latents.new_zeros(1, 1, latents.size(2), 1, 1)
         cond_indicator[:, :, :num_cond_latent_frames] = 1.0
         cond_mask = cond_indicator * ones_padding + (1 - cond_indicator) * zeros_padding
 
-        # For classifier-free guidance
         uncond_indicator = None
         uncond_mask = None
         if batch.do_classifier_free_guidance:
@@ -335,20 +277,15 @@ class CosmosLatentPreparationStage(PipelineStage):
             uncond_indicator[:, :, :num_cond_latent_frames] = 1.0
             uncond_mask = uncond_indicator * ones_padding + (1 - uncond_indicator) * zeros_padding
 
-        # Store in batch
         batch.latents = latents
         batch.raw_latent_shape = latents.shape
         
-        # Store Cosmos-specific conditioning data
         batch.conditioning_latents = conditioning_latents
         batch.cond_indicator = cond_indicator
         batch.uncond_indicator = uncond_indicator
         batch.cond_mask = cond_mask
         batch.uncond_mask = uncond_mask
         
-        # Final verification that shape is correct
-        logger.info(f"CosmosLatentPreparationStage - FINAL latents shape: {latents.shape}")
-
         return batch
 
     def verify_input(self, batch: ForwardBatch,

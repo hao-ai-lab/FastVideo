@@ -236,7 +236,6 @@ class _ModelRegistry:
 
     def _raise_for_unsupported(self, architectures: list[str]) -> NoReturn:
         all_supported_archs = self.get_supported_archs()
-        print('all_supported1', all_supported_archs)
         if any(arch in all_supported_archs for arch in architectures):
             raise ValueError(
                 f"Model architectures {architectures} failed "

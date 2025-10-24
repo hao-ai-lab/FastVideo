@@ -282,7 +282,6 @@ class ComposedPipelineBase(ABC):
         for module_name, (transformers_or_diffusers,
                           architecture) in model_index.items():
             if transformers_or_diffusers is None:
-                print("REQURED", self.required_config_modules, module_name)
                 self.required_config_modules.remove(module_name)
                 continue
             if module_name not in required_modules:

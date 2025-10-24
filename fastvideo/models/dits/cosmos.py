@@ -471,14 +471,10 @@ class CosmosRotaryPosEmbed(nn.Module):
                             w_spatial_freqs)[None, None, :, :].repeat(
                                 pe_size[0], pe_size[1], 1, 1)
 
-        # Apply sequence scaling in temporal dimension
         if fps is None:
             emb_t = torch.outer(seq[:pe_size[0]], temporal_freqs)
         else:
-            # Videos
-            print(f"[FASTVIDEO ROPE FORWARD] Using video mode (fps={fps})")
             temporal_scale = seq[:pe_size[0]] / fps * self.base_fps
-            print(f"[FASTVIDEO ROPE FORWARD] temporal_scale range: {temporal_scale.min().item():.6f} to {temporal_scale.max().item():.6f}")
             emb_t = torch.outer(temporal_scale,
                                 temporal_freqs)
 

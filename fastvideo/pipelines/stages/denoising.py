@@ -602,10 +602,6 @@ class DenoisingStage(PipelineStage):
 class CosmosDenoisingStage(DenoisingStage):
     """
     Denoising stage for Cosmos models using FlowMatchEulerDiscreteScheduler.
-    
-    This stage implements the diffusers-compatible Cosmos denoising process with noise prediction,
-    classifier-free guidance, and conditional video generation support.
-    Compatible with Hugging Face Cosmos models.
     """
 
     def __init__(self, 
@@ -613,23 +609,12 @@ class CosmosDenoisingStage(DenoisingStage):
                  scheduler,
                  pipeline=None) -> None:
         super().__init__(transformer, scheduler, pipeline)
-        # FlowMatchEulerDiscreteScheduler is already set by parent
 
     def forward(
         self,
         batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
-        """
-        Run the diffusers-style Cosmos denoising loop.
-        
-        Args:
-            batch: The current batch information.
-            fastvideo_args: The inference arguments.
-            
-        Returns:
-            The batch with denoised latents.
-        """
         pipeline = self.pipeline() if self.pipeline else None
         if not fastvideo_args.model_loaded["transformer"]:
             loader = TransformerLoader()
@@ -639,7 +624,6 @@ class CosmosDenoisingStage(DenoisingStage):
                 pipeline.add_module("transformer", self.transformer)
             fastvideo_args.model_loaded["transformer"] = True
 
-        # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step,
             {
@@ -648,7 +632,6 @@ class CosmosDenoisingStage(DenoisingStage):
             },
         )
 
-        # For FSDP wrapped models, we need to access the underlying module
         if hasattr(self.transformer, 'module'):
             transformer_dtype = next(self.transformer.module.parameters()).dtype
         else:
@@ -657,7 +640,6 @@ class CosmosDenoisingStage(DenoisingStage):
         autocast_enabled = (target_dtype != torch.float32
                             ) and not fastvideo_args.disable_autocast
 
-        # Get latents and setup
         latents = batch.latents
         num_inference_steps = batch.num_inference_steps
         guidance_scale = batch.guidance_scale
@@ -675,9 +657,6 @@ class CosmosDenoisingStage(DenoisingStage):
                 final_sigmas_type=final_sigmas_type,
             )
 
-        # Setup scheduler timesteps - use default scheduler sigma generation
-        # The torch.linspace(0, 1, num_inference_steps) approach was incorrect for FlowMatchEulerDiscreteScheduler
-        # Let the scheduler generate its own sigmas using the configured sigma_max, sigma_min, etc.
         self.scheduler.set_timesteps(num_inference_steps, device=latents.device)
         timesteps = self.scheduler.timesteps
         
@@ -685,25 +664,21 @@ class CosmosDenoisingStage(DenoisingStage):
             if len(self.scheduler.sigmas) > 1:
                 self.scheduler.sigmas[-1] = self.scheduler.sigmas[-2]
         
-        # Get conditioning setup from batch (prepared by CosmosLatentPreparationStage)
         conditioning_latents = getattr(batch, 'conditioning_latents', None)
-        unconditioning_latents = conditioning_latents  # Same for cosmos
+        unconditioning_latents = conditioning_latents
         
         # Sampling loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
-                # Skip if interrupted
                 if hasattr(self, 'interrupt') and self.interrupt:
                     continue
                 
-                # Get current sigma and preconditioning coefficients (from diffusers cosmos)
                 current_sigma = self.scheduler.sigmas[i]
                 current_t = current_sigma / (current_sigma + 1)
                 c_in = 1 - current_t
                 c_skip = 1 - current_t  
                 c_out = -current_t
                 
-                # Prepare timestep tensor like diffusers (lines 713-715)
                 timestep = current_t.view(1, 1, 1, 1, 1).expand(
                     latents.size(0), -1, latents.size(2), -1, -1
                 )  # [B, 1, T, 1, 1]
@@ -747,7 +722,7 @@ class CosmosDenoisingStage(DenoisingStage):
                                                        device=cond_latent.device, dtype=target_dtype)
 
                         noise_pred = self.transformer(
-                            hidden_states=cond_latent,  # Already converted to target_dtype above
+                            hidden_states=cond_latent,
                             timestep=cond_timestep.to(target_dtype),
                             encoder_hidden_states=batch.prompt_embeds[0].to(target_dtype),
                             fps=24,  # TODO: get fps from batch or config

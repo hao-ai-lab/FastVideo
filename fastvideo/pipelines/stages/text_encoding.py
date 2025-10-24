@@ -111,7 +111,6 @@ class TextEncodingStage(PipelineStage):
                     )
                 negative_prompt_embeds = postprocess_func(negative_outputs)
 
-                # Apply attention mask length processing (like Diffusers does)
                 lengths = negative_attention_mask.sum(dim=1).cpu()
                 for i, length in enumerate(lengths):
                     negative_prompt_embeds[i, length:] = 0
