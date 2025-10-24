@@ -82,7 +82,7 @@ def load_example_prompts():
             print(f"Warning: Could not read {filepath}: {e}")
         return prompts, labels
     
-    examples, example_labels = load_from_file("/FastVideo/examples/inference/gradio/local/prompts_final.txt")
+    examples, example_labels = load_from_file("examples/inference/gradio/local/prompts_final.txt")
     
     if not examples:
         examples = ["A crowded rooftop bar buzzes with energy, the city skyline twinkling like a field of stars in the background."]
@@ -448,6 +448,12 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
             inputs=example_dropdown,
             outputs=prompt,
         )
+        
+        gr.HTML("""
+        <div style="text-align: center; margin-top: 10px; margin-bottom: 15px;">
+            <p style="font-size: 16px; margin: 0;">Note that this demo is meant to showcase FastWan's quality and that under a large number of requests, generation speed may be affected.</p>
+        </div>
+        """)
         
         use_negative_prompt.change(
             fn=lambda x: gr.update(visible=x),
