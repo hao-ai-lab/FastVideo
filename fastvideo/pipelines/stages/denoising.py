@@ -604,10 +604,7 @@ class CosmosDenoisingStage(DenoisingStage):
     Denoising stage for Cosmos models using FlowMatchEulerDiscreteScheduler.
     """
 
-    def __init__(self, 
-                 transformer,
-                 scheduler,
-                 pipeline=None) -> None:
+    def __init__(self, transformer, scheduler, pipeline=None) -> None:
         super().__init__(transformer, scheduler, pipeline)
 
     def forward(
@@ -643,7 +640,7 @@ class CosmosDenoisingStage(DenoisingStage):
         latents = batch.latents
         num_inference_steps = batch.num_inference_steps
         guidance_scale = batch.guidance_scale
-        
+
         sigma_max = 80.0
         sigma_min = 0.002
         sigma_data = 1.0
@@ -659,145 +656,203 @@ class CosmosDenoisingStage(DenoisingStage):
 
         self.scheduler.set_timesteps(num_inference_steps, device=latents.device)
         timesteps = self.scheduler.timesteps
-        
-        if hasattr(self.scheduler.config, 'final_sigmas_type') and self.scheduler.config.final_sigmas_type == "sigma_min":
-            if len(self.scheduler.sigmas) > 1:
-                self.scheduler.sigmas[-1] = self.scheduler.sigmas[-2]
-        
+
+        if (hasattr(self.scheduler.config, 'final_sigmas_type')
+                and self.scheduler.config.final_sigmas_type == "sigma_min"
+                and len(self.scheduler.sigmas) > 1):
+            self.scheduler.sigmas[-1] = self.scheduler.sigmas[-2]
+
         conditioning_latents = getattr(batch, 'conditioning_latents', None)
         unconditioning_latents = conditioning_latents
-        
+
         # Sampling loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if hasattr(self, 'interrupt') and self.interrupt:
                     continue
-                
+
                 current_sigma = self.scheduler.sigmas[i]
                 current_t = current_sigma / (current_sigma + 1)
                 c_in = 1 - current_t
-                c_skip = 1 - current_t  
+                c_skip = 1 - current_t
                 c_out = -current_t
-                
-                timestep = current_t.view(1, 1, 1, 1, 1).expand(
-                    latents.size(0), -1, latents.size(2), -1, -1
-                )  # [B, 1, T, 1, 1]
-                
+
+                timestep = current_t.view(1, 1, 1, 1,
+                                          1).expand(latents.size(0), -1,
+                                                    latents.size(2), -1,
+                                                    -1)  # [B, 1, T, 1, 1]
+
                 with torch.autocast(device_type="cuda",
                                     dtype=target_dtype,
                                     enabled=autocast_enabled):
-                    
+
                     # Conditional forward pass
                     cond_latent = latents * c_in
-                    
-                    if hasattr(batch, 'cond_indicator') and batch.cond_indicator is not None and conditioning_latents is not None:
-                        cond_latent = batch.cond_indicator * conditioning_latents + (1 - batch.cond_indicator) * cond_latent
+
+                    if hasattr(
+                            batch, 'cond_indicator'
+                    ) and batch.cond_indicator is not None and conditioning_latents is not None:
+                        cond_latent = batch.cond_indicator * conditioning_latents + (
+                            1 - batch.cond_indicator) * cond_latent
                     else:
-                        logger.warning(f"Step {i}: Missing conditioning data - cond_indicator: {hasattr(batch, 'cond_indicator')}, conditioning_latents: {conditioning_latents is not None}")
-                    
+                        logger.warning(
+                            "Step %s: Missing conditioning data - cond_indicator: %s, conditioning_latents: %s",
+                            i, hasattr(batch, 'cond_indicator'),
+                            conditioning_latents is not None)
+
                     cond_latent = cond_latent.to(target_dtype)
-                    
+
                     # Apply conditional timestep processing
                     cond_timestep = timestep
-                    if hasattr(batch, 'cond_indicator') and batch.cond_indicator is not None:
+                    if hasattr(batch, 'cond_indicator'
+                               ) and batch.cond_indicator is not None:
                         sigma_conditioning = 0.0001
-                        t_conditioning = sigma_conditioning / (sigma_conditioning + 1)
-                        cond_timestep = batch.cond_indicator * t_conditioning + (1 - batch.cond_indicator) * timestep
+                        t_conditioning = sigma_conditioning / (
+                            sigma_conditioning + 1)
+                        cond_timestep = batch.cond_indicator * t_conditioning + (
+                            1 - batch.cond_indicator) * timestep
                         cond_timestep = cond_timestep.to(target_dtype)
-                    
+
                     with set_forward_context(
-                        current_timestep=i,
-                        attn_metadata=None,
-                        forward_batch=batch,
+                            current_timestep=i,
+                            attn_metadata=None,
+                            forward_batch=batch,
                     ):
                         # Use conditioning masks from CosmosLatentPreparationStage
-                        condition_mask = batch.cond_mask.to(target_dtype) if hasattr(batch, 'cond_mask') else None
-                        padding_mask = torch.zeros(1, 1, batch.height, batch.width, 
-                                                 device=cond_latent.device, dtype=target_dtype)
-                        
+                        condition_mask = batch.cond_mask.to(
+                            target_dtype) if hasattr(batch,
+                                                     'cond_mask') else None
+                        padding_mask = torch.zeros(1,
+                                                   1,
+                                                   batch.height,
+                                                   batch.width,
+                                                   device=cond_latent.device,
+                                                   dtype=target_dtype)
+
                         # Fallback if masks not available
                         if condition_mask is None:
                             batch_size, num_channels, num_frames, height, width = cond_latent.shape
-                            condition_mask = torch.zeros(batch_size, 1, num_frames, height, width, 
-                                                       device=cond_latent.device, dtype=target_dtype)
+                            condition_mask = torch.zeros(
+                                batch_size,
+                                1,
+                                num_frames,
+                                height,
+                                width,
+                                device=cond_latent.device,
+                                dtype=target_dtype)
 
                         noise_pred = self.transformer(
                             hidden_states=cond_latent,
                             timestep=cond_timestep.to(target_dtype),
-                            encoder_hidden_states=batch.prompt_embeds[0].to(target_dtype),
+                            encoder_hidden_states=batch.prompt_embeds[0].to(
+                                target_dtype),
                             fps=24,  # TODO: get fps from batch or config
                             condition_mask=condition_mask,
                             padding_mask=padding_mask,
                             return_dict=False,
                         )[0]
 
-                    cond_pred = (c_skip * latents + c_out * noise_pred.float()).to(target_dtype)
+                    cond_pred = (c_skip * latents +
+                                 c_out * noise_pred.float()).to(target_dtype)
 
-                    if hasattr(batch, 'cond_indicator') and batch.cond_indicator is not None and conditioning_latents is not None:
-                        cond_pred = batch.cond_indicator * conditioning_latents + (1 - batch.cond_indicator) * cond_pred
-                    
+                    if hasattr(
+                            batch, 'cond_indicator'
+                    ) and batch.cond_indicator is not None and conditioning_latents is not None:
+                        cond_pred = batch.cond_indicator * conditioning_latents + (
+                            1 - batch.cond_indicator) * cond_pred
+
                     if batch.do_classifier_free_guidance and batch.negative_prompt_embeds is not None:
                         uncond_latent = latents * c_in
 
-                        if hasattr(batch, 'uncond_indicator') and batch.uncond_indicator is not None and unconditioning_latents is not None:
-                            uncond_latent = batch.uncond_indicator * unconditioning_latents + (1 - batch.uncond_indicator) * uncond_latent
-                        
+                        if hasattr(
+                                batch, 'uncond_indicator'
+                        ) and batch.uncond_indicator is not None and unconditioning_latents is not None:
+                            uncond_latent = batch.uncond_indicator * unconditioning_latents + (
+                                1 - batch.uncond_indicator) * uncond_latent
+
                         with set_forward_context(
-                            current_timestep=i,
-                            attn_metadata=None,
-                            forward_batch=batch,
+                                current_timestep=i,
+                                attn_metadata=None,
+                                forward_batch=batch,
                         ):
                             # Use uncond_mask for unconditional pass if available
-                            uncond_condition_mask = batch.uncond_mask.to(target_dtype) if hasattr(batch, 'uncond_mask') and batch.uncond_mask is not None else condition_mask
-                            
+                            uncond_condition_mask = batch.uncond_mask.to(
+                                target_dtype
+                            ) if hasattr(
+                                batch, 'uncond_mask'
+                            ) and batch.uncond_mask is not None else condition_mask
+
                             # Apply same conditional timestep processing for unconditional pass
                             uncond_timestep = timestep
-                            if hasattr(batch, 'uncond_indicator') and batch.uncond_indicator is not None:
+                            if hasattr(batch, 'uncond_indicator'
+                                       ) and batch.uncond_indicator is not None:
                                 sigma_conditioning = 0.0001  # Same as Diffusers default
-                                t_conditioning = sigma_conditioning / (sigma_conditioning + 1)
-                                uncond_timestep = batch.uncond_indicator * t_conditioning + (1 - batch.uncond_indicator) * timestep
-                                uncond_timestep = uncond_timestep.to(target_dtype)
-                            
+                                t_conditioning = sigma_conditioning / (
+                                    sigma_conditioning + 1)
+                                uncond_timestep = batch.uncond_indicator * t_conditioning + (
+                                    1 - batch.uncond_indicator) * timestep
+                                uncond_timestep = uncond_timestep.to(
+                                    target_dtype)
+
                             noise_pred_uncond = self.transformer(
                                 hidden_states=uncond_latent.to(target_dtype),
                                 timestep=uncond_timestep.to(target_dtype),
-                                encoder_hidden_states=batch.negative_prompt_embeds[0].to(target_dtype),
+                                encoder_hidden_states=batch.
+                                negative_prompt_embeds[0].to(target_dtype),
                                 fps=24,  # TODO: get fps from batch or config
                                 condition_mask=uncond_condition_mask,
                                 padding_mask=padding_mask,
                                 return_dict=False,
                             )[0]
-                        
-                        uncond_pred = (c_skip * latents + c_out * noise_pred_uncond.float()).to(target_dtype)
-                        
+
+                        uncond_pred = (
+                            c_skip * latents +
+                            c_out * noise_pred_uncond.float()).to(target_dtype)
+
                         # Apply conditional indicator masking for unconditional prediction like diffusers
-                        if hasattr(batch, 'uncond_indicator') and batch.uncond_indicator is not None and unconditioning_latents is not None:
-                            uncond_pred = batch.uncond_indicator * unconditioning_latents + (1 - batch.uncond_indicator) * uncond_pred
-                        
+                        if hasattr(
+                                batch, 'uncond_indicator'
+                        ) and batch.uncond_indicator is not None and unconditioning_latents is not None:
+                            uncond_pred = batch.uncond_indicator * unconditioning_latents + (
+                                1 - batch.uncond_indicator) * uncond_pred
+
                         guidance_diff = cond_pred - uncond_pred
                         final_pred = cond_pred + guidance_scale * guidance_diff
                     else:
                         final_pred = cond_pred
-                
+
                 # Convert to noise for scheduler step
                 if current_sigma > 1e-8:
                     noise_for_scheduler = (latents - final_pred) / current_sigma
                 else:
-                    logger.warning(f"Step {i}: current_sigma too small ({current_sigma}), using final_pred directly")
+                    logger.warning(
+                        "Step %s: current_sigma too small (%s), using final_pred directly",
+                        i, current_sigma)
                     noise_for_scheduler = final_pred
 
                 # Debug: Check for NaN values before scheduler step
                 if torch.isnan(noise_for_scheduler).sum() > 0:
-                    logger.error(f"Step {i}: NaN detected in noise_for_scheduler, sum: {noise_for_scheduler.float().sum().item()}")
-                    logger.error(f"Step {i}: latents sum: {latents.float().sum().item()}, final_pred sum: {final_pred.float().sum().item()}, current_sigma: {current_sigma}")
+                    logger.error(
+                        "Step %s: NaN detected in noise_for_scheduler, sum: %s",
+                        i,
+                        noise_for_scheduler.float().sum().item())
+                    logger.error(
+                        "Step %s: latents sum: %s, final_pred sum: %s, current_sigma: %s",
+                        i,
+                        latents.float().sum().item(),
+                        final_pred.float().sum().item(), current_sigma)
 
-                latents = self.scheduler.step(noise_for_scheduler, t, latents, **extra_step_kwargs, return_dict=False)[0]
-                
+                latents = self.scheduler.step(noise_for_scheduler,
+                                              t,
+                                              latents,
+                                              **extra_step_kwargs,
+                                              return_dict=False)[0]
+
                 progress_bar.update()
-        
+
         # Update batch with final latents
         batch.latents = latents
-        
+
         return batch
 
     def verify_input(self, batch: ForwardBatch,

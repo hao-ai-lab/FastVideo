@@ -9,15 +9,15 @@ complete diffusion pipelines.
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.conditioning import ConditioningStage
 from fastvideo.pipelines.stages.decoding import DecodingStage
-from fastvideo.pipelines.stages.denoising import (DenoisingStage,
-                                                  DmdDenoisingStage,
-                                                  CosmosDenoisingStage)
+from fastvideo.pipelines.stages.denoising import (CosmosDenoisingStage,
+                                                  DenoisingStage,
+                                                  DmdDenoisingStage)
 from fastvideo.pipelines.stages.encoding import EncodingStage
 from fastvideo.pipelines.stages.image_encoding import (ImageEncodingStage,
                                                        ImageVAEEncodingStage)
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.latent_preparation import (
-    LatentPreparationStage, CosmosLatentPreparationStage)
+    CosmosLatentPreparationStage, LatentPreparationStage)
 from fastvideo.pipelines.stages.stepvideo_encoding import (
     StepvideoPromptEncodingStage)
 from fastvideo.pipelines.stages.text_encoding import TextEncodingStage

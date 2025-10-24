@@ -94,6 +94,7 @@ class T5Config(TextEncoderConfig):
 @dataclass
 class T5LargeConfig(TextEncoderConfig):
     """T5 Large configuration for your specific model."""
-    arch_config: TextEncoderArchConfig = field(default_factory=T5LargeArchConfig)
+    arch_config: TextEncoderArchConfig = field(
+        default_factory=T5LargeArchConfig)
 
     prefix: str = "t5"

@@ -43,7 +43,8 @@ class RMSNorm(CustomOp):
         """Forward method that matches Diffusers RMSNorm implementation exactly."""
         input_dtype = hidden_states.dtype
         variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
-        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+        hidden_states = hidden_states * torch.rsqrt(variance +
+                                                    self.variance_epsilon)
 
         if self.has_weight and self.weight is not None:
             if self.weight.dtype in [torch.float16, torch.bfloat16]:

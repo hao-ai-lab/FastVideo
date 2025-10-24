@@ -6,24 +6,16 @@ This module contains an implementation of the Cosmos video diffusion pipeline
 using the modular pipeline architecture.
 """
 
-import os
-import numpy as np
-import torch
-
-
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
-                                           CosmosDenoisingStage, InputValidationStage,
-                                           CosmosLatentPreparationStage,
-                                           TextEncodingStage,
-                                           TimestepPreparationStage)
-from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
-
-from fastvideo.models.vaes.wanvae import AutoencoderKLWan
+from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.pipelines.stages import (ConditioningStage, CosmosDenoisingStage,
+                                        CosmosLatentPreparationStage,
+                                        DecodingStage, InputValidationStage,
+                                        TextEncodingStage,
+                                        TimestepPreparationStage)
 
 logger = init_logger(__name__)
 
@@ -31,19 +23,20 @@ logger = init_logger(__name__)
 class Cosmos2VideoToWorldPipeline(ComposedPipelineBase):
 
     _required_config_modules = [
-        "text_encoder", "tokenizer", "vae", "transformer", "scheduler", "safety_checker"
+        "text_encoder", "tokenizer", "vae", "transformer", "scheduler",
+        "safety_checker"
     ]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
             shift=fastvideo_args.pipeline_config.flow_shift,
             use_karras_sigmas=True)
-        
+
         sigma_max = 80.0
         sigma_min = 0.002
         sigma_data = 1.0
         final_sigmas_type = "sigma_min"
-        
+
         if self.modules["scheduler"] is not None:
             scheduler = self.modules["scheduler"]
             scheduler.config.sigma_max = sigma_max
@@ -86,7 +79,6 @@ class Cosmos2VideoToWorldPipeline(ComposedPipelineBase):
 
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))
-        
 
 
 EntryClass = Cosmos2VideoToWorldPipeline

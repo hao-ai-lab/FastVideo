@@ -46,10 +46,10 @@ def _rotate_gptj(x: torch.Tensor) -> torch.Tensor:
 
 def apply_rotary_emb(
     x: torch.Tensor,
-    freqs_cis: torch.Tensor | tuple[torch.Tensor],
+    freqs_cis: torch.Tensor | tuple[torch.Tensor, torch.Tensor],
     use_real: bool = True,
     use_real_unbind_dim: int = -1,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> torch.Tensor:
     """
     Apply rotary embeddings to input tensors using the given frequency tensor. This function applies rotary embeddings
     to the given query or key 'x' tensors using the provided frequency tensor 'freqs_cis'. The input tensors are

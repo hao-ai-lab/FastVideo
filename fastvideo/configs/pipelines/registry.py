@@ -5,13 +5,13 @@ import os
 from collections.abc import Callable
 
 from fastvideo.configs.pipelines.base import PipelineConfig
+from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
 from fastvideo.configs.pipelines.wan import (FastWan2_1_T2V_480P_Config,
                                              FastWan2_2_TI2V_5B_Config,
                                              WanI2V480PConfig, WanI2V720PConfig,
                                              WanT2V480PConfig, WanT2V720PConfig)
-from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.logger import init_logger
 from fastvideo.utils import (maybe_download_model_index,
                              verify_model_config_and_directory)

@@ -4,8 +4,6 @@ Minimal image processing utilities for FastVideo.
 This module provides lightweight image preprocessing without external dependencies beyond PyTorch/NumPy/PIL.
 """
 
-from typing import Optional, Union
-
 import numpy as np
 import PIL.Image
 import torch
@@ -29,9 +27,9 @@ class ImageProcessor:
 
     def preprocess(
         self,
-        image: Union[PIL.Image.Image, np.ndarray, torch.Tensor],
-        height: Optional[int] = None,
-        width: Optional[int] = None,
+        image: PIL.Image.Image | np.ndarray | torch.Tensor,
+        height: int | None = None,
+        width: int | None = None,
     ) -> torch.Tensor:
         """
         Preprocess an image to a normalized torch tensor.
@@ -55,14 +53,13 @@ class ImageProcessor:
         else:
             raise ValueError(
                 f"Unsupported image type: {type(image)}. "
-                "Supported types: PIL.Image.Image, np.ndarray, torch.Tensor"
-            )
+                "Supported types: PIL.Image.Image, np.ndarray, torch.Tensor")
 
     def _preprocess_pil(
         self,
         image: PIL.Image.Image,
-        height: Optional[int] = None,
-        width: Optional[int] = None,
+        height: int | None = None,
+        width: int | None = None,
     ) -> torch.Tensor:
         """Preprocess a PIL image."""
         if height is None:
@@ -73,7 +70,8 @@ class ImageProcessor:
         height = height - (height % self.vae_scale_factor)
         width = width - (width % self.vae_scale_factor)
 
-        image = image.resize((width, height), resample=PIL.Image.Resampling.LANCZOS)
+        image = image.resize((width, height),
+                             resample=PIL.Image.Resampling.LANCZOS)
 
         image_np = np.array(image, dtype=np.float32) / 255.0
 
@@ -85,8 +83,8 @@ class ImageProcessor:
     def _preprocess_numpy(
         self,
         image: np.ndarray,
-        height: Optional[int] = None,
-        width: Optional[int] = None,
+        height: int | None = None,
+        width: int | None = None,
     ) -> torch.Tensor:
         """Preprocess a numpy array."""
         # Determine target dimensions if not provided
@@ -115,7 +113,8 @@ class ImageProcessor:
                 image_uint8 = image.astype(np.uint8)
             pil_image = PIL.Image.fromarray(image_uint8)
 
-        pil_image = pil_image.resize((width, height), resample=PIL.Image.Resampling.LANCZOS)
+        pil_image = pil_image.resize((width, height),
+                                     resample=PIL.Image.Resampling.LANCZOS)
         image_np = np.array(pil_image, dtype=np.float32) / 255.0
 
         # Ensure 3D shape
@@ -127,8 +126,8 @@ class ImageProcessor:
     def _preprocess_tensor(
         self,
         image: torch.Tensor,
-        height: Optional[int] = None,
-        width: Optional[int] = None,
+        height: int | None = None,
+        width: int | None = None,
     ) -> torch.Tensor:
         """Preprocess a torch tensor."""
         # Determine target dimensions
@@ -158,9 +157,10 @@ class ImageProcessor:
             else:  # (H, W, C) - need to rearrange
                 image = image.permute(2, 0, 1).unsqueeze(0)  # (1, C, H, W)
 
-        image = torch.nn.functional.interpolate(
-            image, size=(height, width), mode="bilinear", align_corners=False
-        )
+        image = torch.nn.functional.interpolate(image,
+                                                size=(height, width),
+                                                mode="bilinear",
+                                                align_corners=False)
 
         if image.max() > 1.0:  # Assume [0, 255] range
             image = image / 255.0
@@ -181,9 +181,11 @@ class ImageProcessor:
         """
         # Convert to tensor
         if image_np.ndim == 2:  # (H, W) - grayscale
-            tensor = torch.from_numpy(image_np).unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
+            tensor = torch.from_numpy(image_np).unsqueeze(0).unsqueeze(
+                0)  # (1, 1, H, W)
         elif image_np.ndim == 3:  # (H, W, C)
-            tensor = torch.from_numpy(image_np).permute(2, 0, 1).unsqueeze(0)  # (1, C, H, W)
+            tensor = torch.from_numpy(image_np).permute(2, 0, 1).unsqueeze(
+                0)  # (1, C, H, W)
         else:
             raise ValueError(f"Expected 2D or 3D array, got {image_np.ndim}D")
 

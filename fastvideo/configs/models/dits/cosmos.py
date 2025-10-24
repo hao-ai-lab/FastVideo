@@ -90,7 +90,6 @@ class CosmosArchConfig(DiTArchConfig):
     qk_norm: str = "rms_norm"
     eps: float = 1e-6
     exclude_lora_layers: list[str] = field(default_factory=lambda: ["embedder"])
-    
 
     def __post_init__(self):
         super().__post_init__()

@@ -103,8 +103,8 @@ class DecodingStage(PipelineStage):
                 if (hasattr(self.vae, "shift_factor")
                         and self.vae.shift_factor is not None):
                     if isinstance(self.vae.shift_factor, torch.Tensor):
-                        latents += self.vae.shift_factor.to(latents.device,
-                                                            latents.dtype)
+                        latents += self.vae.shift_factor.to(
+                            latents.device, latents.dtype)
                     else:
                         latents += self.vae.shift_factor
 

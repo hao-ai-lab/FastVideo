@@ -4,19 +4,19 @@ Utility functions for pipeline stages.
 """
 
 import inspect
-from typing import List, Optional, Union
+from typing import Any
 
 import torch
 
 
 def retrieve_timesteps(
-    scheduler,
-    num_inference_steps: Optional[int] = None,
-    device: Optional[Union[str, torch.device]] = None,
-    timesteps: Optional[List[int]] = None,
-    sigmas: Optional[List[float]] = None,
-    **kwargs,
-):
+    scheduler: Any,
+    num_inference_steps: int | None = None,
+    device: str | torch.device | None = None,
+    timesteps: list[int] | None = None,
+    sigmas: list[float] | None = None,
+    **kwargs: Any,
+) -> tuple[Any, int]:
     """
     Calls the scheduler's `set_timesteps` method and retrieves timesteps from the scheduler after the call. Handles
     custom timesteps. Any kwargs will be supplied to `scheduler.set_timesteps`.
@@ -41,9 +41,12 @@ def retrieve_timesteps(
         second element is the number of inference steps.
     """
     if timesteps is not None and sigmas is not None:
-        raise ValueError("Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values")
+        raise ValueError(
+            "Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values"
+        )
     if timesteps is not None:
-        accepts_timesteps = "timesteps" in set(inspect.signature(scheduler.set_timesteps).parameters.keys())
+        accepts_timesteps = "timesteps" in set(
+            inspect.signature(scheduler.set_timesteps).parameters.keys())
         if not accepts_timesteps:
             raise ValueError(
                 f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
@@ -51,9 +54,12 @@ def retrieve_timesteps(
             )
         scheduler.set_timesteps(timesteps=timesteps, device=device, **kwargs)
         timesteps = scheduler.timesteps
+        if timesteps is None:
+            raise ValueError("scheduler.timesteps is None after set_timesteps")
         num_inference_steps = len(timesteps)
     elif sigmas is not None:
-        accept_sigmas = "sigmas" in set(inspect.signature(scheduler.set_timesteps).parameters.keys())
+        accept_sigmas = "sigmas" in set(
+            inspect.signature(scheduler.set_timesteps).parameters.keys())
         if not accept_sigmas:
             raise ValueError(
                 f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
@@ -61,8 +67,13 @@ def retrieve_timesteps(
             )
         scheduler.set_timesteps(sigmas=sigmas, device=device, **kwargs)
         timesteps = scheduler.timesteps
+        if timesteps is None:
+            raise ValueError("scheduler.timesteps is None after set_timesteps")
         num_inference_steps = len(timesteps)
     else:
         scheduler.set_timesteps(num_inference_steps, device=device, **kwargs)
         timesteps = scheduler.timesteps
+        if timesteps is None:
+            raise ValueError("scheduler.timesteps is None after set_timesteps")
+        num_inference_steps = len(timesteps)
     return timesteps, num_inference_steps

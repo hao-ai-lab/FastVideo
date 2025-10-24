@@ -37,8 +37,6 @@ class InputValidationStage(PipelineStage):
         seeds = [seed + i for i in range(num_videos_per_prompt)]
         batch.seeds = seeds
         # Peiyuan: using GPU seed will cause A100 and H100 to generate different results...
-        from fastvideo.distributed import get_local_torch_device
-        device = get_local_torch_device()
         batch.generator = [
             torch.Generator(device="cpu").manual_seed(seed) for seed in seeds
         ]
