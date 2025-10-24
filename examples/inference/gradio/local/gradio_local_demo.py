@@ -449,12 +449,6 @@ def create_gradio_interface(default_params: dict[str, SamplingParam], generators
             outputs=prompt,
         )
         
-        gr.HTML("""
-        <div style="text-align: center; margin-top: 10px; margin-bottom: 15px;">
-            <p style="font-size: 16px; margin: 0;">The compute for this demo is generously provided by <a href="https://www.gmicloud.ai/" target="_blank">GMI Cloud</a>. Note that this demo is meant to showcase FastWan's quality and that under a large number of requests, generation speed may be affected. We are also rate-limiting users to 3 requests per minute.</p>
-        </div>
-        """)
-        
         use_negative_prompt.change(
             fn=lambda x: gr.update(visible=x),
             inputs=use_negative_prompt,
