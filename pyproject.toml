@@ -49,7 +49,7 @@ dependencies = [
     "pytest",
     "PyYAML==6.0.1",
     "protobuf>=5.28.3",
-    "gradio>=5.22.0",
+    "gradio==5.32.0",
     "moviepy>=2.0.0",
     "flask",
     "flask_restful",

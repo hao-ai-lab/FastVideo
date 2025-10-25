@@ -181,7 +181,11 @@ class CudaPlatformBase(Platform):
                     "Failed to import Video Sparse Attention backend: %s",
                     str(e))
                 raise ImportError(
-                    "Video Sparse Attention backend is not installed. ") from e
+                    "The Video Sparse Attention backend is not installed. "
+                    "To install it, please follow the instructions at: "
+                    "https://hao-ai-lab.github.io/FastVideo/video_sparse_attention/installation.html "
+                ) from e
+
         elif selected_backend == AttentionBackendEnum.VMOBA_ATTN:
             try:
                 from csrc.attn.vmoba_attn.vmoba import (  # noqa: F401

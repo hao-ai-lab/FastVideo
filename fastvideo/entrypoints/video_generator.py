@@ -8,6 +8,7 @@ diffusion models.
 
 import math
 import os
+import re
 import time
 from copy import deepcopy
 from typing import Any
@@ -110,7 +111,7 @@ class VideoGenerator:
             prompt: The prompt to use for generation (optional if prompt_txt is provided)
             negative_prompt: The negative prompt to use (overrides the one in fastvideo_args)
             output_path: Path to save the video (overrides the one in fastvideo_args)
-            output_video_name: Name of the video file to save. Default is the first 100 characters of the prompt.
+            prompt_path: Path to prompt file
             save_video: Whether to save the video to disk
             return_frames: Whether to return the raw frames
             num_inference_steps: Number of denoising steps (overrides fastvideo_args)
@@ -127,8 +128,13 @@ class VideoGenerator:
             Either the output dictionary, list of frames, or list of results for batch processing
         """
         # Handle batch processing from text file
-        if self.fastvideo_args.prompt_txt is not None:
-            prompt_txt_path = self.fastvideo_args.prompt_txt
+        if sampling_param is None:
+            sampling_param = SamplingParam.from_pretrained(
+                self.fastvideo_args.model_path)
+        sampling_param.update(kwargs)
+
+        if self.fastvideo_args.prompt_txt is not None or sampling_param.prompt_path is not None:
+            prompt_txt_path = sampling_param.prompt_path or self.fastvideo_args.prompt_txt
             if not os.path.exists(prompt_txt_path):
                 raise FileNotFoundError(
                     f"Prompt text file not found: {prompt_txt_path}")
@@ -142,22 +148,19 @@ class VideoGenerator:
 
             logger.info("Found %d prompts in %s", len(prompts), prompt_txt_path)
 
-            if sampling_param is not None:
-                original_output_video_name = sampling_param.output_video_name
-            else:
-                original_output_video_name = None
-
             results = []
             for i, batch_prompt in enumerate(prompts):
                 logger.info("Processing prompt %d/%d: %s...", i + 1,
                             len(prompts), batch_prompt[:100])
-
                 try:
                     # Generate video for this prompt using the same logic below
-                    if sampling_param is not None and original_output_video_name is not None:
-                        sampling_param.output_video_name = original_output_video_name + f"_{i}"
+                    output_path = self._prepare_output_path(
+                        sampling_param.output_path, batch_prompt)
+                    kwargs["output_path"] = output_path
                     result = self._generate_single_video(
-                        batch_prompt, sampling_param, **kwargs)
+                        prompt=batch_prompt,
+                        sampling_param=sampling_param,
+                        **kwargs)
 
                     # Add prompt info to result
                     if isinstance(result, dict):
@@ -181,8 +184,73 @@ class VideoGenerator:
         # Single prompt generation (original behavior)
         if prompt is None:
             raise ValueError("Either prompt or prompt_txt must be provided")
+        output_path = self._prepare_output_path(sampling_param.output_path,
+                                                prompt)
+        kwargs["output_path"] = output_path
+        return self._generate_single_video(prompt=prompt,
+                                           sampling_param=sampling_param,
+                                           **kwargs)
 
-        return self._generate_single_video(prompt, sampling_param, **kwargs)
+    def _prepare_output_path(
+        self,
+        output_path: str,
+        prompt: str,
+    ) -> str:
+        """Build a unique, sanitized .mp4 output file path.
+
+        - If `output_path` ends with .mp4 (case-insensitive), treat it as a file path.
+        - Otherwise, treat `output_path` as a directory and derive the filename
+          from the prompt.
+        - Invalid filename characters are removed; if the name changes, a
+          warning is logged.
+        - If the target path already exists, a numeric suffix is appended.
+        """
+
+        def _sanitize_filename_component(name: str) -> str:
+            # Remove characters invalid on common filesystems, strip spaces/dots
+            sanitized = re.sub(r'[\\/:*?"<>|]', '', name)
+            sanitized = sanitized.strip().strip('.')
+            sanitized = re.sub(r'\s+', ' ', sanitized)
+            return sanitized or "video"
+
+        base_path, extension = os.path.splitext(output_path)
+        extension_lower = extension.lower()
+
+        if extension_lower == ".mp4":
+            output_dir = os.path.dirname(output_path)
+            base_name = os.path.basename(
+                base_path)  # filename without extension
+            sanitized_base = _sanitize_filename_component(base_name)
+            if sanitized_base != base_name:
+                logger.warning(
+                    "The video name '%s' contained invalid characters. It has been renamed to '%s.mp4'",
+                    os.path.basename(output_path),
+                    sanitized_base,
+                )
+            video_name = f"{sanitized_base}.mp4"
+        else:
+            # Treat as directory; inform if an unexpected extension was provided.
+            if extension:
+                logger.info(
+                    "Output path '%s' has non-mp4 extension '%s'; treating it as a directory and using a .mp4 filename derived from the prompt",
+                    output_path,
+                    extension,
+                )
+            output_dir = output_path
+            prompt_component = _sanitize_filename_component(prompt[:100])
+            video_name = f"{prompt_component}.mp4"
+
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+
+        new_output_path = os.path.join(output_dir, video_name)
+        counter = 1
+        while os.path.exists(new_output_path):
+            name_part, ext_part = os.path.splitext(video_name)
+            new_video_name = f"{name_part}_{counter}{ext_part}"
+            new_output_path = os.path.join(output_dir, new_video_name)
+            counter += 1
+        return new_output_path
 
     def _generate_single_video(
         self,
@@ -200,15 +268,9 @@ class VideoGenerator:
             raise TypeError(
                 f"`prompt` must be a string, but got {type(prompt)}")
         prompt = prompt.strip()
-        if sampling_param is None:
-            sampling_param = SamplingParam.from_pretrained(
-                fastvideo_args.model_path)
-        else:
-            sampling_param = deepcopy(sampling_param)
-
-        kwargs["prompt"] = prompt
-        sampling_param.update(kwargs)
-
+        sampling_param = deepcopy(sampling_param)
+        output_path = kwargs["output_path"]
+        sampling_param.prompt = prompt
         # Process negative prompt
         if sampling_param.negative_prompt is not None:
             sampling_param.negative_prompt = sampling_param.negative_prompt.strip(
@@ -277,7 +339,7 @@ class VideoGenerator:
                       height: {target_height}
                        width: {target_width}
                 video_length: {sampling_param.num_frames}
-                      prompt: {prompt}
+                      prompt: {sampling_param.prompt}
                       image_path: {sampling_param.image_path}
                   neg_prompt: {sampling_param.negative_prompt}
                         seed: {sampling_param.seed}
@@ -288,7 +350,7 @@ class VideoGenerator:
                   flow_shift: {fastvideo_args.pipeline_config.flow_shift}
      embedded_guidance_scale: {fastvideo_args.pipeline_config.embedded_cfg_scale}
                   save_video: {sampling_param.save_video}
-                  output_path: {sampling_param.output_path}
+                  output_path: {output_path}
         """ # type: ignore[attr-defined]
         logger.info(debug_str)
 
@@ -299,10 +361,6 @@ class VideoGenerator:
             n_tokens=n_tokens,
             VSA_sparsity=fastvideo_args.VSA_sparsity,
         )
-
-        # Use prompt[:100] for video name
-        if batch.output_video_name is None:
-            batch.output_video_name = prompt[:100]
 
         # Run inference
         start_time = time.perf_counter()
@@ -323,15 +381,8 @@ class VideoGenerator:
 
         # Save video if requested
         if batch.save_video:
-            output_path = batch.output_path
-            if output_path:
-                os.makedirs(output_path, exist_ok=True)
-                video_path = os.path.join(output_path,
-                                          f"{batch.output_video_name}.mp4")
-                imageio.mimsave(video_path, frames, fps=batch.fps, format="mp4")
-                logger.info("Saved video to %s", video_path)
-            else:
-                logger.warning("No output path provided, video not saved")
+            imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
+            logger.info("Saved video to %s", output_path)
 
         if batch.return_frames:
             return frames
