@@ -124,4 +124,4 @@ def run_self_forcing_tests():
 
 @app.function(gpu="L40S:1", image=image, timeout=900)
 def run_unit_test():
-    run_test("pytest ./fastvideo/tests/dataset/ ./fastvideo/tests/workflow/ -vs")
+    run_test("pytest ./fastvideo/tests/dataset/ ./fastvideo/tests/workflow/ ./fastvideo/tests/entrypoints/ -vs")

@@ -196,20 +196,53 @@ class VideoGenerator:
         output_path: str,
         prompt: str,
     ) -> str:
+        """Build a unique, sanitized .mp4 output file path.
+
+        - If `output_path` ends with .mp4 (case-insensitive), treat it as a file path.
+        - Otherwise, treat `output_path` as a directory and derive the filename
+          from the prompt.
+        - Invalid filename characters are removed; if the name changes, a
+          warning is logged.
+        - If the target path already exists, a numeric suffix is appended.
+        """
+
+        def _sanitize_filename_component(name: str) -> str:
+            # Remove characters invalid on common filesystems, strip spaces/dots
+            sanitized = re.sub(r'[\\/:*?"<>|]', '', name)
+            sanitized = sanitized.strip().strip('.')
+            sanitized = re.sub(r'\s+', ' ', sanitized)
+            return sanitized or "video"
+
         base_path, extension = os.path.splitext(output_path)
-        if extension == ".mp4":
+        extension_lower = extension.lower()
+
+        if extension_lower == ".mp4":
             output_dir = os.path.dirname(output_path)
-            video_name = re.sub(r'[\/:*?"<>|]', '',
-                                os.path.basename(output_path))
-            if video_name != os.path.basename(output_path):
-                print(
-                    f"The video name '{os.path.basename(output_path)}' contained invalid characters. It has been renamed to '{video_name}'"
+            base_name = os.path.basename(
+                base_path)  # filename without extension
+            sanitized_base = _sanitize_filename_component(base_name)
+            if sanitized_base != base_name:
+                logger.warning(
+                    "The video name '%s' contained invalid characters. It has been renamed to '%s.mp4'",
+                    os.path.basename(output_path),
+                    sanitized_base,
                 )
+            video_name = f"{sanitized_base}.mp4"
         else:
+            # Treat as directory; inform if an unexpected extension was provided.
+            if extension:
+                logger.info(
+                    "Output path '%s' has non-mp4 extension '%s'; treating it as a directory and using a .mp4 filename derived from the prompt",
+                    output_path,
+                    extension,
+                )
             output_dir = output_path
-            video_name = re.sub(r'[\/:*?"<>|]', '', prompt[:100] + ".mp4")
+            prompt_component = _sanitize_filename_component(prompt[:100])
+            video_name = f"{prompt_component}.mp4"
+
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
+
         new_output_path = os.path.join(output_dir, video_name)
         counter = 1
         while os.path.exists(new_output_path):
