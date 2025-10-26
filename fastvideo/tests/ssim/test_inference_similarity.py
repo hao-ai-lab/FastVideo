@@ -219,7 +219,7 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     base_output_dir = os.path.join(script_dir, 'generated_videos', model_id)
     output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
-    output_video_name = f"{prompt[:100]}.mp4"
+    output_video_name = f"{prompt[:100].strip()}.mp4"
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -273,7 +273,7 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     reference_video_name = None
 
     for filename in os.listdir(reference_folder):
-        if filename.endswith('.mp4') and prompt[:100] in filename:
+        if filename.endswith('.mp4') and prompt[:100].strip() in filename:
             reference_video_name = filename
             break
 
