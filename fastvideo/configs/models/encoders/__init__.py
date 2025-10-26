@@ -10,6 +10,5 @@ from fastvideo.configs.models.encoders.t5 import T5Config, T5LargeConfig
 __all__ = [
     "EncoderConfig", "TextEncoderConfig", "ImageEncoderConfig",
     "BaseEncoderOutput", "CLIPTextConfig", "CLIPVisionConfig",
-    "WAN2_1ControlCLIPVisionConfig", "LlamaConfig", "T5Config", 
-    "T5LargeConfig"
+    "WAN2_1ControlCLIPVisionConfig", "LlamaConfig", "T5Config", "T5LargeConfig"
 ]
