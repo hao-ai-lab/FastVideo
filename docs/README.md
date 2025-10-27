@@ -1,20 +1,35 @@
-# FastVideo documents
+# FastVideo Documentation
 
-## Build the docs
+This directory contains the FastVideo documentation built with MkDocs.
 
-```bash
-# Install dependencies.
-pip install -r requirements-docs.txt
-
-# Build the docs.
-make clean
-make html
-```
-
-## Open the docs with your browser
+## Build the docs locally
 
 ```bash
-python -m http.server -d build/html/
+# Install dependencies
+pip install -r requirements-mkdocs.txt
+
+# Serve docs with live reload (recommended for development)
+mkdocs serve
+
+# Or build static site
+mkdocs build
 ```
 
-Launch your browser and open localhost:8000.
+## View the docs
+
+### Development server (with live reload)
+```bash
+mkdocs serve
+```
+Then open your browser to: http://127.0.0.1:8000
+
+### Static build
+```bash
+mkdocs build
+python -m http.server -d site/
+```
+Then open your browser to: http://localhost:8000
+
+## Automatic Deployment
+
+Documentation is automatically built and deployed to GitHub Pages when changes are pushed to the `main` branch via the `.github/workflows/docs.yml` workflow.
