@@ -21,35 +21,50 @@ logger = init_logger(__name__)
 os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
-#BASE_MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-BASE_MODEL_PATH = "nvidia/Cosmos-Predict2-2B-Video2World"
-MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-                                  local_dir=os.path.join(
-                                      'data', BASE_MODEL_PATH))
-TEXT_ENCODER_PATH = os.path.join(MODEL_PATH, "text_encoder")
-TOKENIZER_PATH = os.path.join(MODEL_PATH, "tokenizer")
+
+@pytest.fixture
+def t5_model_paths():
+    base_model_path = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+    model_path = maybe_download_model(base_model_path,
+                                      local_dir=os.path.join(
+                                          'data', base_model_path))
+    text_encoder_path = os.path.join(model_path, "text_encoder")
+    tokenizer_path = os.path.join(model_path, "tokenizer")
+    return text_encoder_path, tokenizer_path
+
+
+@pytest.fixture
+def t5_large_model_paths():
+    base_model_path = "nvidia/Cosmos-Predict2-2B-Video2World"
+    model_path = maybe_download_model(base_model_path,
+                                      local_dir=os.path.join(
+                                          'data', base_model_path))
+    text_encoder_path = os.path.join(model_path, "text_encoder")
+    tokenizer_path = os.path.join(model_path, "tokenizer")
+    return text_encoder_path, tokenizer_path
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_t5_encoder():
+def test_t5_encoder(t5_model_paths):
     # Initialize the two model implementations
-    hf_config = AutoConfig.from_pretrained(TEXT_ENCODER_PATH)
+    text_encoder_path, tokenizer_path = t5_model_paths
+    hf_config = AutoConfig.from_pretrained(text_encoder_path)
     print(hf_config)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     precision_str = "fp32"
     precision = PRECISION_TO_TYPE[precision_str]
-    model1 = UMT5EncoderModel.from_pretrained(TEXT_ENCODER_PATH).to(
+    model1 = UMT5EncoderModel.from_pretrained(text_encoder_path).to(
         precision).to(device).eval()
-    tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
 
-    args = FastVideoArgs(model_path=TEXT_ENCODER_PATH,
+    args = FastVideoArgs(model_path=text_encoder_path,
                         pipeline_config=PipelineConfig(text_encoder_configs=(T5Config(),),
                         text_encoder_precisions=(precision_str,)),
                         pin_cpu_memory=False)
     loader = TextEncoderLoader()
-    model2 = loader.load(TEXT_ENCODER_PATH, args)
+    model2 = loader.load(text_encoder_path, args)
     model2 = model2.to(precision)
     model2.eval()
 
@@ -62,7 +77,6 @@ def test_t5_encoder():
     logger.info("Model1 has %s parameters", len(params1))
     logger.info("Model2 has %s parameters", len(params2))
 
-    weight_diffs = []
     # check if embed_tokens are the same
     weights = ["encoder.block.{}.layer.0.layer_norm.weight", "encoder.block.{}.layer.0.SelfAttention.relative_attention_bias.weight", \
                "encoder.block.{}.layer.0.SelfAttention.o.weight", "encoder.block.{}.layer.1.DenseReluDense.wi_0.weight", "encoder.block.{}.layer.1.DenseReluDense.wi_1.weight",\
@@ -140,24 +154,25 @@ def test_t5_encoder():
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_t5_large_encoder():
+def test_t5_large_encoder(t5_large_model_paths):
     # Initialize the two model implementations
-    hf_config = AutoConfig.from_pretrained(TEXT_ENCODER_PATH)
+    text_encoder_path, tokenizer_path = t5_large_model_paths
+    hf_config = AutoConfig.from_pretrained(text_encoder_path)
     print(hf_config)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     precision_str = "fp32"
     precision = PRECISION_TO_TYPE[precision_str]
-    model1 = T5EncoderModel.from_pretrained(TEXT_ENCODER_PATH).to(
+    model1 = T5EncoderModel.from_pretrained(text_encoder_path).to(
         precision).to(device).eval()
-    tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
-    args = FastVideoArgs(model_path=TEXT_ENCODER_PATH,
+    args = FastVideoArgs(model_path=text_encoder_path,
                         pipeline_config=PipelineConfig(text_encoder_configs=(T5LargeConfig(),),
                         text_encoder_precisions=(precision_str,)),
                         pin_cpu_memory=False)
     loader = TextEncoderLoader()
-    model2 = loader.load(TEXT_ENCODER_PATH, args)
+    model2 = loader.load(text_encoder_path, args)
     model2 = model2.to(precision)
     model2.eval()
 
@@ -170,30 +185,28 @@ def test_t5_large_encoder():
     logger.info("Model1 has %s parameters", len(params1))
     logger.info("Model2 has %s parameters", len(params2))
     
-    # # Print parameter names for comparison
-    # logger.info("Model1 parameters:")
-    # for name in sorted(params1.keys()):
-    #     logger.info("  %s: %s", name, params1[name].shape)
+    # Print parameter names for comparison
+    logger.info("Model1 parameters:")
+    for name in sorted(params1.keys()):
+        logger.info("  %s: %s", name, params1[name].shape)
     
-    # logger.info("Model2 parameters:")
-    # for name in sorted(params2.keys()):
-    #     logger.info("  %s: %s", name, params2[name].shape)
+    logger.info("Model2 parameters:")
+    for name in sorted(params2.keys()):
+        logger.info("  %s: %s", name, params2[name].shape)
 
-    weight_diffs = []
-    # check if embed_tokens are the same
-    # weights = ["encoder.block.{}.layer.0.layer_norm.weight", "encoder.block.{}.layer.0.SelfAttention.relative_attention_bias.weight", \
-    #            "encoder.block.{}.layer.0.SelfAttention.o.weight", "encoder.block.{}.layer.1.DenseReluDense.wi_0.weight", "encoder.block.{}.layer.1.DenseReluDense.wi_1.weight",\
-    #             "encoder.block.{}.layer.1.DenseReluDense.wo.weight", \
-    #             "encoder.block.{}.layer.1.layer_norm.weight", "encoder.final_layer_norm.weight"]
+    #check if embed_tokens are the same
+    weights = ["encoder.block.{}.layer.0.layer_norm.weight", "encoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight", \
+               "encoder.block.{}.layer.0.SelfAttention.o.weight", "encoder.block.{}.layer.1.DenseReluDense.wi.weight", \
+                "encoder.block.{}.layer.1.DenseReluDense.wo.weight", "encoder.final_layer_norm.weight"]
     
-    # for idx in range(hf_config.num_hidden_layers):
-    #     for w in weights:
-    #         name1 = w.format(idx)
-    #         name2 = w.format(idx)
-    #         p1 = params1[name1]
-    #         p2 = params2[name2]
-    #         p2 = (p2.to_local() if isinstance(p2, DTensor) else p2).to(p1)
-    #         assert_close(p1, p2, atol=1e-4, rtol=1e-4)
+    for idx in range(hf_config.num_hidden_layers):
+        for w in weights:
+            name1 = w.format(idx)
+            name2 = w.format(idx)
+            p1 = params1[name1]
+            p2 = params2[name2]
+            p2 = (p2.to_local() if isinstance(p2, DTensor) else p2).to(p1)
+            assert_close(p1, p2, atol=1e-4, rtol=1e-4)
     
 
     # Test with some sample prompts

@@ -112,6 +112,56 @@ class LatentPreparationStage(PipelineStage):
 
         return batch
 
+    def adjust_video_length(self, batch: ForwardBatch,
+                            fastvideo_args: FastVideoArgs) -> int:
+        """
+        Adjust video length based on VAE version.
+        
+        Args:
+            batch: The current batch information.
+            fastvideo_args: The inference arguments.
+            
+        Returns:
+            The batch with adjusted video length.
+        """
+
+        video_length = batch.num_frames
+        use_temporal_scaling_frames = fastvideo_args.pipeline_config.vae_config.use_temporal_scaling_frames
+        if use_temporal_scaling_frames:
+            temporal_scale_factor = fastvideo_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+            latent_num_frames = (video_length - 1) // temporal_scale_factor + 1
+        else:  # stepvideo only
+            latent_num_frames = video_length // 17 * 3
+        return int(latent_num_frames)
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify latent preparation stage inputs."""
+        result = VerificationResult()
+        result.add_check(
+            "prompt_or_embeds", None, lambda _: V.string_or_list_strings(
+                batch.prompt) or V.list_not_empty(batch.prompt_embeds))
+        result.add_check("prompt_embeds", batch.prompt_embeds,
+                         V.list_of_tensors)
+        result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt,
+                         V.positive_int)
+        result.add_check("generator", batch.generator,
+                         V.generator_or_list_generators)
+        result.add_check("num_frames", batch.num_frames, V.positive_int)
+        result.add_check("height", batch.height, V.positive_int)
+        result.add_check("width", batch.width, V.positive_int)
+        result.add_check("latents", batch.latents, V.none_or_tensor)
+        return result
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify latent preparation stage outputs."""
+        result = VerificationResult()
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(5)])
+        result.add_check("raw_latent_shape", batch.raw_latent_shape, V.is_tuple)
+        return result
+
 
 class CosmosLatentPreparationStage(PipelineStage):
     """
@@ -325,25 +375,6 @@ class CosmosLatentPreparationStage(PipelineStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> VerificationResult:
-        """Verify Cosmos latent preparation stage inputs."""
-        result = VerificationResult()
-        result.add_check(
-            "prompt_or_embeds", None, lambda _: V.string_or_list_strings(
-                batch.prompt) or V.list_not_empty(batch.prompt_embeds))
-        result.add_check("prompt_embeds", batch.prompt_embeds,
-                         V.list_of_tensors)
-        result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt,
-                         V.positive_int)
-        result.add_check("generator", batch.generator,
-                         V.generator_or_list_generators)
-        result.add_check("num_frames", batch.num_frames, V.positive_int)
-        result.add_check("height", batch.height, V.positive_int)
-        result.add_check("width", batch.width, V.positive_int)
-        result.add_check("latents", batch.latents, V.none_or_tensor)
-        return result
-
     def adjust_video_length(self, batch: ForwardBatch,
                             fastvideo_args: FastVideoArgs) -> int:
         """
@@ -365,6 +396,25 @@ class CosmosLatentPreparationStage(PipelineStage):
         else:  # stepvideo only
             latent_num_frames = video_length // 17 * 3
         return int(latent_num_frames)
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify Cosmos latent preparation stage inputs."""
+        result = VerificationResult()
+        result.add_check(
+            "prompt_or_embeds", None, lambda _: V.string_or_list_strings(
+                batch.prompt) or V.list_not_empty(batch.prompt_embeds))
+        result.add_check("prompt_embeds", batch.prompt_embeds,
+                         V.list_of_tensors)
+        result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt,
+                         V.positive_int)
+        result.add_check("generator", batch.generator,
+                         V.generator_or_list_generators)
+        result.add_check("num_frames", batch.num_frames, V.positive_int)
+        result.add_check("height", batch.height, V.positive_int)
+        result.add_check("width", batch.width, V.positive_int)
+        result.add_check("latents", batch.latents, V.none_or_tensor)
+        return result
 
     def verify_output(self, batch: ForwardBatch,
                       fastvideo_args: FastVideoArgs) -> VerificationResult:
