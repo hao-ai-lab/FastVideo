@@ -39,12 +39,12 @@ dist/
 eggs/
 .eggs/
 
-# Sphinx documentation
-docs/_build/
-docs/source/getting_started/examples/
-docs/source/inference/examples/
-docs/source/training/examples/
-docs/source/distillation/examples/
+# MkDocs documentation
+site/
+docs/getting_started/examples/
+docs/inference/examples/
+docs/training/examples/
+docs/distillation/examples/
 
 # VSCode
 .vscode/
@@ -63,7 +63,7 @@ docs/source/distillation/examples/
 !fastvideo/tests/ssim/reference_videos/**/*.mp4
 
 # Static images
-!docs/source/_static/images/**/*.png
+!docs/assets/images/**/*.png
 !comfyui/assets/**/*.png
 !comfyui/assets/**/*.gif
 
