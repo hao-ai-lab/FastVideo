@@ -25,6 +25,13 @@ def t5_large_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
     if nan_count > 0:
         hidden_state = hidden_state.masked_fill(torch.isnan(hidden_state), 0.0)
 
+    # Zero out embeddings beyond actual sequence length
+    if outputs.attention_mask is not None:
+        attention_mask = outputs.attention_mask
+        lengths = attention_mask.sum(dim=1).cpu()
+        for i, length in enumerate(lengths):
+            hidden_state[i, length:] = 0
+
     return hidden_state
 
 

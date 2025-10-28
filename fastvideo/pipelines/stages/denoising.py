@@ -803,7 +803,6 @@ class CosmosDenoisingStage(DenoisingStage):
         conditioning_latents = getattr(batch, 'conditioning_latents', None)
         unconditioning_latents = conditioning_latents
 
-        # Sampling loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if hasattr(self, 'interrupt') and self.interrupt:
@@ -824,7 +823,6 @@ class CosmosDenoisingStage(DenoisingStage):
                                     dtype=target_dtype,
                                     enabled=autocast_enabled):
 
-                    # Conditional forward pass
                     cond_latent = latents * c_in
 
                     if hasattr(
@@ -840,7 +838,6 @@ class CosmosDenoisingStage(DenoisingStage):
 
                     cond_latent = cond_latent.to(target_dtype)
 
-                    # Apply conditional timestep processing
                     cond_timestep = timestep
                     if hasattr(batch, 'cond_indicator'
                                ) and batch.cond_indicator is not None:
@@ -913,18 +910,16 @@ class CosmosDenoisingStage(DenoisingStage):
                                 attn_metadata=None,
                                 forward_batch=batch,
                         ):
-                            # Use uncond_mask for unconditional pass if available
                             uncond_condition_mask = batch.uncond_mask.to(
                                 target_dtype
                             ) if hasattr(
                                 batch, 'uncond_mask'
                             ) and batch.uncond_mask is not None else condition_mask
 
-                            # Apply same conditional timestep processing for unconditional pass
                             uncond_timestep = timestep
                             if hasattr(batch, 'uncond_indicator'
                                        ) and batch.uncond_indicator is not None:
-                                sigma_conditioning = 0.0001  # Same as Diffusers default
+                                sigma_conditioning = 0.0001
                                 t_conditioning = sigma_conditioning / (
                                     sigma_conditioning + 1)
                                 uncond_timestep = batch.uncond_indicator * t_conditioning + (
@@ -947,7 +942,6 @@ class CosmosDenoisingStage(DenoisingStage):
                             c_skip * latents +
                             c_out * noise_pred_uncond.float()).to(target_dtype)
 
-                        # Apply conditional indicator masking for unconditional prediction like diffusers
                         if hasattr(
                                 batch, 'uncond_indicator'
                         ) and batch.uncond_indicator is not None and unconditioning_latents is not None:
@@ -968,7 +962,6 @@ class CosmosDenoisingStage(DenoisingStage):
                         i, current_sigma)
                     noise_for_scheduler = final_pred
 
-                # Debug: Check for NaN values before scheduler step
                 if torch.isnan(noise_for_scheduler).sum() > 0:
                     logger.error(
                         "Step %s: NaN detected in noise_for_scheduler, sum: %s",
@@ -988,7 +981,6 @@ class CosmosDenoisingStage(DenoisingStage):
 
                 progress_bar.update()
 
-        # Update batch with final latents
         batch.latents = latents
 
         return batch
