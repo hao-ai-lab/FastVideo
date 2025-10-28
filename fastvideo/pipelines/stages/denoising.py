@@ -575,7 +575,7 @@ class DenoisingStage(PipelineStage):
             fastvideo_args: The inference arguments.
         """
         # TODO(kevin): STA mask search, currently only support Wan2.1 with 69x768x1280
-        from fastvideo.STA_configuration import configure_sta
+        from fastvideo.attention.backends.STA_configuration import configure_sta
         STA_mode = fastvideo_args.STA_mode
         skip_time_steps = fastvideo_args.skip_time_steps
         if batch.timesteps is None:
@@ -682,7 +682,7 @@ class DenoisingStage(PipelineStage):
             raise NotImplementedError(
                 "STA mask search is not supported for this resolution")
 
-        from fastvideo.STA_configuration import save_mask_search_results
+        from fastvideo.attention.backends.STA_configuration import save_mask_search_results
         if batch.mask_search_final_result_pos is not None and batch.prompt is not None:
             save_mask_search_results(
                 [
