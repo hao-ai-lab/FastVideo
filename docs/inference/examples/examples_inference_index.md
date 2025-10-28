@@ -7,4 +7,5 @@ Inference examples demonstrate how to use FastVideo inference. We recommend star
 - [Sta Mask Search](sta_mask_search.md)
 - [Basic](basic.md)
 - [Optimizations](optimizations.md)
+- [Local](local.md)
 
