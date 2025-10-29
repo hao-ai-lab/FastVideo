@@ -13,20 +13,35 @@ The symbols used have the following meanings:
 The `HuggingFace Model ID` can be directly pass to `from_pretrained()` methods and FastVideo will use the optimal default parameters when initializing and generating videos.
 
 <style>
-  /* Make smaller to try to improve readability  */
-  td {
-    font-size: 0.9rem;
-    text-align: center;
+  /* Target tables in this section */
+  #models-x-optimization + p + table {
+    display: block;
+    overflow-x: auto;
+    width: 100%;
+    font-size: 0.85rem;
   }
-
-  th {
+  
+  #models-x-optimization + p + table td,
+  #models-x-optimization + p + table th {
     text-align: center;
-    font-size: 0.9rem;
+    white-space: nowrap;
+    padding: 0.5em;
+  }
+  
+  /* First two columns can wrap */
+  #models-x-optimization + p + table td:nth-child(1),
+  #models-x-optimization + p + table td:nth-child(2) {
+    white-space: normal;
+    min-width: 120px;
+  }
+  
+  #models-x-optimization + p + table td:nth-child(2) code {
+    font-size: 0.75rem;
   }
 </style>
 
-| Model Name | HuggingFace Model ID | Resolutions | TeaCache | Sliding Tile Attn | Sage Attn | Video Sparse Attention (VSA) |
-|------------|---------------------|-------------|----------|-------------------|-----------|------------------------------|
+| Model Name | HuggingFace Model ID | Resolutions | TeaCache | Sliding Tile Attn | Sage Attn | VSA |
+|------------|---------------------|-------------|----------|-------------------|-----------|-----|
 | FastWan2.1 T2V 1.3B | `FastVideo/FastWan2.1-T2V-1.3B-Diffusers` | 480P | ⭕ | ⭕ | ⭕ | ✅ |
 | FastWan2.2 TI2V 5B Full Attn* | `FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers` | 720P | ⭕ | ⭕ | ⭕ | ✅ |
 | Wan2.2 TI2V 5B | `Wan-AI/Wan2.2-TI2V-5B-Diffusers` | 720P | ⭕ | ⭕ | ✅ | ⭕ |
