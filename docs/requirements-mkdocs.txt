@@ -9,4 +9,5 @@ mkdocs-macros-plugin>=0.8.0
 mkdocs-minify-plugin>=0.7.0
 mkdocs-simple-hooks>=0.1.5
 pymdown-extensions>=10.0
-
+mkdocs-api-autonav
+mkdocs-autorefs
