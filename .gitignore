@@ -45,6 +45,7 @@ docs/getting_started/examples/
 docs/inference/examples/
 docs/training/examples/
 docs/distillation/examples/
+!requirements-mkdocs.txt
 
 # VSCode
 .vscode/
