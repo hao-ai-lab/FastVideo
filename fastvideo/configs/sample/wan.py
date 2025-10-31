@@ -97,7 +97,7 @@ class WanI2V_14B_720P_SamplingParam(WanT2V_14B_SamplingParam):
 
 
 @dataclass
-class FastWanT2V480PConfig(WanT2V_1_3B_SamplingParam):
+class FastWanT2V480P_SamplingParam(WanT2V_1_3B_SamplingParam):
     # DMD parameters
     # dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 757, 522])
     num_inference_steps: int = 3
@@ -183,5 +183,18 @@ class Wan2_2_Fun_A14B_Control_SamplingParam(
 # ============= Causal Self-Forcing =============
 # =============================================
 @dataclass
-class SelfForcingWanT2V480PConfig(WanT2V_1_3B_SamplingParam):
+class SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam(
+        Wan2_1_Fun_1_3B_InP_SamplingParam):
     pass
+
+
+@dataclass
+class SelfForcingWan2_2_T2V_A14B_480P_SamplingParam(
+        Wan2_2_T2V_A14B_SamplingParam):
+    guidance_scale: float = 2.0
+    guidance_scale_2: float = 2.0
+    num_inference_steps: int = 8
+    num_frames: int = 81
+    height: int = 448
+    width: int = 832
+    fps: int = 16
