@@ -212,9 +212,18 @@ class CausalDMDDenosingStage(DenoisingStage):
             start_index = 0
 
         # DMD loop in causal blocks
+        # Optional per-block callback for streaming
+        on_block = None
+        try:
+            on_block = getattr(batch, "extra",
+                               {}).get("on_block",
+                                       None)  # type: ignore[attr-defined]
+        except Exception:
+            on_block = None
+
         with self.progress_bar(total=len(block_sizes) *
                                len(timesteps)) as progress_bar:
-            for current_num_frames in block_sizes:
+            for block_idx, current_num_frames in enumerate(block_sizes):
                 current_latents = latents[:, :, start_index:start_index +
                                           current_num_frames, :, :]
                 # use BTCHW for DMD conversion routines
@@ -354,6 +363,20 @@ class CausalDMDDenosingStage(DenoisingStage):
                         **pos_cond_kwargs,
                     )
                 start_index += current_num_frames
+
+                # Invoke callback with block metadata (no large tensor transfer required)
+                try:
+                    if callable(on_block):
+                        on_block(
+                            block_index=block_idx,
+                            total_blocks=len(block_sizes),
+                            start_index=start_index - current_num_frames,
+                            num_frames=current_num_frames,
+                            latents=current_latents,
+                        )
+                except Exception as e:
+                    # Swallow callback errors so they don't break generation
+                    logger.warning("on_block callback failed: %s", str(e))
 
         batch.latents = latents
         return batch

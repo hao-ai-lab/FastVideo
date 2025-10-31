@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable
 from multiprocessing.process import BaseProcess
 from typing import Any, cast
+from collections.abc import Iterator
 
 import psutil
 
@@ -22,6 +23,8 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.utils import decorate_logs, get_distributed_init_method, get_exception_traceback, get_loopback_ip, get_mp_context, get_open_port, kill_itself_when_parent_died, force_spawn
 from fastvideo.worker.executor import Executor
 from fastvideo.worker.worker_base import WorkerWrapperBase
+import torch
+import torchvision
 
 logger = init_logger(__name__)
 
@@ -87,6 +90,61 @@ class MultiprocExecutor(Executor):
                                     logging_info=logging_info)
 
         return result_batch
+
+    def execute_forward_streaming(
+            self, forward_batch: ForwardBatch,
+            fastvideo_args: FastVideoArgs) -> Iterator[dict[str, Any]]:
+        """
+        Multiprocess streaming interface.
+
+        Broadcasts a streaming forward request to all workers. Rank 0 streams
+        events (progress/block/complete) back through its pipe; other ranks
+        run the forward pass and return a small completion status.
+        """
+        # Send request to all workers
+        for worker in self.workers:
+            worker.pipe.send({
+                "method": "execute_forward_streaming",
+                "args": (),
+                "kwargs": {
+                    "forward_batch": forward_batch,
+                    "fastvideo_args": fastvideo_args,
+                },
+            })
+
+        done_workers: set[int] = set()
+        rank0_complete = False
+        pipes = [w.pipe for w in self.workers]
+
+        # Drain messages until all workers are done
+        while len(done_workers) < len(self.workers):
+            ready = mp.connection.wait(pipes)
+            for pipe in ready:
+                # Identify which worker sent this
+                idx = next(
+                    (i for i, w in enumerate(self.workers) if w.pipe is pipe),
+                    -1)
+                if idx < 0:
+                    continue
+                msg = pipe.recv()
+
+                # Rank 0 streams events
+                if idx == 0 and isinstance(msg, dict):
+                    msg_type = msg.get("type")
+                    if msg_type in ("progress", "block", "complete"):
+                        yield msg
+                        if msg_type == "complete":
+                            rank0_complete = True
+                            done_workers.add(idx)
+                    elif msg.get("status") == "done":
+                        done_workers.add(idx)
+                else:
+                    # Non-zero ranks: expect simple completion status
+                    if isinstance(msg, dict) and msg.get("status") == "done":
+                        done_workers.add(idx)
+                    else:
+                        # Any unexpected message from non-zero ranks counts as done
+                        done_workers.add(idx)
 
     def set_lora_adapter(self,
                          lora_nickname: str,
@@ -467,6 +525,156 @@ class WorkerMultiprocProc:
                             "output_batch": output_batch.output.cpu(),
                             "logging_info": logging_info
                         })
+                    if method == 'execute_forward_streaming':
+                        forward_batch = kwargs['forward_batch']
+                        fastvideo_args = kwargs['fastvideo_args']
+                        # Install a lightweight per-block callback for streaming metadata from rank 0
+                        try:
+                            extra = getattr(forward_batch, 'extra', None)
+                            if extra is None:
+                                forward_batch.extra = {}
+                                extra = forward_batch.extra
+                        except Exception:
+                            forward_batch.extra = {}
+                            extra = forward_batch.extra
+
+                        def _on_block(**evt):
+                            # Only rank 0 streams events to the executor pipe
+                            if self.rank != 0:
+                                return
+                            try:
+                                block_index = int(evt.get('block_index', 0))
+                                total_blocks = int(evt.get('total_blocks', 0))
+                                num_frames = int(evt.get('num_frames', 0))
+                                latents = evt.get('latents')
+                                if latents is None:
+                                    # Fallback to meta event if no latents provided
+                                    self.pipe.send({
+                                        'type': 'block_meta',
+                                        'block_index': block_index,
+                                        'total_blocks': total_blocks,
+                                        'num_frames': num_frames,
+                                    })
+                                    return
+
+                                # Decode latents to pixels using pipeline VAE
+                                vae = None
+                                try:
+                                    vae = self.worker.pipeline.get_module('vae')
+                                except Exception:
+                                    vae = None
+                                if vae is None:
+                                    # If no VAE, send meta only
+                                    self.pipe.send({
+                                        'type': 'block_meta',
+                                        'block_index': block_index,
+                                        'total_blocks': total_blocks,
+                                        'num_frames': num_frames,
+                                    })
+                                    return
+
+                                # Prepare latents for VAE (apply scaling/shift like DecodingStage)
+                                z = latents.permute(
+                                    0, 2, 1, 3, 4
+                                )  # [B,T,C,H,W] -> [B,C,T,H,W] expected by many VAEs
+                                if hasattr(vae, 'scaling_factor'
+                                           ) and vae.scaling_factor is not None:
+                                    sf = vae.scaling_factor
+                                    if isinstance(sf, torch.Tensor):
+                                        z = z / sf.to(z.device, z.dtype)
+                                    else:
+                                        z = z / sf
+                                if hasattr(vae, 'shift_factor'
+                                           ) and vae.shift_factor is not None:
+                                    shf = vae.shift_factor
+                                    if isinstance(shf, torch.Tensor):
+                                        z = z + shf.to(z.device, z.dtype)
+                                    else:
+                                        z = z + shf
+
+                                with torch.autocast(device_type='cuda',
+                                                    dtype=torch.bfloat16,
+                                                    enabled=True):
+                                    pixels = vae.decode(
+                                        z
+                                    )  # [B,C,T,H,W] in [-1,1] or already normalized depending on VAE
+
+                                # Normalize to [0,1]
+                                pixels = (pixels / 2 + 0.5).clamp(0, 1)
+                                # Convert to uint8 HWC per-frame for first batch element
+                                pixels = (pixels[0].permute(1, 2, 3, 0) *
+                                          255).to(torch.uint8).cpu().numpy()
+                                # Now pixels shape: [T,H,W,C]
+                                frames = [
+                                    pixels[i] for i in range(pixels.shape[0])
+                                ]
+
+                                self.pipe.send({
+                                    'type': 'block',
+                                    'block_index': block_index,
+                                    'total_blocks': total_blocks,
+                                    'frames': frames,
+                                })
+                            except Exception:
+                                # Fail-safe: don't break generation if decode fails
+                                try:
+                                    self.pipe.send({
+                                        'type':
+                                        'block_meta',
+                                        'block_index':
+                                        int(evt.get('block_index', 0)),
+                                        'total_blocks':
+                                        int(evt.get('total_blocks', 0)),
+                                        'num_frames':
+                                        int(evt.get('num_frames', 0)),
+                                    })
+                                except Exception:
+                                    pass
+
+                        try:
+                            extra['on_block'] = _on_block
+                        except Exception:
+                            pass
+                        # Run forward on all ranks
+                        output_batch = self.worker.execute_forward(
+                            forward_batch, fastvideo_args)
+                        if self.rank != 0:
+                            # Non-zero ranks send a small completion message
+                            self.pipe.send({"status": "done"})
+                        else:
+                            # Rank 0 builds frames and streams a single block then complete
+                            samples = output_batch.output  # Tensor [b,c,t,h,w]
+                            try:
+                                videos = samples.permute(2, 0, 1, 3, 4)
+                                frames = []
+                                for x in videos:
+                                    grid = torchvision.utils.make_grid(x,
+                                                                       nrow=6)
+                                    grid = grid.transpose(0, 1).transpose(
+                                        1, 2).squeeze(-1)
+                                    frame = (grid * 255).to(
+                                        torch.uint8).cpu().numpy()
+                                    frames.append(frame)
+                                # Emit a single block with all frames
+                                self.pipe.send({
+                                    "type": "block",
+                                    "block_index": 0,
+                                    "total_blocks": 1,
+                                    "frames": frames,
+                                })
+                            except Exception:
+                                # If frame construction fails, still complete
+                                pass
+                            # Emit a complete event
+                            self.pipe.send({
+                                "type": "complete",
+                                "result": {
+                                    "num_frames":
+                                    int(samples.shape[2])
+                                    if hasattr(samples, 'shape')
+                                    and len(samples.shape) >= 3 else None
+                                },
+                            })
                 else:
                     result = self.worker.execute_method(method, *args, **kwargs)
                     self.pipe.send(result)

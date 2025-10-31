@@ -208,7 +208,7 @@ class VideoGenerator:
 
         def _sanitize_filename_component(name: str) -> str:
             # Remove characters invalid on common filesystems, strip spaces/dots
-            sanitized = re.sub(r'[\\/:*?"<>|]', '', name)
+            sanitized = re.sub(r'[\/:*?"<>|]', '', name)
             sanitized = sanitized.strip().strip('.')
             sanitized = re.sub(r'\s+', ' ', sanitized)
             return sanitized or "video"
