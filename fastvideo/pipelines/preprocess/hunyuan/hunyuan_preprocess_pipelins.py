@@ -6,10 +6,10 @@ from fastvideo.pipelines.stages import (EncodingStage, ImageEncodingStage,
                                         TextEncodingStage)
 from fastvideo.pipelines.stages.image_encoding import ImageVAEEncodingStage
 
+
 class PreprocessPipelineI2V(ComposedPipelineBase):
     _required_config_modules = [
-        "image_encoder", "image_processor", "text_encoder", "tokenizer",
-        "text_encoder_2", "tokenizer_2", "vae"
+        "text_encoder", "tokenizer", "text_encoder_2", "tokenizer_2", "vae"
     ]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
@@ -20,10 +20,19 @@ class PreprocessPipelineI2V(ComposedPipelineBase):
                            preprocess_config.training_cfg_rate,
                            seed=fastvideo_args.preprocess_config.seed,
                        ))
+        text_encoders = [
+            self.get_module("text_encoder"),
+            self.get_module("text_encoder_2")
+        ]
+        tokenizers = [
+            self.get_module("tokenizer"),
+            self.get_module("tokenizer_2")
+        ]
+        
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=TextEncodingStage(
-                           text_encoders=[self.get_module("text_encoder")],
-                           tokenizers=[self.get_module("tokenizer")],
+                           text_encoders=text_encoders,
+                           tokenizers=tokenizers,
                        ))
         self.add_stage(
             stage_name="video_transform_stage",
@@ -49,6 +58,7 @@ class PreprocessPipelineI2V(ComposedPipelineBase):
         self.add_stage(stage_name="video_encoding_stage",
                        stage=EncodingStage(vae=self.get_module("vae"), ))
         
+
 class PreprocessPipelineT2V(ComposedPipelineBase):
     _required_config_modules = [
         "text_encoder", "tokenizer", "text_encoder_2", "tokenizer_2", "vae"
@@ -99,3 +109,6 @@ class PreprocessPipelineT2V(ComposedPipelineBase):
         )
 
 EntryClass = [PreprocessPipelineI2V, PreprocessPipelineT2V]
+
+
+
