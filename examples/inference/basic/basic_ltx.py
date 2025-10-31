@@ -1,5 +1,8 @@
+from fastvideo import VideoGenerator
+from huggingface_hub import snapshot_download
 
 # from fastvideo.configs.sample import SamplingParam
+
 
 OUTPUT_PATH = "video_samples_ltx"
 def main():
@@ -7,23 +10,35 @@ def main():
     # model.
     # If a local path is provided, FastVideo will make a best effort
     # attempt to identify the optimal arguments.
-    generator = VideoGenerator.from_pretrained(
+    allow = [
+        "model_index.json","scheduler/*","tokenizer/*","text_encoder/*","vae/*","transformer/*",
+        "ltxv-13b-0.9.8-dev.safetensors",
+        "ltxv-spatial-upscaler-0.9.8.safetensors",
+    ]
+
+    negative_prompt = "worst quality, inconsistent motion, blurry, jittery, distorted"
+
+
+    snapshot_download(
         "Lightricks/LTX-Video",
-        # # FastVideo will automatically handle distributed setup
+        local_dir="data/Lightricks/LTX-Video",
+        allow_patterns=allow
+        )
+
+    generator = VideoGenerator.from_pretrained(
+        model_path="data/Lightricks/LTX-Video",
+        # TODO: test with >1 gpus
         num_gpus=1,
         use_fsdp_inference=False,
-        # dit_cpu_offload=True,
-        # vae_cpu_offload=False,
-        # text_encoder_cpu_offload=True,
-        # # Set pin_cpu_memory to false if CPU RAM is limited and there're no frequent CPU-GPU transfer
-        # pin_cpu_memory=True,
-        # # image_encoder_cpu_offload=False,
+        pin_cpu_memory=False,
     )
 
-    prompt = "A cute little penguin takes out a book and starts reading it"
-    image_path = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/penguin.png"
+    prompt = "A lone lighthouse in stormy seas, low-flying drone shot, sweeping camera arc, moody clouds, high contrast, cinematic realism"
+    # TODO: when i2v pipeline is checked, add test with image_path
+    image_path = None
 
-    video = generator.generate_video(prompt, image_path=image_path, output_path=OUTPUT_PATH, save_video=True, height=512, width=768, num_frames=20)
+    video = generator.generate_video(prompt, image_path=image_path, neg_prompt=negative_prompt, output_path=OUTPUT_PATH, save_video=True, num_frames=161)
 
 if __name__ == "__main__":
     main()
+

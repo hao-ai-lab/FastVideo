@@ -43,6 +43,13 @@ class LTXPipeline(ComposedPipelineBase):
                            tokenizers=[self.get_module("tokenizer")],
                        ))
 
+        # Add ImageVAEEncodingStage for I2V (conditional based on input)
+        # Before LatentPreparation for I2V
+        # if fastvideo_args.pipeline_config.ltx_i2v_mode:
+        #     self.add_stage(
+        #         stage_name="image_vae_encoding_stage",
+        #         stage=LTXImageVAEEncodingStage(vae=self.get_module("vae")))
+
         self.add_stage(stage_name="conditioning_stage",
                        stage=ConditioningStage())
 
@@ -50,10 +57,13 @@ class LTXPipeline(ComposedPipelineBase):
                        stage=TimestepPreparationStage(
                            scheduler=self.get_module("scheduler")))
 
-        self.add_stage(stage_name="latent_preparation_stage",
-                       stage=LatentPreparationStage(
-                           scheduler=self.get_module("scheduler"),
-                           transformer=self.get_module("transformer", None)))
+        # Only add LatentPreparation for T2V (I2V creates latents in ImageVAEEncoding)
+        if not fastvideo_args.pipeline_config.ltx_i2v_mode:
+            self.add_stage(stage_name="latent_preparation_stage",
+                           stage=LatentPreparationStage(
+                               scheduler=self.get_module("scheduler"),
+                               transformer=self.get_module("transformer",
+                                                           None)))
 
         self.add_stage(stage_name="denoising_stage",
                        stage=DenoisingStage(

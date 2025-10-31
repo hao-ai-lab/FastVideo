@@ -5,7 +5,7 @@ from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
 
 
 def is_blocks(n: str, m) -> bool:
-    return "blocks" in n and str.isdigit(n.split(".")[-1])
+    return "transformer_blocks" in n and n.split(".")[-1].isdigit()
 
 
 @dataclass
@@ -15,6 +15,7 @@ class LTXVideoArchConfig(DiTArchConfig):
     # Parameter name mappings for loading pretrained weights from HuggingFace/Diffusers
     # Maps from source model parameter names to FastVideo LTX implementation names
     param_names_mapping: dict = field(
+        # TODO: most of these are just identity, test after removing?
         default_factory=lambda: {
             # todo: double check all of this
             r"^transformer_blocks\.(\d+)\.norm1\.weight$":
@@ -35,18 +36,6 @@ class LTXVideoArchConfig(DiTArchConfig):
             # Scale-shift table for adaptive layer norm
             r"^transformer_blocks\.(\d+)\.scale_shift_table$":
             r"transformer_blocks.\1.scale_shift_table",
-
-            # Time embedding mappings
-            r"^time_embed\.emb\.timestep_embedder\.linear_1\.(weight|bias)$":
-            r"time_embed.emb.mlp.fc_in.\1",
-            r"^time_embed\.emb\.timestep_embedder\.linear_2\.(weight|bias)$":
-            r"time_embed.emb.mlp.fc_out.\1",
-
-            # Caption projection mappings
-            r"^caption_projection\.linear_1\.(weight|bias)$":
-            r"caption_projection.fc_in.\1",
-            r"^caption_projection\.linear_2\.(weight|bias)$":
-            r"caption_projection.fc_out.\1",
 
             # Output normalization (FP32LayerNorm)
             r"^norm_out\.weight$": r"norm_out.weight",
@@ -76,6 +65,7 @@ class LTXVideoArchConfig(DiTArchConfig):
     exclude_lora_layers: list[str] = field(default_factory=lambda: [])
 
     def __post_init__(self):
+        #super().__post_init__() # TODO: uncomment when FSDP supported?
         self.hidden_size = self.num_attention_heads * self.attention_head_dim
         self.out_channels = self.in_channels if self.out_channels is None else self.out_channels
         self.num_channels_latents = self.out_channels

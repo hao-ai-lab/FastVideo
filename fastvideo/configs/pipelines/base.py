@@ -89,6 +89,10 @@ class PipelineConfig:
     ti2v_task: bool = False
     boundary_ratio: float | None = None
 
+    # LTX parameters
+    ltx_mode: bool = False
+    ltx_i2v_mode: bool = False
+
     # Compilation
     # enable_torch_compile: bool = False
 

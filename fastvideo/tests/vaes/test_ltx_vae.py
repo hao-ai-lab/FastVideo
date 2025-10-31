@@ -150,7 +150,7 @@ def test_ltx_vae():
         assert max_diff_decode < 1e-5, f"Decoded outputs differ significantly: max diff = {max_diff_decode.item()}"
 
 
-# #TODO: test this
+# TODO: modify and test this
 # @pytest.mark.usefixtures("distributed_setup")
 # def test_ltx_vae_tiling():
 #     """Test LTX VAE with tiling enabled for large videos."""

@@ -6,6 +6,7 @@ from typing import Any
 from fastvideo.configs.sample.hunyuan import (FastHunyuanSamplingParam,
                                               HunyuanSamplingParam)
 from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
+from fastvideo.configs.sample.ltx import LTXSamplingParam
 
 # isort: off
 from fastvideo.configs.sample.wan import (
@@ -56,6 +57,9 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     # Causal Self-Forcing Wan2.1
     "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers": SelfForcingWanT2V480PConfig,
     # Add other specific weight variants
+
+    #LTX
+    "Lightricks/LTX-Video": LTXSamplingParam,
 }
 
 # For determining pipeline type from model ID
@@ -64,6 +68,7 @@ SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
     "wanpipeline": lambda id: "wanpipeline" in id.lower(),
     "wanimagetovideo": lambda id: "wanimagetovideo" in id.lower(),
     "stepvideo": lambda id: "stepvideo" in id.lower(),
+    "ltx": lambda id: "ltx" in id.lower(),
     # Add other pipeline architecture detectors
 }
 
@@ -74,7 +79,8 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
     "wanpipeline":
     WanT2V_1_3B_SamplingParam,  # Base Wan config as fallback for any Wan variant
     "wanimagetovideo": WanI2V_14B_480P_SamplingParam,
-    "stepvideo": StepVideoT2VSamplingParam
+    "stepvideo": StepVideoT2VSamplingParam,
+    "ltx": LTXSamplingParam,
     # Other fallbacks by architecture
 }
 

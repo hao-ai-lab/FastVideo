@@ -22,12 +22,6 @@ logger = init_logger(__name__)
 os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
-# BASE_MODEL_PATH = "Lightricks/LTX-Video"
-# MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-#                                   local_dir=os.path.join(
-#                                       'data', BASE_MODEL_PATH))
-# TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
-
 
 snapshot_download(
     "Lightricks/LTX-Video",
@@ -43,10 +37,7 @@ snapshot_download(
         "README.md"
     ]
 )
-#BASE_MODEL_PATH = "Lightricks/LTX-Video"
 TRANSFORMER_PATH = "data/Lightricks/LTX-Video/transformer"
-#TRANSFORMER_PATH = os.path.join(BASE_MODEL_PATH, "transformer")
-print(f"TRANSFORMER_PATH {TRANSFORMER_PATH}")
 
 
 def add_debug_hooks(model, model_name):
@@ -149,9 +140,9 @@ def test_ltx_transformer():
     )
 
 
-    # TODO: clean this up
+    # TODO: clean up
     hidden_states_5d = torch.randn(batch_size, 128, 5, 64, 64, device=device, dtype=precision)
-    # Prepare reshaped version for model1 (original LTX)
+    # LTX uses different shape version as other tests
     hidden_states_3d = hidden_states_5d.permute(0, 2, 3, 4, 1).reshape(batch_size, -1, 128)
 
     # Add hooks to both models
@@ -160,7 +151,6 @@ def test_ltx_transformer():
 
 
     with torch.amp.autocast('cuda', dtype=precision):
-        # LTX transformer expects different arguments
         output1 = model1(
             hidden_states=hidden_states_3d,
             encoder_hidden_states=encoder_hidden_states,

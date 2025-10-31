@@ -247,13 +247,9 @@ def load_model_from_full_model_state_dict(
         NotImplementedError: If got FSDP with more than 1D.
     """
     meta_sd = model.state_dict()
-    # TODO: remove (for debugging)
-    print(list(meta_sd.keys()))
     sharded_sd = {}
     custom_param_sd, reverse_param_names_mapping = hf_to_custom_state_dict(
         full_sd_iterator, param_names_mapping)  # type: ignore
-    # TODO: remove (for debugging)
-    print(list(custom_param_sd.keys()))
     for target_param_name, full_tensor in custom_param_sd.items():
         meta_sharded_param = meta_sd.get(target_param_name)
         if meta_sharded_param is None:

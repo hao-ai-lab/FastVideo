@@ -27,11 +27,14 @@ class LTXVAEArchConfig(VAEArchConfig):
     clip_output: bool = True
 
     def __post_init__(self):
-        # Calculate compression ratios based on patch sizes and downsampling
-        self.temporal_compression_ratio = self.patch_size_t
-        # Spatial compression is usually patch_size * product of spatial downsampling
-        self.spatial_compression_ratio = self.patch_size * (2**(
-            len(self.block_out_channels) - 1))
+        # Calculate compression ratios based on patch sizes and
+        num_downsamples = sum(self.spatio_temporal_scaling)  # Should be 3
+        self.temporal_compression_ratio = self.patch_size_t * (
+            2**num_downsamples)  # 1 * 8 = 8
+
+        # Spatial: patch_size * (2^num_downsamples)
+        self.spatial_compression_ratio = self.patch_size * (2**num_downsamples
+                                                            )  # 4 * 8 = 32
 
         if isinstance(self.scaling_factor, int | float):
             self.scaling_factor_tensor: torch.Tensor = torch.tensor(

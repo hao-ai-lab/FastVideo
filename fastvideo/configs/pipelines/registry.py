@@ -104,20 +104,16 @@ def get_pipeline_config_cls_from_name(
     pipeline_config_cls: type[PipelineConfig] | None = None
 
     # First try exact match for specific weights
-    print(pipeline_name_or_path)
     if pipeline_name_or_path in PIPE_NAME_TO_CONFIG:
         pipeline_config_cls = PIPE_NAME_TO_CONFIG[pipeline_name_or_path]
-    print(f" exact {pipeline_config_cls}")
     # Try partial matches (for local paths that might include the weight ID)
     for registered_id, config_class in PIPE_NAME_TO_CONFIG.items():
         if registered_id in pipeline_name_or_path:
             pipeline_config_cls = config_class
-            print(f" partial {pipeline_config_cls}")
             break
 
     # If no match, try to use the fallback config
     if pipeline_config_cls is None:
-        print(f" trying fallback {pipeline_config_cls}")
         if os.path.exists(pipeline_name_or_path):
             config = verify_model_config_and_directory(pipeline_name_or_path)
         else:

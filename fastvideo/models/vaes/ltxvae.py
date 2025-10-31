@@ -1,4 +1,4 @@
-# Copyright 2025 The Lightricks team and The HuggingFace Team.
+# Copyright 2025 The Lightricks team and The HuggingFace Team and the FastVideo Team.
 # All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,7 +23,6 @@ from fastvideo.configs.models.vaes import LTXVAEConfig
 
 from fastvideo.layers.layernorm import RMSNorm, FP32LayerNorm, LayerNormScaleShift
 from fastvideo.layers.activation import get_act_fn
-from fastvideo.layers.layernorm import ScaleResidual
 from fastvideo.layers.activation import QuickGELU
 from fastvideo.layers.vocab_parallel_embedding import VocabParallelEmbedding, UnquantizedEmbeddingMethod
 
@@ -68,7 +67,7 @@ class FastVideoLTXCausalConv3d(nn.Module):
         padding = (0, height_pad, width_pad)
 
         # TODO: optimize convolution?
-        # TODO: Add  parallelism across output channels
+        # TODO: Add parallelism across output channels
         self.conv = nn.Conv3d(
             in_channels,
             out_channels,
@@ -162,8 +161,6 @@ class FastVideoLTXResnetBlock3d(nn.Module):
         if timestep_conditioning:
             self.scale_shift_table = nn.Parameter(torch.randn(4, in_channels) / in_channels**0.5)
 
-        # # Use ScaleResidual for  residual connection
-        # self.residual = ScaleResidual()
 
     def forward(
         self, inputs: torch.Tensor, temb: Optional[torch.Tensor] = None, generator: Optional[torch.Generator] = None
@@ -231,7 +228,7 @@ class FastVideoLTXDownsampler3d(nn.Module):
 
         out_channels = out_channels // (self.stride[0] * self.stride[1] * self.stride[2])
 
-        # TODO: Add  parallelism ?
+        # TODO: Add parallelism ?
         self.conv = FastVideoLTXCausalConv3d(
             in_channels=in_channels,
             out_channels=out_channels,
@@ -324,9 +321,7 @@ class FastVideoLTXDownBlock3D(nn.Module):
     r"""
     FastVideo down block for LTX VAE.
     
-    TODO: add more optimizations:
-
-    - add parallelism 
+    TODO: add more parallelism optimizations
     """
 
     _supports_gradient_checkpointing = True
@@ -409,97 +404,6 @@ class FastVideoLTXDownBlock3D(nn.Module):
 
         return hidden_states
 
-
-class FastVideoLTX095DownBlock3D(nn.Module):
-    r"""
-    FastVideo down block for LTX VAE.
-    """
-
-    _supports_gradient_checkpointing = True
-
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: Optional[int] = None,
-        num_layers: int = 1,
-        dropout: float = 0.0,
-        resnet_eps: float = 1e-6,
-        resnet_act_fn: str = "swish",
-        spatio_temporal_scale: bool = True,
-        is_causal: bool = True,
-        downsample_type: str = "conv",
-    ):
-        super().__init__()
-
-        out_channels = out_channels or in_channels
-
-        resnets = []
-        for _ in range(num_layers):
-            resnets.append(
-                FastVideoLTXResnetBlock3d(
-                    in_channels=in_channels,
-                    out_channels=in_channels,
-                    dropout=dropout,
-                    eps=resnet_eps,
-                    non_linearity=resnet_act_fn,
-                    is_causal=is_causal,
-                )
-            )
-        self.resnets = nn.ModuleList(resnets)
-
-        self.downsamplers = None
-        if spatio_temporal_scale:
-            self.downsamplers = nn.ModuleList()
-
-            if downsample_type == "conv":
-                self.downsamplers.append(
-                    FastVideoLTXCausalConv3d(
-                        in_channels=in_channels,
-                        out_channels=in_channels,
-                        kernel_size=3,
-                        stride=(2, 2, 2),
-                        is_causal=is_causal,
-                    )
-                )
-            elif downsample_type == "spatial":
-                self.downsamplers.append(
-                    FastVideoLTXDownsampler3d(
-                        in_channels=in_channels, out_channels=out_channels, stride=(1, 2, 2), is_causal=is_causal
-                    )
-                )
-            elif downsample_type == "temporal":
-                self.downsamplers.append(
-                    FastVideoLTXDownsampler3d(
-                        in_channels=in_channels, out_channels=out_channels, stride=(2, 1, 1), is_causal=is_causal
-                    )
-                )
-            elif downsample_type == "spatiotemporal":
-                self.downsamplers.append(
-                    FastVideoLTXDownsampler3d(
-                        in_channels=in_channels, out_channels=out_channels, stride=(2, 2, 2), is_causal=is_causal
-                    )
-                )
-
-        self.gradient_checkpointing = False
-
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        temb: Optional[torch.Tensor] = None,
-        generator: Optional[torch.Generator] = None,
-    ) -> torch.Tensor:
-
-        for i, resnet in enumerate(self.resnets):
-            if torch.is_grad_enabled() and self.gradient_checkpointing:
-                hidden_states = self._gradient_checkpointing_func(resnet, hidden_states, temb, generator)
-            else:
-                hidden_states = resnet(hidden_states, temb, generator)
-
-        if self.downsamplers is not None:
-            for downsampler in self.downsamplers:
-                hidden_states = downsampler(hidden_states)
-
-        return hidden_states
 
 
 class FastVideoLTXMidBlock3d(nn.Module):
@@ -683,9 +587,7 @@ class FastVideoLTXEncoder3d(nn.Module):
     r"""
     FastVideo encoder for LTX VAE.
     
-    TODO: describe optimization:
-    - add parallelism
-    - replace more fastvideo normalization and activations?
+    TODO: describe optimizations
     """
 
     def __init__(
@@ -725,15 +627,11 @@ class FastVideoLTXEncoder3d(nn.Module):
         )
 
         # down blocks
-        is_ltx_095 = down_block_types[-1] == "FastVideoLTX095DownBlock3D"
-        num_block_out_channels = len(block_out_channels) - (1 if is_ltx_095 else 0)
+        num_block_out_channels = len(block_out_channels) - 1
         self.down_blocks = nn.ModuleList([])
         for i in range(num_block_out_channels):
             input_channel = output_channel
-            if not is_ltx_095:
-                output_channel = block_out_channels[i + 1] if i + 1 < num_block_out_channels else block_out_channels[i]
-            else:
-                output_channel = block_out_channels[i + 1]
+            output_channel = block_out_channels[i + 1] if i + 1 < num_block_out_channels else block_out_channels[i]
 
             if down_block_types[i] == "FastVideoLTXDownBlock3D":
                 down_block = FastVideoLTXDownBlock3D(
@@ -743,16 +641,6 @@ class FastVideoLTXEncoder3d(nn.Module):
                     resnet_eps=resnet_norm_eps,
                     spatio_temporal_scale=spatio_temporal_scaling[i],
                     is_causal=is_causal,
-                )
-            elif down_block_types[i] == "FastVideoLTX095DownBlock3D":
-                down_block = FastVideoLTX095DownBlock3D(
-                    in_channels=input_channel,
-                    out_channels=output_channel,
-                    num_layers=layers_per_block[i],
-                    resnet_eps=resnet_norm_eps,
-                    spatio_temporal_scale=spatio_temporal_scaling[i],
-                    is_causal=is_causal,
-                    downsample_type=downsample_type[i],
                 )
             else:
                 raise ValueError(f"Unknown down block type: {down_block_types[i]}")
@@ -792,7 +680,6 @@ class FastVideoLTXEncoder3d(nn.Module):
         hidden_states = hidden_states.reshape(
             batch_size, num_channels, post_patch_num_frames, p_t, post_patch_height, p, post_patch_width, p
         )
-        # Thanks for driving me insane with the weird patching order :(
         hidden_states = hidden_states.permute(0, 1, 3, 7, 5, 2, 4, 6).flatten(1, 4)
         hidden_states = self.conv_in(hidden_states)
 
@@ -960,9 +847,7 @@ class AutoencoderKLLTXVideo(nn.Module):
     r"""
     FastVideo VAE model with KL loss for encoding images into latents and decoding latent representations into images.
         
-    TODO: add more optimizations
-    -  activation functions
-    - add parallelism
+    TODO: add more parallelism
     """
 
     _supports_gradient_checkpointing = True
@@ -1120,11 +1005,6 @@ class AutoencoderKLLTXVideo(nn.Module):
         tile_sample_stride_width: Optional[float] = None,
         tile_sample_stride_num_frames: Optional[float] = None,
     ) -> None:
-        r"""
-        Enable tiled VAE decoding. When this option is enabled, the VAE will split the input tensor into tiles to
-        compute decoding and encoding in several steps. This is useful for saving a large amount of memory and to allow
-        processing larger images.
-        """
         self.use_tiling = True
         self.tile_sample_min_height = tile_sample_min_height or self.tile_sample_min_height
         self.tile_sample_min_width = tile_sample_min_width or self.tile_sample_min_width
@@ -1134,24 +1014,12 @@ class AutoencoderKLLTXVideo(nn.Module):
         self.tile_sample_stride_num_frames = tile_sample_stride_num_frames or self.tile_sample_stride_num_frames
 
     def disable_tiling(self) -> None:
-        r"""
-        Disable tiled VAE decoding. If `enable_tiling` was previously enabled, this method will go back to computing
-        decoding in one step.
-        """
         self.use_tiling = False
 
     def enable_slicing(self) -> None:
-        r"""
-        Enable sliced VAE decoding. When this option is enabled, the VAE will split the input tensor in slices to
-        compute decoding in several steps. This is useful to save some memory and allow larger batch sizes.
-        """
         self.use_slicing = True
 
     def disable_slicing(self) -> None:
-        r"""
-        Disable sliced VAE decoding. If `enable_slicing` was previously enabled, this method will go back to computing
-        decoding in one step.
-        """
         self.use_slicing = False
 
     def _encode(self, x: torch.Tensor) -> torch.Tensor:
