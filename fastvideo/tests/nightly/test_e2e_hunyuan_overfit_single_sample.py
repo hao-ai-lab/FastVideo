@@ -15,14 +15,14 @@ MODEL_PATH = "hunyuanvideo-community/HunyuanVideo"
 # preprocessing
 DATA_DIR = "data"
 LOCAL_RAW_DATA_DIR = Path(os.path.join(DATA_DIR, "cats"))
-NUM_GPUS_PER_NODE_PREPROCESSING = "2"
+NUM_GPUS_PER_NODE_PREPROCESSING = "1"
 PREPROCESSING_ENTRY_FILE_PATH = "fastvideo/pipelines/preprocess/v1_preprocessing_new.py"
 
 LOCAL_PREPROCESSED_DATA_DIR = Path(os.path.join(DATA_DIR, "cats_processed_t2v_hunyuan"))
 
 
 # training
-NUM_GPUS_PER_NODE_TRAINING = "2"
+NUM_GPUS_PER_NODE_TRAINING = "1"
 TRAINING_ENTRY_FILE_PATH = "fastvideo/training/hunyuan_training_pipeline.py"
 # New preprocessing pipeline creates files in training_dataset/worker_0/worker_0/
 LOCAL_TRAINING_DATA_DIR = os.path.join(LOCAL_PREPROCESSED_DATA_DIR, "training_dataset", "worker_0", "worker_0")
@@ -158,8 +158,8 @@ def run_training():
 def test_e2e_hunyuan_overfit_single_sample():
     os.environ["WANDB_MODE"] = "online"
 
-    download_data()
-    run_preprocessing()
+    #download_data()
+    #run_preprocessing()
     run_training()
 
     reference_video_file = os.path.join(os.path.dirname(__file__), "reference_video_hunyuan_1_sample_v0.mp4")
