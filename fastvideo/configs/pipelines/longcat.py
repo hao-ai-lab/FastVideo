@@ -65,12 +65,12 @@ class LongCatT2V480PConfig(PipelineConfig):
     enhance_hf: bool = False
     t_thresh: float | None = None  # refine stage default controlled by sampling args
 
-    # LongCat 不使用 Wan 的 flow_shift
+    # LongCat doesnot need flow_shift
     flow_shift: float | None = None
     dmd_denoising_steps: list[int] | None = None
 
     def __post_init__(self):
-        # LongCat 推理需要 VAE 编解码器均可用
+        # LongCat inference requires vae encoder and decoder
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
     

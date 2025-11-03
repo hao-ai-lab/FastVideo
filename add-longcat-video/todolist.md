@@ -41,69 +41,25 @@
 
 ## 细节
 ### 1) 定义 LongCat 管线配置并注册到 pipeline registry
+- 加入了`fastvideo/configs/pipelines/longcat.py`
+    - longcat采用umt5, 是t5的后继版本，目前的post process text函数用的是和wan的t5一样的post process procedure
+    - LongCatT2V480PConfig内部结构：dit(placeholder，未来要用LongCat3DTransformer替代)(bf16), WAN_VAE(bf16)
+    - longcat没有采用flow shift
+    - longcat推理需要vae encoder和decoder均可用 
+    - use distill设置为了false
+    - 自定义参数例如enable_bsa, use_distill, enhance_hf
+- 更新 `fastvideo/configs/pipelines/registry.py`
+    - PIPE_NAME_TO_CONFIG还没改，之后改
+    - PIPELINE_DETECTOR加入了longcat的detect
+    - PIPELINE_FALLBACK_CONFIG加入longcat的fallback
 
-- 新增文件：`fastvideo/configs/pipelines/longcat.py`
-
-```python
-from dataclasses import dataclass, field
-from fastvideo.configs.pipelines.base import PipelineConfig
-
-
-@dataclass
-class LongCatBaseConfig(PipelineConfig):
-    name: str = "longcat"
-    workload_type: str = "video-generation"
-
-    # LongCat 模块子目录名映射
-    component_subdirs: dict[str, str] = field(default_factory=lambda: {
-        "tokenizer": "tokenizer",
-        "text_encoder": "text_encoder",
-        "vae": "vae",
-        "scheduler": "scheduler",
-        "transformer": "dit",
-    })
-
-    # 默认精度/运行时开关（可被 CLI 覆盖）
-    dit_precision: str = "bf16"
-    vae_precision: str = "bf16"
-    text_encoder_precision: str = "bf16"
-
-    # LongCat 额外配置
-    enable_kv_cache: bool = True
-    offload_kv_cache: bool = False
-    enable_bsa: bool = False
-    use_distill: bool = False
-    enhance_hf: bool = False
-    t_thresh: float = 0.5
-
-
-@dataclass
-class LongCatT2V480PConfig(LongCatBaseConfig):
-    # 以 480p T2V 配置为默认（与 LongCat demos 对齐）
-    vae_config: PipelineConfig.VAEConfig = PipelineConfig.VAEConfig(
-        arch_config=PipelineConfig.VAEArchConfig(
-            temporal_compression_ratio=4,
-            spatial_compression_ratio=8,
-        ),
-        use_temporal_scaling_frames=True,
-    )
-```
-
-- 注册：更新 `fastvideo/configs/pipelines/registry.py`
-
-```python
-from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
-
-
-def get_pipeline_config_cls_from_name(model_path: str):
-    # ... existing code ...
-    name = model_path.lower()
-    if "longcat" in name or "longcat-video" in name:
-        return LongCatT2V480PConfig
-    # ... existing code ...
-```
 
 ### 2) 新增 FlowMatchEulerDiscreteScheduler 的调度器加载器
+
+新增 fastvideo/third_party/longcat/scheduling_flow_match_euler_discrete.py（拷贝 LongCat 实现）。
+在 fastvideo/models/loader/component_loader.py 增加 LongCatSchedulerLoader，识别 _class_name=FlowMatchEulerDiscreteScheduler，从 pipeline_config.component_subdirs["scheduler"] 加载。
+注册到 ALL_SCHEDULER_LOADERS。
+用一个最小模型索引或目录结构做一次构建 smoke（后续第 6 步前的模块加载验证）。
 
 - 引入三方实现（保留原始文件名便于追踪）：
   - 新增：`fastvideo/third_party/longcat/scheduling_flow_match_euler_discrete.py`
