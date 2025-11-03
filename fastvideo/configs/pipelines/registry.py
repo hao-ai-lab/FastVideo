@@ -48,6 +48,7 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
 
 # For determining pipeline type from model ID
 PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
+    "longcat": lambda id: "longcat" in id.lower(),
     "hunyuan": lambda id: "hunyuan" in id.lower(),
     "wanpipeline": lambda id: "wanpipeline" in id.lower(),
     "wanimagetovideo": lambda id: "wanimagetovideo" in id.lower(),

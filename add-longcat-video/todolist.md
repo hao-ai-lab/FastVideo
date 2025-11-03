@@ -3,7 +3,7 @@
 ## 代办清单
 
 - 核心管线与组件
-  - 定义 LongCat 管线配置并注册到 pipeline registry
+  - 定义 LongCat 管线配置并注册到 pipeline registry - Done by Alex
   - 新增 FlowMatchEulerDiscreteScheduler 的调度器加载器
   - 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器
   - 验证并适配 UMT5 文本编码器与分词器加载
