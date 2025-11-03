@@ -28,6 +28,7 @@ from fastvideo.models.loader.utils import set_default_torch_dtype
 from fastvideo.models.loader.weight_utils import (
     filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
     pt_weights_iterator, safetensors_weights_iterator)
+from fastvideo.third_party.longcat.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from fastvideo.models.registry import ModelRegistry
 from fastvideo.utils import PRECISION_TO_TYPE
 
