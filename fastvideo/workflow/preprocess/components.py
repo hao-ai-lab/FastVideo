@@ -288,10 +288,17 @@ def build_dataset(preprocess_config: PreprocessConfig, split: str,
                                split=split)
         column_names = dataset.column_names
         # rename columns to match the schema
-        if "cap" in column_names:
+        if "cap" in column_names and "caption" not in column_names:
             dataset = dataset.rename_column("cap", "caption")
         if "path" in column_names:
             dataset = dataset.rename_column("path", "name")
+        
+        # Add num_frames column if it doesn't exist but fps and duration do
+        if 'num_frames' not in column_names and 'fps' in column_names and 'duration' in column_names:
+            def add_num_frames(item: dict[str, Any]) -> dict[str, Any]:
+                item['num_frames'] = int(item['fps'] * item['duration'])
+                return item
+            dataset = dataset.map(add_num_frames)
 
         dataset = dataset.filter(validator)
         dataset = dataset.shard(num_shards=get_world_size(),
