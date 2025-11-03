@@ -41,7 +41,7 @@
 
 ## 细节
 ### 1) 定义 LongCat 管线配置并注册到 pipeline registry
-已完成
+Done by Alex
 - 加入了`fastvideo/configs/pipelines/longcat.py`
     - longcat采用umt5, 是t5的后继版本，目前的post process text函数用的是和wan的t5一样的post process procedure
     - LongCatT2V480PConfig内部结构：dit(placeholder，未来要用LongCat3DTransformer替代)(bf16), WAN_VAE(bf16)
