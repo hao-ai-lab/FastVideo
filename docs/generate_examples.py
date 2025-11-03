@@ -477,7 +477,7 @@ def generate_nested_examples(nested_structures: dict[str, dict[str, dict[
             category_index.documents.append(method)
 
 
-def generate_examples(generate_main_index=False):
+def generate_examples(generate_main_index: bool = False) -> None:
     """
     Generate example documentation.
     
