@@ -52,7 +52,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 "FASTVIDEO_FSDP2_AUTOWRAP is not implemented for self-forcing distillation. "
                 "Please set FASTVIDEO_FSDP2_AUTOWRAP=0 or unset the environment variable."
             )
-        
+
         logger.info("Initializing self-forcing distillation pipeline...")
 
         self.generator_ema: EMA_FSDP | None = None
