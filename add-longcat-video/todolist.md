@@ -63,45 +63,35 @@ Done by Alex
 
 ### 3) 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器
 
-- 引入三方实现：
-  - 新增：`fastvideo/third_party/longcat/longcat_video_dit.py`
-  - 内容来自 `LongCat-Video/longcat_video/modules/longcat_video_dit.py`
-
-- 扩展组件加载：`fastvideo/models/loader/component_loader.py`
-
-```python
-from fastvideo.third_party.longcat.longcat_video_dit import LongCatVideoTransformer3DModel
-
-
-class LongCatTransformerLoader(TransformerLoader):
-    @classmethod
-    def can_handle(cls, model_index: dict) -> bool:
-        cfg = model_index.get("transformer", {})
-        return cfg.get("_class_name") in {
-            "LongCatVideoTransformer3DModel",
+- 将所有LongCat-Video核心代码移植到了third_party/longcat_video下
+- 在fastvideo/models/registry.py 新增了行："LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"), 使得TransformerLoader可以正确load LongCat自定义的Transformer3D结构
+- TODO: [FUTURE] 后续权重转换的时候确保 LongCat transformer 子目录的 `config.json` 写有 `"_class_name": "LongCatVideoTransformer3DModel"`；并且该目录下有 safetensors 权重，命名与类参数名匹配。
+    - 示例（保存为 `<model_root>/dit/config.json`）：
+        ```json
+        {
+        "_class_name": "LongCatVideoTransformer3DModel",
+        "_diffusers_version": "0.31.0",
+        "in_channels": 16,
+        "out_channels": 16,
+        "hidden_size": 4096,
+        "depth": 48,
+        "num_heads": 32,
+        "caption_channels": 4096,
+        "mlp_ratio": 4,
+        "adaln_tembed_dim": 512,
+        "frequency_embedding_size": 256,
+        "patch_size": [1, 2, 2],
+        "enable_flashattn3": false,
+        "enable_flashattn2": false,
+        "enable_xformers": false,
+        "enable_bsa": false,
+        "bsa_params": null,
+        "cp_split_hw": [1, 1],
+        "text_tokens_zero_pad": false
         }
+        ```
+    - 权重：把 LongCat 的 transformer 权重 `.safetensors` 放在同一个 `dit/` 目录。文件名不限（Loader 会加载该目录下所有 `.safetensors`），但 state_dict 的键必须与模型定义匹配。
 
-    @classmethod
-    def load(cls, model_path: str, device: str, dtype: torch.dtype, config: PipelineConfig, **kwargs):
-        subdir = config.component_subdirs.get("transformer", "dit")
-        cp_split_hw = kwargs.get("cp_split_hw")  # context-parallel 切分，如无则 None
-        dit = LongCatVideoTransformer3DModel.from_pretrained(
-            model_path,
-            subfolder=subdir,
-            cp_split_hw=cp_split_hw,
-            torch_dtype=dtype,
-        )
-        return dit.to(device)
-```
-
-- 注册 Loader：
-
-```python
-ALL_TRANSFORMER_LOADERS = [
-    # ... existing loaders ...
-    LongCatTransformerLoader,
-]
-```
 
 ### 4) 验证并适配 UMT5 文本编码器与分词器加载
 
