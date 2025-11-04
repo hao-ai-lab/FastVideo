@@ -18,16 +18,20 @@ mkdocs build
 ## View the docs
 
 ### Development server (with live reload)
+
 ```bash
 mkdocs serve
 ```
+
 Then open your browser to: http://127.0.0.1:8000
 
 ### Static build
+
 ```bash
 mkdocs build
 python -m http.server -d site/
 ```
+
 Then open your browser to: http://localhost:8000
 
 ## Automatic Deployment

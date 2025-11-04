@@ -30,11 +30,7 @@ conda create -n fastvideo python=3.12 -y
 conda activate fastvideo
 ```
 
-
-
 #### uv
-
-
 
 Or you can create a new Python environment using [uv](https://docs.astral.sh/uv/), a very fast Python environment manager. Please follow the [documentation](https://docs.astral.sh/uv/#getting-started) to install `uv`. After installing `uv`, you can create a new Python environment using the following command:
 

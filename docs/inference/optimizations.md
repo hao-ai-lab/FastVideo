@@ -15,7 +15,6 @@ This page describes the various options for speeding up generation times in Fast
 - Caching Techniques
   - [TeaCache](#optimizations-teacache)
 
-
 ## Attention Backends
 
 ### Available Backends
@@ -47,7 +46,6 @@ You can also set the environment variable on the command line:
 FASTVIDEO_ATTENTION_BACKEND=SAGE_ATTN python example.py
 ```
 
-
 ### Flash Attention
 
 **`FLASH_ATTN`**
@@ -68,9 +66,6 @@ pip install ninja
 python setup.py install
 ```
 
-
-
-
 ### Sliding Tile Attention
 
 **`SLIDING_TILE_ATTN`**
@@ -80,7 +75,6 @@ pip install st_attn==0.0.4
 ```
 
 Please see [this page](#sta-installation) for more installation instructions.
-
 
 ### Video Sparse Attention
 
@@ -93,7 +87,6 @@ python setup_vsa.py install
 
 Please see [this page](#vsa-installation) for more installation instructions.
 
-
 ### Sage Attention
 
 **`SAGE_ATTN`**
@@ -105,7 +98,6 @@ git clone https://github.com/thu-ml/SageAttention.git
 cd sageattention
 python setup.py install  # or pip install -e .
 ```
-
 
 ### Sage Attention 3
 
@@ -126,7 +118,6 @@ To use Sage Attention 3 in FastVideo, first get access to the SageAttention3 cod
 ```bash
 python setup.py install
 ```
-
 
 ## Teacache
 

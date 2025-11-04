@@ -5,7 +5,6 @@ import itertools
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 ROOT_DIR_RELATIVE = '../..'
@@ -106,7 +105,7 @@ class Example:
         generate() -> str: Generates the documentation content.
     """ # noqa: E501
     path: Path
-    category: Optional[str] = None
+    category: str | None = None
     main_file: Path = field(init=False)
     other_files: list[Path] = field(init=False)
     title: str = field(init=False)
@@ -155,20 +154,20 @@ class Example:
         github_path = str(self.path.relative_to(ROOT_DIR)).replace("\\", "/")
         github_url = f"https://github.com/{GITHUB_REPO}/blob/main/{github_path}"
         content = f"**Source:** [{github_path}]({github_url})\n\n"
-        
+
         # Add title for code files
         if self.main_file.suffix != ".md":
             content += f"# {self.title}\n\n"
-        
+
         # Include main file content
         if self.main_file.suffix == ".md":
             # For markdown files, include the content directly
-            with open(self.main_file, 'r', encoding='utf-8') as f:
+            with open(self.main_file, encoding='utf-8') as f:
                 content += f.read() + "\n\n"
         else:
             # For code files, use code blocks
             language = self.main_file.suffix[1:] if self.main_file.suffix else ""
-            with open(self.main_file, 'r', encoding='utf-8') as f:
+            with open(self.main_file, encoding='utf-8') as f:
                 file_content = f.read()
             content += f"```{language}\n{file_content}\n```\n\n"
 
@@ -177,28 +176,30 @@ class Example:
 
         content += "## Additional Files\n\n"
         # Define binary/non-text file extensions to skip
-        binary_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.gif', '.jpg', '.jpeg', '.png', 
-                            '.webp', '.bmp', '.pdf', '.zip', '.tar', '.gz', '.mp3', '.wav'}
-        
+        binary_extensions = {
+            '.mp4', '.avi', '.mov', '.mkv', '.gif', '.jpg', '.jpeg', '.png',
+            '.webp', '.bmp', '.pdf', '.zip', '.tar', '.gz', '.mp3', '.wav'
+        }
+
         for file in sorted(self.other_files):
             # Skip binary files
             if file.suffix.lower() in binary_extensions:
                 continue
-                
+
             file_rel_path = file.relative_to(self.path)
             # Use collapsible admonition syntax for MkDocs
             content += f"??? note \"{file_rel_path}\"\n\n"
-            
+
             try:
                 if file.suffix == ".md":
                     # Include markdown content with indentation
-                    with open(file, 'r', encoding='utf-8') as f:
+                    with open(file, encoding='utf-8') as f:
                         for line in f:
                             content += f"    {line}"
                 else:
                     # Include code with proper formatting
                     language = file.suffix[1:] if file.suffix else ""
-                    with open(file, 'r', encoding='utf-8') as f:
+                    with open(file, encoding='utf-8') as f:
                         file_content = f.read()
                     # Indent the code block for the admonition
                     content += f"    ```{language}\n"
@@ -255,8 +256,7 @@ def create_category_indices() -> dict[str, Index]:
         ),
         "training":
         Index(
-            path=ROOT_DIR /
-            "docs/training/examples/examples_training_index.md",
+            path=ROOT_DIR / "docs/training/examples/examples_training_index.md",
             title="🚀 Examples",
             description=
             "Training examples demonstrate how to use FastVideo training.",
@@ -288,7 +288,7 @@ def find_examples(category_indices: dict[str, Index],
     """Find all examples from the examples directory."""
     examples = []
     glob_patterns = ["*.py", "*.md", "*.sh"]
-    
+
     # Map category names to actual directory names
     category_dir_mapping = {
         "distillation": "distill",  # examples/distill/ -> distillation category
@@ -299,11 +299,11 @@ def find_examples(category_indices: dict[str, Index],
         # Use mapped directory name if available, otherwise use category name
         dir_name = category_dir_mapping.get(category, category)
         category_dir = EXAMPLE_DIR / dir_name
-        
+
         # Skip if directory doesn't exist
         if not category_dir.exists():
             continue
-            
+
         globs = [category_dir.glob(pattern) for pattern in glob_patterns]
         for path in itertools.chain(*globs):
             examples.append(Example(path, category))
@@ -333,7 +333,7 @@ def create_nested_structures(
     nested_structures: dict[str, dict[str, dict[str,
                                                 dict[str,
                                                      NestedStructure]]]] = {}
-    
+
     # Map category names to actual directory names
     category_dir_mapping = {
         "distillation": "distill",
@@ -401,7 +401,7 @@ def create_nested_structures(
 
 def generate_flat_examples(examples: list[Example],
                            category_indices: dict[str, Index],
-                           examples_index: Optional[Index],
+                           examples_index: Index | None,
                            generate_main_index: bool) -> None:
     """Generate documentation for flat structure examples (inference, etc.)."""
     for example in examples:

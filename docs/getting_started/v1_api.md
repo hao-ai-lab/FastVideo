@@ -16,7 +16,6 @@ This class will be the primary Python API for generating videos and images.
 
 `VideoGenerator.from_pretrained()` should be the primary way of creating a new video generator.
 
-
 ## Configuring FastVideo
 
 The following two classes `PipelineConfig` and `SamplingParam` are used to configure initialization and sampling parameters, respectively.

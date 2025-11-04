@@ -29,7 +29,6 @@ FastVideo separates model components from execution logic with these principles:
 - **Custom Attention Backends**: Components can support and use different Attention implementations
 - **Pipeline Abstraction**: Consistent interface across diffusion models
 
-
 ## FastVideoArgs
 
 The `FastVideoArgs` class in `fastvideo/fastvideo_args.py` serves as the central configuration system for FastVideo. It contains all parameters needed to control model loading, inference configuration, performance optimization settings, and more.
@@ -60,7 +59,6 @@ with set_current_fastvideo_args(fastvideo_args):
     # Code that requires access to these arguments
     result = generate_video()
 ```
-
 
 ## Pipeline System
 
@@ -108,7 +106,6 @@ def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> Forward
     return batch
 ```
 
-
 ### ForwardBatch
 
 Defined in `fastvideo/pipelines/pipeline_batch_info.py`, `ForwardBatch` encapsulates the data payload passed between pipeline stages. It typically holds:
@@ -120,11 +117,9 @@ Defined in `fastvideo/pipelines/pipeline_batch_info.py`, `ForwardBatch` encapsul
 
 This structure facilitates clear state transitions between stages.
 
-
 ## Model Components
 
 The `fastvideo/models/` directory contains implementations of the core neural network models used in video diffusion:
-
 
 ### Transformer Models
 
@@ -152,7 +147,6 @@ def forward(
     return noise_pred  # Predicted noise residual
 ```
 
-
 ### VAE (Variational Auto-Encoder)
 
 VAEs handle conversion between pixel space and latent space:
@@ -170,7 +164,6 @@ FastVideo's VAE implementations include:
 - Optional tiling for large frames
 - Distributed weight support
 
-
 ### Text and Image Encoders
 
 Encoders process conditioning inputs into embeddings:
@@ -187,7 +180,6 @@ FastVideo implements optimizations such as:
 - Vocab parallelism for distributed processing
 - Caching for common prompts
 - Precision-tuned computation
-
 
 ### Schedulers
 
@@ -215,7 +207,6 @@ def step(
     # Return updated latents
     return prev_sample
 ```
-
 
 ## Optimized Attention
 
@@ -245,11 +236,9 @@ Supports various patterns with memory optimization techniques:
 - **Cross/Self/Temporal/Global-Local Attention**
 - Chunking, progressive computation, optimized masking
 
-
 ## Distributed Processing
 
 The `fastvideo/distributed/` directory contains implementations for distributed model execution:
-
 
 ### Tensor Parallelism
 
@@ -307,7 +296,6 @@ Efficient communication primitives minimize distributed overhead:
 - **Tensor-Parallel AllReduce**: Combines partial results
 - **Distributed Synchronization**: Coordinates execution
 
-
 ## Forward Context Management
 
 ### ForwardContext
@@ -329,7 +317,6 @@ with set_forward_context(current_timestep, attn_metadata, fastvideo_args):
     # through get_forward_context()
     output = model(inputs)
 ```
-
 
 ## Executor and Worker System
 
@@ -356,7 +343,6 @@ Each GPU worker:
 4. Manages local resources and communicates results back to the executor
 
 This design allows FastVideo to efficiently utilize multiple GPUs while providing a simple, unified interface for model execution.
-
 
 ## Platforms
 
@@ -387,7 +373,6 @@ else:
 ```
 
 The platform system is designed to be extensible for future hardware targets.
-
 
 ## Logger
 See [PR](https://github.com/hao-ai-lab/FastVideo/pull/356)
