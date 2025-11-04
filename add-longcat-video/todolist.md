@@ -5,7 +5,7 @@
 - 核心管线与组件
   - 定义 LongCat 管线配置并注册到 pipeline registry - Done by Alex
   - 新增 FlowMatchEulerDiscreteScheduler 的调度器加载器 - Done by Alex
-  - 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器
+  - 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器 - Done by Alex
   - 验证并适配 UMT5 文本编码器与分词器加载
   - 复用或适配 Wan VAE 加载与配置
   - 实现 LongCatPipeline 并挂接到 build_pipeline
