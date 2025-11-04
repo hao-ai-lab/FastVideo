@@ -62,7 +62,7 @@ Done by Alex
 
 
 ### 3) 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器
-
+Done by Alex
 - 将所有LongCat-Video核心代码移植到了third_party/longcat_video下
 - 在fastvideo/models/registry.py 新增了行："LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"), 使得TransformerLoader可以正确load LongCat自定义的Transformer3D结构
 - TODO: [FUTURE] 后续权重转换的时候确保 LongCat transformer 子目录的 `config.json` 写有 `"_class_name": "LongCatVideoTransformer3DModel"`；并且该目录下有 safetensors 权重，命名与类参数名匹配。
