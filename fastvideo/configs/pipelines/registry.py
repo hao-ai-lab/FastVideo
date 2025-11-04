@@ -5,6 +5,7 @@ import os
 from collections.abc import Callable
 
 from fastvideo.configs.pipelines.base import PipelineConfig
+from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
 
@@ -40,6 +41,7 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "Wan-AI/Wan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_Config,
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": Wan2_2_T2V_A14B_Config,
     "Wan-AI/Wan2.2-I2V-A14B-Diffusers": Wan2_2_I2V_A14B_Config,
+    "nvidia/Cosmos-Predict2-2B-Video2World": CosmosConfig,
     # Add other specific weight variants
 }
 
@@ -51,6 +53,7 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     "wandmdpipeline": lambda id: "wandmdpipeline" in id.lower(),
     "wancausaldmdpipeline": lambda id: "wancausaldmdpipeline" in id.lower(),
     "stepvideo": lambda id: "stepvideo" in id.lower(),
+    "cosmos": lambda id: "cosmos" in id.lower(),
     # Add other pipeline architecture detectors
 }
 

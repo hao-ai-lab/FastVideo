@@ -69,6 +69,7 @@ class TextEncodingStage(PipelineStage):
             encoder_index=all_indices,
             return_attention_mask=True,
         )
+
         for pe in prompt_embeds_list:
             batch.prompt_embeds.append(pe)
         if batch.prompt_attention_mask is not None:
@@ -84,6 +85,7 @@ class TextEncodingStage(PipelineStage):
                 encoder_index=all_indices,
                 return_attention_mask=True,
             )
+
             assert batch.negative_prompt_embeds is not None
             for ne in neg_embeds_list:
                 batch.negative_prompt_embeds.append(ne)

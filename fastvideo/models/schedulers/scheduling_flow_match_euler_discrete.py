@@ -88,6 +88,14 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             The type of dynamic resolution-dependent timestep shifting to apply. Either "exponential" or "linear".
         stochastic_sampling (`bool`, defaults to False):
             Whether to use stochastic sampling.
+        final_sigmas_type (`str`, defaults to "sigma_min"):
+            The type of final sigmas to use. Either "sigma_min" or "zero".
+        sigma_max (`float`, *optional*):
+            The maximum sigma value for the noise schedule.
+        sigma_min (`float`, *optional*):
+            The minimum sigma value for the noise schedule.
+        sigma_data (`float`, *optional*):
+            The sigma data value for scaling.
     """
 
     _compatibles: list[Any] = []
@@ -110,6 +118,10 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
         use_beta_sigmas: bool | None = False,
         time_shift_type: str = "exponential",
         stochastic_sampling: bool = False,
+        final_sigmas_type: str = "sigma_min",
+        sigma_max: float | None = None,
+        sigma_min: float | None = None,
+        sigma_data: float | None = None,
     ):
         if sum([
                 self.config.use_beta_sigmas, self.config.use_exponential_sigmas,
@@ -336,9 +348,9 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
         sigmas_array: np.ndarray
         if sigmas is None:
             if timesteps_array is None:
-                timesteps_array = np.linspace(self._sigma_to_t(self.sigma_max),
-                                              self._sigma_to_t(self.sigma_min),
-                                              num_inference_steps)
+                t_max = self._sigma_to_t(self.sigma_max)
+                t_min = self._sigma_to_t(self.sigma_min)
+                timesteps_array = np.linspace(t_max, t_min, num_inference_steps)
             sigmas_array = timesteps_array / self.config.num_train_timesteps
         else:
             sigmas_array = np.array(sigmas).astype(np.float32)
@@ -403,9 +415,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
                 [sigmas_tensor,
                  torch.ones(1, device=sigmas_tensor.device)])
         else:
-            sigmas_tensor = torch.cat(
-                [sigmas_tensor,
-                 torch.zeros(1, device=sigmas_tensor.device)])
+            sigmas_tensor = torch.cat([sigmas_tensor, torch.zeros(1, device=sigmas_tensor.device)])
 
         self.timesteps = timesteps_tensor
         self.sigmas = sigmas_tensor
@@ -505,7 +515,9 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             next_sigma = lower_sigmas[..., None]
             dt = current_sigma - next_sigma
         else:
-            assert self.step_index is not None, "step_index should not be None"
+            if self.step_index is None:
+                self._init_step_index(timestep)
+
             sigma_idx = self.step_index
             sigma = self.sigmas[sigma_idx]
             sigma_next = self.sigmas[sigma_idx + 1]
@@ -522,7 +534,6 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             prev_sample = sample + dt * model_output
 
         # upon completion increase step index by one
-        assert self._step_index is not None, "_step_index should not be None"
         self._step_index += 1
         if per_token_timesteps is None:
             # Cast sample back to model compatible dtype
@@ -558,7 +569,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
         min_inv_rho = sigma_min**(1 / rho)
         max_inv_rho = sigma_max**(1 / rho)
         sigmas = (max_inv_rho + ramp * (min_inv_rho - max_inv_rho))**rho
-        return sigmas
+        return torch.from_numpy(sigmas).to(dtype=in_sigmas.dtype, device=in_sigmas.device)
 
     # Copied from diffusers.schedulers.scheduling_euler_discrete.EulerDiscreteScheduler._convert_to_exponential
     def _convert_to_exponential(self, in_sigmas: torch.Tensor,
@@ -583,7 +594,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
         sigmas = np.exp(
             np.linspace(math.log(sigma_max), math.log(sigma_min),
                         num_inference_steps))
-        return sigmas
+        return torch.from_numpy(sigmas).to(dtype=in_sigmas.dtype, device=in_sigmas.device)
 
     # Copied from diffusers.schedulers.scheduling_euler_discrete.EulerDiscreteScheduler._convert_to_beta
     def _convert_to_beta(self,
@@ -614,7 +625,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
                 for timestep in 1 - np.linspace(0, 1, num_inference_steps)
             ]
         ])
-        return sigmas
+        return torch.from_numpy(sigmas).to(dtype=in_sigmas.dtype, device=in_sigmas.device)
 
     def _time_shift_exponential(
             self, mu: float, sigma: float,

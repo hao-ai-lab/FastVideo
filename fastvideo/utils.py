@@ -1119,34 +1119,9 @@ def xpu_is_initialized() -> bool:
     return torch.xpu.is_initialized()
 
 
-def maybe_force_spawn() -> None:
-    """Check if we need to force the use of the `spawn` multiprocessing start
-    method.
-    """
-    if os.environ.get("FASTVIDEO_WORKER_MULTIPROC_METHOD") == "spawn":
-        return
-
-    reasons = []
-
-    from fastvideo.worker.ray_utils import is_in_ray_actor
-    if is_in_ray_actor():
-        # even if we choose to spawn, we need to pass the ray address
-        # to the subprocess so that it knows how to connect to the ray cluster.
-        # env vars are inherited by subprocesses, even if we use spawn.
-        import ray
-        os.environ["RAY_ADDRESS"] = ray.get_runtime_context().gcs_address
-        reasons.append("In a Ray actor and can only be spawned")
-
-    if cuda_is_initialized():
-        reasons.append("CUDA is initialized")
-    elif xpu_is_initialized():
-        reasons.append("XPU is initialized")
-
-    if reasons:
-        logger.warning(
-            "We must use the `spawn` multiprocessing start method. "
-            "Overriding FASTVIDEO_WORKER_MULTIPROC_METHOD to 'spawn'. "
-            "Reasons: %s", "; ".join(reasons))
+def force_spawn() -> None:
+    if os.environ.get("FASTVIDEO_WORKER_MULTIPROC_METHOD") == "fork":
+        logger.warning("We must use the `spawn` multiprocessing start method.")
         os.environ["FASTVIDEO_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 
@@ -1157,7 +1132,7 @@ def get_mp_context() -> BaseContext:
     certain conditions, we may enforce spawn and override the value of
     FASTVIDEO_WORKER_MULTIPROC_METHOD.
     """
-    maybe_force_spawn()
+    force_spawn()
     mp_method = envs.FASTVIDEO_WORKER_MULTIPROC_METHOD
     return multiprocessing.get_context(mp_method)
 
