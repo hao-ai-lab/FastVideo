@@ -95,45 +95,65 @@ Done by Alex
 
 ### 4) 验证并适配 UMT5 文本编码器与分词器加载
 
-- 原生 Loader 通常走 `AutoTokenizer`/`AutoModel` 分支；补充 UMT5：
-  - 文件：`fastvideo/models/loader/component_loader.py`
+- 分词器（Tokenizer）
+  - 不需要新增 Loader。确保传给现有 `TokenizerLoader.load(model_path, fastvideo_args)` 的路径就是 `<model_root>/tokenizer` 子目录（由 `model_index.json` 或目录推断提供）。`AutoTokenizer.from_pretrained(<model_root>/tokenizer)` 即可正常工作。
+
+- 文本编码器（UMT5）
+  - 为 UMT5 走 Transformers 的 `from_pretrained` 分支（直接读取 `<model_root>/text_encoder`），绕过本地结构化权重装载。
+  - 修改文件：`fastvideo/models/loader/component_loader.py`
+
+1) 顶部 import 增加 UMT5：
 
 ```python
-from transformers import AutoTokenizer, UMT5EncoderModel
-
-
-class LongCatTokenizerLoader(TokenizerLoader):
-    @classmethod
-    def can_handle(cls, model_index: dict) -> bool:
-        cfg = model_index.get("tokenizer", {})
-        return cfg.get("_class_name", "").lower().find("auto") >= 0  # 兼容 AutoTokenizer
-
-    @classmethod
-    def load(cls, model_path: str, device: str, dtype: torch.dtype, config: PipelineConfig):
-        subdir = config.component_subdirs.get("tokenizer", "tokenizer")
-        tok = AutoTokenizer.from_pretrained(model_path, subfolder=subdir, torch_dtype=dtype)
-        return tok
-
-
-class LongCatTextEncoderLoader(TextEncoderLoader):
-    @classmethod
-    def can_handle(cls, model_index: dict) -> bool:
-        cfg = model_index.get("text_encoder", {})
-        return cfg.get("_class_name") in {"UMT5EncoderModel"}
-
-    @classmethod
-    def load(cls, model_path: str, device: str, dtype: torch.dtype, config: PipelineConfig):
-        subdir = config.component_subdirs.get("text_encoder", "text_encoder")
-        enc = UMT5EncoderModel.from_pretrained(model_path, subfolder=subdir, torch_dtype=dtype)
-        return enc.to(device)
+from transformers import AutoImageProcessor, AutoTokenizer
+from transformers import UMT5EncoderModel  # 新增
 ```
 
-- 在入口注册：
+2) 在 `TextEncoderLoader.load` 开头加入 UMT5 快速路径（检测到 UMT5 就直接用 HF 加载并返回；否则走原逻辑）：
 
 ```python
-ALL_TOKENIZER_LOADERS += [LongCatTokenizerLoader]
-ALL_TEXT_ENCODER_LOADERS += [LongCatTextEncoderLoader]
+def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+    """Load the text encoders based on the model path, and inference args."""
+    # 先尝试读取 transformers 配置，判断是否为 UMT5
+    try:
+        with open(os.path.join(model_path, "config.json")) as f:
+            cfg_json = json.load(f)
+    except Exception:
+        cfg_json = {}
+
+    archs = cfg_json.get("architectures", [])
+    model_type = cfg_json.get("model_type", "")
+    is_umt5 = ("UMT5EncoderModel" in archs) or (model_type.lower() in {"umt5", "t5"})
+
+    if is_umt5:
+        # 设备与精度选择与原逻辑保持一致
+        from fastvideo.platforms import current_platform
+        if fastvideo_args.text_encoder_cpu_offload:
+            target_device = torch.device("mps") if current_platform.is_mps() else torch.device("cpu")
+            encoder_precision = fastvideo_args.pipeline_config.text_encoder_precisions[0]
+        else:
+            target_device = get_local_torch_device()
+            encoder_precision = fastvideo_args.pipeline_config.text_encoder_precisions[0]
+
+        dtype = PRECISION_TO_TYPE.get(encoder_precision, torch.bfloat16)
+        enc = UMT5EncoderModel.from_pretrained(model_path, torch_dtype=dtype)
+        return enc.to(target_device).eval()
+
+    # 非 UMT5 走原有路径
+    model_config = get_diffusers_config(model=model_path)
+    model_config.pop("_name_or_path", None)
+    model_config.pop("transformers_version", None)
+    model_config.pop("model_type", None)
+    model_config.pop("tokenizer_class", None)
+    model_config.pop("torch_dtype", None)
+    logger.info("HF Model config: %s", model_config)
+    # ... 原始实现的其余部分保持不变 ...
 ```
+
+- 验收要点
+  - `<model_root>/tokenizer/config.json` 存在时，`TokenizerLoader` 直接能加载。
+  - `<model_root>/text_encoder/config.json` 包含 `architectures: ["UMT5EncoderModel"]` 或 `model_type: "umt5"` 时，`TextEncoderLoader` 走 HF 分支并返回 `.eval()` 的 `UMT5EncoderModel`。
+  - 开启 `--text-encoder-cpu-offload` 时，编码器落在 CPU；否则落在本地 GPU；dtype 由 `pipeline_config.text_encoder_precisions[0]` 控制。
 
 ### 5) 复用或适配 Wan VAE 加载与配置
 
