@@ -1,0 +1,41 @@
+.vertical-table-header th.head:not(.stub) {
+    writing-mode: sideways-lr;
+    white-space: nowrap;
+    max-width: 0;
+    p {
+       margin: 0;
+    }
+}
+
+/* Image sizing classes */
+.image-small {
+    max-width: 200px;
+    height: auto;
+}
+
+.image-medium {
+    max-width: 400px;
+    height: auto;
+}
+
+.image-large {
+    max-width: 600px;
+    height: auto;
+}
+
+.image-full {
+    max-width: 100%;
+    height: auto;
+}
+
+/* Responsive images */
+img {
+    max-width: 100%;
+    height: auto;
+}
+
+/* Center images */
+.image-center {
+    display: block;
+    margin: 0 auto;
+}

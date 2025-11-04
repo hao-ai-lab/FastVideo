@@ -77,7 +77,7 @@ https://github.com/user-attachments/assets/f3b6dd79-7b43-4b60-a0fa-3d6495ec5747
 Here is a diagram of how the window is configured and passed through the FastVideo pipeline:
 
 <div align="center">
-<img src="../../../docs/source/_static/images/STA_configuration.png" width="80%"/>
+<img src="../../../docs/assets/images/STA_configuration.png" width="80%"/>
 </div>
 
 
