@@ -26,7 +26,8 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
-    "StepVideoModel": ("dits", "stepvideo", "StepVideoModel")
+    "StepVideoModel": ("dits", "stepvideo", "StepVideoModel"),
+    "CosmosTransformer3DModel": ("dits", "cosmos", "CosmosTransformer3DModel")
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
@@ -39,6 +40,7 @@ _TEXT_ENCODER_MODELS = {
     "CLIPTextModel": ("encoders", "clip", "CLIPTextModel"),
     "LlamaModel": ("encoders", "llama", "LlamaModel"),
     "UMT5EncoderModel": ("encoders", "t5", "UMT5EncoderModel"),
+    "T5EncoderModel": ("encoders", "t5", "T5EncoderModel"),
     "STEP1TextEncoder": ("encoders", "stepllm", "STEP1TextEncoder"),
     "BertModel": ("encoders", "clip", "CLIPTextModel"),
 }
@@ -239,7 +241,6 @@ class _ModelRegistry:
 
     def _raise_for_unsupported(self, architectures: list[str]) -> NoReturn:
         all_supported_archs = self.get_supported_archs()
-
         if any(arch in all_supported_archs for arch in architectures):
             raise ValueError(
                 f"Model architectures {architectures} failed "

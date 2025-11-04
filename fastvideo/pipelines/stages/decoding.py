@@ -76,11 +76,12 @@ class DecodingStage(PipelineStage):
         vae_autocast_enabled = (
             vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
-        if isinstance(self.vae.scaling_factor, torch.Tensor):
-            latents = latents / self.vae.scaling_factor.to(
-                latents.device, latents.dtype)
-        else:
-            latents = latents / self.vae.scaling_factor
+        if hasattr(self.vae, 'scaling_factor'):
+            if isinstance(self.vae.scaling_factor, torch.Tensor):
+                latents = latents / self.vae.scaling_factor.to(
+                    latents.device, latents.dtype)
+            else:
+                latents = latents / self.vae.scaling_factor
 
         # Apply shifting if needed
         if (hasattr(self.vae, "shift_factor")

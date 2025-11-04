@@ -7,6 +7,8 @@ from fastvideo.configs.sample.hunyuan import (FastHunyuanSamplingParam,
                                               HunyuanSamplingParam)
 from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
 
+from fastvideo.configs.sample.cosmos import Cosmos_Predict2_2B_Video2World_SamplingParam
+
 # isort: off
 from fastvideo.configs.sample.wan import (
     FastWanT2V480PConfig,
@@ -29,35 +31,52 @@ from fastvideo.utils import (maybe_download_model_index,
 logger = init_logger(__name__)
 # Registry maps specific model weights to their config classes
 SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
-    "FastVideo/FastHunyuan-diffusers": FastHunyuanSamplingParam,
-    "hunyuanvideo-community/HunyuanVideo": HunyuanSamplingParam,
-    "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VSamplingParam,
+    "FastVideo/FastHunyuan-diffusers":
+    FastHunyuanSamplingParam,
+    "hunyuanvideo-community/HunyuanVideo":
+    HunyuanSamplingParam,
+    "FastVideo/stepvideo-t2v-diffusers":
+    StepVideoT2VSamplingParam,
 
     # Wan2.1
-    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V_1_3B_SamplingParam,
-    "Wan-AI/Wan2.1-T2V-14B-Diffusers": WanT2V_14B_SamplingParam,
-    "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V_14B_480P_SamplingParam,
-    "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V_14B_720P_SamplingParam,
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers":
+    WanT2V_1_3B_SamplingParam,
+    "Wan-AI/Wan2.1-T2V-14B-Diffusers":
+    WanT2V_14B_SamplingParam,
+    "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers":
+    WanI2V_14B_480P_SamplingParam,
+    "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers":
+    WanI2V_14B_720P_SamplingParam,
     "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers":
     Wan2_1_Fun_1_3B_InP_SamplingParam,
     "IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers":
     Wan2_1_Fun_1_3B_Control_SamplingParam,
 
     # Wan2.2
-    "Wan-AI/Wan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_SamplingParam,
+    "Wan-AI/Wan2.2-TI2V-5B-Diffusers":
+    Wan2_2_TI2V_5B_SamplingParam,
     "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers":
     Wan2_2_TI2V_5B_SamplingParam,
-    "Wan-AI/Wan2.2-T2V-A14B-Diffusers": Wan2_2_T2V_A14B_SamplingParam,
-    "Wan-AI/Wan2.2-I2V-A14B-Diffusers": Wan2_2_I2V_A14B_SamplingParam,
+    "Wan-AI/Wan2.2-T2V-A14B-Diffusers":
+    Wan2_2_T2V_A14B_SamplingParam,
+    "Wan-AI/Wan2.2-I2V-A14B-Diffusers":
+    Wan2_2_I2V_A14B_SamplingParam,
 
     # FastWan2.1
-    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": FastWanT2V480PConfig,
+    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers":
+    FastWanT2V480PConfig,
 
     # FastWan2.2
-    "FastVideo/FastWan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_SamplingParam,
+    "FastVideo/FastWan2.2-TI2V-5B-Diffusers":
+    Wan2_2_TI2V_5B_SamplingParam,
 
     # Causal Self-Forcing Wan2.1
-    "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers": SelfForcingWanT2V480PConfig,
+    "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers":
+    SelfForcingWanT2V480PConfig,
+
+    # Cosmos2
+    "nvidia/Cosmos-Predict2-2B-Video2World":
+    Cosmos_Predict2_2B_Video2World_SamplingParam,
     # Add other specific weight variants
 }
 

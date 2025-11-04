@@ -31,9 +31,9 @@ log "Setting up Modal authentication from Buildkite secrets..."
 MODAL_TOKEN_ID=$(buildkite-agent secret get modal_token_id)
 MODAL_TOKEN_SECRET=$(buildkite-agent secret get modal_token_secret)
 
+# Retrieve other secrets
 WANDB_API_KEY=$(buildkite-agent secret get wandb_api_key)
-
-WANDB_API_KEY=$(buildkite-agent secret get wandb_api_key)
+HF_API_KEY=$(buildkite-agent secret get hf_api_key)
 
 if [ -n "$MODAL_TOKEN_ID" ] && [ -n "$MODAL_TOKEN_SECRET" ]; then
     log "Retrieved Modal credentials from Buildkite secrets"
@@ -63,15 +63,15 @@ MODAL_ENV="BUILDKITE_REPO=$BUILDKITE_REPO BUILDKITE_COMMIT=$BUILDKITE_COMMIT BUI
 case "$TEST_TYPE" in
     "encoder")
         log "Running encoder tests..."
-        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_encoder_tests"
+        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_encoder_tests"
         ;;
     "vae")
         log "Running VAE tests..."
-        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_vae_tests"
+        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_vae_tests"
         ;;
     "transformer")
         log "Running transformer tests..."
-        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_transformer_tests"
+        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_transformer_tests"
         ;;
     "ssim")
         log "Running SSIM tests..."
