@@ -228,8 +228,6 @@ def shard_model(
             if any([shard_condition(n, m) for shard_condition in fsdp_shard_conditions]):
                 # Count all parameters
                 param_count = sum(p.numel() for p in m.parameters(recurse=True))
-
-                logger.info( "Inspecting module: name = %s, type = %s, param_count = %.2fM", n, type(m).__name__, param_count / 1e6 )
                 
                 # Skip small modules
                 if param_count < min_params:
@@ -242,9 +240,7 @@ def shard_model(
                 fully_shard(m, **fsdp_kwargs)
                 num_layers_sharded += 1
     else:
-        # Original logic: shard all modules matching conditions
-        logger.info("Using original logic: shard all modules matching conditions")
-        
+        # Shard all modules matching conditions        
         for n, m in reversed(list(model.named_modules())):
             if any([shard_condition(n, m) for shard_condition in fsdp_shard_conditions]):
                 fully_shard(m, **fsdp_kwargs)
