@@ -4,7 +4,7 @@
 
 - 核心管线与组件
   - 定义 LongCat 管线配置并注册到 pipeline registry - Done by Alex
-  - 新增 FlowMatchEulerDiscreteScheduler 的调度器加载器
+  - 新增 FlowMatchEulerDiscreteScheduler 的调度器加载器 - Done by Alex
   - 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器
   - 验证并适配 UMT5 文本编码器与分词器加载
   - 复用或适配 Wan VAE 加载与配置
@@ -56,47 +56,10 @@ Done by Alex
 
 
 ### 2) 新增 FlowMatchEulerDiscreteScheduler 的调度器加载器
+Done by Alex
+- 新增 fastvideo/third_party/longcat/scheduling_flow_match_euler_discrete.py（拷贝 LongCat 实现）。
+- 看起来原本Scheduler.load就支持flow match 的scheduler，所以这部分verify为不需要修改
 
-新增 fastvideo/third_party/longcat/scheduling_flow_match_euler_discrete.py（拷贝 LongCat 实现）。
-在 fastvideo/models/loader/component_loader.py 增加 LongCatSchedulerLoader，识别 _class_name=FlowMatchEulerDiscreteScheduler，从 pipeline_config.component_subdirs["scheduler"] 加载。
-注册到 ALL_SCHEDULER_LOADERS。
-用一个最小模型索引或目录结构做一次构建 smoke（后续第 6 步前的模块加载验证）。
-
-- 引入三方实现（保留原始文件名便于追踪）：
-  - 新增：`fastvideo/third_party/longcat/scheduling_flow_match_euler_discrete.py`
-  - 内容来自 `LongCat-Video/longcat_video/modules/scheduling_flow_match_euler_discrete.py`
-
-- 扩展组件加载：`fastvideo/models/loader/component_loader.py`
-
-```python
-from fastvideo.third_party.longcat.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler,
-)
-
-
-class LongCatSchedulerLoader(SchedulerLoader):
-    @classmethod
-    def can_handle(cls, model_index: dict) -> bool:
-        cfg = model_index.get("scheduler", {})
-        return cfg.get("_class_name") in {
-            "FlowMatchEulerDiscreteScheduler",  # LongCat
-        }
-
-    @classmethod
-    def load(cls, model_path: str, device: str, dtype: torch.dtype, config: PipelineConfig):
-        subdir = config.component_subdirs.get("scheduler", "scheduler")
-        scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(model_path, subfolder=subdir, torch_dtype=dtype)
-        return scheduler
-```
-
-- 在通用入口注册新 Loader（同文件或 `__init__` 内）：
-
-```python
-ALL_SCHEDULER_LOADERS = [
-    # ... existing loaders ...
-    LongCatSchedulerLoader,
-]
-```
 
 ### 3) 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器
 
