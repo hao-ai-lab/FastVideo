@@ -9,7 +9,7 @@ Choose a GPU that supports CUDA 12.8
 
 Pick 1 or 2 L40S GPU(s)
 
-![RunPod CUDA selection](../../_static/images/runpod_cuda.png)
+![RunPod CUDA selection](../../assets/images/runpod_cuda.png)
 
 When creating your pod template, use this image:
 
@@ -23,11 +23,11 @@ Paste Container Start Command to support SSH ([RunPod Docs](https://docs.runpod.
 bash -c "apt update;DEBIAN_FRONTEND=noninteractive apt-get install openssh-server -y;mkdir -p ~/.ssh;cd $_;chmod 700 ~/.ssh;echo \"$PUBLIC_KEY\" >> authorized_keys;chmod 700 authorized_keys;service ssh start;sleep infinity"
 ```
 
-![RunPod template configuration](../../_static/images/runpod_template.png)
+![RunPod template configuration](../../assets/images/runpod_template.png)
 
 After deploying, the pod will take a few minutes to pull the image and start the SSH service.
 
-![RunPod ssh](../../_static/images/runpod_ssh.png)
+![RunPod ssh](../../assets/images/runpod_ssh.png)
 
 ## Working with the pod
 
