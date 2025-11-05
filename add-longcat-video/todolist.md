@@ -5,7 +5,7 @@
 - 核心管线与组件
   - 定义 LongCat 管线配置并注册到 pipeline registry - Done by Alex
   - 新增 FlowMatchEulerDiscreteScheduler 的调度器加载器 - Done by Alex
-  - 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器 - Done by Alex
+  - 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器 - Doing by Alex and Shaoxiong
   - 验证并适配 UMT5 文本编码器与分词器加载 - Done by Alex
   - 复用或适配 Wan VAE 加载与配置 - Done by Alex
   - 实现 LongCatPipeline 并挂接到 build_pipeline - Doing by Alex
@@ -62,7 +62,7 @@ Done by Alex
 
 
 ### 3) 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器
-Done by Alex
+Doing by Alex and Shaoxiong
 <!-- - 将所有LongCat-Video核心代码移植到了third_party/longcat_video下 -->
 - 将LongCat-Video的Transformer3D迁移到了fastvideo/models/dits/longcat_video_dit.py
 - 在fastvideo/models/registry.py 新增了行："LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"), 使得TransformerLoader可以正确load LongCat自定义的Transformer3D结构
