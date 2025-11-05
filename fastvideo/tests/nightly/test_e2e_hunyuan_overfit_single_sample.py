@@ -15,14 +15,14 @@ MODEL_PATH = "hunyuanvideo-community/HunyuanVideo"
 # preprocessing
 DATA_DIR = "data"
 LOCAL_RAW_DATA_DIR = Path(os.path.join(DATA_DIR, "cats"))
-NUM_GPUS_PER_NODE_PREPROCESSING = "2"
+NUM_GPUS_PER_NODE_PREPROCESSING = "1"
 PREPROCESSING_ENTRY_FILE_PATH = "fastvideo/pipelines/preprocess/v1_preprocessing_new.py"
 
 LOCAL_PREPROCESSED_DATA_DIR = Path(os.path.join(DATA_DIR, "cats_processed_t2v_hunyuan"))
 
 
 # training
-NUM_GPUS_PER_NODE_TRAINING = "2"
+NUM_GPUS_PER_NODE_TRAINING = "1"
 TRAINING_ENTRY_FILE_PATH = "fastvideo/training/hunyuan_training_pipeline.py"
 # New preprocessing pipeline creates files in training_dataset/worker_0/worker_0/
 LOCAL_TRAINING_DATA_DIR = os.path.join(LOCAL_PREPROCESSED_DATA_DIR, "training_dataset", "worker_0", "worker_0")
@@ -74,6 +74,17 @@ def download_data():
         else:
             raise FileNotFoundError(f"Source validation file not found: {source_validation_file}")
         
+        # Override videos2caption.json with the 1-sample version for preprocessing
+        # The new preprocessing pipeline automatically reads videos2caption.json from the dataset path
+        source_videos2caption = os.path.join(LOCAL_RAW_DATA_DIR, "videos2caption_1_sample.json")
+        target_videos2caption = os.path.join(LOCAL_RAW_DATA_DIR, "videos2caption.json")
+        
+        if os.path.exists(source_videos2caption):
+            print(f"Overriding videos2caption.json with 1-sample version...")
+            shutil.copy2(source_videos2caption, target_videos2caption)
+        else:
+            raise FileNotFoundError(f"Source videos2caption file not found: {source_videos2caption}")
+        
     except Exception as e:
         print(f"Error during download: {str(e)}")
         raise
@@ -101,10 +112,10 @@ def run_preprocessing():
         "--preprocess.dataset_output_dir", str(LOCAL_PREPROCESSED_DATA_DIR),
         "--preprocess.preprocess_video_batch_size", "1",
         "--preprocess.dataloader_num_workers", "0",
-        "--preprocess.max_height", "720",
-        "--preprocess.max_width", "1280",
-        "--preprocess.num_frames", "125",
-        "--preprocess.train_fps", "24",
+        "--preprocess.max_height", "384",
+        "--preprocess.max_width", "640",
+        "--preprocess.num_frames", "49",
+        "--preprocess.train_fps", "16",
         "--preprocess.samples_per_file", "1",
         "--preprocess.flush_frequency", "1",
         "--preprocess.video_length_tolerance_range", "5",
@@ -150,9 +161,9 @@ def run_training():
         "--training_cfg_rate", "0.0",
         "--output_dir", str(LOCAL_OUTPUT_DIR),
         "--tracker_project_name", "hunyuan_finetune_overfit_ci",
-        "--num_height", "720",
-        "--num_width", "1280",
-        "--num_frames", "125",
+        "--num_height", "384",
+        "--num_width", "640",
+        "--num_frames", "49",
         "--validation_guidance_scale", "1.0",
         "--embedded_cfg_scale", "6.0",
         "--num_euler_timesteps", "50",
@@ -171,8 +182,8 @@ def run_training():
 def test_e2e_hunyuan_overfit_single_sample():
     os.environ["WANDB_MODE"] = "online"
 
-    # download_data()
-    # run_preprocessing()
+    download_data()
+    run_preprocessing()
     run_training()
 
     reference_video_file = os.path.join(os.path.dirname(__file__), "reference_video_hunyuan_1_sample_v0.mp4")
