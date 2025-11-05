@@ -2,7 +2,8 @@
 
 ## 代办清单
 
-- 核心管线与组件 I
+- 阶段一（Stage 1）：临时直连 LongCat Transformer3D + 完成管线对接
+  - 目标：不改动核心 Transformer3D 实现，优先把管线/加载/CLI/校验/测试/推理全链条跑通（T2V/I2V/VC/Refine），KV cache/LoRA/BSA 可按需接入为可选项。
   - 定义 LongCat 管线配置并注册到 pipeline registry - Done by Alex
   - 新增 FlowMatchEulerDiscreteScheduler 的调度器加载器 - Done by Alex
   - 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器(Temporary) - Done by Alex and Shaoxiong
@@ -22,8 +23,13 @@
   - 支持直接从目录读取 LongCat 权重与校验（子目录 tokenizer/text_encoder/vae/scheduler/dit）
   - 编写权重转换脚本生成 FastVideo 目录结构（含 model_index.json）
 
-- 核心管线 II
-  - 
+- 阶段二（Stage 2）：核心重写（用 FastVideo 模块重构 LongCat Transformer3D）
+  - 将 Transformer3D 从临时代码切换为 FastVideo 原生模块（LayerNorm/MLP/Linear/Embed/Attention）。
+  - 统一注意力后端（Local/Flash/SDPA/VSA），去除第三方 Attention 依赖，保留/替换 KV cache。
+  - 对齐输出头为 LayerNormScaleShift + 线性投影，替代 FinalLayer_FP32。
+  - 评估并迁移 LoRA 注入到 fastvideo.layers.lora 体系。
+  - 去除/替代 context_parallel 依赖，统一到 FastVideo 的并行与执行器。
+  - 与 Stage 1 的 E2E 行为对齐（1-step smoke 测试和基线画质）。
 - 性能与可选特性
   - 接入 KV Cache 与可选 CPU offload
   - 接入可选 Block Sparse Attention 后端
