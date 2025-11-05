@@ -2,10 +2,10 @@
 
 ## 代办清单
 
-- 核心管线与组件
+- 核心管线与组件 I
   - 定义 LongCat 管线配置并注册到 pipeline registry - Done by Alex
   - 新增 FlowMatchEulerDiscreteScheduler 的调度器加载器 - Done by Alex
-  - 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器 - Doing by Alex and Shaoxiong
+  - 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器(Temporary) - Done by Alex and Shaoxiong
   - 验证并适配 UMT5 文本编码器与分词器加载 - Done by Alex
   - 复用或适配 Wan VAE 加载与配置 - Done by Alex
   - 实现 LongCatPipeline 并挂接到 build_pipeline - Doing by Alex
@@ -22,6 +22,8 @@
   - 支持直接从目录读取 LongCat 权重与校验（子目录 tokenizer/text_encoder/vae/scheduler/dit）
   - 编写权重转换脚本生成 FastVideo 目录结构（含 model_index.json）
 
+- 核心管线 II
+  - 
 - 性能与可选特性
   - 接入 KV Cache 与可选 CPU offload
   - 接入可选 Block Sparse Attention 后端
@@ -61,23 +63,11 @@ Done by Alex
 - 看起来原本Scheduler.load就支持flow match 的scheduler，所以这部分verify为不需要修改
 
 
-### 3) 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器
+### 3) 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器(Temporary)
 Doing by Alex and Shaoxiong
-<!-- - 将所有LongCat-Video核心代码移植到了third_party/longcat_video下 -->
+- 将所有LongCat-Video核心代码移植到了third_party/longcat_video下
 - 将LongCat-Video的Transformer3D迁移到了fastvideo/models/dits/longcat_video_dit.py
-TODO:
-替换归一化与 MLP/Linear/Embed 的 import 与类：
-LayerNorm_FP32 → FP32LayerNorm
-FinalLayer_FP32 → 用 LayerNormScaleShift + nn.Linear
-FeedForwardSwiGLU → MLP
-PatchEmbed3D → PatchEmbed（保持 patch_size 元组）
-TimestepEmbedder 保持，但用 FastVideo 的
-CaptionEmbedder → MLP(in=caption_channels, out=hidden_size)
-nn.Linear → ReplicatedLinear
-自注意力与跨注意力内部用 LocalAttention 完成核心注意力（保留 head 维度 reshape 与 KV-cache 包装）
-输出层按 Wan 的写法替换 FinalLayer_FP32（上面代码引用）
-预留 enable_bsa/disable_bsa 与 lora_* 接口（现状保留）
-context_parallel_util 相关逻辑暂时分支禁用（cp_split_hw 为 None 时直通）
+- 目前先解耦合核心LongCat代码与其他部分（例如pipeline building）。计划先把其余部分跑通再将longcat重写为fastvideo的方式。
 
 - 在fastvideo/models/registry.py 新增了行："LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"), 使得TransformerLoader可以正确load LongCat自定义的Transformer3D结构
 - TODO: [FUTURE] 后续权重转换的时候确保 LongCat transformer 子目录的 `config.json` 写有 `"_class_name": "LongCatVideoTransformer3DModel"`；并且该目录下有 safetensors 权重，命名与类参数名匹配。
@@ -638,3 +628,19 @@ python -m fastvideo generate \
   - `num_frames - 1` 能被 `vae_scale_factor_temporal` 整除；不满足时向下/向上就近对齐并打印警告。
   - T2V/I2V/VC/Refine 四任务均能以 1 步推理通过 smoke test；KV cache 下 VC 性能与显存符合预期。
   - `use_distill/enhance_hf` 互斥；Refine 的 `t_thresh`、`spatial_refine_only` 生效。
+
+### 21) 核心管线II: LongCat Video的Transformer3D用FastVideo的module重构
+
+TODO:
+替换归一化与 MLP/Linear/Embed 的 import 与类：
+LayerNorm_FP32 → FP32LayerNorm
+FinalLayer_FP32 → 用 LayerNormScaleShift + nn.Linear
+FeedForwardSwiGLU → MLP
+PatchEmbed3D → PatchEmbed（保持 patch_size 元组）
+TimestepEmbedder 保持，但用 FastVideo 的
+CaptionEmbedder → MLP(in=caption_channels, out=hidden_size)
+nn.Linear → ReplicatedLinear
+自注意力与跨注意力内部用 LocalAttention 完成核心注意力（保留 head 维度 reshape 与 KV-cache 包装）
+输出层按 Wan 的写法替换 FinalLayer_FP32（上面代码引用）
+预留 enable_bsa/disable_bsa 与 lora_* 接口（现状保留）
+context_parallel_util 相关逻辑暂时分支禁用（cp_split_hw 为 None 时直通）
