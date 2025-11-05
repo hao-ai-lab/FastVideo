@@ -7,7 +7,7 @@
   - 新增 FlowMatchEulerDiscreteScheduler 的调度器加载器 - Done by Alex
   - 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器 - Done by Alex
   - 验证并适配 UMT5 文本编码器与分词器加载 - Done by Alex
-  - 复用或适配 Wan VAE 加载与配置
+  - 复用或适配 Wan VAE 加载与配置 - Doing by Alex
   - 实现 LongCatPipeline 并挂接到 build_pipeline
   - 实现 LongCat 专用去噪阶段支持 T2V/I2V/VC/Refine
   - 实现 I2V/VC 条件编码与潜变量注入阶段
@@ -99,14 +99,14 @@ Done by Alex
 - 原本的AutoTokenizer已经支持读取分词器，所以不需要修改。
 
 ### 5) 复用或适配 Wan VAE 加载与配置
-
-- 直接复用现有 Wan `VAELoader`，仅确认 dtype 可由 `pipeline_config.vae_precision` 控制：
-  - 文件：`fastvideo/models/loader/component_loader.py`
+Done by Alex
+- LongCat用的就是`AutoencoderKLWan`, `fastvideo/models/loader/component_loader.py`已经支持
+- pipeline_config.vae_precision也支持
 
 ```python
-# 在 VAELoader.load 内确保：
-vae_dtype = torch.bfloat16 if config.vae_precision == "bf16" else torch.float32
-vae = AutoencoderKLWan.from_pretrained(model_path, subfolder=subdir, torch_dtype=vae_dtype)
+with set_default_torch_dtype(PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]):
+    vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+    vae = vae_cls(vae_config).to(target_device)
 ```
 
 ### 6) 实现 LongCatPipeline 并挂接到 build_pipeline

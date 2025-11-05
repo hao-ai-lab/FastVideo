@@ -428,8 +428,7 @@ class VAELoader(ComponentLoader):
         else:
             target_device = get_local_torch_device()
 
-        with set_default_torch_dtype(PRECISION_TO_TYPE[
-                fastvideo_args.pipeline_config.vae_precision]):
+        with set_default_torch_dtype(PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]):
             vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
             vae = vae_cls(vae_config).to(target_device)
 
