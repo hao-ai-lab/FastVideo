@@ -65,6 +65,20 @@ Done by Alex
 Doing by Alex and Shaoxiong
 <!-- - 将所有LongCat-Video核心代码移植到了third_party/longcat_video下 -->
 - 将LongCat-Video的Transformer3D迁移到了fastvideo/models/dits/longcat_video_dit.py
+TODO:
+替换归一化与 MLP/Linear/Embed 的 import 与类：
+LayerNorm_FP32 → FP32LayerNorm
+FinalLayer_FP32 → 用 LayerNormScaleShift + nn.Linear
+FeedForwardSwiGLU → MLP
+PatchEmbed3D → PatchEmbed（保持 patch_size 元组）
+TimestepEmbedder 保持，但用 FastVideo 的
+CaptionEmbedder → MLP(in=caption_channels, out=hidden_size)
+nn.Linear → ReplicatedLinear
+自注意力与跨注意力内部用 LocalAttention 完成核心注意力（保留 head 维度 reshape 与 KV-cache 包装）
+输出层按 Wan 的写法替换 FinalLayer_FP32（上面代码引用）
+预留 enable_bsa/disable_bsa 与 lora_* 接口（现状保留）
+context_parallel_util 相关逻辑暂时分支禁用（cp_split_hw 为 None 时直通）
+
 - 在fastvideo/models/registry.py 新增了行："LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"), 使得TransformerLoader可以正确load LongCat自定义的Transformer3D结构
 - TODO: [FUTURE] 后续权重转换的时候确保 LongCat transformer 子目录的 `config.json` 写有 `"_class_name": "LongCatVideoTransformer3DModel"`；并且该目录下有 safetensors 权重，命名与类参数名匹配。
     - 示例（保存为 `<model_root>/dit/config.json`）：
