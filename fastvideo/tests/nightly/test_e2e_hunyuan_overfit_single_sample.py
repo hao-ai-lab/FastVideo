@@ -15,14 +15,14 @@ MODEL_PATH = "hunyuanvideo-community/HunyuanVideo"
 # preprocessing
 DATA_DIR = "data"
 LOCAL_RAW_DATA_DIR = Path(os.path.join(DATA_DIR, "cats"))
-NUM_GPUS_PER_NODE_PREPROCESSING = "1"
+NUM_GPUS_PER_NODE_PREPROCESSING = "2"
 PREPROCESSING_ENTRY_FILE_PATH = "fastvideo/pipelines/preprocess/v1_preprocessing_new.py"
 
 LOCAL_PREPROCESSED_DATA_DIR = Path(os.path.join(DATA_DIR, "cats_processed_t2v_hunyuan"))
 
 
 # training
-NUM_GPUS_PER_NODE_TRAINING = "1"
+NUM_GPUS_PER_NODE_TRAINING = "2"
 TRAINING_ENTRY_FILE_PATH = "fastvideo/training/hunyuan_training_pipeline.py"
 # New preprocessing pipeline creates files in training_dataset/worker_0/worker_0/
 LOCAL_TRAINING_DATA_DIR = os.path.join(LOCAL_PREPROCESSED_DATA_DIR, "training_dataset", "worker_0", "worker_0")
@@ -63,6 +63,16 @@ def download_data():
         if os.path.exists(video_dir) and not os.path.exists(videos_dir):
             print(f"Renaming video directory to videos...")
             os.rename(video_dir, videos_dir)
+    
+        # Copy validation file to expected name
+        source_validation_file = os.path.join(LOCAL_RAW_DATA_DIR, "validation_prompt_1_sample.json")
+        target_validation_file = LOCAL_VALIDATION_DATASET_FILE
+        
+        if os.path.exists(source_validation_file):
+            print(f"Copying {source_validation_file} to {target_validation_file}...")
+            shutil.copy2(source_validation_file, target_validation_file)
+        else:
+            raise FileNotFoundError(f"Source validation file not found: {source_validation_file}")
                 
     except Exception as e:
         print(f"Error during download: {str(e)}")
@@ -115,7 +125,7 @@ def run_training():
         "--data_path", LOCAL_TRAINING_DATA_DIR,
         "--validation_dataset_file", LOCAL_VALIDATION_DATASET_FILE,
         "--train_batch_size", "1",
-        "--num_latent_t", "4",
+        "--num_latent_t", "32",
         "--num_gpus", NUM_GPUS_PER_NODE_TRAINING,
         "--sp_size", NUM_GPUS_PER_NODE_TRAINING,
         "--tp_size", "1",
@@ -158,8 +168,8 @@ def run_training():
 def test_e2e_hunyuan_overfit_single_sample():
     os.environ["WANDB_MODE"] = "online"
 
-    #download_data()
-    #run_preprocessing()
+    # download_data()
+    # run_preprocessing()
     run_training()
 
     reference_video_file = os.path.join(os.path.dirname(__file__), "reference_video_hunyuan_1_sample_v0.mp4")
