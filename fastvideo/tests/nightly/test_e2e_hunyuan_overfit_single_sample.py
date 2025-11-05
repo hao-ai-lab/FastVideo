@@ -22,7 +22,7 @@ LOCAL_PREPROCESSED_DATA_DIR = Path(os.path.join(DATA_DIR, "cats_processed_t2v_hu
 
 
 # training
-NUM_GPUS_PER_NODE_TRAINING = "1"
+NUM_GPUS_PER_NODE_TRAINING = "8"
 TRAINING_ENTRY_FILE_PATH = "fastvideo/training/hunyuan_training_pipeline.py"
 # New preprocessing pipeline creates files in training_dataset/worker_0/worker_0/
 LOCAL_TRAINING_DATA_DIR = os.path.join(LOCAL_PREPROCESSED_DATA_DIR, "training_dataset", "worker_0", "worker_0")
@@ -112,9 +112,9 @@ def run_preprocessing():
         "--preprocess.dataset_output_dir", str(LOCAL_PREPROCESSED_DATA_DIR),
         "--preprocess.preprocess_video_batch_size", "1",
         "--preprocess.dataloader_num_workers", "0",
-        "--preprocess.max_height", "384",
-        "--preprocess.max_width", "640",
-        "--preprocess.num_frames", "49",
+        "--preprocess.max_height", "480",
+        "--preprocess.max_width", "832",
+        "--preprocess.num_frames", "77",
         "--preprocess.train_fps", "16",
         "--preprocess.samples_per_file", "1",
         "--preprocess.flush_frequency", "1",
@@ -161,9 +161,9 @@ def run_training():
         "--training_cfg_rate", "0.0",
         "--output_dir", str(LOCAL_OUTPUT_DIR),
         "--tracker_project_name", "hunyuan_finetune_overfit_ci",
-        "--num_height", "384",
-        "--num_width", "640",
-        "--num_frames", "49",
+        "--num_height", "480",
+        "--num_width", "832",
+        "--num_frames", "81",
         "--validation_guidance_scale", "1.0",
         "--embedded_cfg_scale", "6.0",
         "--num_euler_timesteps", "50",
@@ -182,11 +182,11 @@ def run_training():
 def test_e2e_hunyuan_overfit_single_sample():
     os.environ["WANDB_MODE"] = "online"
 
-    download_data()
+    #download_data()
     run_preprocessing()
     run_training()
 
-    reference_video_file = os.path.join(os.path.dirname(__file__), "reference_video_hunyuan_1_sample_v0.mp4")
+    reference_video_file = os.path.join(os.path.dirname(__file__), "reference_video_1_sample_v0.mp4")
     print(f"reference_video_file: {reference_video_file}")
     final_validation_video_file = os.path.join(LOCAL_OUTPUT_DIR, "validation_step_900_inference_steps_50_video_0.mp4")
     print(f"final_validation_video_file: {final_validation_video_file}")
@@ -196,7 +196,7 @@ def test_e2e_hunyuan_overfit_single_sample():
     assert os.path.exists(reference_video_file), f"Reference video not found at {reference_video_file}"
     assert os.path.exists(final_validation_video_file), f"Validation video not found at {final_validation_video_file}"
 
-    # Compute SSIM
+    #Compute SSIM
     mean_ssim, min_ssim, max_ssim = compute_video_ssim_torchvision(
         reference_video_file,
         final_validation_video_file,
@@ -209,6 +209,7 @@ def test_e2e_hunyuan_overfit_single_sample():
     print(f"Max MS-SSIM: {max_ssim:.4f}")
 
     assert max_ssim > 0.5, f"Max SSIM is below 0.5: {max_ssim}"
+
 
 
 if __name__ == "__main__":
