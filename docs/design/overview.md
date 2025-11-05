@@ -106,6 +106,8 @@ def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> Forward
     return batch
 ```
 
+![Pipeline execution and data flow](../assets/images/pipeline.png)
+
 ### ForwardBatch
 
 Defined in `fastvideo/pipelines/pipeline_batch_info.py`, `ForwardBatch` encapsulates the data payload passed between pipeline stages. It typically holds:
@@ -208,6 +210,10 @@ def step(
     return prev_sample
 ```
 
+This diagram shows how models are discovered, validated, and loaded across entrypoints, executors, pipelines, and model loaders.
+
+![Model loading flow](../assets/images/load_models.png)
+
 ## Optimized Attention
 
 The `fastvideo/attention/` directory contains optimized attention implementations crucial for efficient video diffusion:
@@ -230,6 +236,8 @@ self.attn = LocalAttention(
 # Override via environment variable
 # export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 ```
+
+![Attention backend selector design](../assets/images/attention_backend.png)
 
 ### Attention Patterns
 Supports various patterns with memory optimization techniques:
