@@ -63,7 +63,7 @@ def download_data():
         if os.path.exists(video_dir) and not os.path.exists(videos_dir):
             print(f"Renaming video directory to videos...")
             os.rename(video_dir, videos_dir)
-    
+            
         # Copy validation file to expected name
         source_validation_file = os.path.join(LOCAL_RAW_DATA_DIR, "validation_prompt_1_sample.json")
         target_validation_file = LOCAL_VALIDATION_DATASET_FILE
@@ -73,7 +73,7 @@ def download_data():
             shutil.copy2(source_validation_file, target_validation_file)
         else:
             raise FileNotFoundError(f"Source validation file not found: {source_validation_file}")
-                
+        
     except Exception as e:
         print(f"Error during download: {str(e)}")
         raise
@@ -114,6 +114,9 @@ def run_preprocessing():
 
 
 def run_training():
+    env = os.environ.copy()
+    env['PYTHONPATH'] = os.getcwd()
+
     cmd = [
         "torchrun",
         "--nnodes", NUM_NODES,
@@ -125,7 +128,7 @@ def run_training():
         "--data_path", LOCAL_TRAINING_DATA_DIR,
         "--validation_dataset_file", LOCAL_VALIDATION_DATASET_FILE,
         "--train_batch_size", "1",
-        "--num_latent_t", "32",
+        "--num_latent_t", "8",
         "--num_gpus", NUM_GPUS_PER_NODE_TRAINING,
         "--sp_size", NUM_GPUS_PER_NODE_TRAINING,
         "--tp_size", "1",
@@ -162,7 +165,7 @@ def run_training():
     ]
 
     print(f"Running training with command: {cmd}")
-    process = subprocess.run(cmd, check=True)
+    process = subprocess.run(cmd, check=True, env=env)
 
 
 def test_e2e_hunyuan_overfit_single_sample():
