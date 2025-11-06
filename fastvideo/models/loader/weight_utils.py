@@ -15,7 +15,7 @@ import torch.distributed as dist
 from safetensors.torch import safe_open
 from tqdm.auto import tqdm
 
-from fastvideo.v1.distributed.parallel_state import get_node_group
+from fastvideo.distributed.parallel_state import get_node_group
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.logger import init_logger
 

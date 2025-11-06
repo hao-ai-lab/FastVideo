@@ -12,8 +12,8 @@ from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
 from fastvideo.dataset.parquet_dataset_map_style import (
     build_parquet_map_style_dataloader)
 <<<<<<< HEAD:fastvideo/v1/dataset/benchmarks/benchmark_parquet_dataset_map_style.py
-from fastvideo.v1.distributed import get_world_rank
-from fastvideo.v1.distributed.parallel_state import (
+from fastvideo.distributed import get_world_rank
+from fastvideo.distributed.parallel_state import (
 =======
 from fastvideo.distributed import get_world_rank
 from fastvideo.distributed.parallel_state import (
