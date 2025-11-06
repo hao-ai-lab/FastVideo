@@ -29,14 +29,19 @@ def test_model_instantiation():
     print("Testing Native LongCat Model Instantiation")
     print("=" * 60)
     
-    # Create config
+    # Create config with SMALLER size for testing
     config = LongCatVideoConfig()
+    config.arch_config.depth = 2  # Just 2 blocks instead of 48
+    config.arch_config.hidden_size = 512  # Smaller hidden size
+    config.arch_config.num_attention_heads = 8
+    config.arch_config.attention_head_dim = 64
+    config.arch_config.caption_channels = 512
     
-    print(f"\nModel Configuration:")
-    print(f"  Hidden size: {config.hidden_size}")
-    print(f"  Depth: {config.depth}")
-    print(f"  Num heads: {config.num_attention_heads}")
-    print(f"  Patch size: {config.patch_size}")
+    print(f"\nModel Configuration (REDUCED FOR TESTING):")
+    print(f"  Hidden size: {config.arch_config.hidden_size}")
+    print(f"  Depth: {config.arch_config.depth}")
+    print(f"  Num heads: {config.arch_config.num_attention_heads}")
+    print(f"  Patch size: {config.arch_config.patch_size}")
     
     # Instantiate model
     print("\nInstantiating model...")
@@ -56,23 +61,30 @@ def test_forward_pass():
     print("Testing Native LongCat Forward Pass")
     print("=" * 60)
     
-    # Create model
+    # Create model with SMALLER config for testing
     config = LongCatVideoConfig()
+    config.arch_config.depth = 2  # Just 2 blocks
+    config.arch_config.hidden_size = 512
+    config.arch_config.num_attention_heads = 8
+    config.arch_config.attention_head_dim = 64
+    config.arch_config.caption_channels = 512  # Match text encoder size
+    
     model = LongCatTransformer3DModel(config, hf_config={})
     model.eval()
+    model = model.cuda()  # Move to GPU
     
-    # Create random inputs
+    # Create random inputs - SMALLER for testing
     batch_size = 1
-    T, H, W = 23, 60, 104  # 93 frames -> 23 after VAE, 480p -> 60x104
+    T, H, W = 5, 16, 28  # Much smaller: ~5 frames, lower resolution
     
     print(f"\nInput shapes:")
     print(f"  Batch size: {batch_size}")
     print(f"  Latent shape: [{batch_size}, 16, {T}, {H}, {W}]")
-    print(f"  Text shape: [{batch_size}, 512, 4096]")
+    print(f"  Text shape: [{batch_size}, 128, 512]")  # Smaller text
     
-    hidden_states = torch.randn(batch_size, 16, T, H, W)
-    encoder_hidden_states = torch.randn(batch_size, 512, 4096)
-    timestep = torch.randint(0, 1000, (batch_size,))
+    hidden_states = torch.randn(batch_size, 16, T, H, W).cuda()
+    encoder_hidden_states = torch.randn(batch_size, 128, 512).cuda()  # Smaller text
+    timestep = torch.randint(0, 1000, (batch_size,)).cuda()
     
     print("\nRunning forward pass...")
     
@@ -119,24 +131,35 @@ def test_with_attention_mask():
     print("=" * 60)
     
     config = LongCatVideoConfig()
+    config.arch_config.depth = 2
+    config.arch_config.hidden_size = 512
+    config.arch_config.num_attention_heads = 8
+    config.arch_config.attention_head_dim = 64
+    config.arch_config.caption_channels = 512
+    
     model = LongCatTransformer3DModel(config, hf_config={})
     model.eval()
+    model = model.cuda()
     
     batch_size = 2
-    T, H, W = 23, 60, 104
+    T, H, W = 5, 16, 28  # Smaller for testing
+    
+    max_seq_len = 128
+    seq_len_1 = 100
+    seq_len_2 = 80
     
     print(f"\nTesting with batch_size={batch_size}")
-    print(f"  Sample 1: 400 valid tokens")
-    print(f"  Sample 2: 300 valid tokens")
+    print(f"  Sample 1: {seq_len_1} valid tokens")
+    print(f"  Sample 2: {seq_len_2} valid tokens")
     
-    hidden_states = torch.randn(batch_size, 16, T, H, W)
-    encoder_hidden_states = torch.randn(batch_size, 512, 4096)
-    timestep = torch.randint(0, 1000, (batch_size,))
+    hidden_states = torch.randn(batch_size, 16, T, H, W).cuda()
+    encoder_hidden_states = torch.randn(batch_size, max_seq_len, 512).cuda()
+    timestep = torch.randint(0, 1000, (batch_size,)).cuda()
     
     # Create attention mask with different lengths
-    encoder_attention_mask = torch.zeros(batch_size, 512)
-    encoder_attention_mask[0, :400] = 1  # First sample: 400 tokens
-    encoder_attention_mask[1, :300] = 1  # Second sample: 300 tokens
+    encoder_attention_mask = torch.zeros(batch_size, max_seq_len).cuda()
+    encoder_attention_mask[0, :seq_len_1] = 1  # First sample
+    encoder_attention_mask[1, :seq_len_2] = 1  # Second sample
     
     print("\nRunning forward pass with variable-length text...")
     
@@ -227,5 +250,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        # Ensure cleanup happens even if test fails
+        try:
+            cleanup_dist_env_and_memory()
+        except:
+            pass
 

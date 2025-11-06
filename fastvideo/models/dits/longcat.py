@@ -16,10 +16,10 @@ from einops import rearrange
 
 from fastvideo.configs.models.dits import LongCatVideoConfig
 from fastvideo.layers.linear import ReplicatedLinear
-from fastvideo.layers.layernorm import RMSNorm
+from fastvideo.layers.layernorm import RMSNorm, FP32LayerNorm
 from fastvideo.layers.activation import get_act_fn
 from fastvideo.layers.rotary_embedding_3d import RotaryPositionalEmbedding3D
-from fastvideo.attention.layer import DistributedAttention
+from fastvideo.attention.layer import DistributedAttention, LocalAttention
 from fastvideo.models.dits.base import CachableDiT
 from fastvideo.platforms import AttentionBackendEnum
 
@@ -337,9 +337,16 @@ class LongCatCrossAttention(nn.Module):
         # Output projection
         self.to_out = ReplicatedLinear(dim, dim, bias=True, params_dtype=dtype)
 
-        # Cross-attention uses simple SDPA, not DistributedAttention
-        # because q and k/v have different sequence lengths
-        self.scale = self.head_dim ** -0.5
+        # Cross-attention uses LocalAttention (FastVideo standard)
+        # LocalAttention handles different q and k/v sequence lengths correctly
+        self.attn = LocalAttention(
+            num_heads=num_heads,
+            head_size=self.head_dim,
+            dropout_rate=0,
+            softmax_scale=None,
+            causal=False,
+            supported_attention_backends=config.arch_config._supported_attention_backends,
+        )
 
     def forward(
         self,
@@ -409,31 +416,15 @@ class LongCatCrossAttention(nn.Module):
         q = self.q_norm(q)
         k = self.k_norm(k)
 
-        # Transpose for attention: [B, num_heads, seq_len, head_dim]
-        q = q.transpose(1, 2)
-        k = k.transpose(1, 2)
-        v = v.transpose(1, 2)
+        # LocalAttention expects [B, seq_len, num_heads, head_dim]
+        # (already in this format after view)
 
-        # Create attention mask for padded tokens if needed
-        attn_mask = None
-        if context_seqlens is not None:
-            # Create mask: -inf for positions to mask
-            attn_mask = torch.zeros(B, 1, N_img, N_text, device=x.device, dtype=q.dtype)
-            for i, seq_len in enumerate(context_seqlens):
-                if seq_len < N_text:
-                    attn_mask[i, :, :, seq_len:] = float('-inf')
-
-        # Run cross-attention using torch SDPA
-        # q: [B, num_heads, N_img, head_dim]
-        # k, v: [B, num_heads, N_text, head_dim]
-        out = torch.nn.functional.scaled_dot_product_attention(
-            q, k, v,
-            attn_mask=attn_mask,
-            scale=self.scale
-        )
+        # Run cross-attention using FastVideo's LocalAttention
+        # LocalAttention handles different q and k/v sequence lengths automatically
+        out = self.attn(q, k, v)  # [B, N_img, num_heads, head_dim]
 
         # Reshape and project out
-        out = out.transpose(1, 2).reshape(B, N_img, C)
+        out = out.reshape(B, N_img, C)
         out, _ = self.to_out(out)
 
         return out
@@ -537,7 +528,8 @@ class LongCatTransformerBlock(nn.Module):
         # Normalization layers (using FastVideo's RMSNorm with FP32 support)
         self.norm_attn = RMSNorm(hidden_size, eps=1e-6, dtype=torch.float32, has_weight=False)
         self.norm_ffn = RMSNorm(hidden_size, eps=1e-6, dtype=torch.float32, has_weight=False)
-        self.norm_cross = RMSNorm(hidden_size, eps=1e-6, dtype=dtype or torch.float32)
+        # Use LayerNorm for norm_cross to match original (has both weight and bias)
+        self.norm_cross = FP32LayerNorm(hidden_size, eps=1e-6)
 
         # Self-attention
         self.self_attn = LongCatSelfAttention(
@@ -809,7 +801,7 @@ class LongCatTransformer3DModel(CachableDiT):
         )  # [1, N_total, C], [B]
 
         # 4. Transformer blocks
-        for block in self.blocks:
+        for i, block in enumerate(self.blocks):
             x = block(
                 x, context, t,
                 latent_shape=(N_t, N_h, N_w),
