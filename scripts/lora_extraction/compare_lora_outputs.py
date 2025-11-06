@@ -154,8 +154,8 @@ def main():
         if compute_ssim:
             try:
                 ssim_val = float(ssim_fn(ref, mod, channel_axis=2, data_range=1.0))
-            except Exception:
-                ssim_val = None
+            except Exception as e:
+                print(f"Warning: SSIM calculation for prompt {i} failed: {e}")
 
         results.append({"i": i, "prompt": prompt, "mse": mse, "mae": mae, "lpips": lpips_val, "ssim": ssim_val})
         print(f"[{i}] MSE={mse:.3e}, MAE={mae:.3e}, LPIPS={lpips_val}, SSIM={ssim_val}")
