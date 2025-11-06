@@ -12,7 +12,7 @@ import torch
 import fastvideo.envs as envs
 from fastvideo.attention.backends.abstract import AttentionBackend
 from fastvideo.logger import init_logger
-from fastvideo.platforms import AttentionBackendEnum, current_platform
+from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import STR_BACKEND_ENV_VAR, resolve_obj_by_qualname
 
 logger = init_logger(__name__)
@@ -117,6 +117,8 @@ def _cached_get_attn_backend(
             selected_backend = backend_name_to_enum(backend_by_env_var)
 
     # get device-specific attn_backend
+    from fastvideo.platforms import current_platform
+
     if selected_backend not in supported_attention_backends:
         selected_backend = None
     attention_cls = current_platform.get_attn_backend_cls(

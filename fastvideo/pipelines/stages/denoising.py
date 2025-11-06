@@ -85,8 +85,9 @@ class DenoisingStage(PipelineStage):
                 AttentionBackendEnum.SLIDING_TILE_ATTN,
                 AttentionBackendEnum.VIDEO_SPARSE_ATTN,
                 AttentionBackendEnum.VMOBA_ATTN,
-                AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA
-            )  # hack
+                AttentionBackendEnum.FLASH_ATTN,
+                AttentionBackendEnum.TORCH_SDPA,
+                AttentionBackendEnum.SAGE_ATTN_THREE)  # hack
         )
 
     def forward(
@@ -204,14 +205,14 @@ class DenoisingStage(PipelineStage):
                 neg_prompt_embeds[0]).any(), "neg_prompt_embeds contains nan"
 
         # (Wan2.2) Calculate timestep to switch from high noise expert to low noise expert
-        if fastvideo_args.pipeline_config.dit_config.boundary_ratio is not None:
-            boundary_timestep = fastvideo_args.pipeline_config.dit_config.boundary_ratio
-            if batch.boundary_timestep is not None:
-                logger.info("Overriding boundary timestep from %s to %s",
-                            boundary_timestep, batch.boundary_timestep)
-                boundary_timestep = batch.boundary_timestep
+        boundary_ratio = fastvideo_args.pipeline_config.dit_config.boundary_ratio
+        if batch.boundary_ratio is not None:
+            logger.info("Overriding boundary ratio from %s to %s",
+                        boundary_ratio, batch.boundary_ratio)
+            boundary_ratio = batch.boundary_ratio
 
-            boundary_timestep *= self.scheduler.num_train_timesteps
+        if boundary_ratio is not None:
+            boundary_timestep = boundary_ratio * self.scheduler.num_train_timesteps
         else:
             boundary_timestep = None
         latent_model_input = latents.to(target_dtype)
@@ -253,6 +254,10 @@ class DenoisingStage(PipelineStage):
                                                              patch_size[2])
             seq_len = int(math.ceil(seq_len / sp_world_size)) * sp_world_size
 
+        # Initialize lists for ODE trajectory
+        trajectory_timesteps: list[torch.Tensor] = []
+        trajectory_latents: list[torch.Tensor] = []
+
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -278,9 +283,15 @@ class DenoisingStage(PipelineStage):
                     current_guidance_scale = batch.guidance_scale_2
                 assert current_model is not None, "current_model is None"
 
-                # Expand latents for I2V
+                # Expand latents for V2V/I2V
                 latent_model_input = latents.to(target_dtype)
-                if batch.image_latent is not None:
+                if batch.video_latent is not None:
+                    latent_model_input = torch.cat([
+                        latent_model_input, batch.video_latent,
+                        torch.zeros_like(latents)
+                    ],
+                                                   dim=1).to(target_dtype)
+                elif batch.image_latent is not None:
                     assert not fastvideo_args.pipeline_config.ti2v_task, "image latents should not be provided for TI2V task"
                     latent_model_input = torch.cat(
                         [latent_model_input, batch.image_latent],
@@ -392,16 +403,13 @@ class DenoisingStage(PipelineStage):
                             **pos_cond_kwargs,
                         )
 
-                    # Apply guidance
                     if batch.do_classifier_free_guidance:
                         batch.is_cfg_negative = True
                         with set_forward_context(
                                 current_timestep=i,
                                 attn_metadata=attn_metadata,
                                 forward_batch=batch,
-                                # fastvideo_args=fastvideo_args
                         ):
-                            # Run transformer
                             noise_pred_uncond = current_model(
                                 latent_model_input,
                                 neg_prompt_embeds,
@@ -410,6 +418,7 @@ class DenoisingStage(PipelineStage):
                                 **image_kwargs,
                                 **neg_cond_kwargs,
                             )
+
                         noise_pred_text = noise_pred
                         noise_pred = noise_pred_uncond + current_guidance_scale * (
                             noise_pred_text - noise_pred_uncond)
@@ -433,6 +442,11 @@ class DenoisingStage(PipelineStage):
                         latents = (1. - mask2[0]) * z + mask2[0] * latents
                         # latents = latents.unsqueeze(0)
 
+                # save trajectory latents if needed
+                if batch.return_trajectory_latents:
+                    trajectory_timesteps.append(t)
+                    trajectory_latents.append(latents)
+
                 # Update progress bar
                 if i == len(timesteps) - 1 or (
                     (i + 1) > num_warmup_steps and
@@ -441,8 +455,27 @@ class DenoisingStage(PipelineStage):
                     progress_bar.update()
 
         # Gather results if using sequence parallelism
+        trajectory_tensor: torch.Tensor | None = None
+        if trajectory_latents:
+            trajectory_tensor = torch.stack(trajectory_latents, dim=1)
+            trajectory_timesteps_tensor = torch.stack(trajectory_timesteps,
+                                                      dim=0)
+        else:
+            trajectory_tensor = None
+            trajectory_timesteps_tensor = None
+
+        # Gather results if using sequence parallelism
         if sp_group:
             latents = sequence_model_parallel_all_gather(latents, dim=2)
+            if batch.return_trajectory_latents:
+                trajectory_tensor = trajectory_tensor.to(
+                    get_local_torch_device())
+                trajectory_tensor = sequence_model_parallel_all_gather(
+                    trajectory_tensor, dim=3)
+
+        if trajectory_tensor is not None and trajectory_timesteps_tensor is not None:
+            batch.trajectory_timesteps = trajectory_timesteps_tensor.cpu()
+            batch.trajectory_latents = trajectory_tensor.cpu()
 
         # Update batch with final latents
         batch.latents = latents
@@ -540,7 +573,7 @@ class DenoisingStage(PipelineStage):
             fastvideo_args: The inference arguments.
         """
         # TODO(kevin): STA mask search, currently only support Wan2.1 with 69x768x1280
-        from fastvideo.STA_configuration import configure_sta
+        from fastvideo.attention.backends.STA_configuration import configure_sta
         STA_mode = fastvideo_args.STA_mode
         skip_time_steps = fastvideo_args.skip_time_steps
         if batch.timesteps is None:
@@ -647,7 +680,7 @@ class DenoisingStage(PipelineStage):
             raise NotImplementedError(
                 "STA mask search is not supported for this resolution")
 
-        from fastvideo.STA_configuration import save_mask_search_results
+        from fastvideo.attention.backends.STA_configuration import save_mask_search_results
         if batch.mask_search_final_result_pos is not None and batch.prompt is not None:
             save_mask_search_results(
                 [
@@ -698,6 +731,281 @@ class DenoisingStage(PipelineStage):
     def verify_output(self, batch: ForwardBatch,
                       fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify denoising stage outputs."""
+        result = VerificationResult()
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(5)])
+        return result
+
+
+class CosmosDenoisingStage(DenoisingStage):
+    """
+    Denoising stage for Cosmos models using FlowMatchEulerDiscreteScheduler.
+    """
+
+    def __init__(self, transformer, scheduler, pipeline=None) -> None:
+        super().__init__(transformer, scheduler, pipeline)
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        pipeline = self.pipeline() if self.pipeline else None
+        if not fastvideo_args.model_loaded["transformer"]:
+            loader = TransformerLoader()
+            self.transformer = loader.load(
+                fastvideo_args.model_paths["transformer"], fastvideo_args)
+            if pipeline:
+                pipeline.add_module("transformer", self.transformer)
+            fastvideo_args.model_loaded["transformer"] = True
+
+        extra_step_kwargs = self.prepare_extra_func_kwargs(
+            self.scheduler.step,
+            {
+                "generator": batch.generator,
+                "eta": batch.eta
+            },
+        )
+
+        if hasattr(self.transformer, 'module'):
+            transformer_dtype = next(self.transformer.module.parameters()).dtype
+        else:
+            transformer_dtype = next(self.transformer.parameters()).dtype
+        target_dtype = transformer_dtype
+        autocast_enabled = (target_dtype != torch.float32
+                            ) and not fastvideo_args.disable_autocast
+
+        latents = batch.latents
+        num_inference_steps = batch.num_inference_steps
+        guidance_scale = batch.guidance_scale
+
+        sigma_max = 80.0
+        sigma_min = 0.002
+        sigma_data = 1.0
+        final_sigmas_type = "sigma_min"
+
+        if self.scheduler is not None:
+            self.scheduler.register_to_config(
+                sigma_max=sigma_max,
+                sigma_min=sigma_min,
+                sigma_data=sigma_data,
+                final_sigmas_type=final_sigmas_type,
+            )
+
+        self.scheduler.set_timesteps(num_inference_steps, device=latents.device)
+        timesteps = self.scheduler.timesteps
+
+        if (hasattr(self.scheduler.config, 'final_sigmas_type')
+                and self.scheduler.config.final_sigmas_type == "sigma_min"
+                and len(self.scheduler.sigmas) > 1):
+            self.scheduler.sigmas[-1] = self.scheduler.sigmas[-2]
+
+        conditioning_latents = getattr(batch, 'conditioning_latents', None)
+        unconditioning_latents = conditioning_latents
+
+        with self.progress_bar(total=num_inference_steps) as progress_bar:
+            for i, t in enumerate(timesteps):
+                if hasattr(self, 'interrupt') and self.interrupt:
+                    continue
+
+                current_sigma = self.scheduler.sigmas[i]
+                current_t = current_sigma / (current_sigma + 1)
+                c_in = 1 - current_t
+                c_skip = 1 - current_t
+                c_out = -current_t
+
+                timestep = current_t.view(1, 1, 1, 1,
+                                          1).expand(latents.size(0), -1,
+                                                    latents.size(2), -1,
+                                                    -1)  # [B, 1, T, 1, 1]
+
+                with torch.autocast(device_type="cuda",
+                                    dtype=target_dtype,
+                                    enabled=autocast_enabled):
+
+                    cond_latent = latents * c_in
+
+                    if hasattr(
+                            batch, 'cond_indicator'
+                    ) and batch.cond_indicator is not None and conditioning_latents is not None:
+                        cond_latent = batch.cond_indicator * conditioning_latents + (
+                            1 - batch.cond_indicator) * cond_latent
+                    else:
+                        logger.warning(
+                            "Step %s: Missing conditioning data - cond_indicator: %s, conditioning_latents: %s",
+                            i, hasattr(batch, 'cond_indicator'),
+                            conditioning_latents is not None)
+
+                    cond_latent = cond_latent.to(target_dtype)
+
+                    cond_timestep = timestep
+                    if hasattr(batch, 'cond_indicator'
+                               ) and batch.cond_indicator is not None:
+                        sigma_conditioning = 0.0001
+                        t_conditioning = sigma_conditioning / (
+                            sigma_conditioning + 1)
+                        cond_timestep = batch.cond_indicator * t_conditioning + (
+                            1 - batch.cond_indicator) * timestep
+                        cond_timestep = cond_timestep.to(target_dtype)
+
+                    with set_forward_context(
+                            current_timestep=i,
+                            attn_metadata=None,
+                            forward_batch=batch,
+                    ):
+                        # Use conditioning masks from CosmosLatentPreparationStage
+                        condition_mask = batch.cond_mask.to(
+                            target_dtype) if hasattr(batch,
+                                                     'cond_mask') else None
+                        padding_mask = torch.zeros(1,
+                                                   1,
+                                                   batch.height,
+                                                   batch.width,
+                                                   device=cond_latent.device,
+                                                   dtype=target_dtype)
+
+                        # Fallback if masks not available
+                        if condition_mask is None:
+                            batch_size, num_channels, num_frames, height, width = cond_latent.shape
+                            condition_mask = torch.zeros(
+                                batch_size,
+                                1,
+                                num_frames,
+                                height,
+                                width,
+                                device=cond_latent.device,
+                                dtype=target_dtype)
+
+                        noise_pred = self.transformer(
+                            hidden_states=cond_latent,
+                            timestep=cond_timestep.to(target_dtype),
+                            encoder_hidden_states=batch.prompt_embeds[0].to(
+                                target_dtype),
+                            fps=24,  # TODO: get fps from batch or config
+                            condition_mask=condition_mask,
+                            padding_mask=padding_mask,
+                            return_dict=False,
+                        )[0]
+
+                    cond_pred = (c_skip * latents +
+                                 c_out * noise_pred.float()).to(target_dtype)
+
+                    if hasattr(
+                            batch, 'cond_indicator'
+                    ) and batch.cond_indicator is not None and conditioning_latents is not None:
+                        cond_pred = batch.cond_indicator * conditioning_latents + (
+                            1 - batch.cond_indicator) * cond_pred
+
+                    if batch.do_classifier_free_guidance and batch.negative_prompt_embeds is not None:
+                        uncond_latent = latents * c_in
+
+                        if hasattr(
+                                batch, 'uncond_indicator'
+                        ) and batch.uncond_indicator is not None and unconditioning_latents is not None:
+                            uncond_latent = batch.uncond_indicator * unconditioning_latents + (
+                                1 - batch.uncond_indicator) * uncond_latent
+
+                        with set_forward_context(
+                                current_timestep=i,
+                                attn_metadata=None,
+                                forward_batch=batch,
+                        ):
+                            uncond_condition_mask = batch.uncond_mask.to(
+                                target_dtype
+                            ) if hasattr(
+                                batch, 'uncond_mask'
+                            ) and batch.uncond_mask is not None else condition_mask
+
+                            uncond_timestep = timestep
+                            if hasattr(batch, 'uncond_indicator'
+                                       ) and batch.uncond_indicator is not None:
+                                sigma_conditioning = 0.0001
+                                t_conditioning = sigma_conditioning / (
+                                    sigma_conditioning + 1)
+                                uncond_timestep = batch.uncond_indicator * t_conditioning + (
+                                    1 - batch.uncond_indicator) * timestep
+                                uncond_timestep = uncond_timestep.to(
+                                    target_dtype)
+
+                            noise_pred_uncond = self.transformer(
+                                hidden_states=uncond_latent.to(target_dtype),
+                                timestep=uncond_timestep.to(target_dtype),
+                                encoder_hidden_states=batch.
+                                negative_prompt_embeds[0].to(target_dtype),
+                                fps=24,  # TODO: get fps from batch or config
+                                condition_mask=uncond_condition_mask,
+                                padding_mask=padding_mask,
+                                return_dict=False,
+                            )[0]
+
+                        uncond_pred = (
+                            c_skip * latents +
+                            c_out * noise_pred_uncond.float()).to(target_dtype)
+
+                        if hasattr(
+                                batch, 'uncond_indicator'
+                        ) and batch.uncond_indicator is not None and unconditioning_latents is not None:
+                            uncond_pred = batch.uncond_indicator * unconditioning_latents + (
+                                1 - batch.uncond_indicator) * uncond_pred
+
+                        guidance_diff = cond_pred - uncond_pred
+                        final_pred = cond_pred + guidance_scale * guidance_diff
+                    else:
+                        final_pred = cond_pred
+
+                # Convert to noise for scheduler step
+                if current_sigma > 1e-8:
+                    noise_for_scheduler = (latents - final_pred) / current_sigma
+                else:
+                    logger.warning(
+                        "Step %s: current_sigma too small (%s), using final_pred directly",
+                        i, current_sigma)
+                    noise_for_scheduler = final_pred
+
+                if torch.isnan(noise_for_scheduler).sum() > 0:
+                    logger.error(
+                        "Step %s: NaN detected in noise_for_scheduler, sum: %s",
+                        i,
+                        noise_for_scheduler.float().sum().item())
+                    logger.error(
+                        "Step %s: latents sum: %s, final_pred sum: %s, current_sigma: %s",
+                        i,
+                        latents.float().sum().item(),
+                        final_pred.float().sum().item(), current_sigma)
+
+                latents = self.scheduler.step(noise_for_scheduler,
+                                              t,
+                                              latents,
+                                              **extra_step_kwargs,
+                                              return_dict=False)[0]
+
+                progress_bar.update()
+
+        batch.latents = latents
+
+        return batch
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify Cosmos denoising stage inputs."""
+        result = VerificationResult()
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(5)])
+        result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
+        result.add_check("num_inference_steps", batch.num_inference_steps,
+                         V.positive_int)
+        result.add_check("guidance_scale", batch.guidance_scale,
+                         V.positive_float)
+        result.add_check("do_classifier_free_guidance",
+                         batch.do_classifier_free_guidance, V.bool_value)
+        result.add_check(
+            "negative_prompt_embeds", batch.negative_prompt_embeds, lambda x:
+            not batch.do_classifier_free_guidance or V.list_not_empty(x))
+        return result
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify Cosmos denoising stage outputs."""
         result = VerificationResult()
         result.add_check("latents", batch.latents,
                          [V.is_tensor, V.with_dims(5)])

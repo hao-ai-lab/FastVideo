@@ -6,8 +6,16 @@ import time
 import os
 import torch
 from typing import Tuple
-from flash_attn import flash_attn_varlen_func  # Use the new flash attention function
-from flash_attn.flash_attn_interface import _flash_attn_varlen_forward, _flash_attn_varlen_backward
+try:
+    from flash_attn import flash_attn_varlen_func  # Use the new flash attention function
+    from flash_attn.flash_attn_interface import _flash_attn_varlen_forward, _flash_attn_varlen_backward
+except ImportError:
+    def _unsupported(*args, **kwargs):
+        raise ImportError("flash-attn is not installed. Please install it, e.g., `pip install flash-attn`.")
+    _flash_attn_varlen_forward = _unsupported
+    _flash_attn_varlen_backward = _unsupported
+    flash_attn_varlen_func = _unsupported
+    
 from functools import lru_cache
 from einops import rearrange
 

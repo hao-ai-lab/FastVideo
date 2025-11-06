@@ -50,7 +50,8 @@ def run_worker():
         "--max_train_steps", "5",
         "--learning_rate", "1e-6",
         "--mixed_precision", "bf16",
-        "--checkpointing_steps", "30",
+        "--weight_only_checkpointing_steps", "30",
+        "--training_state_checkpointing_steps", "30",
         "--validation_steps", "10",
         "--validation_sampling_steps", "8",
         "--log_validation",
@@ -118,7 +119,7 @@ def test_distributed_training():
         print(f"Process failed with return code: {process.returncode}")
         raise subprocess.CalledProcessError(process.returncode, cmd, process.stdout, process.stderr)
 
-    summary_file = 'wandb/latest-run/files/wandb-summary.json'
+    summary_file = 'data/wan_finetune_test/tracker/wandb/latest-run/files/wandb-summary.json'
 
     device_name = torch.cuda.get_device_name()
     if "A40" in device_name:

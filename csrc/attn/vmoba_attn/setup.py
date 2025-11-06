@@ -20,5 +20,7 @@ setup(
         "License :: OSI Approved :: Apache Software License",
     ],
     python_requires='>=3.12',
-    install_requires=[]
+    install_requires=[
+        "flash-attn >= 2.7.1",
+    ]
 )

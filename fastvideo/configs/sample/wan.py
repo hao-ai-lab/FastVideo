@@ -97,7 +97,7 @@ class WanI2V_14B_720P_SamplingParam(WanT2V_14B_SamplingParam):
 
 
 @dataclass
-class FastWanT2V480PConfig(WanT2V_1_3B_SamplingParam):
+class FastWanT2V480P_SamplingParam(WanT2V_1_3B_SamplingParam):
     # DMD parameters
     # dmd_denoising_steps: list[int] | None = field(default_factory=lambda: [1000, 757, 522])
     num_inference_steps: int = 3
@@ -120,6 +120,17 @@ class Wan2_1_Fun_1_3B_InP_SamplingParam(SamplingParam):
     negative_prompt: str | None = "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
     guidance_scale: float = 6.0
     num_inference_steps: int = 50
+
+
+@dataclass
+class Wan2_1_Fun_1_3B_Control_SamplingParam(SamplingParam):
+    fps: int = 16
+    num_frames: int = 49
+    height: int = 832
+    width: int = 480
+    guidance_scale: float = 6.0
+    teacache_params: WanTeaCacheParams = field(
+        default_factory=lambda: WanTeaCacheParams(teacache_thresh=0.1, ))
 
 
 # =============================================
@@ -162,9 +173,28 @@ class Wan2_2_I2V_A14B_SamplingParam(Wan2_2_Base_SamplingParam):
     # can be overridden during sampling
 
 
+@dataclass
+class Wan2_2_Fun_A14B_Control_SamplingParam(
+        Wan2_1_Fun_1_3B_Control_SamplingParam):
+    num_frames: int = 81
+
+
 # =============================================
 # ============= Causal Self-Forcing =============
 # =============================================
 @dataclass
-class SelfForcingWanT2V480PConfig(WanT2V_1_3B_SamplingParam):
+class SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam(
+        Wan2_1_Fun_1_3B_InP_SamplingParam):
     pass
+
+
+@dataclass
+class SelfForcingWan2_2_T2V_A14B_480P_SamplingParam(
+        Wan2_2_T2V_A14B_SamplingParam):
+    guidance_scale: float = 2.0
+    guidance_scale_2: float = 2.0
+    num_inference_steps: int = 8
+    num_frames: int = 81
+    height: int = 448
+    width: int = 832
+    fps: int = 16

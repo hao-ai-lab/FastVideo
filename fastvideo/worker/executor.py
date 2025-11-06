@@ -23,11 +23,14 @@ class Executor(ABC):
     def _init_executor(self) -> None:
         raise NotImplementedError
 
-    @classmethod
-    def get_class(cls, fastvideo_args: FastVideoArgs) -> type["Executor"]:
+    @staticmethod
+    def get_class(fastvideo_args: FastVideoArgs) -> type["Executor"]:
         if fastvideo_args.distributed_executor_backend == "mp":
             from fastvideo.worker.multiproc_executor import MultiprocExecutor
             return cast(type["Executor"], MultiprocExecutor)
+        elif fastvideo_args.distributed_executor_backend == "ray":
+            from fastvideo.worker.ray_distributed_executor import RayDistributedExecutor
+            return cast(type["Executor"], RayDistributedExecutor)
         else:
             raise ValueError(
                 f"Unsupported distributed executor backend: {fastvideo_args.distributed_executor_backend}"

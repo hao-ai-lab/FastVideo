@@ -34,13 +34,15 @@ class CausalDMDDenosingStage(DenoisingStage):
     Denoising stage for causal diffusion.
     """
 
-    def __init__(self, transformer, scheduler) -> None:
-        super().__init__(transformer, scheduler)
+    def __init__(self, transformer, scheduler, transformer_2=None) -> None:
+        super().__init__(transformer, scheduler, transformer_2)
         # KV and cross-attention cache state (initialized on first forward)
+        self.transformer = transformer
+        self.transformer_2 = transformer_2
         self.kv_cache1: list | None = None
         self.crossattn_cache: list | None = None
         # Model-dependent constants (aligned with causal_inference.py assumptions)
-        self.num_transformer_blocks = self.transformer.config.arch_config.num_layers
+        self.num_transformer_blocks = len(self.transformer.blocks)
         self.num_frames_per_block = self.transformer.config.arch_config.num_frames_per_block
         self.sliding_window_num_frames = self.transformer.config.arch_config.sliding_window_num_frames
 
@@ -65,21 +67,18 @@ class CausalDMDDenosingStage(DenoisingStage):
             -1] * self.transformer.config.arch_config.patch_size[-2]
         self.frame_seq_length = latent_seq_length // patch_ratio
         # TODO(will): make this a parameter once we add i2v support
-        independent_first_frame = self.transformer.independent_first_frame
-
+        independent_first_frame = self.transformer.independent_first_frame if hasattr(
+            self.transformer, 'independent_first_frame') else False
         # Timesteps for DMD
         timesteps = torch.tensor(
             fastvideo_args.pipeline_config.dmd_denoising_steps,
             dtype=torch.long).cpu()
-
         if fastvideo_args.pipeline_config.warp_denoising_step:
-            logger.info("Warping timesteps...")
             scheduler_timesteps = torch.cat((self.scheduler.timesteps.cpu(),
                                              torch.tensor([0],
                                                           dtype=torch.float32)))
             timesteps = scheduler_timesteps[1000 - timesteps]
         timesteps = timesteps.to(get_local_torch_device())
-        logger.info("Using timesteps: %s", timesteps)
 
         # Image kwargs (kept empty unless caller provides compatible args)
         image_kwargs: dict = {}
@@ -223,6 +222,10 @@ class CausalDMDDenosingStage(DenoisingStage):
                 video_raw_latent_shape = noise_latents_btchw.shape
 
                 for i, t_cur in enumerate(timesteps):
+                    if self.transformer_2 is not None and fastvideo_args.pipeline_config.dit_config.boundary_ratio is not None and t_cur < fastvideo_args.pipeline_config.dit_config.boundary_ratio * self.scheduler.num_train_timesteps:
+                        current_model = self.transformer_2
+                    else:
+                        current_model = self.transformer
                     # Copy for pred conversion
                     noise_latents = noise_latents_btchw.clone()
                     latent_model_input = current_latents.to(target_dtype)
@@ -273,7 +276,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                             (latent_model_input.shape[0], 1),
                             device=latent_model_input.device,
                             dtype=torch.long)
-                        pred_noise_btchw = self.transformer(
+                        pred_noise_btchw = current_model(
                             latent_model_input,
                             prompt_embeds,
                             t_expanded_noise,
@@ -338,7 +341,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                                         attn_metadata=attn_metadata,
                                         forward_batch=batch):
                     t_expanded_context = t_context.unsqueeze(1)
-                    _ = self.transformer(
+                    _ = current_model(
                         context_bcthw,
                         prompt_embeds,
                         t_expanded_context,

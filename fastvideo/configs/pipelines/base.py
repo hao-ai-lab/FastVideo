@@ -87,6 +87,7 @@ class PipelineConfig:
 
     # Wan2.2 TI2V parameters
     ti2v_task: bool = False
+    boundary_ratio: float | None = None
 
     # Compilation
     # enable_torch_compile: bool = False

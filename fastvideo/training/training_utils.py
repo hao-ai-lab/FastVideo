@@ -191,26 +191,48 @@ def save_checkpoint(transformer,
         logger.info("--> checkpoint saved at step %s to %s", step, weight_path)
 
 
-def save_distillation_checkpoint(generator_transformer,
-                                 fake_score_transformer,
-                                 rank,
-                                 output_dir,
-                                 step,
-                                 generator_optimizer=None,
-                                 fake_score_optimizer=None,
-                                 dataloader=None,
-                                 generator_scheduler=None,
-                                 fake_score_scheduler=None,
-                                 noise_generator=None,
-                                 only_save_generator_weight=False) -> None:
+def save_distillation_checkpoint(
+        generator_transformer,
+        fake_score_transformer,
+        rank,
+        output_dir,
+        step,
+        generator_optimizer=None,
+        fake_score_optimizer=None,
+        dataloader=None,
+        generator_scheduler=None,
+        fake_score_scheduler=None,
+        noise_generator=None,
+        generator_ema=None,
+        only_save_generator_weight=False,
+        # MoE support
+        generator_transformer_2=None,
+        real_score_transformer_2=None,
+        fake_score_transformer_2=None,
+        generator_optimizer_2=None,
+        fake_score_optimizer_2=None,
+        generator_scheduler_2=None,
+        fake_score_scheduler_2=None,
+        generator_ema_2=None) -> None:
     """
     Save distillation checkpoint with both generator and fake_score models.
+    Supports MoE (Mixture of Experts) models with transformer_2 variants.
     Saves both distributed checkpoint and consolidated model weights.
     Only saves the generator model for inference (consolidated weights).
     
     Args:
+        generator_transformer: Main generator transformer model
+        fake_score_transformer: Main fake score transformer model
         only_save_generator_weight: If True, only save the generator model weights for inference
                                    without saving distributed checkpoint for training resume.
+        generator_transformer_2: Secondary generator transformer for MoE (optional)
+        real_score_transformer_2: Secondary real score transformer for MoE (optional) 
+        fake_score_transformer_2: Secondary fake score transformer for MoE (optional)
+        generator_optimizer_2: Optimizer for generator_transformer_2 (optional)
+        fake_score_optimizer_2: Optimizer for fake_score_transformer_2 (optional)
+        generator_scheduler_2: Scheduler for generator_transformer_2 (optional)
+        fake_score_scheduler_2: Scheduler for fake_score_transformer_2 (optional)
+        generator_ema_2: EMA for generator_transformer_2 (optional)
     """
     save_dir = os.path.join(output_dir, f"checkpoint-{step}")
     os.makedirs(save_dir, exist_ok=True)
@@ -233,6 +255,8 @@ def save_distillation_checkpoint(generator_transformer,
         if generator_scheduler is not None:
             generator_states["scheduler"] = SchedulerWrapper(
                 generator_scheduler)
+        if generator_ema is not None:
+            generator_states["ema"] = generator_ema.state_dict()
 
         generator_dcp_dir = os.path.join(save_dir, "distributed_checkpoint",
                                          "generator")
@@ -250,6 +274,41 @@ def save_distillation_checkpoint(generator_transformer,
             rank,
             end_time - begin_time,
             local_main_process_only=False)
+
+        # Save generator_2 distributed checkpoint (MoE support)
+        if generator_transformer_2 is not None:
+            generator_2_states = {
+                "model": ModelWrapper(generator_transformer_2),
+            }
+            if generator_optimizer_2 is not None:
+                generator_2_states["optimizer"] = OptimizerWrapper(
+                    generator_transformer_2, generator_optimizer_2)
+            if dataloader is not None:
+                generator_2_states["dataloader"] = dataloader
+            if generator_scheduler_2 is not None:
+                generator_2_states["scheduler"] = SchedulerWrapper(
+                    generator_scheduler_2)
+            if generator_ema_2 is not None:
+                generator_2_states["ema"] = generator_ema_2.state_dict()
+
+            generator_2_dcp_dir = os.path.join(save_dir,
+                                               "distributed_checkpoint",
+                                               "generator_2")
+            logger.info(
+                "rank: %s, saving generator_2 distributed checkpoint to %s",
+                rank,
+                generator_2_dcp_dir,
+                local_main_process_only=False)
+
+            begin_time = time.perf_counter()
+            dcp.save(generator_2_states, checkpoint_id=generator_2_dcp_dir)
+            end_time = time.perf_counter()
+
+            logger.info(
+                "rank: %s, generator_2 distributed checkpoint saved in %.2f seconds",
+                rank,
+                end_time - begin_time,
+                local_main_process_only=False)
 
         # Save critic distributed checkpoint
         critic_states = {
@@ -279,6 +338,67 @@ def save_distillation_checkpoint(generator_transformer,
             rank,
             end_time - begin_time,
             local_main_process_only=False)
+
+        # Save critic_2 distributed checkpoint (MoE support)
+        if fake_score_transformer_2 is not None:
+            critic_2_states = {
+                "model": ModelWrapper(fake_score_transformer_2),
+            }
+            if fake_score_optimizer_2 is not None:
+                critic_2_states["optimizer"] = OptimizerWrapper(
+                    fake_score_transformer_2, fake_score_optimizer_2)
+            if dataloader is not None:
+                critic_2_states["dataloader"] = dataloader
+            if fake_score_scheduler_2 is not None:
+                critic_2_states["scheduler"] = SchedulerWrapper(
+                    fake_score_scheduler_2)
+
+            critic_2_dcp_dir = os.path.join(save_dir, "distributed_checkpoint",
+                                            "critic_2")
+            logger.info(
+                "rank: %s, saving critic_2 distributed checkpoint to %s",
+                rank,
+                critic_2_dcp_dir,
+                local_main_process_only=False)
+
+            begin_time = time.perf_counter()
+            dcp.save(critic_2_states, checkpoint_id=critic_2_dcp_dir)
+            end_time = time.perf_counter()
+
+            logger.info(
+                "rank: %s, critic_2 distributed checkpoint saved in %.2f seconds",
+                rank,
+                end_time - begin_time,
+                local_main_process_only=False)
+
+        # Save real_score_transformer_2 distributed checkpoint (MoE support)
+        if real_score_transformer_2 is not None:
+            real_score_2_states = {
+                "model": ModelWrapper(real_score_transformer_2),
+            }
+            # Note: real_score_transformer_2 typically doesn't have optimizer/scheduler
+            # since it's used for inference only, but we include dataloader for consistency
+            if dataloader is not None:
+                real_score_2_states["dataloader"] = dataloader
+
+            real_score_2_dcp_dir = os.path.join(save_dir,
+                                                "distributed_checkpoint",
+                                                "real_score_2")
+            logger.info(
+                "rank: %s, saving real_score_2 distributed checkpoint to %s",
+                rank,
+                real_score_2_dcp_dir,
+                local_main_process_only=False)
+
+            begin_time = time.perf_counter()
+            dcp.save(real_score_2_states, checkpoint_id=real_score_2_dcp_dir)
+            end_time = time.perf_counter()
+
+            logger.info(
+                "rank: %s, real_score_2 distributed checkpoint saved in %.2f seconds",
+                rank,
+                end_time - begin_time,
+                local_main_process_only=False)
 
         # Save shared random state separately
         shared_states = {
@@ -331,6 +451,47 @@ def save_distillation_checkpoint(generator_transformer,
             json.dump(config_dict, f, indent=4)
         logger.info("--> distillation checkpoint saved at step %s to %s", step,
                     weight_path)
+
+        # Save generator_2 model weights (consolidated) for inference (MoE support)
+        if generator_transformer_2 is not None:
+            inference_save_dir_2 = os.path.join(
+                save_dir, "generator_2_inference_transformer")
+            cpu_state_2 = gather_state_dict_on_cpu_rank0(
+                generator_transformer_2, device=None)
+
+            if rank == 0:
+                os.makedirs(inference_save_dir_2, exist_ok=True)
+                weight_path_2 = os.path.join(
+                    inference_save_dir_2, "diffusion_pytorch_model.safetensors")
+                logger.info(
+                    "rank: %s, saving consolidated generator_2 inference checkpoint to %s",
+                    rank,
+                    weight_path_2,
+                    local_main_process_only=False)
+
+                # Convert training format to diffusers format and save
+                diffusers_state_dict_2 = custom_to_hf_state_dict(
+                    cpu_state_2,
+                    generator_transformer_2.reverse_param_names_mapping)
+                save_file(diffusers_state_dict_2, weight_path_2)
+
+                logger.info(
+                    "rank: %s, consolidated generator_2 inference checkpoint saved to %s",
+                    rank,
+                    weight_path_2,
+                    local_main_process_only=False)
+
+                # Save model config
+                config_dict_2 = generator_transformer_2.hf_config
+                if "dtype" in config_dict_2:
+                    del config_dict_2["dtype"]  # TODO
+                config_path_2 = os.path.join(inference_save_dir_2,
+                                             "config.json")
+                with open(config_path_2, "w") as f:
+                    json.dump(config_dict_2, f, indent=4)
+                logger.info(
+                    "--> generator_2 distillation checkpoint saved at step %s to %s",
+                    step, weight_path_2)
 
 
 def load_checkpoint(transformer,
@@ -393,19 +554,43 @@ def load_checkpoint(transformer,
     return step
 
 
-def load_distillation_checkpoint(generator_transformer,
-                                 fake_score_transformer,
-                                 rank,
-                                 checkpoint_path,
-                                 generator_optimizer=None,
-                                 fake_score_optimizer=None,
-                                 dataloader=None,
-                                 generator_scheduler=None,
-                                 fake_score_scheduler=None,
-                                 noise_generator=None) -> int:
+def load_distillation_checkpoint(
+        generator_transformer,
+        fake_score_transformer,
+        rank,
+        checkpoint_path,
+        generator_optimizer=None,
+        fake_score_optimizer=None,
+        dataloader=None,
+        generator_scheduler=None,
+        fake_score_scheduler=None,
+        noise_generator=None,
+        generator_ema=None,
+        # MoE support
+        generator_transformer_2=None,
+        real_score_transformer_2=None,
+        fake_score_transformer_2=None,
+        generator_optimizer_2=None,
+        fake_score_optimizer_2=None,
+        generator_scheduler_2=None,
+        fake_score_scheduler_2=None,
+        generator_ema_2=None) -> int:
     """
     Load distillation checkpoint with both generator and fake_score models.
+    Supports MoE (Mixture of Experts) models with transformer_2 variants.
     Returns the step number from which training should resume.
+    
+    Args:
+        generator_transformer: Main generator transformer model
+        fake_score_transformer: Main fake score transformer model
+        generator_transformer_2: Secondary generator transformer for MoE (optional)
+        real_score_transformer_2: Secondary real score transformer for MoE (optional)
+        fake_score_transformer_2: Secondary fake score transformer for MoE (optional)
+        generator_optimizer_2: Optimizer for generator_transformer_2 (optional)
+        fake_score_optimizer_2: Optimizer for fake_score_transformer_2 (optional)
+        generator_scheduler_2: Scheduler for generator_transformer_2 (optional)
+        fake_score_scheduler_2: Scheduler for fake_score_transformer_2 (optional)
+        generator_ema_2: EMA for generator_transformer_2 (optional)
     """
     if not os.path.exists(checkpoint_path):
         logger.warning("Distillation checkpoint path %s does not exist",
@@ -456,6 +641,77 @@ def load_distillation_checkpoint(generator_transformer,
         end_time - begin_time,
         local_main_process_only=False)
 
+    # Load EMA state if available and generator_ema is provided
+    if generator_ema is not None:
+        try:
+            ema_state = generator_states.get("ema")
+            if ema_state is not None:
+                generator_ema.load_state_dict(ema_state)
+                logger.info("rank: %s, generator EMA state loaded successfully",
+                            rank)
+            else:
+                logger.info("rank: %s, no EMA state found in checkpoint", rank)
+        except Exception as e:
+            logger.warning("rank: %s, failed to load EMA state: %s", rank,
+                           str(e))
+
+    # Load generator_2 distributed checkpoint (MoE support)
+    if generator_transformer_2 is not None:
+        generator_2_dcp_dir = os.path.join(checkpoint_path,
+                                           "distributed_checkpoint",
+                                           "generator_2")
+        if os.path.exists(generator_2_dcp_dir):
+            generator_2_states = {
+                "model": ModelWrapper(generator_transformer_2),
+            }
+
+            if generator_optimizer_2 is not None:
+                generator_2_states["optimizer"] = OptimizerWrapper(
+                    generator_transformer_2, generator_optimizer_2)
+
+            if dataloader is not None:
+                generator_2_states["dataloader"] = dataloader
+
+            if generator_scheduler_2 is not None:
+                generator_2_states["scheduler"] = SchedulerWrapper(
+                    generator_scheduler_2)
+
+            logger.info(
+                "rank: %s, loading generator_2 distributed checkpoint from %s",
+                rank,
+                generator_2_dcp_dir,
+                local_main_process_only=False)
+
+            begin_time = time.perf_counter()
+            dcp.load(generator_2_states, checkpoint_id=generator_2_dcp_dir)
+            end_time = time.perf_counter()
+
+            logger.info(
+                "rank: %s, generator_2 distributed checkpoint loaded in %.2f seconds",
+                rank,
+                end_time - begin_time,
+                local_main_process_only=False)
+
+            # Load EMA_2 state if available and generator_ema_2 is provided
+            if generator_ema_2 is not None:
+                try:
+                    ema_2_state = generator_2_states.get("ema")
+                    if ema_2_state is not None:
+                        generator_ema_2.load_state_dict(ema_2_state)
+                        logger.info(
+                            "rank: %s, generator_2 EMA state loaded successfully",
+                            rank)
+                    else:
+                        logger.info(
+                            "rank: %s, no EMA_2 state found in checkpoint",
+                            rank)
+                except Exception as e:
+                    logger.warning("rank: %s, failed to load EMA_2 state: %s",
+                                   rank, str(e))
+        else:
+            logger.info("rank: %s, generator_2 checkpoint not found, skipping",
+                        rank)
+
     # Load critic distributed checkpoint
     critic_dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint",
                                   "critic")
@@ -493,6 +749,77 @@ def load_distillation_checkpoint(generator_transformer,
         rank,
         end_time - begin_time,
         local_main_process_only=False)
+
+    # Load critic_2 distributed checkpoint (MoE support)
+    if fake_score_transformer_2 is not None:
+        critic_2_dcp_dir = os.path.join(checkpoint_path,
+                                        "distributed_checkpoint", "critic_2")
+        if os.path.exists(critic_2_dcp_dir):
+            critic_2_states = {
+                "model": ModelWrapper(fake_score_transformer_2),
+            }
+
+            if fake_score_optimizer_2 is not None:
+                critic_2_states["optimizer"] = OptimizerWrapper(
+                    fake_score_transformer_2, fake_score_optimizer_2)
+
+            if dataloader is not None:
+                critic_2_states["dataloader"] = dataloader
+
+            if fake_score_scheduler_2 is not None:
+                critic_2_states["scheduler"] = SchedulerWrapper(
+                    fake_score_scheduler_2)
+
+            logger.info(
+                "rank: %s, loading critic_2 distributed checkpoint from %s",
+                rank,
+                critic_2_dcp_dir,
+                local_main_process_only=False)
+
+            begin_time = time.perf_counter()
+            dcp.load(critic_2_states, checkpoint_id=critic_2_dcp_dir)
+            end_time = time.perf_counter()
+
+            logger.info(
+                "rank: %s, critic_2 distributed checkpoint loaded in %.2f seconds",
+                rank,
+                end_time - begin_time,
+                local_main_process_only=False)
+        else:
+            logger.info("rank: %s, critic_2 checkpoint not found, skipping",
+                        rank)
+
+    # Load real_score_2 distributed checkpoint (MoE support)
+    if real_score_transformer_2 is not None:
+        real_score_2_dcp_dir = os.path.join(checkpoint_path,
+                                            "distributed_checkpoint",
+                                            "real_score_2")
+        if os.path.exists(real_score_2_dcp_dir):
+            real_score_2_states = {
+                "model": ModelWrapper(real_score_transformer_2),
+            }
+
+            if dataloader is not None:
+                real_score_2_states["dataloader"] = dataloader
+
+            logger.info(
+                "rank: %s, loading real_score_2 distributed checkpoint from %s",
+                rank,
+                real_score_2_dcp_dir,
+                local_main_process_only=False)
+
+            begin_time = time.perf_counter()
+            dcp.load(real_score_2_states, checkpoint_id=real_score_2_dcp_dir)
+            end_time = time.perf_counter()
+
+            logger.info(
+                "rank: %s, real_score_2 distributed checkpoint loaded in %.2f seconds",
+                rank,
+                end_time - begin_time,
+                local_main_process_only=False)
+        else:
+            logger.info("rank: %s, real_score_2 checkpoint not found, skipping",
+                        rank)
 
     # Load shared random state
     shared_dcp_dir = os.path.join(checkpoint_path, "distributed_checkpoint",
@@ -1280,5 +1607,177 @@ def get_scheduler(
                          last_epoch=last_epoch)
 
 
+def _local_numel(p: torch.Tensor) -> int:
+    if hasattr(p, "to_local"):
+        return p.to_local().numel()
+    return p.numel()
+
+
 def count_trainable(model: torch.nn.Module) -> int:
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return sum(_local_numel(p) for p in model.parameters() if p.requires_grad)
+
+
+class EMA_FSDP:
+    """
+    FSDP2-friendly EMA with two modes:
+      - mode="local_shard" (default): maintain float32 CPU EMA of local parameter shards on every rank.
+        Provides a context manager to temporarily swap EMA weights into the live model for teacher forward.
+      - mode="rank0_full": maintain a consolidated float32 CPU EMA of full parameters on rank 0 only
+        using gather_state_dict_on_cpu_rank0(). Useful for checkpoint export; not for teacher forward.
+
+    Usage (local_shard for CM teacher):
+      ema = EMA_FSDP(model, decay=0.999, mode="local_shard")
+      for step in ...:
+          ema.update(model)
+      with ema.apply_to_model(model):
+          with torch.no_grad():
+              y_teacher = model(...)
+
+    Usage (rank0_full for export):
+      ema = EMA_FSDP(model, decay=0.999, mode="rank0_full")
+      ema.update(model)
+      ema.state_dict()  # on rank 0
+    """
+
+    def __init__(self, module, decay: float = 0.999, mode: str = "local_shard"):
+        self.decay = float(decay)
+        self.mode = mode
+        self.shadow: dict[str, torch.Tensor] = {}
+        self.rank = dist.get_rank() if dist.is_initialized() else 0
+        if self.mode not in {"local_shard", "rank0_full"}:
+            raise ValueError(f"Unsupported EMA_FSDP mode: {self.mode}")
+        self._init_shadow(module)
+
+    @staticmethod
+    def _to_local_tensor(t: torch.Tensor) -> torch.Tensor:
+        # DTensor-aware to_local fetch; fall back to raw tensor
+        try:
+            from torch.distributed.tensor import DTensor  # type: ignore
+            if isinstance(t, DTensor):
+                return t.to_local()
+        except Exception:
+            pass
+        return t
+
+    @torch.no_grad()
+    def _init_shadow(self, module):
+        if self.mode == "rank0_full":
+            cpu_state = gather_state_dict_on_cpu_rank0(module, device=None)
+            if self.rank == 0:
+                self.shadow = {
+                    k: v.detach().clone().float().cpu()
+                    for k, v in cpu_state.items()
+                }
+            else:
+                self.shadow = {}
+            return
+
+        # local_shard: maintain EMA of local shards for requires_grad params
+        self.shadow = {}
+        for name, p in module.named_parameters():
+            if not p.requires_grad:
+                continue
+            local = self._to_local_tensor(p.detach())
+            self.shadow[name] = local.clone().float().cpu()
+
+    @torch.no_grad()
+    def update(self, module):
+        d = self.decay
+        if self.mode == "rank0_full":
+            if self.rank != 0:
+                return
+            cpu_state = gather_state_dict_on_cpu_rank0(module, device=None)
+            for n, v in cpu_state.items():
+                v_cpu = v.detach().float().cpu()
+                if n not in self.shadow:
+                    self.shadow[n] = v_cpu.clone()
+                else:
+                    self.shadow[n].mul_(d).add_(v_cpu, alpha=1.0 - d)
+            return
+
+        # local_shard: update local shard EMA on every rank
+        for name, p in module.named_parameters():
+            if not p.requires_grad:
+                continue
+            local = self._to_local_tensor(p.detach())
+            v_cpu = local.float().cpu()
+            if name not in self.shadow:
+                self.shadow[name] = v_cpu.clone()
+            else:
+                self.shadow[name].mul_(d).add_(v_cpu, alpha=1.0 - d)
+
+    def state_dict(self) -> dict[str, torch.Tensor]:
+        if self.mode == "rank0_full":
+            return {
+                k: v.clone()
+                for k, v in self.shadow.items()
+            } if self.rank == 0 else {}
+        return {k: v.clone() for k, v in self.shadow.items()}
+
+    def load_state_dict(self, sd: dict[str, torch.Tensor]):
+        self.shadow = {k: v.clone() for k, v in sd.items()}
+
+    @torch.no_grad()
+    def copy_to_unwrapped(self, module) -> None:
+        """
+        Copy EMA weights into a non-sharded (unwrapped) module. Intended for export/eval.
+        For mode="rank0_full", only rank 0 has the full EMA state.
+        """
+        if self.mode == "rank0_full" and self.rank != 0:
+            return
+        name_to_param = dict(module.named_parameters())
+        for n, w in self.shadow.items():
+            if n in name_to_param:
+                p = name_to_param[n]
+                p.data.copy_(w.to(dtype=p.dtype, device=p.device))
+
+    class _ApplyEMACtx:
+
+        def __init__(self, ema: "EMA_FSDP", module):
+            self.ema = ema
+            self.module = module
+            self.saved: dict[str, torch.Tensor] = {}
+
+        def __enter__(self):
+            if self.ema.mode != "local_shard":
+                raise RuntimeError(
+                    "EMA apply_to_model is only supported for mode='local_shard'"
+                )
+            with torch.no_grad():
+                for name, p in self.module.named_parameters():
+                    if not p.requires_grad:
+                        continue
+                    # Save local shard
+                    p_local = EMA_FSDP._to_local_tensor(p.detach())
+                    if p_local.numel() == 0:
+                        # Nothing to swap on this rank for this param
+                        continue
+                    self.saved[name] = p_local.clone().to(device=p_local.device,
+                                                          dtype=p_local.dtype)
+                    if name in self.ema.shadow:
+                        ema_cpu = self.ema.shadow[name]
+                        if ema_cpu.numel() != p_local.numel():
+                            # Shard shape mismatch (e.g., empty shard here), skip
+                            continue
+                        # Copy EMA shard into local param shard
+                        p_local.copy_(
+                            ema_cpu.to(dtype=p_local.dtype,
+                                       device=p_local.device))
+            return self.module
+
+        def __exit__(self, exc_type, exc, tb):
+            with torch.no_grad():
+                for name, p in self.module.named_parameters():
+                    if name in self.saved:
+                        p_local = EMA_FSDP._to_local_tensor(p.detach())
+                        if p_local.numel() == 0:
+                            continue
+                        saved_local = self.saved[name]
+                        if saved_local.numel() != p_local.numel():
+                            continue
+                        p_local.copy_(saved_local)
+            self.saved.clear()
+            return False
+
+    def apply_to_model(self, module):
+        return EMA_FSDP._ApplyEMACtx(self, module)

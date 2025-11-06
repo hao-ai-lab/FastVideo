@@ -71,7 +71,30 @@ class T5ArchConfig(TextEncoderArchConfig):
 
 
 @dataclass
+class T5LargeArchConfig(T5ArchConfig):
+    """T5 Large architecture config with parameters for your specific model."""
+    d_model: int = 1024
+    d_kv: int = 128
+    d_ff: int = 65536
+    num_layers: int = 24
+    num_decoder_layers: int | None = 24
+    num_heads: int = 128
+    decoder_start_token_id: int = 0
+    n_positions: int = 512
+    task_specific_params: dict | None = None
+
+
+@dataclass
 class T5Config(TextEncoderConfig):
     arch_config: TextEncoderArchConfig = field(default_factory=T5ArchConfig)
+
+    prefix: str = "t5"
+
+
+@dataclass
+class T5LargeConfig(TextEncoderConfig):
+    """T5 Large configuration for your specific model."""
+    arch_config: TextEncoderArchConfig = field(
+        default_factory=T5LargeArchConfig)
 
     prefix: str = "t5"

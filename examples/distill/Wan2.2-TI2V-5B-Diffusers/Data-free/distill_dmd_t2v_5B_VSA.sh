@@ -40,6 +40,8 @@ echo "NODE_RANK: $NODE_RANK"
 # Configs
 NUM_GPUS=8
 MODEL_PATH="Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.2-TI2V-5B-Diffusers"
 DATA_DIR=your_data_dir
 VALIDATION_DIR=your_validation_path  #(example:validation_64.json)
 # export CUDA_VISIBLE_DEVICES=4,5
@@ -73,6 +75,8 @@ parallel_args=(
 model_args=(
   --model_path $MODEL_PATH
   --pretrained_model_name_or_path $MODEL_PATH
+  --real_score_model_path $REAL_SCORE_MODEL_PATH
+  --fake_score_model_path $FAKE_SCORE_MODEL_PATH
 )
 
 # Dataset arguments
@@ -92,11 +96,11 @@ validation_args=(
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 2e-5
+  --learning_rate 4e-6
   --lr_scheduler "cosine_with_min_lr"
   --min_lr_ratio 0.5
   --lr_warmup_steps 100
-  --fake_score_learning_rate 1e-5
+  --fake_score_learning_rate 2e-6
   --fake_score_lr_scheduler "cosine_with_min_lr"
   --mixed_precision "bf16"
   --training_state_checkpointing_steps 500

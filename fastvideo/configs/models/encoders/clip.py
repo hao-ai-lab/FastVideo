@@ -77,6 +77,8 @@ class CLIPTextConfig(TextEncoderConfig):
 
     num_hidden_layers_override: int | None = None
     require_post_norm: bool | None = None
+    enable_scale: bool = True
+    is_causal: bool = True
     prefix: str = "clip"
 
 
@@ -87,4 +89,14 @@ class CLIPVisionConfig(ImageEncoderConfig):
 
     num_hidden_layers_override: int | None = None
     require_post_norm: bool | None = None
+    enable_scale: bool = True
+    is_causal: bool = True
     prefix: str = "clip"
+
+
+@dataclass
+class WAN2_1ControlCLIPVisionConfig(CLIPVisionConfig):
+    num_hidden_layers_override: int | None = 31
+    require_post_norm: bool | None = False
+    enable_scale: bool = False
+    is_causal: bool = False

@@ -86,6 +86,11 @@ class ForwardBatch:
     prompt_path: str | None = None
     output_path: str = "outputs/"
     output_video_name: str | None = None
+
+    # Video inputs
+    video_path: str | None = None
+    video_latent: torch.Tensor | None = None
+
     # Primary encoder embeddings
     prompt_embeds: list[torch.Tensor] = field(default_factory=list)
     negative_prompt_embeds: list[torch.Tensor] | None = None
@@ -148,7 +153,12 @@ class ForwardBatch:
     modules: dict[str, Any] = field(default_factory=dict)
 
     # Final output (after pipeline completion)
-    output: Any = None
+    output: torch.Tensor | None = None
+    return_trajectory_latents: bool = False
+    return_trajectory_decoded: bool = False
+    trajectory_timesteps: list[torch.Tensor] | None = None
+    trajectory_latents: torch.Tensor | None = None
+    trajectory_decoded: list[torch.Tensor] | None = None
 
     # Extra parameters that might be needed by specific pipeline implementations
     extra: dict[str, Any] = field(default_factory=dict)
@@ -207,6 +217,10 @@ class TrainingBatch:
     infos: list[dict[str, Any]] | None = None
     mask_lat_size: torch.Tensor | None = None
 
+    # ODE trajectory supervision
+    trajectory_latents: torch.Tensor | None = None
+    trajectory_timesteps: torch.Tensor | None = None
+
     # Transformer inputs
     noisy_model_input: torch.Tensor | None = None
     timesteps: torch.Tensor | None = None
@@ -237,6 +251,7 @@ class TrainingBatch:
     fake_score_loss: float = 0.0
 
     dmd_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
+    latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     fake_score_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
 
 

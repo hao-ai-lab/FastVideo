@@ -18,6 +18,9 @@ class SamplingParam:
     # Image inputs
     image_path: str | None = None
 
+    # Video inputs
+    video_path: str | None = None
+
     # Text inputs
     prompt: str | list[str] | None = None
     negative_prompt: str = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
@@ -48,6 +51,8 @@ class SamplingParam:
     # Misc
     save_video: bool = True
     return_frames: bool = False
+    return_trajectory_latents: bool = False  # returns all latents for each timestep
+    return_trajectory_decoded: bool = False  # returns decoded latents for each timestep
 
     def __post_init__(self) -> None:
         self.data_type = "video" if self.num_frames > 1 else "image"
@@ -199,11 +204,29 @@ class SamplingParam:
             help="Path to input image for image-to-video generation",
         )
         parser.add_argument(
+            "--video_path",
+            type=str,
+            default=SamplingParam.video_path,
+            help="Path to input video for video-to-video generation",
+        )
+        parser.add_argument(
             "--moba-config-path",
             type=str,
             default=None,
             help=
             "Path to a JSON file containing V-MoBA specific configurations.",
+        )
+        parser.add_argument(
+            "--return-trajectory-latents",
+            action="store_true",
+            default=SamplingParam.return_trajectory_latents,
+            help="Whether to return the trajectory",
+        )
+        parser.add_argument(
+            "--return-trajectory-decoded",
+            action="store_true",
+            default=SamplingParam.return_trajectory_decoded,
+            help="Whether to return the decoded trajectory",
         )
         return parser
 

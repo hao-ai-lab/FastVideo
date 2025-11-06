@@ -105,6 +105,18 @@ steps:
                 agents:
                   queue: "default"
             - path:
+                - "fastvideo/training/*self_forcing_distillation_pipeline.py"
+                - "fastvideo/tests/training/self-forcing/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: "Self-Forcing Tests"
+                env:
+                  - TEST_TYPE=self_forcing
+                agents:
+                  queue: "default"
+            - path:
                 - "fastvideo/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"

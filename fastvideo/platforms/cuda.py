@@ -67,6 +67,7 @@ class CudaPlatformBase(Platform):
     device_name: str = "cuda"
     device_type: str = "cuda"
     dispatch_key: str = "CUDA"
+    ray_device_key: str = "GPU"
     device_control_env_var: str = "CUDA_VISIBLE_DEVICES"
 
     @classmethod
@@ -108,6 +109,13 @@ class CudaPlatformBase(Platform):
         return float(torch.cuda.max_memory_allocated(device))
 
     @classmethod
+    def get_torch_device(cls):
+        """
+        Return torch.cuda
+        """
+        return torch.cuda
+
+    @classmethod
     def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None,
                              head_size: int, dtype: torch.dtype) -> str:
         # TODO(will): maybe come up with a more general interface for local attention
@@ -115,6 +123,7 @@ class CudaPlatformBase(Platform):
 
         logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s",
                     envs.FASTVIDEO_ATTENTION_BACKEND)
+        logger.info("Selected backend: %s", selected_backend)
         if selected_backend == AttentionBackendEnum.SLIDING_TILE_ATTN:
             try:
                 from st_attn import sliding_tile_attention  # noqa: F401
@@ -144,6 +153,20 @@ class CudaPlatformBase(Platform):
                 logger.info(
                     "Sage Attention backend is not installed. Fall back to Flash Attention."
                 )
+        elif selected_backend == AttentionBackendEnum.SAGE_ATTN_THREE:
+            try:
+                from fastvideo.attention.backends.sageattn.api import sageattn_blackwell  # noqa: F401
+
+                from fastvideo.attention.backends.sage_attn3 import (  # noqa: F401
+                    SageAttention3Backend)
+                logger.info("Using Sage Attention 3 backend.")
+
+                return "fastvideo.attention.backends.sage_attn3.SageAttention3Backend"
+            except ImportError as e:
+                logger.info(e)
+                logger.info(
+                    "Sage Attention 3 backend is not installed. Fall back to Flash Attention."
+                )
         elif selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
             try:
                 from vsa import block_sparse_attn  # noqa: F401
@@ -158,7 +181,11 @@ class CudaPlatformBase(Platform):
                     "Failed to import Video Sparse Attention backend: %s",
                     str(e))
                 raise ImportError(
-                    "Video Sparse Attention backend is not installed. ") from e
+                    "The Video Sparse Attention backend is not installed. "
+                    "To install it, please follow the instructions at: "
+                    "https://hao-ai-lab.github.io/FastVideo/video_sparse_attention/installation.html "
+                ) from e
+
         elif selected_backend == AttentionBackendEnum.VMOBA_ATTN:
             try:
                 from csrc.attn.vmoba_attn.vmoba import (  # noqa: F401

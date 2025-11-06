@@ -7,7 +7,8 @@ import torch
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.configs.models.encoders import (BaseEncoderOutput,
-                                               CLIPVisionConfig, T5Config)
+                                               CLIPVisionConfig, T5Config,
+                                               WAN2_1ControlCLIPVisionConfig)
 from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 
@@ -54,6 +55,9 @@ class WanT2V480PConfig(PipelineConfig):
     text_encoder_precisions: tuple[str, ...] = field(
         default_factory=lambda: ("fp32", ))
 
+    # self-forcing params
+    warp_denoising_step: bool = True
+
     # WanConfig-specific added parameters
 
     def __post_init__(self):
@@ -98,6 +102,16 @@ class WanI2V720PConfig(WanI2V480PConfig):
 
 
 @dataclass
+class WANV2VConfig(WanI2V480PConfig):
+    """Configuration for WAN2.1 1.3B Control pipeline."""
+
+    image_encoder_config: EncoderConfig = field(
+        default_factory=WAN2_1ControlCLIPVisionConfig)
+    # CLIP encoder precision
+    image_encoder_precision: str = 'bf16'
+
+
+@dataclass
 class FastWan2_1_T2V_480P_Config(WanT2V480PConfig):
     """Base configuration for FastWan T2V 1.3B 480P pipeline architecture with DMD"""
 
@@ -133,6 +147,11 @@ class Wan2_2_T2V_A14B_Config(WanT2V480PConfig):
     flow_shift: float | None = 12.0
     boundary_ratio: float | None = 0.875
 
+    # self-forcing params
+    dmd_denoising_steps: list[int] | None = field(
+        default_factory=lambda: [1000, 750, 500, 250])
+    warp_denoising_step: bool = True
+
     def __post_init__(self) -> None:
         self.dit_config.boundary_ratio = self.boundary_ratio
 
@@ -156,4 +175,14 @@ class SelfForcingWanT2V480PConfig(WanT2V480PConfig):
     flow_shift: float | None = 5.0
     dmd_denoising_steps: list[int] | None = field(
         default_factory=lambda: [1000, 750, 500, 250])
+    warp_denoising_step: bool = True
+
+
+@dataclass
+class SelfForcingWan2_2_T2V480PConfig(Wan2_2_T2V_A14B_Config):
+    is_causal: bool = True
+    flow_shift: float | None = 12.0
+    boundary_ratio: float | None = 0.875
+    dmd_denoising_steps: list[int] | None = field(
+        default_factory=lambda: [1000, 850, 700, 550, 350, 275, 200, 125])
     warp_denoising_step: bool = True
