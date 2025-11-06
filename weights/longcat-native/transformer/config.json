@@ -2,11 +2,24 @@
   "_class_name": "LongCatTransformer3DModel",
   "_diffusers_version": "0.32.0",
   "adaln_tembed_dim": 512,
-  "bsa_params": null,
+  "bsa_params": {
+    "sparsity": 0.9375,
+    "cdf_threshold": null,
+    "chunk_3d_shape_q": [
+      3,
+      5,
+      4
+    ],
+    "chunk_3d_shape_k": [
+      3,
+      5,
+      4
+    ]
+  },
   "caption_channels": 4096,
   "cp_split_hw": null,
   "depth": 48,
-  "enable_bsa": false,
+  "enable_bsa": true,
   "enable_flashattn3": false,
   "enable_flashattn2": true,
   "frequency_embedding_size": 256,

@@ -39,9 +39,6 @@ fi
 python scripts/checkpoint_conversion/manage_bsa.py "$CONFIG_FILE" --preset 720p-balanced --no-backup
 
 echo "✅ BSA enabled with 720p-balanced preset"
-echo "   - sparsity: 0.9375"
-echo "   - chunk_3d_shape: [4, 4, 4]"
-echo ""
 echo "💡 Tip: For different resolutions, you can manually edit the preset:"
 echo "   - 480p: Use --preset 480p (disables BSA)"
 echo "   - 720p quality: Use --preset 720p-quality"

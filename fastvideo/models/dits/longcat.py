@@ -22,6 +22,7 @@ from fastvideo.layers.rotary_embedding_3d import RotaryPositionalEmbedding3D
 from fastvideo.attention.layer import DistributedAttention, LocalAttention
 from fastvideo.models.dits.base import CachableDiT
 from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.third_party.longcat_video.block_sparse_attention.bsa_interface import flash_attn_bsa_3d
 
 
 # ============================================================================
@@ -233,7 +234,7 @@ class CaptionEmbedder(nn.Module):
 
 class LongCatSelfAttention(nn.Module):
     """
-    Self-attention with 3D RoPE support.
+    Self-attention with 3D RoPE support and optional BSA.
     """
 
     def __init__(
@@ -263,7 +264,11 @@ class LongCatSelfAttention(nn.Module):
         # 3D RoPE
         self.rope_3d = RotaryPositionalEmbedding3D(head_dim=self.head_dim)
 
-        # FastVideo attention backend
+        # BSA configuration
+        self.enable_bsa = getattr(config, 'enable_bsa', False)
+        self.bsa_params = getattr(config, 'bsa_params', None)
+
+        # FastVideo attention backend (used when BSA is disabled)
         self.attn = DistributedAttention(
             num_heads=num_heads,
             head_size=self.head_dim,
@@ -277,9 +282,10 @@ class LongCatSelfAttention(nn.Module):
         **kwargs
     ) -> torch.Tensor:
         """
-        Forward pass with 3D RoPE.
+        Forward pass with 3D RoPE and optional BSA.
         """
         B, N, C = x.shape
+        T, H, W = latent_shape
 
         # Project to Q/K/V
         q, _ = self.to_q(x)
@@ -302,12 +308,30 @@ class LongCatSelfAttention(nn.Module):
         # Apply 3D RoPE
         q_rope, k_rope = self.rope_3d(q_rope, k_rope, grid_size=latent_shape)
 
-        # Transpose back for attention: [B, N, num_heads, head_dim]
+        # Transpose back: [B, N, num_heads, head_dim] or [B, H, N, D] for BSA
         q = q_rope.transpose(1, 2)
         k = k_rope.transpose(1, 2)
 
-        # Run attention (expects [B, N, num_heads, head_dim])
-        out, _ = self.attn(q, k, v)  # [B, N, num_heads, head_dim], replicated_out
+        # === Attention: BSA or standard ===
+        if self.enable_bsa and T > 1:  # Only use BSA for multi-frame videos
+            # BSA expects [B, H, S, D] format
+            q_bsa = q.transpose(1, 2).contiguous()  # [B, num_heads, N, head_dim]
+            k_bsa = k.transpose(1, 2).contiguous()
+            v_bsa = v.transpose(1, 2).contiguous()
+            
+            # Call BSA
+            out = flash_attn_bsa_3d(
+                q_bsa, k_bsa, v_bsa,
+                latent_shape_q=latent_shape,
+                latent_shape_k=latent_shape,
+                **self.bsa_params
+            )  # [B, num_heads, N, head_dim]
+            
+            # Transpose back: [B, N, num_heads, head_dim]
+            out = out.transpose(1, 2)
+        else:
+            # Standard attention: [B, N, num_heads, head_dim]
+            out, _ = self.attn(q, k, v)
 
         # Reshape and project out
         out = out.reshape(B, N, C)
@@ -768,6 +792,16 @@ class LongCatTransformer3DModel(CachableDiT):
             adaln_tembed_dim=config.adaln_tembed_dim,
             patch_size=self.patch_size,
         )
+
+    def enable_bsa(self):
+        """Enable BSA for all self-attention layers."""
+        for block in self.blocks:
+            block.self_attn.enable_bsa = True
+    
+    def disable_bsa(self):
+        """Disable BSA for all self-attention layers."""
+        for block in self.blocks:
+            block.self_attn.enable_bsa = False
 
     def forward(
         self,

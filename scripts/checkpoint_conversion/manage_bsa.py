@@ -119,37 +119,37 @@ def apply_preset(config_path, preset, backup=True):
         '720p-balanced': {
             'enable': True,
             'sparsity': 0.9375,
-            'chunk_q': [4, 4, 4],
-            'chunk_k': [4, 4, 4],
+            'chunk_q': [3, 5, 4],  # 720p: latent=(93,45,80), 45%5=0
+            'chunk_k': [3, 5, 4],
             'description': '720p 平衡（推荐）'
         },
         '720p-quality': {
             'enable': True,
             'sparsity': 0.875,
-            'chunk_q': [4, 4, 4],
-            'chunk_k': [4, 4, 4],
+            'chunk_q': [3, 5, 4],
+            'chunk_k': [3, 5, 4],
             'description': '720p 质量优先'
         },
         '720p-fast': {
             'enable': True,
             'sparsity': 0.96875,
-            'chunk_q': [4, 4, 4],
-            'chunk_k': [4, 4, 4],
+            'chunk_q': [3, 5, 4],
+            'chunk_k': [3, 5, 4],
             'description': '720p 速度优先'
         },
         '720p-adaptive': {
             'enable': True,
             'sparsity': 0.875,
             'cdf_threshold': 0.98,
-            'chunk_q': [4, 4, 4],
-            'chunk_k': [4, 4, 4],
+            'chunk_q': [3, 5, 4],
+            'chunk_k': [3, 5, 4],
             'description': '720p 自适应'
         },
         'long-video': {
             'enable': True,
             'sparsity': 0.9375,
-            'chunk_q': [8, 4, 4],
-            'chunk_k': [8, 4, 4],
+            'chunk_q': [6, 4, 4],  # T=6 适配更多帧数
+            'chunk_k': [6, 4, 4],
             'description': '长视频（>93 帧）'
         }
     }

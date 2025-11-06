@@ -104,4 +104,21 @@ class LongCatT2V480PConfig(PipelineConfig):
         # LongCat inference requires vae encoder and decoder
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
+
+
+@dataclass
+class LongCatT2V720PConfig(LongCatT2V480PConfig):
+    """Configuration for LongCat pipeline (720p) with BSA enabled by default.
+    
+    720p resolution requires BSA for efficient inference. BSA parameters
+    should be configured in the transformer config.json with chunk_3d_shape=[3,5,4]
+    to match the latent dimensions after VAE compression and patch embedding:
+    - Input: 720×1280×93
+    - VAE (4x8): 90×160×93  
+    - Patch [1,2,2]: 45×80×93
+    - chunk [3,5,4]: 93%3=0, 45%5=0, 80%4=0 ✅
+    """
+    
+    # Enable BSA by default for 720p
+    enable_bsa: bool = True
     

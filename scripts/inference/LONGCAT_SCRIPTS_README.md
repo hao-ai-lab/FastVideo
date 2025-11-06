@@ -351,35 +351,36 @@ FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA bash scripts/inference/v1_inference_longc
 
 ---
 
+## BSA 工作原理
+
+BSA 在 attention 层有自动判断：
+```python
+# fastvideo/third_party/longcat_video/modules/attention.py
+if self.enable_bsa and shape[0] > 1:  # 只在多帧时触发
+    x = flash_attn_bsa_3d(q, k, v, ...)
+```
+
+**与原始 LongCat 的差异**：
+- **原始**: 手动调用 `pipe.dit.enable_bsa()`，只在 refinement 使用
+- **当前**: 通过 config 自动启用，多帧时自动触发 ✅
+
 ## 相关文档
 
-- **BSA 详细说明**: `../../BSA_实现总结.md`
-- **BSA 集成指南**: `../../BSA_INTEGRATION_GUIDE.md`
-- **配置管理工具**: `../../tools/manage_bsa.py`
-- **配置预设**: `../../examples/bsa_configs/`
-- **使用示例**: `../../examples/longcat_bsa_usage.py`
+- **权重转换**: `../checkpoint_conversion/LONGCAT_WEIGHT_CONVERSION_README.md`
+- **BSA 配置工具**: `../checkpoint_conversion/manage_bsa.py`
 
 ---
 
 ## 快速参考
 
 ```bash
-# 查看当前 BSA 状态
+# 查看 BSA 状态
 python scripts/checkpoint_conversion/manage_bsa.py weights/longcat-native/transformer/config.json --status
 
-# 480p 标准生成（无 BSA）
+# 480p 标准（无 BSA）
 bash scripts/inference/v1_inference_longcat.sh
 
-# 720p 快速生成（有 BSA）
-bash scripts/inference/v1_inference_longcat_BSA.sh
-
-# 对比两种方式
-bash scripts/inference/v1_inference_longcat.sh && \
+# 720p BSA 加速
 bash scripts/inference/v1_inference_longcat_BSA.sh
 ```
-
----
-
-**更新日期**: 2025-11-06  
-**版本**: 1.0
 
