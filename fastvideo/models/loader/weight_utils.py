@@ -185,7 +185,7 @@ def pt_weights_iterator(
     node_group = get_node_group()
     local_rank = node_group.local_rank
     device = f"cuda:{local_rank}" if not to_cpu else "cpu"
-    enable_tqdm = not torch.distributed.is_initialized() or node_group.rank_in_group == 0
+    enable_tqdm = not torch.distributed.is_initialized() or local_rank == 0
     for bin_file in tqdm(
             hf_weights_files,
             desc="Loading pt checkpoint shards",
