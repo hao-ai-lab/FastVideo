@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import torch
 
 from fastvideo.configs.models import DiTConfig, VAEConfig
+from fastvideo.configs.models.dits import LongCatVideoConfig  # Native model config
 from fastvideo.configs.models.dits.base import DiTArchConfig
 from fastvideo.configs.models.encoders import BaseEncoderOutput, T5Config
 from fastvideo.configs.models.vaes import WanVAEConfig
@@ -12,7 +13,11 @@ from fastvideo.configs.pipelines.base import PipelineConfig
 
 @dataclass
 class LongCatDiTArchConfig(DiTArchConfig):
-    """Extended DiTArchConfig with LongCat-specific fields."""
+    """Extended DiTArchConfig with LongCat-specific fields.
+    
+    NOTE: This is for Phase 1 wrapper compatibility. For native model (Phase 2),
+    use LongCatVideoConfig from fastvideo.configs.models.dits.longcat instead.
+    """
     # LongCat-specific architecture parameters
     adaln_tembed_dim: int = 512
     caption_channels: int = 4096
@@ -56,12 +61,15 @@ class LongCatT2V480PConfig(PipelineConfig):
     Components expected by loaders:
       - tokenizer: AutoTokenizer
       - text_encoder: UMT5EncoderModel
-      - transformer: LongCatVideoTransformer3DModel
+      - transformer: LongCatVideoTransformer3DModel (Phase 1 wrapper)
+                  OR LongCatTransformer3DModel (Phase 2 native)
       - vae: AutoencoderKLWan (Wan VAE, 4x8 compression)
       - scheduler: FlowMatchEulerDiscreteScheduler
     """
 
     # DiT config with LongCat-specific arch_config
+    # NOTE: For Phase 1 wrapper, uses LongCatDiTArchConfig
+    # For Phase 2 native model, can use LongCatVideoConfig directly
     dit_config: DiTConfig = field(default_factory=lambda: DiTConfig(arch_config=LongCatDiTArchConfig()))
 
     # VAE config: Wan VAE with encoder+decoder enabled
