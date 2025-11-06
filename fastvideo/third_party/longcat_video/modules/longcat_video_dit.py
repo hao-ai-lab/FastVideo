@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -125,6 +125,20 @@ class LongCatVideoTransformer3DModel(
     ModelMixin, ConfigMixin
 ):
     _supports_gradient_checkpointing = True
+    
+    # FastVideo compatibility: Required class attributes
+    # Phase 1 wrapper: No parameter name remapping needed (weights already match model)
+    param_names_mapping = {}
+    reverse_param_names_mapping = {}
+    lora_param_names_mapping = {}
+    
+    @property
+    def config(self):
+        """Override config property to add arch_config for FastVideo LoRA compatibility."""
+        if hasattr(self, '_config_with_arch'):
+            return self._config_with_arch
+        # Fallback to parent's config if not initialized yet
+        return super().config
 
     @register_to_config
     def __init__(
@@ -148,8 +162,59 @@ class LongCatVideoTransformer3DModel(
         bsa_params: dict = None,
         cp_split_hw: Optional[List[int]] = None,
         text_tokens_zero_pad: bool = False,
+        # FastVideo compatibility: accept config and hf_config parameters
+        config: Any = None,
+        hf_config: dict = None,
+        **kwargs
     ) -> None:
+        # FastVideo passes config and hf_config, extract parameters from hf_config
+        if hf_config is not None:
+            in_channels = hf_config.get("in_channels", in_channels)
+            out_channels = hf_config.get("out_channels", out_channels)
+            hidden_size = hf_config.get("hidden_size", hidden_size)
+            depth = hf_config.get("depth", depth)
+            num_heads = hf_config.get("num_heads", num_heads)
+            caption_channels = hf_config.get("caption_channels", caption_channels)
+            mlp_ratio = hf_config.get("mlp_ratio", mlp_ratio)
+            adaln_tembed_dim = hf_config.get("adaln_tembed_dim", adaln_tembed_dim)
+            frequency_embedding_size = hf_config.get("frequency_embedding_size", frequency_embedding_size)
+            patch_size = hf_config.get("patch_size", patch_size)
+            enable_flashattn3 = hf_config.get("enable_flashattn3", enable_flashattn3)
+            enable_flashattn2 = hf_config.get("enable_flashattn2", enable_flashattn2)
+            enable_xformers = hf_config.get("enable_xformers", enable_xformers)
+            enable_bsa = hf_config.get("enable_bsa", enable_bsa)
+            bsa_params = hf_config.get("bsa_params", bsa_params)
+            cp_split_hw = hf_config.get("cp_split_hw", cp_split_hw)
+            text_tokens_zero_pad = hf_config.get("text_tokens_zero_pad", text_tokens_zero_pad)
+        
         super().__init__()
+        
+        # Store FastVideo config for compatibility
+        self._fastvideo_config = config
+        self._fastvideo_hf_config = hf_config if hf_config is not None else {}
+        
+        # Create a minimal arch_config for LoRA pipeline compatibility (Phase 1)
+        class SimpleArchConfig:
+            exclude_lora_layers = []
+        
+        # Create a wrapper that adds arch_config to the diffusers config
+        class ConfigWithArchConfig:
+            def __init__(self, frozen_dict, arch_config):
+                self._dict = frozen_dict if frozen_dict is not None else {}
+                self.arch_config = arch_config
+            def __getattr__(self, name):
+                if name in ('arch_config', '_dict'):
+                    return object.__getattribute__(self, name)
+                if isinstance(self._dict, dict):
+                    return self._dict.get(name)
+                return getattr(self._dict, name)
+            def get(self, key, default=None):
+                if isinstance(self._dict, dict):
+                    return self._dict.get(key, default)
+                return getattr(self._dict, key, default)
+        
+        # Store the wrapped config
+        self._config_with_arch = ConfigWithArchConfig(self.config, SimpleArchConfig())
 
         self.patch_size = patch_size
         self.in_channels = in_channels
