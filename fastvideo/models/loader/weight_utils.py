@@ -120,10 +120,10 @@ _BAR_FORMAT = "{desc}: {percentage:3.0f}% Completed | {n_fmt}/{total_fmt} [{elap
 
 
 def safetensors_weights_iterator(
-    hf_weights_files: List[str],
+    hf_weights_files: list[str],
     to_cpu: bool = False,
     async_broadcast: bool = False
-) -> Generator[Tuple[str, torch.Tensor], None, None]:
+) -> Generator[tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model safetensor files.
     Args:
         hf_weights_files: List of safetensor files to load.
@@ -131,10 +131,10 @@ def safetensors_weights_iterator(
         async_broadcast: Whether to overlap loading from disk and broadcasting to other ranks. If True,
             must iterate over all the weights before use. Only use if to_cpu is False.
     """
-    local_rank = get_node_group().rank
+    node_group = get_node_group()
+    local_rank = node_group.local_rank
     device = f"cuda:{local_rank}" if not to_cpu else "cpu"
-    enable_tqdm = not torch.distributed.is_initialized() or get_node_group(
-    ).rank == 0
+    enable_tqdm = not torch.distributed.is_initialized() or local_rank == 0
     assert not (async_broadcast
                 and to_cpu), "Cannot broadcast weights when loading to CPU"
 
@@ -157,8 +157,8 @@ def safetensors_weights_iterator(
                         param = torch.empty(shape, device=device)
                     # broadcast to local ranks
                     # TODO(Wenxuan): scatter instead of broadcast
-                    if get_node_group().world_size > 1:
-                        group = get_node_group().device_group
+                    if node_group.world_size > 1:
+                        group = node_group.device_group
                         if async_broadcast:
                             handle = dist.broadcast(param,
                                                     src=dist.get_global_rank(
@@ -178,14 +178,14 @@ def safetensors_weights_iterator(
 
 
 def pt_weights_iterator(
-    hf_weights_files: List[str],
+    hf_weights_files: list[str],
     to_cpu: bool = True  # default to CPU for text encoder
-) -> Generator[Tuple[str, torch.Tensor], None, None]:
+) -> Generator[tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model bin/pt files."""
-    local_rank = get_node_group().rank
+    node_group = get_node_group()
+    local_rank = node_group.local_rank
     device = f"cuda:{local_rank}" if not to_cpu else "cpu"
-    enable_tqdm = not torch.distributed.is_initialized() or get_node_group(
-    ).rank == 0
+    enable_tqdm = not torch.distributed.is_initialized() or node_group.rank_in_group == 0
     for bin_file in tqdm(
             hf_weights_files,
             desc="Loading pt checkpoint shards",
