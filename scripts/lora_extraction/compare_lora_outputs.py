@@ -167,9 +167,13 @@ def main():
     print(f"MSE mean={np.mean(mse_vals):.3e}")
     print(f"MAE mean={np.mean(mae_vals):.3e}")
     if compute_lpips:
-        print(f"LPIPS mean={np.mean([r['lpips'] for r in results if r['lpips']]):.3e}")
+        lpips_vals = [r['lpips'] for r in results if r['lpips'] is not None]
+        if lpips_vals:
+            print(f"LPIPS mean={np.mean(lpips_vals):.3e}")
     if compute_ssim:
-        print(f"SSIM mean={np.mean([r['ssim'] for r in results if r['ssim']]):.4f}")
+        ssim_vals = [r['ssim'] for r in results if r['ssim'] is not None]
+        if ssim_vals:
+            print(f"SSIM mean={np.mean(ssim_vals):.4f}")
 
     # Save CSV
     csv_path = os.path.join(OUTPUT_DIR, "metrics.csv")
