@@ -11,12 +11,12 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.stages import (
     DecodingStage,
-    DenoisingStage,
     InputValidationStage,
     LatentPreparationStage,
     TextEncodingStage,
     TimestepPreparationStage,
 )
+from fastvideo.pipelines.stages.longcat_denoising import LongCatDenoisingStage
 
 logger = init_logger(__name__)
 
@@ -76,7 +76,7 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
 
         self.add_stage(
             stage_name="denoising_stage",
-            stage=DenoisingStage(
+            stage=LongCatDenoisingStage(
                 transformer=self.get_module("transformer"),
                 transformer_2=self.get_module("transformer_2", None),
                 scheduler=self.get_module("scheduler"),

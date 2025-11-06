@@ -220,6 +220,11 @@ class LongCatVideoTransformer3DModel(
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.cp_split_hw = cp_split_hw
+        
+        # FastVideo compatibility: Add required attributes
+        self.hidden_size = hidden_size
+        self.num_attention_heads = num_heads  # LongCat uses num_heads
+        self.num_channels_latents = in_channels  # Latent space channels
 
         self.x_embedder = PatchEmbed3D(patch_size, in_channels, hidden_size)
         self.t_embedder = TimestepEmbedder(t_embed_dim=adaln_tembed_dim, frequency_embedding_size=frequency_embedding_size)
@@ -345,14 +350,16 @@ class LongCatVideoTransformer3DModel(
     def forward(
         self, 
         hidden_states, 
-        timestep, 
-        encoder_hidden_states, 
+        encoder_hidden_states,  # FastVideo's DenoisingStage passes this as 2nd positional arg
+        timestep,               # FastVideo's DenoisingStage passes this as 3rd positional arg
         encoder_attention_mask=None, 
         num_cond_latents=0,
         return_kv=False, 
         kv_cache_dict={},
         skip_crs_attn=False, 
-        offload_kv_cache=False
+        offload_kv_cache=False,
+        guidance=None,  # FastVideo compatibility (unused by LongCat)
+        **kwargs  # Catch any other FastVideo-specific arguments
     ):
 
         B, _, T, H, W = hidden_states.shape
@@ -363,6 +370,26 @@ class LongCatVideoTransformer3DModel(
 
         assert self.patch_size[0]==1, "Currently, 3D x_embedder should not compress the temporal dimension."
 
+        # FastVideo compatibility: Convert timestep to tensor if needed
+        if not isinstance(timestep, torch.Tensor):
+            if isinstance(timestep, list):
+                # Check if list contains tensors
+                if timestep and isinstance(timestep[0], torch.Tensor):
+                    timestep = torch.stack(timestep)
+                else:
+                    timestep = torch.tensor(timestep, device=hidden_states.device)
+            else:
+                # Convert other types (int, float, numpy arrays, etc.) to tensor
+                timestep = torch.as_tensor(timestep, device=hidden_states.device)
+        
+        # Ensure timestep is 1D (batch of scalar timesteps) before expansion
+        # FastVideo may pass timesteps with extra dimensions
+        if timestep.ndim > 1:
+            # Squeeze out extra dimensions but keep batch dimension
+            timestep = timestep.squeeze()
+            if timestep.ndim == 0:  # If squeezed to scalar, add batch dim back
+                timestep = timestep.unsqueeze(0)
+        
         # expand the shape of timestep from [B] to [B, T]
         if len(timestep.shape) == 1:
             timestep = timestep.unsqueeze(1).expand(-1, N_t) # [B, T]
@@ -370,7 +397,17 @@ class LongCatVideoTransformer3DModel(
         dtype = self.x_embedder.proj.weight.dtype
         hidden_states = hidden_states.to(dtype)
         timestep = timestep.to(dtype)
+        
+        # FastVideo compatibility: encoder_hidden_states might be a list of tensors
+        if isinstance(encoder_hidden_states, list):
+            # Take the first encoder output (UMT5)
+            encoder_hidden_states = encoder_hidden_states[0]
         encoder_hidden_states = encoder_hidden_states.to(dtype)
+        
+        # FastVideo compatibility: Add batch dimension if needed
+        # LongCat expects [B, 1, N, C] but FastVideo provides [B, N, C]
+        if encoder_hidden_states.ndim == 3:
+            encoder_hidden_states = encoder_hidden_states.unsqueeze(1)  # [B, N, C] -> [B, 1, N, C]
 
         hidden_states = self.x_embedder(hidden_states)  # [B, N, C]
 
@@ -391,7 +428,7 @@ class LongCatVideoTransformer3DModel(
             y_seqlens = [encoder_hidden_states.shape[2]] * encoder_hidden_states.shape[0]
             encoder_hidden_states = encoder_hidden_states.squeeze(1).view(1, -1, hidden_states.shape[-1])
 
-        if self.cp_split_hw[0] * self.cp_split_hw[1] > 1:
+        if self.cp_split_hw is not None and self.cp_split_hw[0] * self.cp_split_hw[1] > 1:
             hidden_states = rearrange(hidden_states, "B (T H W) C -> B T H W C", T=N_t, H=N_h, W=N_w)
             hidden_states = context_parallel_util.split_cp_2d(hidden_states, seq_dim_hw=(2, 3), split_hw=self.cp_split_hw)
             hidden_states = rearrange(hidden_states, "B T H W C -> B (T H W) C")
@@ -421,7 +458,7 @@ class LongCatVideoTransformer3DModel(
 
         hidden_states = self.final_layer(hidden_states, t, (N_t, N_h, N_w))  # [B, N, C=T_p*H_p*W_p*C_out]
 
-        if self.cp_split_hw[0] * self.cp_split_hw[1] > 1:
+        if self.cp_split_hw is not None and self.cp_split_hw[0] * self.cp_split_hw[1] > 1:
             hidden_states = context_parallel_util.gather_cp_2d(hidden_states, shape=(N_t, N_h, N_w), split_hw=self.cp_split_hw)
 
         hidden_states = self.unpatchify(hidden_states, N_t, N_h, N_w)  # [B, C_out, H, W]

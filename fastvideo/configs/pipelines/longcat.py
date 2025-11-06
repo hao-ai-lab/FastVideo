@@ -4,9 +4,32 @@ from dataclasses import dataclass, field
 import torch
 
 from fastvideo.configs.models import DiTConfig, VAEConfig
+from fastvideo.configs.models.dits.base import DiTArchConfig
 from fastvideo.configs.models.encoders import BaseEncoderOutput, T5Config
 from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
+
+
+@dataclass
+class LongCatDiTArchConfig(DiTArchConfig):
+    """Extended DiTArchConfig with LongCat-specific fields."""
+    # LongCat-specific architecture parameters
+    adaln_tembed_dim: int = 512
+    caption_channels: int = 4096
+    depth: int = 48
+    enable_bsa: bool = False
+    enable_flashattn3: bool = False
+    enable_flashattn2: bool = True
+    enable_xformers: bool = False
+    frequency_embedding_size: int = 256
+    in_channels: int = 16
+    mlp_ratio: int = 4
+    num_heads: int = 32
+    out_channels: int = 16
+    text_tokens_zero_pad: bool = True
+    patch_size: list[int] = field(default_factory=lambda: [1, 2, 2])
+    cp_split_hw: list[int] | None = None
+    bsa_params: dict | None = None
 
 
 def umt5_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
@@ -38,8 +61,8 @@ class LongCatT2V480PConfig(PipelineConfig):
       - scheduler: FlowMatchEulerDiscreteScheduler
     """
 
-    # DiT placeholder (unused by LongCat transformer loader; kept for base compatibility)
-    dit_config: DiTConfig = field(default_factory=DiTConfig)
+    # DiT config with LongCat-specific arch_config
+    dit_config: DiTConfig = field(default_factory=lambda: DiTConfig(arch_config=LongCatDiTArchConfig()))
 
     # VAE config: Wan VAE with encoder+decoder enabled
     vae_config: VAEConfig = field(default_factory=WanVAEConfig)

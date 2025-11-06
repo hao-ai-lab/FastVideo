@@ -609,14 +609,16 @@ def validate_conversion(original_path, converted_path):
 
 ## Next Steps
 
-### Immediate (Phase 1 Complete)
+### Immediate (Phase 1 - In Progress)
 
 - [x] Pipeline loads successfully
-- [x] All components validated
+- [x] All components validated  
 - [x] Registry integration complete
-- [ ] **Test T2V inference** with the wrapper
+- [🔄] **Test T2V inference** with the wrapper (debugging shape issues)
 - [ ] Profile performance baseline
 - [ ] Document any inference issues
+
+**Current status:** Successfully loads 13.58B parameter model through FastVideo. Denoising stage reached but encountering tensor shape mismatches that need resolution.
 
 ### Phase 2 Planning
 
