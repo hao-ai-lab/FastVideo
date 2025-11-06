@@ -108,7 +108,7 @@ class TextEncoderLoader(ComponentLoader):
         prefix: str = ""
         """A prefix to prepend to all weights."""
 
-        fall_back_to_pt: bool = Truex
+        fall_back_to_pt: bool = True
         """Whether .pt weights can be used."""
 
         allow_patterns_overrides: list[str] | None = None
