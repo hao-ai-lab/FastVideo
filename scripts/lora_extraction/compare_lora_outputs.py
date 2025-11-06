@@ -49,12 +49,14 @@ try:
     import lpips
     lpips_model = lpips.LPIPS(net="alex").to(DEVICE)
     compute_lpips = True
-except Exception:
+except ImportError:
+    print("Warning: 'lpips' not found. Skipping LPIPS metric. To enable, run: pip install lpips")
     pass
 try:
     from skimage.metrics import structural_similarity as ssim_fn
     compute_ssim = True
-except Exception:
+except ImportError:
+    print("Warning: 'scikit-image' not found. Skipping SSIM metric. To enable, run: pip install scikit-image")
     pass
 
 # Utility functions
