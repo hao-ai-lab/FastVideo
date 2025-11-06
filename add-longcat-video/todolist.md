@@ -9,7 +9,7 @@
   - 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器(Temporary) - Done by Alex and Shaoxiong
   - 验证并适配 UMT5 文本编码器与分词器加载 - Done by Alex
   - 复用或适配 Wan VAE 加载与配置 - Done by Alex
-  - 实现 LongCatPipeline 并挂接到 build_pipeline - Doing by Alex
+  - 实现 LongCatPipeline 并挂接到 build_pipeline - Doing by Alex and Shaoxiong
   - 实现 LongCat 专用去噪阶段支持 T2V/I2V/VC/Refine
   - 实现 I2V/VC 条件编码与潜变量注入阶段
   - 实现 Refine 上采样流程与 t_thresh 逻辑
@@ -19,7 +19,7 @@
   - 扩展 SamplingParam 增加 task 与 LongCat 标志位
   - 扩展 generate CLI 支持任务类型与输入源（image/video/long）
 
-- 权重导入与转换
+- 权重导入与转换 - Doing by Shaoxiong
   - 支持直接从目录读取 LongCat 权重与校验（子目录 tokenizer/text_encoder/vae/scheduler/dit）
   - 编写权重转换脚本生成 FastVideo 目录结构（含 model_index.json）
 
