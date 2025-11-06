@@ -1,0 +1,257 @@
+name: Publish Video Sparse Attention Kernel to PyPI on Version Change
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "csrc/attn/video_sparse_attn/setup.py"
+  workflow_dispatch:
+
+jobs:
+  check-version-change:
+    runs-on: ubuntu-latest
+    outputs:
+      version-changed: ${{ steps.check-version.outputs.changed }}
+      new-version: ${{ steps.check-version.outputs.new-version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check if version changed
+        id: check-version
+        run: |
+          cd csrc/attn/video_sparse_attn
+          # Get current commit's version
+          NEW_VERSION=$(grep -oP 'VERSION\s*=\s*"\K[^"]+' setup.py)
+          echo "New version: $NEW_VERSION"
+          
+          # Get previous version from git history
+          OLD_VERSION=$(git show HEAD~1:./setup.py | grep -oP 'VERSION\s*=\s*"\K[^"]+' || echo "0.0.0")
+          echo "Old version: $OLD_VERSION"
+          
+          if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
+            echo "Version changed from $OLD_VERSION to $NEW_VERSION"
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "Version did not change"
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+  build_wheels:
+    name: Build Wheel
+    needs: check-version-change
+    if: ${{ needs.check-version-change.outputs.version-changed == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+          # Using ubuntu-20.04 instead of 22.04 for more compatibility (glibc). Ideally we'd use the
+          # manylinux docker image, but I haven't figured out how to install CUDA on manylinux.
+          os: [ubuntu-22.04]
+          python-version: ['3.10', '3.11', '3.12', '3.13']
+          # For version reference https://pytorch.org/get-started/previous-versions/
+          torch-cuda:
+            - torch-version: '2.5.1'
+              cuda-version: '12.4.1'
+              torch-cuda-short: 'cu124'
+            - torch-version: '2.6.0'
+              cuda-version: '12.6.3'
+              torch-cuda-short: 'cu126'
+            - torch-version: '2.7.1'
+              cuda-version: '12.8.0'
+              torch-cuda-short: 'cu128'
+
+    steps:
+      - name: Free up disk space
+        run: |
+          echo "Initial disk space:"
+          df -h
+          
+          # Remove large directories
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/lib/node_modules
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/rust
+          sudo rm -rf /usr/local/.ghcup
+          
+          # Remove cached files
+          sudo rm -rf /var/lib/apt/lists/*
+          sudo rm -rf /var/cache/apt/archives/*
+          
+          echo "Disk space after cleanup:"
+          df -h
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install CUDA ${{ matrix.torch-cuda.cuda-version }}
+        uses: Jimver/cuda-toolkit@v0.2.21
+        id: cuda-toolkit
+        with:
+          cuda: ${{ matrix.torch-cuda.cuda-version }}
+          linux-local-args: '["--toolkit"]'
+          method: 'network'
+
+      - name: Install dependencies (GCC, Clang, CUDA Paths, Git)
+        run: |
+          sudo apt update
+          sudo apt install -y git patchelf gcc-11 g++-11 clang-11
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
+
+          # Allow Git to Access Safe Directory
+          git config --global --add safe.directory /__w/FastVideo/FastVideo
+
+          # Set CUDA environment variables
+          export CUDA_HOME=/usr/local/cuda-${{ matrix.torch-cuda.cuda-version }}
+          export PATH=${CUDA_HOME}/bin:${PATH}
+          export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
+          
+          # Verify installation
+          gcc --version
+          g++ --version
+          clang-11 --version
+          nvcc --version
+
+      - name: Install PyTorch ${{ matrix.torch-cuda.torch-version }}+cu${{ matrix.torch-cuda.cuda-version }}
+        run: |
+          pip install --upgrade pip
+          # With python 3.13 and torch 2.5.1, unless we update typing-extensions, we get error
+          # AttributeError: attribute '__default__' of 'typing.ParamSpec' objects is not writable
+          pip install typing-extensions==4.12.2
+          # We want to figure out the CUDA version to download pytorch
+          # e.g. we can have system CUDA version being 11.7 but if torch==1.12 then we need to download the wheel from cu116
+          # see https://github.com/pytorch/pytorch/blob/main/RELEASE.md#release-compatibility-matrix
+          pip install --no-cache-dir torch==${{ matrix.torch-cuda.torch-version }} --index-url https://download.pytorch.org/whl/${{matrix.torch-cuda.torch-cuda-short}}
+          nvcc --version
+          python --version
+          python -c "import torch; print('PyTorch:', torch.__version__)"
+          python -c "import torch; print('CUDA:', torch.version.cuda)"
+          python -c "from torch.utils import cpp_extension; print (cpp_extension.CUDA_HOME)"
+
+      - name: Build wheel
+        run: |
+          export PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH
+          
+          # We want setuptools >= 49.6.0 otherwise we can't compile the extension if system CUDA version is 11.7 and pytorch cuda version is 11.6
+          # https://github.com/pytorch/pytorch/blob/664058fa83f1d8eede5d66418abff6e20bd76ca8/torch/utils/cpp_extension.py#L810
+          # However this still fails so I'm using a newer version of setuptools
+          pip install setuptools
+          pip install ninja packaging wheel
+
+          cd csrc/attn/video_sparse_attn  # Move into the correct folder
+          git submodule update --init --recursive # Ensure ThunderKittens submodule is initialized
+          python setup.py bdist_wheel --dist-dir=dist
+
+      - name: Rename wheel file
+        run: |
+          cd csrc/attn/video_sparse_attn
+
+          CUDA_SHORT_VERSION=$(echo ${{ matrix.torch-cuda.cuda-version }} | cut -d. -f1,2 | sed 's/\.//g')
+          TORCH_SHORT_VERSION=$(echo ${{ matrix.torch-cuda.torch-version }} | cut -d. -f1,2)
+          # Get the correct version format
+          tmpname=cu${CUDA_SHORT_VERSION}torch${TORCH_SHORT_VERSION}
+          wheel_name=$(ls dist/*whl | xargs -n 1 basename | sed "s/-/+$tmpname-/2")
+          # Rename with version information
+          ls dist/*whl |xargs -I {} mv {} dist/${wheel_name}
+          echo "wheel_name=${wheel_name}" >> $GITHUB_ENV
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.wheel_name }}
+          path: csrc/attn/video_sparse_attn/dist/*.whl
+          retention-days: 90
+
+  publish_package:
+    name: Publish package
+    needs: [build_wheels, check-version-change]
+    if: ${{ needs.check-version-change.outputs.version-changed == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-22.04
+    permissions:
+      id-token: write  # Needed for OIDC Trusted Publishing
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install CUDA 12.4.1
+        uses: Jimver/cuda-toolkit@v0.2.21
+        id: cuda-toolkit
+        with:
+          cuda: 12.4.1
+          linux-local-args: '["--toolkit"]'
+          method: 'network'
+          sub-packages: '["nvcc"]'
+
+      - name: Install dependencies (GCC, Clang, CUDA Paths, Git)
+        run: |
+          sudo apt update
+          sudo apt install -y git patchelf gcc-11 g++-11 clang-11
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
+
+          # Allow Git to Access Safe Directory
+          git config --global --add safe.directory /__w/FastVideo/FastVideo
+
+          # Set CUDA environment variables
+          export CUDA_HOME=/usr/local/cuda-12.4.1
+          export PATH=${CUDA_HOME}/bin:${PATH}
+          export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
+          
+          # Verify installation
+          gcc --version
+          g++ --version
+          clang-11 --version
+          nvcc --version
+
+      - name: Install PyTorch 2.5.1+cu12.4.1
+        run: |
+          pip install --upgrade pip
+          # With python 3.13 and torch 2.5.1, unless we update typing-extensions, we get error
+          # AttributeError: attribute '__default__' of 'typing.ParamSpec' objects is not writable
+          pip install typing-extensions==4.12.2
+          # We want to figure out the CUDA version to download pytorch
+          # e.g. we can have system CUDA version being 11.7 but if torch==1.12 then we need to download the wheel from cu116
+          # see https://github.com/pytorch/pytorch/blob/main/RELEASE.md#release-compatibility-matrix
+          export TORCH_CUDA_VERSION=124
+          pip install --no-cache-dir torch==2.5.1 --index-url https://download.pytorch.org/whl/cu${TORCH_CUDA_VERSION}
+          nvcc --version
+          python --version
+          python -c "import torch; print('PyTorch:', torch.__version__)"
+          python -c "import torch; print('CUDA:', torch.version.cuda)"
+          python -c "from torch.utils import cpp_extension; print (cpp_extension.CUDA_HOME)"
+
+      - name: Build source distribution
+        run: |
+          export PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH
+          
+          # We want setuptools >= 49.6.0 otherwise we can't compile the extension if system CUDA version is 11.7 and pytorch cuda version is 11.6
+          # https://github.com/pytorch/pytorch/blob/664058fa83f1d8eede5d66418abff6e20bd76ca8/torch/utils/cpp_extension.py#L810
+          # However this still fails so I'm using a newer version of setuptools
+          pip install setuptools
+          pip install ninja packaging wheel
+
+          cd csrc/attn/video_sparse_attn  # Move into the correct folder
+          git submodule update --init --recursive # Ensure ThunderKittens submodule is initialized
+          python setup.py sdist --dist-dir=dist
+
+      - name: Publish release distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: csrc/attn/video_sparse_attn/dist/

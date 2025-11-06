@@ -6,6 +6,7 @@ The symbols used have the following meanings:
 
 - ✅ = Full compatibility
 - ❌ = No compatibility
+- ⭕ = Does not apply to this model
 
 ## Models x Optimization
 The `HuggingFace Model ID` can be directly pass to `from_pretrained()` methods and FastVideo will use the optimal default parameters when initializing and generating videos.
@@ -37,51 +38,94 @@ The `HuggingFace Model ID` can be directly pass to `from_pretrained()` methods a
   * TeaCache
   * Sliding Tile Attn
   * Sage Attn
+  * Video Sparse Attention (VSA)
+- * FastWan2.1 T2V 1.3B
+  * `FastVideo/FastWan2.1-T2V-1.3B-Diffusers`
+  * 480P
+  * ⭕
+  * ⭕
+  * ⭕
+  * ✅
+- * FastWan2.2 TI2V 5B Full Attn*
+  * `FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers`
+  * 720P
+  * ⭕
+  * ⭕
+  * ⭕
+  * ✅
+- * Wan2.2 TI2V 5B 
+  * `Wan-AI/Wan2.2-TI2V-5B-Diffusers`
+  * 720P
+  * ⭕
+  * ⭕
+  * ✅
+  * ⭕
+- * Wan2.2 T2V A14B
+  * `Wan-AI/Wan2.2-T2V-A14B-Diffusers`
+  * 480P<br>720P
+  * ❌
+  * ❌
+  * ✅
+  * ⭕
+- * Wan2.2 I2V A14B
+  * `Wan-AI/Wan2.2-I2V-A14B-Diffusers`
+  * 480P<br>720P
+  * ❌
+  * ❌
+  * ✅
+  * ⭕
 - * HunyuanVideo
   * `hunyuanvideo-community/HunyuanVideo`
   * 720px1280p<br>544px960p
   * ❌
   * ✅
   * ✅
+  * ⭕
 - * FastHunyuan
   * `FastVideo/FastHunyuan-diffusers`
   * 720px1280p<br>544px960p
   * ❌
   * ✅
   * ✅
-- * Wan T2V 1.3B
+  * ⭕
+- * Wan2.1 T2V 1.3B
   * `Wan-AI/Wan2.1-T2V-1.3B-Diffusers`
   * 480P
   * ✅
   * ✅*
   * ✅
-- * Wan T2V 14B
+  * ⭕
+- * Wan2.1 T2V 14B
   * `Wan-AI/Wan2.1-T2V-14B-Diffusers`
   * 480P, 720P
   * ✅
   * ✅*
   * ✅
-- * Wan I2V 480P
+  * ⭕
+- * Wan2.1 I2V 480P
   * `Wan-AI/Wan2.1-I2V-14B-480P-Diffusers`
   * 480P
   * ✅
   * ✅*
   * ✅
-- * Wan I2V 720P
+  * ⭕
+- * Wan2.1 I2V 720P
   * `Wan-AI/Wan2.1-I2V-14B-720P-Diffusers`
   * 720P
   * ✅
-  * ✅*
   * ✅
+  * ✅
+  * ⭕
 - * StepVideo T2V
   * `FastVideo/stepvideo-t2v-diffusers`
   * 768px768px204f<br>544px992px204f<br>544px992px136f
   * ❌
   * ❌
   * ✅
+  * ⭕
 :::
 
-**Note**: there are some known quality issues with Wan2.1 + Sliding Tile Attn. We are working on fixing this issue.
+**Note**: Wan2.2 TI2V 5B has some quality issues when performing I2V generation. We are working on fixing this issue.
 
 ## Special requirements
 

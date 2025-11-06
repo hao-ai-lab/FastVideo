@@ -1,148 +1,212 @@
 env:
   IMAGE_VERSION: "py3.12-latest"
+  BUILDKITE_CLEAN_CHECKOUT: true
 
 steps:
   - label: "pre-commit"
     command: ".buildkite/scripts/pre_commit.sh"
     agents:
       queue: "default"
-    env:
-      - BUILDKITE_CLEAN_CHECKOUT=true
 
   - wait
 
   - label: "Trigger Tests"
     plugins:
       - monorepo-diff#v1.4.0:
-          diff: "git diff --name-only $BUILDKITE_PULL_REQUEST_BASE_BRANCH...HEAD"
+          diff: 'git fetch origin "$BUILDKITE_PULL_REQUEST_BASE_BRANCH" && git diff --name-only origin/"$BUILDKITE_PULL_REQUEST_BASE_BRANCH"...HEAD'
           watch:
             - path: 
-                - "fastvideo/v1/models/encoders/**"
-                - "fastvideo/v1/models/loader/**"
-                - "fastvideo/v1/tests/encoders/**"
+                - "fastvideo/models/encoders/**"
+                - "fastvideo/models/loader/**"
+                - "fastvideo/tests/encoders/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: "Encoder Tests"
                 env:
-                  - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=encoder
                 agents:
                   queue: "default"
             - path:
-                - "fastvideo/v1/models/vaes/**"
-                - "fastvideo/v1/models/loader/**"
-                - "fastvideo/v1/tests/vaes/**"
+                - "fastvideo/models/vaes/**"
+                - "fastvideo/models/loader/**"
+                - "fastvideo/tests/vaes/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: "VAE Tests"
                 env:
-                  - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=vae
                 agents:
                   queue: "default"
             - path:
-                - "fastvideo/v1/models/dits/**"
-                - "fastvideo/v1/models/loader/**"
-                - "fastvideo/v1/tests/transformers/**"
-                - "fastvideo/v1/layers/**"
-                - "fastvideo/v1/attention/**"
+                - "fastvideo/models/dits/**"
+                - "fastvideo/models/loader/**"
+                - "fastvideo/tests/transformers/**"
+                - "fastvideo/layers/**"
+                - "fastvideo/attention/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: "Transformer Tests"
                 env:
-                  - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=transformer
                 agents:
                   queue: "default"
             - path: 
-                - "fastvideo/v1/**/*.py"
+                - "fastvideo/**/*.py"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 60m .buildkite/scripts/pr_test.sh"
+                command: "timeout 45m .buildkite/scripts/pr_test.sh"
                 label: "SSIM Tests"
                 env:
-                  - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=ssim
                 agents:
                   queue: "default"
             - path:
-                - "fastvideo/v1/**"
+                - "fastvideo/tests/lora/**"
+                - "fastvideo/models/loader/**"
+                - "fastvideo/tests/transformers/**"
+                - "fastvideo/pipelines/**"
+                - "fastvideo/layers/lora/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: "LoRA Inference Tests"
+                env:
+                  - TEST_TYPE=inference_lora
+                agents:
+                  queue: "default"
+            - path:
+                - "fastvideo/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: "Training Tests"
                 env:
-                  - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=training
                 agents:
                   queue: "default"
             - path:
-                - "fastvideo/v1/**"
-                - "csrc/attn/vsa/**"
-                - "csrc/attn/tk/**"
-                - "csrc/attn/setup_vsa.py"
-                - "csrc/attn/config_vsa.py"
-                - "csrc/attn/vsa.cpp"
+                - "fastvideo/training/*distillation_pipeline.py"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: "Distillation DMDTests"
+                env:
+                  - TEST_TYPE=distillation_dmd
+                agents:
+                  queue: "default"
+            - path:
+                - "fastvideo/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: "LoRA Training Tests"
+                env:
+                  - TEST_TYPE=training_lora
+                agents:
+                  queue: "default"
+            - path:
+                - "fastvideo/**"
+                - "csrc/attn/video_sparse_attn/**"
+                - "csrc/attn/video_sparse_attn/tk/**"
+                - "csrc/attn/video_sparse_attn/setup.py"
+                - "csrc/attn/video_sparse_attn/config_vsa.py"
+                - "csrc/attn/video_sparse_attn/vsa.cpp"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: "Training Tests VSA"
                 env:
-                  - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=training_vsa
                 agents:
                   queue: "default"
             - path:
-                - "fastvideo/v1/**"
-                - "csrc/attn/st_attn/**"
-                - "csrc/attn/setup_sta.py"
-                - "csrc/attn/config_sta.py"
-                - "csrc/attn/st_attn.cpp"
+                - "fastvideo/**"
+                - "csrc/attn/sliding_tile_attn/**"
+                - "csrc/attn/sliding_tile_attn/setup.py"
+                - "csrc/attn/sliding_tile_attn/config_sta.py"
+                - "csrc/attn/sliding_tile_attn/st_attn.cpp"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: "Inference Tests STA"
                 env:
-                  - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=inference_sta
                 agents:
                   queue: "default"
             - path:
-                - "csrc/attn/st_attn/**"
-                - "csrc/attn/setup_sta.py"
-                - "csrc/attn/config_sta.py"
-                - "csrc/attn/st_attn.cpp"
+                - "csrc/attn/sliding_tile_attn/**"
+                - "csrc/attn/sliding_tile_attn/setup.py"
+                - "csrc/attn/sliding_tile_attn/config_sta.py"
+                - "csrc/attn/sliding_tile_attn/st_attn.cpp"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: "Precision Tests STA"
                 env:
-                  - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=precision_sta
                 agents:
                   queue: "default"
             - path:
-                - "csrc/attn/vsa/**"
-                - "csrc/attn/tk/**"
-                - "csrc/attn/setup_vsa.py"
-                - "csrc/attn/config_vsa.py"
-                - "csrc/attn/vsa.cpp"
+                - "csrc/attn/video_sparse_attn/**"
+                - "csrc/attn/video_sparse_attn/tk/**"
+                - "csrc/attn/tests/test_vsa.py"
+                - "csrc/attn/video_sparse_attn/setup.py"
+                - "csrc/attn/video_sparse_attn/config_vsa.py"
+                - "csrc/attn/video_sparse_attn/vsa.cpp"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 30m .buildkite/scripts/pr_test.sh"
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
                 label: "Precision Tests VSA"
                 env:
-                  - BUILDKITE_CLEAN_CHECKOUT=true
                   - TEST_TYPE=precision_vsa
+                agents:
+                  queue: "default"
+            - path:
+                - "csrc/attn/vmoba_attn/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: "Precision Tests VMoBA"
+                env:
+                  - TEST_TYPE=precision_vmoba
+                agents:
+                  queue: "default"
+            - path:
+                - "csrc/attn/vmoba_attn/vmoba/**"
+                - "fastvideo/attention/backends/vmoba.py"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: "Inference Tests VMoBA"
+                env:  
+                  - TEST_TYPE=inference_vmoba
+                agents:
+                  queue: "default"
+            - path:
+                - "fastvideo/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                label: "Unit Tests"
+                env:
+                  - TEST_TYPE=unit_test
                 agents:
                   queue: "default"

@@ -18,6 +18,16 @@ git clone https://github.com/hao-ai-lab/FastVideo.git && cd FastVideo
 python examples/inference/basic/basic.py
 ```
 
+For an example on Apple silicon: 
+```
+python examples/inference/basic/basic_mps.py
+```
+
+For an example running DMD+VSA inference:
+```
+python examples/inference/basic/basic_dmd.py
+```
+
 ## Basic Walkthrough
 
 All you need to generate videos using multi-gpus from state-of-the-art diffusion pipelines is the following few lines!

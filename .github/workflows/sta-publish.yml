@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - "csrc/attn/setup_sta.py"
+      - "csrc/attn/sliding_tile_attn/setup.py"
   workflow_dispatch:
 
 jobs:
@@ -23,13 +23,13 @@ jobs:
       - name: Check if version changed
         id: check-version
         run: |
-          cd csrc/attn
+          cd csrc/attn/sliding_tile_attn
           # Get current commit's version
-          NEW_VERSION=$(grep -oP 'VERSION\s*=\s*"\K[^"]+' setup_sta.py)
+          NEW_VERSION=$(grep -oP 'VERSION\s*=\s*"\K[^"]+' setup.py)
           echo "New version: $NEW_VERSION"
           
           # Get previous version from git history
-          OLD_VERSION=$(git show HEAD~1:./setup_sta.py | grep -oP 'VERSION\s*=\s*"\K[^"]+' || echo "0.0.0")
+          OLD_VERSION=$(git show HEAD~1:./setup.py | grep -oP 'VERSION\s*=\s*"\K[^"]+' || echo "0.0.0")
           echo "Old version: $OLD_VERSION"
           
           if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
@@ -144,13 +144,13 @@ jobs:
           pip install setuptools
           pip install ninja packaging wheel
 
-          cd csrc/attn  # Move into the correct folder
+          cd csrc/attn/sliding_tile_attn  # Move into the correct folder
           git submodule update --init --recursive # Ensure ThunderKittens submodule is initialized
-          python setup_sta.py bdist_wheel --dist-dir=dist
+          python setup.py bdist_wheel --dist-dir=dist
 
       - name: Rename wheel file
         run: |
-          cd csrc/attn
+          cd csrc/attn/sliding_tile_attn
 
           CUDA_SHORT_VERSION=$(echo ${{ matrix.cuda-version }} | cut -d. -f1,2 | sed 's/\.//g')
           TORCH_SHORT_VERSION=$(echo ${{ matrix.torch-version }} | cut -d. -f1,2)
@@ -165,7 +165,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.wheel_name }}
-          path: csrc/attn/dist/*.whl
+          path: csrc/attn/sliding_tile_attn/dist/*.whl
           retention-days: 90
 
   publish_package:
@@ -239,11 +239,11 @@ jobs:
           pip install setuptools
           pip install ninja packaging wheel
 
-          cd csrc/attn  # Move into the correct folder
+          cd csrc/attn/sliding_tile_attn  # Move into the correct folder
           git submodule update --init --recursive # Ensure ThunderKittens submodule is initialized
-          python setup_sta.py sdist --dist-dir=dist
+          python setup.py sdist --dist-dir=dist
 
       - name: Publish release distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: csrc/attn/dist/
+          packages-dir: csrc/attn/sliding_tile_attn/dist/

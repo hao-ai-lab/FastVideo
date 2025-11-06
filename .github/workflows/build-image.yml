@@ -18,6 +18,12 @@ on:
         required: false
         default: false
         type: boolean
+      python_3_12_cuda_12_9:
+        description: 'Build Python 3.12 image Cuda 12.9'
+        required: false
+        default: false
+        type: boolean
+
 
 permissions:
   contents: read
@@ -49,4 +55,13 @@ jobs:
       python_version: '3.12'
       dockerfile_path: docker/Dockerfile.python3.12
       tag_suffix: py3.12
+    secrets: inherit
+
+  build-python-3-12-cuda-12-9:
+    if: ${{ github.event.inputs.python_3_12_cuda_12_9 == 'true' }}
+    uses: ./.github/workflows/build-image-template.yml
+    with:
+      python_version: '3.12'
+      dockerfile_path: docker/Dockerfile.python3.12.cuda12.9.1
+      tag_suffix: py3.12-cuda12.9.1
     secrets: inherit

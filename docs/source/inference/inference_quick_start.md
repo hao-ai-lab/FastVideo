@@ -5,7 +5,7 @@ This page contains step-by-step instructions to get you quickly started with vid
 ## Requirements
 - **OS**: Linux (Tested on Ubuntu 22.04+)
 - **Python**: 3.10-3.12
-- **CUDA**: 12.4
+- **CUDA**: 12.8
 - **GPU**: At least one NVIDIA GPU
 
 ## Installation
@@ -121,4 +121,4 @@ If the generated video doesn't match your prompt:
 - Learn about using [Optimizations](#inference-optimizations)
 - See [Examples](../examples/examples_inference_index.md) for more usage scenarios
 - Join our [Community Discord](https://discord.gg/JA7cksDz86).
-- Join our [Community Slack](https://join.slack.com/t/fastvideo/shared_invite/zt-2zf6ru791-sRwI9lPIUJQq1mIeB_yjJg).
+- Join our [Community Slack](https://join.slack.com/t/fastvideo/shared_invite/zt-38u6p1jqe-yDI1QJOCEnbtkLoaI5bjZQ).

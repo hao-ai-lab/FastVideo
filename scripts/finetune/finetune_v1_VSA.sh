@@ -1,10 +1,11 @@
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=offline
 export WANDB_API_KEY='your_wandb_api_key'
+export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 export TRITON_CACHE_DIR=/tmp/triton_cache
 DATA_DIR=~/train/
-VALIDATION_DIR=~latents/test/
+VALIDATION_DATASET_FILE=[your validation dataset file]
 NUM_GPUS=8
 export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
 # export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
@@ -13,15 +14,15 @@ export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
 
 CHECKPOINT_PATH="$DATA_DIR/outputs/wan_finetune/checkpoint-5"
 
-# If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
+# Make sure that num_latent_t is a multiple of sp_size
 torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
-    fastvideo/v1/training/wan_training_pipeline.py \
+    fastvideo/training/wan_training_pipeline.py \
     --model_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --inference_mode False\
     --pretrained_model_name_or_path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --cache_dir "/home/ray/.cache" \
     --data_path "$DATA_DIR" \
-    --validation_preprocessed_path "$VALIDATION_DIR" \
+    --validation_dataset_file "$VALIDATION_DATASET_FILE" \
     --train_batch_size 1 \
     --num_latent_t 16 \
     --sp_size 1 \
@@ -40,7 +41,6 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --validation_sampling_steps "50" \
     --log_validation \
     --checkpoints_total_limit 3 \
-    --allow_tf32 \
     --ema_start_step 0 \
     --training_cfg_rate 0.0 \
     --output_dir "$DATA_DIR/outputs/wan_finetune" \
@@ -58,5 +58,6 @@ torchrun --nnodes 1 --nproc_per_node $NUM_GPUS \
     --VSA_decay_sparsity 0.9 \
     --VSA_decay_rate 0.03 \
     --VSA_decay_interval_steps 30 \
-    --VSA_val_sparsity 0.9
+    --VSA_val_sparsity 0.9 \
+    --enable_gradient_checkpointing_type "full"
 # --resume_from_checkpoint "$CHECKPOINT_PATH"

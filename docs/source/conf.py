@@ -18,7 +18,6 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Optional
 
 import requests
 
@@ -97,8 +96,7 @@ copybutton_prompt_is_regexp = True
 #
 html_title = project
 html_theme = 'sphinx_book_theme'
-html_logo = '../../assets/logo.jpg'
-#html_favicon = 'assets/logos/vllm-logo-only-light.ico'
+html_logo = '../../assets/logos/icon_simple.svg'
 html_theme_options = {
     'path_to_docs': 'docs/source',
     'repository_url': 'https://github.com/hao-ai-lab/FastVideo/',
@@ -168,8 +166,7 @@ _cached_base: str = ""
 _cached_branch: str = ""
 
 
-def get_repo_base_and_branch(
-        pr_number: str) -> tuple[Optional[str], Optional[str]]:
+def get_repo_base_and_branch(pr_number: str) -> tuple[str | None, str | None]:
     global _cached_base, _cached_branch
     if _cached_base and _cached_branch:
         return _cached_base, _cached_branch

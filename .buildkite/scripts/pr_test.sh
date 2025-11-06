@@ -50,7 +50,7 @@ else
     exit 1
 fi
 
-MODAL_TEST_FILE="fastvideo/v1/tests/modal/pr_test.py"
+MODAL_TEST_FILE="fastvideo/tests/modal/pr_test.py"
 
 if [ -z "${TEST_TYPE:-}" ]; then
     log "Error: TEST_TYPE environment variable is not set"
@@ -58,7 +58,7 @@ if [ -z "${TEST_TYPE:-}" ]; then
 fi
 log "Test type: $TEST_TYPE"
 
-MODAL_ENV="BUILDKITE_REPO=$BUILDKITE_REPO BUILDKITE_COMMIT=$BUILDKITE_COMMIT IMAGE_VERSION=$IMAGE_VERSION"
+MODAL_ENV="BUILDKITE_REPO=$BUILDKITE_REPO BUILDKITE_COMMIT=$BUILDKITE_COMMIT BUILDKITE_PULL_REQUEST=$BUILDKITE_PULL_REQUEST IMAGE_VERSION=$IMAGE_VERSION"
 
 case "$TEST_TYPE" in
     "encoder")
@@ -81,6 +81,10 @@ case "$TEST_TYPE" in
         log "Running training tests..."
         MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_training_tests"
         ;;
+    "training_lora")
+        log "Running LoRA training tests..."
+        MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_training_lora_tests"
+        ;;
     "training_vsa")
         log "Running training VSA tests..."
         MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_training_tests_VSA"
@@ -96,6 +100,27 @@ case "$TEST_TYPE" in
     "precision_vsa")
         log "Running precision VSA tests..."
         MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_precision_tests_VSA"
+        ;;
+    "inference_lora")
+        log "Running LoRA tests..."
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_inference_lora_tests"
+        ;;
+    "distillation_dmd")
+        log "Running distillation DMD tests..."
+        MODAL_COMMAND="$MODAL_ENV WANDB_API_KEY=$WANDB_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_distill_dmd_tests"
+        ;;
+        # run_inference_tests_vmoba
+    "inference_vmoba")
+        log "Running V-MoBA inference tests..."
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_inference_tests_vmoba"
+        ;;
+    "precision_vmoba")
+        log "Running V-MoBA precision tests..."
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_precision_tests_vmoba"
+        ;;
+    "unit_test")
+        log "Running unit tests..."
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_unit_test"
         ;;
     *)
         log "Error: Unknown test type: $TEST_TYPE"

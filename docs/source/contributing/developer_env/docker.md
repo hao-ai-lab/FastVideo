@@ -3,12 +3,12 @@
 
 If you prefer a containerized development environment or want to avoid managing dependencies manually, you can use our prebuilt Docker image:
 
-**Image:** [`ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:latest`](https://ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev)
+**Images:** [`ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:py3.12-latest`](https://ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev)
 
 ## Starting the container
 
 ```bash
-docker run --gpus all -it ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:latest
+docker run --gpus all -it ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:py3.12-latest
 ```
 
 This will:

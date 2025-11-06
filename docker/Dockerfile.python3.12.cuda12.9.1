@@ -1,0 +1,72 @@
+FROM nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+SHELL ["/bin/bash", "-c"]
+
+WORKDIR /FastVideo
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    git \
+    ca-certificates \
+    openssh-server \
+    zsh \
+    vim \
+    curl \
+    gcc-11 \
+    g++-11 \
+    clang-11 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up C++20 compilers for ThunderKittens
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
+
+# Set CUDA environment variables
+ENV CUDA_HOME=/usr/local/cuda-12.9
+ENV PATH=${CUDA_HOME}/bin:${PATH}
+ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
+
+# Install uv and source its environment
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    echo 'source $HOME/.local/bin/env' >> /root/.bashrc
+
+# Copy just the pyproject.toml first to leverage Docker cache
+COPY pyproject.toml ./
+
+# Create a dummy README to satisfy the installation
+RUN echo "# Placeholder" > README.md
+
+# Create and activate virtual environment with specific Python version and seed
+RUN source $HOME/.local/bin/env && \
+    uv venv --python 3.12 --seed /opt/venv && \
+    source /opt/venv/bin/activate && \
+    uv pip install --no-cache-dir --upgrade pip && \
+    uv pip install --no-cache-dir .[dev] && \
+    uv pip install --no-cache-dir flash-attn==2.8.3 --no-build-isolation
+
+COPY . .
+
+# Install dependencies using uv and set up shell configuration
+RUN source $HOME/.local/bin/env && \
+    source /opt/venv/bin/activate && \
+    uv pip install --no-cache-dir -e .[dev] && \
+    git config --unset-all http.https://github.com/.extraheader || true && \
+    echo 'source /opt/venv/bin/activate' >> /root/.bashrc && \
+    echo 'if [ -n "$ZSH_VERSION" ] && [ -f ~/.zshrc ]; then . ~/.zshrc; elif [ -f ~/.bashrc ]; then . ~/.bashrc; fi' > /root/.profile
+
+# Install STA (Sliding Tile Attention)
+RUN source $HOME/.local/bin/env && \
+    source /opt/venv/bin/activate && \
+    cd csrc/attn/sliding_tile_attn && \
+    git submodule update --init --recursive && \
+    python setup.py install
+
+# Install VSA 
+RUN source $HOME/.local/bin/env && \
+    source /opt/venv/bin/activate && \
+    cd csrc/attn/video_sparse_attn && \
+    git submodule update --init --recursive && \
+    python setup.py install
+
+EXPOSE 22

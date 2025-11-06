@@ -20,6 +20,7 @@ samples/
 data/
 outputs/
 outputs_video
+checkpoints/
 sbatch.sh
 *.out
 env
@@ -40,6 +41,8 @@ eggs/
 docs/_build/
 docs/source/getting_started/examples/
 docs/source/inference/examples/
+docs/source/training/examples/
+docs/source/distillation/examples/
 
 # VSCode
 .vscode/
@@ -55,7 +58,12 @@ docs/source/inference/examples/
 *.pkl
 
 # Reference videos
-!fastvideo/v1/tests/ssim/reference_videos/**/*.mp4
+!fastvideo/tests/ssim/reference_videos/**/*.mp4
 
 # Static images
 !docs/source/_static/images/**/*.png
+!comfyui/assets/**/*.png
+!comfyui/assets/**/*.gif
+
+dmd_t2v_output/
+preprocess_output_text/

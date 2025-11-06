@@ -1,0 +1,697 @@
+{
+  "id": "23a1f065-bbba-4a8f-b144-944e1318fcbf",
+  "revision": 0,
+  "last_node_id": 8,
+  "last_link_id": 7,
+  "nodes": [
+    {
+      "id": 7,
+      "type": "LoadImagePath",
+      "pos": [
+        33.15385437011719,
+        191.2037353515625
+      ],
+      "size": [
+        270,
+        334
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "image_path",
+          "type": "STRING",
+          "links": [
+            1
+          ]
+        },
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImagePath"
+      },
+      "widgets_values": [
+        "woman.jpg",
+        "image"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "VHS_LoadVideoPath",
+      "pos": [
+        1350.136962890625,
+        331.20361328125
+      ],
+      "size": [
+        231.8896484375,
+        286
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "meta_batch",
+          "shape": 7,
+          "type": "VHS_BatchManager",
+          "link": null
+        },
+        {
+          "name": "vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": null
+        },
+        {
+          "name": "video",
+          "type": "STRING",
+          "widget": {
+            "name": "video"
+          },
+          "link": 4
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            5
+          ]
+        },
+        {
+          "name": "frame_count",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "links": null
+        },
+        {
+          "name": "video_info",
+          "type": "VHS_VIDEOINFO",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VHS_LoadVideoPath"
+      },
+      "widgets_values": {
+        "video": "",
+        "force_rate": 0,
+        "custom_width": 0,
+        "custom_height": 0,
+        "frame_load_cap": 0,
+        "skip_first_frames": 0,
+        "select_every_nth": 1,
+        "format": "Wan",
+        "videopreview": {
+          "hidden": false,
+          "paused": false,
+          "params": {
+            "filename": "",
+            "type": "path",
+            "format": "video/",
+            "force_rate": 0,
+            "custom_width": 0,
+            "custom_height": 0,
+            "frame_load_cap": 0,
+            "skip_first_frames": 0,
+            "select_every_nth": 1
+          }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "VHS_VideoCombine",
+      "pos": [
+        1668.3499755859375,
+        328.22625732421875
+      ],
+      "size": [
+        214.7587890625,
+        334
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 5
+        },
+        {
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
+        },
+        {
+          "name": "meta_batch",
+          "shape": 7,
+          "type": "VHS_BatchManager",
+          "link": null
+        },
+        {
+          "name": "vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Filenames",
+          "type": "VHS_FILENAMES",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VHS_VideoCombine"
+      },
+      "widgets_values": {
+        "frame_rate": 24,
+        "loop_count": 0,
+        "filename_prefix": "",
+        "format": "video/h264-mp4",
+        "pix_fmt": "yuv420p",
+        "crf": 19,
+        "save_metadata": true,
+        "trim_to_audio": false,
+        "pingpong": false,
+        "save_output": false,
+        "videopreview": {
+          "hidden": false,
+          "paused": false,
+          "params": {}
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "VAEConfig",
+      "pos": [
+        374.2159423828125,
+        554.85888671875
+      ],
+      "size": [
+        334.080078125,
+        322
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "vae_config",
+          "type": "VAE_CONFIG",
+          "links": [
+            2
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAEConfig"
+      },
+      "widgets_values": [
+        true,
+        true,
+        256,
+        256,
+        16,
+        192,
+        192,
+        12,
+        0,
+        true,
+        true,
+        true
+      ],
+      "auto_widget_states": {
+        "load_encoder": {
+          "isAuto": true,
+          "value": true,
+          "cachedValue": true
+        },
+        "load_decoder": {
+          "isAuto": true,
+          "value": true,
+          "cachedValue": true
+        },
+        "tile_sample_min_height": {
+          "isAuto": true,
+          "value": 256,
+          "cachedValue": 256
+        },
+        "tile_sample_min_width": {
+          "isAuto": true,
+          "value": 256,
+          "cachedValue": 256
+        },
+        "tile_sample_min_num_frames": {
+          "isAuto": true,
+          "value": 16,
+          "cachedValue": 16
+        },
+        "tile_sample_stride_height": {
+          "isAuto": true,
+          "value": 192,
+          "cachedValue": 192
+        },
+        "tile_sample_stride_width": {
+          "isAuto": true,
+          "value": 192,
+          "cachedValue": 192
+        },
+        "tile_sample_stride_num_frames": {
+          "isAuto": true,
+          "value": 12,
+          "cachedValue": 12
+        },
+        "blend_num_frames": {
+          "isAuto": true,
+          "value": 0,
+          "cachedValue": 0
+        },
+        "use_tiling": {
+          "isAuto": true,
+          "value": true,
+          "cachedValue": true
+        },
+        "use_temporal_tiling": {
+          "isAuto": true,
+          "value": true,
+          "cachedValue": true
+        },
+        "use_parallel_tiling": {
+          "isAuto": true,
+          "value": true,
+          "cachedValue": true
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "InferenceArgs",
+      "pos": [
+        411.46307373046875,
+        178.18182373046875
+      ],
+      "size": [
+        278.73828125,
+        298
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image_path",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "image_path"
+          },
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "inference_args",
+          "type": "INFERENCE_ARGS",
+          "links": [
+            3
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "InferenceArgs"
+      },
+      "widgets_values": [
+        832,
+        480,
+        45,
+        20,
+        1,
+        17,
+        1024,
+        "fixed",
+        24,
+        "X://insert/path/here.mp4",
+        true
+      ],
+      "auto_widget_states": {
+        "height": {
+          "isAuto": false,
+          "value": 832,
+          "cachedValue": 720
+        },
+        "width": {
+          "isAuto": false,
+          "value": 480,
+          "cachedValue": 1280
+        },
+        "num_frames": {
+          "isAuto": false,
+          "value": 45,
+          "cachedValue": 45
+        },
+        "num_inference_steps": {
+          "isAuto": false,
+          "value": 20,
+          "cachedValue": 6
+        },
+        "guidance_scale": {
+          "isAuto": true,
+          "value": 1,
+          "cachedValue": 1
+        },
+        "flow_shift": {
+          "isAuto": true,
+          "value": 17,
+          "cachedValue": 17
+        },
+        "seed": {
+          "isAuto": false,
+          "value": 1024,
+          "cachedValue": 1024
+        },
+        "fps": {
+          "isAuto": false,
+          "value": 24,
+          "cachedValue": 24
+        },
+        "image_path": {
+          "isAuto": true,
+          "value": "X://insert/path/here.mp4",
+          "cachedValue": "X://insert/path/here.mp4"
+        },
+        "enable_teacache": {
+          "isAuto": true,
+          "value": true,
+          "cachedValue": true
+        }
+      }
+    },
+    {
+      "id": 1,
+      "type": "VideoGenerator",
+      "pos": [
+        818.804931640625,
+        348.9299621582031
+      ],
+      "size": [
+        400,
+        436
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "inference_args",
+          "shape": 7,
+          "type": "INFERENCE_ARGS",
+          "link": 3
+        },
+        {
+          "name": "vae_config",
+          "shape": 7,
+          "type": "VAE_CONFIG",
+          "link": 2
+        },
+        {
+          "name": "text_encoder_config",
+          "shape": 7,
+          "type": "TEXT_ENCODER_CONFIG",
+          "link": 7
+        },
+        {
+          "name": "dit_config",
+          "shape": 7,
+          "type": "DIT_CONFIG",
+          "link": 6
+        }
+      ],
+      "outputs": [
+        {
+          "name": "video_path",
+          "type": "STRING",
+          "links": [
+            4
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VideoGenerator"
+      },
+      "widgets_values": [
+        "A woman crying from laughter.",
+        "/workspace/ComfyUI/outputs_video/",
+        4,
+        "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
+        6,
+        2,
+        2,
+        "fp16",
+        true,
+        true,
+        "fp16",
+        "fp16",
+        true
+      ],
+      "auto_widget_states": {
+        "embedded_cfg_scale": {
+          "isAuto": true,
+          "value": 6,
+          "cachedValue": 6
+        },
+        "sp_size": {
+          "isAuto": true,
+          "value": 2,
+          "cachedValue": 2
+        },
+        "tp_size": {
+          "isAuto": true,
+          "value": 2,
+          "cachedValue": 2
+        },
+        "vae_precision": {
+          "isAuto": true,
+          "value": "fp16",
+          "cachedValue": "fp16"
+        },
+        "vae_tiling": {
+          "isAuto": true,
+          "value": true,
+          "cachedValue": true
+        },
+        "vae_sp": {
+          "isAuto": true,
+          "value": true,
+          "cachedValue": true
+        },
+        "text_encoder_precision": {
+          "isAuto": true,
+          "value": "fp16",
+          "cachedValue": "fp16"
+        },
+        "precision": {
+          "isAuto": true,
+          "value": "fp16",
+          "cachedValue": "fp16"
+        },
+        "dit_cpu_offload": {
+          "isAuto": true,
+          "value": true,
+          "cachedValue": true
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "TextEncoderConfig",
+      "pos": [
+        416.4937744140625,
+        953.6171875
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "text_encoder_config",
+          "type": "TEXT_ENCODER_CONFIG",
+          "links": [
+            7
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TextEncoderConfig"
+      },
+      "widgets_values": [
+        "",
+        "",
+        ""
+      ],
+      "auto_widget_states": {
+        "prefix": {
+          "isAuto": true,
+          "value": "",
+          "cachedValue": ""
+        },
+        "quant_config": {
+          "isAuto": true,
+          "value": "",
+          "cachedValue": ""
+        },
+        "lora_config": {
+          "isAuto": true,
+          "value": "",
+          "cachedValue": ""
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "DITConfig",
+      "pos": [
+        415.1928405761719,
+        1154.1573486328125
+      ],
+      "size": [
+        270,
+        82
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "dit_config",
+          "type": "DIT_CONFIG",
+          "links": [
+            6
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "DITConfig"
+      },
+      "widgets_values": [
+        "",
+        ""
+      ],
+      "auto_widget_states": {
+        "prefix": {
+          "isAuto": true,
+          "value": "",
+          "cachedValue": ""
+        },
+        "quant_config": {
+          "isAuto": true,
+          "value": "",
+          "cachedValue": ""
+        }
+      }
+    }
+  ],
+  "links": [
+    [
+      1,
+      7,
+      0,
+      2,
+      0,
+      "STRING"
+    ],
+    [
+      2,
+      4,
+      0,
+      1,
+      1,
+      "VAE_CONFIG"
+    ],
+    [
+      3,
+      2,
+      0,
+      1,
+      0,
+      "INFERENCE_ARGS"
+    ],
+    [
+      4,
+      1,
+      0,
+      3,
+      2,
+      "STRING"
+    ],
+    [
+      5,
+      3,
+      0,
+      8,
+      0,
+      "IMAGE"
+    ],
+    [
+      6,
+      6,
+      0,
+      1,
+      3,
+      "DIT_CONFIG"
+    ],
+    [
+      7,
+      5,
+      0,
+      1,
+      2,
+      "TEXT_ENCODER_CONFIG"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.8264462809917354,
+      "offset": [
+        646.7950212991898,
+        66.17259910028655
+      ]
+    },
+    "frontendVersion": "1.20.4",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}

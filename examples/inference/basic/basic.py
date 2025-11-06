@@ -1,6 +1,6 @@
 from fastvideo import VideoGenerator
 
-# from fastvideo.v1.configs.sample import SamplingParam
+# from fastvideo.configs.sample import SamplingParam
 
 OUTPUT_PATH = "video_samples"
 def main():
@@ -11,9 +11,13 @@ def main():
     generator = VideoGenerator.from_pretrained(
         "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         # FastVideo will automatically handle distributed setup
-        num_gpus=2,
+        num_gpus=1,
         use_fsdp_inference=True,
-        use_cpu_offload=False
+        dit_cpu_offload=False,
+        vae_cpu_offload=False,
+        text_encoder_cpu_offload=True,
+        pin_cpu_memory=True, # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
+        # image_encoder_cpu_offload=False,
     )
 
     # sampling_param = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
