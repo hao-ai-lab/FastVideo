@@ -88,7 +88,7 @@ class RotaryPositionalEmbedding(nn.Module):
         freqs = broadcat((freqs_t[:, None, None, :], freqs_h[None, :, None, :], freqs_w[None, None, :, :]), dim=-1)
         # (T H W D)
         freqs = rearrange(freqs, "T H W D -> (T H W) D")
-        if self.cp_split_hw[0] * self.cp_split_hw[1] > 1:
+        if self.cp_split_hw is not None and self.cp_split_hw[0] * self.cp_split_hw[1] > 1:
             with torch.no_grad():
                 freqs = rearrange(freqs, "(T H W) D -> T H W D", T=num_frames, H=height, W=width)
                 freqs = context_parallel_util.split_cp_2d(freqs, seq_dim_hw=(1, 2), split_hw=self.cp_split_hw)

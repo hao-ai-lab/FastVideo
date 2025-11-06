@@ -1,0 +1,64 @@
+============================================================
+LongCat → FastVideo Native Conversion
+============================================================
+Source: /mnt/fast-disks/hao_lab/shao/LongCat-Video/weights/LongCat-Video
+Output: weights/longcat-native
+
+[Step 1/4] Converting transformer weights...
+  Found 6 shard(s)
+  Loading diffusion_pytorch_model-00001-of-00006.safetensors...
+  Loading diffusion_pytorch_model-00002-of-00006.safetensors...
+  Loading diffusion_pytorch_model-00003-of-00006.safetensors...
+  Loading diffusion_pytorch_model-00004-of-00006.safetensors...
+  Loading diffusion_pytorch_model-00005-of-00006.safetensors...
+  Loading diffusion_pytorch_model-00006-of-00006.safetensors...
+  Loaded 1022 parameters
+  Converting transformer weights...
+  Processing parameters:   0%|          | 0/1022 [00:00<?, ?it/s]  Processing parameters: 100%|██████████| 1022/1022 [00:00<00:00, 662838.83it/s]
+  Converted to 1310 parameters
+
+  Validating conversion...
+    Original parameters: 13,581,071,424
+    Converted parameters: 13,581,071,424
+    Dropped parameters (norms without params): 0
+    ✓ Parameter count matches
+
+  Verifying QKV/KV splits...
+    ✓ All splits verified successfully
+
+✓ Validation passed!
+
+  Saving to weights/longcat-native/transformer/model.safetensors...
+  ✓ Saved (50.59 GB)
+
+[Step 2/4] Copying other components...
+  ✓ vae copied
+  ✓ text_encoder copied
+  ✓ tokenizer copied
+  ✓ scheduler copied
+  ✓ lora copied
+
+[Step 3/4] Updating transformer config...
+  Copied config.json
+  Updated _class_name: LongCatVideoTransformer3DModel → LongCatTransformer3DModel
+  ✓ Transformer config updated
+
+[Step 4/4] Creating model_index.json...
+  ✓ Created weights/longcat-native/model_index.json
+
+============================================================
+✓ Conversion Complete!
+============================================================
+Native weights ready at: weights/longcat-native
+
+Next steps:
+  1. Test loading the model:
+     from fastvideo import VideoGenerator
+     generator = VideoGenerator.from_pretrained('weights/longcat-native')
+
+  2. Generate a test video:
+     video = generator.generate_video(
+         prompt='A cat playing piano',
+         num_inference_steps=50
+     )
+

@@ -1,0 +1,25 @@
+{
+  "_class_name": "LongCatPipeline",
+  "_diffusers_version": "0.32.0",
+  "workload_type": "video-generation",
+  "tokenizer": [
+    "transformers",
+    "AutoTokenizer"
+  ],
+  "text_encoder": [
+    "transformers",
+    "UMT5EncoderModel"
+  ],
+  "vae": [
+    "diffusers",
+    "AutoencoderKLWan"
+  ],
+  "scheduler": [
+    "diffusers",
+    "FlowMatchEulerDiscreteScheduler"
+  ],
+  "transformer": [
+    "diffusers",
+    "LongCatVideoTransformer3DModel"
+  ]
+}
