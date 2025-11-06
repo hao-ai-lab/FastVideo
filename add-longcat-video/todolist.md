@@ -3,42 +3,38 @@
 ## 代办清单
 
 - 阶段一（Stage 1）：临时直连 LongCat Transformer3D + 完成管线对接
-  - 目标：不改动核心 Transformer3D 实现，优先把管线/加载/CLI/校验/测试/推理全链条跑通（T2V/I2V/VC/Refine），KV cache/LoRA/BSA 可按需接入为可选项。
-  - 定义 LongCat 管线配置并注册到 pipeline registry - Done by Alex
-  - 新增 FlowMatchEulerDiscreteScheduler 的调度器加载器 - Done by Alex
-  - 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器(Temporary) - Done by Alex and Shaoxiong
-  - 验证并适配 UMT5 文本编码器与分词器加载 - Done by Alex
-  - 复用或适配 Wan VAE 加载与配置 - Done by Alex
-  - 实现 LongCatPipeline 并挂接到 build_pipeline - Done by Alex and Shaoxiong
-  - 实现 LongCat 专用去噪阶段支持 T2V/I2V/VC/Refine
-  - 实现 I2V/VC 条件编码与潜变量注入阶段
-  - 实现 Refine 上采样流程与 t_thresh 逻辑
+ - 目标：不改动核心 Transformer3D 实现，优先把管线/加载/CLI/校验/测试/推理全链条跑通（T2V/I2V/VC/Refine），KV cache/LoRA/BSA 	按需接入为可选项。
+ - 定义 LongCat 管线配置并注册到 pipeline registry - Done by Alex
+ - 新增 FlowMatchEulerDiscreteScheduler 的调度器加载器 - Done by Alex
+ - 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器(Temporary) - Done by Alex and Shaoxiong
+ - 验证并适配 UMT5 文本编码器与分词器加载 - Done by Alex
+ - 复用或适配 Wan VAE 加载与配置 - Done by Alex
+ - 实现 LongCatPipeline 并挂接到 build_pipeline - Done by Alex and Shaoxiong
+ - 实现 LongCat 专用去噪阶段支持 - Done by Shaoxiong
+ - 实现 I2V/VC 条件编码与潜变量注入阶段 - Done by Shaoxiong
+ - 实现 Refine 上采样流程与 t_thresh 逻辑 - Pause
 
-- 数据结构与 CLI
-  - 扩展 ForwardBatch 以支持 LongCat 额外参数（use_distill/kv_cache/num_cond_frames 等）
-  - 扩展 SamplingParam 增加 task 与 LongCat 标志位
-  - 扩展 generate CLI 支持任务类型与输入源（image/video/long）
 
-- 权重导入与转换 - Doing by Shaoxiong
-  - 支持直接从目录读取 LongCat 权重与校验（子目录 tokenizer/text_encoder/vae/scheduler/dit）
-  - 编写权重转换脚本生成 FastVideo 目录结构（含 model_index.json）
+- 权重导入与转换 - Done by Shaoxiong
+ - 支持直接从目录读取 LongCat 权重与校验（子目录 tokenizer/text_encoder/vae/scheduler/dit）
+ - 编写权重转换脚本生成 FastVideo 目录结构（含 model_index.json）
 
-- 阶段二（Stage 2）：核心重写（用 FastVideo 模块重构 LongCat Transformer3D）
-  - 将 Transformer3D 从临时代码切换为 FastVideo 原生模块（LayerNorm/MLP/Linear/Embed/Attention）。
-  - 统一注意力后端（Local/Flash/SDPA/VSA），去除第三方 Attention 依赖，保留/替换 KV cache。
-  - 对齐输出头为 LayerNormScaleShift + 线性投影，替代 FinalLayer_FP32。
-  - 评估并迁移 LoRA 注入到 fastvideo.layers.lora 体系。
-  - 去除/替代 context_parallel 依赖，统一到 FastVideo 的并行与执行器。
-  - 与 Stage 1 的 E2E 行为对齐（1-step smoke 测试和基线画质）。
-- 性能与可选特性
-  - 接入 KV Cache 与可选 CPU offload
-  - 接入可选 Block Sparse Attention 后端
-  - 接入 LongCat LoRA 装载与启用/禁用接口
+
+- 阶段二（Stage 2）：核心重写 - Done by Shaoxiong
+ - 将 Transformer3D 从临时代码切换为 FastVideo 原生模块（LayerNorm/MLP/Linear/Embed/Attention）。
+ - 统一注意力后端（Local/Flash/SDPA/VSA），去除第三方 Attention 依赖。
+
+
+ - 性能与可选特性
+ - 接入 KV Cache 与可选 CPU offload
+ - 接入 Block Sparse Attention 后端
+ - 接入 LongCat LoRA 装载与启用/禁用接口
+
 
 - 验证与文档
-  - 新增单元与集成测试覆盖构建与一步推理
-  - 新增 inference 脚本与文档，给出示例参数
-  - 端到端验证各任务并对齐分辨率/帧数约束
+ - 新增单元与集成测试覆盖构建与一步推理
+ - 新增 inference 脚本与文档，给出示例参数
+ - 端到端验证各任务并对齐分辨率/帧数约束
 
 简要说明
 - LongCat 的组件与接口：`tokenizer=AutoTokenizer`、`text_encoder=UMT5EncoderModel`、`vae=AutoencoderKLWan`、`scheduler=FlowMatchEulerDiscreteScheduler`、`dit=LongCatVideoTransformer3DModel`，其管线提供 4 个入口：`generate_t2v/generate_i2v/generate_vc/generate_refine`，并包含 `use_distill`、KV cache、LoRA、Refine 上采样等特性。

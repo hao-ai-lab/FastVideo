@@ -29,6 +29,7 @@ env
 **.pyc
 **.txt
 add-longcat-video/LongCat-Video/
+*.log
 
 # Distribution / packaging
 build/
