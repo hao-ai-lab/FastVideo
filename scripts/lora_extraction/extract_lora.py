@@ -83,8 +83,8 @@ for i, key in progress_bar:
         A = (U[:, :rank] * S[:rank].sqrt()).half().cpu()
         B = (Vh[:rank, :].T * S[:rank].sqrt()).half().cpu()
         lora_dict[key] = {"A": A, "B": B}
-    except Exception as e:
-        print(f"Skipping {key} due to error: {e}")
+    except torch.linalg.LinAlgError as e:
+        print(f"Skipping {key} due to SVD error: {e}")
         continue
 
     del W_base, W_ft, delta, U, S, Vh
