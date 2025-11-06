@@ -9,7 +9,7 @@
   - 新增 LongCatVideoTransformer3DModel 的 Transformer 加载器(Temporary) - Done by Alex and Shaoxiong
   - 验证并适配 UMT5 文本编码器与分词器加载 - Done by Alex
   - 复用或适配 Wan VAE 加载与配置 - Done by Alex
-  - 实现 LongCatPipeline 并挂接到 build_pipeline - Doing by Alex and Shaoxiong
+  - 实现 LongCatPipeline 并挂接到 build_pipeline - Done by Alex and Shaoxiong
   - 实现 LongCat 专用去噪阶段支持 T2V/I2V/VC/Refine
   - 实现 I2V/VC 条件编码与潜变量注入阶段
   - 实现 Refine 上采样流程与 t_thresh 逻辑
@@ -121,112 +121,12 @@ with set_default_torch_dtype(PRECISION_TO_TYPE[fastvideo_args.pipeline_config.va
 ```
 
 ### 6) 实现 LongCatPipeline 并挂接到 build_pipeline
-
+Done by Alex and Shaoxiong
 - 新增文件：`fastvideo/pipelines/basic/longcat/longcat_pipeline.py`
-
-```python
-from fastvideo.fastvideo_args import FastVideoArgs
-from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
-from fastvideo.pipelines.stages import (
-    InputValidationStage,
-    TextEncodingStage,
-    TimestepPreparationStage,
-    LatentPreparationStage,
-    DecodingStage,
-)
-
-# 你的自定义阶段（需要在同目录下实现）
-from .stages.longcat_conditioning import LongCatConditioningStage
-from .stages.longcat_denoising import LongCatDenoisingStage
-# 可选：KV cache 预热阶段
-try:
-    from .stages.longcat_kvcache import LongCatKVCacheStage
-except Exception:
-    LongCatKVCacheStage = None
-
-
-class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
-    _required_config_modules = ["text_encoder", "tokenizer", "vae", "transformer", "scheduler"]
-
-    def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        # LongCat：直接使用权重中自带的 scheduler，不替换
-        pass
-
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
-        self.add_stage(
-            stage_name="input_validation_stage",
-            stage=InputValidationStage(),
-        )
-
-        self.add_stage(
-            stage_name="prompt_encoding_stage",
-            stage=TextEncodingStage(
-                text_encoders=[self.get_module("text_encoder")],
-                tokenizers=[self.get_module("tokenizer")],
-            ),
-        )
-
-        self.add_stage(
-            stage_name="conditioning_stage",
-            stage=LongCatConditioningStage(
-                vae=self.get_module("vae"),
-            ),
-        )
-
-        self.add_stage(
-            stage_name="timestep_preparation_stage",
-            stage=TimestepPreparationStage(
-                scheduler=self.get_module("scheduler"),
-            ),
-        )
-
-        self.add_stage(
-            stage_name="latent_preparation_stage",
-            stage=LatentPreparationStage(
-                scheduler=self.get_module("scheduler"),
-                transformer=self.get_module("transformer", None),
-            ),
-        )
-
-        if LongCatKVCacheStage is not None and fastvideo_args.pipeline_config.enable_kv_cache:
-            self.add_stage(
-                stage_name="kv_cache_stage",
-                stage=LongCatKVCacheStage(
-                    transformer=self.get_module("transformer"),
-                ),
-            )
-
-        self.add_stage(
-            stage_name="denoising_stage",
-            stage=LongCatDenoisingStage(
-                transformer=self.get_module("transformer"),
-                scheduler=self.get_module("scheduler"),
-                vae=self.get_module("vae"),
-                pipeline=self,
-            ),
-        )
-
-        self.add_stage(
-            stage_name="decoding_stage",
-            stage=DecodingStage(
-                vae=self.get_module("vae"),
-                pipeline=self,
-            ),
-        )
-
-
-EntryClass = LongCatPipeline
-```
-
+    - 完成input_validation_stage → prompt_encoding_stage → conditioning_stage → timestep_preparation_stage → latent_preparation_stage → (kv_cache_stage 可选，目前还没实现) → denoising_stage → decoding_stage的框架搭建
 - 注册到构建器：`fastvideo/pipelines/pipeline_registry.py`
-
-```python
-from fastvideo.pipelines.basic.longcat.longcat_pipeline import LongCatPipeline
-
-PIPELINE_CLASS_REGISTRY.update({
-    ("LongCatPipeline", "video-generation"): LongCatPipeline,
-})
-```
+    - 在模块末尾导出 EntryClass = LongCatPipeline
+    - 在 pipeline_registry.py 的 _PIPELINE_NAME_TO_ARCHITECTURE_NAME 中添加 "LongCatPipeline": "longcat"
 
 ### 7) 实现 LongCat 专用去噪阶段支持 T2V/I2V/VC/Refine
 
