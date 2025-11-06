@@ -75,10 +75,10 @@ class RandomStateWrapper(torch.distributed.checkpoint.stateful.Stateful):
             "python_rng_state": random.getstate(),
         }
 
-        if torch.cuda.is_available():
-            state["cuda_rng_state"] = torch.cuda.get_rng_state()
-            if torch.cuda.device_count() > 1:
-                state["cuda_rng_state_all"] = torch.cuda.get_rng_state_all()
+        if torch.musa.is_available():
+            state["musa_rng_state"] = torch.musa.get_rng_state()
+            if torch.musa.device_count() > 1:
+                state["musa_rng_state_all"] = torch.musa.get_rng_state_all()
 
         if self.noise_generator is not None:
             state["noise_generator_state"] = self.noise_generator.get_state()
@@ -95,12 +95,12 @@ class RandomStateWrapper(torch.distributed.checkpoint.stateful.Stateful):
         if "python_rng_state" in state_dict:
             random.setstate(state_dict["python_rng_state"])
 
-        # Restore CUDA random state
-        if torch.cuda.is_available():
-            if "cuda_rng_state" in state_dict:
-                torch.cuda.set_rng_state(state_dict["cuda_rng_state"])
-            if "cuda_rng_state_all" in state_dict:
-                torch.cuda.set_rng_state_all(state_dict["cuda_rng_state_all"])
+        # Restore MUSA random state
+        if torch.musa.is_available():
+            if "musa_rng_state" in state_dict:
+                torch.musa.set_rng_state(state_dict["musa_rng_state"])
+            if "musa_rng_state_all" in state_dict:
+                torch.musa.set_rng_state_all(state_dict["musa_rng_state_all"])
 
         # Restore noise generator state
         if "noise_generator_state" in state_dict and self.noise_generator is not None:

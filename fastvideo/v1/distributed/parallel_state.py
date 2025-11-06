@@ -41,7 +41,7 @@ from torch.distributed import Backend, ProcessGroup, ReduceOp
 import fastvideo.v1.envs as envs
 from fastvideo.v1.distributed.device_communicators.base_device_communicator import (
     DeviceCommunicatorBase)
-from fastvideo.v1.distributed.device_communicators.cuda_communicator import (
+from fastvideo.v1.distributed.device_communicators.musa_communicator import (
     CudaCommunicator)
 from fastvideo.v1.distributed.utils import StatelessProcessGroup
 from fastvideo.v1.logger import init_logger
@@ -51,7 +51,7 @@ logger = init_logger(__name__)
 
 @dataclass
 class GraphCaptureContext:
-    stream: torch.cuda.Stream
+    stream: torch.musa.Stream
 
 
 TensorMetadata = namedtuple("TensorMetadata", ["device", "dtype", "size"])
@@ -71,7 +71,7 @@ def _split_tensor_dict(
         if isinstance(value, torch.Tensor):
             # Note: we cannot use `value.device` here,
             # because it contains not only the device type but also the device
-            # index (e.g. "cuda:0"). We only need the device type.
+            # index (e.g. "musa:0"). We only need the device type.
             # receiving side will set the device index.
             device = value.device.type
             metadata_list.append(
@@ -121,7 +121,7 @@ class GroupCoordinator:
     """
     PyTorch ProcessGroup wrapper for a group of processes.
     PyTorch ProcessGroup is bound to one specific communication backend,
-        e.g. NCCL, Gloo, MPI, etc.
+        e.g. MCCL, Gloo, MPI, etc.
     GroupCoordinator takes charge of all the communication operations among
         the processes in the group. It manages both CPU and device
         communication.
@@ -183,8 +183,8 @@ class GroupCoordinator:
         from fastvideo.v1.platforms import current_platform
 
         # TODO: fix it for other platforms
-        if current_platform.is_cuda_alike():
-            self.device = torch.device(f"cuda:{local_rank}")
+        if current_platform.is_musa_alike():
+            self.device = torch.device(f"musa:{local_rank}")
         else:
             self.device = torch.device("cpu")
 
@@ -206,7 +206,7 @@ class GroupCoordinator:
         from fastvideo.v1.platforms import current_platform
 
         # TODO(will): check if this is needed
-        # self.use_custom_op_call = current_platform.is_cuda_alike()
+        # self.use_custom_op_call = current_platform.is_musa_alike()
         self.use_custom_op_call = False
 
     @property
@@ -247,18 +247,18 @@ class GroupCoordinator:
     def graph_capture(self,
                       graph_capture_context: GraphCaptureContext | None = None):
         if graph_capture_context is None:
-            stream = torch.cuda.Stream()
+            stream = torch.musa.Stream()
             graph_capture_context = GraphCaptureContext(stream)
         else:
             stream = graph_capture_context.stream
 
         # ensure all initialization operations complete before attempting to
         # capture the graph on another stream
-        curr_stream = torch.cuda.current_stream()
+        curr_stream = torch.musa.current_stream()
         if curr_stream != stream:
             stream.wait_stream(curr_stream)
 
-        with torch.cuda.stream(stream):
+        with torch.musa.stream(stream):
             yield graph_capture_context
 
     def all_reduce(
@@ -658,7 +658,7 @@ class GroupCoordinator:
 
     def barrier(self) -> None:
         """Barrier synchronization among the group.
-        NOTE: don't use `device_group` here! `barrier` in NCCL is
+        NOTE: don't use `device_group` here! `barrier` in MCCL is
         terrible because it is internally a broadcast operation with
         secretly created GPU tensors. It is easy to mess up the current
         device. Use the CPU group instead.
@@ -749,7 +749,7 @@ def init_distributed_environment(
     rank: int = 0,
     distributed_init_method: str = "env://",
     local_rank: int = 0,
-    backend: str = "nccl",
+    backend: str = "mccl",
     device_id: torch.device | None = None,
 ):
     logger.debug(
@@ -909,7 +909,7 @@ def get_dp_rank() -> int:
 
 def get_local_torch_device() -> torch.device:
     """Return the torch device for the current rank."""
-    return torch.device(f"cuda:{envs.LOCAL_RANK}")
+    return torch.device(f"musa:{envs.LOCAL_RANK}")
 
 
 def maybe_init_distributed_environment_and_model_parallel(
@@ -924,7 +924,7 @@ def maybe_init_distributed_environment_and_model_parallel(
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     rank = int(os.environ.get("RANK", 0))
-    device = torch.device(f"cuda:{local_rank}")
+    device = torch.device(f"musa:{local_rank}")
 
     init_distributed_environment(
         world_size=world_size,
@@ -934,7 +934,7 @@ def maybe_init_distributed_environment_and_model_parallel(
         device_id=device)
     initialize_model_parallel(tensor_model_parallel_size=tp_size,
                               sequence_model_parallel_size=sp_size)
-    torch.cuda.set_device(device)
+    torch.musa.set_device(device)
 
 
 def model_parallel_is_initialized() -> bool:
@@ -1026,8 +1026,8 @@ def in_the_same_node_as(pg: ProcessGroup | StatelessProcessGroup,
     """
     if isinstance(pg, ProcessGroup):
         assert torch.distributed.get_backend(
-            pg) != torch.distributed.Backend.NCCL, (
-                "in_the_same_node_as should be tested with a non-NCCL group.")
+            pg) != torch.distributed.Backend.MCCL, (
+                "in_the_same_node_as should be tested with a non-MCCL group.")
         # local rank inside the group
         rank = torch.distributed.get_rank(group=pg)
         world_size = torch.distributed.get_world_size(group=pg)

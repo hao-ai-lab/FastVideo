@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-# Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/platforms/cuda.py
-"""Code inside this file can safely assume cuda platform, e.g. importing
-pynvml. However, it should not initialize cuda context.
+# Adapted from vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/platforms/musa.py
+"""Code inside this file can safely assume musa platform, e.g. importing
+pynvml. However, it should not initialize musa context.
 """
 
 import os
@@ -28,17 +28,17 @@ pynvml = import_pynvml()  # type: ignore[no-untyped-call]
 
 # pytorch 2.5 uses cudnn sdpa by default, which will cause crash on some models
 # see https://github.com/huggingface/diffusers/issues/9704 for details
-torch.backends.cuda.enable_cudnn_sdp(False)
+torch.backends.musa.enable_cudnn_sdp(False)
 
 
 def device_id_to_physical_device_id(device_id: int) -> int:
-    if "CUDA_VISIBLE_DEVICES" in os.environ:
-        device_ids = os.environ["CUDA_VISIBLE_DEVICES"].split(",")
+    if "MUSA_VISIBLE_DEVICES" in os.environ:
+        device_ids = os.environ["MUSA_VISIBLE_DEVICES"].split(",")
         if device_ids == [""]:
             msg = (
-                "CUDA_VISIBLE_DEVICES is set to empty string, which means"
+                "MUSA_VISIBLE_DEVICES is set to empty string, which means"
                 " GPU support is disabled. If you are using ray, please unset"
-                " the environment variable `CUDA_VISIBLE_DEVICES` inside the"
+                " the environment variable `MUSA_VISIBLE_DEVICES` inside the"
                 " worker/actor. "
                 "Check https://github.com/vllm-project/vllm/issues/8402 for"
                 " more information.")
@@ -63,11 +63,11 @@ def with_nvml_context(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
 
 class CudaPlatformBase(Platform):
-    _enum = PlatformEnum.CUDA
-    device_name: str = "cuda"
-    device_type: str = "cuda"
-    dispatch_key: str = "CUDA"
-    device_control_env_var: str = "CUDA_VISIBLE_DEVICES"
+    _enum = PlatformEnum.MUSA
+    device_name: str = "musa"
+    device_type: str = "musa"
+    dispatch_key: str = "MUSA"
+    device_control_env_var: str = "MUSA_VISIBLE_DEVICES"
 
     @classmethod
     def get_device_capability(cls,
@@ -86,7 +86,7 @@ class CudaPlatformBase(Platform):
     def is_async_output_supported(cls, enforce_eager: bool | None) -> bool:
         if enforce_eager:
             logger.warning(
-                "To see benefits of async output processing, enable CUDA "
+                "To see benefits of async output processing, enable MUSA "
                 "graph. Since, enforce-eager is enabled, async output "
                 "processor cannot be used")
             return False
@@ -104,8 +104,8 @@ class CudaPlatformBase(Platform):
     def get_current_memory_usage(cls,
                                  device: torch.types.Device | None = None
                                  ) -> float:
-        torch.cuda.reset_peak_memory_stats(device)
-        return float(torch.cuda.max_memory_allocated(device))
+        torch.musa.reset_peak_memory_stats(device)
+        return float(torch.musa.max_memory_allocated(device))
 
     @classmethod
     def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None,
@@ -213,13 +213,13 @@ class CudaPlatformBase(Platform):
 
     @classmethod
     def get_device_communicator_cls(cls) -> str:
-        return "fastvideo.v1.distributed.device_communicators.cuda_communicator.CudaCommunicator"  # noqa
+        return "fastvideo.v1.distributed.device_communicators.musa_communicator.CudaCommunicator"  # noqa
 
 
 # NVML utils
-# Note that NVML is not affected by `CUDA_VISIBLE_DEVICES`,
+# Note that NVML is not affected by `MUSA_VISIBLE_DEVICES`,
 # all the related functions work on real physical device ids.
-# the major benefit of using NVML is that it will not initialize CUDA
+# the major benefit of using NVML is that it will not initialize MUSA
 class NvmlCudaPlatform(CudaPlatformBase):
 
     @classmethod
@@ -312,10 +312,10 @@ class NvmlCudaPlatform(CudaPlatformBase):
                 cls._get_physical_device_name(i) for i in range(device_ids)
             ]
             if (len(set(device_names)) > 1
-                    and os.environ.get("CUDA_DEVICE_ORDER") != "PCI_BUS_ID"):
+                    and os.environ.get("MUSA_DEVICE_ORDER") != "PCI_BUS_ID"):
                 logger.warning(
                     "Detected different devices in the system: %s. Please"
-                    " make sure to set `CUDA_DEVICE_ORDER=PCI_BUS_ID` to "
+                    " make sure to set `MUSA_DEVICE_ORDER=PCI_BUS_ID` to "
                     "avoid unexpected behavior.",
                     ", ".join(device_names),
                 )
@@ -325,16 +325,16 @@ class NonNvmlCudaPlatform(CudaPlatformBase):
 
     @classmethod
     def get_device_capability(cls, device_id: int = 0) -> DeviceCapability:
-        major, minor = torch.cuda.get_device_capability(device_id)
+        major, minor = torch.musa.get_device_capability(device_id)
         return DeviceCapability(major=major, minor=minor)
 
     @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
-        return str(torch.cuda.get_device_name(device_id))
+        return str(torch.musa.get_device_name(device_id))
 
     @classmethod
     def get_device_total_memory(cls, device_id: int = 0) -> int:
-        device_props = torch.cuda.get_device_properties(device_id)
+        device_props = torch.musa.get_device_properties(device_id)
         return int(device_props.total_memory)
 
     @classmethod

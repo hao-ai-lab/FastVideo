@@ -568,7 +568,7 @@ class STEP1TextEncoder(torch.nn.Module):
     def forward(self, prompts, with_mask=True, max_length=None):
         self.device = next(self.text_encoder.parameters()).device
 
-        with torch.no_grad(), torch.amp.autocast('cuda', dtype=torch.bfloat16):
+        with torch.no_grad(), torch.amp.autocast('musa', dtype=torch.bfloat16):
             if type(prompts) is str:
                 prompts = [prompts]
             txt_tokens = self.text_tokenizer(prompts,

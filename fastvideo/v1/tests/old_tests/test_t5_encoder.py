@@ -29,7 +29,7 @@ def test_t5_encoder():
     torch.manual_seed(42)
     np.random.seed(42)
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("musa:0" if torch.musa.is_available() else "cpu")
 
     # Initialize the two model implementations
     model_path = "/workspace/data/Wan2.1-T2V-1.3B-Diffusers/text_encoder"

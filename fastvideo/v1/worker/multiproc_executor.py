@@ -25,7 +25,7 @@ class MultiprocExecutor(Executor):
         self.world_size = self.fastvideo_args.num_gpus
         self.shutting_down = False
 
-        # this will force the use of the `spawn` multiprocessing start if cuda
+        # this will force the use of the `spawn` multiprocessing start if musa
         # is initialized
         mp.set_start_method("spawn", force=True)
 

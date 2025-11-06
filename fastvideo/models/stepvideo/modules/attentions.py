@@ -10,7 +10,7 @@ except ImportError:
     sliding_tile_attention = None
 
 from fastvideo.utils.communications import all_to_all_4D
-from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
+from fastvideo.utils.parallel_states import get_sequence_parallel_state, mccl_info
 
 
 class Attention(nn.Module):
@@ -74,18 +74,18 @@ class Attention(nn.Module):
             v = all_to_all_4D(v, scatter_dim=2, gather_dim=1)
 
         if mask_strategy[0] is not None:
-            q = self.tile(q, nccl_info.sp_size).transpose(1, 2).contiguous()
-            k = self.tile(k, nccl_info.sp_size).transpose(1, 2).contiguous()
-            v = self.tile(v, nccl_info.sp_size).transpose(1, 2).contiguous()
+            q = self.tile(q, mccl_info.sp_size).transpose(1, 2).contiguous()
+            k = self.tile(k, mccl_info.sp_size).transpose(1, 2).contiguous()
+            v = self.tile(v, mccl_info.sp_size).transpose(1, 2).contiguous()
 
             head_num = q.size(1)  # 48 // sp_size
-            current_rank = nccl_info.rank_within_group
+            current_rank = mccl_info.rank_within_group
 
             start_head = current_rank * head_num
             windows = [mask_strategy[head_idx + start_head] for head_idx in range(head_num)]
 
             x = sliding_tile_attention(q, k, v, windows, 0, False).transpose(1, 2).contiguous()
-            x = self.untile(x, nccl_info.sp_size)
+            x = self.untile(x, mccl_info.sp_size)
         else:
             x = flash_attn_func(q, k, v, dropout_p=0.0, softmax_scale=None, causal=False)
 

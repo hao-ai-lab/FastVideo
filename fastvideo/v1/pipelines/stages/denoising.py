@@ -200,7 +200,7 @@ class DenoisingStage(PipelineStage):
                     is not None else None)
 
                 # Predict noise residual
-                with torch.autocast(device_type="cuda",
+                with torch.autocast(device_type="musa",
                                     dtype=target_dtype,
                                     enabled=autocast_enabled):
                     if (st_attn_available

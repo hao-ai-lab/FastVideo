@@ -18,8 +18,8 @@ def set_seed(seed: int = 42):
 
     # PyTorch
     torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)  # if using multi-GPU
+    torch.musa.manual_seed(seed)
+    torch.musa.manual_seed_all(seed)  # if using multi-GPU
 
 
 @torch.no_grad
@@ -33,12 +33,12 @@ def precision_metric(quant_o, fa2_o):
 
 def create_input_tensors(batch, head, seq_len, headdim):
     """Create random input tensors for attention."""
-    q = torch.randn(batch, head, seq_len, headdim, dtype=torch.bfloat16, device="cuda")
-    k = torch.randn(batch, head, seq_len, headdim, dtype=torch.bfloat16, device="cuda")
-    v = torch.randn(batch, head, seq_len, headdim, dtype=torch.bfloat16, device="cuda")
+    q = torch.randn(batch, head, seq_len, headdim, dtype=torch.bfloat16, device="musa")
+    k = torch.randn(batch, head, seq_len, headdim, dtype=torch.bfloat16, device="musa")
+    v = torch.randn(batch, head, seq_len, headdim, dtype=torch.bfloat16, device="musa")
     return q, k, v
 
-def generate_block_sparse_pattern(bs, h, num_q_blocks, num_kv_blocks, k, device="cuda"):
+def generate_block_sparse_pattern(bs, h, num_q_blocks, num_kv_blocks, k, device="musa"):
     """
     Generate a block sparse pattern where each q block attends to exactly k kv blocks.
     
@@ -175,7 +175,7 @@ def main(args):
 
             # Generate block sparse pattern
             q2k_block_sparse_index, q2k_block_sparse_num, k2q_block_sparse_index, k2q_block_sparse_num, block_sparse_mask = generate_block_sparse_pattern(
-                batch, head, num_q_blocks, num_kv_blocks, topk, device="cuda")
+                batch, head, num_q_blocks, num_kv_blocks, topk, device="musa")
 
             # expand block_sparse_mask to full mask
             block_mask_expanded = block_sparse_mask.unsqueeze(-1).unsqueeze(-2)  # [b, h, num_q_blocks, num_kv_blocks, 1, 1]
@@ -202,7 +202,7 @@ def main(args):
             q.data = torch.empty(0, device=q.device)
             k.data = torch.empty(0, device=k.device)
             v.data = torch.empty(0, device=v.device)
-            torch.cuda.empty_cache()
+            torch.musa.empty_cache()
 
             o_sdpa = torch.nn.functional.scaled_dot_product_attention(q_sdpa, k_sdpa, v_sdpa, attn_mask=full_mask)
 
@@ -250,7 +250,7 @@ def main(args):
             
             del o, o_sdpa, grad_o, q_sdpa, k_sdpa, v_sdpa
             gc.collect()
-            torch.cuda.empty_cache()
+            torch.musa.empty_cache()
 
         # Print summary statistics if multiple iterations were run
         if num_iterations > 1:

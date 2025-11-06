@@ -38,7 +38,7 @@ class Predictor(BasePredictor):
         if not os.path.exists(MODEL_CACHE):
             download_weights(MODEL_URL, MODEL_CACHE)
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("musa" if torch.musa.is_available() else "cpu")
         args = argparse.Namespace(
             num_frames=125,
             height=720,

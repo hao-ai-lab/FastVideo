@@ -35,7 +35,7 @@ def test_t5_encoder():
     hf_config = AutoConfig.from_pretrained(TEXT_ENCODER_PATH)
     print(hf_config)
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("musa:0" if torch.musa.is_available() else "cpu")
     precision_str = "fp32"
     precision = PRECISION_TO_TYPE[precision_str]
     model1 = UMT5EncoderModel.from_pretrained(TEXT_ENCODER_PATH).to(
@@ -130,7 +130,7 @@ def test_t5_encoder():
                         max_diff_hidden.item())
             logger.info("Mean difference in last hidden states: %s",
                         mean_diff_hidden.item())
-            logger.info("Max memory allocated: %s GB", torch.cuda.max_memory_allocated() / 1024**3)
+            logger.info("Max memory allocated: %s GB", torch.musa.max_memory_allocated() / 1024**3)
             # Check if outputs are similar (allowing for small numerical differences)
             assert mean_diff_hidden < 1e-4, \
                 f"Hidden states differ significantly: mean diff = {mean_diff_hidden.item()}"

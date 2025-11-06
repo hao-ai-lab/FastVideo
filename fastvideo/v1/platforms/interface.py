@@ -23,7 +23,7 @@ class AttentionBackendEnum(enum.Enum):
 
 
 class PlatformEnum(enum.Enum):
-    CUDA = enum.auto()
+    MUSA = enum.auto()
     ROCM = enum.auto()
     TPU = enum.auto()
     CPU = enum.auto()
@@ -67,8 +67,8 @@ class Platform:
 
     supported_quantization: list[str] = []
 
-    def is_cuda(self) -> bool:
-        return self._enum == PlatformEnum.CUDA
+    def is_musa(self) -> bool:
+        return self._enum == PlatformEnum.MUSA
 
     def is_rocm(self) -> bool:
         return self._enum == PlatformEnum.ROCM
@@ -82,10 +82,10 @@ class Platform:
     def is_out_of_tree(self) -> bool:
         return self._enum == PlatformEnum.OOT
 
-    def is_cuda_alike(self) -> bool:
-        """Stateless version of :func:`torch.cuda.is_available`."""
+    def is_musa_alike(self) -> bool:
+        """Stateless version of :func:`torch.musa.is_available`."""
         # TODO(will): ROCM will be supported in the future here
-        return self._enum == PlatformEnum.CUDA
+        return self._enum == PlatformEnum.MUSA
 
     @classmethod
     def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None,
@@ -98,7 +98,7 @@ class Platform:
         cls,
         device_id: int = 0,
     ) -> DeviceCapability | None:
-        """Stateless version of :func:`torch.cuda.get_device_capability`."""
+        """Stateless version of :func:`torch.musa.get_device_capability`."""
         return None
 
     @classmethod
@@ -168,7 +168,7 @@ class Platform:
             random.seed(seed)
             np.random.seed(seed)
             torch.manual_seed(seed)
-            torch.cuda.manual_seed_all(seed)
+            torch.musa.manual_seed_all(seed)
 
     @classmethod
     def verify_model_arch(cls, model_arch: str) -> None:

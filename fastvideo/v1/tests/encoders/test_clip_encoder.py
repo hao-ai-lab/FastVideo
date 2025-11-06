@@ -44,7 +44,7 @@ def test_clip_encoder():
     """
     args = FastVideoArgs(model_path="openai/clip-vit-large-patch14",
                          pipeline_config=PipelineConfig(text_encoder_configs=(CLIPTextConfig(),), text_encoder_precisions=("fp16",)))
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("musa:0" if torch.musa.is_available() else "cpu")
 
     logger.info("Loading models from %s", args.model_path)
 
@@ -92,7 +92,7 @@ def test_clip_encoder():
         param2 = param2.to_local().to(device) if isinstance(param2, DTensor) else param2.to(device)
         assert_close(param1, param2, atol=1e-4, rtol=1e-4)
     gc.collect()
-    torch.cuda.empty_cache()
+    torch.musa.empty_cache()
     # Load tokenizer
     tokenizer, _ = load_tokenizer(tokenizer_type="clipL",
                                   tokenizer_path=args.model_path,

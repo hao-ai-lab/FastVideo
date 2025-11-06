@@ -38,7 +38,7 @@ from diffusers.utils.torch_utils import randn_tensor
 from einops import rearrange
 
 from fastvideo.utils.communications import all_gather
-from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
+from fastvideo.utils.parallel_states import get_sequence_parallel_state, mccl_info
 
 from ...constants import PRECISION_TO_TYPE
 from ...modules import HYVideoDiffusionTransformer
@@ -687,7 +687,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
         else:
             batch_size = prompt_embeds.shape[0]
 
-        device = (torch.device(f"cuda:{dist.get_rank()}") if dist.is_initialized() else self._execution_device)
+        device = (torch.device(f"musa:{dist.get_rank()}") if dist.is_initialized() else self._execution_device)
 
         # 3. Encode input prompt
         lora_scale = (self.cross_attention_kwargs.get("scale", None)
@@ -782,7 +782,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             generator,
             latents,
         )
-        world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
+        world_size, rank = mccl_info.sp_size, mccl_info.rank_within_group
         if get_sequence_parallel_state():
             latents = rearrange(latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
             latents = latents[:, :, rank, :, :, :]
@@ -832,7 +832,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
                     device=device,
                 ).to(target_dtype) * 1000.0 if embedded_guidance_scale is not None else None)
                 # predict the noise residual
-                with torch.autocast(device_type="cuda", dtype=target_dtype, enabled=autocast_enabled):
+                with torch.autocast(device_type="musa", dtype=target_dtype, enabled=autocast_enabled):
                     # concat prompt_embeds_2 and prompt_embeds. Mismatch fill with zeros
                     if prompt_embeds_2.shape[-1] != prompt_embeds.shape[-1]:
                         prompt_embeds_2 = F.pad(
@@ -905,7 +905,7 @@ class HunyuanVideoPipeline(DiffusionPipeline):
             else:
                 latents = latents / self.vae.config.scaling_factor
 
-            with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
+            with torch.autocast(device_type="musa", dtype=vae_dtype, enabled=vae_autocast_enabled):
                 if enable_tiling:
                     self.vae.enable_tiling()
                 if enable_vae_sp:

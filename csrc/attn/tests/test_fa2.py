@@ -51,10 +51,10 @@ def check_correctness(b, h, n, d, mean, std, num_iterations=100, error_mode='all
     for _ in range(num_iterations):
         torch.manual_seed(0)
         
-        Q  = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'cuda')
-        K  = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'cuda')
-        V  = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'cuda')
-        dO = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'cuda')
+        Q  = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'musa')
+        K  = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'musa')
+        V  = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'musa')
+        dO = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'musa')
         
         pt_o, pt_qg, pt_kg, pt_vg = pytorch_test(Q, K, V, dO)
         fa2_o, fa2_qg, fa2_kg, fa2_vg = fa2_test(Q, K, V, dO)
@@ -81,7 +81,7 @@ def check_correctness(b, h, n, d, mean, std, num_iterations=100, error_mode='all
             results['FA2 vs PT']['sum_abs'] += torch.sum(torch.abs(pt)).item()
             results['FA2 vs PT']['max_diff'] = max(results['FA2 vs PT']['max_diff'], torch.max(abs_diff).item())
                 
-        torch.cuda.empty_cache()
+        torch.musa.empty_cache()
 
     # Calculate total elements based on test mode and error mode
     if test_mode == 'forward_only':

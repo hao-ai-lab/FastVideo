@@ -1,6 +1,6 @@
 import os
 
-os.environ["NCCL_DEBUG"] = "ERROR"
+os.environ["MCCL_DEBUG"] = "ERROR"
 
 from .diffusion.scheduler import *
 from .diffusion.video_pipeline import *

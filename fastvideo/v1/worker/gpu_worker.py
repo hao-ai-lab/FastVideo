@@ -59,16 +59,16 @@ class Worker:
         # as the number of all_reduce calls increases. This env var disables
         # this behavior.
         # Related issue:
-        # https://discuss.pytorch.org/t/cuda-allocation-lifetime-for-inputs-to-distributed-all-reduce/191573
-        os.environ["TORCH_NCCL_AVOID_RECORD_STREAMS"] = "1"
+        # https://discuss.pytorch.org/t/musa-allocation-lifetime-for-inputs-to-distributed-all-reduce/191573
+        os.environ["TORCH_MCCL_AVOID_RECORD_STREAMS"] = "1"
 
         # This env var set by Ray causes exceptions with graph building.
-        os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
-        self.device = torch.device(f"cuda:{self.local_rank}")
-        torch.cuda.set_device(self.device)
+        os.environ.pop("MCCL_ASYNC_ERROR_HANDLING", None)
+        self.device = torch.device(f"musa:{self.local_rank}")
+        torch.musa.set_device(self.device)
 
         # _check_if_gpu_supports_dtype(self.model_config.dtype)
-        self.init_gpu_memory = torch.cuda.mem_get_info()[0]
+        self.init_gpu_memory = torch.musa.mem_get_info()[0]
 
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = str(self.master_port)

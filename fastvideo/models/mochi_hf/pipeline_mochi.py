@@ -32,7 +32,7 @@ from transformers import T5EncoderModel, T5TokenizerFast
 
 from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
 from fastvideo.utils.communications import all_gather
-from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
+from fastvideo.utils.parallel_states import get_sequence_parallel_state, mccl_info
 
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm
@@ -51,7 +51,7 @@ EXAMPLE_DOC_STRING = """
         >>> from diffusers.utils import export_to_video
 
         >>> pipe = MochiPipeline.from_pretrained("genmo/mochi-1-preview", torch_dtype=torch.bfloat16)
-        >>> pipe.to("cuda")
+        >>> pipe.to("musa")
         >>> prompt = "Close-up of a chameleon's eye, with its scaly skin changing color. Ultra high resolution 4k."
         >>> frames = pipe(prompt, num_inference_steps=28, guidance_scale=3.5).frames[0]
         >>> export_to_video(frames, "mochi.mp4")
@@ -634,7 +634,7 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
             generator,
             latents,
         )
-        world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
+        world_size, rank = mccl_info.sp_size, mccl_info.rank_within_group
         if get_sequence_parallel_state():
             latents = rearrange(latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
             latents = latents[:, :, rank, :, :, :]
@@ -664,7 +664,7 @@ class MochiPipeline(DiffusionPipeline, Mochi1LoraLoaderMixin):
         self._num_timesteps = len(timesteps)
 
         # 6. Denoising loop
-        self._progress_bar_config = {"disable": nccl_info.rank_within_group != 0}
+        self._progress_bar_config = {"disable": mccl_info.rank_within_group != 0}
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:

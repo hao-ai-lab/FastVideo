@@ -32,12 +32,12 @@ class CustomOp(nn.Module):
         """
         raise NotImplementedError
 
-    def forward_cuda(self, *args, **kwargs) -> Any:
+    def forward_musa(self, *args, **kwargs) -> Any:
         raise NotImplementedError
 
     def forward_cpu(self, *args, **kwargs) -> Any:
-        # By default, we assume that CPU ops are compatible with CUDA ops.
-        return self.forward_cuda(*args, **kwargs)
+        # By default, we assume that CPU ops are compatible with MUSA ops.
+        return self.forward_musa(*args, **kwargs)
 
     def forward_tpu(self, *args, **kwargs) -> Any:
         # By default, we assume that TPU ops are compatible with the
@@ -52,7 +52,7 @@ class CustomOp(nn.Module):
 
     def dispatch_forward(self) -> Callable:
         # FIXME(will): for now, we always use the native implementation, since
-        # forward_cuda is using vllm's custom ops and it doesn't support
+        # forward_musa is using vllm's custom ops and it doesn't support
         # backwards. We should add our own custom ops that support backwards.
         return self.forward_native
         # NOTE(woosuk): Here we assume that vLLM was built for only one
@@ -62,7 +62,7 @@ class CustomOp(nn.Module):
         if not enabled:
             return self.forward_native
 
-        return self.forward_cuda
+        return self.forward_musa
 
     @classmethod
     def enabled(cls) -> bool:

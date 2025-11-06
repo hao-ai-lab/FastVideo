@@ -228,7 +228,7 @@ class FastVideoArgs:
             "--pin-cpu-memory",
             action=StoreBoolean,
             help=
-            "Pin memory for CPU offload. Only added as a temp workaround if it throws \"CUDA error: invalid argument\". "
+            "Pin memory for CPU offload. Only added as a temp workaround if it throws \"MUSA error: invalid argument\". "
             "Should be enabled in almost all cases",
         )
         parser.add_argument(

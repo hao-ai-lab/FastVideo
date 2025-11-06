@@ -691,14 +691,14 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
         # convert to DTensor
         vec_ = torch.distributed.tensor.DTensor.from_local(
             vec_,
-            torch.distributed.DeviceMesh("cuda",
+            torch.distributed.DeviceMesh("musa",
                                          list(range(get_sp_world_size())),
                                          mesh_dim_names=("dp", )),
             [torch.distributed.tensor.Replicate()])
 
         inp = torch.distributed.tensor.DTensor.from_local(
             inp,
-            torch.distributed.DeviceMesh("cuda",
+            torch.distributed.DeviceMesh("musa",
                                          list(range(get_sp_world_size())),
                                          mesh_dim_names=("dp", )),
             [torch.distributed.tensor.Replicate()])

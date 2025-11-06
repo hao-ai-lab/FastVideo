@@ -75,12 +75,12 @@ def generate_video(
     if randomize_seed:
         seed = torch.randint(0, 1000000, (1, )).item()
 
-    generator = torch.Generator(device="cuda").manual_seed(seed)
+    generator = torch.Generator(device="musa").manual_seed(seed)
 
     if not use_negative_prompt:
         negative_prompt = None
 
-    with torch.autocast("cuda", dtype=torch.bfloat16):
+    with torch.autocast("musa", dtype=torch.bfloat16):
         output = pipe(
             prompt=[prompt],
             negative_prompt=negative_prompt,

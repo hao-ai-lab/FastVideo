@@ -10,7 +10,7 @@ except ImportError:
 
 from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
 from fastvideo.utils.communications import all_gather, all_to_all_4D
-from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
+from fastvideo.utils.parallel_states import get_sequence_parallel_state, mccl_info
 
 
 def attention(
@@ -71,8 +71,8 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
         value = all_to_all_4D(value, scatter_dim=2, gather_dim=1)
 
         def shrink_head(encoder_state, dim):
-            local_heads = encoder_state.shape[dim] // nccl_info.sp_size
-            return encoder_state.narrow(dim, nccl_info.rank_within_group * local_heads, local_heads)
+            local_heads = encoder_state.shape[dim] // mccl_info.sp_size
+            return encoder_state.narrow(dim, mccl_info.rank_within_group * local_heads, local_heads)
 
         encoder_query = shrink_head(encoder_query, dim=2)
         encoder_key = shrink_head(encoder_key, dim=2)
@@ -83,12 +83,12 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
     encoder_sequence_length = encoder_query.size(1)
 
     if mask_strategy[0] is not None:
-        query = torch.cat([tile(query, nccl_info.sp_size), encoder_query], dim=1).transpose(1, 2)
-        key = torch.cat([tile(key, nccl_info.sp_size), encoder_key], dim=1).transpose(1, 2)
-        value = torch.cat([tile(value, nccl_info.sp_size), encoder_value], dim=1).transpose(1, 2)
+        query = torch.cat([tile(query, mccl_info.sp_size), encoder_query], dim=1).transpose(1, 2)
+        key = torch.cat([tile(key, mccl_info.sp_size), encoder_key], dim=1).transpose(1, 2)
+        value = torch.cat([tile(value, mccl_info.sp_size), encoder_value], dim=1).transpose(1, 2)
 
         head_num = query.size(1)
-        current_rank = nccl_info.rank_within_group
+        current_rank = mccl_info.rank_within_group
         start_head = current_rank * head_num
         windows = [mask_strategy[head_idx + start_head] for head_idx in range(head_num)]
 
@@ -107,7 +107,7 @@ def parallel_attention(q, k, v, img_q_len, img_kv_len, text_mask, mask_strategy=
                                                                           dim=1)
 
     if mask_strategy[0] is not None:
-        hidden_states = untile(hidden_states, nccl_info.sp_size)
+        hidden_states = untile(hidden_states, mccl_info.sp_size)
 
     if get_sequence_parallel_state():
         hidden_states = all_to_all_4D(hidden_states, scatter_dim=1, gather_dim=2)

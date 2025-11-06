@@ -1,6 +1,6 @@
 import torch
 
-from fastvideo.utils.parallel_states import nccl_info
+from fastvideo.utils.parallel_states import mccl_info
 
 
 class RoPE1D:
@@ -80,7 +80,7 @@ class RoPE3D(RoPE1D):
             cos, sin = self.get_cos_sin(D, int(mesh_grid.max()) + 1, tokens.device, tokens.dtype)
 
             if parallel:
-                mesh = torch.chunk(mesh_grid[:, :, i], nccl_info.sp_size, dim=1)[nccl_info.rank_within_group].clone()
+                mesh = torch.chunk(mesh_grid[:, :, i], mccl_info.sp_size, dim=1)[mccl_info.rank_within_group].clone()
             else:
                 mesh = mesh_grid[:, :, i].clone()
             x = self.apply_rope1d(x, mesh.to(tokens.device), cos, sin)

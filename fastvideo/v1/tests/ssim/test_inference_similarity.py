@@ -12,7 +12,7 @@ from fastvideo.v1.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
 
-device_name = torch.cuda.get_device_name()
+device_name = torch.musa.get_device_name()
 device_reference_folder_suffix = '_reference_videos'
 
 if "A40" in device_name:

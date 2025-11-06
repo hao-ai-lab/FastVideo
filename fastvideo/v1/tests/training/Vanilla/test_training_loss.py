@@ -109,7 +109,7 @@ def test_distributed_training():
 
     summary_file = 'wandb/latest-run/files/wandb-summary.json'
 
-    device_name = torch.cuda.get_device_name()
+    device_name = torch.musa.get_device_name()
     if "A40" in device_name:
         reference_wandb_summary_file = a40_reference_wandb_summary_file
     elif "L40S" in device_name:

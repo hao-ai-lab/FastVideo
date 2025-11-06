@@ -17,7 +17,7 @@ from fastvideo.distill.solver import PCMFMScheduler
 from fastvideo.models.mochi_hf.pipeline_mochi import (linear_quadratic_schedule, retrieve_timesteps)
 from fastvideo.utils.communications import all_gather
 from fastvideo.utils.load import load_vae
-from fastvideo.utils.parallel_states import (get_sequence_parallel_state, nccl_info)
+from fastvideo.utils.parallel_states import (get_sequence_parallel_state, mccl_info)
 
 
 def prepare_latents(
@@ -88,7 +88,7 @@ def sample_validation_video(
         vae_spatial_scale_factor,
         vae_temporal_scale_factor,
     )
-    world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
+    world_size, rank = mccl_info.sp_size, mccl_info.rank_within_group
     if get_sequence_parallel_state():
         latents = rearrange(latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
         latents = latents[:, :, rank, :, :, :]
@@ -117,18 +117,18 @@ def sample_validation_video(
     # 6. Denoising loop
     # with self.progress_bar(total=num_inference_steps) as progress_bar:
     # write with tqdm instead
-    # only enable if nccl_info.global_rank == 0
+    # only enable if mccl_info.global_rank == 0
 
     with tqdm(
             total=num_inference_steps,
-            disable=nccl_info.rank_within_group != 0,
+            disable=mccl_info.rank_within_group != 0,
             desc="Validation sampling...",
     ) as progress_bar:
         for i, t in enumerate(timesteps):
             latent_model_input = (torch.cat([latents] * 2) if do_classifier_free_guidance else latents)
             # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
             timestep = t.expand(latent_model_input.shape[0])
-            with torch.autocast("cuda", dtype=torch.bfloat16):
+            with torch.autocast("musa", dtype=torch.bfloat16):
                 if model_type == "wan":
                     pred_kwargs = {
                         "hidden_states": latent_model_input,
@@ -184,7 +184,7 @@ def sample_validation_video(
             latents = latents * latents_std / vae.config.scaling_factor + latents_mean
         else:
             latents = latents / vae.config.scaling_factor
-        with torch.autocast("cuda", dtype=vae.dtype):
+        with torch.autocast("musa", dtype=vae.dtype):
             video = vae.decode(latents, return_dict=False)[0]
         video_processor = VideoProcessor(vae_scale_factor=vae_spatial_scale_factor)
         video = video_processor.postprocess_video(video, output_type=output_type)
@@ -193,7 +193,7 @@ def sample_validation_video(
 
 
 @torch.no_grad()
-@torch.autocast("cuda", dtype=torch.bfloat16)
+@torch.autocast("musa", dtype=torch.bfloat16)
 def log_validation(
     args,
     transformer,
@@ -250,13 +250,13 @@ def log_validation(
             masks = sorted([f for f in os.listdir(mask_dir)])
             num_embeds = len(embeds)
             validation_prompt_ids = list(range(num_embeds))
-            num_sp_groups = int(os.getenv("WORLD_SIZE", "1")) // nccl_info.sp_size
+            num_sp_groups = int(os.getenv("WORLD_SIZE", "1")) // mccl_info.sp_size
             # pad to multiple of groups
             if num_embeds % num_sp_groups != 0:
                 validation_prompt_ids += [0] * (num_sp_groups - num_embeds % num_sp_groups)
             num_embeds_per_group = len(validation_prompt_ids) // num_sp_groups
-            local_prompt_ids = validation_prompt_ids[nccl_info.group_id *
-                                                     num_embeds_per_group:(nccl_info.group_id + 1) *
+            local_prompt_ids = validation_prompt_ids[mccl_info.group_id *
+                                                     num_embeds_per_group:(mccl_info.group_id + 1) *
                                                      num_embeds_per_group]
 
             for i in local_prompt_ids:
@@ -289,17 +289,17 @@ def log_validation(
                     vae_temporal_scale_factor=vae_temporal_scale_factor,
                     num_channels_latents=num_channels_latents,
                 )[0]
-                if nccl_info.rank_within_group == 0:
+                if mccl_info.rank_within_group == 0:
                     videos.append(video[0])
             # collect videos from all process to process zero
 
             gc.collect()
-            torch.cuda.empty_cache()
+            torch.musa.empty_cache()
             # log if main process
             torch.distributed.barrier()
             all_videos = [None for i in range(int(os.getenv("WORLD_SIZE", "1")))]  # remove padded videos
             torch.distributed.all_gather_object(all_videos, videos)
-            if nccl_info.global_rank == 0:
+            if mccl_info.global_rank == 0:
                 # remove padding
                 videos = [video for videos in all_videos for video in videos]
                 videos = videos[:num_embeds]

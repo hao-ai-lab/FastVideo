@@ -14,7 +14,7 @@ import torch
 from torch import nn
 from torch.distributed import DeviceMesh, init_device_mesh
 from torch.distributed._tensor import distribute_tensor
-from torch.distributed.fsdp import (CPUOffloadPolicy, FSDPModule,
+from torch.distributed._composable.fsdp import (CPUOffloadPolicy, FSDPModule,
                                     MixedPrecisionPolicy, fully_shard)
 from torch.nn.modules.module import _IncompatibleKeys
 
@@ -86,14 +86,14 @@ def maybe_load_fsdp_model(
                                reduce_dtype=reduce_dtype,
                                output_dtype=output_dtype)
 
-    with set_default_dtype(default_dtype), torch.device("meta"):
+    with set_default_dtype(default_dtype), torch.device("musa"):
         model = model_cls(**init_params)
     world_size = hsdp_replicate_dim * hsdp_shard_dim
     if not training_mode and not fsdp_inference:
         hsdp_replicate_dim = world_size
         hsdp_shard_dim = 1
     device_mesh = init_device_mesh(
-        "cuda",
+        "musa",
         # (Replicate(), Shard(dim=0))
         mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
         mesh_dim_names=("replicate", "shard"),

@@ -81,7 +81,7 @@ class EncodingStage(PipelineStage):
             vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         # Encode Image
-        with torch.autocast(device_type="cuda",
+        with torch.autocast(device_type="musa",
                             dtype=vae_dtype,
                             enabled=vae_autocast_enabled):
             if fastvideo_args.pipeline_config.vae_tiling:

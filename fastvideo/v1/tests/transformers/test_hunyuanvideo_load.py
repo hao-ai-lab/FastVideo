@@ -44,7 +44,7 @@ def test_hunyuanvideo_distributed():
         f"Initializing process: rank={RANK}, local_rank={LOCAL_RANK}, world_size={WORLD_SIZE}"
     )
 
-    torch.cuda.set_device(f"cuda:{LOCAL_RANK}")
+    torch.musa.set_device(f"musa:{LOCAL_RANK}")
 
     # Get tensor parallel info
     sp_rank = get_sp_parallel_rank()
@@ -64,7 +64,7 @@ def test_hunyuanvideo_distributed():
     args = FastVideoArgs(model_path=TRANSFORMER_PATH,
                          use_cpu_offload=True,
                          pipeline_config=PipelineConfig(dit_config=HunyuanVideoConfig(), dit_precision=precision_str))
-    args.device = torch.device(f"cuda:{LOCAL_RANK}")
+    args.device = torch.device(f"musa:{LOCAL_RANK}")
 
     loader = TransformerLoader()
     model = loader.load(TRANSFORMER_PATH, args)
@@ -74,7 +74,7 @@ def test_hunyuanvideo_distributed():
     # Create random inputs for testing
     batch_size = 1
     seq_len = 3
-    device = torch.device(f"cuda:{LOCAL_RANK}")
+    device = torch.device(f"musa:{LOCAL_RANK}")
 
     # Video latents [B, C, T, H, W]
     hidden_states = torch.randn(batch_size,
@@ -104,7 +104,7 @@ def test_hunyuanvideo_distributed():
     # Disable gradients for inference
     with torch.no_grad():
         # Run inference on model
-        with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
+        with torch.amp.autocast(device_type="musa", dtype=torch.bfloat16):
             with set_forward_context(current_timestep=0, attn_metadata=None, forward_batch=forward_batch):
                 output = model(
                     hidden_states=hidden_states,

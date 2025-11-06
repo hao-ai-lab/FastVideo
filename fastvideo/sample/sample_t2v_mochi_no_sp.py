@@ -10,7 +10,7 @@ from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
 
 def main(args):
     # Set the random seed for reproducibility
-    generator = torch.Generator("cuda").manual_seed(args.seed)
+    generator = torch.Generator("musa").manual_seed(args.seed)
     # do not invert
     scheduler = FlowMatchEulerDiscreteScheduler()
     if args.transformer_path is not None:
@@ -19,11 +19,11 @@ def main(args):
         transformer = MochiTransformer3DModel.from_pretrained(args.model_path, subfolder="transformer/")
     pipe = MochiPipeline.from_pretrained(args.model_path, transformer=transformer, scheduler=scheduler)
     pipe.enable_vae_tiling()
-    # pipe.to("cuda:1")
+    # pipe.to("musa:1")
     pipe.enable_model_cpu_offload()
 
     # Generate videos from the input prompt
-    with torch.autocast("cuda", dtype=torch.bfloat16):
+    with torch.autocast("musa", dtype=torch.bfloat16):
         videos = pipe(
             prompt=args.prompts,
             height=args.height,

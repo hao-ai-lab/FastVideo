@@ -331,19 +331,19 @@ def load_vae(model_type, pretrained_model_name_or_path):
     if model_type == "mochi":
         vae = AutoencoderKLMochi.from_pretrained(pretrained_model_name_or_path,
                                                  subfolder="vae",
-                                                 torch_dtype=weight_dtype).to("cuda")
+                                                 torch_dtype=weight_dtype).to("musa")
         autocast_type = torch.bfloat16
         fps = 30
     elif model_type == "hunyuan_hf":
         vae = AutoencoderKLHunyuanVideo.from_pretrained(pretrained_model_name_or_path,
                                                         subfolder="vae",
-                                                        torch_dtype=weight_dtype).to("cuda")
+                                                        torch_dtype=weight_dtype).to("musa")
         autocast_type = torch.bfloat16
         fps = 24
     elif model_type == "wan":
         vae = AutoencoderKLWan.from_pretrained(pretrained_model_name_or_path,
                                                  subfolder="vae",
-                                                 torch_dtype=weight_dtype).to("cuda")
+                                                 torch_dtype=weight_dtype).to("musa")
         autocast_type = torch.bfloat16
         fps = 24
     elif model_type == "hunyuan":
@@ -364,7 +364,7 @@ def load_vae(model_type, pretrained_model_name_or_path):
         vae.load_state_dict(ckpt)
         vae = vae.to(dtype=vae_precision)
         vae.requires_grad_(False)
-        vae = vae.to("cuda")
+        vae = vae.to("musa")
         vae.eval()
         autocast_type = torch.float32
         fps = 24
@@ -399,7 +399,7 @@ def get_no_split_modules(transformer):
 
 if __name__ == "__main__":
     # test encode prompt
-    device = torch.cuda.current_device()
+    device = torch.musa.current_device()
     pretrained_model_name_or_path = "data/hunyuan"
     text_encoder = load_text_encoder("hunyuan", pretrained_model_name_or_path, device)
     prompt = "A man on stage claps his hands together while facing the audience. The audience, visible in the foreground, holds up mobile devices to record the event, capturing the moment from various angles. The background features a large banner with text identifying the man on stage. Throughout the sequence, the man's expression remains engaged and directed towards the audience. The camera angle remains constant, focusing on capturing the interaction between the man on stage and the audience."

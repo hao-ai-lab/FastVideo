@@ -10,21 +10,21 @@ import torchvision
 from einops import rearrange
 
 from fastvideo.models.hunyuan.inference import HunyuanVideoSampler
-from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
+from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, mccl_info
 
 
 def initialize_distributed():
     local_rank = int(os.getenv("RANK", 0))
     world_size = int(os.getenv("WORLD_SIZE", 1))
     print("world_size", world_size)
-    torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
+    torch.musa.set_device(local_rank)
+    dist.init_process_group(backend="mccl", init_method="env://", world_size=world_size, rank=local_rank)
     initialize_sequence_parallel_state(world_size)
 
 
 def main(args):
     initialize_distributed()
-    print(nccl_info.sp_size)
+    print(mccl_info.sp_size)
 
     print(args)
     models_root_path = Path(args.model_path)

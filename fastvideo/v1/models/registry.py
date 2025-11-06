@@ -154,7 +154,7 @@ class _LazyRegisteredModel(_BaseRegisteredModel):
     component_name: str
     class_name: str
 
-    # Performed in another process to avoid initializing CUDA
+    # Performed in another process to avoid initializing MUSA
     def inspect_model_cls(self) -> _ModelInfo:
         return _run_in_subprocess(
             lambda: _ModelInfo.from_model_cls(self.load_model_cls()))
@@ -211,9 +211,9 @@ class _ModelRegistry:
 
         - A :class:`torch.nn.Module` class directly referencing the model.
         - A string in the format :code:`<module>:<class>` which can be used to
-          lazily import the model. This is useful to avoid initializing CUDA
+          lazily import the model. This is useful to avoid initializing MUSA
           when importing the model and thus the related error
-          :code:`RuntimeError: Cannot re-initialize CUDA in forked subprocess`.
+          :code:`RuntimeError: Cannot re-initialize MUSA in forked subprocess`.
         """
         if model_arch in self.models:
             logger.warning(

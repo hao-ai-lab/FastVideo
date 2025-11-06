@@ -52,10 +52,10 @@ def main(args):
     world_size = int(os.getenv("WORLD_SIZE", 1))
     print("world_size", world_size, "local rank", local_rank)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    torch.cuda.set_device(local_rank)
+    device = torch.device("musa" if torch.musa.is_available() else "cpu")
+    torch.musa.set_device(local_rank)
     if not dist.is_initialized():
-        dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
+        dist.init_process_group(backend="mccl", init_method="env://", world_size=world_size, rank=local_rank)
 
     videoprocessor = VideoProcessor(vae_scale_factor=8)
     os.makedirs(args.output_dir, exist_ok=True)
@@ -81,7 +81,7 @@ def main(args):
     json_data = []
     for _, data in tqdm(enumerate(train_dataloader), disable=local_rank != 0):
         with torch.inference_mode():
-            with torch.autocast("cuda", dtype=autocast_type):
+            with torch.autocast("musa", dtype=autocast_type):
                 prompt_embeds, prompt_attention_mask = text_encoder.encode_prompt(prompt=data["caption"], )
                 if args.vae_debug:
                     latents = data["latents"]

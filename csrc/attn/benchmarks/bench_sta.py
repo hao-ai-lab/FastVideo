@@ -27,9 +27,9 @@ def benchmark_attention(configurations):
         print("=" * 60)
         print(f"Timing forward and backward pass for B={B}, H={H}, N={N}, D={D}, causal={causal}")
 
-        q = torch.randn(B, H, N, D, dtype=torch.bfloat16, device='cuda', requires_grad=False).contiguous()
-        k = torch.randn(B, H, N, D, dtype=torch.bfloat16, device='cuda', requires_grad=False).contiguous()
-        v = torch.randn(B, H, N, D, dtype=torch.bfloat16, device='cuda', requires_grad=False).contiguous()
+        q = torch.randn(B, H, N, D, dtype=torch.bfloat16, device='musa', requires_grad=False).contiguous()
+        k = torch.randn(B, H, N, D, dtype=torch.bfloat16, device='musa', requires_grad=False).contiguous()
+        v = torch.randn(B, H, N, D, dtype=torch.bfloat16, device='musa', requires_grad=False).contiguous()
 
         # grad_output = torch.randn_like(q, requires_grad=False).contiguous()
         # qg = torch.zeros_like(q, requires_grad=False, dtype=torch.float).contiguous()
@@ -58,12 +58,12 @@ def benchmark_attention(configurations):
         print(f"Average TFLOPS: {tflops_fwd}")
         print("-" * 60)
 
-        # torch.cuda.empty_cache()
-        # torch.cuda.synchronize()
+        # torch.musa.empty_cache()
+        # torch.musa.synchronize()
 
         # # Prepare for timing backward pass
-        # start_events_bwd = [torch.cuda.Event(enable_timing=True) for _ in range(10)]
-        # end_events_bwd = [torch.cuda.Event(enable_timing=True) for _ in range(10)]
+        # start_events_bwd = [torch.musa.Event(enable_timing=True) for _ in range(10)]
+        # end_events_bwd = [torch.musa.Event(enable_timing=True) for _ in range(10)]
 
         # # Warmup for backward pass
         # for _ in range(10):
@@ -75,7 +75,7 @@ def benchmark_attention(configurations):
         #     qg, kg, vg = tk.mha_backward(q, k, v, o, l_vec, grad_output, causal)
         #     end_events_bwd[i].record()
 
-        # torch.cuda.synchronize()
+        # torch.musa.synchronize()
         # times_bwd = [s.elapsed_time(e) for s, e in zip(start_events_bwd, end_events_bwd)]
         # time_us_bwd = np.mean(times_bwd) * 1000
 
@@ -86,7 +86,7 @@ def benchmark_attention(configurations):
         # print(f"Average TFLOPS: {tflops_bwd}")
         # print("=" * 60)
 
-        torch.cuda.empty_cache()
+        torch.musa.empty_cache()
 
     return results
 

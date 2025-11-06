@@ -9,7 +9,7 @@ flex_attention = torch.compile(flex_attention, dynamic=False)
 
 
 def flex_test(Q, K, V, kernel_size):
-    mask = get_sliding_tile_attention_mask(kernel_size, (6, 8, 8), (18, 48, 80), 0, 'cuda', 0)
+    mask = get_sliding_tile_attention_mask(kernel_size, (6, 8, 8), (18, 48, 80), 0, 'musa', 0)
     output = flex_attention(Q, K, V, block_mask=mask)
 
     return output
@@ -43,9 +43,9 @@ def check_correctness(b, h, n, d, causal, mean, std, num_iterations=50, error_mo
         for _ in range(num_iterations):
             torch.manual_seed(0)
 
-            Q = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'cuda')
-            K = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'cuda')
-            V = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'cuda')
+            Q = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'musa')
+            K = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'musa')
+            V = generate_tensor((b, h, n, d), mean, std, torch.bfloat16, 'musa')
             tk_o = h100_fwd_kernel_test(Q, K, V, kernel_size)
             pt_o = flex_test(Q, K, V, kernel_size)
 
@@ -54,7 +54,7 @@ def check_correctness(b, h, n, d, causal, mean, std, num_iterations=50, error_mo
             results['TK vs FLEX']['sum_diff'] += torch.sum(abs_diff).item()
             results['TK vs FLEX']['max_diff'] = max(results['TK vs FLEX']['max_diff'], torch.max(abs_diff).item())
 
-            torch.cuda.empty_cache()
+            torch.musa.empty_cache()
         print("kernel_size", kernel_size)
         print("max_diff", torch.max(abs_diff).item())
         print(

@@ -14,7 +14,7 @@ from fastvideo.models.hunyuan.modules import load_model
 from fastvideo.models.hunyuan.text_encoder import TextEncoder
 from fastvideo.models.hunyuan.utils.data_utils import align_to
 from fastvideo.models.hunyuan.vae import load_vae
-from fastvideo.utils.parallel_states import nccl_info
+from fastvideo.utils.parallel_states import mccl_info
 
 
 class Inference:
@@ -44,7 +44,7 @@ class Inference:
         self.use_cpu_offload = use_cpu_offload
 
         self.args = args
-        self.device = (device if device is not None else "cuda" if torch.cuda.is_available() else "cpu")
+        self.device = (device if device is not None else "musa" if torch.musa.is_available() else "cpu")
         self.logger = logger
         self.parallel_args = parallel_args
 
@@ -62,10 +62,10 @@ class Inference:
         logger.info(f"Got text-to-video model root path: {pretrained_model_path}")
 
         # ==================== Initialize Distributed Environment ================
-        if nccl_info.sp_size > 1:
-            device = torch.device(f"cuda:{os.environ['LOCAL_RANK']}")
+        if mccl_info.sp_size > 1:
+            device = torch.device(f"musa:{os.environ['LOCAL_RANK']}")
         if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            device = "musa" if torch.musa.is_available() else "cpu"
 
         parallel_args = None  # {"ulysses_degree": args.ulysses_degree, "ring_degree": args.ring_degree}
 

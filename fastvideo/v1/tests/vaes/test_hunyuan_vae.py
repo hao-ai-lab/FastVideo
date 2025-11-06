@@ -38,7 +38,7 @@ L40S_REFERENCE_LATENT = -158.32318115234375
 
 @pytest.mark.usefixtures("distributed_setup")
 def test_hunyuan_vae():
-    device = torch.device("cuda:0")
+    device = torch.device("musa:0")
     precision = torch.bfloat16
     precision_str = "bf16"
     args = FastVideoArgs(model_path=VAE_PATH, pipeline_config=PipelineConfig(vae_config=HunyuanVAEConfig(), vae_precision=precision_str))
@@ -70,7 +70,7 @@ def test_hunyuan_vae():
         latent = model.encode(input_tensor).mean.double().sum().item()
 
     # Check if latents are similar
-    device_name = torch.cuda.get_device_name()
+    device_name = torch.musa.get_device_name()
     if "A40" in device_name:
         REFERENCE_LATENT = A40_REFERENCE_LATENT
     elif "L40S" in device_name:

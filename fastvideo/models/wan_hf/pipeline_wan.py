@@ -33,7 +33,7 @@ from transformers import UMT5EncoderModel, T5TokenizerFast
 
 from fastvideo.models.mochi_hf.modeling_wan import WanTransformer3DModel
 from fastvideo.utils.communications import all_gather
-from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
+from fastvideo.utils.parallel_states import get_sequence_parallel_state, mccl_info
 
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm
@@ -62,7 +62,7 @@ EXAMPLE_DOC_STRING = """
         >>> pipe = WanPipeline.from_pretrained(model_id, vae=vae, torch_dtype=torch.bfloat16)
         >>> flow_shift = 5.0  # 5.0 for 720P, 3.0 for 480P
         >>> pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config, flow_shift=flow_shift)
-        >>> pipe.to("cuda")
+        >>> pipe.to("musa")
 
         >>> prompt = "A cat and a dog baking a cake together in a kitchen. The cat is carefully measuring flour, while the dog is stirring the batter with a wooden spoon. The kitchen is cozy, with sunlight streaming through the window."
         >>> negative_prompt = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
@@ -522,7 +522,7 @@ class WanPipeline(DiffusionPipeline, WanLoraLoaderMixin):
             latents,
         )
 
-        world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
+        world_size, rank = mccl_info.sp_size, mccl_info.rank_within_group
         if get_sequence_parallel_state():
             latents = rearrange(latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
             latents = latents[:, :, rank, :, :, :]
@@ -531,7 +531,7 @@ class WanPipeline(DiffusionPipeline, WanLoraLoaderMixin):
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
         
-        self._progress_bar_config = {"disable": nccl_info.rank_within_group != 0}
+        self._progress_bar_config = {"disable": mccl_info.rank_within_group != 0}
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:

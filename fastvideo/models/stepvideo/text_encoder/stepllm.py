@@ -274,7 +274,7 @@ class STEP1TextEncoder(torch.nn.Module):
         self.text_encoder = text_encoder.eval().to(torch.bfloat16)
 
     @torch.no_grad
-    @torch.autocast(device_type='cuda', dtype=torch.bfloat16)
+    @torch.autocast(device_type='musa', dtype=torch.bfloat16)
     def forward(self, prompts, with_mask=True, max_length=None):
         self.device = next(self.text_encoder.parameters()).device
         if type(prompts) is str:

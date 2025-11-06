@@ -332,7 +332,7 @@ def clip_grad_norm_(
         error_if_nonfinite (`bool`, defaults to `False`):
             If `True`, an error is thrown if the total norm of the gradients from `parameters` is `nan`, `inf`, or `-inf`.
         foreach (`bool`, defaults to `None`):
-            Use the faster foreach-based implementation. If `None`, use the foreach implementation for CUDA and CPU native tensors
+            Use the faster foreach-based implementation. If `None`, use the foreach implementation for MUSA and CPU native tensors
             and silently fall back to the slow implementation for other device types.
         pp_mesh (`torch.distributed.device_mesh.DeviceMesh`, defaults to `None`):
             Pipeline parallel device mesh. If not `None`, will reduce gradient norm across PP stages.
@@ -463,7 +463,7 @@ def _get_total_norm(
 
 def _get_foreach_kernels_supported_devices() -> list[str]:
     r"""Return the device type list that supports foreach kernels."""
-    return ["cuda", "xpu", torch._C._get_privateuse1_backend_name()]
+    return ["musa", "xpu", torch._C._get_privateuse1_backend_name()]
 
 
 @torch.no_grad()

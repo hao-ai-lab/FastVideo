@@ -49,54 +49,54 @@ STR_BACKEND_ENV_VAR: str = "FASTVIDEO_ATTENTION_BACKEND"
 STR_ATTN_CONFIG_ENV_VAR: str = "FASTVIDEO_ATTENTION_CONFIG"
 
 
-def find_nccl_library() -> str:
+def find_mccl_library() -> str:
     """
-    We either use the library file specified by the `VLLM_NCCL_SO_PATH`
+    We either use the library file specified by the `VLLM_MCCL_SO_PATH`
     environment variable, or we find the library file brought by PyTorch.
-    After importing `torch`, `libnccl.so.2` or `librccl.so.1` can be
+    After importing `torch`, `libmccl.so.2` or `librccl.so.1` can be
     found by `ctypes` automatically.
     """
-    so_file = envs.FASTVIDEO_NCCL_SO_PATH
+    so_file = envs.FASTVIDEO_MCCL_SO_PATH
 
-    # manually load the nccl library
+    # manually load the mccl library
     if so_file:
         logger.info(
-            "Found nccl from environment variable FASTVIDEO_NCCL_SO_PATH=%s",
+            "Found mccl from environment variable FASTVIDEO_MCCL_SO_PATH=%s",
             so_file)
     else:
-        if torch.version.cuda is not None:
-            so_file = "libnccl.so.2"
+        if torch.version.musa is not None:
+            so_file = "libmccl.so.2"
         elif torch.version.hip is not None:
             so_file = "librccl.so.1"
         else:
-            raise ValueError("NCCL only supports CUDA and ROCm backends.")
-        logger.info("Found nccl from library %s", so_file)
+            raise ValueError("MCCL only supports MUSA and ROCm backends.")
+        logger.info("Found mccl from library %s", so_file)
     return str(so_file)
 
 
-prev_set_stream = torch.cuda.set_stream
+prev_set_stream = torch.musa.set_stream
 
 _current_stream = None
 
 
-def _patched_set_stream(stream: torch.cuda.Stream) -> None:
+def _patched_set_stream(stream: torch.musa.Stream) -> None:
     global _current_stream
     _current_stream = stream
     prev_set_stream(stream)
 
 
-torch.cuda.set_stream = _patched_set_stream
+torch.musa.set_stream = _patched_set_stream
 
 
-def current_stream() -> torch.cuda.Stream:
+def current_stream() -> torch.musa.Stream:
     """
-    replace `torch.cuda.current_stream()` with `fastvideo.v1.utils.current_stream()`.
-    it turns out that `torch.cuda.current_stream()` is quite expensive,
+    replace `torch.musa.current_stream()` with `fastvideo.v1.utils.current_stream()`.
+    it turns out that `torch.musa.current_stream()` is quite expensive,
     as it will construct a new stream object at each call.
-    here we patch `torch.cuda.set_stream` to keep track of the current stream
-    directly, so that we can avoid calling `torch.cuda.current_stream()`.
+    here we patch `torch.musa.set_stream` to keep track of the current stream
+    directly, so that we can avoid calling `torch.musa.current_stream()`.
 
-    the underlying hypothesis is that we do not call `torch._C._cuda_setStream`
+    the underlying hypothesis is that we do not call `torch._C._musa_setStream`
     from C/C++ code.
     """
     from fastvideo.v1.platforms import current_platform
@@ -107,8 +107,8 @@ def current_stream() -> torch.cuda.Stream:
         # On ROCm using the default 0 stream in combination with RCCL
         # is hurting performance. Therefore creating a dedicated stream
         # per process
-        _current_stream = torch.cuda.Stream() if current_platform.is_rocm(
-        ) else torch.cuda.current_stream()
+        _current_stream = torch.musa.Stream() if current_platform.is_rocm(
+        ) else torch.musa.current_stream()
     return _current_stream
 
 
@@ -431,7 +431,7 @@ def import_pynvml():
 
     libnvml.so is the library behind nvidia-smi, and
     pynvml is a Python wrapper around it. We use it to get GPU
-    status without initializing CUDA context in the current process.
+    status without initializing MUSA context in the current process.
     Historically, there are two packages that provide pynvml:
     - `nvidia-ml-py` (https://pypi.org/project/nvidia-ml-py/): The official
         wrapper. It is a dependency of FastVideo, and is installed when users

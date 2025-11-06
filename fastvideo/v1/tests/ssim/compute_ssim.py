@@ -26,9 +26,9 @@ def compute_video_ssim_torchvision(video1_path, video2_path, use_ms_ssim=True):
     frames1 = frames1.float() / 255.0
     frames2 = frames2.float() / 255.0
 
-    if torch.cuda.is_available():
-        frames1 = frames1.cuda()
-        frames2 = frames2.cuda()
+    if torch.musa.is_available():
+        frames1 = frames1.musa()
+        frames2 = frames2.musa()
 
     ssim_values = []
 

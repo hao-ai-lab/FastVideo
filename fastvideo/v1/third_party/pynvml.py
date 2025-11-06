@@ -324,7 +324,7 @@ NVML_ENCODER_QUERY_UNKNOWN = 255
 _nvmlFBCSessionType_t = c_uint
 NVML_FBC_SESSION_TYPE_UNKNOWN = 0
 NVML_FBC_SESSION_TYPE_TOSYS = 1
-NVML_FBC_SESSION_TYPE_CUDA = 2
+NVML_FBC_SESSION_TYPE_MUSA = 2
 NVML_FBC_SESSION_TYPE_VID = 3
 NVML_FBC_SESSION_TYPE_HWENC = 4
 
@@ -2459,18 +2459,18 @@ def nvmlSystemGetNVMLVersion():
     return c_version.value
 
 def nvmlSystemGetCudaDriverVersion():
-    c_cuda_version = c_int()
+    c_musa_version = c_int()
     fn = _nvmlGetFunctionPointer("nvmlSystemGetCudaDriverVersion")
-    ret = fn(byref(c_cuda_version))
+    ret = fn(byref(c_musa_version))
     _nvmlCheckReturn(ret)
-    return c_cuda_version.value
+    return c_musa_version.value
 
 def nvmlSystemGetCudaDriverVersion_v2():
-    c_cuda_version = c_int()
+    c_musa_version = c_int()
     fn = _nvmlGetFunctionPointer("nvmlSystemGetCudaDriverVersion_v2")
-    ret = fn(byref(c_cuda_version))
+    ret = fn(byref(c_musa_version))
     _nvmlCheckReturn(ret)
-    return c_cuda_version.value
+    return c_musa_version.value
 
 # Added in 2.285
 @convertStrBytes

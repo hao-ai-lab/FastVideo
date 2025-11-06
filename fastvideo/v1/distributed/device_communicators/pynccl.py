@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
-# Adapted from https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/distributed/device_communicators/pynccl.py
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/distributed/device_communicators/pymccl.py
 
 # ===================== import region =====================
 import torch
 import torch.distributed as dist
 from torch.distributed import ProcessGroup, ReduceOp
 
-from fastvideo.v1.distributed.device_communicators.pynccl_wrapper import (
-    NCCLLibrary, buffer_type, cudaStream_t, ncclComm_t, ncclDataTypeEnum,
-    ncclRedOpTypeEnum, ncclUniqueId)
+from fastvideo.v1.distributed.device_communicators.pymccl_wrapper import (
+    MCCLLibrary, buffer_type, musaStream_t, mcclComm_t, mcclDataTypeEnum,
+    mcclRedOpTypeEnum, mcclUniqueId)
 from fastvideo.v1.distributed.utils import StatelessProcessGroup
 from fastvideo.v1.logger import init_logger
 from fastvideo.v1.utils import current_stream
@@ -29,16 +29,16 @@ class PyNcclCommunicator:
             group: the process group to work on. If None, it will use the
                 default process group.
             device: the device to bind the PyNcclCommunicator to. If None,
-                it will be bind to f"cuda:{local_rank}".
-            library_path: the path to the NCCL library. If None, it will
+                it will be bind to f"musa:{local_rank}".
+            library_path: the path to the MCCL library. If None, it will
                 use the default library path.
         It is the caller's responsibility to make sure each communicator
         is bind to a unique device.
         """
         if not isinstance(group, StatelessProcessGroup):
             assert dist.is_initialized()
-            assert dist.get_backend(group) != dist.Backend.NCCL, (
-                "PyNcclCommunicator should be attached to a non-NCCL group.")
+            assert dist.get_backend(group) != dist.Backend.MCCL, (
+                "PyNcclCommunicator should be attached to a non-MCCL group.")
             # note: this rank is the rank in the group
             self.rank = dist.get_rank(group)
             self.world_size = dist.get_world_size(group)
@@ -54,9 +54,9 @@ class PyNcclCommunicator:
             self.disabled = True
             return
         try:
-            self.nccl = NCCLLibrary(library_path)
+            self.mccl = MCCLLibrary(library_path)
         except Exception:
-            # disable because of missing NCCL library
+            # disable because of missing MCCL library
             # e.g. in a non-GPU environment
             self.available = False
             self.disabled = True
@@ -65,14 +65,14 @@ class PyNcclCommunicator:
         self.available = True
         self.disabled = False
 
-        logger.info("FastVideo is using nccl==%s", self.nccl.ncclGetVersion())
+        logger.info("FastVideo is using mccl==%s", self.mccl.mcclGetVersion())
 
         if self.rank == 0:
-            # get the unique id from NCCL
-            self.unique_id = self.nccl.ncclGetUniqueId()
+            # get the unique id from MCCL
+            self.unique_id = self.mccl.mcclGetUniqueId()
         else:
             # construct an empty unique id
-            self.unique_id = ncclUniqueId()
+            self.unique_id = mcclUniqueId()
 
         if not isinstance(group, StatelessProcessGroup):
             tensor = torch.ByteTensor(list(self.unique_id.internal))
@@ -85,17 +85,17 @@ class PyNcclCommunicator:
         else:
             self.unique_id = group.broadcast_obj(self.unique_id, src=0)
         if isinstance(device, int):
-            device = torch.device(f"cuda:{device}")
+            device = torch.device(f"musa:{device}")
         elif isinstance(device, str):
             device = torch.device(device)
         # now `device` is a `torch.device` object
         assert isinstance(device, torch.device)
         self.device = device
-        # nccl communicator and stream will use this device
-        # `torch.cuda.device` is a context manager that changes the
-        # current cuda device to the specified one
-        with torch.cuda.device(device):
-            self.comm: ncclComm_t = self.nccl.ncclCommInitRank(
+        # mccl communicator and stream will use this device
+        # `torch.musa.device` is a context manager that changes the
+        # current musa device to the specified one
+        with torch.musa.device(device):
+            self.comm: mcclComm_t = self.mccl.mcclCommInitRank(
                 self.world_size, self.unique_id, self.rank)
 
             stream = current_stream()
@@ -111,23 +111,23 @@ class PyNcclCommunicator:
                    stream=None) -> torch.Tensor:
         if self.disabled:
             return None
-        # nccl communicator created on a specific device
+        # mccl communicator created on a specific device
         # will only work on tensors on the same device
         # otherwise it will cause "illegal memory access"
         assert in_tensor.device == self.device, (
-            f"this nccl communicator is created to work on {self.device}, "
+            f"this mccl communicator is created to work on {self.device}, "
             f"but the input tensor is on {in_tensor.device}")
 
         out_tensor = torch.empty_like(in_tensor)
 
         if stream is None:
             stream = current_stream()
-        self.nccl.ncclAllReduce(buffer_type(in_tensor.data_ptr()),
+        self.mccl.mcclAllReduce(buffer_type(in_tensor.data_ptr()),
                                 buffer_type(out_tensor.data_ptr()),
                                 in_tensor.numel(),
-                                ncclDataTypeEnum.from_torch(in_tensor.dtype),
-                                ncclRedOpTypeEnum.from_torch(op), self.comm,
-                                cudaStream_t(stream.cuda_stream))
+                                mcclDataTypeEnum.from_torch(in_tensor.dtype),
+                                mcclRedOpTypeEnum.from_torch(op), self.comm,
+                                musaStream_t(stream.musa_stream))
         return out_tensor
 
     def all_gather(self,
@@ -136,19 +136,19 @@ class PyNcclCommunicator:
                    stream=None):
         if self.disabled:
             return
-        # nccl communicator created on a specific device
+        # mccl communicator created on a specific device
         # will only work on tensors on the same device
         # otherwise it will cause "illegal memory access"
         assert input_tensor.device == self.device, (
-            f"this nccl communicator is created to work on {self.device}, "
+            f"this mccl communicator is created to work on {self.device}, "
             f"but the input tensor is on {input_tensor.device}")
         if stream is None:
             stream = current_stream()
-        self.nccl.ncclAllGather(buffer_type(input_tensor.data_ptr()),
+        self.mccl.mcclAllGather(buffer_type(input_tensor.data_ptr()),
                                 buffer_type(output_tensor.data_ptr()),
                                 input_tensor.numel(),
-                                ncclDataTypeEnum.from_torch(input_tensor.dtype),
-                                self.comm, cudaStream_t(stream.cuda_stream))
+                                mcclDataTypeEnum.from_torch(input_tensor.dtype),
+                                self.comm, musaStream_t(stream.musa_stream))
 
     def reduce_scatter(self,
                        output_tensor: torch.Tensor,
@@ -157,60 +157,60 @@ class PyNcclCommunicator:
                        stream=None):
         if self.disabled:
             return
-        # nccl communicator created on a specific device
+        # mccl communicator created on a specific device
         # will only work on tensors on the same device
         # otherwise it will cause "illegal memory access"
         assert input_tensor.device == self.device, (
-            f"this nccl communicator is created to work on {self.device}, "
+            f"this mccl communicator is created to work on {self.device}, "
             f"but the input tensor is on {input_tensor.device}")
         if stream is None:
             stream = current_stream()
-        self.nccl.ncclReduceScatter(
+        self.mccl.mcclReduceScatter(
             buffer_type(input_tensor.data_ptr()),
             buffer_type(output_tensor.data_ptr()), output_tensor.numel(),
-            ncclDataTypeEnum.from_torch(input_tensor.dtype),
-            ncclRedOpTypeEnum.from_torch(op), self.comm,
-            cudaStream_t(stream.cuda_stream))
+            mcclDataTypeEnum.from_torch(input_tensor.dtype),
+            mcclRedOpTypeEnum.from_torch(op), self.comm,
+            musaStream_t(stream.musa_stream))
 
     def send(self, tensor: torch.Tensor, dst: int, stream=None):
         if self.disabled:
             return
         assert tensor.device == self.device, (
-            f"this nccl communicator is created to work on {self.device}, "
+            f"this mccl communicator is created to work on {self.device}, "
             f"but the input tensor is on {tensor.device}")
         if stream is None:
             stream = current_stream()
-        self.nccl.ncclSend(buffer_type(tensor.data_ptr()), tensor.numel(),
-                           ncclDataTypeEnum.from_torch(tensor.dtype), dst,
-                           self.comm, cudaStream_t(stream.cuda_stream))
+        self.mccl.mcclSend(buffer_type(tensor.data_ptr()), tensor.numel(),
+                           mcclDataTypeEnum.from_torch(tensor.dtype), dst,
+                           self.comm, musaStream_t(stream.musa_stream))
 
     def recv(self, tensor: torch.Tensor, src: int, stream=None):
         if self.disabled:
             return
         assert tensor.device == self.device, (
-            f"this nccl communicator is created to work on {self.device}, "
+            f"this mccl communicator is created to work on {self.device}, "
             f"but the input tensor is on {tensor.device}")
         if stream is None:
             stream = current_stream()
-        self.nccl.ncclRecv(buffer_type(tensor.data_ptr()), tensor.numel(),
-                           ncclDataTypeEnum.from_torch(tensor.dtype), src,
-                           self.comm, cudaStream_t(stream.cuda_stream))
+        self.mccl.mcclRecv(buffer_type(tensor.data_ptr()), tensor.numel(),
+                           mcclDataTypeEnum.from_torch(tensor.dtype), src,
+                           self.comm, musaStream_t(stream.musa_stream))
 
     def broadcast(self, tensor: torch.Tensor, src: int, stream=None):
         if self.disabled:
             return
         assert tensor.device == self.device, (
-            f"this nccl communicator is created to work on {self.device}, "
+            f"this mccl communicator is created to work on {self.device}, "
             f"but the input tensor is on {tensor.device}")
         if stream is None:
             stream = current_stream()
         if src == self.rank:
             sendbuff = buffer_type(tensor.data_ptr())
-            # NCCL requires the sender also to have a receive buffer
+            # MCCL requires the sender also to have a receive buffer
             recvbuff = buffer_type(tensor.data_ptr())
         else:
             sendbuff = buffer_type()
             recvbuff = buffer_type(tensor.data_ptr())
-        self.nccl.ncclBroadcast(sendbuff, recvbuff, tensor.numel(),
-                                ncclDataTypeEnum.from_torch(tensor.dtype), src,
-                                self.comm, cudaStream_t(stream.cuda_stream))
+        self.mccl.mcclBroadcast(sendbuff, recvbuff, tensor.numel(),
+                                mcclDataTypeEnum.from_torch(tensor.dtype), src,
+                                self.comm, musaStream_t(stream.musa_stream))

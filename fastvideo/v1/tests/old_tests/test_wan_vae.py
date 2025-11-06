@@ -18,7 +18,7 @@ def test_wan_vae():
     torch.manual_seed(42)
     np.random.seed(42)
 
-    device = torch.device("cuda:0")
+    device = torch.device("musa:0")
     # Initialize the two model implementations
     path = "/workspace/data/Wan2.1-T2V-1.3B-Diffusers/vae"
     config_path = os.path.join(path, "config.json")

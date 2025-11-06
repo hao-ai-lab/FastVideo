@@ -13,7 +13,7 @@ from einops import rearrange
 
 from fastvideo.models.hunyuan.inference import HunyuanVideoSampler
 from fastvideo.models.hunyuan.modules.modulate_layers import modulate
-from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
+from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, mccl_info
 
 
 def teacache_forward(
@@ -43,7 +43,7 @@ def teacache_forward(
         oh // self.patch_size[1],  # codespell:ignore
         ow // self.patch_size[2],  # codespell:ignore
     )
-    original_tt = nccl_info.sp_size * tt
+    original_tt = mccl_info.sp_size * tt
     freqs_cos, freqs_sin = self.get_rotary_pos_embed((original_tt, th, tw))
     # Prepare modulation vectors.
     vec = self.time_in(t)
@@ -175,14 +175,14 @@ def initialize_distributed():
     local_rank = int(os.getenv("RANK", 0))
     world_size = int(os.getenv("WORLD_SIZE", 1))
     print("world_size", world_size)
-    torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
+    torch.musa.set_device(local_rank)
+    dist.init_process_group(backend="mccl", init_method="env://", world_size=world_size, rank=local_rank)
     initialize_sequence_parallel_state(world_size)
 
 
 def main(args):
     initialize_distributed()
-    print(nccl_info.sp_size)
+    print(mccl_info.sp_size)
 
     print(args)
     models_root_path = Path(args.model_path)

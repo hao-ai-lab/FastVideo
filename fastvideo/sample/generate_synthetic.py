@@ -11,7 +11,7 @@ from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
 
 def generate_video_and_latent(pipe, prompt, height, width, num_frames, num_inference_steps, guidance_scale):
     # Set the random seed for reproducibility
-    generator = torch.Generator("cuda").manual_seed(12345)
+    generator = torch.Generator("musa").manual_seed(12345)
     # Generate videos from the input prompt
     noise, video, latent, prompt_embed, prompt_attention_mask = pipe(
         prompt=prompt,
@@ -45,8 +45,8 @@ if __name__ == "__main__":
     local_rank = int(os.getenv("RANK", 0))
     world_size = int(os.getenv("WORLD_SIZE", 1))
     print("world_size", world_size, "local rank", local_rank)
-    torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
+    torch.musa.set_device(local_rank)
+    dist.init_process_group(backend="mccl", init_method="env://", world_size=world_size, rank=local_rank)
 
     if not isinstance(args.prompt_path, list):
         args.prompt_path = [args.prompt_path]

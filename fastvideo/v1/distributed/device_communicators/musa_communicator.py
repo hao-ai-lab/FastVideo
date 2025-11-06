@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Adapted from https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/distributed/device_communicators/cuda_communicator.py
+# Adapted from https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/distributed/device_communicators/musa_communicator.py
 
 import torch
 from torch.distributed import ProcessGroup
@@ -17,25 +17,25 @@ class CudaCommunicator(DeviceCommunicatorBase):
                  unique_name: str = ""):
         super().__init__(cpu_group, device, device_group, unique_name)
 
-        from fastvideo.v1.distributed.device_communicators.pynccl import (
+        from fastvideo.v1.distributed.device_communicators.pymccl import (
             PyNcclCommunicator)
 
-        self.pynccl_comm: PyNcclCommunicator | None = None
+        self.pymccl_comm: PyNcclCommunicator | None = None
         if self.world_size > 1:
-            self.pynccl_comm = PyNcclCommunicator(
+            self.pymccl_comm = PyNcclCommunicator(
                 group=self.cpu_group,
                 device=self.device,
             )
 
     def all_reduce(self, input_, op: torch.distributed.ReduceOp | None = None):
-        pynccl_comm = self.pynccl_comm
-        assert pynccl_comm is not None
-        out = pynccl_comm.all_reduce(input_, op=op)
+        pymccl_comm = self.pymccl_comm
+        assert pymccl_comm is not None
+        out = pymccl_comm.all_reduce(input_, op=op)
         if out is None:
             # fall back to the default all-reduce using PyTorch.
             # this usually happens during testing.
             # when we run the model, allreduce only happens for the TP
-            # group, where we always have either custom allreduce or pynccl.
+            # group, where we always have either custom allreduce or pymccl.
             out = input_.clone()
             torch.distributed.all_reduce(out, group=self.device_group, op=op)
         return out
@@ -46,9 +46,9 @@ class CudaCommunicator(DeviceCommunicatorBase):
         if dst is None:
             dst = (self.rank_in_group + 1) % self.world_size
 
-        pynccl_comm = self.pynccl_comm
-        if pynccl_comm is not None and not pynccl_comm.disabled:
-            pynccl_comm.send(tensor, dst)
+        pymccl_comm = self.pymccl_comm
+        if pymccl_comm is not None and not pymccl_comm.disabled:
+            pymccl_comm.send(tensor, dst)
         else:
             torch.distributed.send(tensor, self.ranks[dst], self.device_group)
 
@@ -62,13 +62,13 @@ class CudaCommunicator(DeviceCommunicatorBase):
             src = (self.rank_in_group - 1) % self.world_size
 
         tensor = torch.empty(size, dtype=dtype, device=self.device)
-        pynccl_comm = self.pynccl_comm
-        if pynccl_comm is not None and not pynccl_comm.disabled:
-            pynccl_comm.recv(tensor, src)
+        pymccl_comm = self.pymccl_comm
+        if pymccl_comm is not None and not pymccl_comm.disabled:
+            pymccl_comm.recv(tensor, src)
         else:
             torch.distributed.recv(tensor, self.ranks[src], self.device_group)
         return tensor
 
     def destroy(self) -> None:
-        if self.pynccl_comm is not None:
-            self.pynccl_comm = None
+        if self.pymccl_comm is not None:
+            self.pymccl_comm = None

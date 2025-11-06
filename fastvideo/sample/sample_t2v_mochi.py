@@ -10,22 +10,22 @@ from diffusers.utils import export_to_video
 from fastvideo.distill.solver import PCMFMScheduler
 from fastvideo.models.mochi_hf.modeling_mochi import MochiTransformer3DModel
 from fastvideo.models.mochi_hf.pipeline_mochi import MochiPipeline
-from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
+from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, mccl_info
 
 
 def initialize_distributed():
     local_rank = int(os.getenv("RANK", 0))
     world_size = int(os.getenv("WORLD_SIZE", 1))
     print("world_size", world_size)
-    torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
+    torch.musa.set_device(local_rank)
+    dist.init_process_group(backend="mccl", init_method="env://", world_size=world_size, rank=local_rank)
     initialize_sequence_parallel_state(world_size)
 
 
 def main(args):
     initialize_distributed()
-    print(nccl_info.sp_size)
-    device = torch.cuda.current_device()
+    print(mccl_info.sp_size)
+    device = torch.musa.current_device()
     # Peiyuan: GPU seed will cause A100 and H100 to produce different results .....
 
     if args.scheduler_type == "euler":
@@ -82,7 +82,7 @@ def main(args):
         encoder_attention_mask = None
 
     if prompts is not None:
-        with torch.autocast("cuda", dtype=torch.bfloat16):
+        with torch.autocast("musa", dtype=torch.bfloat16):
             for prompt in prompts:
                 generator = torch.Generator("cpu").manual_seed(args.seed)
                 video = pipe(
@@ -94,7 +94,7 @@ def main(args):
                     guidance_scale=args.guidance_scale,
                     generator=generator,
                 ).frames
-                if nccl_info.global_rank == 0:
+                if mccl_info.global_rank == 0:
                     os.makedirs(args.output_path, exist_ok=True)
                     suffix = prompt.split(".")[0]
                     export_to_video(
@@ -103,7 +103,7 @@ def main(args):
                         fps=30,
                     )
     else:
-        with torch.autocast("cuda", dtype=torch.bfloat16):
+        with torch.autocast("musa", dtype=torch.bfloat16):
             generator = torch.Generator("cpu").manual_seed(args.seed)
             videos = pipe(
                 prompt_embeds=prompt_embeds,
@@ -116,7 +116,7 @@ def main(args):
                 generator=generator,
             ).frames
 
-        if nccl_info.global_rank == 0:
+        if mccl_info.global_rank == 0:
             export_to_video(videos[0], args.output_path + ".mp4", fps=30)
 
 

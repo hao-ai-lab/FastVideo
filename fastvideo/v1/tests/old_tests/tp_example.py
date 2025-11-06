@@ -125,7 +125,7 @@ def main():
 
     # Move to GPU if available
     device = torch.device(
-        f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
+        f"musa:{local_rank}" if torch.musa.is_available() else "cpu")
     model = model.to(device)
     x = x.to(device)
 

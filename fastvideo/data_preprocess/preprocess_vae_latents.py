@@ -28,10 +28,10 @@ def main(args):
         num_workers=args.dataloader_num_workers,
     )
 
-    encoder_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    torch.cuda.set_device(local_rank)
+    encoder_device = torch.device("musa" if torch.musa.is_available() else "cpu")
+    torch.musa.set_device(local_rank)
     if not dist.is_initialized():
-        dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
+        dist.init_process_group(backend="mccl", init_method="env://", world_size=world_size, rank=local_rank)
     vae, autocast_type, fps = load_vae(args.model_type, args.model_path)
     if args.model_type != "wan":
         vae.enable_tiling()
@@ -41,7 +41,7 @@ def main(args):
     json_data = []
     for _, data in tqdm(enumerate(train_dataloader), disable=local_rank != 0):
         with torch.inference_mode():
-            with torch.autocast("cuda", dtype=autocast_type):
+            with torch.autocast("musa", dtype=autocast_type):
                 latents = vae.encode(data["pixel_values"].to(encoder_device))["latent_dist"].sample()
             for idx, video_path in enumerate(data["path"]):
                 video_name = os.path.basename(video_path).split(".")[0]

@@ -158,7 +158,7 @@ def distill_one_step_adv(
     noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
 
     # Predict the noise residual
-    with torch.autocast("cuda", dtype=torch.bfloat16):
+    with torch.autocast("musa", dtype=torch.bfloat16):
         model_pred = transformer(
             noisy_model_input,
             encoder_hidden_states,
@@ -189,7 +189,7 @@ def distill_one_step_adv(
 
     with torch.no_grad():
         w = distill_cfg
-        with torch.autocast("cuda", dtype=torch.bfloat16):
+        with torch.autocast("musa", dtype=torch.bfloat16):
             cond_teacher_output = teacher_transformer(
                 noisy_model_input,
                 encoder_hidden_states,
@@ -201,7 +201,7 @@ def distill_one_step_adv(
             uncond_teacher_output = cond_teacher_output
         else:
             # Get teacher model prediction on noisy_latents and unconditional embedding
-            with torch.autocast("cuda", dtype=torch.bfloat16):
+            with torch.autocast("musa", dtype=torch.bfloat16):
                 uncond_teacher_output = teacher_transformer(
                     noisy_model_input,
                     uncond_prompt_embed.unsqueeze(0).expand(bsz, -1, -1),
@@ -214,7 +214,7 @@ def distill_one_step_adv(
 
     # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
     with torch.no_grad():
-        with torch.autocast("cuda", dtype=torch.bfloat16):
+        with torch.autocast("musa", dtype=torch.bfloat16):
             target_pred = transformer(
                 x_prev.float(),
                 encoder_hidden_states,
@@ -232,7 +232,7 @@ def distill_one_step_adv(
     huber_c = 0.001
     g_loss = torch.mean(torch.sqrt((model_pred.float() - target.float())**2 + huber_c**2) - huber_c)
     discriminator.requires_grad_(False)
-    with torch.autocast("cuda", dtype=torch.bfloat16):
+    with torch.autocast("musa", dtype=torch.bfloat16):
         g_gan_loss = adv_weight * gan_g_loss(
             discriminator,
             teacher_transformer,
@@ -256,7 +256,7 @@ def distill_one_step_adv(
 
     discriminator_optimizer.zero_grad()
     discriminator.requires_grad_(True)
-    with torch.autocast("cuda", dtype=torch.bfloat16):
+    with torch.autocast("musa", dtype=torch.bfloat16):
         d_loss = gan_d_loss(
             discriminator,
             teacher_transformer,
@@ -278,14 +278,14 @@ def distill_one_step_adv(
 
 
 def main(args):
-    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.musa.matmul.allow_tf32 = True
 
     local_rank = int(os.environ["LOCAL_RANK"])
     rank = int(os.environ["RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
-    dist.init_process_group("nccl")
-    torch.cuda.set_device(local_rank)
-    device = torch.cuda.current_device()
+    dist.init_process_group("mccl")
+    torch.musa.set_device(local_rank)
+    device = torch.musa.current_device()
     initialize_sequence_parallel_state(args.sp_size)
 
     # If passed along, set the training seed now. On GPU...
@@ -737,7 +737,7 @@ if __name__ == "__main__":
         "--allow_tf32",
         action="store_true",
         help=("Whether or not to allow TF32 on Ampere GPUs. Can be used to speed up training. For more information, see"
-              " https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices"),
+              " https://pytorch.org/docs/stable/notes/musa.html#tensorfloat-32-tf32-on-ampere-devices"),
     )
     parser.add_argument(
         "--mixed_precision",

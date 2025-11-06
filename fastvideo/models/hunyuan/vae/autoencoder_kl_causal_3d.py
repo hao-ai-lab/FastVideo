@@ -25,7 +25,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 
-from fastvideo.utils.parallel_states import nccl_info
+from fastvideo.utils.parallel_states import mccl_info
 
 try:
     # This diffusers is modified and packed in the mirror.
@@ -576,7 +576,7 @@ class AutoencoderKLCausal3D(ModelMixin, ConfigMixin, FromOriginalVAEMixin):
         """
         Parallel version of tiled_decode that distributes both temporal and spatial computation across GPUs
         """
-        world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
+        world_size, rank = mccl_info.sp_size, mccl_info.rank_within_group
         B, C, T, H, W = z.shape
 
         # Calculate parameters
@@ -635,7 +635,7 @@ class AutoencoderKLCausal3D(ModelMixin, ConfigMixin, FromOriginalVAEMixin):
 
         results = torch.cat(local_results, dim=0).contiguous()
         del local_results
-        torch.cuda.empty_cache()
+        torch.musa.empty_cache()
         # first gather size to pad the results
         local_size = torch.tensor([results.size(0)], device=results.device, dtype=torch.int64)
         all_sizes = [torch.zeros(1, device=results.device, dtype=torch.int64) for _ in range(world_size)]
@@ -644,7 +644,7 @@ class AutoencoderKLCausal3D(ModelMixin, ConfigMixin, FromOriginalVAEMixin):
         padded_results = torch.zeros(max_size, device=results.device)
         padded_results[:results.size(0)] = results
         del results
-        torch.cuda.empty_cache()
+        torch.musa.empty_cache()
         # Gather all results
         gathered_dim_metadata = [None] * world_size
         gathered_results = torch.zeros_like(padded_results).repeat(

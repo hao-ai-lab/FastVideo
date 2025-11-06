@@ -9,12 +9,12 @@ import torch
 import torch.distributed as dist
 from torch import Tensor
 
-from fastvideo.utils.parallel_states import nccl_info
+from fastvideo.utils.parallel_states import mccl_info
 
 
 def broadcast(input_: torch.Tensor):
-    src = nccl_info.group_id * nccl_info.sp_size
-    dist.broadcast(input_, src=src, group=nccl_info.group)
+    src = mccl_info.group_id * mccl_info.sp_size
+    dist.broadcast(input_, src=src, group=mccl_info.group)
 
 
 def _all_to_all_4D(input: torch.tensor, scatter_idx: int = 2, gather_idx: int = 1, group=None) -> torch.tensor:
@@ -49,7 +49,7 @@ def _all_to_all_4D(input: torch.tensor, scatter_idx: int = 2, gather_idx: int = 
         # (P, seq_len/P, bs, hc/P, hs) scatter seqlen -all2all-> (P, seq_len/P, bs, hc/P, hs) scatter head
         if seq_world_size > 1:
             dist.all_to_all_single(output, input_t, group=group)
-            torch.cuda.synchronize()
+            torch.musa.synchronize()
         else:
             output = input_t
         # if scattering the seq-dim, transpose the heads back to the original dimension
@@ -80,7 +80,7 @@ def _all_to_all_4D(input: torch.tensor, scatter_idx: int = 2, gather_idx: int = 
         # (P, bs x hc/P, seqlen/P, hs) scatter seqlen -all2all-> (P, bs x seq_len/P, hc/P, hs) scatter head
         if seq_world_size > 1:
             dist.all_to_all_single(output, input_t, group=group)
-            torch.cuda.synchronize()
+            torch.musa.synchronize()
         else:
             output = input_t
 
@@ -126,7 +126,7 @@ def all_to_all_4D(
     scatter_dim: int = 2,
     gather_dim: int = 1,
 ):
-    return SeqAllToAll4D.apply(nccl_info.group, input_, scatter_dim, gather_dim)
+    return SeqAllToAll4D.apply(mccl_info.group, input_, scatter_dim, gather_dim)
 
 
 def _all_to_all(
@@ -183,7 +183,7 @@ def all_to_all(
     scatter_dim: int = 2,
     gather_dim: int = 1,
 ):
-    return _AllToAll.apply(input_, nccl_info.group, scatter_dim, gather_dim)
+    return _AllToAll.apply(input_, mccl_info.group, scatter_dim, gather_dim)
 
 
 class _AllGather(torch.autograd.Function):
@@ -197,8 +197,8 @@ class _AllGather(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input_, dim):
         ctx.dim = dim
-        world_size = nccl_info.sp_size
-        group = nccl_info.group
+        world_size = mccl_info.sp_size
+        group = mccl_info.group
         input_size = list(input_.size())
 
         ctx.input_size = input_size[dim]
@@ -212,8 +212,8 @@ class _AllGather(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        world_size = nccl_info.sp_size
-        rank = nccl_info.rank_within_group
+        world_size = mccl_info.sp_size
+        rank = mccl_info.rank_within_group
         dim = ctx.dim
         input_size = ctx.input_size
 
@@ -239,7 +239,7 @@ def all_gather(input_: torch.Tensor, dim: int = 1):
 
 
 def prepare_sequence_parallel_data(hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask):
-    if nccl_info.sp_size == 1:
+    if mccl_info.sp_size == 1:
         return (
             hidden_states,
             encoder_hidden_states,
@@ -259,7 +259,7 @@ def prepare_sequence_parallel_data(hidden_states, encoder_hidden_states, attenti
             encoder_attention_mask,
         )
 
-    sp_size = nccl_info.sp_size
+    sp_size = mccl_info.sp_size
     frame = hidden_states.shape[2]
     assert frame % sp_size == 0, "frame should be a multiple of sp_size"
 

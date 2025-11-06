@@ -87,7 +87,7 @@ class QuantizationConfig(ABC):
         """Minimum GPU capability to support the quantization method.
 
         E.g., 70 for Volta, 75 for Turing, 80 for Ampere.
-        This requirement is due to the custom CUDA kernels used by the
+        This requirement is due to the custom MUSA kernels used by the
         quantization method.
         """
         raise NotImplementedError

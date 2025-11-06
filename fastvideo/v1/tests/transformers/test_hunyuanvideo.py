@@ -64,7 +64,7 @@ def test_hunyuanvideo_distributed():
     heads_num = 4
     mm_double_blocks_depth = 2
     mm_single_blocks_depth = 2
-    torch.cuda.set_device("cuda:0")
+    torch.musa.set_device("musa:0")
     # Initialize the two model implementations
     model = HunyuanVideoDit(
         patch_size=2,
@@ -94,7 +94,7 @@ def test_hunyuanvideo_distributed():
     model.eval()
 
     # Move to GPU based on local rank (0 or 1 for 2 GPUs)
-    device = torch.device(f"cuda:0")
+    device = torch.device(f"musa:0")
     model = model
 
     batch_size = 1

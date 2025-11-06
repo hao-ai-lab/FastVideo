@@ -94,7 +94,7 @@ class DecodingStage(PipelineStage):
                     latents += self.vae.shift_factor
 
             # Decode latents
-            with torch.autocast(device_type="cuda",
+            with torch.autocast(device_type="musa",
                                 dtype=vae_dtype,
                                 enabled=vae_autocast_enabled):
                 if fastvideo_args.pipeline_config.vae_tiling:

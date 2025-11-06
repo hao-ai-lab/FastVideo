@@ -92,7 +92,7 @@ def get_dit_fsdp_kwargs(
     elif sharding_strategy == "hybrid_zero2":
         sharding_strategy = ShardingStrategy._HYBRID_SHARD_ZERO2
 
-    device_id = torch.cuda.current_device()
+    device_id = torch.musa.current_device()
     cpu_offload = (torch.distributed.fsdp.CPUOffload(offload_params=True) if cpu_offload else None)
     fsdp_kwargs = {
         "auto_wrap_policy": auto_wrap_policy,
@@ -120,7 +120,7 @@ def get_discriminator_fsdp_kwargs(master_weight_type="fp32"):
 
     mixed_precision = get_mixed_precision(master_weight_type)
     sharding_strategy = ShardingStrategy.NO_SHARD
-    device_id = torch.cuda.current_device()
+    device_id = torch.musa.current_device()
     fsdp_kwargs = {
         "auto_wrap_policy": auto_wrap_policy,
         "mixed_precision": mixed_precision,

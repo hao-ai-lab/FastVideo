@@ -123,7 +123,7 @@ def distill_one_step(
         timesteps_prev = (sigmas_prev * noise_scheduler.config.num_train_timesteps).view(-1)
         noisy_model_input = sigmas * noise + (1.0 - sigmas) * model_input
         # Predict the noise residual
-        with torch.autocast("cuda", dtype=torch.bfloat16):
+        with torch.autocast("musa", dtype=torch.bfloat16):
             if args.model_type == "wan":
                     teacher_kwargs = {
                     "hidden_states": noisy_model_input,
@@ -149,7 +149,7 @@ def distill_one_step(
         model_pred, end_index = solver.euler_style_multiphase_pred(noisy_model_input, model_pred, index, multiphase)
         with torch.no_grad():
             w = distill_cfg
-            with torch.autocast("cuda", dtype=torch.bfloat16):
+            with torch.autocast("musa", dtype=torch.bfloat16):
                 if args.model_type == "wan":
                     cond_teacher_kwargs ={
                     "hidden_states": noisy_model_input,
@@ -170,7 +170,7 @@ def distill_one_step(
                 uncond_teacher_output = cond_teacher_output
             else:
                 # Get teacher model prediction on noisy_latents and unconditional embedding
-                with torch.autocast("cuda", dtype=torch.bfloat16):
+                with torch.autocast("musa", dtype=torch.bfloat16):
                     if args.model_type == "wan":
                         uncond_teacher_kwargs = {
                         "hidden_states": noisy_model_input,
@@ -194,7 +194,7 @@ def distill_one_step(
 
         # 20.4.12. Get target LCM prediction on x_prev, w, c, t_n
         with torch.no_grad():
-            with torch.autocast("cuda", dtype=torch.bfloat16):
+            with torch.autocast("musa", dtype=torch.bfloat16):
                 if args.model_type == "wan":
                     target_pred_kwargs = {
                         "hidden_states": x_prev.float(),
@@ -256,14 +256,14 @@ def distill_one_step(
 
 
 def main(args):
-    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.musa.matmul.allow_tf32 = True
 
     local_rank = int(os.environ["LOCAL_RANK"])
     rank = int(os.environ["RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
-    dist.init_process_group("nccl")
-    torch.cuda.set_device(local_rank)
-    device = torch.cuda.current_device()
+    dist.init_process_group("mccl")
+    torch.musa.set_device(local_rank)
+    device = torch.musa.current_device()
     initialize_sequence_parallel_state(args.sp_size)
 
     # If passed along, set the training seed now. On GPU...
@@ -715,7 +715,7 @@ if __name__ == "__main__":
         "--allow_tf32",
         action="store_true",
         help=("Whether or not to allow TF32 on Ampere GPUs. Can be used to speed up training. For more information, see"
-              " https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices"),
+              " https://pytorch.org/docs/stable/notes/musa.html#tensorfloat-32-tf32-on-ampere-devices"),
     )
     parser.add_argument(
         "--mixed_precision",

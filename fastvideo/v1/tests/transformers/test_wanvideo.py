@@ -30,7 +30,7 @@ TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
 
 @pytest.mark.usefixtures("distributed_setup")
 def test_wan_transformer():
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("musa:0" if torch.musa.is_available() else "cpu")
     precision = torch.bfloat16
     precision_str = "bf16"
     args = FastVideoArgs(model_path=TRANSFORMER_PATH,
@@ -99,7 +99,7 @@ def test_wan_transformer():
         data_type="dummy",
     )
 
-    with torch.amp.autocast('cuda', dtype=precision):
+    with torch.amp.autocast('musa', dtype=precision):
         output1 = model1(
             hidden_states=hidden_states,
             encoder_hidden_states=encoder_hidden_states,

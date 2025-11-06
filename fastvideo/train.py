@@ -1,5 +1,6 @@
 # !/bin/python3
 # isort: skip_file
+import torch_musa
 import argparse
 import math
 import os
@@ -133,7 +134,7 @@ def train_one_step(
             dtype=latents.dtype,
         )
         noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
-        with torch.autocast("cuda", dtype=torch.bfloat16):
+        with torch.autocast("musa", dtype=torch.bfloat16):
             input_kwargs = {
                 "hidden_states": noisy_model_input,
                 "encoder_hidden_states": encoder_hidden_states,
@@ -160,21 +161,27 @@ def train_one_step(
         dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
         total_loss += avg_loss.item()
 
-    grad_norm = transformer.clip_grad_norm_(max_grad_norm)
+    #grad_norm = transformer.clip_grad_norm_(max_grad_norm)
+    #grad_norm = torch.tensor(0.0)
+    params = [p for p in transformer.parameters() if p.grad is not None]
+    if len(params) == 0:
+        grad_norm = torch.tensor(0.0)
+    else:
+        grad_norm = torch.nn.utils.clip_grad_norm_(params, max_grad_norm)
     optimizer.step()
     lr_scheduler.step()
     return total_loss, grad_norm.item()
 
 
 def main(args):
-    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.mudnn.allow_tf32 = True
 
     local_rank = int(os.environ["LOCAL_RANK"])
     rank = int(os.environ["RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
-    dist.init_process_group("nccl")
-    torch.cuda.set_device(local_rank)
-    device = torch.cuda.current_device()
+    dist.init_process_group("mccl")
+    torch.musa.set_device(local_rank)
+    device = torch.musa.current_device()
     initialize_sequence_parallel_state(args.sp_size)
 
     # If passed along, set the training seed now. On GPU...
@@ -249,7 +256,6 @@ def main(args):
         transformer.config.lora_target_modules = ["to_k", "to_q", "to_v", "to_out.0"]
         transformer._no_split_modules = [no_split_module.__name__ for no_split_module in no_split_modules]
         fsdp_kwargs["auto_wrap_policy"] = fsdp_kwargs["auto_wrap_policy"](transformer)
-
     transformer = FSDP(
         transformer,
         **fsdp_kwargs,
@@ -565,7 +571,7 @@ if __name__ == "__main__":
         "--allow_tf32",
         action="store_true",
         help=("Whether or not to allow TF32 on Ampere GPUs. Can be used to speed up training. For more information, see"
-              " https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices"),
+              " https://pytorch.org/docs/stable/notes/musa.html#tensorfloat-32-tf32-on-ampere-devices"),
     )
     parser.add_argument(
         "--mixed_precision",

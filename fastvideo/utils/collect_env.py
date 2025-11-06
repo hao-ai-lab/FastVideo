@@ -30,7 +30,7 @@ SystemEnv = namedtuple(
     [
         'torch_version',
         'is_debug_build',
-        'cuda_compiled_version',
+        'musa_compiled_version',
         'gcc_version',
         'clang_version',
         'cmake_version',
@@ -38,9 +38,9 @@ SystemEnv = namedtuple(
         'libc_version',
         'python_version',
         'python_platform',
-        'is_cuda_available',
-        'cuda_runtime_version',
-        'cuda_module_loading',
+        'is_musa_available',
+        'musa_runtime_version',
+        'musa_module_loading',
         'nvidia_driver_version',
         'nvidia_gpu_models',
         'cudnn_version',
@@ -62,13 +62,13 @@ SystemEnv = namedtuple(
 DEFAULT_CONDA_PATTERNS = {
     "torch",
     "numpy",
-    "cudatoolkit",
+    "musatoolkit",
     "soumith",
     "mkl",
     "magma",
     "triton",
     "optree",
-    "nccl",
+    "mccl",
     "transformers",
     "accelerate",
     "peft",
@@ -85,7 +85,7 @@ DEFAULT_PIP_PATTERNS = {
     "triton",
     "optree",
     "onnx",
-    "nccl",
+    "mccl",
     "transformers",
     "accelerate",
     "peft",
@@ -175,9 +175,9 @@ def get_cmake_version(run_lambda):
 
 def get_nvidia_driver_version(run_lambda):
     if get_platform() == 'darwin':
-        cmd = 'kextstat | grep -i cuda'
+        cmd = 'kextstat | grep -i musa'
         return run_and_parse_first_match(run_lambda, cmd,
-                                         r'com[.]nvidia[.]CUDA [(](.*?)[)]')
+                                         r'com[.]nvidia[.]MUSA [(](.*?)[)]')
     smi = get_nvidia_smi()
     return run_and_parse_first_match(run_lambda, smi, r'Driver Version: (.*?) ')
 
@@ -185,16 +185,16 @@ def get_nvidia_driver_version(run_lambda):
 def get_gpu_info(run_lambda):
     if get_platform() == 'darwin' or (TORCH_AVAILABLE and hasattr(
             torch.version, 'hip') and torch.version.hip is not None):
-        if TORCH_AVAILABLE and torch.cuda.is_available():
+        if TORCH_AVAILABLE and torch.musa.is_available():
             if torch.version.hip is not None:
-                prop = torch.cuda.get_device_properties(0)
+                prop = torch.musa.get_device_properties(0)
                 if hasattr(prop, "gcnArchName"):
                     gcnArch = " ({})".format(prop.gcnArchName)
                 else:
                     gcnArch = "NoGCNArchNameOnOldPyTorch"
             else:
                 gcnArch = ""
-            return torch.cuda.get_device_name(None) + gcnArch
+            return torch.musa.get_device_name(None) + gcnArch
         return None
     smi = get_nvidia_smi()
     uuid_regex = re.compile(r' \(UUID: .+?\)')
@@ -205,8 +205,8 @@ def get_gpu_info(run_lambda):
     return re.sub(uuid_regex, '', out)
 
 
-def get_running_cuda_version(run_lambda):
-    return run_and_parse_first_match(run_lambda, 'nvcc --version',
+def get_running_musa_version(run_lambda):
+    return run_and_parse_first_match(run_lambda, 'mcc --version',
                                      r'release .+ V(.*)')
 
 
@@ -214,15 +214,15 @@ def get_cudnn_version(run_lambda):
     """Return a list of libcudnn.so; it's hard to tell which one is being used."""
     if get_platform() == 'win32':
         system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
-        cuda_path = os.environ.get('CUDA_PATH', "%CUDA_PATH%")
+        musa_path = os.environ.get('MUSA_PATH', "%MUSA_PATH%")
         where_cmd = os.path.join(system_root, 'System32', 'where')
-        cudnn_cmd = '{} /R "{}\\bin" cudnn*.dll'.format(where_cmd, cuda_path)
+        cudnn_cmd = '{} /R "{}\\bin" cudnn*.dll'.format(where_cmd, musa_path)
     elif get_platform() == 'darwin':
-        # CUDA libraries and drivers can be found in /usr/local/cuda/. See
-        # https://docs.nvidia.com/cuda/cuda-installation-guide-mac-os-x/index.html#install
+        # MUSA libraries and drivers can be found in /usr/local/musa/. See
+        # https://docs.nvidia.com/musa/musa-installation-guide-mac-os-x/index.html#install
         # https://docs.nvidia.com/deeplearning/sdk/cudnn-install/index.html#installmac
         # Use CUDNN_LIBRARY when cudnn library is installed elsewhere.
-        cudnn_cmd = 'ls /usr/local/cuda/lib/libcudnn*'
+        cudnn_cmd = 'ls /usr/local/musa/lib/libcudnn*'
     else:
         cudnn_cmd = 'ldconfig -p | grep libcudnn | rev | cut -d" " -f1 | rev'
     rc, out, _ = run_lambda(cudnn_cmd)
@@ -287,8 +287,8 @@ def get_fastvideo_version():
 
 def summarize_fastvideo_build_flags():
     # This could be a static method if the flags are constant, or dynamic if you need to check environment variables, etc.
-    return 'CUDA Archs: {}; ROCm: {}; Neuron: {}'.format(
-        os.environ.get('TORCH_CUDA_ARCH_LIST', 'Not Set'),
+    return 'MUSA Archs: {}; ROCm: {}; Neuron: {}'.format(
+        os.environ.get('TORCH_MUSA_ARCH_LIST', 'Not Set'),
         'Enabled' if os.environ.get('ROCM_HOME') else 'Disabled',
         'Enabled' if os.environ.get('NEURON_CORES') else 'Disabled',
     )
@@ -512,14 +512,14 @@ def get_pip_packages(run_lambda, patterns=None):
 
 
 def get_cachingallocator_config():
-    ca_config = os.environ.get('PYTORCH_CUDA_ALLOC_CONF', '')
+    ca_config = os.environ.get('PYTORCH_MUSA_ALLOC_CONF', '')
     return ca_config
 
 
-def get_cuda_module_loading_config():
-    if TORCH_AVAILABLE and torch.cuda.is_available():
-        torch.cuda.init()
-        config = os.environ.get('CUDA_MODULE_LOADING', '')
+def get_musa_module_loading_config():
+    if TORCH_AVAILABLE and torch.musa.is_available():
+        torch.musa.init()
+        config = os.environ.get('MUSA_MODULE_LOADING', '')
         return config
     else:
         return "N/A"
@@ -536,7 +536,7 @@ def is_xnnpack_available():
 def get_env_vars():
     env_vars = ''
     secret_terms = ('secret', 'token', 'api', 'access', 'password')
-    report_prefix = ("TORCH", "NCCL", "PYTORCH", "CUDA", "CUBLAS", "CUDNN",
+    report_prefix = ("TORCH", "MCCL", "PYTORCH", "MUSA", "CUBLAS", "CUDNN",
                      "OMP_", "MKL_", "NVIDIA")
     for k, v in os.environ.items():
         if any(term in k.lower() for term in secret_terms):
@@ -556,10 +556,10 @@ def get_env_info():
     if TORCH_AVAILABLE:
         version_str = torch.__version__
         debug_mode_str = str(torch.version.debug)
-        cuda_available_str = str(torch.cuda.is_available())
-        cuda_version_str = torch.version.cuda
+        musa_available_str = str(torch.musa.is_available())
+        musa_version_str = torch.version.musa
         if not hasattr(torch.version,
-                       'hip') or torch.version.hip is None:  # cuda version
+                       'hip') or torch.version.hip is None:  # musa version
             hip_compiled_version = hip_runtime_version = miopen_runtime_version = 'N/A'
         else:  # HIP version
 
@@ -570,10 +570,10 @@ def get_env_info():
             cfg = torch._C._show_config().split('\n')
             hip_runtime_version = get_version_or_na(cfg, 'HIP Runtime')
             miopen_runtime_version = get_version_or_na(cfg, 'MIOpen')
-            cuda_version_str = 'N/A'
+            musa_version_str = 'N/A'
             hip_compiled_version = torch.version.hip
     else:
-        version_str = debug_mode_str = cuda_available_str = cuda_version_str = 'N/A'
+        version_str = debug_mode_str = musa_available_str = musa_version_str = 'N/A'
         hip_compiled_version = hip_runtime_version = miopen_runtime_version = 'N/A'
 
     sys_version = sys.version.replace("\n", " ")
@@ -591,10 +591,10 @@ def get_env_info():
             sys_version,
             sys.maxsize.bit_length() + 1),
         python_platform=get_python_platform(),
-        is_cuda_available=cuda_available_str,
-        cuda_compiled_version=cuda_version_str,
-        cuda_runtime_version=get_running_cuda_version(run_lambda),
-        cuda_module_loading=get_cuda_module_loading_config(),
+        is_musa_available=musa_available_str,
+        musa_compiled_version=musa_version_str,
+        musa_runtime_version=get_running_musa_version(run_lambda),
+        musa_module_loading=get_musa_module_loading_config(),
         nvidia_gpu_models=get_gpu_info(run_lambda),
         nvidia_driver_version=get_nvidia_driver_version(run_lambda),
         cudnn_version=get_cudnn_version(run_lambda),
@@ -622,7 +622,7 @@ def get_env_info():
 env_info_fmt = """
 PyTorch version: {torch_version}
 Is debug build: {is_debug_build}
-CUDA used to build PyTorch: {cuda_compiled_version}
+MUSA used to build PyTorch: {musa_compiled_version}
 ROCM used to build PyTorch: {hip_compiled_version}
 
 OS: {os}
@@ -633,9 +633,9 @@ Libc version: {libc_version}
 
 Python version: {python_version}
 Python platform: {python_platform}
-Is CUDA available: {is_cuda_available}
-CUDA runtime version: {cuda_runtime_version}
-CUDA_MODULE_LOADING set to: {cuda_module_loading}
+Is MUSA available: {is_musa_available}
+MUSA runtime version: {musa_runtime_version}
+MUSA_MODULE_LOADING set to: {musa_module_loading}
 GPU models and configuration: {nvidia_gpu_models}
 Nvidia driver version: {nvidia_driver_version}
 cuDNN version: {cudnn_version}
@@ -706,21 +706,21 @@ def pretty_str(envinfo):
     mutable_dict['nvidia_gpu_models'] = \
         maybe_start_on_next_line(envinfo.nvidia_gpu_models)
 
-    # If the machine doesn't have CUDA, report some fields as 'No CUDA'
-    dynamic_cuda_fields = [
-        'cuda_runtime_version',
+    # If the machine doesn't have MUSA, report some fields as 'No MUSA'
+    dynamic_musa_fields = [
+        'musa_runtime_version',
         'nvidia_gpu_models',
         'nvidia_driver_version',
     ]
-    all_cuda_fields = dynamic_cuda_fields + ['cudnn_version']
-    all_dynamic_cuda_fields_missing = all(mutable_dict[field] is None
-                                          for field in dynamic_cuda_fields)
-    if TORCH_AVAILABLE and not torch.cuda.is_available(
-    ) and all_dynamic_cuda_fields_missing:
-        for field in all_cuda_fields:
-            mutable_dict[field] = 'No CUDA'
-        if envinfo.cuda_compiled_version is None:
-            mutable_dict['cuda_compiled_version'] = 'None'
+    all_musa_fields = dynamic_musa_fields + ['cudnn_version']
+    all_dynamic_musa_fields_missing = all(mutable_dict[field] is None
+                                          for field in dynamic_musa_fields)
+    if TORCH_AVAILABLE and not torch.musa.is_available(
+    ) and all_dynamic_musa_fields_missing:
+        for field in all_musa_fields:
+            mutable_dict[field] = 'No MUSA'
+        if envinfo.musa_compiled_version is None:
+            mutable_dict['musa_compiled_version'] = 'None'
 
     # Replace True with Yes, False with No
     mutable_dict = replace_bools(mutable_dict)

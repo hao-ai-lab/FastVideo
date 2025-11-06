@@ -11,7 +11,7 @@ from fastvideo.models.stepvideo.modules.model import StepVideoModel
 from fastvideo.models.stepvideo.utils import setup_seed
 from fastvideo.models.stepvideo.utils.quantization import convert_fp8_linear, fp8_linear_forward
 from fastvideo.utils.logging_ import main_print
-from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
+from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, mccl_info
 
 
 def initialize_distributed():
@@ -19,8 +19,8 @@ def initialize_distributed():
     local_rank = int(os.getenv("RANK", 0))
     world_size = int(os.getenv("WORLD_SIZE", 1))
     print("world_size", world_size)
-    torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
+    torch.musa.set_device(local_rank)
+    dist.init_process_group(backend="mccl", init_method="env://", world_size=world_size, rank=local_rank)
     initialize_sequence_parallel_state(world_size)
 
 
@@ -184,8 +184,8 @@ def add_inference_args(parser: argparse.ArgumentParser):
 if __name__ == "__main__":
     args = parse_args()
     initialize_distributed()
-    main_print(f"sequence parallel size: {nccl_info.sp_size}")
-    device = torch.cuda.current_device()
+    main_print(f"sequence parallel size: {mccl_info.sp_size}")
+    device = torch.musa.current_device()
 
     setup_seed(args.seed)
     main_print("Loading model, this might take a while...")

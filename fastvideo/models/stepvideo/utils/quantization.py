@@ -107,7 +107,7 @@ def convert_fp8_linear(module, original_dtype, params_to_keep={}):
             scale_dict[key] = scale
             layer.weight = torch.nn.Parameter(quantized_weight.to(torch.float8_e4m3fn))
             del original_weight  # Delete the reference to the original weights
-            torch.cuda.empty_cache()
+            torch.musa.empty_cache()
 
             # print(f"layer weight dtype: {layer.weight.dtype} for layer {key}")
             setattr(layer, "fp8_scale", scale.to(dtype=original_dtype))

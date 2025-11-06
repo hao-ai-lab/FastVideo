@@ -134,7 +134,7 @@ class PreprocessPipeline_I2V(BasePreprocessPipeline):
 
         video_conditions = torch.cat(video_conditions, dim=0)
 
-        with torch.autocast(device_type="cuda",
+        with torch.autocast(device_type="musa",
                             dtype=torch.float32,
                             enabled=True):
             encoder_outputs = self.get_module("vae").encode(video_conditions)

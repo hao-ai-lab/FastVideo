@@ -501,7 +501,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 self.sp_group.barrier()
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 self._log_validation(self.transformer, self.training_args, step)
-                gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
+                gpu_memory_usage = torch.musa.memory_allocated() / 1024**2
                 logger.info("GPU memory usage after validation: %s MB",
                             gpu_memory_usage)
 
@@ -547,7 +547,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         logger.info("  Master weight dtype: %s",
                     self.transformer.parameters().__next__().dtype)
 
-        gpu_memory_usage = torch.cuda.memory_allocated() / 1024**2
+        gpu_memory_usage = torch.musa.memory_allocated() / 1024**2
         logger.info("GPU memory usage before train_one_step: %s MB",
                     gpu_memory_usage)
         logger.info("VSA validation sparsity: %s",

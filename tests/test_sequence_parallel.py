@@ -6,7 +6,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-from fastvideo.utils.communications import nccl_info, prepare_sequence_parallel_data
+from fastvideo.utils.communications import mccl_info, prepare_sequence_parallel_data
 
 
 def _init_distributed_test_gpu(rank, world_size, backend, port, data, results):
@@ -17,14 +17,14 @@ def _init_distributed_test_gpu(rank, world_size, backend, port, data, results):
         rank=rank,
     )
 
-    device = torch.device(f"cuda:{rank}")
+    device = torch.device(f"musa:{rank}")
 
-    nccl_info.sp_size = world_size
-    nccl_info.rank_within_group = rank
-    nccl_info.group_id = 0
+    mccl_info.sp_size = world_size
+    mccl_info.rank_within_group = rank
+    mccl_info.group_id = 0
 
     seq_group = dist.new_group(ranks=list(range(world_size)))
-    nccl_info.group = seq_group
+    mccl_info.group = seq_group
 
     hidden_states, encoder_hidden_states, attention_mask, encoder_attention_mask = data
     hidden_states = hidden_states[rank].unsqueeze(dim=0).to(device)
@@ -58,11 +58,11 @@ def _init_distributed_test_gpu(rank, world_size, backend, port, data, results):
     dist.destroy_process_group()
 
 
-@pytest.mark.skipif(not torch.cuda.is_available() or torch.cuda.device_count() < 2,
-                    reason="Requires at least 2 GPUs to run NCCL tests")
+@pytest.mark.skipif(not torch.musa.is_available() or torch.musa.device_count() < 2,
+                    reason="Requires at least 2 GPUs to run MCCL tests")
 def test_prepare_sequence_parallel_data_gpu():
     world_size = 2
-    backend = "nccl"
+    backend = "mccl"
     port = 12355  # or use a random free port if collisions occur
 
     # Create test tensors on CPU; the dimension at index=2 should be divisible by world_size=2 (if applicable).

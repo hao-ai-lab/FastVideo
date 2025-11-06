@@ -29,7 +29,7 @@ class LoRAPipeline(ComposedPipelineBase):
     lora_layers: dict[str, BaseLayerWithLoRA] = {}
     fastvideo_args: FastVideoArgs
     exclude_lora_layers: list[str] = []
-    device: torch.device = torch.device(f"cuda:{torch.cuda.current_device()}")
+    device: torch.device = torch.device(f"musa:{torch.musa.current_device()}")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

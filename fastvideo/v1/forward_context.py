@@ -92,7 +92,7 @@ def set_forward_context(current_timestep,
                 forward_stats = []
                 for bs, times in batchsize_forward_time.items():
                     if len(times) <= 1:
-                        # can be cudagraph / profiling run
+                        # can be musagraph / profiling run
                         continue
                     medium = torch.quantile(torch.tensor(times), q=0.5).item()
                     medium = round(medium, 2)

@@ -31,7 +31,7 @@ from einops import rearrange
 from transformers import CLIPTextModel, CLIPTokenizer, LlamaModel, LlamaTokenizerFast
 
 from fastvideo.utils.communications import all_gather
-from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
+from fastvideo.utils.parallel_states import get_sequence_parallel_state, mccl_info
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -48,7 +48,7 @@ EXAMPLE_DOC_STRING = """
         ... )
         >>> pipe = HunyuanVideoPipeline.from_pretrained(model_id, transformer=transformer, torch_dtype=torch.float16)
         >>> pipe.vae.enable_tiling()
-        >>> pipe.to("cuda")
+        >>> pipe.to("musa")
 
         >>> output = pipe(
         ...     prompt="A cat walks on the grass, realistic",
@@ -618,7 +618,7 @@ class HunyuanVideoPipeline(DiffusionPipeline, HunyuanVideoLoraLoaderMixin):
             latents,
         )
         # check sequence_parallel
-        world_size, rank = nccl_info.sp_size, nccl_info.rank_within_group
+        world_size, rank = mccl_info.sp_size, mccl_info.rank_within_group
         if get_sequence_parallel_state():
             latents = rearrange(latents, "b t (n s) h w -> b t n s h w", n=world_size).contiguous()
             latents = latents[:, :, rank, :, :, :]

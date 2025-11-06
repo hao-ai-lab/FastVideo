@@ -30,14 +30,14 @@ from diffusers.utils import USE_PEFT_BACKEND, is_torch_version, logging, scale_l
 
 from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
 from fastvideo.utils.communications import all_gather, all_to_all_4D
-from fastvideo.utils.parallel_states import get_sequence_parallel_state, nccl_info
+from fastvideo.utils.parallel_states import get_sequence_parallel_state, mccl_info
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
 def shrink_head(encoder_state, dim):
-    local_heads = encoder_state.shape[dim] // nccl_info.sp_size
-    return encoder_state.narrow(dim, nccl_info.rank_within_group * local_heads, local_heads)
+    local_heads = encoder_state.shape[dim] // mccl_info.sp_size
+    return encoder_state.narrow(dim, mccl_info.rank_within_group * local_heads, local_heads)
 
 
 class HunyuanVideoAttnProcessor2_0:
@@ -154,7 +154,7 @@ class HunyuanVideoAttnProcessor2_0:
 
         if get_sequence_parallel_state():
             hidden_states, encoder_hidden_states = hidden_states.split_with_sizes(
-                (sequence_length * nccl_info.sp_size, encoder_sequence_length), dim=1)
+                (sequence_length * mccl_info.sp_size, encoder_sequence_length), dim=1)
             hidden_states = all_to_all_4D(hidden_states, scatter_dim=1, gather_dim=2)
             encoder_hidden_states = all_gather(encoder_hidden_states, dim=2).contiguous()
             hidden_states = hidden_states.flatten(2, 3)
@@ -377,7 +377,7 @@ class HunyuanVideoRotaryPosEmbed(nn.Module):
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         rope_sizes = [
-            num_frames * nccl_info.sp_size // self.patch_size_t, height // self.patch_size, width // self.patch_size
+            num_frames * mccl_info.sp_size // self.patch_size_t, height // self.patch_size, width // self.patch_size
         ]
 
         axes_grids = []

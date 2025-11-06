@@ -7,7 +7,7 @@ from diffusers.models import ModelMixin
 from einops import rearrange
 
 from fastvideo.models.hunyuan.modules.posemb_layers import get_nd_rotary_pos_embed
-from fastvideo.utils.parallel_states import nccl_info
+from fastvideo.utils.parallel_states import mccl_info
 
 from .activation_layers import get_activation_layer
 from .attenion import parallel_attention
@@ -141,8 +141,8 @@ class MMDoubleStreamBlock(nn.Module):
         if freqs_cis is not None:
 
             def shrink_head(encoder_state, dim):
-                local_heads = encoder_state.shape[dim] // nccl_info.sp_size
-                return encoder_state.narrow(dim, nccl_info.rank_within_group * local_heads, local_heads)
+                local_heads = encoder_state.shape[dim] // mccl_info.sp_size
+                return encoder_state.narrow(dim, mccl_info.rank_within_group * local_heads, local_heads)
 
             freqs_cis = (
                 shrink_head(freqs_cis[0], dim=0),
@@ -272,8 +272,8 @@ class MMSingleStreamBlock(nn.Module):
         k = self.k_norm(k).to(v)
 
         def shrink_head(encoder_state, dim):
-            local_heads = encoder_state.shape[dim] // nccl_info.sp_size
-            return encoder_state.narrow(dim, nccl_info.rank_within_group * local_heads, local_heads)
+            local_heads = encoder_state.shape[dim] // mccl_info.sp_size
+            return encoder_state.narrow(dim, mccl_info.rank_within_group * local_heads, local_heads)
 
         freqs_cis = (
             shrink_head(freqs_cis[0], dim=0),
@@ -536,7 +536,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             oh // self.patch_size[1],  # codespell:ignore
             ow // self.patch_size[2],  # codespell:ignore
         )
-        original_tt = nccl_info.sp_size * tt
+        original_tt = mccl_info.sp_size * tt
         freqs_cos, freqs_sin = self.get_rotary_pos_embed((original_tt, th, tw))
         # Prepare modulation vectors.
         vec = self.time_in(t)

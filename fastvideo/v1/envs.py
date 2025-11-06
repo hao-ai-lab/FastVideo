@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     FASTVIDEO_RINGBUFFER_WARNING_INTERVAL: int = 60
-    FASTVIDEO_NCCL_SO_PATH: str | None = None
+    FASTVIDEO_MCCL_SO_PATH: str | None = None
     LD_LIBRARY_PATH: str | None = None
     LOCAL_RANK: int = 0
-    CUDA_VISIBLE_DEVICES: str | None = None
+    MUSA_VISIBLE_DEVICES: str | None = None
     FASTVIDEO_CACHE_ROOT: str = os.path.expanduser("~/.cache/fastvideo")
     FASTVIDEO_CONFIG_ROOT: str = os.path.expanduser("~/.config/fastvideo")
     FASTVIDEO_CONFIGURE_LOGGING: int = 1
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     FASTVIDEO_ATTENTION_BACKEND: str | None = None
     FASTVIDEO_ATTENTION_CONFIG: str | None = None
     FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "fork"
-    FASTVIDEO_TARGET_DEVICE: str = "cuda"
+    FASTVIDEO_TARGET_DEVICE: str = "musa"
     MAX_JOBS: str | None = None
     NVCC_THREADS: str | None = None
     CMAKE_BUILD_TYPE: str | None = None
@@ -58,17 +58,17 @@ environment_variables: dict[str, Callable[[], Any]] = {
 
     # ================== Installation Time Env Vars ==================
 
-    # Target device of FastVideo, supporting [cuda (by default),
+    # Target device of FastVideo, supporting [musa (by default),
     # rocm, neuron, cpu, openvino]
     "FASTVIDEO_TARGET_DEVICE":
-    lambda: os.getenv("FASTVIDEO_TARGET_DEVICE", "cuda"),
+    lambda: os.getenv("FASTVIDEO_TARGET_DEVICE", "musa"),
 
     # Maximum number of compilation jobs to run in parallel.
     # By default this is the number of CPUs
     "MAX_JOBS":
     lambda: os.getenv("MAX_JOBS", None),
 
-    # Number of threads to use for nvcc
+    # Number of threads to use for mcc
     # By default this is 1.
     # If set, `MAX_JOBS` will be reduced to avoid oversubscribing the CPU.
     "NVCC_THREADS":
@@ -116,12 +116,12 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "FASTVIDEO_RINGBUFFER_WARNING_INTERVAL":
     lambda: int(os.environ.get("FASTVIDEO_RINGBUFFER_WARNING_INTERVAL", "60")),
 
-    # Path to the NCCL library file. It is needed because nccl>=2.19 brought
-    # by PyTorch contains a bug: https://github.com/NVIDIA/nccl/issues/1234
-    "FASTVIDEO_NCCL_SO_PATH":
-    lambda: os.environ.get("FASTVIDEO_NCCL_SO_PATH", None),
+    # Path to the MCCL library file. It is needed because mccl>=2.19 brought
+    # by PyTorch contains a bug: https://github.com/NVIDIA/mccl/issues/1234
+    "FASTVIDEO_MCCL_SO_PATH":
+    lambda: os.environ.get("FASTVIDEO_MCCL_SO_PATH", None),
 
-    # when `FASTVIDEO_NCCL_SO_PATH` is not set, fastvideo will try to find the nccl
+    # when `FASTVIDEO_MCCL_SO_PATH` is not set, fastvideo will try to find the mccl
     # library file in the locations specified by `LD_LIBRARY_PATH`
     "LD_LIBRARY_PATH":
     lambda: os.environ.get("LD_LIBRARY_PATH", None),
@@ -137,8 +137,8 @@ environment_variables: dict[str, Callable[[], Any]] = {
     lambda: int(os.environ.get("LOCAL_RANK", "0")),
 
     # used to control the visible devices in the distributed setting
-    "CUDA_VISIBLE_DEVICES":
-    lambda: os.environ.get("CUDA_VISIBLE_DEVICES", None),
+    "MUSA_VISIBLE_DEVICES":
+    lambda: os.environ.get("MUSA_VISIBLE_DEVICES", None),
 
     # timeout for each iteration in the engine
     "FASTVIDEO_ENGINE_ITERATION_TIMEOUT_S":

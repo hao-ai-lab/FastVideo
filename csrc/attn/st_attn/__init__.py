@@ -3,7 +3,7 @@ import math
 import torch
 from torch.utils.checkpoint import detach_variable
 try:
-    from st_attn_cuda import sta_fwd
+    from st_attn_musa import sta_fwd
 except ImportError:
     sta_fwd = None
 

@@ -15,8 +15,8 @@ import torch
 class AttentionBackend(ABC):
     """Abstract class for attention backends."""
     # For some attention backends, we allocate an output tensor before
-    # calling the custom op. When piecewise cudagraph is enabled, this
-    # makes sure the output tensor is allocated inside the cudagraph.
+    # calling the custom op. When piecewise musagraph is enabled, this
+    # makes sure the output tensor is allocated inside the musagraph.
     accept_output_buffer: bool = False
 
     @staticmethod

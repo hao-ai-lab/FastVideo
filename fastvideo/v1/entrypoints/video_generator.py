@@ -58,7 +58,7 @@ class VideoGenerator:
         
         Args:
             model_path: Path or identifier for the pretrained model
-            device: Device to load the model on (e.g., "cuda", "cuda:0", "cpu")
+            device: Device to load the model on (e.g., "musa", "musa:0", "cpu")
             torch_dtype: Data type for model weights (e.g., torch.float16)
             pipeline_config: Pipeline config to use for inference
             **kwargs: Additional arguments to customize model loading, set any FastVideoArgs or PipelineConfig attributes here.

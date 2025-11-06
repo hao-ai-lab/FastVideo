@@ -13,49 +13,50 @@ from fastvideo.v1.utils import resolve_obj_by_qualname
 logger = init_logger(__name__)
 
 
-def cuda_platform_plugin() -> str | None:
-    is_cuda = False
+def musa_platform_plugin() -> str | None:
+    is_musa = False
 
     try:
         from fastvideo.v1.utils import import_pynvml
-        pynvml = import_pynvml()  # type: ignore[no-untyped-call]
-        pynvml.nvmlInit()
-        try:
+        #pynvml = import_pynvml()  # type: ignore[no-untyped-call]
+        #pynvml.nvmlInit()
+        #try:
             # NOTE: Edge case: fastvideo cpu build on a GPU machine.
             # Third-party pynvml can be imported in cpu build,
             # we need to check if fastvideo is built with cpu too.
-            # Otherwise, fastvideo will always activate cuda plugin
+            # Otherwise, fastvideo will always activate musa plugin
             # on a GPU machine, even if in a cpu build.
-            is_cuda = (pynvml.nvmlDeviceGetCount() > 0)
-        finally:
-            pynvml.nvmlShutdown()
+            #is_musa = (pynvml.nvmlDeviceGetCount() > 0)
+        is_musa = True
+        #finally:
+            #pynvml.nvmlShutdown()
     except Exception as e:
         if "nvml" not in e.__class__.__name__.lower():
             # If the error is not related to NVML, re-raise it.
             raise e
 
-        # CUDA is supported on Jetson, but NVML may not be.
+        # MUSA is supported on Jetson, but NVML may not be.
         import os
 
-        def cuda_is_jetson() -> bool:
+        def musa_is_jetson() -> bool:
             return os.path.isfile("/etc/nv_tegra_release") \
                 or os.path.exists("/sys/class/tegra-firmware")
 
-        if cuda_is_jetson():
-            is_cuda = True
+        if musa_is_jetson():
+            is_musa = True
 
-    return "fastvideo.v1.platforms.cuda.CudaPlatform" if is_cuda else None
+    return "fastvideo.v1.platforms.musa.CudaPlatform" if is_musa else None
 
 
 builtin_platform_plugins = {
-    'cuda': cuda_platform_plugin,
+    'musa': musa_platform_plugin,
 }
 
 
 def resolve_current_platform_cls_qualname() -> str:
     # TODO(will): if we need to support other platforms, we should consider if
     # vLLM's plugin architecture is suitable for our needs.
-    platform_cls_qualname = builtin_platform_plugins['cuda']()
+    platform_cls_qualname = builtin_platform_plugins['musa']()
     if platform_cls_qualname is None:
         raise RuntimeError("No platform plugin found. Please check your "
                            "installation.")
@@ -65,11 +66,13 @@ def resolve_current_platform_cls_qualname() -> str:
 _current_platform = None
 _init_trace: str = ''
 
-if TYPE_CHECKING:
-    current_platform: Platform
+print(f"===== TYPE_CHECKING: {TYPE_CHECKING} =====")
+#if TYPE_CHECKING:
+current_platform = Platform
 
 
 def __getattr__(name: str):
+    print(f"===== name: {name} =====")
     if name == 'current_platform':
         # lazy init current_platform.
         # 1. out-of-tree platform plugins need `from fastvideo.platforms import
@@ -86,6 +89,7 @@ def __getattr__(name: str):
         if _current_platform is None:
             platform_cls_qualname = resolve_current_platform_cls_qualname()
             _current_platform = resolve_obj_by_qualname(platform_cls_qualname)()
+            print(f"===== _current_platform: {_curent_platform} =====")
             global _init_trace
             _init_trace = "".join(traceback.format_stack())
         return _current_platform
@@ -96,4 +100,5 @@ def __getattr__(name: str):
             f"No attribute named '{name}' exists in {__name__}.")
 
 
+print(f"===== current_platform: {current_platform} =====")
 __all__ = ['Platform', 'PlatformEnum', 'current_platform', "_init_trace"]

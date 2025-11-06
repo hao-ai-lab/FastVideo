@@ -15,10 +15,10 @@ def main(args):
     world_size = int(os.getenv("WORLD_SIZE", 1))
     print("world_size", world_size, "local rank", local_rank)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    torch.cuda.set_device(local_rank)
+    device = torch.device("musa" if torch.musa.is_available() else "cpu")
+    torch.musa.set_device(local_rank)
     if not dist.is_initialized():
-        dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
+        dist.init_process_group(backend="mccl", init_method="env://", world_size=world_size, rank=local_rank)
 
     text_encoder = load_text_encoder(args.model_type, args.model_path, device=device)
     autocast_type = torch.float16 if args.model_type == "hunyuan" else torch.bfloat16
@@ -36,7 +36,7 @@ def main(args):
     prompts = [line.strip() for line in lines]
     for prompt in prompts:
         with torch.inference_mode():
-            with torch.autocast("cuda", dtype=autocast_type):
+            with torch.autocast("musa", dtype=autocast_type):
                 prompt_embeds, prompt_attention_mask = text_encoder.encode_prompt(prompt)
                 file_name = prompt.split(".")[0]
                 prompt_embed_path = os.path.join(args.output_dir, "validation", "prompt_embed", f"{file_name}.pt")

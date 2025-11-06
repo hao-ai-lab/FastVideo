@@ -4,7 +4,7 @@ import torch
 from torch.utils.checkpoint import detach_variable
 from typing import Tuple
 try:
-    from vsa_cuda import block_sparse_fwd, block_sparse_bwd
+    from vsa_musa import block_sparse_fwd, block_sparse_bwd
 except ImportError:
     block_sparse_fwd = None
     block_sparse_bwd = None

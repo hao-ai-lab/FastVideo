@@ -271,7 +271,7 @@ class TextEncoderLoader(ComponentLoader):
 
             if use_cpu_offload:
                 mesh = init_device_mesh(
-                    "cuda",
+                    "musa",
                     mesh_shape=(1, dist.get_world_size()),
                     mesh_dim_names=("offload", "replicate"),
                 )

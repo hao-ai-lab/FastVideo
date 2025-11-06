@@ -326,7 +326,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                 }
 
                 # VAE
-                with torch.autocast("cuda", dtype=torch.float32):
+                with torch.autocast("musa", dtype=torch.float32):
                     latents = self.get_module("vae").encode(
                         valid_data["pixel_values"].to(
                             get_local_torch_device())).mean

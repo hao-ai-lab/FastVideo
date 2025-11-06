@@ -7,7 +7,7 @@ import torch
 from flask import Blueprint, Flask, Response, request
 from flask_restful import Api, Resource
 
-device = f'cuda:{torch.cuda.device_count()-1}'
+device = f'musa:{torch.musa.device_count()-1}'
 dtype = torch.bfloat16
 
 
@@ -51,7 +51,7 @@ class StepVaePipeline(Resource):
                     samples = samples.sample
                 return samples
             except:
-                torch.cuda.empty_cache()
+                torch.musa.empty_cache()
                 return None
 
 

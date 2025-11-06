@@ -10,7 +10,7 @@ from diffusers.utils import export_to_video
 
 from fastvideo.models.hunyuan_hf.modeling_hunyuan import HunyuanVideoTransformer3DModel
 from fastvideo.models.hunyuan_hf.pipeline_hunyuan import HunyuanVideoPipeline
-from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, nccl_info
+from fastvideo.utils.parallel_states import initialize_sequence_parallel_state, mccl_info
 
 
 def initialize_distributed():
@@ -18,15 +18,15 @@ def initialize_distributed():
     local_rank = int(os.getenv("RANK", 0))
     world_size = int(os.getenv("WORLD_SIZE", 1))
     print("world_size", world_size)
-    torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=local_rank)
+    torch.musa.set_device(local_rank)
+    dist.init_process_group(backend="mccl", init_method="env://", world_size=world_size, rank=local_rank)
     initialize_sequence_parallel_state(world_size)
 
 
 def inference(args):
     initialize_distributed()
-    print(nccl_info.sp_size)
-    device = torch.cuda.current_device()
+    print(mccl_info.sp_size)
+    device = torch.musa.current_device()
     # Peiyuan: GPU seed will cause A100 and H100 to produce different results .....
     weight_dtype = torch.bfloat16
 
@@ -75,7 +75,7 @@ def inference(args):
         encoder_attention_mask = None
 
     if prompts is not None:
-        with torch.autocast("cuda", dtype=torch.bfloat16):
+        with torch.autocast("musa", dtype=torch.bfloat16):
             for prompt in prompts:
                 generator = torch.Generator("cpu").manual_seed(args.seed)
                 video = pipe(
@@ -86,7 +86,7 @@ def inference(args):
                     num_inference_steps=args.num_inference_steps,
                     generator=generator,
                 ).frames
-                if nccl_info.global_rank == 0:
+                if mccl_info.global_rank == 0:
                     os.makedirs(args.output_path, exist_ok=True)
                     suffix = prompt.split(".")[0]
                     export_to_video(
@@ -95,7 +95,7 @@ def inference(args):
                         fps=24,
                     )
     else:
-        with torch.autocast("cuda", dtype=torch.bfloat16):
+        with torch.autocast("musa", dtype=torch.bfloat16):
             generator = torch.Generator("cpu").manual_seed(args.seed)
             videos = pipe(
                 prompt_embeds=prompt_embeds,
@@ -107,13 +107,13 @@ def inference(args):
                 generator=generator,
             ).frames
 
-        if nccl_info.global_rank == 0:
+        if mccl_info.global_rank == 0:
             export_to_video(videos[0], args.output_path + ".mp4", fps=24)
 
 
 def inference_quantization(args):
     torch.manual_seed(args.seed)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "musa" if torch.musa.is_available() else "cpu"
     model_id = args.model_path
 
     if args.quantization == "nf4":
@@ -136,20 +136,20 @@ def inference_quantization(args):
                                                                      subfolder="transformer/",
                                                                      torch_dtype=torch.bfloat16).to(device)
 
-    print("Max vram for read transformer:", round(torch.cuda.max_memory_allocated(device="cuda") / 1024**3, 3), "GiB")
-    torch.cuda.reset_max_memory_allocated(device)
+    print("Max vram for read transformer:", round(torch.musa.max_memory_allocated(device="musa") / 1024**3, 3), "GiB")
+    torch.musa.reset_max_memory_allocated(device)
 
     if not args.cpu_offload:
         pipe = HunyuanVideoPipeline.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(device)
         pipe.transformer = transformer
     else:
         pipe = HunyuanVideoPipeline.from_pretrained(model_id, transformer=transformer, torch_dtype=torch.bfloat16)
-    torch.cuda.reset_max_memory_allocated(device)
+    torch.musa.reset_max_memory_allocated(device)
     pipe.scheduler._shift = args.flow_shift
     pipe.vae.enable_tiling()
     if args.cpu_offload:
         pipe.enable_model_cpu_offload()
-    print("Max vram for init pipeline:", round(torch.cuda.max_memory_allocated(device="cuda") / 1024**3, 3), "GiB")
+    print("Max vram for init pipeline:", round(torch.musa.max_memory_allocated(device="musa") / 1024**3, 3), "GiB")
     if args.prompt.endswith('.txt'):
         with open(args.prompt) as f:
             prompts = [line.strip() for line in f.readlines()]
@@ -158,7 +158,7 @@ def inference_quantization(args):
 
     generator = torch.Generator("cpu").manual_seed(args.seed)
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
-    torch.cuda.reset_max_memory_allocated(device)
+    torch.musa.reset_max_memory_allocated(device)
     for prompt in prompts:
         start_time = time.perf_counter()
         output = pipe(
@@ -171,7 +171,7 @@ def inference_quantization(args):
         ).frames[0]
         export_to_video(output, os.path.join(args.output_path, f"{prompt[:100]}.mp4"), fps=args.fps)
         print("Time:", round(time.perf_counter() - start_time, 2), "seconds")
-        print("Max vram for denoise:", round(torch.cuda.max_memory_allocated(device="cuda") / 1024**3, 3), "GiB")
+        print("Max vram for denoise:", round(torch.musa.max_memory_allocated(device="musa") / 1024**3, 3), "GiB")
 
 
 if __name__ == "__main__":

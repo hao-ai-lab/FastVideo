@@ -66,7 +66,7 @@ class BaseLayerWithLoRA(nn.Module):
             placements = self.base_layer.weight.data.placements
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(
-                f"cuda:{torch.cuda.current_device()}").full_tensor()
+                f"musa:{torch.musa.current_device()}").full_tensor()
             data += (self.slice_lora_b_weights(self.lora_B)
                      @ self.slice_lora_a_weights(self.lora_A)).to(data)
             self.base_layer.weight = nn.Parameter(
@@ -75,7 +75,7 @@ class BaseLayerWithLoRA(nn.Module):
         else:
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.to(
-                f"cuda:{torch.cuda.current_device()}")
+                f"musa:{torch.musa.current_device()}")
             data += \
                 (self.slice_lora_b_weights(self.lora_B) @ self.slice_lora_a_weights(self.lora_A)).to(data)
             self.base_layer.weight = nn.Parameter(data.to(current_device))
@@ -102,7 +102,7 @@ class BaseLayerWithLoRA(nn.Module):
             placement = self.base_layer.weight.data.placements
             device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(
-                f"cuda:{torch.cuda.current_device()}").full_tensor()
+                f"musa:{torch.musa.current_device()}").full_tensor()
             data -= self.slice_lora_b_weights(
                 self.lora_B) @ self.slice_lora_a_weights(self.lora_A)
             self.base_layer.weight = nn.Parameter(

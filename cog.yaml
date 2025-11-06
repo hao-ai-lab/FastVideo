@@ -3,10 +3,8 @@
 
 build:
   gpu: true
-  cuda: "12.1"
   python_version: "3.10"
   python_packages:
-    - "torch==2.4.0"
     - "torchvision"
     - "ninja==1.11.1.3"
     - "transformers==4.46.1"

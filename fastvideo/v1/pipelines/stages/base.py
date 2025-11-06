@@ -101,7 +101,7 @@ class PipelineStage(ABC):
     @property
     def device(self) -> torch.device:
         """Get the device for this stage."""
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        return torch.device("musa" if torch.musa.is_available() else "cpu")
 
     def set_logging(self, enable: bool):
         """
