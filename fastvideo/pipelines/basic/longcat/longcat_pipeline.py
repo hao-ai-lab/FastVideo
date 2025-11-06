@@ -41,7 +41,22 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
         """Initialize LongCat-specific components."""
         # LongCat uses FlowMatchEulerDiscreteScheduler which is already loaded
         # from the model_index.json, so no need to override
-        pass
+        
+        # Enable BSA (Block Sparse Attention) if configured
+        pipeline_config = fastvideo_args.pipeline_config
+        if hasattr(pipeline_config, 'enable_bsa') and pipeline_config.enable_bsa:
+            transformer = self.get_module("transformer", None)
+            if transformer is not None and hasattr(transformer, 'enable_bsa'):
+                logger.info("Enabling Block Sparse Attention (BSA) for LongCat transformer")
+                transformer.enable_bsa()
+                
+                # Log BSA parameters if available
+                if hasattr(transformer, 'blocks') and len(transformer.blocks) > 0:
+                    bsa_params = transformer.blocks[0].attn.bsa_params
+                    if bsa_params:
+                        logger.info(f"BSA parameters: {bsa_params}")
+            else:
+                logger.warning("BSA is enabled in config but transformer does not support it")
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""

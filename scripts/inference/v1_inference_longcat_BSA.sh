@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# LongCat inference script WITHOUT BSA (standard inference)
-# Usage: bash scripts/inference/v1_inference_longcat.sh
+# LongCat inference script WITH BSA (Block Sparse Attention)
+# Usage: bash scripts/inference/v1_inference_longcat_BSA.sh
 #
-# This script disables BSA for standard inference with maximum quality.
-# Use this for baseline comparison or when BSA is not needed (e.g., 480p).
+# This script enables BSA for better performance on high-resolution generation.
+# BSA reduces memory usage and increases speed with minimal quality loss.
 
 # Number of GPUs
 num_gpus=1
@@ -23,8 +23,8 @@ export MODEL_BASE=weights/longcat-native
 # ==============================================================================
 # BSA Configuration
 # ==============================================================================
-# Automatically disable BSA before inference
-echo "🔧 Configuring standard inference (BSA disabled)..."
+# Automatically enable BSA before inference
+echo "🔧 Configuring BSA (Block Sparse Attention)..."
 
 # Check if config file exists
 CONFIG_FILE="$MODEL_BASE/transformer/config.json"
@@ -34,14 +34,18 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
-# Disable BSA using the management tool
-python scripts/checkpoint_conversion/manage_bsa.py "$CONFIG_FILE" --disable --no-backup
+# Enable BSA using the management tool
+# Using 720p-balanced preset (sparsity=0.9375)
+python scripts/checkpoint_conversion/manage_bsa.py "$CONFIG_FILE" --preset 720p-balanced --no-backup
 
-echo "✅ BSA disabled - using standard attention"
-echo "   - Maximum quality"
-echo "   - Higher memory usage"
+echo "✅ BSA enabled with 720p-balanced preset"
+echo "   - sparsity: 0.9375"
+echo "   - chunk_3d_shape: [4, 4, 4]"
 echo ""
-echo "💡 Tip: For high-resolution (720p+), consider using v1_inference_longcat_BSA.sh"
+echo "💡 Tip: For different resolutions, you can manually edit the preset:"
+echo "   - 480p: Use --preset 480p (disables BSA)"
+echo "   - 720p quality: Use --preset 720p-quality"
+echo "   - 720p fast: Use --preset 720p-fast"
 echo ""
 # ==============================================================================
 
@@ -55,8 +59,8 @@ fastvideo generate \
     --vae-cpu-offload False \
     --text-encoder-cpu-offload True \
     --pin-cpu-memory False \
-    --height 480 \
-    --width 832 \
+    --height 720 \
+    --width 1280 \
     --num-frames 93 \
     --num-inference-steps 50 \
     --fps 15 \
@@ -64,7 +68,7 @@ fastvideo generate \
     --prompt "In a realistic photography style, an asian boy around seven or eight years old sits on a park bench, wearing a light yellow T-shirt, denim shorts, and white sneakers. He holds an ice cream cone with vanilla and chocolate flavors, and beside him is a medium-sized golden Labrador. Smiling, the boy offers the ice cream to the dog, who eagerly licks it with its tongue. The sun is shining brightly, and the background features a green lawn and several tall trees, creating a warm and loving scene." \
     --negative-prompt "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards" \
     --seed 42 \
-    --output-path outputs_video/longcat_no_bsa
+    --output-path outputs_video/longcat_bsa
 
 # Optional: provide an inline prompt instead of a file
 # fastvideo generate \
