@@ -116,34 +116,33 @@ def apply_preset(config_path, preset, backup=True):
             'enable': False,
             'description': '480p 标准（不使用 BSA）'
         },
-        '720p-balanced': {
+        '704p-balanced': {
             'enable': True,
             'sparsity': 0.9375,
-            'chunk_q': [3, 5, 4],  # 720p: latent=(93,45,80), 45%5=0
-            'chunk_k': [3, 5, 4],
-            'description': '720p 平衡（推荐）'
+            'chunk_q': [4, 4, 4],  # 704×1280×96: latent=(96,44,80), 原始refinement配置
+            'chunk_k': [4, 4, 4],
+            'description': '704p 平衡（原始 LongCat refinement 参数）'
         },
-        '720p-quality': {
+        '704p-quality': {
             'enable': True,
             'sparsity': 0.875,
-            'chunk_q': [3, 5, 4],
-            'chunk_k': [3, 5, 4],
-            'description': '720p 质量优先'
+            'chunk_q': [4, 4, 4],
+            'chunk_k': [4, 4, 4],
+            'description': '704p 质量优先'
         },
-        '720p-fast': {
+        '704p-fast': {
             'enable': True,
             'sparsity': 0.96875,
-            'chunk_q': [3, 5, 4],
-            'chunk_k': [3, 5, 4],
-            'description': '720p 速度优先'
+            'chunk_q': [4, 4, 4],
+            'chunk_k': [4, 4, 4],
+            'description': '704p 速度优先'
         },
-        '720p-adaptive': {
+        '768p-balanced': {
             'enable': True,
-            'sparsity': 0.875,
-            'cdf_threshold': 0.98,
-            'chunk_q': [3, 5, 4],
-            'chunk_k': [3, 5, 4],
-            'description': '720p 自适应'
+            'sparsity': 0.9375,
+            'chunk_q': [4, 4, 4],  # 768×1216×96: latent=(96,48,76), 48%4=0, 76%4=0
+            'chunk_k': [4, 4, 4],
+            'description': '768p 平衡（ASPECT_RATIO_960_F64 bucket）'
         },
         'long-video': {
             'enable': True,

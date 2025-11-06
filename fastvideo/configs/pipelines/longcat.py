@@ -107,18 +107,19 @@ class LongCatT2V480PConfig(PipelineConfig):
 
 
 @dataclass
-class LongCatT2V720PConfig(LongCatT2V480PConfig):
-    """Configuration for LongCat pipeline (720p) with BSA enabled by default.
+class LongCatT2V704PConfig(LongCatT2V480PConfig):
+    """Configuration for LongCat pipeline (704p) with BSA enabled by default.
     
-    720p resolution requires BSA for efficient inference. BSA parameters
-    should be configured in the transformer config.json with chunk_3d_shape=[3,5,4]
-    to match the latent dimensions after VAE compression and patch embedding:
-    - Input: 720×1280×93
-    - VAE (4x8): 90×160×93  
-    - Patch [1,2,2]: 45×80×93
-    - chunk [3,5,4]: 93%3=0, 45%5=0, 80%4=0 ✅
+    Uses the same resolution and BSA parameters as original LongCat refinement stage.
+    BSA parameters configured in transformer config.json with chunk_3d_shape=[4,4,4]:
+    - Input: 704×1280×96
+    - VAE (8x): 88×160×96  
+    - Patch [1,2,2]: 44×80×96
+    - chunk [4,4,4]: 96%4=0, 44%4=0, 80%4=0 ✅
+    
+    This configuration matches the original LongCat refinement stage parameters.
     """
     
-    # Enable BSA by default for 720p
+    # Enable BSA by default for 704p
     enable_bsa: bool = True
     

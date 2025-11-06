@@ -6,13 +6,13 @@
     "sparsity": 0.9375,
     "cdf_threshold": null,
     "chunk_3d_shape_q": [
-      3,
-      5,
+      4,
+      4,
       4
     ],
     "chunk_3d_shape_k": [
-      3,
-      5,
+      4,
+      4,
       4
     ]
   },

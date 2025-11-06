@@ -34,15 +34,20 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
-# Enable BSA using the management tool
-# Using 720p-balanced preset (sparsity=0.9375)
-python scripts/checkpoint_conversion/manage_bsa.py "$CONFIG_FILE" --preset 720p-balanced --no-backup
+# Enable BSA using original LongCat refinement parameters
+# 704×1280×96, chunk [4,4,4], sparsity 0.9375
+python scripts/checkpoint_conversion/manage_bsa.py "$CONFIG_FILE" \
+    --enable \
+    --sparsity 0.9375 \
+    --chunk-q 4 4 4 \
+    --chunk-k 4 4 4 \
+    --no-backup
 
-echo "✅ BSA enabled with 720p-balanced preset"
-echo "💡 Tip: For different resolutions, you can manually edit the preset:"
-echo "   - 480p: Use --preset 480p (disables BSA)"
-echo "   - 720p quality: Use --preset 720p-quality"
-echo "   - 720p fast: Use --preset 720p-fast"
+echo "✅ BSA enabled (original LongCat refinement config)"
+echo "   - Resolution: 704×1280×96 frames"
+echo "   - Latent shape after VAE+Patch: (96, 44, 80)"
+echo "   - chunk_3d_shape: [4, 4, 4] (all divisible)"
+echo "   - sparsity: 0.9375"
 echo ""
 # ==============================================================================
 
@@ -56,9 +61,9 @@ fastvideo generate \
     --vae-cpu-offload False \
     --text-encoder-cpu-offload True \
     --pin-cpu-memory False \
-    --height 720 \
+    --height 704 \
     --width 1280 \
-    --num-frames 93 \
+    --num-frames 96 \
     --num-inference-steps 50 \
     --fps 15 \
     --guidance-scale 4.0 \
