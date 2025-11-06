@@ -97,6 +97,6 @@ for i, key in progress_bar:
 # Final save
 torch.save(lora_dict, OUTPUT_PATH)
 print("\nLoRA extraction complete.")
-print(f"Average |delta| magnitude: {sum(mean_deltas)/len(mean_deltas):.5f}")
+print(f"Average |delta| magnitude: {sum(mean_deltas)/len(mean_deltas) if mean_deltas else 0.0:.5f}")
 if os.path.exists(CHECKPOINT_PATH):
     os.remove(CHECKPOINT_PATH)
