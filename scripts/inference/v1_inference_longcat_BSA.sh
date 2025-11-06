@@ -63,7 +63,7 @@ fastvideo generate \
     --pin-cpu-memory False \
     --height 448 \
     --width 832 \
-    --num-frames 64 \
+    --num-frames 96 \
     --num-inference-steps 50 \
     --fps 15 \
     --guidance-scale 4.0 \
