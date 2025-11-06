@@ -116,6 +116,13 @@ def apply_preset(config_path, preset, backup=True):
             'enable': False,
             'description': '480p 标准（不使用 BSA）'
         },
+        '480p-bsa': {
+            'enable': True,
+            'sparsity': 0.9375,
+            'chunk_q': [4, 4, 4],  # 448×832×64: latent=(64,28,52), VSA同款
+            'chunk_k': [4, 4, 4],
+            'description': '480p BSA（448×832，VSA 同款分辨率）'
+        },
         '704p-balanced': {
             'enable': True,
             'sparsity': 0.9375,
