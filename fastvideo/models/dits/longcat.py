@@ -128,6 +128,11 @@ class TimestepEmbedder(nn.Module):
         # Sinusoidal embedding in FP32
         t_freq = self.timestep_embedding(t.flatten(), self.frequency_embedding_size)
         
+        # Cast to model dtype before MLP
+        target_dtype = self.linear_1.weight.dtype
+        if t_freq.dtype != target_dtype:
+            t_freq = t_freq.to(target_dtype)
+        
         # MLP projection
         t_emb, _ = self.linear_1(t_freq)
         t_emb = self.act(t_emb)
@@ -290,19 +295,22 @@ class LongCatSelfAttention(nn.Module):
         q = self.q_norm(q)
         k = self.k_norm(k)
 
-        # Transpose for attention: [B, num_heads, N, head_dim]
-        q = q.transpose(1, 2)
-        k = k.transpose(1, 2)
-        v = v.transpose(1, 2)
+        # For RoPE: need [B, num_heads, N, head_dim]
+        q_rope = q.transpose(1, 2)
+        k_rope = k.transpose(1, 2)
 
         # Apply 3D RoPE
-        q, k = self.rope_3d(q, k, grid_size=latent_shape)
+        q_rope, k_rope = self.rope_3d(q_rope, k_rope, grid_size=latent_shape)
 
-        # Run attention
-        out, _ = self.attn(q, k, v)  # [B, num_heads, N, head_dim], replicated_out
+        # Transpose back for attention: [B, N, num_heads, head_dim]
+        q = q_rope.transpose(1, 2)
+        k = k_rope.transpose(1, 2)
+
+        # Run attention (expects [B, N, num_heads, head_dim])
+        out, _ = self.attn(q, k, v)  # [B, N, num_heads, head_dim], replicated_out
 
         # Reshape and project out
-        out = out.transpose(1, 2).reshape(B, N, C)
+        out = out.reshape(B, N, C)
         out, _ = self.to_out(out)
 
         return out
@@ -458,11 +466,11 @@ class LongCatSwiGLUFFN(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass: gate(x) * SiLU(up(x)) -> down
+        Forward pass: SiLU(w1(x)) * w3(x) -> w2 (matching original LongCat)
         """
-        gate_out, _ = self.w1(x)
-        up_out, _ = self.w3(x)
-        combined = gate_out * self.act(up_out)
+        w1_out, _ = self.w1(x)
+        w3_out, _ = self.w3(x)
+        combined = self.act(w1_out) * w3_out
         out, _ = self.w2(combined)
         return out
 
@@ -473,19 +481,20 @@ class LongCatSwiGLUFFN(nn.Module):
 
 def modulate_fp32(norm: nn.Module, x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
     """
-    Apply modulation in FP32 for numerical stability.
+    Apply modulation in FP32 for numerical stability (matching original LongCat).
+    
+    shift and scale should already be FP32 from torch.amp.autocast context.
     """
+    # Ensure modulation params are FP32 (should be from autocast)
+    assert shift.dtype == torch.float32 and scale.dtype == torch.float32, \
+        f"shift and scale must be FP32, got {shift.dtype} and {scale.dtype}"
+    
     orig_dtype = x.dtype
-
-    # Cast to FP32
-    x = x.to(torch.float32)
-    shift = shift.to(torch.float32)
-    scale = scale.to(torch.float32)
-
-    # Normalize and modulate
-    x_norm = norm(x)
-    x_mod = x_norm * (1 + scale) + shift
-
+    
+    # Normalize and modulate in FP32
+    x_norm = norm(x.to(torch.float32))
+    x_mod = x_norm * (scale + 1) + shift
+    
     return x_mod.to(orig_dtype)
 
 
@@ -525,11 +534,12 @@ class LongCatTransformerBlock(nn.Module):
         )
         self.adaln_act = nn.SiLU()
 
-        # Normalization layers (using FastVideo's RMSNorm with FP32 support)
-        self.norm_attn = RMSNorm(hidden_size, eps=1e-6, dtype=torch.float32, has_weight=False)
-        self.norm_ffn = RMSNorm(hidden_size, eps=1e-6, dtype=torch.float32, has_weight=False)
-        # Use LayerNorm for norm_cross to match original (has both weight and bias)
-        self.norm_cross = FP32LayerNorm(hidden_size, eps=1e-6)
+        # Normalization layers (CRITICAL: Use LayerNorm not RMSNorm like original!)
+        # Original LongCat uses LayerNorm_FP32 with elementwise_affine=False
+        self.norm_attn = FP32LayerNorm(hidden_size, eps=1e-6, elementwise_affine=False)
+        self.norm_ffn = FP32LayerNorm(hidden_size, eps=1e-6, elementwise_affine=False)
+        # Cross-attention norm has elementwise_affine=True (has weight and bias)
+        self.norm_cross = FP32LayerNorm(hidden_size, eps=1e-6, elementwise_affine=True)
 
         # Self-attention
         self.self_attn = LongCatSelfAttention(
@@ -572,14 +582,15 @@ class LongCatTransformerBlock(nn.Module):
         """
         B, N, C = x.shape
         T, H, W = latent_shape
+        x_orig_dtype = x.dtype  # Save for later casting
 
-        # === AdaLN Modulation (CRITICAL: FP32) ===
-        # Compute modulation in FP32 for stability
-        t_mod = self.adaln_act(t)
-        mod_params, _ = self.adaln_linear_1(t_mod.to(torch.float32))
-        
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = \
-            mod_params.unsqueeze(2).chunk(6, dim=-1)  # [B, T, 1, C]
+        # === AdaLN Modulation (CRITICAL: FP32 for stability like original) ===
+        # Use autocast to compute modulation params in FP32
+        with torch.amp.autocast(device_type='cuda', dtype=torch.float32):
+            t_mod = self.adaln_act(t)
+            mod_params, _ = self.adaln_linear_1(t_mod)
+            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = \
+                mod_params.unsqueeze(2).chunk(6, dim=-1)  # [B, T, 1, C]
 
         # === Self-Attention ===
         x_norm = modulate_fp32(self.norm_attn, x.view(B, T, -1, C), shift_msa, scale_msa)
@@ -587,10 +598,10 @@ class LongCatTransformerBlock(nn.Module):
 
         attn_out = self.self_attn(x_norm, latent_shape=latent_shape)
 
-        # Residual with gating (FP32)
-        # Expand gate_msa from [B, T, 1, C] to [B, T, H*W, C] then reshape to [B, N, C]
-        gate_msa_expanded = gate_msa.expand(-1, -1, H * W, -1).reshape(B, N, C)
-        x = x + gate_msa_expanded * attn_out
+        # Residual with gating (CRITICAL: FP32 like original, then cast back)
+        with torch.amp.autocast(device_type='cuda', dtype=torch.float32):
+            x = x + (gate_msa * attn_out.view(B, T, -1, C)).view(B, N, C)
+        x = x.to(x_orig_dtype)
 
         # === Cross-Attention ===
         x_norm_cross = self.norm_cross(x)
@@ -603,10 +614,10 @@ class LongCatTransformerBlock(nn.Module):
 
         ffn_out = self.ffn(x_norm_ffn)
 
-        # Residual with gating (FP32)
-        # Expand gate_mlp from [B, T, 1, C] to [B, T, H*W, C] then reshape to [B, N, C]
-        gate_mlp_expanded = gate_mlp.expand(-1, -1, H * W, -1).reshape(B, N, C)
-        x = x + gate_mlp_expanded * ffn_out
+        # Residual with gating (CRITICAL: FP32 like original, then cast back)
+        with torch.amp.autocast(device_type='cuda', dtype=torch.float32):
+            x = x + (gate_mlp * ffn_out.view(B, T, -1, C)).view(B, N, C)
+        x = x.to(x_orig_dtype)
 
         return x
 
@@ -639,7 +650,8 @@ class FinalLayer(nn.Module):
         )
         self.adaln_act = nn.SiLU()
 
-        self.norm = RMSNorm(hidden_size, eps=1e-6, dtype=torch.float32, has_weight=False)
+        # CRITICAL: Use LayerNorm not RMSNorm! (matches original)
+        self.norm = FP32LayerNorm(hidden_size, eps=1e-6, elementwise_affine=False)
 
         # Output projection
         num_patch = patch_size[0] * patch_size[1] * patch_size[2]
@@ -662,10 +674,11 @@ class FinalLayer(nn.Module):
         B, N, C = x.shape
         T, _, _ = latent_shape
 
-        # AdaLN modulation (FP32)
-        t_mod = self.adaln_act(t)
-        mod_params, _ = self.adaln_linear(t_mod.to(torch.float32))
-        shift, scale = mod_params.unsqueeze(2).chunk(2, dim=-1)
+        # AdaLN modulation (FP32 for stability like original)
+        with torch.amp.autocast(device_type='cuda', dtype=torch.float32):
+            t_mod = self.adaln_act(t)
+            mod_params, _ = self.adaln_linear(t_mod)
+            shift, scale = mod_params.unsqueeze(2).chunk(2, dim=-1)
 
         # Modulate
         x = modulate_fp32(self.norm, x.view(B, T, -1, C), shift, scale)

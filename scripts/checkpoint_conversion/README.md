@@ -74,3 +74,4 @@ python scripts/checkpoint_conversion/wan_to_diffusers.py
 | `wan_to_diffusers.py` | WanVideo conversion | WanVideo models |
 | `LONGCAT_WEIGHT_CONVERSION_README.md` | Detailed LongCat guide | Reference |
 
+
