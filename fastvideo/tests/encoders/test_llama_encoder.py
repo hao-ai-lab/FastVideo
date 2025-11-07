@@ -78,24 +78,6 @@ def test_llama_encoder():
         "layers.{}.input_layernorm.weight",
         "layers.{}.post_attention_layernorm.weight"
     ]
-<<<<<<< HEAD:fastvideo/v1/tests/encoders/test_llama_encoder.py
-
-    for name1, param1 in sorted(params1.items()):
-        name2 = name1
-        skip = False
-        for param_name, weight_name, shard_id in model2.config.arch_config.stacked_params_mapping:
-            if weight_name not in name1:
-                skip = True
-        # stacked params are more troublesome
-        if skip:
-            continue
-        param2 = params2[name2]
-        param2 = param2.to_local().to(device) if isinstance(param2, DTensor) else param2.to(device)
-        assert_close(param1, param2, atol=1e-4, rtol=1e-4)
-    gc.collect()
-    torch.cuda.empty_cache()
-=======
->>>>>>> main:fastvideo/tests/encoders/test_llama_encoder.py
 
     for name1, param1 in sorted(params1.items()):
         name2 = name1

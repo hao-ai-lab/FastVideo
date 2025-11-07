@@ -11,13 +11,8 @@ import torch.distributed.checkpoint as dist_cp
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
 from fastvideo.dataset.parquet_dataset_map_style import (
     build_parquet_map_style_dataloader)
-<<<<<<< HEAD:fastvideo/v1/dataset/benchmarks/benchmark_parquet_dataset_map_style.py
 from fastvideo.distributed import get_world_rank
 from fastvideo.distributed.parallel_state import (
-=======
-from fastvideo.distributed import get_world_rank
-from fastvideo.distributed.parallel_state import (
->>>>>>> main:fastvideo/dataset/benchmarks/benchmark_parquet_dataset_map_style.py
     cleanup_dist_env_and_memory, get_local_torch_device,
     maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.logger import init_logger
