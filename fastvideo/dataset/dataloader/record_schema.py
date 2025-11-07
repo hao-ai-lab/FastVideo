@@ -72,7 +72,7 @@ def i2v_record_creator(batch: PreprocessBatch) -> list[dict[str, Any]]:
     """Create a record for the Parquet dataset with CLIP features."""
     records = basic_t2v_record_creator(batch)
 
-    # Adapt for model doesn't have image decoder, e.g., Hunyuan
+    # Adapt for model doesn't have image encoder, e.g., Hunyuan
     if len(batch.image_embeds) == 0:
         image_embeds = None
     elif len(batch.image_embeds) == 1:
