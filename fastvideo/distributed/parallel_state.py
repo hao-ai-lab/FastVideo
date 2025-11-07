@@ -740,6 +740,11 @@ def init_world_group(ranks: list[int], local_rank: int,
     )
 
 
+def get_node_group() -> GroupCoordinator:
+    assert _NODE is not None, ("node group is not initialized")
+    return _NODE
+
+
 def init_node_group(local_rank: int, backend: str):
     cpu_group = get_world_group().cpu_group
     node_ranks = same_node_ranks(cpu_group)
