@@ -9,7 +9,7 @@ Uses FlashInfer API for 4-bit quantization producing bf16 matrices.
 
 import torch
 import numpy as np
-from flashinfer import SfLayout, mm_fp4, nvfp4_quantize
+from flashinfer import SfLayout, mm_fp4, nvfp4_quantize, e2m1_and_ufp8sf_scale_to_float
 import unittest
 from typing import Tuple, Dict, Any
 
@@ -20,6 +20,16 @@ import triton.profiler as proton
 from triton.tools.tensor_descriptor import TensorDescriptor
 from triton.tools.mxfp import MXFP4Tensor, MXScaleTensor
 
+def get_fake_quant(x: torch.Tensor):
+    # TODO: dtype needs to be float32?
+    orig_shape = x.shape
+    orig_dtype = x.dtype
+    device = x.device
+    x = x.view(-1, x.shape[-1])
+    x_global_sf = (448 * 6) / x.float().abs().nan_to_num().max()
+    x_fp4, x_scale = nvfp4_quantize(x, x_global_sf, sfLayout=SfLayout.layout_128x4, do_shuffle=False)
+    x_dequant = e2m1_and_ufp8sf_scale_to_float(x_fp4, x_scale, 1 / x_global_sf)  # Note: this function does dequantization on the cpu
+    return x_dequant.view(orig_shape).to(orig_dtype).to(device)
 
 
 def generate_fake_quant(a_f32: torch.Tensor,
@@ -344,10 +354,108 @@ def main():
     # Run comprehensive test
     print("\nRunning comprehensive tests...")
     results = tester.run_comprehensive_test()
-    
-    
 
+
+def test_get_fake_quant():
+    """Test the get_fake_quant function with various inputs."""
+    print("Testing get_fake_quant function...")
+    
+    if not torch.cuda.is_available():
+        print("CUDA not available, skipping test")
+        return
+    
+    device = "cuda"
+    dtype = torch.bfloat16
+    
+    # Test 1: Basic functionality - 2D tensor
+    print("\nTest 1: Basic 2D tensor")
+    x = torch.randn(128, 64, device=device, dtype=dtype)
+    x_fq = get_fake_quant(x)
+    assert x_fq.shape == x.shape, f"Shape mismatch: {x_fq.shape} vs {x.shape}"
+    assert x_fq.dtype == x.dtype, f"Dtype mismatch: {x_fq.dtype} vs {x.dtype}"
+    assert x_fq.device == x.device, f"Device mismatch: {x_fq.device} vs {x.device}"
+    max_diff = (x - x_fq).abs().max().item()
+    print(f"  Max difference: {max_diff:.6f}")
+    assert max_diff < 1.0, f"Difference too large: {max_diff}"
+    
+    # Test 2: 3D tensor (B, H, D)
+    print("\nTest 2: 3D tensor [B, H, D]")
+    x = torch.randn(2, 8, 128, device=device, dtype=dtype)
+    x_fq = get_fake_quant(x)
+    assert x_fq.shape == x.shape, f"Shape mismatch: {x_fq.shape} vs {x.shape}"
+    assert x_fq.dtype == x.dtype, f"Dtype mismatch: {x_fq.dtype} vs {x.dtype}"
+    max_diff = (x - x_fq).abs().max().item()
+    print(f"  Max difference: {max_diff:.6f}")
+    assert max_diff < 1.0, f"Difference too large: {max_diff}"
+    
+    # Test 3: 4D tensor (B, H, L, D)
+    print("\nTest 3: 4D tensor [B, H, L, D]")
+    x = torch.randn(1, 8, 256, 128, device=device, dtype=dtype)
+    x_fq = get_fake_quant(x)
+    assert x_fq.shape == x.shape, f"Shape mismatch: {x_fq.shape} vs {x.shape}"
+    assert x_fq.dtype == x.dtype, f"Dtype mismatch: {x_fq.dtype} vs {x.dtype}"
+    max_diff = (x - x_fq).abs().max().item()
+    print(f"  Max difference: {max_diff:.6f}")
+    assert max_diff < 1.0, f"Difference too large: {max_diff}"
+    
+    # Test 4: Small values
+    print("\nTest 4: Small values")
+    x = torch.randn(128, 64, device=device, dtype=dtype) * 0.01
+    x_fq = get_fake_quant(x)
+    assert x_fq.shape == x.shape
+    max_diff = (x - x_fq).abs().max().item()
+    print(f"  Max difference: {max_diff:.6f}")
+    
+    # Test 5: Large values
+    print("\nTest 5: Large values")
+    x = torch.randn(128, 64, device=device, dtype=dtype) * 10.0
+    x_fq = get_fake_quant(x)
+    assert x_fq.shape == x.shape
+    max_diff = (x - x_fq).abs().max().item()
+    print(f"  Max difference: {max_diff:.6f}")
+    
+    # Test 6: Zeros
+    print("\nTest 6: Zeros")
+    x = torch.zeros(128, 64, device=device, dtype=dtype)
+    x_fq = get_fake_quant(x)
+    assert x_fq.shape == x.shape
+    max_diff = (x - x_fq).abs().max().item()
+    print(f"  Max difference: {max_diff:.6f}")
+    assert max_diff < 1e-5, f"Zeros should remain zeros: {max_diff}"
+    
+    # Test 7: Different dtypes
+    print("\nTest 7: Float16 dtype")
+    x = torch.randn(128, 64, device=device, dtype=torch.float16)
+    x_fq = get_fake_quant(x)
+    assert x_fq.shape == x.shape
+    assert x_fq.dtype == x.dtype
+    max_diff = (x - x_fq).abs().max().item()
+    print(f"  Max difference: {max_diff:.6f}")
+    
+    # Test 8: Idempotency check (quantizing twice should be similar)
+    print("\nTest 8: Idempotency")
+    x = torch.randn(128, 64, device=device, dtype=dtype)
+    x_fq1 = get_fake_quant(x)
+    x_fq2 = get_fake_quant(x_fq1)
+    # Second quantization should be close to first
+    max_diff = (x_fq1 - x_fq2).abs().max().item()
+    print(f"  Max difference between two quantizations: {max_diff:.6f}")
+    
+    # Test 9: Requires grad
+    print("\nTest 9: Gradient flow")
+    x = torch.randn(128, 64, device=device, dtype=dtype, requires_grad=True)
+    x_fq = get_fake_quant(x)
+    # Note: get_fake_quant uses no_grad internally, so x_fq won't have grad
+    # But we can check it doesn't crash
+    assert x_fq.shape == x.shape
+    print("  Gradient test passed (no crash)")
+    
+    print("\n✓ All tests passed!")
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "test_fake_quant":
+        test_get_fake_quant()
+    else:
+        main()

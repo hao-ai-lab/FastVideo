@@ -12,6 +12,7 @@ from fastvideo.attention.backends.abstract import (AttentionBackend,
                                                    AttentionMetadata,
                                                    AttentionMetadataBuilder)
 from fastvideo.logger import init_logger
+from test_quantization_precision import get_fake_quant
 
 logger = init_logger(__name__)
 
@@ -99,6 +100,43 @@ def attn_forward_4bit_fwd_16bit_bwd(q, k, v, is_causal=False, per_block_mean=Fal
     scale_row = row_max_p / (448 * 6)
     out = _Matmul3d4bitFWD16bitBWD.apply(p.squeeze(0), v.squeeze(0).transpose(1, 2).contiguous(), scale_row.squeeze(0)).unsqueeze(0)
     return out.transpose(1, 2).contiguous()
+
+def preprocess(q, k, v):
+    return get_fake_quant(q), get_fake_quant(k), get_fake_quant(v)
+
+def qat_attn_qk_torch(fq_q, fq_k):
+    """
+    Inputs:  q/k/v in [B, H, L, D]
+    Returns: out in  [B, H, L, D]
+    """
+    B, H, qL, D = fq_q.shape
+    B, H, kL, D = fq_k.shape
+    assert B == 1
+    q, k = fq_q.squeeze(0), fq_k.squeeze(0)
+    qk = torch.matmul(q, k.transpose(-2, -1)) / torch.sqrt(torch.tensor(q.shape[-1], device=q.device, dtype=q.dtype))
+    qk = qk / torch.sqrt(torch.tensor(D, device=q.device, dtype=q.dtype))
+    p = torch.softmax(qk, dim=-1)
+    return p.unsqueeze(0)
+
+def qat_attn_backward_16bit(fq_q_BLHD, fq_k_BLHD, fq_v_BLHD, high_prec_o_BLHD, grad_out_BLHD, is_causal=False):
+    assert is_causal == False
+    fq_q, fq_k, fq_v, high_prec_o, do = fq_q_BLHD.transpose(1 ,2).contiguous(), fq_k_BLHD.transpose(1 ,2).contiguous(), fq_v_BLHD.transpose(1 ,2).contiguous(), high_prec_o_BLHD.transpose(1 ,2).contiguous(), grad_out_BLHD.transpose(1 ,2).contiguous()
+    B, H, _, D = fq_q.shape
+    p = qat_attn_qk_torch(fq_q, fq_k).to(do.dtype)
+    fq_p = get_fake_quant(p).unsqueeze(0)
+    dV = fq_p.transpose(-2, -1) @ do  # [B,H,L,D]
+
+    dP = do @ fq_v.transpose(-2, -1)  # [B,H,L,L]
+
+    do_dot_o = (do * high_prec_o).sum(dim=-1, keepdim=True)  # [B,H,L,1]
+    dS = p * (dP - do_dot_o)  # [B,H,L,L]
+
+
+    dQ = (dS @ fq_k) / torch.sqrt(torch.tensor(D, device=fq_q.device, dtype=fq_q.dtype))            # [B,H,L,D]
+    dK = (dS.transpose(-2, -1) @ fq_q) / torch.sqrt(torch.tensor(D, device=fq_q.device, dtype=fq_q.dtype))  # [B,H,L,D]
+
+    # grads w.r.t inputs, None for non-tensor inputs
+    return dQ.transpose(1, 2).contiguous(), dK.transpose(1, 2).contiguous(), dV.transpose(1, 2).contiguous(), None, None, None
 
 
 def sage_attn_qk_torch(q, k, per_block_mean=False):
@@ -195,6 +233,7 @@ def flash_attn_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_caus
 
 USE_TORCH_4BIT_FWD = True
 USE_TORCH_16BIT_BWD = True
+USE_QAT_ATTN = True
 class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
     @staticmethod
     def forward(ctx, q_BLHD, k_BLHD, v_BLHD, is_causal=False, per_block_mean=False):
@@ -211,8 +250,21 @@ class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
         v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
 
         with torch.no_grad():
-            if USE_TORCH_4BIT_FWD:
+            if USE_QAT_ATTN:
+                fq_q, fq_k, fq_v = preprocess(q_BHLD, k_BHLD, v_BHLD)
+                # Compute attention probabilities and output
+                p = qat_attn_qk_torch(fq_q, fq_k)  # [B, H, L, L] where B=1
+                fq_p = get_fake_quant(p)  # [B, H, L, L] - preserves shape
+                out_BHLD = fq_p @ fq_v
+                high_prec_o = p @ fq_v
+                # Save fake quantized tensors and high precision output for backward
+                ctx.save_for_backward(fq_q, fq_k, fq_v, high_prec_o)
+                out_BLHD = out_BHLD.permute(0, 2, 1, 3).contiguous()
+            elif USE_TORCH_4BIT_FWD:
                 out_BHLD, p = attn_forward_4bit(q_BHLD, k_BHLD, v_BHLD, is_causal)
+                # Convert to BLHD for saving
+                out_BLHD = out_BHLD.permute(0, 2, 1, 3).contiguous()
+                ctx.save_for_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD)
             else:
                 out_BHLD = sageattn_blackwell(
                     q_BHLD, k_BHLD, v_BHLD,
@@ -220,22 +272,34 @@ class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
                     is_causal=is_causal,
                     per_block_mean=per_block_mean,
                 )
-
-        # Back to BLHD; keep for FA bwd
-        out_BLHD = out_BHLD.permute(0, 2, 1, 3).contiguous()
-        ctx.save_for_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD)
+                # Convert to BLHD for saving
+                out_BLHD = out_BHLD.permute(0, 2, 1, 3).contiguous()
+                ctx.save_for_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD)
 
         return out_BLHD
 
     @staticmethod
     def backward(ctx, grad_out_BLHD):
-        q_BLHD, k_BLHD, v_BLHD, out_BLHD = ctx.saved_tensors
         is_causal = ctx.is_causal
 
-        if USE_TORCH_16BIT_BWD:
-            return attn_backward_16bit(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal)
+        if USE_QAT_ATTN:
+            fq_q, fq_k, fq_v, high_prec_o = ctx.saved_tensors
+            # Convert from BHLD (saved format) to BLHD (expected by qat_attn_backward_16bit)
+            fq_q_BLHD = fq_q.permute(0, 2, 1, 3).contiguous()
+            fq_k_BLHD = fq_k.permute(0, 2, 1, 3).contiguous()
+            fq_v_BLHD = fq_v.permute(0, 2, 1, 3).contiguous()
+            high_prec_o_BLHD = high_prec_o.permute(0, 2, 1, 3).contiguous()
+            # qat_attn_backward_16bit expects BLHD format and returns BLHD format
+            grad_q_BLHD, grad_k_BLHD, grad_v_BLHD, _, _, _ = qat_attn_backward_16bit(
+                fq_q_BLHD, fq_k_BLHD, fq_v_BLHD, high_prec_o_BLHD, grad_out_BLHD, is_causal
+            )
+            return grad_q_BLHD, grad_k_BLHD, grad_v_BLHD, None, None
         else:
-            return flash_attn_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal)
+            q_BLHD, k_BLHD, v_BLHD, out_BLHD = ctx.saved_tensors
+            if USE_TORCH_16BIT_BWD:
+                return attn_backward_16bit(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal)
+            else:
+                return flash_attn_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal)
 
 
 
