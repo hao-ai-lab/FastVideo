@@ -150,7 +150,7 @@ class BaseLayerWithLoRA(nn.Module):
 
             # Apply LoRA with alpha scaling
             lora_delta = (self.slice_lora_b_weights(self.lora_B).to(data)
-                         @ self.slice_lora_a_weights(self.lora_A).to(data))
+                          @ self.slice_lora_a_weights(self.lora_A).to(data))
             if alpha_scale != 1.0:
                 data += alpha_scale * lora_delta
             else:
@@ -182,7 +182,7 @@ class BaseLayerWithLoRA(nn.Module):
 
             # Apply LoRA with alpha scaling
             lora_delta = (self.slice_lora_b_weights(self.lora_B.to(data))
-                         @ self.slice_lora_a_weights(self.lora_A.to(data)))
+                          @ self.slice_lora_a_weights(self.lora_A.to(data)))
             if alpha_scale != 1.0:
                 data += alpha_scale * lora_delta
             else:
