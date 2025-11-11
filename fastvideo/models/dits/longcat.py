@@ -129,7 +129,9 @@ class TimestepEmbedder(nn.Module):
         t_freq = self.timestep_embedding(t.flatten(), self.frequency_embedding_size)
         
         # Cast to model dtype before MLP
-        target_dtype = self.linear_1.weight.dtype
+        # Handle LoRA wrapper if present
+        linear_layer = self.linear_1.base_layer if hasattr(self.linear_1, 'base_layer') else self.linear_1
+        target_dtype = linear_layer.weight.dtype
         if t_freq.dtype != target_dtype:
             t_freq = t_freq.to(target_dtype)
         
@@ -589,6 +591,9 @@ class LongCatTransformerBlock(nn.Module):
         with torch.amp.autocast(device_type='cuda', dtype=torch.float32):
             t_mod = self.adaln_act(t)
             mod_params, _ = self.adaln_linear_1(t_mod)
+            # Ensure FP32 output (needed when LoRA is applied)
+            if mod_params.dtype != torch.float32:
+                mod_params = mod_params.float()
             shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = \
                 mod_params.unsqueeze(2).chunk(6, dim=-1)  # [B, T, 1, C]
 
@@ -678,6 +683,9 @@ class FinalLayer(nn.Module):
         with torch.amp.autocast(device_type='cuda', dtype=torch.float32):
             t_mod = self.adaln_act(t)
             mod_params, _ = self.adaln_linear(t_mod)
+            # Ensure FP32 output (needed when LoRA is applied)
+            if mod_params.dtype != torch.float32:
+                mod_params = mod_params.float()
             shift, scale = mod_params.unsqueeze(2).chunk(2, dim=-1)
 
         # Modulate

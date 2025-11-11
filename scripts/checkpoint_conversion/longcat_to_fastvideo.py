@@ -8,7 +8,8 @@ to FastVideo native implementation in a single step:
 
 1. Converts transformer weights (with QKV/KV splitting)
 2. Copies other components (VAE, text encoder, tokenizer, scheduler)
-3. Updates config files to point to native model
+3. Converts LoRA weights (cfg_step_lora, refinement_lora)
+4. Updates config files to point to native model
 
 Usage:
     python scripts/checkpoint_conversion/longcat_to_fastvideo.py \
@@ -20,6 +21,7 @@ Usage:
 import argparse
 import glob
 import json
+import re
 import shutil
 from pathlib import Path
 from collections import OrderedDict
@@ -315,6 +317,213 @@ def update_transformer_config(transformer_dir: Path):
     print("  ✓ Transformer config updated")
 
 
+# ============================================================================
+# LoRA Conversion Functions
+# ============================================================================
+
+def parse_lora_key(key: str) -> tuple[str, str]:
+    """Parse LongCat LoRA key into module path and weight type."""
+    if key.startswith("lora___lorahyphen___"):
+        key = key[len("lora___lorahyphen___"):]
+    
+    key = key.replace("___lorahyphen___", ".")
+    
+    if ".lora_down.weight" in key:
+        return key.replace(".lora_down.weight", ""), "lora_down.weight"
+    elif ".lora_up.weight" in key:
+        return key.replace(".lora_up.weight", ""), "lora_up.weight"
+    elif ".lora_up.blocks." in key:
+        match = re.match(r"(.+)\.lora_up\.blocks\.(\d+)\.weight", key)
+        if match:
+            return match.group(1), f"lora_up.blocks.{match.group(2)}.weight"
+    elif ".alpha_scale" in key:
+        return key.replace(".alpha_scale", ""), "alpha_scale"
+    elif ".lora_alpha" in key:
+        return key.replace(".lora_alpha", ""), "lora_alpha"
+    
+    raise ValueError(f"Unknown LoRA key format: {key}")
+
+
+def map_lora_module(module_path: str) -> list[tuple[str, str]]:
+    """Map LongCat module path to FastVideo paths. Returns [(path, component)]."""
+    # Self-attention QKV → Q, K, V
+    match = re.match(r"blocks\.(\d+)\.attn\.qkv", module_path)
+    if match:
+        b = match.group(1)
+        return [(f"blocks.{b}.self_attn.to_q", "q"),
+                (f"blocks.{b}.self_attn.to_k", "k"),
+                (f"blocks.{b}.self_attn.to_v", "v")]
+    
+    # Self-attention output
+    match = re.match(r"blocks\.(\d+)\.attn\.proj", module_path)
+    if match:
+        return [(f"blocks.{match.group(1)}.self_attn.to_out", "single")]
+    
+    # Cross-attention Q
+    match = re.match(r"blocks\.(\d+)\.cross_attn\.q_linear", module_path)
+    if match:
+        return [(f"blocks.{match.group(1)}.cross_attn.to_q", "single")]
+    
+    # Cross-attention KV → K, V
+    match = re.match(r"blocks\.(\d+)\.cross_attn\.kv_linear", module_path)
+    if match:
+        b = match.group(1)
+        return [(f"blocks.{b}.cross_attn.to_k", "k"),
+                (f"blocks.{b}.cross_attn.to_v", "v")]
+    
+    # FFN
+    match = re.match(r"blocks\.(\d+)\.ffn\.(w[123])", module_path)
+    if match:
+        return [(f"blocks.{match.group(1)}.ffn.{match.group(2)}", "single")]
+    
+    # AdaLN modulation
+    match = re.match(r"blocks\.(\d+)\.adaLN_modulation\.1", module_path)
+    if match:
+        return [(f"blocks.{match.group(1)}.adaln_linear_1", "single")]
+    
+    # Final layer
+    if module_path == "final_layer.adaLN_modulation.1":
+        return [("final_layer.adaln_linear", "single")]
+    if module_path == "final_layer.linear":
+        return [("final_layer.proj", "single")]
+    
+    raise ValueError(f"Unknown LoRA module: {module_path}")
+
+
+def convert_lora_weights(source_weights: dict[str, torch.Tensor], lora_name: str) -> dict[str, torch.Tensor]:
+    """Convert LongCat LoRA to FastVideo format."""
+    print(f"  Converting {lora_name}...")
+    print(f"    Source keys: {len(source_weights)}")
+    
+    converted = OrderedDict()
+    
+    # Group by module
+    modules = {}
+    for key in source_weights.keys():
+        try:
+            module_path, weight_type = parse_lora_key(key)
+            if module_path not in modules:
+                modules[module_path] = {}
+            modules[module_path][weight_type] = key
+        except ValueError:
+            continue
+    
+    # Process each module
+    for module_path, weight_keys in modules.items():
+        try:
+            targets = map_lora_module(module_path)
+        except ValueError:
+            continue
+        
+        # Get alpha_scale if present (defaults to 1.0 if missing)
+        alpha_scale = 1.0
+        if "alpha_scale" in weight_keys:
+            alpha_scale_tensor = source_weights[weight_keys["alpha_scale"]]
+            alpha_scale = alpha_scale_tensor.item() if alpha_scale_tensor.numel() == 1 else float(alpha_scale_tensor.mean())
+        
+        # Handle lora_down (lora_A)
+        if "lora_down.weight" in weight_keys:
+            lora_down = source_weights[weight_keys["lora_down.weight"]]
+            
+            if len(targets) == 1:
+                converted[f"{targets[0][0]}.lora_A"] = lora_down
+                # Compute alpha from alpha_scale and rank
+                rank = lora_down.shape[0]
+                alpha = alpha_scale * rank
+                converted[f"{targets[0][0]}.lora_alpha"] = torch.tensor(alpha, dtype=torch.float32)
+            else:
+                # Split for fused projections
+                n = len(targets)
+                rank = lora_down.shape[0] // n
+                for i, (path, _) in enumerate(targets):
+                    converted[f"{path}.lora_A"] = lora_down[i*rank:(i+1)*rank, :]
+                    # Compute alpha from alpha_scale and rank for each split
+                    alpha = alpha_scale * rank
+                    converted[f"{path}.lora_alpha"] = torch.tensor(alpha, dtype=torch.float32)
+        
+        # Handle lora_up (lora_B) - may have multiple blocks
+        lora_up_blocks = []
+        i = 0
+        while f"lora_up.blocks.{i}.weight" in weight_keys:
+            lora_up_blocks.append(source_weights[weight_keys[f"lora_up.blocks.{i}.weight"]])
+            i += 1
+        
+        if lora_up_blocks:
+            lora_up = torch.cat(lora_up_blocks, dim=0)
+        elif "lora_up.weight" in weight_keys:
+            lora_up = source_weights[weight_keys["lora_up.weight"]]
+        else:
+            continue
+        
+        # Split if needed
+        if len(targets) == 1:
+            converted[f"{targets[0][0]}.lora_B"] = lora_up
+        else:
+            n = len(targets)
+            out_dim = lora_up.shape[0] // n
+            for i, (path, _) in enumerate(targets):
+                converted[f"{path}.lora_B"] = lora_up[i*out_dim:(i+1)*out_dim, :]
+    
+    print(f"    Output keys: {len(converted)} (including lora_alpha)")
+    # Count how many lora_alpha values were added
+    alpha_count = sum(1 for k in converted.keys() if "lora_alpha" in k)
+    print(f"    Alpha values saved: {alpha_count}")
+    return converted
+
+
+def convert_loras(source_dir: Path, output_dir: Path) -> bool:
+    """Convert all LoRA files in source directory."""
+    lora_source = source_dir / "lora"
+    if not lora_source.exists():
+        print("  No LoRA directory found, skipping")
+        return False
+    
+    lora_files = list(lora_source.glob("*.safetensors"))
+    if not lora_files:
+        print("  No LoRA files found, skipping")
+        return False
+    
+    print(f"  Found {len(lora_files)} LoRA file(s)")
+    
+    # Map LoRA filenames to subdirectory names for FastVideo compatibility
+    # Each LoRA gets its own directory under lora/
+    lora_subdir_mapping = {
+        "cfg_step_lora.safetensors": "distilled",
+        "refinement_lora.safetensors": "refinement",
+    }
+    
+    for lora_file in lora_files:
+        try:
+            # Determine output subdirectory - use mapping if available, otherwise generic name
+            if lora_file.name in lora_subdir_mapping:
+                lora_subdir_name = lora_subdir_mapping[lora_file.name]
+            else:
+                # For unknown LoRAs, create subdirectory based on filename
+                lora_subdir_name = lora_file.stem
+            
+            lora_output = output_dir / "lora" / lora_subdir_name
+            lora_output.mkdir(parents=True, exist_ok=True)
+            
+            # Load
+            source_weights = load_file(str(lora_file))
+            
+            # Convert
+            converted = convert_lora_weights(source_weights, lora_file.stem)
+            
+            # Save
+            output_file = lora_output / lora_file.name
+            save_file(converted, str(output_file))
+            
+            size_mb = output_file.stat().st_size / (1024**2)
+            print(f"    ✓ {lora_file.name} → lora/{lora_subdir_name}/ ({size_mb:.1f} MB)")
+        
+        except Exception as e:
+            print(f"    ❌ Failed to convert {lora_file.name}: {e}")
+            return False
+    
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Convert LongCat weights to FastVideo native format"
@@ -399,26 +608,22 @@ def main():
     print()
     
     # Step 2: Copy other components
-    print("[Step 2/4] Copying other components...")
+    print("[Step 2/5] Copying other components...")
     output_dir.mkdir(parents=True, exist_ok=True)
     
     components = ["vae", "text_encoder", "tokenizer", "scheduler"]
     for component in components:
         copy_component(source_dir, output_dir, component)
     
-    # Copy LoRA if exists
-    lora_source = source_dir / "lora"
-    if lora_source.exists():
-        lora_dest = output_dir / "lora"
-        if lora_dest.exists():
-            shutil.rmtree(lora_dest)
-        shutil.copytree(lora_source, lora_dest)
-        print(f"  ✓ lora copied")
-    
     print()
     
-    # Step 3: Update transformer config
-    print("[Step 3/4] Updating transformer config...")
+    # Step 3: Convert LoRA weights
+    print("[Step 3/5] Converting LoRA weights...")
+    convert_loras(source_dir, output_dir)
+    print()
+    
+    # Step 4: Update transformer config
+    print("[Step 4/5] Updating transformer config...")
     
     # Copy config.json from source if exists
     source_config = transformer_source / "config.json"
@@ -430,8 +635,8 @@ def main():
     update_transformer_config(transformer_output)
     print()
     
-    # Step 4: Create model_index.json
-    print("[Step 4/4] Creating model_index.json...")
+    # Step 5: Create model_index.json
+    print("[Step 5/5] Creating model_index.json...")
     model_index_path = output_dir / "model_index.json"
     with open(model_index_path, 'w') as f:
         json.dump(create_model_index(), f, indent=2)
@@ -443,16 +648,36 @@ def main():
     print("=" * 60)
     print(f"Native weights ready at: {output_dir}")
     print()
+    print("Converted components:")
+    print("  ✓ Transformer (native FastVideo implementation)")
+    print("  ✓ VAE, text encoder, tokenizer, scheduler")
+    if (output_dir / "lora").exists():
+        lora_dirs = [d for d in (output_dir / "lora").iterdir() if d.is_dir()]
+        if lora_dirs:
+            print(f"  ✓ LoRA weights ({len(lora_dirs)} adapters)")
+            for lora_dir in sorted(lora_dirs):
+                print(f"    - lora/{lora_dir.name}/")
+    print()
     print("Next steps:")
-    print("  1. Test loading the model:")
+    print()
+    print("  1. Test basic generation:")
     print("     from fastvideo import VideoGenerator")
     print(f"     generator = VideoGenerator.from_pretrained('{output_dir}')")
-    print()
-    print("  2. Generate a test video:")
     print("     video = generator.generate_video(")
     print("         prompt='A cat playing piano',")
     print("         num_inference_steps=50")
     print("     )")
+    print()
+    if (output_dir / "lora" / "distilled").exists():
+        print("  2. Test distilled generation (16 steps with LoRA):")
+        print(f"     generator = VideoGenerator.from_pretrained('{output_dir}',")
+        print(f"         lora_path='{output_dir}/lora/distilled',")
+        print("         lora_nickname='distilled')")
+        print("     video = generator.generate_video(")
+        print("         prompt='A cat playing piano',")
+        print("         num_inference_steps=16,")
+        print("         guidance_scale=1.0)")
+    print()
     print()
     
     return 0

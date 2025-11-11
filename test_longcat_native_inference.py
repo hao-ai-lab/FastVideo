@@ -28,12 +28,13 @@ def test_native_inference(
     model_path: str,
     prompt: str,
     output_path: str,
+    negative_prompt: str = "",
     num_inference_steps: int = 50,
     guidance_scale: float = 4.0,
     height: int = 480,
     width: int = 832,
-    num_frames: int = 65,
-    fps: int = 16,
+    num_frames: int = 93,
+    fps: int = 15,
     seed: int = 42,
     num_gpus: int = 1,
 ):
@@ -44,12 +45,13 @@ def test_native_inference(
         model_path: Path to converted native weights
         prompt: Text prompt for video generation
         output_path: Path to save output video
+        negative_prompt: Negative prompt for video generation (default: "")
         num_inference_steps: Number of denoising steps
         guidance_scale: CFG guidance scale
         height: Video height (default: 480)
         width: Video width (default: 832)
-        num_frames: Number of frames (default: 65)
-        fps: Frames per second (default: 16)
+        num_frames: Number of frames (default: 93)
+        fps: Frames per second (default: 15)
         seed: Random seed for reproducibility
         num_gpus: Number of GPUs to use
     """
@@ -59,6 +61,8 @@ def test_native_inference(
     print("=" * 80)
     print(f"Model path: {model_path}")
     print(f"Prompt: {prompt}")
+    if negative_prompt:
+        print(f"Negative prompt: {negative_prompt}")
     print(f"Output: {output_path}")
     print(f"Resolution: {width}x{height} @ {num_frames} frames")
     print(f"Inference steps: {num_inference_steps}")
@@ -109,6 +113,7 @@ def test_native_inference(
         
         video = generator.generate_video(
             prompt=prompt,
+            negative_prompt=negative_prompt if negative_prompt else None,
             num_inference_steps=num_inference_steps,
             guidance_scale=guidance_scale,
             height=height,
@@ -175,8 +180,14 @@ def main():
     parser.add_argument(
         "--prompt",
         type=str,
-        default="A cat playing piano in a cozy living room",
+        default="In a realistic photography style, a white boy around seven or eight years old sits on a park bench, wearing a light blue T-shirt, denim shorts, and white sneakers. He holds an ice cream cone with vanilla and chocolate flavors, and beside him is a medium-sized golden Labrador. Smiling, the boy offers the ice cream to the dog, who eagerly licks it with its tongue. The sun is shining brightly, and the background features a green lawn and several tall trees, creating a warm and loving scene.",
         help="Text prompt for video generation",
+    )
+    parser.add_argument(
+        "--negative-prompt",
+        type=str,
+        default="Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards",
+        help="Negative prompt for video generation",
     )
     parser.add_argument(
         "--output",
@@ -211,14 +222,14 @@ def main():
     parser.add_argument(
         "--num-frames",
         type=int,
-        default=65,
-        help="Number of frames (default: 65)",
+        default=93,
+        help="Number of frames (default: 93)",
     )
     parser.add_argument(
         "--fps",
         type=int,
-        default=16,
-        help="Frames per second (default: 16)",
+        default=15,
+        help="Frames per second (default: 15)",
     )
     parser.add_argument(
         "--seed",
@@ -239,6 +250,7 @@ def main():
         model_path=args.model_path,
         prompt=args.prompt,
         output_path=args.output,
+        negative_prompt=args.negative_prompt,
         num_inference_steps=args.steps,
         guidance_scale=args.guidance_scale,
         height=args.height,
