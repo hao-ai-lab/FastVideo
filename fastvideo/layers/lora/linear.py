@@ -108,12 +108,12 @@ class BaseLayerWithLoRA(nn.Module):
             A)  # share storage with weights in the pipeline
         self.lora_B = torch.nn.Parameter(B)
         self.disable_lora = False
-        
+
         # Store rank and alpha directly
         rank = A.shape[0]  # rank is the first dimension of A
         self.lora_rank = rank
         self.lora_alpha = int(lora_alpha) if lora_alpha is not None else rank
-        
+
         if not training_mode:
             self.merge_lora_weights()
         self.lora_path = lora_path
@@ -141,16 +141,16 @@ class BaseLayerWithLoRA(nn.Module):
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(
                 get_local_torch_device()).full_tensor()
-            
+
             # Calculate alpha/rank scaling factor
             if self.lora_alpha is not None and self.lora_rank is not None and self.lora_rank != 0:
                 alpha_scale = self.lora_alpha / self.lora_rank
             else:
                 alpha_scale = 1.0
-            
+
             # Apply LoRA with alpha scaling
-            data += alpha_scale * (self.slice_lora_b_weights(self.lora_B).to(data)
-                                   @ self.slice_lora_a_weights(self.lora_A).to(data))
+            data += alpha_scale * (self.slice_lora_b_weights(self.lora_B).to(
+                data) @ self.slice_lora_a_weights(self.lora_A).to(data))
             unsharded_base_layer.weight = nn.Parameter(data.to(current_device))
             if isinstance(getattr(self.base_layer, "bias", None), DTensor):
                 unsharded_base_layer.bias = nn.Parameter(
@@ -169,13 +169,13 @@ class BaseLayerWithLoRA(nn.Module):
         else:
             current_device = self.base_layer.weight.data.device
             data = self.base_layer.weight.data.to(get_local_torch_device())
-            
+
             # Calculate alpha/rank scaling factor
             if self.lora_alpha is not None and self.lora_rank is not None and self.lora_rank != 0:
                 alpha_scale = self.lora_alpha / self.lora_rank
             else:
                 alpha_scale = 1.0
-            
+
             # Apply LoRA with alpha scaling
             data += alpha_scale * \
                 (self.slice_lora_b_weights(self.lora_B.to(data)) @ self.slice_lora_a_weights(self.lora_A.to(data)))
