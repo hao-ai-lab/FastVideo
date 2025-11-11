@@ -42,11 +42,11 @@ def run_worker():
         "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         "--data_path", "data/crush-smol_processed_t2v/combined_parquet_dataset",
         "--validation_dataset_file", "examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json",
-        "--train_batch_size", "4",
+        "--train_batch_size", "2",
         "--num_latent_t", "4",
-        "--num_gpus", "2",
+        "--num_gpus", NUM_GPUS_PER_NODE,
         "--sp_size", "2",
-        "--tp_size", "2",
+        "--tp_size", "1",
         "--hsdp_replicate_dim", "1",
         "--hsdp_shard_dim", "2",
         "--train_sp_batch_size", "1",
@@ -124,7 +124,7 @@ def test_distributed_training():
         print(f"Process failed with return code: {process.returncode}")
         raise subprocess.CalledProcessError(process.returncode, cmd, process.stdout, process.stderr)
 
-    summary_file = 'data/mfu_calculation/tracker/wandb/latest-run/files/wandb-summary.json'
+    summary_file = 'data/wan_finetune_test/tracker/wandb/latest-run/files/wandb-summary.json'
 
     wandb_summary = json.load(open(summary_file))
     
