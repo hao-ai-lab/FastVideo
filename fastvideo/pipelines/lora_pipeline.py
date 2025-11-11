@@ -183,9 +183,20 @@ class LoRAPipeline(ComposedPipelineBase):
             lora_param_names_mapping_fn = get_param_names_mapping(
                 self.modules["transformer"].lora_param_names_mapping)
 
+            # Extract alpha values and weights in a single pass
+            alpha_values = {}
             to_merge_params: defaultdict[Hashable,
                                          dict[Any, Any]] = defaultdict(dict)
             for name, weight in lora_state_dict.items():
+                if "lora_alpha" in name:
+                    # Extract alpha value
+                    layer_name = name.replace("diffusion_model.", "").replace(".lora_alpha", "")
+                    layer_name, _, _ = lora_param_names_mapping_fn(layer_name)
+                    target_name, _, _ = param_names_mapping_fn(layer_name)
+                    alpha_values[target_name] = weight.item() if weight.numel() == 1 else float(weight.mean())
+                    continue
+                
+                # Extract weights (lora_A and lora_B)
                 name = name.replace("diffusion_model.", "")
                 name = name.replace(".weight", "")
                 name, _, _ = lora_param_names_mapping_fn(name)
@@ -227,9 +238,15 @@ class LoRAPipeline(ComposedPipelineBase):
             lora_B_name = name + ".lora_B"
             if lora_A_name in self.lora_adapters[lora_nickname]\
                 and lora_B_name in self.lora_adapters[lora_nickname]:
+                # Get alpha value for this layer (defaults to None if not present)
+                lora_A = self.lora_adapters[lora_nickname][lora_A_name]
+                lora_B = self.lora_adapters[lora_nickname][lora_B_name]
+                alpha = alpha_values.get(name, None) if adapter_updated else None
+                
                 layer.set_lora_weights(
-                    self.lora_adapters[lora_nickname][lora_A_name],
-                    self.lora_adapters[lora_nickname][lora_B_name],
+                    lora_A,
+                    lora_B,
+                    lora_alpha=alpha,
                     training_mode=self.fastvideo_args.training_mode,
                     lora_path=lora_path)
                 adapted_count += 1
