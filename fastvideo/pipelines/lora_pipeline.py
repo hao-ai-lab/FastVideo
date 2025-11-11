@@ -28,9 +28,7 @@ class LoRAPipeline(ComposedPipelineBase):
     TODO: support training.
     """
     lora_adapters: dict[str, dict[str, torch.Tensor]] = defaultdict(
-        dict)  # state dicts of loaded lora adapters
-    alpha_values: dict[str, dict[str, float]] = defaultdict(
-        dict)  # alpha values for each adapter and layer
+        dict)  # state dicts of loaded lora adapters (includes lora_A, lora_B, and lora_alpha)
     cur_adapter_name: str = ""
     cur_adapter_path: str = ""
     lora_layers: dict[str, BaseLayerWithLoRA] = {}
@@ -192,17 +190,19 @@ class LoRAPipeline(ComposedPipelineBase):
                 # Extract weights (lora_A, lora_B, and lora_alpha)
                 name = name.replace("diffusion_model.", "")
                 name = name.replace(".weight", "")
-
+                
                 if "lora_alpha" in name:
-                    # Apply BOTH mappings to alpha (same as lora_A/lora_B) for consistency
+                    # Store alpha with minimal mapping - same processing as lora_A/lora_B
+                    # but store in lora_adapters with ".lora_alpha" suffix
                     layer_name = name.replace(".lora_alpha", "")
                     layer_name, _, _ = lora_param_names_mapping_fn(layer_name)
                     target_name, _, _ = param_names_mapping_fn(layer_name)
-                    # Store with fully-mapped name in self.alpha_values
-                    self.alpha_values[lora_nickname][target_name] = weight.item(
+                    # Store alpha alongside weights with same target_name base
+                    alpha_key = target_name + ".lora_alpha"
+                    self.lora_adapters[lora_nickname][alpha_key] = weight.item(
                     ) if weight.numel() == 1 else float(weight.mean())
                     continue
-
+                
                 name, _, _ = lora_param_names_mapping_fn(name)
                 target_name, merge_index, num_params_to_merge = param_names_mapping_fn(
                     name)
@@ -240,14 +240,15 @@ class LoRAPipeline(ComposedPipelineBase):
         for name, layer in self.lora_layers.items():
             lora_A_name = name + ".lora_A"
             lora_B_name = name + ".lora_B"
+            lora_alpha_name = name + ".lora_alpha"
             if lora_A_name in self.lora_adapters[lora_nickname]\
                 and lora_B_name in self.lora_adapters[lora_nickname]:
                 # Get alpha value for this layer (defaults to None if not present)
                 lora_A = self.lora_adapters[lora_nickname][lora_A_name]
                 lora_B = self.lora_adapters[lora_nickname][lora_B_name]
-                # Simple lookup using the same base name
-                alpha = self.alpha_values[lora_nickname].get(
-                    name) if adapter_updated else None
+                # Simple lookup - alpha stored with same naming scheme as lora_A/lora_B
+                alpha = self.lora_adapters[lora_nickname].get(
+                    lora_alpha_name) if adapter_updated else None
 
                 layer.set_lora_weights(
                     lora_A,
