@@ -149,10 +149,10 @@ def test_distributed_training():
         # Calculate achieved FLOPs (forward + backward)
         # Per layer, per batch, forward pass:
         # - Linear ops (QKV, out_proj, MLP): 12 * hidden_dim^2 * seq_len
-        # - Attention ops (QK^T, Attn*V): 2 * seq_len^2 * hidden_dim
+        # - Attention ops (QK^T, Attn*V): 4 * seq_len^2 * hidden_dim
         # Training multiplier: 3x (1 forward + 2 backward)
         linear_flops = 12 * hidden_dim * hidden_dim * seq_len
-        attention_flops = 2 * seq_len * seq_len * hidden_dim
+        attention_flops = 4 * seq_len * seq_len * hidden_dim
         flops_per_layer = linear_flops + attention_flops
         achieved_flops = batch_size * flops_per_layer * num_layers * 3
 
