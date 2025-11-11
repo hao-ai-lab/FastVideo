@@ -180,6 +180,10 @@ class ReplicatedLinear(LinearBase):
         prefix: The name of the layer in the state dict, including all parents
                         (e.g. model.layers.0.qkv_proj)
     """
+    
+    # Class-level set to track unique shapes and dictionary to map shapes to layer types
+    _unique_shapes = set()
+    _shape_to_layer_types = {}
 
     def __init__(self,
                  input_size: int,
@@ -197,7 +201,9 @@ class ReplicatedLinear(LinearBase):
                          prefix=prefix)
 
         # All the linear layer supports quant method.
-        assert self.quant_method is not None
+        if self.quant_method is None:
+            self.quant_method = UnquantizedLinearMethod()
+        
         self.quant_method.create_weights(self,
                                          self.input_size, [self.output_size],
                                          self.input_size,
@@ -232,8 +238,25 @@ class ReplicatedLinear(LinearBase):
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, Parameter | None]:
         bias = self.bias if not self.skip_bias_add else None
-        assert self.quant_method is not None
+        if self.quant_method is None:
+            self.quant_method = UnquantizedLinearMethod()
+        
         output = self.quant_method.apply(self, x, bias)
+        
+        # Create a shape key for uniqueness checking
+        shape_key = (x.shape, output.shape)
+        
+        # Track unique shapes and map them to layer types
+        if shape_key not in self._unique_shapes:
+            self._unique_shapes.add(shape_key)
+            self._shape_to_layer_types[shape_key] = []
+            print(f"Layer: {self.prefix} | input shape: {x.shape} --> output shape: {output.shape}, Quant Method: {self.quant_method.__class__.__name__}")
+        
+        # Add this layer type to the list for this shape if not already present
+        layer_type = self.__class__.__name__
+        if layer_type not in self._shape_to_layer_types[shape_key]:
+            self._shape_to_layer_types[shape_key].append(layer_type)
+        
         output_bias = self.bias if self.skip_bias_add else None
         return output, output_bias
 
@@ -242,6 +265,28 @@ class ReplicatedLinear(LinearBase):
         s += f", output_features={self.output_size}"
         s += f", bias={self.bias is not None}"
         return s
+    
+    @classmethod
+    def get_shape_mapping(cls) -> dict:
+        """Get the mapping from (input_shape, output_shape) to layer types."""
+        return cls._shape_to_layer_types.copy()
+    
+    @classmethod
+    def print_shape_summary(cls):
+        """Print a summary of all unique shapes and their layer types."""
+        if not cls._shape_to_layer_types:
+            print("No shapes have been processed yet.")
+            return
+        
+        print(f"\n=== Matrix Multiplication Shape Summary ===")
+        print(f"Total unique shapes: {len(cls._shape_to_layer_types)}")
+        print()
+        
+        for i, (shape_key, layer_types) in enumerate(cls._shape_to_layer_types.items(), 1):
+            input_shape, output_shape = shape_key
+            print(f"{i}. Input: {input_shape} → Output: {output_shape}")
+            print(f"   Layer types: {', '.join(layer_types)}")
+            print()
 
 
 class ColumnParallelLinear(LinearBase):
@@ -298,7 +343,9 @@ class ColumnParallelLinear(LinearBase):
         if output_sizes is None:
             output_sizes = [output_size]
 
-        assert self.quant_method is not None
+        if self.quant_method is None:
+            self.quant_method = UnquantizedLinearMethod()
+        
         self.quant_method.create_weights(
             layer=self,
             input_size_per_partition=self.input_size_per_partition,
@@ -359,7 +406,8 @@ class ColumnParallelLinear(LinearBase):
         bias = self.bias if not self.skip_bias_add else None
 
         # Matrix multiply.
-        assert self.quant_method is not None
+        if self.quant_method is None:
+            self.quant_method = UnquantizedLinearMethod()
         output_parallel = self.quant_method.apply(self, input_, bias)
         if self.gather_output:
             # All-gather across the partitions.
@@ -866,7 +914,9 @@ class RowParallelLinear(LinearBase):
         self.input_is_parallel = input_is_parallel
         self.reduce_results = reduce_results
 
-        assert self.quant_method is not None
+        if self.quant_method is None:
+            self.quant_method = UnquantizedLinearMethod()
+        
         self.quant_method.create_weights(
             layer=self,
             input_size_per_partition=self.input_size_per_partition,
@@ -935,7 +985,8 @@ class RowParallelLinear(LinearBase):
             input_parallel = splitted_input[tp_rank].contiguous()
 
         # Matrix multiply.
-        assert self.quant_method is not None
+        if self.quant_method is None:
+            self.quant_method = UnquantizedLinearMethod()
         # Only fuse bias add into GEMM for rank 0 (this ensures that
         # bias will not get added more than once in TP>1 case)
         bias_ = None if (self.tp_rank > 0 or self.skip_bias_add) else self.bias

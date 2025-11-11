@@ -24,6 +24,8 @@ from fastvideo.models.loader.utils import (get_param_names_mapping,
                                            hf_to_custom_state_dict)
 from fastvideo.models.loader.weight_utils import safetensors_weights_iterator
 from fastvideo.utils import set_mixed_precision_policy
+from fastvideo.layers.quantization.fp8_config import convert_model_to_fp8
+from fastvideo.layers.quantization.fp4_config import convert_model_to_fp4
 
 logger = init_logger(__name__)
 
@@ -56,7 +58,9 @@ def set_default_dtype(dtype: torch.dtype) -> Generator[None, None, None]:
         torch.set_default_dtype(old_dtype)
 
 
-# Supports optional torch.compile for FSDP-wrapped models during training
+USE_FP8 = False
+USE_FP4 = False
+# TODO(PY): add compile option
 def maybe_load_fsdp_model(
     model_cls: type[nn.Module],
     init_params: dict[str, Any],
@@ -152,6 +156,10 @@ def maybe_load_fsdp_model(
         # Avoid unintended computation graph accumulation during inference
         if isinstance(p, torch.nn.Parameter):
             p.requires_grad = False
+    if USE_FP4:
+        convert_model_to_fp4(model)
+    elif USE_FP8:
+        convert_model_to_fp8(model)
 
     compile_in_loader = enable_torch_compile and training_mode
     if compile_in_loader:

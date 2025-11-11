@@ -30,6 +30,7 @@ from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed,
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import CachableDiT
 from fastvideo.platforms import AttentionBackendEnum, current_platform
+from fastvideo.layers.quantization import QuantizationConfig
 
 from fastvideo.distributed.parallel_state import get_sp_world_size
 from fastvideo.distributed.utils import create_attention_mask_for_padding
@@ -108,7 +109,9 @@ class WanSelfAttention(nn.Module):
                  window_size=(-1, -1),
                  qk_norm=True,
                  eps=1e-6,
-                 parallel_attention=False) -> None:
+                 parallel_attention=False,
+                 quant_config: QuantizationConfig | None = None,
+                 prefix: str = "") -> None:
         assert dim % num_heads == 0
         super().__init__()
         self.dim = dim
@@ -120,10 +123,10 @@ class WanSelfAttention(nn.Module):
         self.parallel_attention = parallel_attention
 
         # layers
-        self.to_q = ReplicatedLinear(dim, dim)
-        self.to_k = ReplicatedLinear(dim, dim)
-        self.to_v = ReplicatedLinear(dim, dim)
-        self.to_out = ReplicatedLinear(dim, dim)
+        self.to_q = ReplicatedLinear(dim, dim, quant_config=quant_config, prefix=f"{prefix}.to_q")
+        self.to_k = ReplicatedLinear(dim, dim, quant_config=quant_config, prefix=f"{prefix}.to_k")
+        self.to_v = ReplicatedLinear(dim, dim, quant_config=quant_config, prefix=f"{prefix}.to_v")
+        self.to_out = ReplicatedLinear(dim, dim, quant_config=quant_config, prefix=f"{prefix}.to_out")
         self.norm_q = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
@@ -196,13 +199,15 @@ class WanI2VCrossAttention(WanSelfAttention):
         qk_norm=True,
         eps=1e-6,
         supported_attention_backends: tuple[AttentionBackendEnum, ...]
-        | None = None
+        | None = None,
+        quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
     ) -> None:
         super().__init__(dim, num_heads, window_size, qk_norm, eps,
-                         supported_attention_backends)
+                         supported_attention_backends, quant_config=quant_config, prefix=prefix)
 
-        self.add_k_proj = ReplicatedLinear(dim, dim)
-        self.add_v_proj = ReplicatedLinear(dim, dim)
+        self.add_k_proj = ReplicatedLinear(dim, dim, quant_config=quant_config, prefix=f"{prefix}.add_k_proj")
+        self.add_v_proj = ReplicatedLinear(dim, dim, quant_config=quant_config, prefix=f"{prefix}.add_v_proj")
         self.norm_added_k = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_added_q = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
@@ -248,16 +253,17 @@ class WanTransformerBlock(nn.Module):
                  added_kv_proj_dim: int | None = None,
                  supported_attention_backends: tuple[AttentionBackendEnum, ...]
                  | None = None,
+                 quant_config: QuantizationConfig | None = None,
                  prefix: str = ""):
         super().__init__()
 
         # 1. Self-attention
         self.norm1 = FP32LayerNorm(dim, eps, elementwise_affine=False)
-        self.to_q = ReplicatedLinear(dim, dim, bias=True)
-        self.to_k = ReplicatedLinear(dim, dim, bias=True)
-        self.to_v = ReplicatedLinear(dim, dim, bias=True)
+        self.to_q = ReplicatedLinear(dim, dim, bias=True, quant_config=quant_config, prefix=f"{prefix}.to_q")
+        self.to_k = ReplicatedLinear(dim, dim, bias=True, quant_config=quant_config, prefix=f"{prefix}.to_k")
+        self.to_v = ReplicatedLinear(dim, dim, bias=True, quant_config=quant_config, prefix=f"{prefix}.to_v")
 
-        self.to_out = ReplicatedLinear(dim, dim, bias=True)
+        self.to_out = ReplicatedLinear(dim, dim, bias=True, quant_config=quant_config, prefix=f"{prefix}.to_out")
         self.attn1 = DistributedAttention(
             num_heads=num_heads,
             head_size=dim // num_heads,
@@ -292,13 +298,17 @@ class WanTransformerBlock(nn.Module):
             self.attn2 = WanI2VCrossAttention(dim,
                                               num_heads,
                                               qk_norm=qk_norm,
-                                              eps=eps)
+                                              eps=eps,
+                                              quant_config=quant_config,
+                                              prefix=f"{prefix}.attn2")
         else:
             # T2V
             self.attn2 = WanT2VCrossAttention(dim,
                                               num_heads,
                                               qk_norm=qk_norm,
-                                              eps=eps)
+                                              eps=eps,
+                                              quant_config=quant_config,
+                                              prefix=f"{prefix}.attn2")
         self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(
             dim,
             norm_type="layer",
@@ -308,7 +318,7 @@ class WanTransformerBlock(nn.Module):
             compute_dtype=torch.float32)
 
         # 3. Feed-forward
-        self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh")
+        self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh", quant_config=quant_config, prefix=f"{prefix}.ffn")
         self.mlp_residual = ScaleResidual()
 
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
@@ -402,17 +412,17 @@ class WanTransformerBlock_VSA(nn.Module):
                  added_kv_proj_dim: int | None = None,
                  supported_attention_backends: tuple[AttentionBackendEnum, ...]
                  | None = None,
+                 quant_config: QuantizationConfig | None = None,
                  prefix: str = ""):
         super().__init__()
 
         # 1. Self-attention
         self.norm1 = FP32LayerNorm(dim, eps, elementwise_affine=False)
-        self.to_q = ReplicatedLinear(dim, dim, bias=True)
-        self.to_k = ReplicatedLinear(dim, dim, bias=True)
-        self.to_v = ReplicatedLinear(dim, dim, bias=True)
-        self.to_gate_compress = ReplicatedLinear(dim, dim, bias=True)
-
-        self.to_out = ReplicatedLinear(dim, dim, bias=True)
+        self.to_q = ReplicatedLinear(dim, dim, bias=True, quant_config=quant_config, prefix=f"{prefix}.to_q")
+        self.to_k = ReplicatedLinear(dim, dim, bias=True, quant_config=quant_config, prefix=f"{prefix}.to_k")
+        self.to_v = ReplicatedLinear(dim, dim, bias=True, quant_config=quant_config, prefix=f"{prefix}.to_v")
+        self.to_gate_compress = ReplicatedLinear(dim, dim, bias=True, quant_config=quant_config, prefix=f"{prefix}.to_gate_compress")
+        self.to_out = ReplicatedLinear(dim, dim, bias=True, quant_config=quant_config, prefix=f"{prefix}.to_out")
         self.attn1 = DistributedAttention_VSA(
             num_heads=num_heads,
             head_size=dim // num_heads,
@@ -447,13 +457,17 @@ class WanTransformerBlock_VSA(nn.Module):
             self.attn2 = WanI2VCrossAttention(dim,
                                               num_heads,
                                               qk_norm=qk_norm,
-                                              eps=eps)
+                                              eps=eps,
+                                              quant_config=quant_config,
+                                              prefix=f"{prefix}.attn2")
         else:
             # T2V
             self.attn2 = WanT2VCrossAttention(dim,
                                               num_heads,
                                               qk_norm=qk_norm,
-                                              eps=eps)
+                                              eps=eps,
+                                              quant_config=quant_config,
+                                              prefix=f"{prefix}.attn2")
         self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(
             dim,
             norm_type="layer",
@@ -463,7 +477,7 @@ class WanTransformerBlock_VSA(nn.Module):
             compute_dtype=torch.float32)
 
         # 3. Feed-forward
-        self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh")
+        self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh", quant_config=quant_config, prefix=f"{prefix}.ffn")
         self.mlp_residual = ScaleResidual()
 
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
@@ -549,6 +563,7 @@ class WanTransformer3DModel(CachableDiT):
     def __init__(self, config: WanVideoConfig, hf_config: dict[str,
                                                                Any]) -> None:
         super().__init__(config=config, hf_config=hf_config)
+        self.quant_config = config.quant_config
 
         inner_dim = config.num_attention_heads * config.attention_head_dim
         self.hidden_size = config.hidden_size
@@ -587,6 +602,7 @@ class WanTransformer3DModel(CachableDiT):
                               config.eps,
                               config.added_kv_proj_dim,
                               self._supported_attention_backends,
+                              quant_config=config.quant_config,
                               prefix=f"{config.prefix}.blocks.{i}")
             for i in range(config.num_layers)
         ])

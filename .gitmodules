@@ -5,3 +5,6 @@
 [submodule "csrc/attn/sliding_tile_attn/tk"]
 	path = csrc/attn/sliding_tile_attn/tk
 	url = https://github.com/HazyResearch/ThunderKittens.git
+[submodule "DeepGEMM"]
+	path = DeepGEMM
+	url = https://github.com/deepseek-ai/DeepGEMM
