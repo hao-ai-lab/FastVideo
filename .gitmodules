@@ -5,6 +5,10 @@
 	path = fastvideo-kernel/include/cutlass
 	url = https://github.com/NVIDIA/cutlass.git
 
+[submodule "DeepGEMM"]
+	path = DeepGEMM
+	url = https://github.com/deepseek-ai/DeepGEMM
+
 [submodule "fastvideo/DeepGEMM"]
 	path = fastvideo/DeepGEMM
 	url = https://github.com/deepseek-ai/DeepGEMM
