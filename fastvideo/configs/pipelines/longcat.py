@@ -1,6 +1,9 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
+import html
 
+import ftfy
+import regex as re
 import torch
 
 from fastvideo.configs.models import DiTConfig, VAEConfig
@@ -35,6 +38,34 @@ class LongCatDiTArchConfig(DiTArchConfig):
     patch_size: list[int] = field(default_factory=lambda: [1, 2, 2])
     cp_split_hw: list[int] | None = None
     bsa_params: dict | None = None
+
+
+def longcat_preprocess_text(prompt: str) -> str:
+    """Clean and preprocess text like original LongCat implementation.
+    
+    This function applies the same text cleaning pipeline as the original
+    LongCat-Video implementation to ensure identical tokenization results.
+    
+    Steps:
+    1. basic_clean: Fix unicode issues and unescape HTML entities
+    2. whitespace_clean: Normalize whitespace to single spaces
+    
+    Args:
+        prompt: Raw input text prompt
+        
+    Returns:
+        Cleaned and normalized text prompt
+    """
+    # basic_clean: fix unicode and HTML entities
+    text = ftfy.fix_text(prompt)
+    text = html.unescape(html.unescape(text))
+    text = text.strip()
+    
+    # whitespace_clean: normalize whitespace
+    text = re.sub(r"\s+", " ", text)
+    text = text.strip()
+    
+    return text
 
 
 def umt5_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
@@ -84,6 +115,9 @@ class LongCatT2V480PConfig(PipelineConfig):
 
     # Text encoding (UMT5 uses T5-like config; postprocess to fixed 512)
     text_encoder_configs: tuple[T5Config, ...] = field(default_factory=lambda: (T5Config(),))
+    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
+        default_factory=lambda: (longcat_preprocess_text,)
+    )
     postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor], ...] = field(
         default_factory=lambda: (umt5_postprocess_text,)
     )

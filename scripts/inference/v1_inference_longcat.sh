@@ -53,7 +53,7 @@ fastvideo generate \
     --num-gpus $num_gpus \
     --dit-cpu-offload False \
     --vae-cpu-offload False \
-    --text-encoder-cpu-offload True \
+    --text-encoder-cpu-offload False \
     --pin-cpu-memory False \
     --height 480 \
     --width 832 \

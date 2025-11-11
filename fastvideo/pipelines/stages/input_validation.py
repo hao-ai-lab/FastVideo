@@ -41,7 +41,7 @@ class InputValidationStage(PipelineStage):
         batch.seeds = seeds
         # Peiyuan: using GPU seed will cause A100 and H100 to generate different results...
         batch.generator = [
-            torch.Generator("cpu").manual_seed(seed) for seed in seeds
+            torch.Generator("cuda").manual_seed(seed) for seed in seeds
         ]
 
     def forward(
