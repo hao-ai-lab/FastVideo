@@ -176,3 +176,13 @@ class SelfForcingWanT2V480PConfig(WanT2V480PConfig):
     dmd_denoising_steps: list[int] | None = field(
         default_factory=lambda: [1000, 750, 500, 250])
     warp_denoising_step: bool = True
+
+
+@dataclass
+class SelfForcingWan2_2_T2V480PConfig(Wan2_2_T2V_A14B_Config):
+    is_causal: bool = True
+    flow_shift: float | None = 12.0
+    boundary_ratio: float | None = 0.875
+    dmd_denoising_steps: list[int] | None = field(
+        default_factory=lambda: [1000, 850, 700, 550, 350, 275, 200, 125])
+    warp_denoising_step: bool = True
