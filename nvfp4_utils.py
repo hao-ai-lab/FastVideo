@@ -22,6 +22,8 @@ def _compute_quant_and_scale(src_tensor, valid_src_mask, mx_tensor_dtype: tl.con
     abs_tensor = tl.reshape(abs_tensor, [BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, MXFP_BLOCK_SIZE])
     
     global_max_val = tl.max(abs_tensor)
+    # Avoid division by zero: if all values are padding (max is 0), use a default scale
+    global_max_val = tl.maximum(global_max_val, 1e-8)
     s_enc = (6 * 448) / global_max_val
     s_dec = (1 / s_enc)
     max_val = tl.max(abs_tensor, axis=2, keep_dims=True)  # (BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, 1)  # per block maxima
@@ -101,6 +103,116 @@ def _compute_quant_and_scale(src_tensor, valid_src_mask, mx_tensor_dtype: tl.con
         out_tensor = evens | (odds << 4)
 
     return out_tensor, dequant_scale, s_dec
+
+@triton.jit
+def _compute_dequant(
+    mx_tensor,
+    scale,
+    s_dec,
+    BLOCK_SIZE_OUT_DIM: tl.constexpr,
+    BLOCK_SIZE_QUANT_DIM: tl.constexpr,
+    dst_dtype: tl.constexpr,
+):
+    tl.static_assert(BLOCK_SIZE_QUANT_DIM % MXFP_BLOCK_SIZE == 0, f"Block size along quantization block must be a multiple of {MXFP_BLOCK_SIZE=}")
+    # uint8 signifies two fp4 e2m1 values packed into a single byte
+    mx_tensor_dtype: tl.constexpr = mx_tensor.dtype
+    tl.static_assert(dst_dtype == tl.float16 or dst_dtype == tl.bfloat16 or dst_dtype == tl.float32)
+    tl.static_assert(
+        mx_tensor_dtype == tl.uint8
+        or ((mx_tensor_dtype == tl.float8e4nv or mx_tensor_dtype == tl.float8e5) or mx_tensor_dtype == dst_dtype),
+        "mx_tensor_ptr must be uint8 or float8 or dst_dtype")
+    tl.static_assert(scale.dtype == tl.uint8, "scale must be uint8")
+
+    # Determine if we are dealing with fp8 types.
+    is_fp4: tl.constexpr = mx_tensor_dtype == tl.uint8
+    is_fp8: tl.constexpr = mx_tensor_dtype == tl.float8e4nv or mx_tensor_dtype == tl.float8e5
+    K_DIVISOR: tl.constexpr = 2 if is_fp4 else 1
+    BLOCK_SIZE_QUANT_MX_SCALE: tl.constexpr = BLOCK_SIZE_QUANT_DIM // MXFP_BLOCK_SIZE
+    BLOCK_SIZE_QUANT_MX_TENSOR: tl.constexpr = BLOCK_SIZE_QUANT_DIM // K_DIVISOR
+
+    # Upcast the scale to the destination type.
+    if dst_dtype == tl.bfloat16:
+        dst_scale = (scale.to(tl.uint16) << 8).to(dst_dtype, bitcast=True)  # for e4m3 scale factor 
+    else:
+        dst_scale = (scale.to(tl.uint32) << 24).to(tl.float32, bitcast=True)
+        if dst_dtype == tl.float16:
+            dst_scale = dst_scale.to(tl.float16)
+
+    # Now upcast the tensor.
+    intermediate_dtype: tl.constexpr = tl.bfloat16 if dst_dtype == tl.float32 else dst_dtype
+    if cuda_capability_geq(10, 0):
+        assert is_fp4
+        packed_u32 = tl.inline_asm_elementwise(
+            asm="""
+            {
+            .reg .b8 in_8;
+            .reg .f16x2 out;
+            cvt.u8.u32 in_8, $1;
+            cvt.rn.f16x2.e2m1x2 out, in_8;
+            mov.b32 $0, out;
+            }
+            """,
+            constraints="=r,r",
+            args=[mx_tensor],  # tl.uint8 passed in as a 32-bit reg with value in low 8 bits
+            dtype=tl.uint32,
+            is_pure=True,
+            pack=1,
+        )
+        lo_u16 = (packed_u32 & 0xFFFF).to(tl.uint16)
+        hi_u16 = (packed_u32 >> 16).to(tl.uint16)
+        lo_f16 = lo_u16.to(tl.float16, bitcast=True)
+        hi_f16 = hi_u16.to(tl.float16, bitcast=True)
+
+        if intermediate_dtype == tl.float16:
+            x0, x1 = lo_f16, hi_f16
+        else:
+            x0 = lo_f16.to(intermediate_dtype)
+            x1 = hi_f16.to(intermediate_dtype)
+
+        dst_tensor = tl.interleave(x0, x1)
+
+    else:
+        assert is_fp4
+        dst_bias: tl.constexpr = 127 if intermediate_dtype == tl.bfloat16 else 15  # exponent bias
+        dst_0p5: tl.constexpr = 16128 if intermediate_dtype == tl.bfloat16 else 0x3800
+        dst_m_bits: tl.constexpr = 7 if intermediate_dtype == tl.bfloat16 else 10  # mantissa bits
+        # e2m1
+        em0 = mx_tensor & 0x07
+        em1 = mx_tensor & 0x70
+        x0 = (em0.to(tl.uint16) << (dst_m_bits - 1)) | ((mx_tensor & 0x08).to(tl.uint16) << 12)
+        x1 = (em1.to(tl.uint16) << (dst_m_bits - 5)) | ((mx_tensor & 0x80).to(tl.uint16) << 8)
+        # Three cases:
+        # 1) x is normal and non-zero: Correct bias
+        x0 = tl.where((em0 & 0x06) != 0, x0 + ((dst_bias - 1) << dst_m_bits), x0)
+        x1 = tl.where((em1 & 0x60) != 0, x1 + ((dst_bias - 1) << dst_m_bits), x1)
+        # 2) x is subnormal (x == 0bs001 where s is the sign): Map to +-0.5 in the dst type
+        x0 = tl.where(em0 == 0x01, dst_0p5 | (x0 & 0x8000), x0)
+        x1 = tl.where(em1 == 0x10, dst_0p5 | (x1 & 0x8000), x1)
+        # 3) x is zero, do nothing
+        dst_tensor = tl.interleave(x0, x1).to(intermediate_dtype, bitcast=True)
+
+    dst_tensor = dst_tensor.to(dst_dtype)
+
+    # Reshape for proper broadcasting: the scale was stored with a 16‐sized “inner” grouping.
+    dst_tensor = dst_tensor.reshape([BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, MXFP_BLOCK_SIZE])
+    dst_scale = dst_scale.reshape([BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, 1])
+    scale = scale.reshape(dst_scale.shape)
+
+    out_tensor = dst_tensor * dst_scale * s_dec  # NVFP4 has the additional global scale factor
+    if dst_dtype == tl.float32:
+        max_fin = 3.4028234663852886e+38
+    elif dst_dtype == tl.bfloat16:
+        max_fin = 3.3895313892515355e+38
+    else:
+        tl.static_assert(dst_dtype == tl.float16)
+        max_fin = 65504
+    # TODO: handle infinity same as upcast_from_mxfp_torch together with the
+    # above FIXME
+    out_tensor = tl.clamp(out_tensor, min=-max_fin, max=max_fin)
+    # Correct any NaNs encoded via the scale.
+    out_tensor = tl.where(scale == 0xFF, float("nan"), out_tensor)
+    out_tensor = out_tensor.reshape([BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_DIM])
+    return out_tensor
 
 @triton.jit
 def _downcast_to_mxfp(

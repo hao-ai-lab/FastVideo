@@ -13,6 +13,7 @@ from fastvideo.attention.backends.abstract import (AttentionBackend,
                                                    AttentionMetadataBuilder)
 from fastvideo.logger import init_logger
 from test_quantization_precision import get_fake_quant
+from qat_attn import attention
 
 logger = init_logger(__name__)
 
@@ -281,7 +282,6 @@ class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_out_BLHD):
         is_causal = ctx.is_causal
-
         if USE_QAT_ATTN:
             fq_q, fq_k, fq_v, high_prec_o = ctx.saved_tensors
             # Convert from BHLD (saved format) to BLHD (expected by qat_attn_backward_16bit)
@@ -309,6 +309,14 @@ def sageattn_blackwell_with_16bit_bwd(q_BLHD, k_BLHD, v_BLHD, is_causal=False, p
     Backward: recomputes FlashAttention fwd+bwd in 16bit directly.
     """
     return _SageAttnBlackwellWith16bitBwd.apply(q_BLHD, k_BLHD, v_BLHD, is_causal, per_block_mean)
+
+
+def qat_attn(q_BLHD, k_BLHD, v_BLHD, is_causal=False):
+    q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
+    k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
+    v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
+    o_BHLD = attention.apply(q_BHLD, k_BHLD, v_BHLD, is_causal, 1.0 / sqrt(q_BLHD.shape[-1]), warp_specialize=True, IS_QAT=True)
+    return o_BHLD.permute(0, 2, 1, 3).contiguous()
 
 
 class SageAttention3Backend(AttentionBackend):
@@ -365,4 +373,5 @@ class SageAttention3Impl(AttentionImpl):
     ) -> torch.Tensor:
         output = sageattn_blackwell_with_16bit_bwd(query, key, value, is_causal=self.causal)
         # output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
+        # output = qat_attn(query, key, value, is_causal=self.causal)
         return output
