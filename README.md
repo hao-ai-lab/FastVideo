@@ -49,10 +49,10 @@ conda activate fastvideo
 pip install fastvideo
 ```
 
-Please see our [docs](https://hao-ai-lab.github.io/FastVideo/getting_started/installation.html) for more detailed installation instructions.
+Please see our [docs](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/) for more detailed installation instructions.
 
 ## Sparse Distillation
-For our sparse distillation techniques, please see our [distillation docs](https://hao-ai-lab.github.io/FastVideo/distillation/dmd.html) and check out our [blog](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/).
+For our sparse distillation techniques, please see our [distillation docs](https://hao-ai-lab.github.io/FastVideo/distillation/dmd/) and check out our [blog](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/).
 
 See below for recipes and datasets:
 
@@ -64,7 +64,7 @@ See below for recipes and datasets:
 
 ## Inference
 ### Generating Your First Video
-Here's a minimal example to generate a video using the default settings. Make sure VSA kernels are [installed](https://hao-ai-lab.github.io/FastVideo/video_sparse_attention/installation.html). Create a file called `example.py` with the following code:
+Here's a minimal example to generate a video using the default settings. Make sure VSA kernels are [installed](https://hao-ai-lab.github.io/FastVideo/video_sparse_attention/installation/). Create a file called `example.py` with the following code:
 
 ```python
 import os
@@ -100,15 +100,15 @@ Run the script with:
 python example.py
 ```
 
-For a more detailed guide, please see our [inference quick start](https://hao-ai-lab.github.io/FastVideo/inference/inference_quick_start.html).
+For a more detailed guide, please see our [inference quick start](https://hao-ai-lab.github.io/FastVideo/inference/inference_quick_start/).
 
 ### Other docs:
 
-- [Design Overview](https://hao-ai-lab.github.io/FastVideo/design/overview.html)
-- [Contribution Guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation.html)
+- [Design Overview](https://hao-ai-lab.github.io/FastVideo/design/overview/)
+- [Contribution Guide](https://hao-ai-lab.github.io/FastVideo/getting_started/installation/)
 
 ## Distillation and Finetuning
-- [Distillation Guide](https://hao-ai-lab.github.io/FastVideo/distillation/dmd.html)
+- [Distillation Guide](https://hao-ai-lab.github.io/FastVideo/distillation/dmd/)
 <!-- - [Finetuning Guide](https://hao-ai-lab.github.io/FastVideo/training/finetune.html) -->
 
 ## 📑 Development Plan
@@ -127,7 +127,7 @@ See details in [development roadmap](https://github.com/hao-ai-lab/FastVideo/iss
 
 ## 🤝 Contributing
 
-We welcome all contributions. Please check out our guide [here](https://hao-ai-lab.github.io/FastVideo/contributing/overview.html)
+We welcome all contributions. Please check out our guide [here](https://hao-ai-lab.github.io/FastVideo/contributing/overview/)
 
 ## Acknowledgement
 We learned and reused code from the following projects:
