@@ -4,7 +4,7 @@
 
 import triton
 import triton.language as tl
-from triton_kernels.target_info import cuda_capability_geq
+from triton.language.target_info import cuda_capability_geq
 
 MXFP_BLOCK_SIZE = tl.constexpr(16)
 
