@@ -3,7 +3,7 @@
 # LongCat inference script WITHOUT BSA (standard inference)
 # Usage: bash scripts/inference/v1_inference_longcat.sh
 #
-# This script disables BSA for standard inference with maximum quality.
+# This script runs standard inference (no BSA) for maximum quality.
 # Use this for baseline comparison or when BSA is not needed (e.g., 480p).
 
 # Number of GPUs
@@ -21,28 +21,12 @@ export MODEL_BASE=weights/longcat-native
 # - Or use the wrapper (Phase 1) for reference:
 
 # ==============================================================================
-# BSA Configuration
+# BSA Configuration (Runtime via CLI)
 # ==============================================================================
-# Automatically disable BSA before inference
-echo "🔧 Configuring standard inference (BSA disabled)..."
-
-# Check if config file exists
-CONFIG_FILE="$MODEL_BASE/transformer/config.json"
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo "❌ Error: Config file not found at $CONFIG_FILE"
-    echo "   Please ensure your model directory is correct."
-    exit 1
-fi
-
-# Disable BSA using the management tool
-python scripts/checkpoint_conversion/manage_bsa.py "$CONFIG_FILE" --disable --no-backup
-
-echo "✅ BSA disabled - using standard attention"
-echo "   - Maximum quality"
-echo "   - Higher memory usage"
-echo ""
+# Disable BSA via CLI (no config.json edits)
+echo "🔧 Configuring standard inference (BSA disabled via CLI)..."
+echo "✅ BSA disabled - using standard attention (maximum quality)"
 echo "💡 Tip: For high-resolution (720p+), consider using v1_inference_longcat_BSA.sh"
-echo ""
 # ==============================================================================
 
 # You can either use --prompt or --prompt-txt, but not both.
@@ -55,6 +39,7 @@ fastvideo generate \
     --vae-cpu-offload False \
     --text-encoder-cpu-offload False \
     --pin-cpu-memory False \
+    --enable-bsa False \
     --height 480 \
     --width 832 \
     --num-frames 93 \

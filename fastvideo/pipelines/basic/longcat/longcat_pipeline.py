@@ -44,19 +44,53 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
         
         # Enable BSA (Block Sparse Attention) if configured
         pipeline_config = fastvideo_args.pipeline_config
-        if hasattr(pipeline_config, 'enable_bsa') and pipeline_config.enable_bsa:
-            transformer = self.get_module("transformer", None)
-            if transformer is not None and hasattr(transformer, 'enable_bsa'):
+        transformer = self.get_module("transformer", None)
+        if transformer is None:
+            return
+        # If user toggles BSA via CLI/config
+        if getattr(pipeline_config, 'enable_bsa', False):
+            # Build effective BSA params:
+            # 1) from explicit CLI overrides if provided
+            # 2) else from pipeline_config.bsa_params
+            # 3) else fall back to reasonable defaults
+            bsa_params_cfg = getattr(pipeline_config, 'bsa_params', None) or {}
+            sparsity = getattr(pipeline_config, 'bsa_sparsity', None)
+            cdf_threshold = getattr(pipeline_config, 'bsa_cdf_threshold', None)
+            chunk_q = getattr(pipeline_config, 'bsa_chunk_q', None)
+            chunk_k = getattr(pipeline_config, 'bsa_chunk_k', None)
+
+            effective_bsa_params = dict(bsa_params_cfg) if isinstance(bsa_params_cfg, dict) else {}
+            if sparsity is not None:
+                effective_bsa_params['sparsity'] = sparsity
+            if cdf_threshold is not None:
+                effective_bsa_params['cdf_threshold'] = cdf_threshold
+            if chunk_q is not None:
+                effective_bsa_params['chunk_3d_shape_q'] = chunk_q
+            if chunk_k is not None:
+                effective_bsa_params['chunk_3d_shape_k'] = chunk_k
+            # Provide defaults if still missing
+            effective_bsa_params.setdefault('sparsity', 0.9375)
+            effective_bsa_params.setdefault('chunk_3d_shape_q', [4, 4, 4])
+            effective_bsa_params.setdefault('chunk_3d_shape_k', [4, 4, 4])
+
+            if hasattr(transformer, 'enable_bsa'):
                 logger.info("Enabling Block Sparse Attention (BSA) for LongCat transformer")
                 transformer.enable_bsa()
-                
-                # Log BSA parameters if available
-                if hasattr(transformer, 'blocks') and len(transformer.blocks) > 0:
-                    bsa_params = transformer.blocks[0].attn.bsa_params
-                    if bsa_params:
-                        logger.info(f"BSA parameters: {bsa_params}")
+                # Propagate params to all attention modules
+                if hasattr(transformer, 'blocks'):
+                    try:
+                        for blk in transformer.blocks:
+                            if hasattr(blk, 'self_attn'):
+                                setattr(blk.self_attn, 'bsa_params', effective_bsa_params)
+                    except Exception as e:
+                        logger.warning("Failed to set BSA params on all blocks: %s", e)
+                logger.info("BSA parameters in effect: %s", effective_bsa_params)
             else:
                 logger.warning("BSA is enabled in config but transformer does not support it")
+        else:
+            # Explicitly disable if present
+            if hasattr(transformer, 'disable_bsa'):
+                transformer.disable_bsa()
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""

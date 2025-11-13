@@ -21,34 +21,12 @@ export MODEL_BASE=weights/longcat-native
 # - Or use the wrapper (Phase 1) for reference:
 
 # ==============================================================================
-# BSA Configuration
+# BSA Configuration (Runtime via CLI)
 # ==============================================================================
-# Automatically enable BSA before inference
-echo "🔧 Configuring BSA (Block Sparse Attention)..."
-
-# Check if config file exists
-CONFIG_FILE="$MODEL_BASE/transformer/config.json"
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo "❌ Error: Config file not found at $CONFIG_FILE"
-    echo "   Please ensure your model directory is correct."
-    exit 1
-fi
-
-# Enable BSA for 480p-like resolution (same as VSA)
-# 448×832×64, chunk [4,4,4], sparsity 0.9375
-python scripts/checkpoint_conversion/manage_bsa.py "$CONFIG_FILE" \
-    --enable \
-    --sparsity 0.9375 \
-    --chunk-q 4 4 4 \
-    --chunk-k 4 4 4 \
-    --no-backup
-
-echo "✅ BSA enabled (480p-like config, same as VSA)"
-echo "   - Resolution: 448×832×64 frames"
-echo "   - Latent shape after VAE+Patch: (64, 28, 52)"
-echo "   - chunk_3d_shape: [4, 4, 4] (all divisible)"
-echo "   - sparsity: 0.9375"
-echo ""
+# Enable BSA via CLI (no config.json edits)
+echo "🔧 Enabling BSA (Block Sparse Attention) via CLI..."
+echo "   - BSA sparsity: 0.9375"
+echo "   - chunk_3d_shape_q/k: [4, 4, 4]"
 # ==============================================================================
 
 # You can either use --prompt or --prompt-txt, but not both.
@@ -61,6 +39,10 @@ fastvideo generate \
     --vae-cpu-offload False \
     --text-encoder-cpu-offload True \
     --pin-cpu-memory False \
+    --enable-bsa True \
+    --bsa-sparsity 0.9375 \
+    --bsa-chunk-q 4 4 4 \
+    --bsa-chunk-k 4 4 4 \
     --height 448 \
     --width 832 \
     --num-frames 96 \

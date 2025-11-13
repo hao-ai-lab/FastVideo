@@ -128,6 +128,11 @@ class LongCatT2V480PConfig(PipelineConfig):
     enable_bsa: bool = False
     use_distill: bool = False
     enhance_hf: bool = False
+    # BSA runtime overrides (preferred over bsa_params if provided via CLI)
+    bsa_sparsity: float | None = None
+    bsa_cdf_threshold: float | None = None
+    bsa_chunk_q: list[int] | None = None
+    bsa_chunk_k: list[int] | None = None
     t_thresh: float | None = None  # refine stage default controlled by sampling args
 
     # LongCat doesnot need flow_shift
