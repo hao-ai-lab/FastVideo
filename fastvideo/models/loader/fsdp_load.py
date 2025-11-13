@@ -165,7 +165,6 @@ def maybe_load_fsdp_model(
 
 def shard_model(
     model,
-    *,
     cpu_offload: bool,
     reshard_after_forward: bool = True,
     mp_policy: MixedPrecisionPolicy | None = MixedPrecisionPolicy(),  # noqa
