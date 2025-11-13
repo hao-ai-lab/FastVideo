@@ -21,26 +21,12 @@ export MODEL_BASE=weights/longcat-native
 # - Or use the wrapper (Phase 1) for reference:
 
 # ==============================================================================
-# BSA Configuration
+# BSA Configuration (Runtime via CLI)
 # ==============================================================================
-# Automatically disable BSA before distilled inference (480p)
-echo "🔧 Configuring distilled inference (BSA disabled for 480p)..."
-
-# Check if config file exists
-CONFIG_FILE="$MODEL_BASE/transformer/config.json"
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo "❌ Error: Config file not found at $CONFIG_FILE"
-    echo "   Please ensure your model directory is correct."
-    exit 1
-fi
-
-# Disable BSA using the management tool
-python scripts/checkpoint_conversion/manage_bsa.py "$CONFIG_FILE" --disable --no-backup
-
+# Disable BSA via CLI for distilled (480p)
+echo "🔧 Configuring distilled inference (BSA disabled via CLI for 480p)..."
 echo "✅ BSA disabled - using standard attention for 480p distilled mode"
-echo ""
 echo "💡 Tip: For refinement (720p+), use v1_inference_longcat_refine.sh"
-echo ""
 # ==============================================================================
 
 # You can either use --prompt or --prompt-txt, but not both.
@@ -53,7 +39,8 @@ fastvideo generate \
     --vae-cpu-offload False \
     --text-encoder-cpu-offload False \
     --pin-cpu-memory False \
-    --lora-path "$MODEL_BASE/lora/cfg_step_lora.safetensors" \
+    --enable-bsa False \
+    --lora-path "$MODEL_BASE/lora/distilled" \
     --lora-nickname "distilled" \
     --height 480 \
     --width 832 \
