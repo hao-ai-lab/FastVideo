@@ -17,6 +17,8 @@ from fastvideo.pipelines.stages import (
     TimestepPreparationStage,
 )
 from fastvideo.pipelines.stages.longcat_denoising import LongCatDenoisingStage
+from fastvideo.pipelines.stages.longcat_refine_init import LongCatRefineInitStage
+from fastvideo.pipelines.stages.longcat_refine_timestep import LongCatRefineTimestepStage
 
 logger = init_logger(__name__)
 
@@ -105,6 +107,22 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
             stage=TextEncodingStage(
                 text_encoders=[self.get_module("text_encoder")],
                 tokenizers=[self.get_module("tokenizer")],
+            )
+        )
+
+        # Add refine initialization stage (will be skipped if not refining)
+        self.add_stage(
+            stage_name="longcat_refine_init_stage",
+            stage=LongCatRefineInitStage(
+                vae=self.get_module("vae")
+            )
+        )
+
+        # Add refine timestep stage (will be skipped if not refining)
+        self.add_stage(
+            stage_name="longcat_refine_timestep_stage",
+            stage=LongCatRefineTimestepStage(
+                scheduler=self.get_module("scheduler")
             )
         )
 

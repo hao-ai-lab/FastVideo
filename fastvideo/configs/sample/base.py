@@ -21,6 +21,12 @@ class SamplingParam:
     # Video inputs
     video_path: str | None = None
 
+    # Refine inputs (LongCat 480p->720p upscaling)
+    refine_from: str | None = None  # Path to stage1 video (480p output from distill)
+    t_thresh: float = 0.5  # Threshold for timestep scheduling in refinement
+    spatial_refine_only: bool = False  # If True, only spatial (no temporal doubling)
+    num_cond_frames: int = 0  # Number of conditioning frames
+
     # Text inputs
     prompt: str | list[str] | None = None
     negative_prompt: str = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
@@ -208,6 +214,30 @@ class SamplingParam:
             type=str,
             default=SamplingParam.video_path,
             help="Path to input video for video-to-video generation",
+        )
+        parser.add_argument(
+            "--refine-from",
+            type=str,
+            default=SamplingParam.refine_from,
+            help="Path to stage1 video for refinement (LongCat 480p->720p)",
+        )
+        parser.add_argument(
+            "--t-thresh",
+            type=float,
+            default=SamplingParam.t_thresh,
+            help="Threshold for timestep scheduling in refinement (default: 0.5)",
+        )
+        parser.add_argument(
+            "--spatial-refine-only",
+            action="store_true",
+            default=SamplingParam.spatial_refine_only,
+            help="Only perform spatial super-resolution (no temporal doubling)",
+        )
+        parser.add_argument(
+            "--num-cond-frames",
+            type=int,
+            default=SamplingParam.num_cond_frames,
+            help="Number of conditioning frames for refinement",
         )
         parser.add_argument(
             "--moba-config-path",
