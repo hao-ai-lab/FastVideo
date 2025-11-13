@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastvideo.logger import init_logger
-
+from fastvideo.utils import StoreBoolean
 logger = init_logger(__name__)
 
 
@@ -229,7 +229,7 @@ class SamplingParam:
         )
         parser.add_argument(
             "--spatial-refine-only",
-            action="store_true",
+            action=StoreBoolean,
             default=SamplingParam.spatial_refine_only,
             help="Only perform spatial super-resolution (no temporal doubling)",
         )
