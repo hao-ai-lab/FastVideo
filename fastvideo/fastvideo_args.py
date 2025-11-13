@@ -317,6 +317,27 @@ class FastVideoArgs:
             "Path to a text file containing prompts (one per line) for batch processing",
         )
 
+        # LoRA parameters (inference-time adapter loading)
+        parser.add_argument(
+            "--lora-path",
+            type=str,
+            default=FastVideoArgs.lora_path,
+            help="Path to a LoRA adapter (directory or HF repo id). If set, LoRA will be applied at inference.",
+        )
+        parser.add_argument(
+            "--lora-nickname",
+            type=str,
+            default=FastVideoArgs.lora_nickname,
+            help="Nickname to refer to the loaded LoRA adapter (useful for swapping).",
+        )
+        parser.add_argument(
+            "--lora-target-modules",
+            nargs="+",
+            type=str,
+            default=FastVideoArgs.lora_target_modules,
+            help="Optional list of module name substrings to restrict LoRA injection (e.g. q_proj k_proj v_proj).",
+        )
+
         # STA (Sliding Tile Attention) parameters
         parser.add_argument(
             "--STA-mode",
