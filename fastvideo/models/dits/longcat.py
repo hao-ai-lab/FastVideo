@@ -130,7 +130,9 @@ class TimestepEmbedder(nn.Module):
         t_freq = self.timestep_embedding(t.flatten(), self.frequency_embedding_size)
         
         # Cast to model dtype before MLP
-        target_dtype = self.linear_1.weight.dtype
+        # Handle LoRA wrapper if present
+        linear_layer = self.linear_1.base_layer if hasattr(self.linear_1, 'base_layer') else self.linear_1
+        target_dtype = linear_layer.weight.dtype
         if t_freq.dtype != target_dtype:
             t_freq = t_freq.to(target_dtype)
         
@@ -182,15 +184,13 @@ class CaptionEmbedder(nn.Module):
         self,
         encoder_hidden_states: torch.Tensor,
         encoder_attention_mask: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, list[int]]:
+    ) -> torch.Tensor:
         """
         Args:
             encoder_hidden_states: [B, N_text, C_text] or [B, 1, N_text, C_text]
             encoder_attention_mask: [B, N_text] or [B, 1, 1, N_text]
         Returns:
-            (y, y_seqlens):
-                y: [1, N_total, C] - compacted representation
-                y_seqlens: [B] - valid tokens per sample
+            y: [B, N_text, C] - standard padded representation (like other models)
         """
         # Handle extra dimension from wrapper
         if len(encoder_hidden_states.shape) == 4:
@@ -201,7 +201,7 @@ class CaptionEmbedder(nn.Module):
         y = self.act(y)
         y, _ = self.linear_2(y)  # [B, N_text, C]
         
-        # Handle attention masking
+        # Handle attention masking - just zero out padded tokens if requested
         if encoder_attention_mask is not None:
             # Remove extra dimensions
             if len(encoder_attention_mask.shape) == 4:
@@ -212,20 +212,9 @@ class CaptionEmbedder(nn.Module):
             # Zero out padded tokens if requested
             if self.text_tokens_zero_pad:
                 y = y * encoder_attention_mask.unsqueeze(-1)
-            
-            # Get sequence lengths
-            y_seqlens = encoder_attention_mask.sum(dim=1).long().tolist()
-            
-            # Compact: only keep valid tokens
-            y_list = [y[i, :seq_len] for i, seq_len in enumerate(y_seqlens)]
-            y = torch.cat(y_list, dim=0).unsqueeze(0)  # [1, N_total, C]
-        else:
-            # No masking, all tokens are valid
-            B, N, C = y.shape
-            y_seqlens = [N] * B
-            y = y.reshape(1, -1, C)  # [1, B*N, C]
         
-        return y, y_seqlens
+        # Return standard format [B, N_text, C] - no compaction!
+        return y
 
 
 # ============================================================================
@@ -342,7 +331,7 @@ class LongCatSelfAttention(nn.Module):
 
 class LongCatCrossAttention(nn.Module):
     """
-    Cross-attention for text conditioning with variable-length support.
+    Cross-attention for text conditioning (standard implementation like other models).
     """
 
     def __init__(
@@ -370,7 +359,6 @@ class LongCatCrossAttention(nn.Module):
         self.to_out = ReplicatedLinear(dim, dim, bias=True, params_dtype=dtype)
 
         # Cross-attention uses LocalAttention (FastVideo standard)
-        # LocalAttention handles different q and k/v sequence lengths correctly
         self.attn = LocalAttention(
             num_heads=num_heads,
             head_size=self.head_dim,
@@ -383,61 +371,24 @@ class LongCatCrossAttention(nn.Module):
     def forward(
         self,
         x: torch.Tensor,              # [B, N_img, C]
-        context: torch.Tensor,        # [B, N_text, C] or [1, N_total, C] (compacted)
-        context_seqlens: list[int] | None = None,  # [B] lengths of each sequence
+        context: torch.Tensor,        # [B, N_text, C]
         **kwargs
     ) -> torch.Tensor:
         """
-        Forward pass for cross-attention with variable-length text support.
+        Forward pass for cross-attention (standard implementation).
         
         Args:
             x: Image tokens [B, N_img, C]
-            context: Text tokens [B, N_text, C] or [1, N_total, C] if compacted
-            context_seqlens: List of valid token counts per sample (if compacted)
+            context: Text tokens [B, N_text, C] (standard padded format)
         """
         B, N_img, C = x.shape
 
-        # Project queries from image
+        # Project Q, K, V (standard cross-attention like WanVideo/StepVideo/Cosmos)
         q, _ = self.to_q(x)
-
-        # Handle compacted text representation
-        if context.shape[0] == 1 and context_seqlens is not None:
-            # Context is compacted: [1, N_total, C]
-            # Need to expand back to [B, max_len, C]
-            k, _ = self.to_k(context)  # [1, N_total, C]
-            v, _ = self.to_v(context)  # [1, N_total, C]
-            
-            # Split by sequence lengths
-            k_list = []
-            v_list = []
-            offset = 0
-            for seq_len in context_seqlens:
-                k_list.append(k[0, offset:offset+seq_len])  # [seq_len, C]
-                v_list.append(v[0, offset:offset+seq_len])
-                offset += seq_len
-            
-            # Pad to max length
-            max_len = max(context_seqlens)
-            k_padded = []
-            v_padded = []
-            for k_i, v_i, seq_len in zip(k_list, v_list, context_seqlens):
-                # Pad each sequence
-                if seq_len < max_len:
-                    pad_len = max_len - seq_len
-                    k_i = torch.cat([k_i, k_i.new_zeros(pad_len, C)], dim=0)
-                    v_i = torch.cat([v_i, v_i.new_zeros(pad_len, C)], dim=0)
-                k_padded.append(k_i)
-                v_padded.append(v_i)
-            
-            k = torch.stack(k_padded, dim=0)  # [B, max_len, C]
-            v = torch.stack(v_padded, dim=0)  # [B, max_len, C]
-            N_text = max_len
-        else:
-            # Standard format: [B, N_text, C]
-            k, _ = self.to_k(context)
-            v, _ = self.to_v(context)
-            N_text = context.shape[1]
-            context_seqlens = None  # No masking needed
+        k, _ = self.to_k(context)
+        v, _ = self.to_v(context)
+        
+        N_text = context.shape[1]
 
         # Reshape to heads
         q = q.view(B, N_img, self.num_heads, self.head_dim)
@@ -447,9 +398,6 @@ class LongCatCrossAttention(nn.Module):
         # Per-head RMS normalization
         q = self.q_norm(q)
         k = self.k_norm(k)
-
-        # LocalAttention expects [B, seq_len, num_heads, head_dim]
-        # (already in this format after view)
 
         # Run cross-attention using FastVideo's LocalAttention
         # LocalAttention handles different q and k/v sequence lengths automatically
@@ -595,10 +543,9 @@ class LongCatTransformerBlock(nn.Module):
     def forward(
         self,
         x: torch.Tensor,              # [B, N, C]
-        context: torch.Tensor,        # [1, N_total, C] or [B, N_text, C]
+        context: torch.Tensor,        # [B, N_text, C]
         t: torch.Tensor,              # [B, T, C_t]
         latent_shape: tuple,          # (T, H, W)
-        context_seqlens: list[int] | None = None,  # [B] for compacted text
         **kwargs
     ) -> torch.Tensor:
         """
@@ -613,6 +560,9 @@ class LongCatTransformerBlock(nn.Module):
         with torch.amp.autocast(device_type='cuda', dtype=torch.float32):
             t_mod = self.adaln_act(t)
             mod_params, _ = self.adaln_linear_1(t_mod)
+            # Ensure FP32 output (needed when LoRA is applied)
+            if mod_params.dtype != torch.float32:
+                mod_params = mod_params.float()
             shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = \
                 mod_params.unsqueeze(2).chunk(6, dim=-1)  # [B, T, 1, C]
 
@@ -629,7 +579,7 @@ class LongCatTransformerBlock(nn.Module):
 
         # === Cross-Attention ===
         x_norm_cross = self.norm_cross(x)
-        cross_out = self.cross_attn(x_norm_cross, context, context_seqlens=context_seqlens)
+        cross_out = self.cross_attn(x_norm_cross, context)
         x = x + cross_out
 
         # === FFN ===
@@ -702,6 +652,9 @@ class FinalLayer(nn.Module):
         with torch.amp.autocast(device_type='cuda', dtype=torch.float32):
             t_mod = self.adaln_act(t)
             mod_params, _ = self.adaln_linear(t_mod)
+            # Ensure FP32 output (needed when LoRA is applied)
+            if mod_params.dtype != torch.float32:
+                mod_params = mod_params.float()
             shift, scale = mod_params.unsqueeze(2).chunk(2, dim=-1)
 
         # Modulate
@@ -729,7 +682,10 @@ class LongCatTransformer3DModel(CachableDiT):
     _fsdp_shard_conditions = [
         lambda n, m: "blocks" in n and n.split(".")[-1].isdigit(),
     ]
-    _compile_conditions = []
+    # torch.compile optimization: compile each transformer block for speedup
+    _compile_conditions = [
+        lambda n, m: "blocks" in n and n.split(".")[-1].isdigit(),
+    ]
 
     # Parameter name mapping (for weight conversion)
     param_names_mapping = {}  # Will be defined in config
@@ -841,18 +797,17 @@ class LongCatTransformer3DModel(CachableDiT):
         if t.ndim == 2:
             t = t.reshape(B, N_t, -1)  # [B, T, C_t]
 
-        # 3. Caption embedding with compaction
-        context, context_seqlens = self.caption_embedder(
+        # 3. Caption embedding (standard format, no compaction)
+        context = self.caption_embedder(
             encoder_hidden_states,
             encoder_attention_mask=encoder_attention_mask
-        )  # [1, N_total, C], [B]
+        )  # [B, N_text, C]
 
         # 4. Transformer blocks
         for i, block in enumerate(self.blocks):
             x = block(
                 x, context, t,
-                latent_shape=(N_t, N_h, N_w),
-                context_seqlens=context_seqlens
+                latent_shape=(N_t, N_h, N_w)
             )
 
         # 5. Output projection
