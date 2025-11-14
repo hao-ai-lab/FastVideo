@@ -26,7 +26,6 @@ from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.layers.activation import get_act_fn
 from fastvideo.models.vaes.common import (DiagonalGaussianDistribution,
                                           ParallelTiledVAE)
-from fastvideo.platforms import current_platform
 
 CACHE_T = 2
 
@@ -189,6 +188,8 @@ class WanCausalConv3d(nn.Conv3d):
         self.padding = (0, 0, 0)
 
     def forward(self, x, cache_x=None):
+        from fastvideo.platforms import current_platform
+
         padding = list(self._padding)
         if cache_x is not None and self._padding[4] > 0:
             cache_x = cache_x.to(x.device)

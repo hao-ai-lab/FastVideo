@@ -4,6 +4,8 @@
 # Copyright 2024 The TorchTune Authors.
 # Copyright 2025 The FastVideo Authors.
 
+from __future__ import annotations
+import os
 import contextlib
 from collections.abc import Callable, Generator
 from itertools import chain
@@ -54,7 +56,7 @@ def set_default_dtype(dtype: torch.dtype) -> Generator[None, None, None]:
         torch.set_default_dtype(old_dtype)
 
 
-# TODO(PY): add compile option
+# Supports optional torch.compile for FSDP-wrapped models during training
 def maybe_load_fsdp_model(
     model_cls: type[nn.Module],
     init_params: dict[str, Any],
@@ -70,6 +72,8 @@ def maybe_load_fsdp_model(
     output_dtype: torch.dtype | None = None,
     training_mode: bool = True,
     pin_cpu_memory: bool = True,
+    enable_torch_compile: bool = False,
+    torch_compile_kwargs: dict[str, Any] | None = None,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -106,8 +110,17 @@ def maybe_load_fsdp_model(
         if not training_mode and not fsdp_inference:
             hsdp_replicate_dim = world_size
             hsdp_shard_dim = 1
-
-        device_mesh = init_device_mesh(
+        
+        if current_platform.is_npu():
+            with torch.device("cpu"):
+                device_mesh = init_device_mesh(
+                    "npu",
+                    # (Replicate(), Shard(dim=0))
+                    mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
+                    mesh_dim_names=("replicate", "shard"),
+                )
+        else:
+            device_mesh = init_device_mesh(
             "cuda",
             # (Replicate(), Shard(dim=0))
             mesh_shape=(hsdp_replicate_dim, hsdp_shard_dim),
@@ -139,6 +152,14 @@ def maybe_load_fsdp_model(
         # Avoid unintended computation graph accumulation during inference
         if isinstance(p, torch.nn.Parameter):
             p.requires_grad = False
+
+    compile_in_loader = enable_torch_compile and training_mode
+    if compile_in_loader:
+        compile_kwargs = torch_compile_kwargs or {}
+        logger.info("Enabling torch.compile for FSDP training module with kwargs=%s",
+                    compile_kwargs)
+        model = torch.compile(model, **compile_kwargs)
+        logger.info("torch.compile enabled for %s", type(model).__name__)
     return model
 
 
@@ -178,10 +199,11 @@ def shard_model(
     Raises:
         ValueError: If no layer modules were sharded, indicating that no shard_condition was triggered.
     """
-    if fsdp_shard_conditions is None or len(fsdp_shard_conditions) == 0:
-        logger.warning(
-            "The FSDP shard condition list is empty or None. No modules will be sharded in %s",
-            type(model).__name__)
+    # Check if we should use size-based filtering
+    use_size_filtering = os.environ.get("FASTVIDEO_FSDP2_AUTOWRAP", "0") == "1"
+    
+    if not fsdp_shard_conditions:
+        logger.warning("No FSDP shard conditions provided; nothing will be sharded.")
         return
 
     fsdp_kwargs = {
@@ -196,20 +218,38 @@ def shard_model(
     # iterating in reverse to start with
     # lowest-level modules first
     num_layers_sharded = 0
-    # TODO(will): don't reshard after forward for the last layer to save on the
-    # all-gather that will immediately happen Shard the model with FSDP,
-    for n, m in reversed(list(model.named_modules())):
-        if any([
-                shard_condition(n, m)
-                for shard_condition in fsdp_shard_conditions
-        ]):
-            fully_shard(m, **fsdp_kwargs)
-            num_layers_sharded += 1
-
-    if num_layers_sharded == 0:
-        raise ValueError(
-            "No layer modules were sharded. Please check if shard conditions are working as expected."
-        )
+    
+    if use_size_filtering:
+        # Size-based filtering mode
+        min_params = int(os.environ.get("FASTVIDEO_FSDP2_MIN_PARAMS", "10000000"))
+        logger.info("Using size-based filtering with threshold: %.2fM", min_params / 1e6)
+        
+        for n, m in reversed(list(model.named_modules())):
+            if any([shard_condition(n, m) for shard_condition in fsdp_shard_conditions]):
+                # Count all parameters
+                param_count = sum(p.numel() for p in m.parameters(recurse=True))
+                
+                # Skip small modules
+                if param_count < min_params:
+                    logger.info("Skipping module %s (%.2fM params < %.2fM threshold)", 
+                               n, param_count / 1e6, min_params / 1e6)
+                    continue
+                
+                # Shard this module
+                logger.info("Sharding module %s (%.2fM params)", n, param_count / 1e6)
+                fully_shard(m, **fsdp_kwargs)
+                num_layers_sharded += 1
+    else:
+        # Shard all modules matching conditions        
+        for n, m in reversed(list(model.named_modules())):
+            if any([shard_condition(n, m) for shard_condition in fsdp_shard_conditions]):
+                fully_shard(m, **fsdp_kwargs)
+                num_layers_sharded += 1
+        
+        if num_layers_sharded == 0:
+            raise ValueError(
+                "No layer modules were sharded. Please check if shard conditions are working as expected."
+            )
 
     # Finally shard the entire model to account for any stragglers
     fully_shard(model, **fsdp_kwargs)

@@ -37,7 +37,6 @@ from fastvideo.layers.quantization import QuantizationConfig
 from fastvideo.layers.vocab_parallel_embedding import VocabParallelEmbedding
 from fastvideo.models.encoders.base import TextEncoder
 from fastvideo.models.loader.weight_utils import default_weight_loader
-from fastvideo.platforms import current_platform
 
 
 class AttentionType:
@@ -181,7 +180,7 @@ class T5Attention(nn.Module):
 
         self.qkv_proj = QKVParallelLinear(
             self.d_model,
-            self.d_model // self.total_num_heads,
+            self.key_value_proj_dim,
             self.total_num_heads,
             self.total_num_kv_heads,
             bias=False,
@@ -199,7 +198,7 @@ class T5Attention(nn.Module):
                                        padding_size=self.relative_attention_num_buckets,
                                        quant_config=quant_config)
         self.o = RowParallelLinear(
-            self.d_model,
+            self.total_num_heads * self.key_value_proj_dim,
             self.d_model,
             bias=False,
             quant_config=quant_config,
@@ -298,7 +297,7 @@ class T5Attention(nn.Module):
     ) -> torch.Tensor:
         bs, seq_len, _ = hidden_states.shape
         num_seqs = bs
-        n, c = self.n_heads, self.d_model // self.total_num_heads
+        n, c = self.n_heads, self.key_value_proj_dim
         qkv, _ = self.qkv_proj(hidden_states)
         # Projection of 'own' hidden state (self-attention). No GQA here.
         q, k, v = qkv.split(self.inner_dim, dim=-1)
@@ -321,6 +320,8 @@ class T5Attention(nn.Module):
         else:
             # Encoder/Decoder Self-Attention Layer, attn bias already cached.
             assert attn_bias is not None
+
+        from fastvideo.platforms import current_platform
 
         if attention_mask is not None:
             attention_mask = attention_mask.view(
@@ -539,7 +540,10 @@ class T5EncoderModel(TextEncoder):
             attn_metadata=attn_metadata,
         )
 
-        return BaseEncoderOutput(last_hidden_state=hidden_states)
+        return BaseEncoderOutput(
+            last_hidden_state=hidden_states,
+            attention_mask=attention_mask,
+        )
 
     def load_weights(self, weights: Iterable[tuple[str,
                                                    torch.Tensor]]) -> set[str]:

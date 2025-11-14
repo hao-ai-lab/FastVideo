@@ -20,10 +20,7 @@ class WanDistillationPipeline(DistillationPipeline):
     A distillation pipeline for Wan that uses a single transformer model.
     The main transformer serves as the student model, and copies are made for teacher and critic.
     """
-    _required_config_modules = [
-        "scheduler", "transformer", "vae", "real_score_transformer",
-        "fake_score_transformer"
-    ]
+    _required_config_modules = ["scheduler", "transformer", "vae"]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """Initialize Wan-specific scheduler."""

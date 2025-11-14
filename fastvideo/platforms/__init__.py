@@ -64,6 +64,29 @@ def mps_platform_plugin() -> str | None:
     return "fastvideo.platforms.mps.MpsPlatform" if is_mps else None
 
 
+def npu_platform_plugin() -> str | None:
+    is_npu = False
+
+    try:
+        import torch
+        # 导入 torch_npu 以初始化 NPU 后端
+        import torch_npu  # noqa: F401
+        if torch.npu.is_available():
+            is_npu = True
+            logger.info("NPU is available")
+    except ImportError:
+        logger.error(
+            "NPU detection failed: PyTorch or PyTorch_NPU is not installed")
+    except AttributeError:
+        logger.error(
+            "NPU detection failed: PyTorch has no 'npu' attribute (use Ascend-adapted PyTorch)"
+        )
+    except Exception as e:
+        logger.error("NPU detection failed: unknown error - %s", str(e))
+
+    return "fastvideo.platforms.npu.NPUPlatform" if is_npu else None
+
+
 def cpu_platform_plugin() -> str | None:
     """Detect if CPU platform should be used."""
     # CPU is always available as a fallback
@@ -93,6 +116,7 @@ builtin_platform_plugins = {
     'rocm': rocm_platform_plugin,
     'mps': mps_platform_plugin,
     'cpu': cpu_platform_plugin,
+    'npu': npu_platform_plugin,
 }
 
 
@@ -112,6 +136,11 @@ def resolve_current_platform_cls_qualname() -> str:
 
     # Fall back to CUDA
     platform_cls_qualname = cuda_platform_plugin()
+    if platform_cls_qualname is not None:
+        return platform_cls_qualname
+
+    # Fall back to NPU
+    platform_cls_qualname = npu_platform_plugin()
     if platform_cls_qualname is not None:
         return platform_cls_qualname
 

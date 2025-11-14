@@ -21,8 +21,9 @@ class WanSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
     with DMD for video generation.
     """
     _required_config_modules = [
-        "scheduler", "transformer", "vae", "real_score_transformer",
-        "fake_score_transformer"
+        "scheduler",
+        "transformer",
+        "vae",
     ]
 
     def create_training_stages(self, training_args: TrainingArgs):
@@ -40,7 +41,10 @@ class WanSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
             training_args.model_path,
             args=args_copy,  # type: ignore
             inference_mode=True,
-            loaded_modules={"transformer": self.get_module("transformer")},
+            loaded_modules={
+                "transformer": self.get_module("transformer"),
+                "transformer_2": self.get_module("transformer_2")
+            },
             tp_size=training_args.tp_size,
             sp_size=training_args.sp_size,
             num_gpus=training_args.num_gpus,

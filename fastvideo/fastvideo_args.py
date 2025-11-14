@@ -7,14 +7,20 @@ import json
 from contextlib import contextmanager
 from dataclasses import field
 from enum import Enum
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from fastvideo.configs.configs import PreprocessConfig
 from fastvideo.configs.pipelines.base import PipelineConfig, STA_Mode
 from fastvideo.configs.utils import clean_cli_args
 from fastvideo.logger import init_logger
-from fastvideo.platforms import current_platform
 from fastvideo.utils import FlexibleArgumentParser, StoreBoolean
+
+if TYPE_CHECKING:
+    from ray.runtime_env import RuntimeEnv
+    from ray.util.placement_group import PlacementGroup
+else:
+    RuntimeEnv = Any
+    PlacementGroup = Any
 
 logger = init_logger(__name__)
 
@@ -91,6 +97,11 @@ class FastVideoArgs:
     # Distributed executor backend
     distributed_executor_backend: str = "mp"
 
+    # a few attributes for ray related
+    ray_placement_group: PlacementGroup | None = None
+
+    ray_runtime_env: RuntimeEnv | None = None
+
     inference_mode: bool = True  # if False == training mode
 
     # HuggingFace specific parameters
@@ -133,6 +144,7 @@ class FastVideoArgs:
 
     # Compilation
     enable_torch_compile: bool = False
+    torch_compile_kwargs: dict[str, Any] = field(default_factory=dict)
 
     disable_autocast: bool = False
 
@@ -159,12 +171,14 @@ class FastVideoArgs:
         "vae": True,
     })
     override_transformer_cls_name: str | None = None
+    init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
+    init_weights_from_safetensors_2: str = ""  # path to safetensors file for initial weight loading for transformer_2
 
     # # DMD parameters
     # dmd_denoising_steps: List[int] | None = field(default=None)
 
     # MoE parameters used by Wan2.2
-    boundary_ratio: float | None = None
+    boundary_ratio: float | None = 0.875
 
     @property
     def training_mode(self) -> bool:
@@ -330,6 +344,13 @@ class FastVideoArgs:
             help="Use torch.compile to speed up DiT inference." +
             "However, will likely cause precision drifts. See (https://github.com/pytorch/pytorch/issues/145213)",
         )
+        parser.add_argument(
+            "--torch-compile-kwargs",
+            type=str,
+            default=None,
+            help=
+            "JSON string of kwargs to pass to torch.compile. Example: '{\"backend\":\"inductor\",\"mode\":\"reduce-overhead\"}'",
+        )
 
         parser.add_argument(
             "--dit-cpu-offload",
@@ -403,6 +424,15 @@ class FastVideoArgs:
             default=FastVideoArgs.override_transformer_cls_name,
             help="Override transformer cls name",
         )
+        parser.add_argument(
+            "--init-weights-from-safetensors",
+            type=str,
+            help="Path to safetensors file for initial weight loading")
+        parser.add_argument(
+            "--init-weights-from-safetensors-2",
+            type=str,
+            help="Path to safetensors file for initial weight loading")
+
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)
 
@@ -431,6 +461,21 @@ class FastVideoArgs:
                 mode_value = getattr(args, attr, FastVideoArgs.mode.value)
                 kwargs['mode'] = ExecutionMode.from_string(
                     mode_value) if isinstance(mode_value, str) else mode_value
+            elif attr == 'torch_compile_kwargs':
+                # Parse JSON string for torch.compile kwargs
+                torch_compile_kwargs_str = getattr(args, 'torch_compile_kwargs',
+                                                   None)
+                if torch_compile_kwargs_str:
+                    try:
+                        import json
+                        kwargs['torch_compile_kwargs'] = json.loads(
+                            torch_compile_kwargs_str)
+                    except json.JSONDecodeError as e:
+                        raise ValueError(
+                            f"Invalid JSON for torch_compile_kwargs: {e}"
+                        ) from e
+                else:
+                    kwargs['torch_compile_kwargs'] = {}
             elif attr == 'workload_type':
                 # Convert string to WorkloadType enum
                 workload_type_value = getattr(args, 'workload_type',
@@ -472,6 +517,8 @@ class FastVideoArgs:
 
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
+        from fastvideo.platforms import current_platform
+
         if current_platform.is_mps():
             self.use_fsdp_inference = False
 
@@ -610,10 +657,8 @@ class TrainingArgs(FastVideoArgs):
 
     # text encoder & vae & diffusion model
     pretrained_model_name_or_path: str = ""
-    dit_model_name_or_path: str = ""
 
     # DMD model paths - separate paths for each network
-    generator_model_path: str = ""  # path for generator (student) model
     real_score_model_path: str = ""  # path for real score (teacher) model
     fake_score_model_path: str = ""  # path for fake score (critic) model
 
@@ -630,6 +675,7 @@ class TrainingArgs(FastVideoArgs):
     validation_guidance_scale: str = ""
     validation_steps: float = 0.0
     log_validation: bool = False
+    trackers: list[str] = dataclasses.field(default_factory=list)
     tracker_project_name: str = ""
     wandb_run_name: str = ""
     seed: int | None = None
@@ -638,7 +684,6 @@ class TrainingArgs(FastVideoArgs):
     output_dir: str = ""
     checkpoints_total_limit: int = 0
     resume_from_checkpoint: str = ""  # specify the checkpoint folder to resume from
-    init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
 
     # optimizer & scheduler
     num_train_epochs: int = 0
@@ -710,7 +755,6 @@ class TrainingArgs(FastVideoArgs):
     independent_first_frame: bool = False
     enable_gradient_masking: bool = True
     gradient_mask_last_n_frames: int = 21
-    validate_cache_structure: bool = False  # Debug flag for cache validation
     same_step_across_blocks: bool = False  # Use same exit timestep for all blocks
     last_step_only: bool = False  # Only use the last timestep for training
     context_noise: int = 0  # Context noise level for cache updates
@@ -896,10 +940,6 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--resume-from-checkpoint",
                             type=str,
                             help="Path to checkpoint to resume from")
-        parser.add_argument(
-            "--init-weights-from-safetensors",
-            type=str,
-            help="Path to safetensors file for initial weight loading")
         parser.add_argument("--logging-dir",
                             type=str,
                             help="Directory for logging")

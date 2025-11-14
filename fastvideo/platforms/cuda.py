@@ -67,6 +67,7 @@ class CudaPlatformBase(Platform):
     device_name: str = "cuda"
     device_type: str = "cuda"
     dispatch_key: str = "CUDA"
+    ray_device_key: str = "GPU"
     device_control_env_var: str = "CUDA_VISIBLE_DEVICES"
 
     @classmethod
@@ -106,6 +107,13 @@ class CudaPlatformBase(Platform):
                                  ) -> float:
         torch.cuda.reset_peak_memory_stats(device)
         return float(torch.cuda.max_memory_allocated(device))
+
+    @classmethod
+    def get_torch_device(cls):
+        """
+        Return torch.cuda
+        """
+        return torch.cuda
 
     @classmethod
     def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None,
@@ -173,7 +181,11 @@ class CudaPlatformBase(Platform):
                     "Failed to import Video Sparse Attention backend: %s",
                     str(e))
                 raise ImportError(
-                    "Video Sparse Attention backend is not installed. ") from e
+                    "The Video Sparse Attention backend is not installed. "
+                    "To install it, please follow the instructions at: "
+                    "https://hao-ai-lab.github.io/FastVideo/video_sparse_attention/installation.html "
+                ) from e
+
         elif selected_backend == AttentionBackendEnum.VMOBA_ATTN:
             try:
                 from csrc.attn.vmoba_attn.vmoba import (  # noqa: F401

@@ -6,7 +6,6 @@ import os
 import torch
 from torch.distributed import ProcessGroup
 
-from fastvideo.platforms import current_platform
 from fastvideo.platforms.interface import CpuArchEnum
 
 from .base_device_communicator import DeviceCommunicatorBase
@@ -21,6 +20,8 @@ class CpuCommunicator(DeviceCommunicatorBase):
                  unique_name: str = ""):
         super().__init__(cpu_group, device, device_group, unique_name)
         self.dist_module = torch.distributed
+
+        from fastvideo.platforms import current_platform
 
         if (current_platform.get_cpu_architecture()
                 == CpuArchEnum.X86) and hasattr(

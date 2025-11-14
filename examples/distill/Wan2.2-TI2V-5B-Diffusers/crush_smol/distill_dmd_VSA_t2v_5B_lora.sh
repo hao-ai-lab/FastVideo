@@ -14,6 +14,8 @@ export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
 # Configs
 NUM_GPUS=1
 MODEL_PATH="Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.2-TI2V-5B-Diffusers"
 DATA_DIR="data/crush-smol_processed_ti2v/combined_parquet_dataset/"
 VALIDATION_DATASET_FILE="examples/distill/Wan2.2-TI2V-5B-Diffusers/crush_smol/validation.json"
 # export CUDA_VISIBLE_DEVICES=4,5
@@ -51,6 +53,8 @@ parallel_args=(
 model_args=(
   --model_path $MODEL_PATH
   --pretrained_model_name_or_path $MODEL_PATH
+  --real_score_model_path $REAL_SCORE_MODEL_PATH
+  --fake_score_model_path $FAKE_SCORE_MODEL_PATH
 )
 
 # Dataset arguments

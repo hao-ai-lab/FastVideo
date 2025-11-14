@@ -14,20 +14,29 @@ if TYPE_CHECKING:
     FASTVIDEO_CACHE_ROOT: str = os.path.expanduser("~/.cache/fastvideo")
     FASTVIDEO_CONFIG_ROOT: str = os.path.expanduser("~/.config/fastvideo")
     FASTVIDEO_CONFIGURE_LOGGING: int = 1
+    FASTVIDEO_RAY_PER_WORKER_GPUS: float = 1.0
     FASTVIDEO_LOGGING_LEVEL: str = "INFO"
     FASTVIDEO_LOGGING_PREFIX: str = ""
     FASTVIDEO_LOGGING_CONFIG_PATH: str | None = None
     FASTVIDEO_TRACE_FUNCTION: int = 0
     FASTVIDEO_ATTENTION_BACKEND: str | None = None
     FASTVIDEO_ATTENTION_CONFIG: str | None = None
-    FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "fork"
+    FASTVIDEO_WORKER_MULTIPROC_METHOD: str = "spawn"
     FASTVIDEO_TARGET_DEVICE: str = "cuda"
     MAX_JOBS: str | None = None
     NVCC_THREADS: str | None = None
     CMAKE_BUILD_TYPE: str | None = None
     VERBOSE: bool = False
+    FASTVIDEO_TORCH_PROFILER_DIR: str | None = None
+    FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES: bool = False
+    FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY: bool = False
+    FASTVIDEO_TORCH_PROFILER_WITH_STACK: bool = True
+    FASTVIDEO_TORCH_PROFILER_WITH_FLOPS: bool = False
+    FASTVIDEO_TORCH_PROFILE_REGIONS: str = ""
     FASTVIDEO_SERVER_DEV_MODE: bool = False
     FASTVIDEO_STAGE_LOGGING: bool = False
+    FASTVIDEO_HOST_IP: str = ""
+    FASTVIDEO_LOOPBACK_IP: str = ""
 
 
 def get_default_cache_root() -> str:
@@ -113,6 +122,23 @@ environment_variables: dict[str, Callable[[], Any]] = {
             os.path.join(get_default_cache_root(), "fastvideo"),
         )),
 
+    # used in distributed environment to determine the ip address
+    # of the current node, when the node has multiple network interfaces.
+    # If you are using multi-node inference, you should set this differently
+    # on each node.
+    "FASTVIDEO_HOST_IP":
+    lambda: os.getenv("FASTVIDEO_HOST_IP", ""),
+
+    # Used to force set up loopback IP
+    "FASTVIDEO_LOOPBACK_IP":
+    lambda: os.getenv("FASTVIDEO_LOOPBACK_IP", ""),
+
+    # Number of GPUs per worker in Ray, if it is set to be a fraction,
+    # it allows ray to schedule multiple actors on a single GPU,
+    # so that users can colocate other actors on the same GPUs as FastVideo.
+    "FASTVIDEO_RAY_PER_WORKER_GPUS":
+    lambda: float(os.getenv("FASTVIDEO_RAY_PER_WORKER_GPUS", "1.0")),
+
     # Interval in seconds to log a warning message when the ring buffer is full
     "FASTVIDEO_RINGBUFFER_WARNING_INTERVAL":
     lambda: int(os.environ.get("FASTVIDEO_RINGBUFFER_WARNING_INTERVAL", "60")),
@@ -186,9 +212,8 @@ environment_variables: dict[str, Callable[[], Any]] = {
              os.path.expanduser(os.getenv("FASTVIDEO_ATTENTION_CONFIG", "."))),
 
     # Use dedicated multiprocess context for workers.
-    # Both spawn and fork work
     "FASTVIDEO_WORKER_MULTIPROC_METHOD":
-    lambda: os.getenv("FASTVIDEO_WORKER_MULTIPROC_METHOD", "fork"),
+    lambda: os.getenv("FASTVIDEO_WORKER_MULTIPROC_METHOD", "spawn"),
 
     # Enables torch profiler if set. Path to the directory where torch profiler
     # traces are saved. Note that it must be an absolute path.
@@ -196,6 +221,34 @@ environment_variables: dict[str, Callable[[], Any]] = {
     lambda: (None
              if os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", None) is None else os.
              path.expanduser(os.getenv("FASTVIDEO_TORCH_PROFILER_DIR", "."))),
+
+    # Enable torch profiler to record shapes if set
+    # FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES=1. If not set, torch profiler will
+    # not record shapes.
+    "FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES":
+    lambda: bool(
+        os.getenv("FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES", "0") != "0"),
+
+    # Enable torch profiler to profile memory if set
+    # FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY=1. If not set, torch profiler
+    # will not profile memory.
+    "FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY":
+    lambda: bool(
+        os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY", "0") != "0"),
+
+    # Enable torch profiler to profile stack if set
+    # FASTVIDEO_TORCH_PROFILER_WITH_STACK=1. If not set, torch profiler WILL
+    # profile stack by default.
+    "FASTVIDEO_TORCH_PROFILER_WITH_STACK":
+    lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_STACK", "1") != "0"),
+
+    # Enable torch profiler to profile flops if set
+    # FASTVIDEO_TORCH_PROFILER_WITH_FLOPS=1. If not set, torch profiler will
+    # not profile flops.
+    "FASTVIDEO_TORCH_PROFILER_WITH_FLOPS":
+    lambda: bool(os.getenv("FASTVIDEO_TORCH_PROFILER_WITH_FLOPS", "0") != "0"),
+    "FASTVIDEO_TORCH_PROFILE_REGIONS":
+    lambda: os.getenv("FASTVIDEO_TORCH_PROFILE_REGIONS", ""),
 
     # If set, fastvideo will run in development mode, which will enable
     # some additional endpoints for developing and debugging,

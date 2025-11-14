@@ -29,7 +29,6 @@ from fastvideo.models.loader.weight_utils import (
     filter_duplicate_safetensors_files, filter_files_not_needed_for_inference,
     pt_weights_iterator, safetensors_weights_iterator)
 from fastvideo.models.registry import ModelRegistry
-from fastvideo.platforms import current_platform
 from fastvideo.utils import PRECISION_TO_TYPE
 
 logger = init_logger(__name__)
@@ -251,6 +250,8 @@ class TextEncoderLoader(ComponentLoader):
         use_cpu_offload = fastvideo_args.text_encoder_cpu_offload and len(
             getattr(model_config, "_fsdp_shard_conditions", [])) > 0
 
+        from fastvideo.platforms import current_platform
+
         if fastvideo_args.text_encoder_cpu_offload:
             target_device = torch.device(
                 "mps") if current_platform.is_mps() else torch.device("cpu")
@@ -274,12 +275,27 @@ class TextEncoderLoader(ComponentLoader):
             # Explicitly move model to target device after loading weights
             model = model.to(target_device)
 
+            from fastvideo.platforms import current_platform
+
             if use_cpu_offload:
                 # Disable FSDP for MPS as it's not compatible
                 if current_platform.is_mps():
                     logger.info(
                         "Disabling FSDP sharding for MPS platform as it's not compatible"
                     )
+                elif current_platform.is_npu():
+                    mesh = init_device_mesh(
+                        "npu",
+                        mesh_shape=(1, dist.get_world_size()),
+                        mesh_dim_names=("offload", "replicate"),
+                    )
+                    shard_model(
+                        model,
+                        cpu_offload=True,
+                        reshard_after_forward=True,
+                        mesh=mesh["offload"],
+                        fsdp_shard_conditions=model._fsdp_shard_conditions,
+                        pin_cpu_memory=fastvideo_args.pin_cpu_memory)
                 else:
                     mesh = init_device_mesh(
                         "cuda",
@@ -324,6 +340,8 @@ class ImageEncoderLoader(TextEncoderLoader):
 
         encoder_config = fastvideo_args.pipeline_config.image_encoder_config
         encoder_config.update_model_arch(model_config)
+
+        from fastvideo.platforms import current_platform
 
         if fastvideo_args.image_encoder_cpu_offload:
             target_device = torch.device("mps") if current_platform.is_mps() else torch.device("cpu")
@@ -378,6 +396,8 @@ class VAELoader(ComponentLoader):
 
         vae_config = fastvideo_args.pipeline_config.vae_config
         vae_config.update_model_arch(config)
+
+        from fastvideo.platforms import current_platform
 
         if fastvideo_args.vae_cpu_offload:
             target_device = torch.device("mps") if current_platform.is_mps() else torch.device("cpu")
@@ -438,11 +458,11 @@ class TransformerLoader(ComponentLoader):
         # Check if we should use custom initialization weights
         custom_weights_path = getattr(fastvideo_args, 'init_weights_from_safetensors', None)
         use_custom_weights = (custom_weights_path and os.path.exists(custom_weights_path) and 
-                            fastvideo_args.training_mode and 
                             not hasattr(fastvideo_args, '_loading_teacher_critic_model'))
 
         if use_custom_weights:
-            logger.info("Using custom initialization weights from: %s", custom_weights_path)
+            if 'transformer_2' in model_path:
+                custom_weights_path = getattr(fastvideo_args, 'init_weights_from_safetensors_2', None)
             assert custom_weights_path is not None, "Custom initialization weights must be provided"
             if os.path.isdir(custom_weights_path):
                 safetensors_list = glob.glob(
@@ -479,7 +499,9 @@ class TransformerLoader(ComponentLoader):
             param_dtype=torch.bfloat16,
             reduce_dtype=torch.float32,
             output_dtype=None,
-            training_mode=fastvideo_args.training_mode)
+            training_mode=fastvideo_args.training_mode,
+            enable_torch_compile=fastvideo_args.enable_torch_compile,
+            torch_compile_kwargs=fastvideo_args.torch_compile_kwargs)
 
 
         total_params = sum(p.numel() for p in model.parameters())

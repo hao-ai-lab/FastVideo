@@ -33,6 +33,8 @@ def run_worker():
         "--model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         "--inference_mode", "False",
         "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        "--real_score_model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        "--fake_score_model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
         "--data_path", "data/crush-smol_processed_t2v/combined_parquet_dataset",
         "--validation_dataset_file", "examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json",
         "--train_batch_size", "1",

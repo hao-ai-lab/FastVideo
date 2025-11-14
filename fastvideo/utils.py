@@ -7,26 +7,31 @@ import hashlib
 import importlib
 import importlib.util
 import inspect
+import ipaddress
 import json
 import math
+import multiprocessing
+from multiprocessing.context import BaseContext
 import os
 import signal
 import socket
 import sys
 import tempfile
+import warnings
 import threading
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, fields, is_dataclass
 from functools import lru_cache, partial, wraps
-from typing import Any, TypeVar, cast
+from pathlib import Path
+from typing import Any, TextIO, TypeVar, cast
 
 import cloudpickle
 import filelock
 import imageio
 import numpy as np
 import torch
-import torchvision
+import torchvision.utils as make_grid
 import yaml
 from diffusers.loaders.lora_base import (
     _best_guess_weight_name)  # watch out for potetential removal from diffusers
@@ -56,7 +61,7 @@ STR_ATTN_CONFIG_ENV_VAR: str = "FASTVIDEO_ATTENTION_CONFIG"
 
 def find_nccl_library() -> str:
     """
-    We either use the library file specified by the `VLLM_NCCL_SO_PATH`
+    We either use the library file specified by the `FASTVIDEO_NCCL_SO_PATH`
     environment variable, or we find the library file brought by PyTorch.
     After importing `torch`, `libnccl.so.2` or `librccl.so.1` can be
     found by `ctypes` automatically.
@@ -77,6 +82,28 @@ def find_nccl_library() -> str:
             raise ValueError("NCCL only supports CUDA and ROCm backends.")
         logger.info("Found nccl from library %s", so_file)
     return str(so_file)
+
+
+def find_hccl_library() -> str:
+    """
+    We either use the library file specified by the `HCCL_SO_PATH`
+    environment variable, or we find the library file brought by PyTorch.
+    After importing `torch`, `libhccl.so` can be
+    found by `ctypes` automatically.
+    """
+    so_file = envs.HCCL_SO_PATH
+
+    # manually load the nccl library
+    if so_file:
+        logger.info("Found hccl from environment variable HCCL_SO_PATH=%s",
+                    so_file)
+    else:
+        if torch.version.cann is not None:  # codespell:ignore cann
+            so_file = "libhccl.so"
+        else:
+            raise ValueError("HCCL only supports Ascend NPU backends.")
+        logger.info("Found hccl from library %s", so_file)
+    return so_file
 
 
 prev_set_stream = torch.cuda.set_stream
@@ -898,9 +925,262 @@ def save_decoded_latents_as_video(decoded_latents: list[torch.Tensor],
     videos = rearrange(decoded_latents, "b c t h w -> t b c h w")
     frames = []
     for x in videos:
-        x = torchvision.utils.make_grid(x, nrow=6)
+        x = make_grid(x, nrow=6)
         x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
         frames.append((x * 255).numpy().astype(np.uint8))
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     imageio.mimsave(output_path, frames, fps=fps, format="mp4")
+
+
+def _format_bytes(num_bytes: int | float | None) -> str:
+    if num_bytes is None:
+        return "N/A"
+    return f"{num_bytes / (1024 ** 3):.2f} GB"
+
+
+def log_torch_cuda_memory(
+        tag: str | None = None,
+        *,
+        log_fn: Callable[[str], None] | None = None,
+        log_file_path: str | os.PathLike[str] | None = "memory_trace.txt"
+) -> None:
+    """Log CUDA memory statistics via logger and append to a trace file."""
+
+    log_fn = log_fn or logger.info
+    prefix = f"[{tag}] " if tag else ""
+
+    if not torch.cuda.is_available():
+        message = f"{prefix}CUDA not available on this host."
+        log_fn(message)
+        _append_to_memory_trace(message, log_file_path)
+        return
+
+    try:
+        device_index = torch.cuda.current_device()
+        device_name = torch.cuda.get_device_name(device_index)
+        allocated = torch.cuda.memory_allocated(device_index)
+        reserved = torch.cuda.memory_reserved(device_index)
+        max_allocated = torch.cuda.max_memory_allocated(device_index)
+        max_reserved = torch.cuda.max_memory_reserved(device_index)
+        free_mem, total_mem = torch.cuda.mem_get_info(device_index)
+    except Exception as exc:  # noqa: BLE001
+        message = f"{prefix}Unable to query CUDA memory stats: {exc}"
+        log_fn(message)
+        _append_to_memory_trace(message, log_file_path)
+        return
+
+    used_mem = total_mem - free_mem
+
+    stats = [
+        f"device={device_name} (index={device_index})",
+        f"allocated={_format_bytes(allocated)}",
+        f"reserved={_format_bytes(reserved)}",
+        f"max_allocated={_format_bytes(max_allocated)}",
+        f"max_reserved={_format_bytes(max_reserved)}",
+        f"used={_format_bytes(used_mem)}",
+        f"free={_format_bytes(free_mem)}",
+        f"total={_format_bytes(total_mem)}",
+    ]
+
+    message = f"{prefix}CUDA memory stats: {' | '.join(stats)}"
+    log_fn(message)
+    _append_to_memory_trace(message, log_file_path)
+
+
+def _append_to_memory_trace(
+        message: str, log_file_path: str | os.PathLike[str] | None) -> None:
+    if not log_file_path:
+        return
+
+    try:
+        path = Path(log_file_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as outfile:
+            outfile.write(message + "\n")
+    except Exception:  # noqa: BLE001
+        # Avoid raising/logging recursively if writing to the file fails.
+        pass
+
+
+# TODO(xingyu): add adopted message for this
+def get_ip() -> str:
+    host_ip = envs.FASTVIDEO_HOST_IP
+    if host_ip:
+        return host_ip
+
+    # IP is not set, try to get it from the network interface
+
+    # try ipv4
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))  # Doesn't need to be reachable
+        return s.getsockname()[0]
+    except Exception:
+        pass
+
+    # try ipv6
+    try:
+        s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+        # Google's public DNS server, see
+        # https://developers.google.com/speed/public-dns/docs/using#addresses
+        s.connect(("2001:4860:4860::8888", 80))  # Doesn't need to be reachable
+        return s.getsockname()[0]
+    except Exception:
+        pass
+
+    warnings.warn(
+        "Failed to get the IP address, using 0.0.0.0 by default."
+        "The value can be set by the environment variable FASTVIDEO_HOST_IP.",
+        stacklevel=2)
+    return "0.0.0.0"
+
+
+def test_loopback_bind(address: str, family: socket.AddressFamily) -> bool:
+    try:
+        s = socket.socket(family, socket.SOCK_DGRAM)
+        s.bind((address, 0))  # Port 0 = auto assign
+        s.close()
+        return True
+    except OSError:
+        return False
+
+
+def get_loopback_ip() -> str:
+    loopback_ip = envs.FASTVIDEO_LOOPBACK_IP
+    if loopback_ip:
+        return loopback_ip
+
+    # FASTVIDEO_LOOPBACK_IP is not set, try to get it based on network interface
+
+    if test_loopback_bind("127.0.0.1", socket.AF_INET):
+        return "127.0.0.1"
+    elif test_loopback_bind("::1", socket.AF_INET6):
+        return "::1"
+    else:
+        raise RuntimeError(
+            "Neither 127.0.0.1 nor ::1 are bound to a local interface. "
+            "Set the FASTVIDEO_LOOPBACK_IP environment variable explicitly.")
+
+
+def is_valid_ipv6_address(address: str) -> bool:
+    try:
+        ipaddress.IPv6Address(address)
+        return True
+    except ValueError:
+        return False
+
+
+def get_distributed_init_method(ip: str, port: int) -> str:
+    return get_tcp_uri(ip, port)
+
+
+def get_tcp_uri(ip: str, port: int) -> str:
+    if is_valid_ipv6_address(ip):
+        return f"tcp://[{ip}]:{port}"
+    else:
+        return f"tcp://{ip}:{port}"
+
+
+def get_open_port(port: int | None = None) -> int:
+    if port is not None:
+        while True:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(("", port))
+                    return port
+            except OSError:
+                port += 1  # Increment port number if already in use
+                logger.info("Port %d is already in use, trying port %d",
+                            port - 1, port)
+    # try ipv4
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("", 0))
+            return s.getsockname()[1]
+    except OSError:
+        # try ipv6
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
+            s.bind(("", 0))
+            return s.getsockname()[1]
+
+
+def cuda_is_initialized() -> bool:
+    """Check if CUDA is initialized."""
+    if not torch.cuda._is_compiled():
+        return False
+    return torch.cuda.is_initialized()
+
+
+def xpu_is_initialized() -> bool:
+    """Check if XPU is initialized."""
+    if not torch.xpu._is_compiled():
+        return False
+    return torch.xpu.is_initialized()
+
+
+def force_spawn() -> None:
+    if os.environ.get("FASTVIDEO_WORKER_MULTIPROC_METHOD") == "fork":
+        logger.warning("We must use the `spawn` multiprocessing start method.")
+        os.environ["FASTVIDEO_WORKER_MULTIPROC_METHOD"] = "spawn"
+
+
+def get_mp_context() -> BaseContext:
+    """Get a multiprocessing context with a particular method (spawn or fork).
+    By default we follow the value of the FASTVIDEO_WORKER_MULTIPROC_METHOD to
+    determine the multiprocessing method (default is fork). However, under
+    certain conditions, we may enforce spawn and override the value of
+    FASTVIDEO_WORKER_MULTIPROC_METHOD.
+    """
+    force_spawn()
+    mp_method = envs.FASTVIDEO_WORKER_MULTIPROC_METHOD
+    return multiprocessing.get_context(mp_method)
+
+
+# ANSI color codes
+CYAN = '\033[1;36m'
+RESET = '\033[0;0m'
+
+
+def _add_prefix(file: TextIO, worker_name: str, pid: int) -> None:
+    """Prepend each output line with process-specific prefix"""
+
+    prefix = f"{CYAN}({worker_name} pid={pid}){RESET} "
+    file_write = file.write
+
+    def write_with_prefix(s: str):
+        if not s:
+            return
+        if file.start_new_line:  # type: ignore[attr-defined]
+            file_write(prefix)
+        idx = 0
+        while (next_idx := s.find('\n', idx)) != -1:
+            next_idx += 1
+            file_write(s[idx:next_idx])
+            if next_idx == len(s):
+                file.start_new_line = True  # type: ignore[attr-defined]
+                return
+            file_write(prefix)
+            idx = next_idx
+        file_write(s[idx:])
+        file.start_new_line = False  # type: ignore[attr-defined]
+
+    file.start_new_line = True  # type: ignore[attr-defined]
+    file.write = write_with_prefix  # type: ignore[method-assign]
+
+
+def decorate_logs(process_name: str | None = None) -> None:
+    """
+    Adds a process-specific prefix to each line of output written to stdout and
+    stderr.
+
+    Args:
+        process_name: Optional; the name of the process to use in the prefix.
+            If not provided, the current process name from the multiprocessing
+            context is used.
+    """
+    if process_name is None:
+        process_name = get_mp_context().current_process().name
+    pid = os.getpid()
+    _add_prefix(sys.stdout, process_name, pid)
+    _add_prefix(sys.stderr, process_name, pid)

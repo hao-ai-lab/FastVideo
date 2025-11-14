@@ -1,3 +1,4 @@
+from fastvideo.configs.models.vaes.cosmosvae import CosmosVAEConfig
 from fastvideo.configs.models.vaes.hunyuanvae import HunyuanVAEConfig
 from fastvideo.configs.models.vaes.ltxvae import LTXVAEConfig
 from fastvideo.configs.models.vaes.stepvideovae import StepVideoVAEConfig
@@ -8,4 +9,5 @@ __all__ = [
     "WanVAEConfig",
     "StepVideoVAEConfig",
     "LTXVAEConfig",
+    "CosmosVAEConfig",
 ]

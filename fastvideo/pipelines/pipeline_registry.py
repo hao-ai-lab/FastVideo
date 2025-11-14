@@ -21,10 +21,12 @@ _PIPELINE_NAME_TO_ARCHITECTURE_NAME: dict[str, str] = {
     "WanPipeline": "wan",
     "WanDMDPipeline": "wan",
     "WanImageToVideoPipeline": "wan",
+    "WanVideoToVideoPipeline": "wan",
     "WanCausalDMDPipeline": "wan",
     "StepVideoPipeline": "stepvideo",
     "HunyuanVideoPipeline": "hunyuan",
     "LTXPipeline": "ltx",
+    "Cosmos2VideoToWorldPipeline": "cosmos"
 }
 
 _PREPROCESS_WORKLOAD_TYPE_TO_PIPELINE_NAME: dict[WorkloadType, str] = {
