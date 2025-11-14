@@ -5,7 +5,7 @@
 # Usage: bash scripts/inference/v1_inference_longcat_refine_simple.sh
 
 # Number of GPUs
-num_gpus=2
+num_gpus=1
 
 # Attention backend
 export FASTVIDEO_ATTENTION_BACKEND=
@@ -53,14 +53,14 @@ fastvideo generate \
     --sp-size $num_gpus \
     --tp-size 1 \
     --num-gpus $num_gpus \
-    --dit-cpu-offload False \
+    --dit-cpu-offload True \
     --vae-cpu-offload False \
     --text-encoder-cpu-offload True \
     --pin-cpu-memory False \
     --enable-bsa True \
     --bsa-sparsity 0.9375 \
-    --bsa-chunk-q 4 4 4 \
-    --bsa-chunk-k 4 4 4 \
+    --bsa-chunk-q 4 4 8 \
+    --bsa-chunk-k 4 4 8 \
     --lora-path "$MODEL_BASE/lora/refinement" \
     --lora-nickname "refinement" \
     --refine-from "$INPUT_VIDEO" \

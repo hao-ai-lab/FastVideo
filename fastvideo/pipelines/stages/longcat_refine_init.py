@@ -22,6 +22,7 @@ from fastvideo.logger import init_logger
 from fastvideo.models.vision_utils import load_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
+from fastvideo.utils.bucket_config import get_bucket_config
 
 logger = init_logger(__name__)
 
@@ -75,20 +76,62 @@ class LongCatRefineInitStage(PipelineStage):
         # Store in batch for reference
         batch.stage1_video = pil_images
         
-        # Get target dimensions from batch
-        height = batch.height
-        width = batch.width
+        # Get parameters from batch
         num_frames = len(pil_images)
         spatial_refine_only = batch.spatial_refine_only
         t_thresh = batch.t_thresh
+        num_cond_frames = batch.num_cond_frames if hasattr(batch, 'num_cond_frames') else 0
         
         # Calculate new frame count (temporal upsampling if not spatial_refine_only)
         new_num_frames = num_frames if spatial_refine_only else 2 * num_frames
         logger.info(f"Refine mode: {'spatial only' if spatial_refine_only else 'spatial + temporal'}")
-        logger.info(f"Target: {width}x{height} @ {new_num_frames} frames")
         
         # Update batch.num_frames to reflect the upsampled count
         batch.num_frames = new_num_frames
+        
+        # Use bucket system to select resolution (exactly like LongCat)
+        # Calculate scale_factor_spatial considering SP split
+        sp_size = fastvideo_args.sp_size if fastvideo_args.sp_size > 0 else 1
+        vae_scale_factor_spatial = 8  # VAE spatial downsampling
+        patch_size_spatial = 2  # LongCat patch size
+        bsa_latent_granularity = 4
+        scale_factor_spatial = vae_scale_factor_spatial * patch_size_spatial * bsa_latent_granularity  # 64
+        
+        # Calculate optimal split like LongCat (cp_split_hw logic)
+        # For sp_size=1: [1,1], max=1
+        # For sp_size=2: [1,2], max=2
+        # For sp_size=4: [2,2], max=2
+        # For sp_size=8: [2,4], max=4
+        if sp_size > 1:
+            # Get optimal 2D split factors (mimic context_parallel_util.get_optimal_split)
+            factors = []
+            for i in range(1, int(sp_size**0.5) + 1):
+                if sp_size % i == 0:
+                    factors.append([i, sp_size // i])
+            cp_split_hw = min(factors, key=lambda x: abs(x[0] - x[1]))
+            scale_factor_spatial *= max(cp_split_hw)
+            logger.info(f"SP split: sp_size={sp_size}, cp_split_hw={cp_split_hw}, max_split={max(cp_split_hw)}")
+        else:
+            cp_split_hw = [1, 1]
+        
+        # Get bucket config and find closest bucket for the input aspect ratio
+        bucket_config = get_bucket_config('720p', scale_factor_spatial)
+        
+        # Get input aspect ratio from stage1 video
+        input_height, input_width = pil_images[0].height, pil_images[0].width
+        input_ratio = input_height / input_width
+        
+        # Find closest bucket
+        closest_ratio = min(bucket_config.keys(), key=lambda x: abs(float(x) - input_ratio))
+        height, width = bucket_config[closest_ratio][0]
+        
+        logger.info(f"Input aspect ratio: {input_ratio:.2f} ({input_width}x{input_height})")
+        logger.info(f"Matched bucket ratio: {closest_ratio} -> resolution: {width}x{height}")
+        logger.info(f"Target: {width}x{height} @ {new_num_frames} frames (sp_size={sp_size}, scale_factor={scale_factor_spatial})")
+        
+        # Override batch height/width with bucket-selected resolution
+        batch.height = height
+        batch.width = width
         
         # Convert PIL images to tensor [T, C, H, W]
         stage1_video_tensor = torch.stack([
@@ -100,82 +143,53 @@ class LongCatRefineInitStage(PipelineStage):
         dtype = batch.prompt_embeds[0].dtype
         stage1_video_tensor = stage1_video_tensor.to(device=device, dtype=dtype)
         
+        # Replicate LongCat's exact preprocessing (lines 1227-1235 in pipeline_longcat_video.py)
+        # First: spatial interpolation to target (height, width) on [T, C, H, W]
+        video_down = F.interpolate(stage1_video_tensor, size=(height, width), mode='bilinear', align_corners=True)
+        
         # Rearrange to [C, T, H, W] and add batch dimension -> [1, C, T, H, W]
-        video_down = stage1_video_tensor.permute(1, 0, 2, 3).unsqueeze(0)  # [1, C, T, H, W]
+        video_down = video_down.permute(1, 0, 2, 3).unsqueeze(0)  # [1, C, T, H, W]
         video_down = video_down / 255.0  # Normalize to [0, 1]
         
-        # Spatial downsampling followed by upsampling (to target resolution)
-        # First interpolate spatially to target H, W
-        video_down_resized = F.interpolate(
-            video_down, 
-            size=(video_down.shape[2], height, width),  # Keep T, upsample H, W
-            mode='trilinear', 
-            align_corners=True
-        )
-        
-        # Then interpolate temporally to new_num_frames
-        video_up = F.interpolate(
-            video_down_resized,
-            size=(new_num_frames, height, width),
-            mode='trilinear',
-            align_corners=True
-        )
+        # Then: temporal+spatial interpolation to (new_num_frames, height, width)
+        video_up = F.interpolate(video_down, size=(new_num_frames, height, width), mode='trilinear', align_corners=True)
         
         # Rescale to [-1, 1] for VAE
         video_up = video_up * 2.0 - 1.0
         
         logger.info(f"Upsampled video shape: {video_up.shape}")
         
-        # Pad video to ensure BSA compatibility
-        # BSA requires latent dimensions to be divisible by bsa_latent_granularity (4)
-        # AND also divisible by sp_size after splitting (for sequence parallelism)
-        bsa_latent_granularity = 4
-        vae_scale_factor_temporal = 4  # VAE temporal downsampling factor
-        vae_scale_factor_spatial = 8   # VAE spatial downsampling factor
+        # Padding logic (exactly like LongCat lines 1237-1255)
+        # Only pad temporal dimension to ensure BSA compatibility
+        vae_scale_factor_temporal = 4
+        num_noise_frames = video_up.shape[2] - num_cond_frames
         
-        # Get sequence parallelism size
-        sp_size = fastvideo_args.sp_size if fastvideo_args.sp_size > 0 else 1
+        num_cond_latents = 0
+        num_cond_frames_added = 0
+        if num_cond_frames > 0:
+            num_cond_latents = 1 + math.ceil((num_cond_frames - 1) / vae_scale_factor_temporal)
+            num_cond_latents = math.ceil(num_cond_latents / bsa_latent_granularity) * bsa_latent_granularity
+            num_cond_frames_added = 1 + (num_cond_latents - 1) * vae_scale_factor_temporal - num_cond_frames
+            num_cond_frames = num_cond_frames + num_cond_frames_added
         
-        current_frames = video_up.shape[2]
-        current_height = video_up.shape[3]
-        current_width = video_up.shape[4]
+        num_noise_latents = math.ceil(num_noise_frames / vae_scale_factor_temporal)
+        num_noise_latents = math.ceil(num_noise_latents / bsa_latent_granularity) * bsa_latent_granularity
+        num_noise_frames_added = num_noise_latents * vae_scale_factor_temporal - num_noise_frames
         
-        # Calculate required latent dimensions
-        # For temporal: must be divisible by bsa_chunk (no SP split on T)
-        num_latents_t = math.ceil(current_frames / vae_scale_factor_temporal)
-        num_latents_t_padded = math.ceil(num_latents_t / bsa_latent_granularity) * bsa_latent_granularity
-        target_frames = num_latents_t_padded * vae_scale_factor_temporal
+        if num_cond_frames_added > 0 or num_noise_frames_added > 0:
+            logger.info(f"Padding temporal dimension for BSA: cond_frames+={num_cond_frames_added}, noise_frames+={num_noise_frames_added}")
+            pad_front = video_up[:, :, 0:1].repeat(1, 1, num_cond_frames_added, 1, 1)
+            pad_back = video_up[:, :, -1:].repeat(1, 1, num_noise_frames_added, 1, 1)
+            video_up = torch.cat([pad_front, video_up, pad_back], dim=2)
+            logger.info(f"Padded video shape: {video_up.shape}")
         
-        # For spatial: must be divisible by (bsa_chunk * sp_size) since SP splits spatially
-        num_latents_h = current_height // vae_scale_factor_spatial
-        spatial_granularity = bsa_latent_granularity * sp_size
-        num_latents_h_padded = math.ceil(num_latents_h / spatial_granularity) * spatial_granularity
-        target_height = num_latents_h_padded * vae_scale_factor_spatial
+        # Update batch with actual frame count after padding
+        batch.num_frames = video_up.shape[2]
         
-        num_latents_w = current_width // vae_scale_factor_spatial
-        num_latents_w_padded = math.ceil(num_latents_w / spatial_granularity) * spatial_granularity
-        target_width = num_latents_w_padded * vae_scale_factor_spatial
-        
-        # Pad if needed
-        pad_t = target_frames - current_frames
-        pad_h = target_height - current_height
-        pad_w = target_width - current_width
-        
-        if pad_t > 0 or pad_h > 0 or pad_w > 0:
-            logger.info(f"Padding video for BSA (sp_size={sp_size}): T {current_frames}->{target_frames}, H {current_height}->{target_height}, W {current_width}->{target_width}")
-            
-            # Pad frames at the end (repeat last frame)
-            if pad_t > 0:
-                pad_frames = video_up[:, :, -1:].repeat(1, 1, pad_t, 1, 1)
-                video_up = torch.cat([video_up, pad_frames], dim=2)
-            
-            # Pad height and width (use F.pad with replication)
-            if pad_h > 0 or pad_w > 0:
-                # F.pad format: (left, right, top, bottom, front, back)
-                # We want to pad bottom and right
-                video_up = F.pad(video_up, (0, pad_w, 0, pad_h, 0, 0), mode='replicate')
-        
-        logger.info(f"Padded video shape: {video_up.shape}")
+        # Store num_cond_latents for denoising stage
+        if num_cond_latents > 0:
+            batch.num_cond_latents = num_cond_latents
+            logger.info(f"Will use num_cond_latents={num_cond_latents} during denoising")
         
         # VAE encode
         logger.info("Encoding stage1 video with VAE...")
@@ -199,15 +213,17 @@ class LongCatRefineInitStage(PipelineStage):
                 # Assume it's already a tensor
                 latent_up = latent_dist
         
-        # Normalize latents using VAE config
+        # Normalize latents using VAE config (exactly like LongCat)
         if hasattr(self.vae.config, 'latents_mean') and hasattr(self.vae.config, 'latents_std'):
             latents_mean = torch.tensor(self.vae.config.latents_mean).view(
                 1, self.vae.config.z_dim, 1, 1, 1
             ).to(latent_up.device, latent_up.dtype)
-            latents_std = torch.tensor(self.vae.config.latents_std).view(
+            # LongCat uses: 1.0 / latents_std (equivalent to dividing by latents_std)
+            latents_std = 1.0 / torch.tensor(self.vae.config.latents_std).view(
                 1, self.vae.config.z_dim, 1, 1, 1
             ).to(latent_up.device, latent_up.dtype)
-            latent_up = (latent_up - latents_mean) / latents_std
+            # LongCat: (latents - mean) * (1/std)
+            latent_up = (latent_up - latents_mean) * latents_std
         
         logger.info(f"Encoded latent shape: {latent_up.shape}")
         

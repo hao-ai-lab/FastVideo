@@ -308,11 +308,33 @@ class LongCatSelfAttention(nn.Module):
             k_bsa = k.transpose(1, 2).contiguous()
             v_bsa = v.transpose(1, 2).contiguous()
             
-            # Call BSA
+            # Handle SP split: BSA operates on per-rank spatial dimensions
+            # Replicate LongCat's cp_split_hw logic exactly
+            from fastvideo.distributed.parallel_state import get_sp_world_size
+            sp_size = get_sp_world_size()
+            if sp_size > 1:
+                # Calculate optimal 2D split (same as LongCat's get_optimal_split)
+                factors = []
+                for i in range(1, int(sp_size**0.5) + 1):
+                    if sp_size % i == 0:
+                        factors.append([i, sp_size // i])
+                cp_split_hw = min(factors, key=lambda x: abs(x[0] - x[1]))
+                
+                # Split H and W dimensions by their respective factors
+                T_bsa, H_bsa, W_bsa = latent_shape
+                assert H_bsa % cp_split_hw[0] == 0 and W_bsa % cp_split_hw[1] == 0, \
+                    f"H {H_bsa} must be divisible by {cp_split_hw[0]}, W {W_bsa} must be divisible by {cp_split_hw[1]}"
+                H_bsa = H_bsa // cp_split_hw[0]
+                W_bsa = W_bsa // cp_split_hw[1]
+                latent_shape_bsa = (T_bsa, H_bsa, W_bsa)
+            else:
+                latent_shape_bsa = latent_shape
+            
+            # Call BSA with per-rank latent shape
             out = flash_attn_bsa_3d(
                 q_bsa, k_bsa, v_bsa,
-                latent_shape_q=latent_shape,
-                latent_shape_k=latent_shape,
+                latent_shape_q=latent_shape_bsa,
+                latent_shape_k=latent_shape_bsa,
                 **self.bsa_params
             )  # [B, num_heads, N, head_dim]
             
