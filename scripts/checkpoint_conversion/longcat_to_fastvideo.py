@@ -449,20 +449,41 @@ def convert_lora_weights(source_weights: dict[str, torch.Tensor], lora_name: str
             i += 1
         
         if lora_up_blocks:
-            lora_up = torch.cat(lora_up_blocks, dim=0)
+            # Multi-block LoRA: construct block-diagonal lora_B
+            # This is equivalent to the multi-block computation without modifying fastvideo
+            n_blocks = len(lora_up_blocks)
+            out_per_block, rank_per_block = lora_up_blocks[0].shape  # e.g., [4096, 128]
+            
+            if len(targets) == 1:
+                # Single layer with multi-block: create block-diagonal matrix
+                total_out = out_per_block * n_blocks
+                total_rank = rank_per_block * n_blocks
+                lora_B_blockdiag = torch.zeros(total_out, total_rank, dtype=lora_up_blocks[0].dtype)
+                
+                for i in range(n_blocks):
+                    lora_B_blockdiag[i*out_per_block:(i+1)*out_per_block, 
+                                     i*rank_per_block:(i+1)*rank_per_block] = lora_up_blocks[i]
+                
+                converted[f"{targets[0][0]}.lora_B"] = lora_B_blockdiag
+                # Note: rank for alpha calculation should be total_rank (will be computed from lora_A.shape[0])
+            else:
+                # Multi-block with split targets (e.g., QKV split)
+                # Each target gets one block
+                for i, (path, _) in enumerate(targets):
+                    if i < n_blocks:
+                        converted[f"{path}.lora_B"] = lora_up_blocks[i]
         elif "lora_up.weight" in weight_keys:
             lora_up = source_weights[weight_keys["lora_up.weight"]]
+            # Split if needed
+            if len(targets) == 1:
+                converted[f"{targets[0][0]}.lora_B"] = lora_up
+            else:
+                n = len(targets)
+                out_dim = lora_up.shape[0] // n
+                for i, (path, _) in enumerate(targets):
+                    converted[f"{path}.lora_B"] = lora_up[i*out_dim:(i+1)*out_dim, :]
         else:
             continue
-        
-        # Split if needed
-        if len(targets) == 1:
-            converted[f"{targets[0][0]}.lora_B"] = lora_up
-        else:
-            n = len(targets)
-            out_dim = lora_up.shape[0] // n
-            for i, (path, _) in enumerate(targets):
-                converted[f"{path}.lora_B"] = lora_up[i*out_dim:(i+1)*out_dim, :]
     
     print(f"    Output keys: {len(converted)} (including lora_alpha)")
     # Count how many lora_alpha values were added

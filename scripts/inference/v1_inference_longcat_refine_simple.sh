@@ -5,7 +5,7 @@
 # Usage: bash scripts/inference/v1_inference_longcat_refine_simple.sh
 
 # Number of GPUs
-num_gpus=1
+num_gpus=2
 
 # Attention backend
 export FASTVIDEO_ATTENTION_BACKEND=
@@ -14,7 +14,7 @@ export FASTVIDEO_ATTENTION_BACKEND=
 export MODEL_BASE=weights/longcat-native
 
 # Input video (change this to your 480p video path)
-INPUT_VIDEO="outputs/output_t2v_distill_1.mp4"
+INPUT_VIDEO="outputs_video/longcat_distill/source.mp4"
 
 # Output directory
 REFINE_OUTPUT="outputs_video/longcat_refine_720p"
@@ -54,7 +54,7 @@ fastvideo generate \
     --tp-size 1 \
     --num-gpus $num_gpus \
     --dit-cpu-offload False \
-    --vae-cpu-offload True \
+    --vae-cpu-offload False \
     --text-encoder-cpu-offload True \
     --pin-cpu-memory False \
     --enable-bsa True \

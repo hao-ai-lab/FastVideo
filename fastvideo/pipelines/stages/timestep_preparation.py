@@ -7,6 +7,8 @@ This module contains implementations of timestep preparation stages for diffusio
 
 import inspect
 
+import torch
+
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -71,7 +73,12 @@ class TimestepPreparationStage(PipelineStage):
                     f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
                     f" timestep schedules. Please check whether you are using the correct scheduler."
                 )
-            scheduler.set_timesteps(timesteps=timesteps,
+            # Convert timesteps to CPU if it's a tensor (for numpy conversion in scheduler)
+            if isinstance(timesteps, torch.Tensor):
+                timesteps_for_scheduler = timesteps.cpu()
+            else:
+                timesteps_for_scheduler = timesteps
+            scheduler.set_timesteps(timesteps=timesteps_for_scheduler,
                                     device=device,
                                     **extra_set_timesteps_kwargs)
             timesteps = scheduler.timesteps
