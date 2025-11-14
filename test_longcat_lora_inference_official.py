@@ -11,24 +11,29 @@ Modes:
 
 Usage:
     # Standard generation (50 steps, 480p)
-    python test_longcat_lora_inference.py --mode standard
+    python test_longcat_lora_inference_official.py --mode standard
 
     # Distilled generation (16 steps, 480p with LoRA)
-    python test_longcat_lora_inference.py --mode distilled
+    python test_longcat_lora_inference_official.py --mode distilled
 
     # Distilled + Refinement pipeline (480p -> 720p)
-    python test_longcat_lora_inference.py --mode distilled_refine
+    python test_longcat_lora_inference_official.py --mode distilled_refine
 
     # Refinement only (720p with LoRA)
-    python test_longcat_lora_inference.py --mode refinement
+    python test_longcat_lora_inference_official.py --mode refinement
 """
 
 import argparse
 import time
 from pathlib import Path
 
+import numpy as np
+import PIL.Image
 import torch
+from torchvision.io import write_video
+
 from fastvideo import VideoGenerator
+from fastvideo.third_party.longcat_video.pipeline_longcat_video import LongCatVideoPipeline
 
 
 def test_standard(model_path: str, num_gpus: int = 1, num_steps: int = 50):
@@ -129,7 +134,7 @@ def test_distilled(model_path: str, num_gpus: int = 1):
 
 
 def test_distilled_refine(model_path: str, num_gpus: int = 1):
-    """Test distilled + refinement pipeline (480p -> 720p)."""
+    """Test distilled + refinement pipeline (480p -> 720p) using official generate_refine()."""
     
     prompt = "In a realistic photography style, an asian boy around seven or eight years old sits on a park bench, wearing a light yellow T-shirt, denim shorts, and white sneakers. He holds an ice cream cone with vanilla and chocolate flavors, and beside him is a medium-sized golden Labrador. Smiling, the boy offers the ice cream to the dog, who eagerly licks it with its tongue. The sun is shining brightly, and the background features a green lawn and several tall trees, creating a warm and loving scene."
     
@@ -138,7 +143,7 @@ def test_distilled_refine(model_path: str, num_gpus: int = 1):
     output_dir.mkdir(exist_ok=True)
     
     print("=" * 80)
-    print("Distilled + Refinement Pipeline (480p -> 720p)")
+    print("Distilled + Refinement Pipeline (480p -> 720p) [OFFICIAL]")
     print("=" * 80)
     print(f"Model: {model_path}")
     print(f"LoRA: {model_path}/lora/distilled -> {model_path}/lora/refinement")
@@ -164,7 +169,7 @@ def test_distilled_refine(model_path: str, num_gpus: int = 1):
         dit_cpu_offload=False,
     )
     
-    output_distill_path = output_dir / "output_t2v_distill_stage1.mp4"
+    output_distill_path = output_dir / "output_t2v_distill_stage1_official.mp4"
     video_distill = generator.generate_video(
         prompt=prompt,
         negative_prompt=None,
@@ -183,9 +188,18 @@ def test_distilled_refine(model_path: str, num_gpus: int = 1):
     print(f"✓ Stage 1 completed in {distill_time:.2f}s → {output_distill_path}")
     print()
     
-    # Clean up Stage 1 generator and free GPU memory
-    print("Shutting down Stage 1 generator to free GPU memory...")
-    generator.shutdown()
+    # Convert video_distill to PIL.Image list (like official demo)
+    print("Converting stage1 video to PIL.Image list...")
+    stage1_video = [(video_distill[i] * 255).astype(np.uint8) for i in range(video_distill.shape[0])]
+    stage1_video = [PIL.Image.fromarray(img) for img in stage1_video]
+    print(f"✓ Converted {len(stage1_video)} frames")
+    print()
+    
+    # Get the official pipeline from the executor
+    official_pipe = generator.executor.pipeline
+    
+    # Clean up Stage 1 generator but keep the pipeline
+    print("Releasing Stage 1 generator resources (keeping pipeline)...")
     del video_distill, generator
     import gc
     gc.collect()
@@ -193,49 +207,51 @@ def test_distilled_refine(model_path: str, num_gpus: int = 1):
     print("✓ Stage 1 resources released")
     print()
     
-    # Stage 2: Refinement (720p, 50 steps)
+    # Stage 2: Refinement (720p, 50 steps) using official generate_refine()
     print("-" * 80)
-    print("Stage 2: Refinement Generation (50 steps, 720p)")
+    print("Stage 2: Refinement Generation (50 steps, 720p) [OFFICIAL generate_refine()]")
     print("-" * 80)
     
     refine_start = time.time()
     
-    # Reload generator with refinement LoRA and BSA enabled
-    # Use aggressive offloading to save GPU memory for 720p generation
-    refinement_lora_path = f"{model_path}/lora/refinement"
-    generator = VideoGenerator.from_pretrained(
-        model_path,
-        lora_path=refinement_lora_path,
-        lora_nickname="refinement",
-        num_gpus=num_gpus,
-        use_fsdp_inference=(num_gpus > 1),
-        dit_cpu_offload=True,  # Enable CPU offload to save memory
-        vae_cpu_offload=False,  # Keep VAE on GPU for speed
-        text_encoder_cpu_offload=True,  # Offload text encoder
-        enable_bsa=True,  # Enable BSA for refinement
-        bsa_sparsity=0.9375,
-        bsa_chunk_q=[4, 4, 8],
-        bsa_chunk_k=[4, 4, 8],
-    )
+    # Get DIT module from the official pipeline
+    dit = official_pipe.get_module("transformer")
     
-    # Generate refined video at 720p using refine-from
-    output_refine_path = output_dir / "output_t2v_refine.mp4"
-    video_refine = generator.generate_video(
+    # Load refinement LoRA from the official weights path
+    print("Loading refinement LoRA...")
+    refinement_lora_path = "weights/longcat-for-fastvideo/lora/refinement"
+    dit.load_lora(refinement_lora_path, 'refinement_lora')
+    dit.enable_loras(['refinement_lora'])
+    print(f"✓ Refinement LoRA loaded from {refinement_lora_path}")
+    
+    # Enable BSA
+    print("Enabling BSA (Block Sparse Attention)...")
+    dit.enable_bsa()
+    print("✓ BSA enabled")
+    print()
+    
+    # Create generator for refinement
+    torch_generator = torch.Generator(device=official_pipe.device)
+    torch_generator.manual_seed(seed)
+    
+    # Call official generate_refine() method
+    print("Generating refined video...")
+    output_refine = official_pipe.generate_refine(
         prompt=prompt,
-        refine_from=str(output_distill_path),
-        t_thresh=0.5,
-        spatial_refine_only=False,
-        num_cond_frames=0,
-        height=720,
-        width=1280,
+        stage1_video=stage1_video,
         num_inference_steps=50,
-        guidance_scale=1.0,
-        seed=seed,
-        output_path=str(output_refine_path),
-        save_video=True,
-        return_frames=True,
-        fps=30,
-    )
+        generator=torch_generator,
+    )[0]
+    
+    # Disable BSA and LoRA
+    dit.disable_all_loras()
+    dit.disable_bsa()
+    
+    # Save refined video
+    output_refine_path = output_dir / "output_t2v_refine_official.mp4"
+    output_tensor = torch.from_numpy(output_refine)
+    output_tensor = (output_tensor * 255).clamp(0, 255).to(torch.uint8)
+    write_video(str(output_refine_path), output_tensor, fps=30, video_codec="libx264", options={"crf": "10"})
     
     refine_time = time.time() - refine_start
     print(f"✓ Stage 2 completed in {refine_time:.2f}s → {output_refine_path}")
