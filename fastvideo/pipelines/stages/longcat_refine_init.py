@@ -128,25 +128,32 @@ class LongCatRefineInitStage(PipelineStage):
         
         # Pad video to ensure BSA compatibility
         # BSA requires latent dimensions to be divisible by bsa_latent_granularity (4)
+        # AND also divisible by sp_size after splitting (for sequence parallelism)
         bsa_latent_granularity = 4
         vae_scale_factor_temporal = 4  # VAE temporal downsampling factor
         vae_scale_factor_spatial = 8   # VAE spatial downsampling factor
+        
+        # Get sequence parallelism size
+        sp_size = fastvideo_args.sp_size if fastvideo_args.sp_size > 0 else 1
         
         current_frames = video_up.shape[2]
         current_height = video_up.shape[3]
         current_width = video_up.shape[4]
         
         # Calculate required latent dimensions
+        # For temporal: must be divisible by bsa_chunk (no SP split on T)
         num_latents_t = math.ceil(current_frames / vae_scale_factor_temporal)
         num_latents_t_padded = math.ceil(num_latents_t / bsa_latent_granularity) * bsa_latent_granularity
         target_frames = num_latents_t_padded * vae_scale_factor_temporal
         
+        # For spatial: must be divisible by (bsa_chunk * sp_size) since SP splits spatially
         num_latents_h = current_height // vae_scale_factor_spatial
-        num_latents_h_padded = math.ceil(num_latents_h / bsa_latent_granularity) * bsa_latent_granularity
+        spatial_granularity = bsa_latent_granularity * sp_size
+        num_latents_h_padded = math.ceil(num_latents_h / spatial_granularity) * spatial_granularity
         target_height = num_latents_h_padded * vae_scale_factor_spatial
         
         num_latents_w = current_width // vae_scale_factor_spatial
-        num_latents_w_padded = math.ceil(num_latents_w / bsa_latent_granularity) * bsa_latent_granularity
+        num_latents_w_padded = math.ceil(num_latents_w / spatial_granularity) * spatial_granularity
         target_width = num_latents_w_padded * vae_scale_factor_spatial
         
         # Pad if needed
@@ -155,7 +162,7 @@ class LongCatRefineInitStage(PipelineStage):
         pad_w = target_width - current_width
         
         if pad_t > 0 or pad_h > 0 or pad_w > 0:
-            logger.info(f"Padding video for BSA: T {current_frames}->{target_frames}, H {current_height}->{target_height}, W {current_width}->{target_width}")
+            logger.info(f"Padding video for BSA (sp_size={sp_size}): T {current_frames}->{target_frames}, H {current_height}->{target_height}, W {current_width}->{target_width}")
             
             # Pad frames at the end (repeat last frame)
             if pad_t > 0:
