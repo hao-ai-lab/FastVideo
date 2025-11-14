@@ -168,6 +168,15 @@ class DecodingStage(PipelineStage):
 
         # Convert to CPU float32 for compatibility
         frames = frames.cpu().float()
+        
+        # Crop padding if this is a LongCat refinement (CRITICAL for correct output!)
+        if hasattr(batch, 'num_cond_frames_added') and hasattr(batch, 'new_frame_size_before_padding'):
+            num_cond_frames_added = batch.num_cond_frames_added
+            new_frame_size = batch.new_frame_size_before_padding
+            if num_cond_frames_added > 0 or frames.shape[2] != new_frame_size:
+                # frames is [B, C, T, H, W], crop temporal dimension
+                frames = frames[:, :, num_cond_frames_added:num_cond_frames_added + new_frame_size, :, :]
+                logger.info(f"Cropped LongCat refinement padding: {num_cond_frames_added}:{num_cond_frames_added + new_frame_size}, final shape: {frames.shape}")
 
         # Update batch with decoded image
         batch.output = frames

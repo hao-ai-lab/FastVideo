@@ -186,10 +186,17 @@ class LongCatRefineInitStage(PipelineStage):
         # Update batch with actual frame count after padding
         batch.num_frames = video_up.shape[2]
         
+        # Store padding info for later cropping (CRITICAL for correct output!)
+        batch.num_cond_frames_added = num_cond_frames_added
+        batch.num_noise_frames_added = num_noise_frames_added
+        batch.new_frame_size_before_padding = new_num_frames
+        
         # Store num_cond_latents for denoising stage
         if num_cond_latents > 0:
             batch.num_cond_latents = num_cond_latents
             logger.info(f"Will use num_cond_latents={num_cond_latents} during denoising")
+        
+        logger.info(f"Padding info: cond+={num_cond_frames_added}, noise+={num_noise_frames_added}, original={new_num_frames}")
         
         # VAE encode
         logger.info("Encoding stage1 video with VAE...")
