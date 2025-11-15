@@ -159,7 +159,7 @@ class CausalDMDDenosingStage(DenoisingStage):
             # Causal video gen directly replaces the first frame of the latent with
             # the image latent instead of appending along the channel dim
             assert self.vae is not None, "VAE is not provided for causal video gen task"
-            self.vae = self.vae.to(get_local_torch_device())
+           self.vae = self.vae.to(get_local_torch_device())
             first_frame_latent = self.vae.encode(batch.pil_image).mean.float()
             if (hasattr(self.vae, "shift_factor")
                     and self.vae.shift_factor is not None):
@@ -201,6 +201,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                     **pos_cond_kwargs,
                 )
                 if boundary_timestep is not None:
+                    assert self.transformer_2 is not None, "transformer_2 is not provided, but boundary_timestep is not None"
                     self.transformer_2(
                         first_frame_latent.to(target_dtype),
                         prompt_embeds,
@@ -283,6 +284,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                             (latent_model_input.shape[0], 1),
                             device=latent_model_input.device,
                             dtype=torch.long)
+                        assert current_model is not None
                         pred_noise_btchw = current_model(
                             latent_model_input,
                             prompt_embeds,
@@ -347,7 +349,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                             0, 2, 1, 3, 4)
                     else:
                         current_latents = pred_video_btchw.permute(
-                            0, 2, 1, 3, 4)
+                            0, 2, 1, 3, 4)                        
 
                     if progress_bar is not None:
                         progress_bar.update()
@@ -384,7 +386,6 @@ class CausalDMDDenosingStage(DenoisingStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                         )
-
                     self.transformer(
                         context_bcthw,
                         prompt_embeds,
@@ -397,7 +398,6 @@ class CausalDMDDenosingStage(DenoisingStage):
                         **image_kwargs,
                         **pos_cond_kwargs,
                     )
-
                 start_index += current_num_frames
 
         if boundary_timestep is not None:

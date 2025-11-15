@@ -10,8 +10,9 @@ def main():
     # model.
     # If a local path is provided, FastVideo will make a best effort
     # attempt to identify the optimal arguments.
+    model_id = "FastVideo/CausalWan2.2-I2V-A14B-Preview-Diffusers"
     generator = VideoGenerator.from_pretrained(
-        "FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers",
+        model_id,
         # FastVideo will automatically handle distributed setup
         num_gpus=1,
         use_fsdp_inference=True,
@@ -25,7 +26,7 @@ def main():
         # image_encoder_cpu_offload=False,
     )
 
-    sampling_param = SamplingParam.from_pretrained("FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers")
+    sampling_param = SamplingParam.from_pretrained(model_id)
     sampling_param.num_frames = 81
     sampling_param.width = 832
     sampling_param.height = 480
