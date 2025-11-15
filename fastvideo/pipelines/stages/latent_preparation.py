@@ -424,3 +424,168 @@ class CosmosLatentPreparationStage(PipelineStage):
                          [V.is_tensor, V.with_dims(5)])
         result.add_check("raw_latent_shape", batch.raw_latent_shape, V.is_tuple)
         return result
+
+
+class LTXLatentPreparationStage(LatentPreparationStage):
+    """
+    Latent preparation stage for LTX Video
+    """
+
+    def __init__(self, scheduler, transformer) -> None:
+        super().__init__(scheduler, transformer)
+
+    def pack_latents(self,
+                     latents: torch.Tensor,
+                     patch_size: int = 1,
+                     patch_size_t: int = 1) -> torch.Tensor:
+        """Pack video latents into sequence format for transformer."""
+        batch_size, num_channels, num_frames, height, width = latents.shape
+        post_patch_num_frames = num_frames // patch_size_t
+        post_patch_height = height // patch_size
+        post_patch_width = width // patch_size
+        latents = latents.reshape(batch_size, -1, post_patch_num_frames,
+                                  patch_size_t, post_patch_height, patch_size,
+                                  post_patch_width, patch_size)
+        latents = latents.permute(0, 2, 4, 6, 1, 3, 5,
+                                  7).flatten(4, 7).flatten(1, 3)
+        return latents
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        """
+        Prepare initial latent variables for LTX diffusion process.
+        
+        LTX requires packing latents into sequence format.
+        """
+        latent_num_frames = None
+        # Adjust video length based on VAE version if needed
+        if hasattr(self, 'adjust_video_length'):
+            latent_num_frames = self.adjust_video_length(batch, fastvideo_args)
+
+        # Determine batch size
+        if isinstance(batch.prompt, list):
+            batch_size = len(batch.prompt)
+        elif batch.prompt is not None:
+            batch_size = 1
+        else:
+            batch_size = batch.prompt_embeds[0].shape[0]
+
+        # Adjust batch size for number of videos per prompt
+        batch_size *= batch.num_videos_per_prompt
+
+        # Get required parameters
+        dtype = batch.prompt_embeds[0].dtype
+        device = get_local_torch_device()
+        generator = batch.generator
+        latents = batch.latents
+        num_frames = latent_num_frames if latent_num_frames is not None else batch.num_frames
+        height = batch.height
+        width = batch.width
+
+        if height is None or width is None:
+            raise ValueError("Height and width must be provided")
+
+        # Calculate latent shape (before packing)
+        shape = (
+            batch_size,
+            self.transformer.num_channels_latents,
+            num_frames,
+            height // fastvideo_args.pipeline_config.vae_config.arch_config.
+            spatial_compression_ratio,
+            width // fastvideo_args.pipeline_config.vae_config.arch_config.
+            spatial_compression_ratio,
+        )
+
+        # Validate generator if it's a list
+        if isinstance(generator, list) and len(generator) != batch_size:
+            raise ValueError(
+                f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
+                f" size of {batch_size}. Make sure the batch size matches the length of the generators."
+            )
+
+        # Generate or use provided latents
+        if latents is None:
+            latents = randn_tensor(shape,
+                                   generator=generator,
+                                   device=device,
+                                   dtype=dtype)
+        else:
+            latents = latents.to(device)
+
+        # Scale the initial noise if needed
+        if hasattr(self.scheduler, "init_noise_sigma"):
+            latents = latents * self.scheduler.init_noise_sigma
+
+        # Store raw latent shape before packing
+        batch.raw_latent_shape = latents.shape
+
+        # Initialize LTX-specific data in batch.extra
+        if 'ltx' not in batch.extra:
+            batch.extra['ltx'] = {}
+
+        # Store unpacked dimensions for later use
+        batch.extra['ltx']['latent_num_frames'] = latents.shape[2]
+        batch.extra['ltx']['latent_height'] = latents.shape[3]
+        batch.extra['ltx']['latent_width'] = latents.shape[4]
+        batch.extra['ltx']['frame_rate'] = 25  # Default frame rate for LTX
+        batch.extra['ltx']['transformer_spatial_patch_size'] = 1  # LTX uses 1
+        batch.extra['ltx']['transformer_temporal_patch_size'] = 1  # LTX uses 1
+
+        # Pack the latents for LTX transformer
+        latents = self.pack_latents(
+            latents,
+            patch_size=1,  # transformer patch size
+            patch_size_t=1)
+
+        # Mark latents as packed
+        batch.packed_latents = True
+        batch.extra['ltx']['packed_latents'] = True
+
+        logger.info("LTX packed latents shape: %s (from %s)", latents.shape,
+                    batch.raw_latent_shape)
+
+        # Calculate sequence length for validation
+        expected_seq_len = (batch.extra['ltx']['latent_num_frames'] *
+                            batch.extra['ltx']['latent_height'] *
+                            batch.extra['ltx']['latent_width'])
+
+        # Store sequence length for timestep preparation
+        batch.sequence_length = expected_seq_len
+
+        # Update batch with prepared latents
+        batch.latents = latents
+        return batch
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify LTX latent preparation stage inputs."""
+        result = VerificationResult()
+        result.add_check(
+            "prompt_or_embeds", None, lambda _: V.string_or_list_strings(
+                batch.prompt) or V.list_not_empty(batch.prompt_embeds))
+        result.add_check("prompt_embeds", batch.prompt_embeds,
+                         V.list_of_tensors)
+        result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt,
+                         V.positive_int)
+        result.add_check("generator", batch.generator,
+                         V.generator_or_list_generators)
+        result.add_check("num_frames", batch.num_frames, V.positive_int)
+        result.add_check("height", batch.height, V.positive_int)
+        result.add_check("width", batch.width, V.positive_int)
+        result.add_check("latents", batch.latents, V.none_or_tensor)
+        return result
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify LTX latent preparation stage outputs."""
+        result = VerificationResult()
+        # LTX outputs packed latents: [batch_size, sequence_length, channels]
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(3)])
+        result.add_check("raw_latent_shape", batch.raw_latent_shape, V.is_tuple)
+        result.add_check("packed_latents", batch.packed_latents,
+                         lambda x: x is True)
+        return result
