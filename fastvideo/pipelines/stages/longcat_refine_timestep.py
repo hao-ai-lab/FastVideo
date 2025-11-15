@@ -58,14 +58,14 @@ class LongCatRefineTimestepStage(PipelineStage):
 
         # ------------------------------------------------------------------
         # 1) Match LongCatVideoPipeline.get_timesteps_sigmas (non-distill):
-        #    sigmas = linspace(1, 0.001, num_inference_steps)
+        #    sigmas = linspace(1, 0.001, num_inference_steps) on CPU
         # ------------------------------------------------------------------
         base_sigmas = torch.linspace(
             1.0,
             0.001,
             num_inference_steps,
             dtype=torch.float32,
-            device=device,
+            device="cpu",  # scheduler.set_timesteps expects CPU-convertible sigmas
         )
         # Let the scheduler build its internal timestep schedule from sigmas
         self.scheduler.set_timesteps(
