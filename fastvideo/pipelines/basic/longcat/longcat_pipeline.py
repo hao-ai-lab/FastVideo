@@ -118,17 +118,19 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
             )
         )
 
-        # Add refine timestep stage (will be skipped if not refining)
+        # First prepare generic timesteps (for non-refine paths)
         self.add_stage(
-            stage_name="longcat_refine_timestep_stage",
-            stage=LongCatRefineTimestepStage(
+            stage_name="timestep_preparation_stage",
+            stage=TimestepPreparationStage(
                 scheduler=self.get_module("scheduler")
             )
         )
 
+        # Then override timesteps for refinement (will be a no-op if not refining),
+        # matching LongCat's generate_refine schedule.
         self.add_stage(
-            stage_name="timestep_preparation_stage",
-            stage=TimestepPreparationStage(
+            stage_name="longcat_refine_timestep_stage",
+            stage=LongCatRefineTimestepStage(
                 scheduler=self.get_module("scheduler")
             )
         )

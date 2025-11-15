@@ -186,7 +186,7 @@ def test_distilled_refine(model_path: str, num_gpus: int = 1):
     # Clean up Stage 1 generator and free GPU memory
     print("Shutting down Stage 1 generator to free GPU memory...")
     generator.shutdown()
-    del video_distill, generator
+    del generator
     import gc
     gc.collect()
     torch.cuda.empty_cache()
@@ -213,7 +213,7 @@ def test_distilled_refine(model_path: str, num_gpus: int = 1):
         vae_cpu_offload=False,  # Keep VAE on GPU for speed
         text_encoder_cpu_offload=True,  # Offload text encoder
         enable_bsa=True,  # Enable BSA for refinement
-        bsa_sparsity=0.9375,
+        bsa_sparsity=0.875,
         bsa_chunk_q=[4, 4, 8],
         bsa_chunk_k=[4, 4, 8],
     )
@@ -222,7 +222,7 @@ def test_distilled_refine(model_path: str, num_gpus: int = 1):
     output_refine_path = output_dir / "output_t2v_refine.mp4"
     video_refine = generator.generate_video(
         prompt=prompt,
-        refine_from=str(output_distill_path),
+        stage1_video=video_distill,
         t_thresh=0.5,
         spatial_refine_only=False,
         num_cond_frames=0,

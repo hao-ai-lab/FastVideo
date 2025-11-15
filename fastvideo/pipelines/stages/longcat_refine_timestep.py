@@ -46,43 +46,58 @@ class LongCatRefineTimestepStage(PipelineStage):
             The batch with refinement timesteps.
         """
         # Only apply if this is a refinement task
-        if batch.refine_from is None:
+        # Trigger when either a refine_from path or in-memory stage1_video is provided
+        if batch.refine_from is None and getattr(batch, "stage1_video", None) is None:
             return batch
-        
+
         device = get_local_torch_device()
         num_inference_steps = batch.num_inference_steps
         t_thresh = batch.t_thresh
-        
+
         logger.info(f"Preparing LongCat refinement timesteps (t_thresh={t_thresh})")
-        
-        # Generate sigmas for normal schedule
-        # For FlowMatchEulerDiscreteScheduler, we need to construct sigmas
-        # that match the refinement starting point
-        
-        # First set timesteps normally to get the base schedule
-        self.scheduler.set_timesteps(num_inference_steps, device=device)
+
+        # ------------------------------------------------------------------
+        # 1) Match LongCatVideoPipeline.get_timesteps_sigmas (non-distill):
+        #    sigmas = linspace(1, 0.001, num_inference_steps)
+        # ------------------------------------------------------------------
+        base_sigmas = torch.linspace(
+            1.0,
+            0.001,
+            num_inference_steps,
+            dtype=torch.float32,
+            device=device,
+        )
+        # Let the scheduler build its internal timestep schedule from sigmas
+        self.scheduler.set_timesteps(
+            num_inference_steps, sigmas=base_sigmas, device=device
+        )
         base_timesteps = self.scheduler.timesteps
-        
-        # Filter timesteps to only those < t_thresh * 1000
-        t_thresh_value = t_thresh * 1000
-        t_thresh_tensor = torch.tensor(t_thresh_value, dtype=base_timesteps.dtype, device=device)
+
+        # ------------------------------------------------------------------
+        # 2) Apply t_thresh cropping exactly like generate_refine:
+        #    timesteps = [t_thresh*1000] + [t for t in base_timesteps if t < t_thresh*1000]
+        #    sigmas = timesteps / 1000  (with trailing zero)
+        # ------------------------------------------------------------------
+        t_thresh_value = t_thresh * 1000.0
+        t_thresh_tensor = torch.tensor(
+            t_thresh_value, dtype=base_timesteps.dtype, device=device
+        )
         filtered_timesteps = base_timesteps[base_timesteps < t_thresh_tensor]
-        
-        # Prepend t_thresh as the starting timestep
+
         timesteps = torch.cat([t_thresh_tensor.unsqueeze(0), filtered_timesteps])
-        
-        # Update scheduler with these custom timesteps
+
+        # Update scheduler with these custom timesteps and corresponding sigmas
         self.scheduler.timesteps = timesteps
-        
-        # Reconstruct sigmas: sigma = timestep / 1000, plus a trailing zero
         sigmas = torch.cat([timesteps / 1000.0, torch.zeros(1, device=device)])
         self.scheduler.sigmas = sigmas
-        
-        logger.info(f"Refinement timesteps: {len(timesteps)} steps starting from t={t_thresh}")
+
+        logger.info(
+            f"Refinement timesteps: {len(timesteps)} steps starting from t={t_thresh}"
+        )
         logger.info(f"First few timesteps: {timesteps[:5].tolist()}")
-        
-        # Store in batch
+
+        # Store in batch so downstream stages (denoising) use the same schedule
         batch.timesteps = timesteps
-        
+
         return batch
 

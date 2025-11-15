@@ -22,10 +22,15 @@ class SamplingParam:
     video_path: str | None = None
 
     # Refine inputs (LongCat 480p->720p upscaling)
+    # Path-based refine (load stage1 video from disk, e.g. MP4)
     refine_from: str | None = None  # Path to stage1 video (480p output from distill)
     t_thresh: float = 0.5  # Threshold for timestep scheduling in refinement
     spatial_refine_only: bool = False  # If True, only spatial (no temporal doubling)
     num_cond_frames: int = 0  # Number of conditioning frames
+    # In-memory refine input (for two-stage pipeline where stage1 frames are already in memory)
+    # This mirrors LongCat's demo where a list of frames (e.g. np.ndarray or PIL.Image)
+    # is passed directly to the refinement pipeline instead of reloading from disk.
+    stage1_video: Any | None = None
 
     # Text inputs
     prompt: str | list[str] | None = None

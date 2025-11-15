@@ -58,22 +58,50 @@ class LongCatRefineInitStage(PipelineStage):
             The batch with initialized latents for refinement.
         """
         refine_from = batch.refine_from
-        if refine_from is None:
+        in_memory_stage1 = getattr(batch, "stage1_video", None)
+
+        # Only run for refinement tasks: either a path (refine_from) or in-memory video is provided
+        if refine_from is None and in_memory_stage1 is None:
             # Not a refinement task, skip
             return batch
 
-        logger.info(f"Initializing LongCat refinement from: {refine_from}")
-        
-        # Load stage1 video
-        stage1_video_path = Path(refine_from)
-        if not stage1_video_path.exists():
-            raise FileNotFoundError(f"Stage1 video not found: {refine_from}")
-        
-        # Load video frames as PIL Images
-        pil_images, original_fps = load_video(str(stage1_video_path), return_fps=True)
-        logger.info(f"Loaded stage1 video: {len(pil_images)} frames @ {original_fps} fps")
-        
-        # Store in batch for reference
+        # ------------------------------------------------------------------
+        # 1. Obtain stage1 frames (either from disk or from in-memory input)
+        # ------------------------------------------------------------------
+        if in_memory_stage1 is not None:
+            # User provided stage1 frames directly (e.g., from distilled stage output)
+            if len(in_memory_stage1) == 0:
+                raise ValueError(
+                    "stage1_video is empty; expected a non-empty list of frames"
+                )
+
+            if isinstance(in_memory_stage1[0], Image.Image):
+                pil_images = in_memory_stage1
+            else:
+                # Assume numpy arrays or torch tensors with shape [H, W, C]
+                pil_images = [
+                    Image.fromarray(np.array(frame)) for frame in in_memory_stage1
+                ]
+
+            logger.info(
+                f"Initializing LongCat refinement from in-memory stage1_video ({len(pil_images)} frames)"
+            )
+        else:
+            # Path-based refine: load video from disk (original design)
+            logger.info(f"Initializing LongCat refinement from file: {refine_from}")
+            stage1_video_path = Path(refine_from)
+            if not stage1_video_path.exists():
+                raise FileNotFoundError(f"Stage1 video not found: {refine_from}")
+
+            # Load video frames as PIL Images
+            pil_images, original_fps = load_video(
+                str(stage1_video_path), return_fps=True
+            )
+            logger.info(
+                f"Loaded stage1 video: {len(pil_images)} frames @ {original_fps} fps"
+            )
+
+        # Store in batch for reference (use PIL images, same as official demo)
         batch.stage1_video = pil_images
         
         # Get parameters from batch
