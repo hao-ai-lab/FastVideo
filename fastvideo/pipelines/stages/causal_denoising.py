@@ -228,15 +228,17 @@ class CausalDMDDenosingStage(DenoisingStage):
             if (hasattr(self.vae, "shift_factor")
                     and self.vae.shift_factor is not None):
                 if isinstance(self.vae.shift_factor, torch.Tensor):
-                    first_frame_latent -= self.vae.shift_factor.to(first_frame_latent.device, first_frame_latent.dtype)
+                    first_frame_latent -= self.vae.shift_factor.to(
+                        first_frame_latent.device, first_frame_latent.dtype)
                 else:
                     first_frame_latent -= self.vae.shift_factor
 
             if isinstance(self.vae.scaling_factor, torch.Tensor):
-                first_frame_latent = first_frame_latent * self.vae.scaling_factor.to(first_frame_latent.device, first_frame_latent.dtype)
+                first_frame_latent = first_frame_latent * self.vae.scaling_factor.to(
+                    first_frame_latent.device, first_frame_latent.dtype)
             else:
                 first_frame_latent = first_frame_latent * self.vae.scaling_factor
-            
+
             if fastvideo_args.vae_cpu_offload:
                 self.vae = self.vae.to("cpu")
 
@@ -250,11 +252,24 @@ class CausalDMDDenosingStage(DenoisingStage):
                 set_forward_context(current_timestep=0,
                                     attn_metadata=None,
                                     forward_batch=batch):
-                    self.transformer(
+                self.transformer(
+                    first_frame_latent.to(target_dtype),
+                    prompt_embeds,
+                    t_zero,
+                    kv_cache=kv_cache1,
+                    crossattn_cache=crossattn_cache,
+                    current_start=(pos_start_base + start_index) *
+                    self.frame_seq_length,
+                    start_frame=start_index,
+                    **image_kwargs,
+                    **pos_cond_kwargs,
+                )
+                if boundary_timestep is not None:
+                    self.transformer_2(
                         first_frame_latent.to(target_dtype),
                         prompt_embeds,
                         t_zero,
-                        kv_cache=kv_cache1,
+                        kv_cache=kv_cache2,
                         crossattn_cache=crossattn_cache,
                         current_start=(pos_start_base + start_index) *
                         self.frame_seq_length,
@@ -262,24 +277,11 @@ class CausalDMDDenosingStage(DenoisingStage):
                         **image_kwargs,
                         **pos_cond_kwargs,
                     )
-                    if boundary_timestep is not None:
-                        self.transformer_2(
-                            first_frame_latent.to(target_dtype),
-                            prompt_embeds,
-                            t_zero,
-                            kv_cache=kv_cache2,
-                            crossattn_cache=crossattn_cache,
-                            current_start=(pos_start_base + start_index) *
-                            self.frame_seq_length,
-                            start_frame=start_index,
-                            **image_kwargs,
-                            **pos_cond_kwargs,
-                        )
-            
+
             start_index += 1
             block_sizes.pop(0)
             latents[:, :, :1, :, :] = first_frame_latent
-                
+
         # DMD loop in causal blocks
         with self.progress_bar(total=len(block_sizes) *
                                len(timesteps)) as progress_bar:
@@ -409,7 +411,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                             0, 2, 1, 3, 4)
                     else:
                         current_latents = pred_video_btchw.permute(
-                            0, 2, 1, 3, 4)                        
+                            0, 2, 1, 3, 4)
 
                     if progress_bar is not None:
                         progress_bar.update()
