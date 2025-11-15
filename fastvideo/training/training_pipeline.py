@@ -656,6 +656,17 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     "grad_norm": grad_norm,
                     "vsa_sparsity": current_vsa_sparsity,
                 }
+                # Log actual batch shape for MFU calculation
+                if (hasattr(training_batch, 'raw_latent_shape')
+                        and training_batch.raw_latent_shape is not None):
+                    metrics["batch_size"] = int(
+                        training_batch.raw_latent_shape[0])
+                    metrics["latent_shape_t"] = int(
+                        training_batch.raw_latent_shape[2])
+                    metrics["latent_shape_h"] = int(
+                        training_batch.raw_latent_shape[3])
+                    metrics["latent_shape_w"] = int(
+                        training_batch.raw_latent_shape[4])
                 self.tracker.log(metrics, step)
             if step % self.training_args.training_state_checkpointing_steps == 0:
                 with self.profiler_controller.region(
