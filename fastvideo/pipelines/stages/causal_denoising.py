@@ -34,7 +34,11 @@ class CausalDMDDenosingStage(DenoisingStage):
     Denoising stage for causal diffusion.
     """
 
-    def __init__(self, transformer, scheduler, transformer_2=None, vae=None) -> None:
+    def __init__(self,
+                 transformer,
+                 scheduler,
+                 transformer_2=None,
+                 vae=None) -> None:
         super().__init__(transformer, scheduler, transformer_2)
         # KV and cross-attention cache state (initialized on first forward)
         self.transformer = transformer
@@ -110,14 +114,14 @@ class CausalDMDDenosingStage(DenoisingStage):
 
         # Initialize or reset caches
         kv_cache1 = self._initialize_kv_cache(batch_size=latents.shape[0],
-                                      dtype=target_dtype,
-                                      device=latents.device)
+                                              dtype=target_dtype,
+                                              device=latents.device)
         kv_cache2 = None
         if boundary_timestep is not None:
             # Initialize the low noise kv cache
             kv_cache2 = self._initialize_kv_cache(batch_size=latents.shape[0],
-                                      dtype=target_dtype,
-                                      device=latents.device)
+                                                  dtype=target_dtype,
+                                                  device=latents.device)
 
         def _get_kv_cache(timestep: float) -> dict:
             if boundary_timestep is not None:
@@ -128,11 +132,11 @@ class CausalDMDDenosingStage(DenoisingStage):
             return kv_cache1
 
         crossattn_cache = self._initialize_crossattn_cache(
-                batch_size=latents.shape[0],
-                max_text_len=fastvideo_args.pipeline_config.
-                text_encoder_configs[0].arch_config.text_len,
-                dtype=target_dtype,
-                device=latents.device)
+            batch_size=latents.shape[0],
+            max_text_len=fastvideo_args.pipeline_config.text_encoder_configs[0].
+            arch_config.text_len,
+            dtype=target_dtype,
+            device=latents.device)
 
         pos_start_base = 0
 
@@ -151,15 +155,17 @@ class CausalDMDDenosingStage(DenoisingStage):
             if (hasattr(self.vae, "shift_factor")
                     and self.vae.shift_factor is not None):
                 if isinstance(self.vae.shift_factor, torch.Tensor):
-                    first_frame_latent -= self.vae.shift_factor.to(first_frame_latent.device, first_frame_latent.dtype)
+                    first_frame_latent -= self.vae.shift_factor.to(
+                        first_frame_latent.device, first_frame_latent.dtype)
                 else:
                     first_frame_latent -= self.vae.shift_factor
 
             if isinstance(self.vae.scaling_factor, torch.Tensor):
-                first_frame_latent = first_frame_latent * self.vae.scaling_factor.to(first_frame_latent.device, first_frame_latent.dtype)
+                first_frame_latent = first_frame_latent * self.vae.scaling_factor.to(
+                    first_frame_latent.device, first_frame_latent.dtype)
             else:
                 first_frame_latent = first_frame_latent * self.vae.scaling_factor
-            
+
             if fastvideo_args.vae_cpu_offload:
                 self.vae = self.vae.to("cpu")
 
@@ -173,11 +179,24 @@ class CausalDMDDenosingStage(DenoisingStage):
                 set_forward_context(current_timestep=0,
                                     attn_metadata=None,
                                     forward_batch=batch):
-                    self.transformer(
+                self.transformer(
+                    first_frame_latent.to(target_dtype),
+                    prompt_embeds,
+                    t_zero,
+                    kv_cache=kv_cache1,
+                    crossattn_cache=crossattn_cache,
+                    current_start=(pos_start_base + start_index) *
+                    self.frame_seq_length,
+                    start_frame=start_index,
+                    **image_kwargs,
+                    **pos_cond_kwargs,
+                )
+                if boundary_timestep is not None:
+                    self.transformer_2(
                         first_frame_latent.to(target_dtype),
                         prompt_embeds,
                         t_zero,
-                        kv_cache=kv_cache1,
+                        kv_cache=kv_cache2,
                         crossattn_cache=crossattn_cache,
                         current_start=(pos_start_base + start_index) *
                         self.frame_seq_length,
@@ -185,24 +204,11 @@ class CausalDMDDenosingStage(DenoisingStage):
                         **image_kwargs,
                         **pos_cond_kwargs,
                     )
-                    if boundary_timestep is not None:
-                        self.transformer_2(
-                            first_frame_latent.to(target_dtype),
-                            prompt_embeds,
-                            t_zero,
-                            kv_cache=kv_cache2,
-                            crossattn_cache=crossattn_cache,
-                            current_start=(pos_start_base + start_index) *
-                            self.frame_seq_length,
-                            start_frame=start_index,
-                            **image_kwargs,
-                            **pos_cond_kwargs,
-                        )
-            
+
             start_index += 1
             block_sizes.pop(0)
             latents[:, :, :1, :, :] = first_frame_latent
-                
+
         # DMD loop in causal blocks
         with self.progress_bar(total=len(block_sizes) *
                                len(timesteps)) as progress_bar:
@@ -287,8 +293,10 @@ class CausalDMDDenosingStage(DenoisingStage):
                             pred_noise=pred_noise_btchw.flatten(0, 1),
                             noise_input_latent=noise_latents.flatten(0, 1),
                             timestep=t_expand,
-                            boundary_timestep=torch.ones_like(t_expand) * boundary_timestep,
-                            scheduler=self.scheduler).unflatten(0, pred_noise_btchw.shape[:2])
+                            boundary_timestep=torch.ones_like(t_expand) *
+                            boundary_timestep,
+                            scheduler=self.scheduler).unflatten(
+                                0, pred_noise_btchw.shape[:2])
                     else:
                         pred_video_btchw = pred_noise_to_pred_video(
                             pred_noise=pred_noise_btchw.flatten(0, 1),
@@ -309,25 +317,28 @@ class CausalDMDDenosingStage(DenoisingStage):
                                 batch.generator, list) else
                                        batch.generator)).to(self.device)
                         noise_btchw = noise
-                        if boundary_timestep is not None and i < len(high_noise_timesteps) - 1:
+                        if boundary_timestep is not None and i < len(
+                                high_noise_timesteps) - 1:
                             noise_latents_btchw = self.scheduler.add_noise_high(
                                 pred_video_btchw.flatten(0, 1),
-                                noise_btchw.flatten(0, 1),
-                                next_timestep,
-                                torch.ones_like(next_timestep) * boundary_timestep).unflatten(0, pred_video_btchw.shape[:2])
-                        elif boundary_timestep is not None and i == len(high_noise_timesteps) - 1:
+                                noise_btchw.flatten(0, 1), next_timestep,
+                                torch.ones_like(next_timestep) *
+                                boundary_timestep).unflatten(
+                                    0, pred_video_btchw.shape[:2])
+                        elif boundary_timestep is not None and i == len(
+                                high_noise_timesteps) - 1:
                             noise_latents_btchw = pred_video_btchw
                         else:
                             noise_latents_btchw = self.scheduler.add_noise(
                                 pred_video_btchw.flatten(0, 1),
                                 noise_btchw.flatten(0, 1),
-                                next_timestep).unflatten(0,
-                                                        pred_video_btchw.shape[:2])
+                                next_timestep).unflatten(
+                                    0, pred_video_btchw.shape[:2])
                         current_latents = noise_latents_btchw.permute(
                             0, 2, 1, 3, 4)
                     else:
                         current_latents = pred_video_btchw.permute(
-                            0, 2, 1, 3, 4)                        
+                            0, 2, 1, 3, 4)
 
                     if progress_bar is not None:
                         progress_bar.update()
@@ -364,7 +375,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                         )
-                    
+
                     self.transformer(
                         context_bcthw,
                         prompt_embeds,
@@ -377,7 +388,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                         **image_kwargs,
                         **pos_cond_kwargs,
                     )
-                        
+
                 start_index += current_num_frames
 
         batch.latents = latents
