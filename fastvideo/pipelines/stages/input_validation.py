@@ -5,7 +5,6 @@ Input validation stage for diffusion pipelines.
 
 import torch
 import torchvision.transforms.functional as TF
-from PIL import Image
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -14,7 +13,6 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import (StageValidators,
                                                    VerificationResult)
-from fastvideo.utils import best_output_size
 
 logger = init_logger(__name__)
 

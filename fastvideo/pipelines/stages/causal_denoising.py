@@ -349,7 +349,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                             0, 2, 1, 3, 4)
                     else:
                         current_latents = pred_video_btchw.permute(
-                            0, 2, 1, 3, 4)                        
+                            0, 2, 1, 3, 4)
 
                     if progress_bar is not None:
                         progress_bar.update()
@@ -374,6 +374,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                     t_expanded_context = t_context.unsqueeze(1)
 
                     if boundary_timestep is not None:
+                        assert self.transformer_2 is not None, "transformer_2 is not provided, but boundary_timestep is not None"
                         self.transformer_2(
                             context_bcthw,
                             prompt_embeds,
