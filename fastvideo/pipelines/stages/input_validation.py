@@ -5,7 +5,6 @@ Input validation stage for diffusion pipelines.
 
 import torch
 import torchvision.transforms.functional as TF
-from PIL import Image
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -14,7 +13,6 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import (StageValidators,
                                                    VerificationResult)
-from fastvideo.utils import best_output_size
 
 logger = init_logger(__name__)
 
@@ -106,7 +104,9 @@ class InputValidationStage(PipelineStage):
             batch.pil_image = image
 
         # further processing for ti2v task
-        if (fastvideo_args.pipeline_config.ti2v_task or fastvideo_args.pipeline_config.is_causal) and batch.pil_image is not None:
+        if (fastvideo_args.pipeline_config.ti2v_task
+                or fastvideo_args.pipeline_config.is_causal
+            ) and batch.pil_image is not None:
             img = batch.pil_image
             # ih, iw = img.height, img.width
             # patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
@@ -126,8 +126,7 @@ class InputValidationStage(PipelineStage):
             # y1 = (img.height - oh) // 2
             # img = img.crop((x1, y1, x1 + ow, y1 + oh))
             # assert img.width == ow and img.height == oh
-            logger.info("img height: %s, img width: %s", img.height,
-                        img.width)
+            logger.info("img height: %s, img width: %s", img.height, img.width)
             oh = img.height
             ow = img.width
             # to tensor
