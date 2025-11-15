@@ -209,29 +209,6 @@ class TextEncoderLoader(ComponentLoader):
 
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the text encoders based on the model path, and inference args."""
-        # UMT5 Path for LongCat-Video, not needed. Later discovered that it's already supported by the registry.
-        # try:
-        #     with open(os.path.join(model_path, "config.json")) as f:
-        #         cfg_json = json.load(f)
-        # except Exception:
-        #     cfg_json = {}
-        # archs_name = cfg_json.get("architectures", [])
-        # model_type = cfg_json.get("model_type", "")
-        # is_umt5 = ("UMT5EncoderModel" in archs_name) or (model_type.lower() in {"umt5", "t5"})
-
-        # if is_umt5:
-        #     from fastvideo.platforms import current_platform
-        #     if fastvideo_args.text_encoder_cpu_offload:
-        #         target_device = torch.device("mps") if current_platform.is_mps() else torch.device("cpu")
-        #     else:
-        #         target_device = get_local_torch_device()
-            
-        #     encoder_precision = fastvideo_args.pipeline_config.text_encoder_precisions[0]
-            
-        #     dtype = PRECISION_TO_TYPE.get(encoder_precision, torch.bfloat16)
-        #     encoder = UMT5EncoderModel.from_pretrained(model_path, torch_dtype=dtype)
-        #     return encoder.to(target_device).eval()
-
         # model_config: PretrainedConfig = get_hf_config(
         #     model=model_path,
         #     trust_remote_code=fastvideo_args.trust_remote_code,
@@ -428,7 +405,8 @@ class VAELoader(ComponentLoader):
         else:
             target_device = get_local_torch_device()
 
-        with set_default_torch_dtype(PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]):
+        with set_default_torch_dtype(PRECISION_TO_TYPE[
+                fastvideo_args.pipeline_config.vae_precision] if fastvideo_args.pipeline_config.vae_precision else torch.bfloat16):
             vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
             vae = vae_cls(vae_config).to(target_device)
 
