@@ -177,6 +177,7 @@ def test_distilled_refine(model_path: str, num_gpus: int = 1):
         output_path=str(output_distill_path),
         save_video=True,
         return_frames=True,
+        fps=15,
     )
     
     distill_time = time.time() - distill_start
