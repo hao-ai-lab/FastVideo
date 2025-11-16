@@ -1,0 +1,908 @@
+W1218 20:00:23.836000 2210460 torch/distributed/run.py:803] 
+W1218 20:00:23.836000 2210460 torch/distributed/run.py:803] *****************************************
+W1218 20:00:23.836000 2210460 torch/distributed/run.py:803] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1218 20:00:23.836000 2210460 torch/distributed/run.py:803] *****************************************
+W1218 20:00:23.836000 353305 torch/distributed/run.py:803] 
+W1218 20:00:23.836000 353305 torch/distributed/run.py:803] *****************************************
+W1218 20:00:23.836000 353305 torch/distributed/run.py:803] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1218 20:00:23.836000 353305 torch/distributed/run.py:803] *****************************************
+Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 2676.10it/s]
+Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 9862.16it/s]
+Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 148502.99it/s]
+Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 47808.30it/s]
+Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 221892.21it/s]
+Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 168100.16it/s]
+Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 189390.38it/s]
+Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 159671.74it/s]
+Loading safetensors checkpoint shards:   0% Completed | 0/12 [00:00<?, ?it/s]
+Loading safetensors checkpoint shards: 100% Completed | 12/12 [00:00<00:00, 345.90it/s]
+
+Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 14340.10it/s]
+Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 12933.70it/s]
+Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 31958.09it/s]
+Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 42418.96it/s]
+wandb: Currently logged in as: nmr73 (backpropt) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 52063.72it/s]
+Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 32786.74it/s]
+Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 66576.25it/s]
+wandb: setting up run 2fn51t5s
+wandb: Tracking run with wandb version 0.23.0
+wandb: Run data is saved locally in /home/hal-matthewn/FastVideo-Quantization/wandb/run-20251218_200437-2fn51t5s
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run olive-pond-70
+wandb: ⭐️ View project at https://wandb.ai/backpropt/wan_t2v_finetune_qat
+wandb: 🚀 View run at https://wandb.ai/backpropt/wan_t2v_finetune_qat/runs/2fn51t5s
+Fetching 41 files:   0%|          | 0/41 [00:00<?, ?it/s]Fetching 41 files: 100%|██████████| 41/41 [00:00<00:00, 26928.67it/s]
+Loading safetensors checkpoint shards:   0% Completed | 0/5 [00:00<?, ?it/s]
+Loading safetensors checkpoint shards:  20% Completed | 1/5 [00:00<00:01,  2.93it/s]
+Loading safetensors checkpoint shards:  40% Completed | 2/5 [00:00<00:01,  2.08it/s]
+Loading safetensors checkpoint shards:  60% Completed | 3/5 [00:01<00:01,  1.93it/s]
+Loading safetensors checkpoint shards:  80% Completed | 4/5 [00:02<00:00,  1.89it/s]
+Loading safetensors checkpoint shards: 100% Completed | 5/5 [00:02<00:00,  1.87it/s]
+Loading safetensors checkpoint shards: 100% Completed | 5/5 [00:02<00:00,  1.94it/s]
+
+  0%|          | 0/50 [00:00<?, ?it/s][rank3]: Traceback (most recent call last):
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 74, in <module>
+[rank3]:     main(args)
+[rank3]:     ~~~~^^^^^^
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 61, in main
+[rank3]:     pipeline.train()
+[rank3]:     ~~~~~~~~~~~~~~^^
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 581, in train
+[rank3]:     self._log_validation(self.transformer, self.training_args,
+[rank3]:     ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:                          self.init_steps)
+[rank3]:                          ^^^^^^^^^^^^^^^^
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+[rank3]:     return func(*args, **kwargs)
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 791, in _log_validation
+[rank3]:     output_batch = self.validation_pipeline.forward(
+[rank3]:         batch, training_args)
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+[rank3]:     return func(*args, **kwargs)
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/composed_pipeline_base.py", line 358, in forward
+[rank3]:     batch = stage(batch, fastvideo_args)
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/stages/base.py", line 169, in __call__
+[rank3]:     result = self.forward(batch, fastvideo_args)
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/stages/denoising.py", line 391, in forward
+[rank3]:     noise_pred = current_model(
+[rank3]:         latent_model_input,
+[rank3]:     ...<4 lines>...
+[rank3]:         **pos_cond_kwargs,
+[rank3]:     )
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank3]:     return self._call_impl(*args, **kwargs)
+[rank3]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1881, in _call_impl
+[rank3]:     return inner()
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1829, in inner
+[rank3]:     result = forward_call(*args, **kwargs)
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/models/dits/wanvideo.py", line 729, in forward
+[rank3]:     hidden_states = block(hidden_states, encoder_hidden_states,
+[rank3]:                           timestep_proj, freqs_cis)
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank3]:     return self._call_impl(*args, **kwargs)
+[rank3]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+[rank3]:     return forward_call(*args, **kwargs)
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/algorithms/_checkpoint/checkpoint_wrapper.py", line 171, in forward
+[rank3]:     return self.checkpoint_fn(  # type: ignore[misc]
+[rank3]:            ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:         self._checkpoint_wrapped_module, *args, **kwargs
+[rank3]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:     )
+[rank3]:     ^
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_compile.py", line 53, in inner
+[rank3]:     return disable_fn(*args, **kwargs)
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+[rank3]:     return fn(*args, **kwargs)
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/checkpoint.py", line 503, in checkpoint
+[rank3]:     ret = function(*args, **kwargs)
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank3]:     return self._call_impl(*args, **kwargs)
+[rank3]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1881, in _call_impl
+[rank3]:     return inner()
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1829, in inner
+[rank3]:     result = forward_call(*args, **kwargs)
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/models/dits/wanvideo.py", line 375, in forward
+[rank3]:     attn_output, _ = self.attn1(query, key, value)
+[rank3]:                      ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank3]:     return self._call_impl(*args, **kwargs)
+[rank3]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+[rank3]:     return forward_call(*args, **kwargs)
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+[rank3]:     return fn(*args, **kwargs)
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/layer.py", line 117, in forward
+[rank3]:     output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 379, in forward
+[rank3]:     output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 108, in attn_forward_4bit_fwd_16bit_bwd
+[rank3]:     p = sage_attn_qk_torch(q, k).to(q.dtype)
+[rank3]:         ~~~~~~~~~~~~~~~~~~^^^^^^
+[rank3]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 165, in sage_attn_qk_torch
+[rank3]:     qk = qk / torch.sqrt(torch.tensor(D, device=q.device, dtype=q.dtype))
+[rank3]:          ~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[rank3]: torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 96.56 GiB. GPU 3 has a total capacity of 184.31 GiB of which 67.28 GiB is free. Including non-PyTorch memory, this process has 117.02 GiB memory in use. Of the allocated memory 107.23 GiB is allocated by PyTorch, and 2.23 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 74, in <module>
+[rank1]:     main(args)
+[rank1]:     ~~~~^^^^^^
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 61, in main
+[rank1]:     pipeline.train()
+[rank1]:     ~~~~~~~~~~~~~~^^
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 581, in train
+[rank1]:     self._log_validation(self.transformer, self.training_args,
+[rank1]:     ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:                          self.init_steps)
+[rank1]:                          ^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+[rank1]:     return func(*args, **kwargs)
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 791, in _log_validation
+[rank1]:     output_batch = self.validation_pipeline.forward(
+[rank1]:         batch, training_args)
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+[rank1]:     return func(*args, **kwargs)
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/composed_pipeline_base.py", line 358, in forward
+[rank1]:     batch = stage(batch, fastvideo_args)
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/stages/base.py", line 169, in __call__
+[rank1]:     result = self.forward(batch, fastvideo_args)
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/stages/denoising.py", line 391, in forward
+[rank1]:     noise_pred = current_model(
+[rank1]:         latent_model_input,
+[rank1]:     ...<4 lines>...
+[rank1]:         **pos_cond_kwargs,
+[rank1]:     )
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank1]:     return self._call_impl(*args, **kwargs)
+[rank1]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1881, in _call_impl
+[rank1]:     return inner()
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1829, in inner
+[rank1]:     result = forward_call(*args, **kwargs)
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/models/dits/wanvideo.py", line 729, in forward
+[rank1]:     hidden_states = block(hidden_states, encoder_hidden_states,
+[rank1]:                           timestep_proj, freqs_cis)
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank1]:     return self._call_impl(*args, **kwargs)
+[rank1]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+[rank1]:     return forward_call(*args, **kwargs)
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/algorithms/_checkpoint/checkpoint_wrapper.py", line 171, in forward
+[rank1]:     return self.checkpoint_fn(  # type: ignore[misc]
+[rank1]:            ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:         self._checkpoint_wrapped_module, *args, **kwargs
+[rank1]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:     )
+[rank1]:     ^
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_compile.py", line 53, in inner
+[rank1]:     return disable_fn(*args, **kwargs)
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+[rank1]:     return fn(*args, **kwargs)
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/checkpoint.py", line 503, in checkpoint
+[rank1]:     ret = function(*args, **kwargs)
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank1]:     return self._call_impl(*args, **kwargs)
+[rank1]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1881, in _call_impl
+[rank1]:     return inner()
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1829, in inner
+[rank1]:     result = forward_call(*args, **kwargs)
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/models/dits/wanvideo.py", line 375, in forward
+[rank1]:     attn_output, _ = self.attn1(query, key, value)
+[rank1]:                      ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank1]:     return self._call_impl(*args, **kwargs)
+[rank1]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+[rank1]:     return forward_call(*args, **kwargs)
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+[rank1]:     return fn(*args, **kwargs)
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/layer.py", line 117, in forward
+[rank1]:     output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 379, in forward
+[rank1]:     output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 108, in attn_forward_4bit_fwd_16bit_bwd
+[rank1]:     p = sage_attn_qk_torch(q, k).to(q.dtype)
+[rank1]:         ~~~~~~~~~~~~~~~~~~^^^^^^
+[rank1]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 165, in sage_attn_qk_torch
+[rank1]:     qk = qk / torch.sqrt(torch.tensor(D, device=q.device, dtype=q.dtype))
+[rank1]:          ~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[rank1]: torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 96.56 GiB. GPU 1 has a total capacity of 184.31 GiB of which 67.28 GiB is free. Including non-PyTorch memory, this process has 117.02 GiB memory in use. Of the allocated memory 107.23 GiB is allocated by PyTorch, and 2.23 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+  0%|          | 0/50 [00:00<?, ?it/s]  0%|          | 0/50 [00:01<?, ?it/s]
+  0%|          | 0/50 [00:06<?, ?it/s]
+Traceback (most recent call last):
+[rank4]: Traceback (most recent call last):
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 74, in <module>
+[rank4]:     main(args)
+[rank4]:     ~~~~^^^^^^
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 61, in main
+[rank4]:     pipeline.train()
+[rank4]:     ~~~~~~~~~~~~~~^^
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 581, in train
+[rank4]:     self._log_validation(self.transformer, self.training_args,
+[rank4]:     ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank4]:                          self.init_steps)
+[rank4]:                          ^^^^^^^^^^^^^^^^
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+[rank4]:     return func(*args, **kwargs)
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 791, in _log_validation
+[rank4]:     output_batch = self.validation_pipeline.forward(
+[rank4]:         batch, training_args)
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+[rank4]:     return func(*args, **kwargs)
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/composed_pipeline_base.py", line 358, in forward
+[rank4]:     batch = stage(batch, fastvideo_args)
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/stages/base.py", line 169, in __call__
+[rank4]:     result = self.forward(batch, fastvideo_args)
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/stages/denoising.py", line 391, in forward
+[rank4]:     noise_pred = current_model(
+[rank4]:         latent_model_input,
+[rank4]:     ...<4 lines>...
+[rank4]:         **pos_cond_kwargs,
+[rank4]:     )
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank4]:     return self._call_impl(*args, **kwargs)
+[rank4]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1881, in _call_impl
+[rank4]:     return inner()
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1829, in inner
+[rank4]:     result = forward_call(*args, **kwargs)
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/models/dits/wanvideo.py", line 729, in forward
+[rank4]:     hidden_states = block(hidden_states, encoder_hidden_states,
+[rank4]:                           timestep_proj, freqs_cis)
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank4]:     return self._call_impl(*args, **kwargs)
+[rank4]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+[rank4]:     return forward_call(*args, **kwargs)
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/algorithms/_checkpoint/checkpoint_wrapper.py", line 171, in forward
+[rank4]:     return self.checkpoint_fn(  # type: ignore[misc]
+[rank4]:            ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+[rank4]:         self._checkpoint_wrapped_module, *args, **kwargs
+[rank4]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank4]:     )
+[rank4]:     ^
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_compile.py", line 53, in inner
+[rank4]:     return disable_fn(*args, **kwargs)
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+[rank4]:     return fn(*args, **kwargs)
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/checkpoint.py", line 503, in checkpoint
+[rank4]:     ret = function(*args, **kwargs)
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank4]:     return self._call_impl(*args, **kwargs)
+[rank4]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1881, in _call_impl
+[rank4]:     return inner()
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1829, in inner
+[rank4]:     result = forward_call(*args, **kwargs)
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/models/dits/wanvideo.py", line 375, in forward
+[rank4]:     attn_output, _ = self.attn1(query, key, value)
+[rank4]:                      ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank4]:     return self._call_impl(*args, **kwargs)
+[rank4]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+[rank4]:     return forward_call(*args, **kwargs)
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+[rank4]:     return fn(*args, **kwargs)
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/layer.py", line 117, in forward
+[rank4]:     output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 379, in forward
+[rank4]:     output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 108, in attn_forward_4bit_fwd_16bit_bwd
+[rank4]:     p = sage_attn_qk_torch(q, k).to(q.dtype)
+[rank4]:         ~~~~~~~~~~~~~~~~~~^^^^^^
+[rank4]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 165, in sage_attn_qk_torch
+[rank4]:     qk = qk / torch.sqrt(torch.tensor(D, device=q.device, dtype=q.dtype))
+[rank4]:          ~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[rank4]: torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 96.56 GiB. GPU 0 has a total capacity of 184.31 GiB of which 67.28 GiB is free. Including non-PyTorch memory, this process has 117.02 GiB memory in use. Of the allocated memory 107.23 GiB is allocated by PyTorch, and 2.23 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[rank5]: Traceback (most recent call last):
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 74, in <module>
+[rank5]:     main(args)
+[rank5]:     ~~~~^^^^^^
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 61, in main
+[rank5]:     pipeline.train()
+[rank5]:     ~~~~~~~~~~~~~~^^
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 581, in train
+[rank5]:     self._log_validation(self.transformer, self.training_args,
+[rank5]:     ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank5]:                          self.init_steps)
+[rank5]:                          ^^^^^^^^^^^^^^^^
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+[rank5]:     return func(*args, **kwargs)
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 791, in _log_validation
+[rank5]:     output_batch = self.validation_pipeline.forward(
+[rank5]:         batch, training_args)
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+[rank5]:     return func(*args, **kwargs)
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/composed_pipeline_base.py", line 358, in forward
+[rank5]:     batch = stage(batch, fastvideo_args)
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/stages/base.py", line 169, in __call__
+[rank5]:     result = self.forward(batch, fastvideo_args)
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/stages/denoising.py", line 391, in forward
+[rank5]:     noise_pred = current_model(
+[rank5]:         latent_model_input,
+[rank5]:     ...<4 lines>...
+[rank5]:         **pos_cond_kwargs,
+[rank5]:     )
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank5]:     return self._call_impl(*args, **kwargs)
+[rank5]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1881, in _call_impl
+[rank5]:     return inner()
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1829, in inner
+[rank5]:     result = forward_call(*args, **kwargs)
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/models/dits/wanvideo.py", line 729, in forward
+[rank5]:     hidden_states = block(hidden_states, encoder_hidden_states,
+[rank5]:                           timestep_proj, freqs_cis)
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank5]:     return self._call_impl(*args, **kwargs)
+[rank5]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+[rank5]:     return forward_call(*args, **kwargs)
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/algorithms/_checkpoint/checkpoint_wrapper.py", line 171, in forward
+[rank5]:     return self.checkpoint_fn(  # type: ignore[misc]
+[rank5]:            ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+[rank5]:         self._checkpoint_wrapped_module, *args, **kwargs
+[rank5]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank5]:     )
+[rank5]:     ^
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_compile.py", line 53, in inner
+[rank5]:     return disable_fn(*args, **kwargs)
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+[rank5]:     return fn(*args, **kwargs)
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/checkpoint.py", line 503, in checkpoint
+[rank5]:     ret = function(*args, **kwargs)
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank5]:     return self._call_impl(*args, **kwargs)
+[rank5]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1881, in _call_impl
+[rank5]:     return inner()
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1829, in inner
+[rank5]:     result = forward_call(*args, **kwargs)
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/models/dits/wanvideo.py", line 375, in forward
+[rank5]:     attn_output, _ = self.attn1(query, key, value)
+[rank5]:                      ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank5]:     return self._call_impl(*args, **kwargs)
+[rank5]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+[rank5]:     return forward_call(*args, **kwargs)
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+[rank5]:     return fn(*args, **kwargs)
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/layer.py", line 117, in forward
+[rank5]:     output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 379, in forward
+[rank5]:     output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 108, in attn_forward_4bit_fwd_16bit_bwd
+[rank5]:     p = sage_attn_qk_torch(q, k).to(q.dtype)
+[rank5]:         ~~~~~~~~~~~~~~~~~~^^^^^^
+[rank5]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 165, in sage_attn_qk_torch
+[rank5]:     qk = qk / torch.sqrt(torch.tensor(D, device=q.device, dtype=q.dtype))
+[rank5]:          ~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[rank5]: torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 96.56 GiB. GPU 1 has a total capacity of 184.31 GiB of which 67.28 GiB is free. Including non-PyTorch memory, this process has 117.02 GiB memory in use. Of the allocated memory 107.23 GiB is allocated by PyTorch, and 2.23 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 74, in <module>
+    main(args)
+    ~~~~^^^^^^
+  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 61, in main
+    pipeline.train()
+    ~~~~~~~~~~~~~~^^
+  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 581, in train
+    self._log_validation(self.transformer, self.training_args,
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                         self.init_steps)
+                         ^^^^^^^^^^^^^^^^
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+    return func(*args, **kwargs)
+  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 791, in _log_validation
+    output_batch = self.validation_pipeline.forward(
+        batch, training_args)
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+    return func(*args, **kwargs)
+  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/composed_pipeline_base.py", line 358, in forward
+    batch = stage(batch, fastvideo_args)
+  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/stages/base.py", line 169, in __call__
+    result = self.forward(batch, fastvideo_args)
+  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/stages/denoising.py", line 391, in forward
+    noise_pred = current_model(
+        latent_model_input,
+    ...<4 lines>...
+        **pos_cond_kwargs,
+    )
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1881, in _call_impl
+    return inner()
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1829, in inner
+    result = forward_call(*args, **kwargs)
+  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/models/dits/wanvideo.py", line 729, in forward
+    hidden_states = block(hidden_states, encoder_hidden_states,
+                          timestep_proj, freqs_cis)
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/algorithms/_checkpoint/checkpoint_wrapper.py", line 171, in forward
+    return self.checkpoint_fn(  # type: ignore[misc]
+           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+        self._checkpoint_wrapped_module, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_compile.py", line 53, in inner
+    return disable_fn(*args, **kwargs)
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+    return fn(*args, **kwargs)
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/checkpoint.py", line 503, in checkpoint
+    ret = function(*args, **kwargs)
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1881, in _call_impl
+    return inner()
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1829, in inner
+    result = forward_call(*args, **kwargs)
+  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/models/dits/wanvideo.py", line 375, in forward
+    attn_output, _ = self.attn1(query, key, value)
+                     ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+    return fn(*args, **kwargs)
+  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/layer.py", line 117, in forward
+    output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 379, in forward
+    output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
+  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 108, in attn_forward_4bit_fwd_16bit_bwd
+    p = sage_attn_qk_torch(q, k).to(q.dtype)
+        ~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 165, in sage_attn_qk_torch
+    qk = qk / torch.sqrt(torch.tensor(D, device=q.device, dtype=q.dtype))
+         ~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 96.56 GiB. GPU 0 has a total capacity of 184.31 GiB of which 67.15 GiB is free. Including non-PyTorch memory, this process has 117.14 GiB memory in use. Of the allocated memory 107.23 GiB is allocated by PyTorch, and 2.23 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 74, in <module>
+[rank0]:     main(args)
+[rank0]:     ~~~~^^^^^^
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 61, in main
+[rank0]:     pipeline.train()
+[rank0]:     ~~~~~~~~~~~~~~^^
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 581, in train
+[rank0]:     self._log_validation(self.transformer, self.training_args,
+[rank0]:     ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:                          self.init_steps)
+[rank0]:                          ^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+[rank0]:     return func(*args, **kwargs)
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 791, in _log_validation
+[rank0]:     output_batch = self.validation_pipeline.forward(
+[rank0]:         batch, training_args)
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+[rank0]:     return func(*args, **kwargs)
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/composed_pipeline_base.py", line 358, in forward
+[rank0]:     batch = stage(batch, fastvideo_args)
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/stages/base.py", line 169, in __call__
+[rank0]:     result = self.forward(batch, fastvideo_args)
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/stages/denoising.py", line 391, in forward
+[rank0]:     noise_pred = current_model(
+[rank0]:         latent_model_input,
+[rank0]:     ...<4 lines>...
+[rank0]:         **pos_cond_kwargs,
+[rank0]:     )
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1881, in _call_impl
+[rank0]:     return inner()
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1829, in inner
+[rank0]:     result = forward_call(*args, **kwargs)
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/models/dits/wanvideo.py", line 729, in forward
+[rank0]:     hidden_states = block(hidden_states, encoder_hidden_states,
+[rank0]:                           timestep_proj, freqs_cis)
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/algorithms/_checkpoint/checkpoint_wrapper.py", line 171, in forward
+[rank0]:     return self.checkpoint_fn(  # type: ignore[misc]
+[rank0]:            ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:         self._checkpoint_wrapped_module, *args, **kwargs
+[rank0]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:     )
+[rank0]:     ^
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_compile.py", line 53, in inner
+[rank0]:     return disable_fn(*args, **kwargs)
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+[rank0]:     return fn(*args, **kwargs)
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/checkpoint.py", line 503, in checkpoint
+[rank0]:     ret = function(*args, **kwargs)
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1881, in _call_impl
+[rank0]:     return inner()
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1829, in inner
+[rank0]:     result = forward_call(*args, **kwargs)
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/models/dits/wanvideo.py", line 375, in forward
+[rank0]:     attn_output, _ = self.attn1(query, key, value)
+[rank0]:                      ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+[rank0]:     return fn(*args, **kwargs)
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/layer.py", line 117, in forward
+[rank0]:     output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 379, in forward
+[rank0]:     output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 108, in attn_forward_4bit_fwd_16bit_bwd
+[rank0]:     p = sage_attn_qk_torch(q, k).to(q.dtype)
+[rank0]:         ~~~~~~~~~~~~~~~~~~^^^^^^
+[rank0]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 165, in sage_attn_qk_torch
+[rank0]:     qk = qk / torch.sqrt(torch.tensor(D, device=q.device, dtype=q.dtype))
+[rank0]:          ~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[rank0]: torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 96.56 GiB. GPU 0 has a total capacity of 184.31 GiB of which 67.15 GiB is free. Including non-PyTorch memory, this process has 117.14 GiB memory in use. Of the allocated memory 107.23 GiB is allocated by PyTorch, and 2.23 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[rank6]: Traceback (most recent call last):
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 74, in <module>
+[rank6]:     main(args)
+[rank6]:     ~~~~^^^^^^
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 61, in main
+[rank6]:     pipeline.train()
+[rank6]:     ~~~~~~~~~~~~~~^^
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 581, in train
+[rank6]:     self._log_validation(self.transformer, self.training_args,
+[rank6]:     ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank6]:                          self.init_steps)
+[rank6]:                          ^^^^^^^^^^^^^^^^
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+[rank6]:     return func(*args, **kwargs)
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 791, in _log_validation
+[rank6]:     output_batch = self.validation_pipeline.forward(
+[rank6]:         batch, training_args)
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+[rank6]:     return func(*args, **kwargs)
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/composed_pipeline_base.py", line 358, in forward
+[rank6]:     batch = stage(batch, fastvideo_args)
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/stages/base.py", line 169, in __call__
+[rank6]:     result = self.forward(batch, fastvideo_args)
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/stages/denoising.py", line 391, in forward
+[rank6]:     noise_pred = current_model(
+[rank6]:         latent_model_input,
+[rank6]:     ...<4 lines>...
+[rank6]:         **pos_cond_kwargs,
+[rank6]:     )
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank6]:     return self._call_impl(*args, **kwargs)
+[rank6]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1881, in _call_impl
+[rank6]:     return inner()
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1829, in inner
+[rank6]:     result = forward_call(*args, **kwargs)
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/models/dits/wanvideo.py", line 729, in forward
+[rank6]:     hidden_states = block(hidden_states, encoder_hidden_states,
+[rank6]:                           timestep_proj, freqs_cis)
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank6]:     return self._call_impl(*args, **kwargs)
+[rank6]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+[rank6]:     return forward_call(*args, **kwargs)
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/algorithms/_checkpoint/checkpoint_wrapper.py", line 171, in forward
+[rank6]:     return self.checkpoint_fn(  # type: ignore[misc]
+[rank6]:            ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+[rank6]:         self._checkpoint_wrapped_module, *args, **kwargs
+[rank6]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank6]:     )
+[rank6]:     ^
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_compile.py", line 53, in inner
+[rank6]:     return disable_fn(*args, **kwargs)
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+[rank6]:     return fn(*args, **kwargs)
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/checkpoint.py", line 503, in checkpoint
+[rank6]:     ret = function(*args, **kwargs)
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank6]:     return self._call_impl(*args, **kwargs)
+[rank6]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1881, in _call_impl
+[rank6]:     return inner()
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1829, in inner
+[rank6]:     result = forward_call(*args, **kwargs)
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/models/dits/wanvideo.py", line 375, in forward
+[rank6]:     attn_output, _ = self.attn1(query, key, value)
+[rank6]:                      ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank6]:     return self._call_impl(*args, **kwargs)
+[rank6]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+[rank6]:     return forward_call(*args, **kwargs)
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+[rank6]:     return fn(*args, **kwargs)
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/layer.py", line 117, in forward
+[rank6]:     output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 379, in forward
+[rank6]:     output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 108, in attn_forward_4bit_fwd_16bit_bwd
+[rank6]:     p = sage_attn_qk_torch(q, k).to(q.dtype)
+[rank6]:         ~~~~~~~~~~~~~~~~~~^^^^^^
+[rank6]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 165, in sage_attn_qk_torch
+[rank6]:     qk = qk / torch.sqrt(torch.tensor(D, device=q.device, dtype=q.dtype))
+[rank6]:          ~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[rank6]: torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 96.56 GiB. GPU 2 has a total capacity of 184.31 GiB of which 67.28 GiB is free. Including non-PyTorch memory, this process has 117.02 GiB memory in use. Of the allocated memory 107.23 GiB is allocated by PyTorch, and 2.23 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[rank7]: Traceback (most recent call last):
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 74, in <module>
+[rank7]:     main(args)
+[rank7]:     ~~~~^^^^^^
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 61, in main
+[rank7]:     pipeline.train()
+[rank7]:     ~~~~~~~~~~~~~~^^
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 581, in train
+[rank7]:     self._log_validation(self.transformer, self.training_args,
+[rank7]:     ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank7]:                          self.init_steps)
+[rank7]:                          ^^^^^^^^^^^^^^^^
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+[rank7]:     return func(*args, **kwargs)
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 791, in _log_validation
+[rank7]:     output_batch = self.validation_pipeline.forward(
+[rank7]:         batch, training_args)
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+[rank7]:     return func(*args, **kwargs)
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/composed_pipeline_base.py", line 358, in forward
+[rank7]:     batch = stage(batch, fastvideo_args)
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/stages/base.py", line 169, in __call__
+[rank7]:     result = self.forward(batch, fastvideo_args)
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/stages/denoising.py", line 391, in forward
+[rank7]:     noise_pred = current_model(
+[rank7]:         latent_model_input,
+[rank7]:     ...<4 lines>...
+[rank7]:         **pos_cond_kwargs,
+[rank7]:     )
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank7]:     return self._call_impl(*args, **kwargs)
+[rank7]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1881, in _call_impl
+[rank7]:     return inner()
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1829, in inner
+[rank7]:     result = forward_call(*args, **kwargs)
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/models/dits/wanvideo.py", line 729, in forward
+[rank7]:     hidden_states = block(hidden_states, encoder_hidden_states,
+[rank7]:                           timestep_proj, freqs_cis)
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank7]:     return self._call_impl(*args, **kwargs)
+[rank7]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+[rank7]:     return forward_call(*args, **kwargs)
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/algorithms/_checkpoint/checkpoint_wrapper.py", line 171, in forward
+[rank7]:     return self.checkpoint_fn(  # type: ignore[misc]
+[rank7]:            ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+[rank7]:         self._checkpoint_wrapped_module, *args, **kwargs
+[rank7]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank7]:     )
+[rank7]:     ^
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_compile.py", line 53, in inner
+[rank7]:     return disable_fn(*args, **kwargs)
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+[rank7]:     return fn(*args, **kwargs)
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/checkpoint.py", line 503, in checkpoint
+[rank7]:     ret = function(*args, **kwargs)
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank7]:     return self._call_impl(*args, **kwargs)
+[rank7]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1881, in _call_impl
+[rank7]:     return inner()
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1829, in inner
+[rank7]:     result = forward_call(*args, **kwargs)
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/models/dits/wanvideo.py", line 375, in forward
+[rank7]:     attn_output, _ = self.attn1(query, key, value)
+[rank7]:                      ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank7]:     return self._call_impl(*args, **kwargs)
+[rank7]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+[rank7]:     return forward_call(*args, **kwargs)
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+[rank7]:     return fn(*args, **kwargs)
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/layer.py", line 117, in forward
+[rank7]:     output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 379, in forward
+[rank7]:     output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 108, in attn_forward_4bit_fwd_16bit_bwd
+[rank7]:     p = sage_attn_qk_torch(q, k).to(q.dtype)
+[rank7]:         ~~~~~~~~~~~~~~~~~~^^^^^^
+[rank7]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 165, in sage_attn_qk_torch
+[rank7]:     qk = qk / torch.sqrt(torch.tensor(D, device=q.device, dtype=q.dtype))
+[rank7]:          ~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[rank7]: torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 96.56 GiB. GPU 3 has a total capacity of 184.31 GiB of which 67.28 GiB is free. Including non-PyTorch memory, this process has 117.02 GiB memory in use. Of the allocated memory 107.23 GiB is allocated by PyTorch, and 2.23 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 74, in <module>
+[rank2]:     main(args)
+[rank2]:     ~~~~^^^^^^
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/wan_training_pipeline.py", line 61, in main
+[rank2]:     pipeline.train()
+[rank2]:     ~~~~~~~~~~~~~~^^
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 581, in train
+[rank2]:     self._log_validation(self.transformer, self.training_args,
+[rank2]:     ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:                          self.init_steps)
+[rank2]:                          ^^^^^^^^^^^^^^^^
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+[rank2]:     return func(*args, **kwargs)
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/training/training_pipeline.py", line 791, in _log_validation
+[rank2]:     output_batch = self.validation_pipeline.forward(
+[rank2]:         batch, training_args)
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+[rank2]:     return func(*args, **kwargs)
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/composed_pipeline_base.py", line 358, in forward
+[rank2]:     batch = stage(batch, fastvideo_args)
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/stages/base.py", line 169, in __call__
+[rank2]:     result = self.forward(batch, fastvideo_args)
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/pipelines/stages/denoising.py", line 391, in forward
+[rank2]:     noise_pred = current_model(
+[rank2]:         latent_model_input,
+[rank2]:     ...<4 lines>...
+[rank2]:         **pos_cond_kwargs,
+[rank2]:     )
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank2]:     return self._call_impl(*args, **kwargs)
+[rank2]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1881, in _call_impl
+[rank2]:     return inner()
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1829, in inner
+[rank2]:     result = forward_call(*args, **kwargs)
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/models/dits/wanvideo.py", line 729, in forward
+[rank2]:     hidden_states = block(hidden_states, encoder_hidden_states,
+[rank2]:                           timestep_proj, freqs_cis)
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank2]:     return self._call_impl(*args, **kwargs)
+[rank2]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+[rank2]:     return forward_call(*args, **kwargs)
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/algorithms/_checkpoint/checkpoint_wrapper.py", line 171, in forward
+[rank2]:     return self.checkpoint_fn(  # type: ignore[misc]
+[rank2]:            ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:         self._checkpoint_wrapped_module, *args, **kwargs
+[rank2]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:     )
+[rank2]:     ^
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_compile.py", line 53, in inner
+[rank2]:     return disable_fn(*args, **kwargs)
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+[rank2]:     return fn(*args, **kwargs)
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/utils/checkpoint.py", line 503, in checkpoint
+[rank2]:     ret = function(*args, **kwargs)
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank2]:     return self._call_impl(*args, **kwargs)
+[rank2]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1881, in _call_impl
+[rank2]:     return inner()
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1829, in inner
+[rank2]:     result = forward_call(*args, **kwargs)
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/models/dits/wanvideo.py", line 375, in forward
+[rank2]:     attn_output, _ = self.attn1(query, key, value)
+[rank2]:                      ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+[rank2]:     return self._call_impl(*args, **kwargs)
+[rank2]:            ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+[rank2]:     return forward_call(*args, **kwargs)
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+[rank2]:     return fn(*args, **kwargs)
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/layer.py", line 117, in forward
+[rank2]:     output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 379, in forward
+[rank2]:     output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 108, in attn_forward_4bit_fwd_16bit_bwd
+[rank2]:     p = sage_attn_qk_torch(q, k).to(q.dtype)
+[rank2]:         ~~~~~~~~~~~~~~~~~~^^^^^^
+[rank2]:   File "/home/hal-matthewn/FastVideo-Quantization/fastvideo/attention/backends/sage_attn3.py", line 165, in sage_attn_qk_torch
+[rank2]:     qk = qk / torch.sqrt(torch.tensor(D, device=q.device, dtype=q.dtype))
+[rank2]:          ~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[rank2]: torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 96.56 GiB. GPU 2 has a total capacity of 184.31 GiB of which 67.28 GiB is free. Including non-PyTorch memory, this process has 117.02 GiB memory in use. Of the allocated memory 107.23 GiB is allocated by PyTorch, and 2.23 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[rank3]:[W1218 20:07:44.535428492 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+[rank1]:[W1218 20:07:44.666017699 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+[rank2]:[W1218 20:07:44.191777715 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+[rank5]:[W1218 20:07:45.217607691 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+[rank7]:[W1218 20:07:45.241774202 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+[rank6]:[W1218 20:07:45.275828693 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+[rank4]:[W1218 20:07:45.277266674 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+[rank0]:[W1218 20:07:46.978083362 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+W1218 20:07:48.393000 353305 torch/distributed/elastic/multiprocessing/api.py:908] Sending process 353380 closing signal SIGTERM
+W1218 20:07:48.394000 353305 torch/distributed/elastic/multiprocessing/api.py:908] Sending process 353381 closing signal SIGTERM
+W1218 20:07:48.395000 353305 torch/distributed/elastic/multiprocessing/api.py:908] Sending process 353382 closing signal SIGTERM
+W1218 20:07:49.110000 2210460 torch/distributed/elastic/multiprocessing/api.py:908] Sending process 2210533 closing signal SIGTERM
+W1218 20:07:49.111000 2210460 torch/distributed/elastic/multiprocessing/api.py:908] Sending process 2210534 closing signal SIGTERM
+W1218 20:07:49.111000 2210460 torch/distributed/elastic/multiprocessing/api.py:908] Sending process 2210535 closing signal SIGTERM
+E1218 20:07:49.311000 353305 torch/distributed/elastic/multiprocessing/api.py:882] failed (exitcode: 1) local_rank: 3 (pid: 353383) of binary: /home/hal-matthewn/FastVideo-Quantization/.venv/bin/python3
+Traceback (most recent call last):
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
+    return f(*args, **kwargs)
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/run.py", line 936, in main
+    run(args)
+    ~~~^^^^^^
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/run.py", line 927, in run
+    elastic_launch(
+    ~~~~~~~~~~~~~~~
+        config=config,
+        ~~~~~~~~~~~~~~
+        entrypoint=cmd,
+        ~~~~~~~~~~~~~~~
+    )(*cmd_args)
+    ~^^^^^^^^^^^
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/launcher/api.py", line 156, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/launcher/api.py", line 293, in launch_agent
+    raise ChildFailedError(
+    ...<2 lines>...
+    )
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+fastvideo/training/wan_training_pipeline.py FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2025-12-18_20:07:48
+  host      : hpc-rack-1-16.slurm-compute.slurm.svc.cluster.local
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 353383)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+srun: error: hpc-rack-1-16: task 1: Exited with exit code 1
+E1218 20:07:49.943000 2210460 torch/distributed/elastic/multiprocessing/api.py:882] failed (exitcode: 1) local_rank: 3 (pid: 2210536) of binary: /home/hal-matthewn/FastVideo-Quantization/.venv/bin/python3
+Traceback (most recent call last):
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/bin/torchrun", line 10, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
+    return f(*args, **kwargs)
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/run.py", line 936, in main
+    run(args)
+    ~~~^^^^^^
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/run.py", line 927, in run
+    elastic_launch(
+    ~~~~~~~~~~~~~~~
+        config=config,
+        ~~~~~~~~~~~~~~
+        entrypoint=cmd,
+        ~~~~~~~~~~~~~~~
+    )(*cmd_args)
+    ~^^^^^^^^^^^
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/launcher/api.py", line 156, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/home/hal-matthewn/FastVideo-Quantization/.venv/lib/python3.13/site-packages/torch/distributed/launcher/api.py", line 293, in launch_agent
+    raise ChildFailedError(
+    ...<2 lines>...
+    )
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+fastvideo/training/wan_training_pipeline.py FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2025-12-18_20:07:49
+  host      : hpc-rack-1-3.slurm-compute.slurm.svc.cluster.local
+  rank      : 7 (local_rank: 3)
+  exitcode  : 1 (pid: 2210536)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+srun: error: hpc-rack-1-3: task 0: Exited with exit code 1

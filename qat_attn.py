@@ -113,7 +113,7 @@ def _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid,
             v = tl.where(kv_valid[:, None], v, 0.0)
         p = p.to(dtype)
         # note that this non transposed v for FP8 is only supported on Blackwell
-        acc = tl.dot(p, v, acc)
+        acc = tl.dot(p, v.to(dtype), acc)
         if IS_QAT:
             high_prec_acc = tl.dot(high_prec_p, v, high_prec_acc)
         # update m_i and l_i
@@ -338,6 +338,7 @@ def _attn_bwd_dkdv(dk, dv,
     tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
     curr_m = start_m
     step_m = BLOCK_M1
+    kv_valid = offs_n < N_CTX
     for blk_idx in range(num_steps):
         offs_m = curr_m + tl.arange(0, BLOCK_M1)
         q_valid = offs_m < N_CTX
