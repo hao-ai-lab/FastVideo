@@ -95,21 +95,27 @@ class LatentPreparationStage(PipelineStage):
                 f" size of {batch_size}. Make sure the batch size matches the length of the generators."
             )
         # Generate or use provided latents
-        # If latents already exist (e.g., from refine init stage), use them directly
         if latents is None:
-            # Freshly-sampled noise: follow diffusers convention and scale by init_noise_sigma
-            latents = randn_tensor(shape,
-                                   generator=generator,
-                                   device=device,
-                                   dtype=dtype)
+            latents = randn_tensor(
+                shape,
+                generator=generator,
+                device=device,
+                dtype=dtype,
+            )
             if hasattr(self.scheduler, "init_noise_sigma"):
                 latents = latents * self.scheduler.init_noise_sigma
         else:
-            # Latents already prepared (e.g., by refinement init stage) are assumed
-            # to be in the correct scale already (matching original LongCat math),
-            # so we only move them to the correct device without extra scaling.
+            # Pre-initialized latents:
+            # - For LongCat refine (refine_from or stage1_video present), we should not re-scale by init_noise_sigma.
+            # - For other models, keep the original behavior.
             latents = latents.to(device)
-            logger.info("Using pre-initialized latents without re-scaling (e.g., from refinement stage)")
+            if not (
+                getattr(batch, "refine_from", None) is not None
+                or getattr(batch, "stage1_video", None) is not None
+            ):
+                if hasattr(self.scheduler, "init_noise_sigma"):
+                    latents = latents * self.scheduler.init_noise_sigma
+
         # Update batch with prepared latents
         batch.latents = latents
         batch.raw_latent_shape = latents.shape

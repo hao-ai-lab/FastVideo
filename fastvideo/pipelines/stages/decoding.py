@@ -169,7 +169,7 @@ class DecodingStage(PipelineStage):
         # Convert to CPU float32 for compatibility
         frames = frames.cpu().float()
         
-        # Crop padding if this is a LongCat refinement (CRITICAL for correct output!)
+        # Crop padding if this is a LongCat refinement
         if hasattr(batch, 'num_cond_frames_added') and hasattr(batch, 'new_frame_size_before_padding'):
             num_cond_frames_added = batch.num_cond_frames_added
             new_frame_size = batch.new_frame_size_before_padding
