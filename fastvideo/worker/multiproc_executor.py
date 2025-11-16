@@ -467,6 +467,10 @@ class WorkerMultiprocProc:
                             "output_batch": output_batch.output.cpu(),
                             "logging_info": logging_info
                         })
+                    else:
+                        result = self.worker.execute_method(
+                            method, *args, **kwargs)
+                        self.pipe.send(result)
                 else:
                     result = self.worker.execute_method(method, *args, **kwargs)
                     self.pipe.send(result)
