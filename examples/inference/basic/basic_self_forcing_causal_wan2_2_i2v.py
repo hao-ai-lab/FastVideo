@@ -16,6 +16,7 @@ def main():
         num_gpus=1,
         use_fsdp_inference=True,
         dit_cpu_offload=True, # DiT need to be offloaded for MoE
+        dit_precision="fp32",
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
         dmd_denoising_steps=[1000, 850, 700, 550, 350, 275, 200, 125],
@@ -30,7 +31,7 @@ def main():
     sampling_param.num_frames = 73
     sampling_param.width = 832
     sampling_param.height = 480
-    sampling_param.seed = 42
+    sampling_param.seed = 1000
 
     with open("prompts/mixkit_i2v.jsonl", "r") as f:
         prompt_image_pairs = json.load(f)
