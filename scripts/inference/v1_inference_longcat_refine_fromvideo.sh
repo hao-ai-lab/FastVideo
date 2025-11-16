@@ -1,25 +1,17 @@
 #!/bin/bash
 
-# LongCat Simple Refinement Script
-# This script refines an existing 480p video to 720p
-# Usage: bash scripts/inference/v1_inference_longcat_refine_simple.sh
-
-# Number of GPUs
 num_gpus=1
-
-# Attention backend
 export FASTVIDEO_ATTENTION_BACKEND=
-
-# Model path
+# For longcat, we must first convert the official weights to FastVideo native format
+# conversion method: python scripts/checkpoint_conversion/longcat_to_fastvideo.py
+# --source /path/to/LongCat-Video/weights/LongCat-Video
+# --output weights/longcat-native
 export MODEL_BASE=weights/longcat-native
 
-# Input video (change this to your 480p video path)
 INPUT_VIDEO="outputs_video/longcat_distill/In a realistic photography style, an asian boy around seven or eight years old sits on a park bench,.mp4"
-
-# Output directory
 REFINE_OUTPUT="outputs_video/longcat_refine_720p"
 
-# Prompt (should match the original prompt used for base generation)
+# Prompt used for base generation
 PROMPT="In a realistic photography style, an asian boy around seven or eight years old sits on a park bench, wearing a light yellow T-shirt, denim shorts, and white sneakers. He holds an ice cream cone with vanilla and chocolate flavors, and beside him is a medium-sized golden Labrador. Smiling, the boy offers the ice cream to the dog, who eagerly licks it with its tongue. The sun is shining brightly, and the background features a green lawn and several tall trees, creating a warm and loving scene."
 
 echo "=========================================="
@@ -37,9 +29,6 @@ if [ ! -f "$INPUT_VIDEO" ]; then
     exit 1
 fi
 
-# ==============================================================================
-# Refine 480p -> 720p with BSA and refinement LoRA
-# ==============================================================================
 echo "🔧 Configuring refinement (BSA enabled, refinement LoRA)..."
 echo "✅ Input video: $INPUT_VIDEO"
 echo "✅ BSA enabled with sparsity=0.875"

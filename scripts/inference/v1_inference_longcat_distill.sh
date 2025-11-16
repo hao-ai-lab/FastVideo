@@ -1,35 +1,13 @@
 #!/bin/bash
 
-# LongCat distilled inference (480p, 16 steps, LoRA)
-# Usage: bash scripts/inference/v1_inference_longcat_distill.sh
-# - Disables BSA for 480p
-# - Applies distilled LoRA adapter
-# - Sets 16 steps, guidance=1.0, no negative prompt
-
-# Number of GPUs
 num_gpus=1
-
-# Attention backend:
-# - leave empty to auto-select best available
-# - set to TORCH_SDPA for maximum compatibility
-# - set to FLASH_ATTN if FlashAttention is installed and desired
 export FASTVIDEO_ATTENTION_BACKEND=
-
-# Model path:
-# - Native (recommended after weight conversion)
+# For longcat, we must first convert the official weights to FastVideo native format
+# conversion method: python scripts/checkpoint_conversion/longcat_to_fastvideo.py
+# --source /path/to/LongCat-Video/weights/LongCat-Video
+# --output weights/longcat-native
 export MODEL_BASE=weights/longcat-native
-# - Or use the wrapper (Phase 1) for reference:
 
-# ==============================================================================
-# BSA Configuration (Runtime via CLI)
-# ==============================================================================
-# Disable BSA via CLI for distilled (480p)
-echo "🔧 Configuring distilled inference (BSA disabled via CLI for 480p)..."
-echo "✅ BSA disabled - using standard attention for 480p distilled mode"
-echo "💡 Tip: For refinement (720p+), use v1_inference_longcat_refine.sh"
-# ==============================================================================
-
-# You can either use --prompt or --prompt-txt, but not both.
 fastvideo generate \
     --model-path $MODEL_BASE \
     --sp-size $num_gpus \

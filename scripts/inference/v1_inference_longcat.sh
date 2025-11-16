@@ -1,35 +1,15 @@
 #!/bin/bash
 
-# LongCat inference script WITHOUT BSA (standard inference)
-# Usage: bash scripts/inference/v1_inference_longcat.sh
-#
-# This script runs standard inference (no BSA) for maximum quality.
-# Use this for baseline comparison or when BSA is not needed (e.g., 480p).
-
-# Number of GPUs
 num_gpus=1
 
-# Attention backend:
-# - leave empty to auto-select best available
-# - set to TORCH_SDPA for maximum compatibility
-# - set to FLASH_ATTN if FlashAttention is installed and desired
 export FASTVIDEO_ATTENTION_BACKEND=
 
-# Model path:
-# - Native (recommended after weight conversion)
+# For longcat, we must first convert the official weights to FastVideo native format
+# conversion method: python scripts/checkpoint_conversion/longcat_to_fastvideo.py
+# --source /path/to/LongCat-Video/weights/LongCat-Video
+# --output weights/longcat-native
 export MODEL_BASE=weights/longcat-native
-# - Or use the wrapper (Phase 1) for reference:
 
-# ==============================================================================
-# BSA Configuration (Runtime via CLI)
-# ==============================================================================
-# Disable BSA via CLI (no config.json edits)
-echo "🔧 Configuring standard inference (BSA disabled via CLI)..."
-echo "✅ BSA disabled - using standard attention (maximum quality)"
-echo "💡 Tip: For high-resolution (720p+), consider using v1_inference_longcat_BSA.sh"
-# ==============================================================================
-
-# You can either use --prompt or --prompt-txt, but not both.
 fastvideo generate \
     --model-path $MODEL_BASE \
     --sp-size $num_gpus \
