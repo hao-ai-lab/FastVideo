@@ -186,3 +186,7 @@ class SelfForcingWan2_2_T2V480PConfig(Wan2_2_T2V_A14B_Config):
     dmd_denoising_steps: list[int] | None = field(
         default_factory=lambda: [1000, 850, 700, 550, 350, 275, 200, 125])
     warp_denoising_step: bool = True
+
+    def __post_init__(self) -> None:
+        self.vae_config.load_encoder = True
+        self.vae_config.load_decoder = True

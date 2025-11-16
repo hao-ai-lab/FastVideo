@@ -191,8 +191,6 @@ class SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam(
 @dataclass
 class SelfForcingWan2_2_T2V_A14B_480P_SamplingParam(
         Wan2_2_T2V_A14B_SamplingParam):
-    guidance_scale: float = 2.0
-    guidance_scale_2: float = 2.0
     num_inference_steps: int = 8
     num_frames: int = 81
     height: int = 448

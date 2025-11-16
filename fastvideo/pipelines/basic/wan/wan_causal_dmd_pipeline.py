@@ -50,7 +50,8 @@ class WanCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
                        stage=CausalDMDDenosingStage(
                            transformer=self.get_module("transformer"),
                            transformer_2=self.get_module("transformer_2", None),
-                           scheduler=self.get_module("scheduler")))
+                           scheduler=self.get_module("scheduler"),
+                           vae=self.get_module("vae")))
 
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))
