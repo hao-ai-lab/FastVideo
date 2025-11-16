@@ -78,6 +78,8 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     # Causal Self-Forcing Wan2.2
     "rand0nmr/SFWan2.2-T2V-A14B-Diffusers":
     SelfForcingWan2_2_T2V_A14B_480P_SamplingParam,
+    "FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers":
+    SelfForcingWan2_2_T2V_A14B_480P_SamplingParam,
 
     # Cosmos2
     "nvidia/Cosmos-Predict2-2B-Video2World":

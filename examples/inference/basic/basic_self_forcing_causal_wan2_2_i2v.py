@@ -11,7 +11,7 @@ def main():
     # If a local path is provided, FastVideo will make a best effort
     # attempt to identify the optimal arguments.
     generator = VideoGenerator.from_pretrained(
-        "rand0nmr/SFWan2.2-T2V-A14B-Diffusers",
+        "FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers",
         # FastVideo will automatically handle distributed setup
         num_gpus=1,
         use_fsdp_inference=True,
@@ -22,12 +22,10 @@ def main():
         dmd_denoising_steps=[1000, 850, 700, 550, 350, 275, 200, 125],
         # Set pin_cpu_memory to false if CPU RAM is limited and there're no frequent CPU-GPU transfer
         pin_cpu_memory=True,
-        init_weights_from_safetensors="/mnt/sharefs/users/hao.zhang/wei/SFwan2.2_distill_self_forcing_release_x0_CacheAppend_1333/checkpoint-442_weight_only/ema/generator_ema.safetensors",
-        init_weights_from_safetensors_2="/mnt/sharefs/users/hao.zhang/wei/SFwan2.2_distill_self_forcing_release_x0_CacheAppend_1333/checkpoint-442_weight_only/ema/generator_ema_2.safetensors",
         # image_encoder_cpu_offload=False,
     )
 
-    sampling_param = SamplingParam.from_pretrained("rand0nmr/SFWan2.2-T2V-A14B-Diffusers")
+    sampling_param = SamplingParam.from_pretrained("FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers")
     sampling_param.num_frames = 73
     sampling_param.width = 832
     sampling_param.height = 480
