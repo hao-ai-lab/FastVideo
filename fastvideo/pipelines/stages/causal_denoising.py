@@ -123,11 +123,12 @@ class CausalDMDDenosingStage(DenoisingStage):
                                                   dtype=target_dtype,
                                                   device=latents.device)
 
-        def _get_kv_cache(timestep: float) -> dict:
+        def _get_kv_cache(timestep: float) -> list[dict]:
             if boundary_timestep is not None:
                 if timestep >= boundary_timestep:
                     return kv_cache1
                 else:
+                    assert kv_cache2 is not None, "kv_cache2 is not initialized"
                     return kv_cache2
             return kv_cache1
 
@@ -394,7 +395,7 @@ class CausalDMDDenosingStage(DenoisingStage):
         batch.latents = latents
         return batch
 
-    def _initialize_kv_cache(self, batch_size, dtype, device) -> None:
+    def _initialize_kv_cache(self, batch_size, dtype, device) -> list[dict]:
         """
         Initialize a Per-GPU KV cache aligned with the Wan model assumptions.
         """
@@ -431,7 +432,7 @@ class CausalDMDDenosingStage(DenoisingStage):
         return kv_cache1
 
     def _initialize_crossattn_cache(self, batch_size, max_text_len, dtype,
-                                    device) -> None:
+                                    device) -> list[dict]:
         """
         Initialize a Per-GPU cross-attention cache aligned with the Wan model assumptions.
         """
