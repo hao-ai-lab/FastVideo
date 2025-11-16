@@ -4,10 +4,11 @@ set -euo pipefail
 ############################################
 # Single node, 6 GPUs
 ############################################
-NUM_GPUS=4
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+NUM_GPUS=1
+export WANDB_API_KEY=2f25ad37933894dbf0966c838c0b8494987f9f2f
+# export CUDA_VISIBLE_DEVICES=0,1,2,3
 
-
+export TRITON_PRINT_AUTOTUNING=1  # to print the best config
 export WANDB_MODE="online"
 export WANDB_BASE_URL="https://api.wandb.ai"
 export TOKENIZERS_PARALLELISM=false
@@ -23,13 +24,13 @@ echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 # Configs
 ############################################
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-DATA_DIR=data/Wan-Syn_77x448x832_600k/train
-VALIDATION_DATASET_FILE=data/Wan-Syn_77x448x832_600k/validation_4.json
+DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
+VALIDATION_DATASET_FILE="examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json"
 OUTPUT_DIR="checkpoints/sage3_distill"
 
 # Training arguments
 training_args=(
-  --tracker_project_name wan_t2v_distill_dmd
+  --tracker_project_name wan_t2v_distill_dmd_qat
   --output_dir "$OUTPUT_DIR"
   --max_train_steps 4000
   --train_batch_size 1
@@ -45,11 +46,11 @@ training_args=(
 
 # Parallel arguments (adjusted to 6 GPUs)
 parallel_args=(
-  --num_gpus 4
+  --num_gpus $NUM_GPUS
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
-  --hsdp_shard_dim 4
+  --hsdp_shard_dim $NUM_GPUS
 )
 
 # Model arguments
@@ -61,7 +62,7 @@ model_args=(
 # Dataset arguments
 dataset_args=(
   --data_path "$DATA_DIR"
-  --dataloader_num_workers 4
+  --dataloader_num_workers 1
 )
 
 # Validation arguments

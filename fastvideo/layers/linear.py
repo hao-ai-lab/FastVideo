@@ -182,8 +182,8 @@ class ReplicatedLinear(LinearBase):
     """
     
     # Class-level set to track unique shapes and dictionary to map shapes to layer types
-    _unique_shapes = set()
-    _shape_to_layer_types = {}
+    # _unique_shapes = set()
+    # _shape_to_layer_types = {}
 
     def __init__(self,
                  input_size: int,
@@ -244,18 +244,18 @@ class ReplicatedLinear(LinearBase):
         output = self.quant_method.apply(self, x, bias)
         
         # Create a shape key for uniqueness checking
-        shape_key = (x.shape, output.shape)
+        # shape_key = (x.shape, output.shape)
         
         # Track unique shapes and map them to layer types
-        if shape_key not in self._unique_shapes:
-            self._unique_shapes.add(shape_key)
-            self._shape_to_layer_types[shape_key] = []
-            print(f"Layer: {self.prefix} | input shape: {x.shape} --> output shape: {output.shape}, Quant Method: {self.quant_method.__class__.__name__}")
+        # if shape_key not in self._unique_shapes:
+        #     self._unique_shapes.add(shape_key)
+        #     self._shape_to_layer_types[shape_key] = []
+        #     print(f"Layer: {self.prefix} | input shape: {x.shape} --> output shape: {output.shape}, Quant Method: {self.quant_method.__class__.__name__}")
         
         # Add this layer type to the list for this shape if not already present
-        layer_type = self.__class__.__name__
-        if layer_type not in self._shape_to_layer_types[shape_key]:
-            self._shape_to_layer_types[shape_key].append(layer_type)
+        # layer_type = self.__class__.__name__
+        # if layer_type not in self._shape_to_layer_types[shape_key]:
+        #     self._shape_to_layer_types[shape_key].append(layer_type)
         
         output_bias = self.bias if self.skip_bias_add else None
         return output, output_bias
@@ -1009,3 +1009,4 @@ class RowParallelLinear(LinearBase):
         s += f", tp_size={self.tp_size}"
         s += f", reduce_results={self.reduce_results}"
         return s
+

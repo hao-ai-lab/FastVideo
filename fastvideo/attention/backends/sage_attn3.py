@@ -1,6 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from curses import KEY_B2
+import os
+import sys
+from pathlib import Path
+
+# Add project root to sys.path to allow importing qat_attn
+_project_root = Path(__file__).resolve().parent.parent.parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
 import torch
 try:
     from sageattn import sageattn_blackwell
@@ -139,7 +148,7 @@ def qat_attn_backward_16bit(fq_q_BLHD, fq_k_BLHD, fq_v_BLHD, high_prec_o_BLHD, g
     # grads w.r.t inputs, None for non-tensor inputs
     return dQ.transpose(1, 2).contiguous(), dK.transpose(1, 2).contiguous(), dV.transpose(1, 2).contiguous(), None, None, None
 
-
+USE_SMOOTHING = False
 def sage_attn_qk_torch(q, k, per_block_mean=False):
     """
     Inputs:  q/k/v in [B, H, L, D]
@@ -149,15 +158,10 @@ def sage_attn_qk_torch(q, k, per_block_mean=False):
     B, H, kL, D = k.shape
     assert B == 1
     q, k = q.squeeze(0), k.squeeze(0)
-    if True:
+    if USE_SMOOTHING:
         qk = _Matmul3d4bitFWD16bitBWD_with_smoothing.apply(q, k)
     else:
-        k = k - k.mean(dim=-2, keepdim=True)  # [H, L, D]
-        qm = q.mean(dim=-2, keepdim=True)  # [H, 1, D]
-        q = q - qm  # [B, H, L, D]
-        delta_s = torch.matmul(qm, k.transpose(-2, -1)).contiguous()  # [H, 1, L]
         qk = _Matmul3d4bitFWD16bitBWD.apply(q, k)
-        qk = qk + delta_s 
     qk = qk / torch.sqrt(torch.tensor(D, device=q.device, dtype=q.dtype))
     p = torch.softmax(qk, dim=-1)
     return p.unsqueeze(0)
@@ -234,7 +238,7 @@ def flash_attn_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_caus
 
 USE_TORCH_4BIT_FWD = True
 USE_TORCH_16BIT_BWD = True
-USE_QAT_ATTN = True
+USE_QAT_ATTN = False
 class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
     @staticmethod
     def forward(ctx, q_BLHD, k_BLHD, v_BLHD, is_causal=False, per_block_mean=False):
@@ -315,7 +319,7 @@ def qat_attn(q_BLHD, k_BLHD, v_BLHD, is_causal=False):
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
     v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
-    o_BHLD = attention.apply(q_BHLD, k_BHLD, v_BHLD, is_causal, 1.0 / sqrt(q_BLHD.shape[-1]), warp_specialize=True, IS_QAT=True)
+    o_BHLD = attention(q_BHLD, k_BHLD, v_BHLD, is_causal, 1.0 / sqrt(q_BLHD.shape[-1]))
     return o_BHLD.permute(0, 2, 1, 3).contiguous()
 
 

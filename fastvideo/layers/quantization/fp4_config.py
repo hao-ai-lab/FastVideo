@@ -49,8 +49,6 @@ class FP4QuantizeMethod(QuantizeMethodBase):
         out = mm_fp4(x_fp4, weight_fp4.T, x_scale, weight_scale.T, 1.0/(x_global_sf * weight_global_sf), torch.bfloat16, None, backend='cutlass')
             
         if bias is not None:
-            logger.info(f"Bias shape: {bias.shape}")
-            logger.info(f"Out shape: {out.shape}")
             if bias.device != out.device or bias.dtype != out.dtype:
                 bias = bias.to(device=out.device, dtype=out.dtype)
             out = out + bias

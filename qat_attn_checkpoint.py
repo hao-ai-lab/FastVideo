@@ -55,7 +55,7 @@ def fake_quantize(src_tensor, valid_src_mask, BLOCK_SIZE_OUT_DIM: tl.constexpr,
                                   BLOCK_SIZE_OUT_DIM=BLOCK_SIZE_OUT_DIM, 
                                   BLOCK_SIZE_QUANT_DIM=BLOCK_SIZE_QUANT_DIM, 
                                   dst_dtype=dst_dtype)
-    return src_tensor, high_prec_src_tensor.to(src_tensor.dtype)
+    return src_tensor, high_prec_src_tensor
     
 @triton.jit
 def print_dtype(tensor):
@@ -96,7 +96,6 @@ def _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid, #
         kv_valid = (start_n + offs_n) < N_CTX
         # -- compute qk ----
         k = desc_k.load([offsetk_y, 0])
-        k = tl.where(kv_valid[:, None], k, 0.0)
         if IS_QAT:
             k, _ = fake_quantize(src_tensor=k, valid_src_mask=kv_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_N, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=k.dtype)
         qk = tl.dot(q, tl.trans(k))
@@ -132,14 +131,13 @@ def _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid, #
             v = desc_v.load([0, offsetv_y]).T
         else:
             v = desc_v.load([offsetv_y, 0])
-            v = tl.where(kv_valid[:, None], v, 0.0)
             if IS_QAT:
                 v, _ = fake_quantize(src_tensor=v, valid_src_mask=kv_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_N, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=dtype)
         p = p.to(dtype)
         # note that this non transposed v for FP8 is only supported on Blackwell
         acc = tl.dot(p, v.to(dtype), acc)
         if IS_QAT:
-            high_prec_acc = tl.dot(high_prec_p, v, high_prec_acc)
+            high_prec_acc = tl.dot(high_prec_p, v.to(tl.float32), high_prec_acc)
         # update m_i and l_i
         # place this at the end of the loop to reduce register pressure
         l_i = l_i * alpha + l_ij
@@ -178,7 +176,7 @@ else:
 
 configs = [
     triton.Config({'BLOCK_M': BM, 'BLOCK_N': BN}, num_stages=s, num_warps=w, pre_hook=_host_descriptor_pre_hook) \
-    for BM in [64, 128]\
+    for BM in [32, 64, 128]\
     for BN in [32, 64, 128]\
     for s in NUM_STAGES_OPTIONS \
     for w in [4, 8]\
@@ -273,7 +271,6 @@ def _attn_fwd(sm_scale, M,  #
     qk_scale *= 1.44269504  # 1/log(2)
     # load q: it will stay in SRAM throughout
     q = desc_q.load([qo_offset_y, 0])  # load from start of q block and start of the entire head dimension
-    q = tl.where(q_valid[:, None], q, 0.0)
     if IS_QAT:
         q, _ = fake_quantize(src_tensor=q, valid_src_mask=q_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_M, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=q.dtype)
     # stage 1: off-band

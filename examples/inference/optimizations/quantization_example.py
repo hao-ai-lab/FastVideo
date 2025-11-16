@@ -30,7 +30,7 @@ def main():
     pipeline_config.dit_config.quant_config = FP4Config()
     # pipeline_config.dit_config.quant_config = FP8Config()
 
-    ReplicatedLinear.print_shape_summary()
+    # ReplicatedLinear.print_shape_summary()
     
     print("\nLoading model with FP4 quantization...")
     generator = VideoGenerator.from_pretrained(
@@ -86,19 +86,9 @@ def main():
         
     except Exception as e:
         print(f"Error during video generation: {e}")
-        print("Make sure you have the required deep_gemm library installed for FP4 support")
         return
     
-    print(f"\n=== FP4 Quantization Summary ===")
     print(f"Videos saved to: {OUTPUT_PATH}")
-    print("FP4 quantization benefits:")
-    print("- ✓ Reduced memory usage compared to FP16/BF16")
-    print("- ✓ Faster inference on supported hardware (H100+)")
-    print("- ✓ Maintains model quality with proper scaling")
-    print("\nFor optimal FP4 performance:")
-    print("1. Use H100 or newer GPUs")
-    print("2. Ensure deep_gemm library is installed")
-    print("3. Keep models on GPU (avoid CPU offloading for quantized layers)")
 
 
 if __name__ == "__main__":

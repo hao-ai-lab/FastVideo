@@ -55,7 +55,7 @@ def fake_quantize(src_tensor, valid_src_mask, BLOCK_SIZE_OUT_DIM: tl.constexpr,
                                   BLOCK_SIZE_OUT_DIM=BLOCK_SIZE_OUT_DIM, 
                                   BLOCK_SIZE_QUANT_DIM=BLOCK_SIZE_QUANT_DIM, 
                                   dst_dtype=dst_dtype)
-    return src_tensor, high_prec_src_tensor.to(src_tensor.dtype)
+    return src_tensor, high_prec_src_tensor
     
 @triton.jit
 def print_dtype(tensor):
@@ -93,10 +93,13 @@ def _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid, #
     # loop over k, v and update accumulator
     for start_n in tl.range(lo, hi, BLOCK_N, warp_specialize=warp_specialize):
         start_n = tl.multiple_of(start_n, BLOCK_N)
+        # bounds checking for kv block
         kv_valid = (start_n + offs_n) < N_CTX
         # -- compute qk ----
+        # Load without mask (tensor descriptors don't support mask), then mask manually
         k = desc_k.load([offsetk_y, 0])
-        k = tl.where(kv_valid[:, None], k, 0.0)
+        # Zero out invalid positions
+        # k = tl.where(kv_valid[:, None], k, 0.0)
         if IS_QAT:
             k, _ = fake_quantize(src_tensor=k, valid_src_mask=kv_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_N, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=k.dtype)
         qk = tl.dot(q, tl.trans(k))
@@ -106,6 +109,9 @@ def _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid, #
             m_ij = tl.maximum(m_i, tl.max(qk, 1))
             qk -= m_ij[:, None]
         else:
+            # Mask out invalid kv positions before computing max
+            # qk_masked = tl.where(kv_valid[None, :], qk * qk_scale, -1.0e6)
+            # m_ij = tl.maximum(m_i, tl.max(qk_masked, 1))
             m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
             qk = qk * qk_scale - m_ij[:, None]
         p = tl.math.exp2(qk)
@@ -130,16 +136,19 @@ def _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid, #
         # prepare p and v for the dot
         if dtype == tl.float8e5:
             v = desc_v.load([0, offsetv_y]).T
+            # Zero out invalid positions
+            # v = tl.where(kv_valid[:, None], v, 0.0)
         else:
             v = desc_v.load([offsetv_y, 0])
-            v = tl.where(kv_valid[:, None], v, 0.0)
+            # Zero out invalid positions
+            # v = tl.where(kv_valid[:, None], v, 0.0)
             if IS_QAT:
                 v, _ = fake_quantize(src_tensor=v, valid_src_mask=kv_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_N, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=dtype)
         p = p.to(dtype)
         # note that this non transposed v for FP8 is only supported on Blackwell
         acc = tl.dot(p, v.to(dtype), acc)
         if IS_QAT:
-            high_prec_acc = tl.dot(high_prec_p, v, high_prec_acc)
+            high_prec_acc = tl.dot(high_prec_p, v.to(tl.float32), high_prec_acc)
         # update m_i and l_i
         # place this at the end of the loop to reduce register pressure
         l_i = l_i * alpha + l_ij
@@ -178,8 +187,8 @@ else:
 
 configs = [
     triton.Config({'BLOCK_M': BM, 'BLOCK_N': BN}, num_stages=s, num_warps=w, pre_hook=_host_descriptor_pre_hook) \
-    for BM in [64, 128]\
-    for BN in [32, 64, 128]\
+    for BM in [64]\
+    for BN in [64]\
     for s in NUM_STAGES_OPTIONS \
     for w in [4, 8]\
 ]
@@ -202,7 +211,7 @@ def prune_invalid_configs(configs, named_args, **kwargs):
     N_CTX_KV = kwargs["N_CTX_KV"]
     return [conf for conf in configs 
             if conf.kwargs.get("BLOCK_M", 0) <= N_CTX_Q 
-            and conf.kwargs.get("BLOCK_N", 0) <= N_CTX_KV and conf.kwargs.get("BLOCK_N", 0) % conf.kwargs.get("BLOCK_M", 0) == 0]
+            and conf.kwargs.get("BLOCK_N", 0) <= N_CTX_KV]
 
 
 @triton.jit
@@ -213,8 +222,8 @@ def _maybe_make_tensor_desc(desc_or_ptr, shape, strides, block_shape):
         return tl.make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape)
 
 
-@triton.autotune(configs=list(filter(keep, configs)), key=["N_CTX_Q", "N_CTX_KV", "HEAD_DIM", "FP8_OUTPUT", "warp_specialize"],
-                 prune_configs_by={'early_config_prune': prune_invalid_configs}, cache_results=True)
+# @triton.autotune(configs=list(filter(keep, configs)), key=["N_CTX_Q", "N_CTX_KV", "HEAD_DIM", "FP8_OUTPUT", "warp_specialize"],
+#                  prune_configs_by={'early_config_prune': prune_invalid_configs})
 @triton.jit
 def _attn_fwd(sm_scale, M,  #
               Z, H, desc_q, desc_k, desc_v, desc_o, desc_high_prec_o, N_CTX_Q, N_CTX_KV,  #
@@ -258,6 +267,7 @@ def _attn_fwd(sm_scale, M,  #
     # initialize offsets
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)  # for kv blocks
+
     q_valid = offs_m < N_CTX_Q
     # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
@@ -273,7 +283,8 @@ def _attn_fwd(sm_scale, M,  #
     qk_scale *= 1.44269504  # 1/log(2)
     # load q: it will stay in SRAM throughout
     q = desc_q.load([qo_offset_y, 0])  # load from start of q block and start of the entire head dimension
-    q = tl.where(q_valid[:, None], q, 0.0)
+    # Zero out invalid positions
+    # q = tl.where(q_valid[:, None], q, 0.0)
     if IS_QAT:
         q, _ = fake_quantize(src_tensor=q, valid_src_mask=q_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_M, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=q.dtype)
     # stage 1: off-band
@@ -300,7 +311,7 @@ def _attn_fwd(sm_scale, M,  #
     if IS_QAT:
         high_prec_acc = high_prec_acc / l_i[:, None]
     m_ptrs = M + off_hz * N_CTX_Q + offs_m
-    tl.store(m_ptrs, m_i)
+    tl.store(m_ptrs, m_i, mask=q_valid)
     desc_o.store([qo_offset_y, 0], acc.to(dtype))
     if IS_QAT:
         desc_high_prec_o.store([qo_offset_y, 0], high_prec_acc.to(dtype))
@@ -315,13 +326,14 @@ def _attn_bwd_preprocess(O, DO,  #
     off_m = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
     off_hz = tl.program_id(1)
     off_n = tl.arange(0, HEAD_DIM)
+    # bounds checking
     valid = off_m < N_CTX
     # load
     o = tl.load(O + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :], mask=valid[:, None], other=0.0)
     do = tl.load(DO + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :], mask=valid[:, None], other=0.0).to(tl.float32)
     delta = tl.sum(o * do, axis=1)
     # write-back
-    tl.store(Delta + off_hz * N_CTX + off_m, delta)
+    tl.store(Delta + off_hz * N_CTX + off_m, delta, mask=valid)
 
 
 # The main inner-loop logic for computing dK and dV.
@@ -348,8 +360,10 @@ def _attn_bwd_dkdv(dk, dv,  #
     tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
     curr_m = start_m
     step_m = BLOCK_M1
+    # bounds checking for kv block (static)
     kv_valid = offs_n < N_CTX
     for blk_idx in range(num_steps):
+        # bounds checking for query block (dynamic)
         offs_m = curr_m + tl.arange(0, BLOCK_M1)
         q_valid = offs_m < N_CTX
         q = tl.load(q_ptrs, mask=q_valid[:, None], other=0.0)
@@ -402,6 +416,7 @@ def _attn_bwd_dq(dq, q, K, V,  #
     offs_k = tl.arange(0, HEAD_DIM)
     k_ptrs = K + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
     v_ptrs = V + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
+    # bounds checking for query block (static)
     q_valid = offs_m < N_CTX
     # D (= delta) is pre-divided by ds_scale.
     Di = tl.load(D + offs_m, mask=q_valid, other=0.0)
@@ -436,17 +451,11 @@ def _attn_bwd_dq(dq, q, K, V,  #
         k_ptrs += step_n * stride_tok
         v_ptrs += step_n * stride_tok
     return dq
-    
-@triton.jit
-def _compute_cross_attn_pointer_offsets(bhid, H, N_CTX_Q, stride_z_q, stride_z_kv, stride_h_q, stride_h_kv):
-    """Helper function to compute pointer offsets for cross-attention backward kernels."""
-    off_chz = (bhid * N_CTX_Q).to(tl.int64)
-    adj_q = (stride_h_q * (bhid % H) + stride_z_q * (bhid // H))
-    adj_kv = (stride_h_kv * (bhid % H) + stride_z_kv * (bhid // H))
-    return off_chz, adj_q, adj_kv
 
+
+# Kernel for computing dQ in cross-attention (N_CTX_Q != N_CTX_KV)
 @triton.jit
-def _attn_bwd_dq_cross(Q, K, V,
+def _attn_bwd_dq_cross(Q, K, V, sm_scale,
                        DO, DQ,
                        M, D,
                        stride_z_q, stride_z_kv, stride_h_q, 
@@ -456,10 +465,13 @@ def _attn_bwd_dq_cross(Q, K, V,
                        BLOCK_N2: tl.constexpr,
                        HEAD_DIM: tl.constexpr,
                        IS_QAT: tl.constexpr):
+
     LN2: tl.constexpr = 0.6931471824645996
 
     bhid = tl.program_id(2)
-    off_chz, adj_q, adj_kv = _compute_cross_attn_pointer_offsets(bhid, H, N_CTX_Q, stride_z_q, stride_z_kv, stride_h_q, stride_h_kv)
+    off_chz = (bhid * N_CTX_Q).to(tl.int64)
+    adj_q = (stride_h_q * (bhid % H) + stride_z_q * (bhid // H))
+    adj_kv = (stride_h_kv * (bhid % H) + stride_z_kv * (bhid // H))
 
     Q += adj_q
     K += adj_kv
@@ -474,15 +486,23 @@ def _attn_bwd_dq_cross(Q, K, V,
     offs_m = start_m + tl.arange(0, BLOCK_M2)
     offs_k = tl.arange(0, HEAD_DIM)
 
+    # bounds checking for query block
     q_valid = offs_m < N_CTX_Q
+
+    # load q
     q = tl.load(Q + offs_m[:, None] * stride_tok_q + offs_k[None, :] * stride_d_q, mask=q_valid[:, None], other=0.0)
     if IS_QAT:
         q, _q_high_prec = fake_quantize(src_tensor=q, valid_src_mask=q_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_M2, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=q.dtype)
-    dq = tl.zeros([BLOCK_M2, HEAD_DIM], dtype=tl.float32)
+
+    # load do
     do = tl.load(DO + offs_m[:, None] * stride_tok_q + offs_k[None, :] * stride_d_q, mask=q_valid[:, None], other=0.0)
+
+    # load m (float32 logmax)
     m = tl.load(M + offs_m, mask=q_valid, other=-1e8)[:, None]
-    
-    Di = tl.load(D + offs_m, mask=q_valid, other=0.0)
+
+    dq = tl.zeros([BLOCK_M2, HEAD_DIM], dtype=tl.float32)
+
+    # iterate over KV blocks
     num_steps = (N_CTX_KV + BLOCK_N2 - 1) // BLOCK_N2
     for step in range(num_steps):
         start_n = step * BLOCK_N2
@@ -491,22 +511,30 @@ def _attn_bwd_dq_cross(Q, K, V,
 
         k = tl.load(K + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv, mask=kv_valid[:, None], other=0.0)
         v = tl.load(V + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv, mask=kv_valid[:, None], other=0.0)
+
         if IS_QAT:
             k, _k_high_prec = fake_quantize(src_tensor=k, valid_src_mask=kv_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_N2, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=k.dtype)
             v, _v_high_prec = fake_quantize(src_tensor=v, valid_src_mask=kv_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_N2, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=v.dtype)
+
         qk = tl.dot(q, tl.trans(k))
         p = tl.math.exp2(qk - m)
 
         dp = tl.dot(do, tl.trans(v)).to(tl.float32)
+
+        Di = tl.load(D + offs_m, mask=q_valid, other=0.0)
+
         ds = p * (dp - Di[:, None])
         ds = ds.to(tl.float16)
+
         dq += tl.dot(ds, k.to(tl.float16))
 
     dq *= LN2
     dq_ptrs = DQ + offs_m[:, None] * stride_tok_q + offs_k[None, :] * stride_d_q
-    tl.store(dq_ptrs, dq)
+    tl.store(dq_ptrs, dq, mask=q_valid[:, None])
 
+    
 
+# Kernel for computing dK and dV in cross-attention (N_CTX_Q != N_CTX_KV)
 @triton.jit
 def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
                          DO, DK, DV,
@@ -520,7 +548,9 @@ def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
                          IS_QAT: tl.constexpr):
 
     bhid = tl.program_id(2)
-    off_chz, adj_q, adj_kv = _compute_cross_attn_pointer_offsets(bhid, H, N_CTX_Q, stride_z_q, stride_z_kv, stride_h_q, stride_h_kv)
+    off_chz = (bhid * N_CTX_Q).to(tl.int64)
+    adj_q = (stride_h_q * (bhid % H) + stride_z_q * (bhid // H))
+    adj_kv = (stride_h_kv * (bhid % H) + stride_z_kv * (bhid // H))
 
     Q += adj_q
     K += adj_kv
@@ -536,12 +566,16 @@ def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
     offs_n = start_n + tl.arange(0, BLOCK_N1)
     offs_k = tl.arange(0, HEAD_DIM)
 
+    # bounds checking for kv block
+    kv_valid = offs_n < N_CTX_KV
+
     dk = tl.zeros([BLOCK_N1, HEAD_DIM], dtype=tl.float32)
     dv = tl.zeros([BLOCK_N1, HEAD_DIM], dtype=tl.float32)
-    
-    kv_valid = offs_n < N_CTX_KV
+
+    # static K/V block
     k_block = tl.load(K + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv, mask=kv_valid[:, None], other=0.0)
     v_block = tl.load(V + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv, mask=kv_valid[:, None], other=0.0)
+
     if IS_QAT:
         k_block, _k_high_prec = fake_quantize(src_tensor=k_block, valid_src_mask=kv_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_N1, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=k_block.dtype)
         v_block, _v_high_prec = fake_quantize(src_tensor=v_block, valid_src_mask=kv_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_N1, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=v_block.dtype)
@@ -562,23 +596,27 @@ def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
         qk = tl.dot(q, tl.trans(k_block))
         p = tl.math.exp2(qk - m[:, None])
 
+        # dV
         p16 = p.to(tl.float16)
         if IS_QAT:
             p16, _p16_high_prec = fake_quantize(src_tensor=p16, valid_src_mask=q_valid[:, None] & kv_valid[None, :], BLOCK_SIZE_OUT_DIM=BLOCK_M1, BLOCK_SIZE_QUANT_DIM=BLOCK_N1, dst_dtype=p16.dtype)
         dv += tl.dot(tl.trans(p16), do.to(tl.float16))
 
+        # dK
         dp = tl.dot(do, tl.trans(v_block)).to(tl.float32)
         Di = tl.load(D + offs_m, mask=q_valid, other=0.0)
         ds = p * (dp - Di[:, None])
         ds = ds.to(tl.float16)
+
         dk += tl.dot(tl.trans(ds), q.to(tl.float16))
 
     dv_ptrs = DV + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv
-    tl.store(dv_ptrs, dv)
+    tl.store(dv_ptrs, dv, mask=kv_valid[:, None])
 
-    dk *= sm_scale
+    dk *= (sm_scale)
     dk_ptrs = DK + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv
-    tl.store(dk_ptrs, dk)
+    tl.store(dk_ptrs, dk, mask=kv_valid[:, None])
+
 
 
 @triton.jit
@@ -649,7 +687,7 @@ def _attn_bwd(Q, K, V, sm_scale,  #
                             )
 
     start_m += num_steps * MASK_BLOCK_M1
-    num_steps = (N_CTX - start_m) // BLOCK_M1
+    num_steps = (N_CTX - start_m + BLOCK_M1 - 1) // BLOCK_M1
 
     # Compute dK and dV for non-masked blocks.
     dk, dv = _attn_bwd_dkdv(  #
@@ -666,12 +704,12 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     )
 
     dv_ptrs = DV + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
-    tl.store(dv_ptrs, dv)
+    tl.store(dv_ptrs, dv, mask=kv_valid[:, None])
 
     # Write back dK.
     dk *= sm_scale
     dk_ptrs = DK + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
-    tl.store(dk_ptrs, dk)
+    tl.store(dk_ptrs, dk, mask=kv_valid[:, None])
 
     # THIS BLOCK DOES DQ:
     start_m = pid * BLOCK_M2
@@ -706,7 +744,7 @@ def _attn_bwd(Q, K, V, sm_scale,  #
                       )
     end_n -= num_steps * MASK_BLOCK_N2
     # stage 2
-    num_steps = end_n // BLOCK_N2
+    num_steps = (end_n + BLOCK_N2 - 1) // BLOCK_N2
     dq = _attn_bwd_dq(dq, q, K, V,  #
                       do, m, D,  #
                       stride_tok, stride_d,  #
@@ -719,13 +757,13 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     # Write back dQ.
     dq_ptrs = DQ + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
     dq *= LN2
-    tl.store(dq_ptrs, dq)
+    tl.store(dq_ptrs, dq, mask=q_valid[:, None])
 
 
 class _attention(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, q, k, v, causal, sm_scale, warp_specialize=True, IS_QAT=False):
+    def forward(ctx, q, k, v, causal, sm_scale, warp_specialize=True, IS_QAT=True):
         # Debug: Print input tensor dtypes
         # if IS_QAT:
             # print(f"[DEBUG] QAT Forward - Input tensor dtypes:")
@@ -800,8 +838,10 @@ class _attention(torch.autograd.Function):
 
         triton.set_allocator(alloc_fn)
 
-        def grid(META):
-            return (triton.cdiv(q.shape[2], META["BLOCK_M"]), q.shape[0] * q.shape[1], 1)  # (ceil(N_CTX / BLOCK_M), Z * H, 1)
+        BLOCK_M = 64
+        BLOCK_N = 64
+        def grid(_):
+            return (triton.cdiv(q.shape[2], BLOCK_M), q.shape[0] * q.shape[1], 1)  # (ceil(N_CTX / BLOCK_M), Z * H, 1)
 
         ctx.grid = grid
         if is_blackwell() and warp_specialize:
@@ -809,6 +849,20 @@ class _attention(torch.autograd.Function):
                 extra_kern_args["maxnreg"] = 168
             else:
                 extra_kern_args["maxnreg"] = 80
+        
+        # Apply pre-hook to set block shapes on tensor descriptors
+        _host_descriptor_pre_hook({
+            "BLOCK_M": BLOCK_M,
+            "BLOCK_N": BLOCK_N,
+            "HEAD_DIM": HEAD_DIM_K,
+            "desc_q": desc_q,
+            "desc_k": desc_k,
+            "desc_v": desc_v,
+            "desc_o": desc_o,
+            "desc_high_prec_o": desc_high_prec_o,
+            "FP8_OUTPUT": q.dtype == torch.float8_e5m2,
+        })
+        
         _attn_fwd[grid](
             sm_scale, M,  #
             q.shape[0], q.shape[1],  #
@@ -816,11 +870,15 @@ class _attention(torch.autograd.Function):
             N_CTX_Q=N_CTX_Q,  #
             N_CTX_KV=N_CTX_KV,  #
             HEAD_DIM=HEAD_DIM_K,  #
+            BLOCK_M=BLOCK_M,  #
+            BLOCK_N=BLOCK_N,  #
             FP8_OUTPUT=q.dtype == torch.float8_e5m2,  #
             STAGE=stage,  #
             warp_specialize=warp_specialize,  #
             IS_HOPPER=is_hopper(),  #
             IS_QAT=IS_QAT,  #
+            num_warps=4,
+            num_stages=2,
             **extra_kern_args)
         o_for_bwd = high_prec_o if IS_QAT else o
         
@@ -858,14 +916,21 @@ class _attention(torch.autograd.Function):
         BATCH, N_HEAD, N_CTX_Q = q.shape[:3]
         N_CTX_KV = k.shape[2]  
         assert k.shape[2] == v.shape[2], "k and v must have the same sequence length"
-        PRE_BLOCK = 128
-        NUM_STAGES = 2
-        NUM_WARPS = 8
-        BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 32, 32, 32
-        BLK_SLICE_FACTOR = 1 if ctx.IS_QAT else 2  # must be 1 for QAT
+        PRE_BLOCK = 64
+        # if N_CTX_Q > 8000 or N_CTX_KV > 8000:
+        #     NUM_STAGES = 2  # Very large sequences need fewer stages
+        # elif N_CTX_Q > 4096 or N_CTX_KV > 4096:
+        #     NUM_STAGES = 3
+        # else:
+        #     NUM_STAGES = 5
+        NUM_STAGES = 1
+        NUM_WARPS = 4
+        BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 64, 64, 64, 64
+        BLK_SLICE_FACTOR = 2
         RCP_LN2 = 1.4426950408889634  # = 1.0 / ln(2)
         arg_k = k
         arg_k = arg_k * (ctx.sm_scale * RCP_LN2)
+        PRE_BLOCK = 32
         pre_grid = ((N_CTX_Q + PRE_BLOCK - 1) // PRE_BLOCK, BATCH * N_HEAD)
         delta = torch.empty_like(M)
         _attn_bwd_preprocess[pre_grid](
@@ -895,7 +960,7 @@ class _attention(torch.autograd.Function):
             # Use separate kernels for cross-attention (different sequence lengths)
             grid_dq = ((N_CTX_Q + BLOCK_M2 - 1) // BLOCK_M2, 1, BATCH * N_HEAD)
             _attn_bwd_dq_cross[grid_dq](
-                q, arg_k, v, do, dq, M, delta,  #
+                q, arg_k, v, ctx.sm_scale, do, dq, M, delta,  #
                 q.stride(0), k.stride(0), q.stride(1), k.stride(1), q.stride(2), k.stride(2), q.stride(3), k.stride(3),  #
                 N_HEAD, N_CTX_Q, N_CTX_KV,  #
                 BLOCK_M2=BLOCK_M2, BLOCK_N2=BLOCK_N2,  #
@@ -1091,6 +1156,33 @@ def bench_flash_attention(BATCH, H, N_CTX, HEAD_DIM, causal, warp_specialize, mo
     if mode == "bwd":
         total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
     return total_flops * 1e-12 / (ms * 1e-3)
+
+
+def debug_fake_quantize_dtypes():
+    """Helper function to debug fake_quantize dtype behavior."""
+    import torch
+    
+    print("\n[DEBUG] Testing fake_quantize dtype behavior...")
+    
+    # Test with different input dtypes
+    test_cases = [
+        (torch.float16, "float16"),
+        (torch.float32, "float32"),
+    ]
+    
+    for input_dtype, name in test_cases:
+        print(f"\n--- Testing with input dtype: {name} ---")
+        x = torch.randn(128, 64, device=DEVICE, dtype=input_dtype)
+        print(f"Input: dtype={x.dtype}, shape={x.shape}")
+        print(f"  min={x.min().item():.6f}, max={x.max().item():.6f}, mean={x.mean().item():.6f}")
+        
+        # Test fake_quantize with different dst_dtypes
+        for dst_dtype, dst_name in [(torch.float16, "float16"), (torch.float32, "float32")]:
+            print(f"\n  fake_quantize with dst_dtype={dst_name}:")
+            # Note: We can't directly call the JIT function, but we can check what dtype
+            # the input tensor should be converted to
+            print(f"    Expected behavior: input {name} -> fake_quantize -> output {dst_name}")
+            print(f"    (Note: fake_quantize is JIT compiled, actual dtype conversion happens in kernel)")
 
 
 if __name__ == "__main__":
