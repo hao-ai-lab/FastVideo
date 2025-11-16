@@ -62,3 +62,11 @@ class LlamaConfig(TextEncoderConfig):
     arch_config: TextEncoderArchConfig = field(default_factory=LlamaArchConfig)
 
     prefix: str = "llama"
+    tokenizer_kwargs: dict = field(
+        default_factory=lambda: {
+            "padding": "max_length",
+            "truncation": True,
+            "max_length": 256,
+            "return_tensors": "pt",
+        }
+    )

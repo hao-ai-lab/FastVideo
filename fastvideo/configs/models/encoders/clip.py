@@ -80,6 +80,14 @@ class CLIPTextConfig(TextEncoderConfig):
     enable_scale: bool = True
     is_causal: bool = True
     prefix: str = "clip"
+    tokenizer_kwargs: dict = field(
+        default_factory=lambda: {
+            "padding": "max_length",
+            "truncation": True,
+            "max_length": 77,
+            "return_tensors": "pt",
+        }
+    )
 
 
 @dataclass
