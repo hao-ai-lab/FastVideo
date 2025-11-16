@@ -11,10 +11,6 @@ from .flash_attn_bsa_varlen_mask import (
     configs_fwd_bsa_varlen_preset, configs_fwd_bsa_varlen_align_preset, configs_bwd_dkdv_bsa_varlen_preset, configs_bwd_dq_bsa_varlen_preset, configs_bwd_dq_bsa_varlen_align_preset
 )
 
-from .communicate import p2p_communicate
-
-from ..context_parallel import context_parallel_util
-
 torch._dynamo.config.cache_size_limit = 32
 
 def is_cuda():

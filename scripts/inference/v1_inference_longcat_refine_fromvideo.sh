@@ -14,15 +14,13 @@ export FASTVIDEO_ATTENTION_BACKEND=
 export MODEL_BASE=weights/longcat-native
 
 # Input video (change this to your 480p video path)
-INPUT_VIDEO="outputs_video/longcat_distill/source.mp4"
+INPUT_VIDEO="outputs_video/longcat_distill/In a realistic photography style, an asian boy around seven or eight years old sits on a park bench,.mp4"
 
 # Output directory
 REFINE_OUTPUT="outputs_video/longcat_refine_720p"
 
 # Prompt (should match the original prompt used for base generation)
 PROMPT="In a realistic photography style, an asian boy around seven or eight years old sits on a park bench, wearing a light yellow T-shirt, denim shorts, and white sneakers. He holds an ice cream cone with vanilla and chocolate flavors, and beside him is a medium-sized golden Labrador. Smiling, the boy offers the ice cream to the dog, who eagerly licks it with its tongue. The sun is shining brightly, and the background features a green lawn and several tall trees, creating a warm and loving scene."
-
-NEGATIVE_PROMPT="Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
 
 echo "=========================================="
 echo "LongCat 480p -> 720p Refinement"
@@ -44,7 +42,7 @@ fi
 # ==============================================================================
 echo "🔧 Configuring refinement (BSA enabled, refinement LoRA)..."
 echo "✅ Input video: $INPUT_VIDEO"
-echo "✅ BSA enabled with sparsity=0.9375"
+echo "✅ BSA enabled with sparsity=0.875"
 echo "✅ Refinement LoRA loaded"
 echo ""
 
@@ -58,7 +56,7 @@ fastvideo generate \
     --text-encoder-cpu-offload True \
     --pin-cpu-memory False \
     --enable-bsa True \
-    --bsa-sparsity 0.9375 \
+    --bsa-sparsity 0.875 \
     --bsa-chunk-q 4 4 8 \
     --bsa-chunk-k 4 4 8 \
     --lora-path "$MODEL_BASE/lora/refinement" \
@@ -73,7 +71,6 @@ fastvideo generate \
     --fps 30 \
     --guidance-scale 1.0 \
     --prompt "$PROMPT" \
-    --negative-prompt "$NEGATIVE_PROMPT" \
     --seed 42 \
     --output-path "$REFINE_OUTPUT"
 
