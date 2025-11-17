@@ -1,58 +1,75 @@
 # LoRA Extraction and Verification Scripts
 
-This folder contains utility scripts for **extracting, verifying, and comparing LoRA adapters** between a base diffusion model and its fine-tuned version.  
-It was developed for FastVideo models built on the [Wan 2.2 TI2V architecture](https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B-Diffusers).
+Utility scripts for extracting, verifying, merging and comparing LoRA adapters between a base diffusion model and a fine-tuned FastVideo model.
+
+Intended models: Wan 2.2 TI2V style models (e.g. Wan-AI/Wan2.2-TI2V-5B-Diffusers and FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers).
 
 ---
 
 ## Scripts Overview
 
-### 1. `extract_lora.py`
-Extracts LoRA adapter matrices by computing the weight deltas between the **base model** and the **fine-tuned model**, then performing low-rank decomposition.
+Contents (scripts)
 
-**Default configuration:**
-- Base model: `Wan-AI/Wan2.2-TI2V-5B-Diffusers`
-- Finetuned model: `FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers`
-- Rank: 16
-- Outputs LoRA checkpoint at `fastwan2.2_transformer_lora.pt`
+extract_lora.py — Extract LoRA adapters by SVD of (fine_tuned_weight - base_weight) and save adapters (safetensors preferred). Supports checkpointing and resume.
 
-Supports checkpointing for large model runs to avoid restarting on failure.
+verify_lora.py — Reconstruct base + (B @ A) from the adapter and compare to the fine-tuned model (numeric verification on sampled layers).
 
----
+merge_lora.py — Merge adapter into base transformer weights offline and write merged transformer weights (HF diffusers / safetensors friendly).
 
-### 2. `verify_lora.py`
-Loads the extracted LoRA weights and re-applies them to the base model to verify equivalence to the fine-tuned model numerically.
-
----
-
-### 3. `compare_lora_outputs.py`
-Compares visual outputs (e.g. generated frames or videos) between:
-- Base model  
-- Fine-tuned model  
-- Base + Extracted LoRA  
-
-to validate that the extracted LoRA produces comparable results.
+lora_inference_comparison.py — Generate videos with the fine-tuned model and with merged/base+adapter using the same seed; optionally compute SSIM to quantify similarity.
 
 ---
 
 ## Usage
 
+Usage examples
+
+Run commands from the repository root (so fastvideo can be imported)
+
 Run extraction:
 ```bash
-python scripts/lora_extraction/extract_lora.py
-```
-
-Resume from a saved checkpoint:
-```bash
-python scripts/lora_extraction/extract_lora.py --resume
+python extract_lora.py --base <base> --ft <ft> --out adapter.safetensors --rank 16
 ```
 
 Verify:
 ```bash
-python scripts/lora_extraction/verify_lora.py
+python verify_lora.py \
+  --base Wan-AI/Wan2.2-TI2V-5B-Diffusers \
+  --ft FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers \
+  --adapter adapter.safetensors \
+  --samples 100
+
 ```
 
-Compare outputs:
+Merge Adapter into base model:
+```base
+python scripts/lora_extraction/merge_lora.py \
+  --base Wan-AI/Wan2.2-TI2V-5B-Diffusers \
+  --adapter artifacts/fastvideo_adapter.r16.safetensors \
+  --output ./merged_model_base_lora
+```
+
+Compare inference outputs:
+
+with offline merge:
 ```bash
-python scripts/lora_extraction/compare_lora_outputs.py
+python scripts/lora_extraction/lora_inference_comparison.py \
+  --base ./merged_model \
+  --ft FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers \
+  --adapter NONE \
+  --output-dir ./inference_comparison \
+  --compute-ssim \
+  --seed 42
+```
+
+with online merge:
+```bash
+python scripts/lora_extraction/lora_inference_comparison.py \
+  --base Wan-AI/Wan2.2-TI2V-5B-Diffusers \
+  --ft FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers \
+  --adapter adapter.safetensors \
+  --output-dir ./inference_comparison \
+  --compute-ssim \
+  --seed 42
+
 ```
