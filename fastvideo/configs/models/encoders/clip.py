@@ -44,6 +44,15 @@ class CLIPTextArchConfig(TextEncoderArchConfig):
     _fsdp_shard_conditions: list = field(
         default_factory=lambda: [_is_transformer_layer, _is_embeddings])
 
+    tokenizer_kwargs: dict = field(
+        default_factory=lambda: {
+            "padding": "max_length",
+            "truncation": True,
+            "max_length": 77,
+            "return_tensors": "pt",
+        }
+    )
+
 
 @dataclass
 class CLIPVisionArchConfig(ImageEncoderArchConfig):
@@ -80,14 +89,6 @@ class CLIPTextConfig(TextEncoderConfig):
     enable_scale: bool = True
     is_causal: bool = True
     prefix: str = "clip"
-    tokenizer_kwargs: dict = field(
-        default_factory=lambda: {
-            "padding": "max_length",
-            "truncation": True,
-            "max_length": 77,
-            "return_tensors": "pt",
-        }
-    )
 
 
 @dataclass

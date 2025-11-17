@@ -22,7 +22,7 @@ LOCAL_PREPROCESSED_DATA_DIR = Path(os.path.join(DATA_DIR, "cats_processed_t2v_hu
 
 
 # training
-NUM_GPUS_PER_NODE_TRAINING = "8"
+NUM_GPUS_PER_NODE_TRAINING = "1"
 TRAINING_ENTRY_FILE_PATH = "fastvideo/training/hunyuan_training_pipeline.py"
 # New preprocessing pipeline creates files in training_dataset/worker_0/worker_0/
 LOCAL_TRAINING_DATA_DIR = os.path.join(LOCAL_PREPROCESSED_DATA_DIR, "training_dataset", "worker_0", "worker_0")
