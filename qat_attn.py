@@ -300,7 +300,7 @@ def _attn_fwd(sm_scale, M,  #
     if IS_QAT:
         high_prec_acc = high_prec_acc / l_i[:, None]
     m_ptrs = M + off_hz * N_CTX_Q + offs_m
-    tl.store(m_ptrs, m_i)
+    tl.store(m_ptrs, m_i, mask=q_valid)
     desc_o.store([qo_offset_y, 0], acc.to(dtype))
     if IS_QAT:
         desc_high_prec_o.store([qo_offset_y, 0], high_prec_acc.to(dtype))
@@ -321,7 +321,7 @@ def _attn_bwd_preprocess(O, DO,  #
     do = tl.load(DO + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :], mask=valid[:, None], other=0.0).to(tl.float32)
     delta = tl.sum(o * do, axis=1)
     # write-back
-    tl.store(Delta + off_hz * N_CTX + off_m, delta)
+    tl.store(Delta + off_hz * N_CTX + off_m, delta, mask=valid)
 
 
 # The main inner-loop logic for computing dK and dV.
@@ -356,9 +356,10 @@ def _attn_bwd_dkdv(dk, dv,  #
         if IS_QAT:
             q, _ = fake_quantize(src_tensor=q, valid_src_mask=q_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_M1, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=q.dtype)
         # Load m before computing qk to reduce pipeline stall.
-        m = tl.load(M + offs_m, mask=q_valid, other=-1e8)
+        m = tl.load(M + offs_m, mask=q_valid, other=0.0)
         qk = tl.dot(q, tl.trans(k))
         p = tl.math.exp2(qk - m[:, None])
+        p = tl.where(q_valid[:, None] & kv_valid[None, :], p, 0.0)
         # Autoregressive masking.
         if MASK:
             mask = (offs_m[:, None] >= offs_n[None, :])
@@ -420,6 +421,7 @@ def _attn_bwd_dq(dq, q, K, V,  #
             v, _ = fake_quantize(src_tensor=v, valid_src_mask=kv_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_N2, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=v.dtype)
         qk = tl.dot(q, tl.trans(k))
         p = tl.math.exp2(qk - m)
+        p = tl.where(q_valid[:, None] & kv_valid[None, :], p, 0.0)
         # Autoregressive masking.
         if MASK:
             mask = (offs_m[:, None] >= offs_n[None, :])
@@ -480,7 +482,7 @@ def _attn_bwd_dq_cross(Q, K, V,
         q, _q_high_prec = fake_quantize(src_tensor=q, valid_src_mask=q_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_M2, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=q.dtype)
     dq = tl.zeros([BLOCK_M2, HEAD_DIM], dtype=tl.float32)
     do = tl.load(DO + offs_m[:, None] * stride_tok_q + offs_k[None, :] * stride_d_q, mask=q_valid[:, None], other=0.0)
-    m = tl.load(M + offs_m, mask=q_valid, other=-1e8)[:, None]
+    m = tl.load(M + offs_m, mask=q_valid, other=0.0)[:, None]
     
     Di = tl.load(D + offs_m, mask=q_valid, other=0.0)
     num_steps = (N_CTX_KV + BLOCK_N2 - 1) // BLOCK_N2
@@ -496,6 +498,7 @@ def _attn_bwd_dq_cross(Q, K, V,
             v, _v_high_prec = fake_quantize(src_tensor=v, valid_src_mask=kv_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_N2, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=v.dtype)
         qk = tl.dot(q, tl.trans(k))
         p = tl.math.exp2(qk - m)
+        p = tl.where(q_valid[:, None] & kv_valid[None, :], p, 0.0)
 
         dp = tl.dot(do, tl.trans(v)).to(tl.float32)
         ds = p * (dp - Di[:, None])
@@ -504,7 +507,7 @@ def _attn_bwd_dq_cross(Q, K, V,
 
     dq *= LN2
     dq_ptrs = DQ + offs_m[:, None] * stride_tok_q + offs_k[None, :] * stride_d_q
-    tl.store(dq_ptrs, dq)
+    tl.store(dq_ptrs, dq, mask=q_valid[:, None])
 
 
 @triton.jit
@@ -554,13 +557,14 @@ def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
 
         q = tl.load(Q + offs_m[:, None] * stride_tok_q + offs_k[None, :] * stride_d_q, mask=q_valid[:, None], other=0.0)
         do = tl.load(DO + offs_m[:, None] * stride_tok_q + offs_k[None, :] * stride_d_q, mask=q_valid[:, None], other=0.0)
-        m = tl.load(M + offs_m, mask=q_valid, other=-1e8)
+        m = tl.load(M + offs_m, mask=q_valid, other=0.0)
 
         if IS_QAT:
             q, _q_high_prec = fake_quantize(src_tensor=q, valid_src_mask=q_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_M1, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=q.dtype)
 
         qk = tl.dot(q, tl.trans(k_block))
         p = tl.math.exp2(qk - m[:, None])
+        p = tl.where(q_valid[:, None] & kv_valid[None, :], p, 0.0)
 
         p16 = p.to(tl.float16)
         if IS_QAT:
@@ -574,11 +578,11 @@ def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
         dk += tl.dot(tl.trans(ds), q.to(tl.float16))
 
     dv_ptrs = DV + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv
-    tl.store(dv_ptrs, dv)
+    tl.store(dv_ptrs, dv, mask=kv_valid[:, None])
 
     dk *= sm_scale
     dk_ptrs = DK + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv
-    tl.store(dk_ptrs, dk)
+    tl.store(dk_ptrs, dk, mask=kv_valid[:, None])
 
 
 @triton.jit
@@ -595,6 +599,7 @@ def _attn_bwd(Q, K, V, sm_scale,  #
               BLOCK_N2: tl.constexpr,  #
               BLK_SLICE_FACTOR: tl.constexpr,  #
               HEAD_DIM: tl.constexpr,
+              CAUSAL: tl.constexpr,
               IS_QAT: tl.constexpr):
     LN2: tl.constexpr = 0.6931471824645996  # = ln(2)
 
@@ -634,22 +639,29 @@ def _attn_bwd(Q, K, V, sm_scale,  #
         k, _ = fake_quantize(src_tensor=k, valid_src_mask=kv_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_N1, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=k.dtype)
         v, _ = fake_quantize(src_tensor=v, valid_src_mask=kv_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_N1, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=v.dtype)
 
-    num_steps = BLOCK_N1 // MASK_BLOCK_M1
+    # For causal attention, process diagonal block with masking, then rest without
+    # For non-causal attention, process all blocks without masking
+    if CAUSAL:
+        num_steps = BLOCK_N1 // MASK_BLOCK_M1
 
-    dk, dv = _attn_bwd_dkdv(dk, dv,  #
-                            Q, k, v, sm_scale,  #
-                            DO,  #
-                            M, D,  #
-                            stride_tok, stride_d,  #
-                            H, N_CTX,  #
-                            MASK_BLOCK_M1, BLOCK_N1, HEAD_DIM,  #
-                            start_n, start_m, num_steps,  #
-                            MASK=True,  #
-                            IS_QAT=IS_QAT  #
-                            )
+        dk, dv = _attn_bwd_dkdv(dk, dv,  #
+                                Q, k, v, sm_scale,  #
+                                DO,  #
+                                M, D,  #
+                                stride_tok, stride_d,  #
+                                H, N_CTX,  #
+                                MASK_BLOCK_M1, BLOCK_N1, HEAD_DIM,  #
+                                start_n, start_m, num_steps,  #
+                                MASK=True,  #
+                                IS_QAT=IS_QAT  #
+                                )
 
-    start_m += num_steps * MASK_BLOCK_M1
-    num_steps = (N_CTX - start_m) // BLOCK_M1
+        start_m += num_steps * MASK_BLOCK_M1
+        num_steps = (N_CTX - start_m + BLOCK_M1 - 1) // BLOCK_M1
+    else:
+        # For non-causal, start from 0 and process all Q blocks
+        start_m = 0
+        num_steps = (N_CTX + BLOCK_M1 - 1) // BLOCK_M1
 
     # Compute dK and dV for non-masked blocks.
     dk, dv = _attn_bwd_dkdv(  #
@@ -666,12 +678,12 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     )
 
     dv_ptrs = DV + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
-    tl.store(dv_ptrs, dv)
+    tl.store(dv_ptrs, dv, mask=kv_valid[:, None])
 
     # Write back dK.
     dk *= sm_scale
     dk_ptrs = DK + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
-    tl.store(dk_ptrs, dk)
+    tl.store(dk_ptrs, dk, mask=kv_valid[:, None])
 
     # THIS BLOCK DOES DQ:
     start_m = pid * BLOCK_M2
@@ -687,45 +699,52 @@ def _attn_bwd(Q, K, V, sm_scale,  #
     dq = tl.zeros([BLOCK_M2, HEAD_DIM], dtype=tl.float32)
     do = tl.load(DO + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d, mask=q_valid[:, None], other=0.0)
 
-    m = tl.load(M + offs_m, mask=q_valid, other=-1e8)[:, None]
+    m = tl.load(M + offs_m, mask=q_valid, other=0.0)[:, None]
 
     # Compute dQ for masked (diagonal) blocks.
     # NOTE: This code scans each row of QK^T backward (from right to left,
     # but inside each call to _attn_bwd_dq, from left to right), but that's
     # not due to anything important.  I just wanted to reuse the loop
     # structure for dK & dV above as much as possible.
-    num_steps = BLOCK_M2 // MASK_BLOCK_N2
-    dq = _attn_bwd_dq(dq, q, K, V,  #
-                      do, m, D,  #
-                      stride_tok, stride_d,  #
-                      H, N_CTX,  #
-                      BLOCK_M2, MASK_BLOCK_N2, HEAD_DIM,  #
-                      start_m, end_n - num_steps * MASK_BLOCK_N2, num_steps,  #
-                      MASK=True,  #
-                      IS_QAT=IS_QAT  #
-                      )
-    end_n -= num_steps * MASK_BLOCK_N2
+    if CAUSAL:
+        num_steps = BLOCK_M2 // MASK_BLOCK_N2
+        dq = _attn_bwd_dq(dq, q, K, V,  #
+                          do, m, D,  #
+                          stride_tok, stride_d,  #
+                          H, N_CTX,  #
+                          BLOCK_M2, MASK_BLOCK_N2, HEAD_DIM,  #
+                          start_m, end_n - num_steps * MASK_BLOCK_N2, num_steps,  #
+                          MASK=True,  #
+                          IS_QAT=IS_QAT  #
+                          )
+        end_n -= num_steps * MASK_BLOCK_N2
+        # stage 2: process KV blocks from 0 to end_n (before diagonal), ceiling division to include remainder
+        num_steps = (end_n + BLOCK_N2 - 1) // BLOCK_N2
+        start_n = 0
+    else:
+        # For non-causal, process all KV blocks from 0 to N_CTX (ceiling division to include remainder)
+        num_steps = (N_CTX + BLOCK_N2 - 1) // BLOCK_N2
+        start_n = 0
     # stage 2
-    num_steps = end_n // BLOCK_N2
     dq = _attn_bwd_dq(dq, q, K, V,  #
                       do, m, D,  #
                       stride_tok, stride_d,  #
                       H, N_CTX,  #
                       BLOCK_M2, BLOCK_N2, HEAD_DIM,  #
-                      start_m, end_n - num_steps * BLOCK_N2, num_steps,  #
+                      start_m, start_n, num_steps,  #
                       MASK=False,  #
                       IS_QAT=IS_QAT  #
                       )
     # Write back dQ.
     dq_ptrs = DQ + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
     dq *= LN2
-    tl.store(dq_ptrs, dq)
+    tl.store(dq_ptrs, dq, mask=q_valid[:, None])
 
 
 class _attention(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, q, k, v, causal, sm_scale, warp_specialize=True, IS_QAT=False):
+    def forward(ctx, q, k, v, causal, sm_scale, warp_specialize=True, IS_QAT=True):
         # Debug: Print input tensor dtypes
         # if IS_QAT:
             # print(f"[DEBUG] QAT Forward - Input tensor dtypes:")
@@ -887,6 +906,7 @@ class _attention(torch.autograd.Function):
                 BLOCK_M2=BLOCK_M2, BLOCK_N2=BLOCK_N2,  #
                 BLK_SLICE_FACTOR=BLK_SLICE_FACTOR,  #
                 HEAD_DIM=ctx.HEAD_DIM,  #
+                CAUSAL=ctx.causal,  #
                 IS_QAT=ctx.IS_QAT,  #
                 num_warps=NUM_WARPS,  #
                 num_stages=NUM_STAGES  #
