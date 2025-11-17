@@ -77,6 +77,11 @@ def i2v_record_creator(batch: PreprocessBatch) -> list[dict[str, Any]]:
         image_embeds = None
     elif len(batch.image_embeds) == 1:
         image_embeds = batch.image_embeds[0]
+    else:
+        raise ValueError(
+            "Unexpected number of image_embeds in batch: expected 0 or 1, got {}".format(
+                len(batch.image_embeds)))
+        
     image_latent = batch.image_latent
     pil_image = batch.pil_image
 
