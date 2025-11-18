@@ -71,7 +71,6 @@ def longcat_preprocess_text(prompt: str) -> str:
 def umt5_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
     """Postprocess UMT5/T5 encoder outputs to fixed length 512 embeddings.
 
-    TODO: Not sure if using same procedure as t5 postprocess_text function is correct.
     """
     mask: torch.Tensor = outputs.attention_mask
     hidden_state: torch.Tensor = outputs.last_hidden_state
