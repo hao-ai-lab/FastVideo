@@ -62,5 +62,21 @@
     {
         "prompt": "A solitary boat glides across the expansive, tranquil expanse of a serene lake. The vessel leaves a gentle wake behind, creating delicate ripples across the mirror-like surface. The water appears a rich shade of teal, seamlessly blending with the sky at the horizon. Silhouettes of distant trees are faintly visible, creating a picturesque backdrop that enhances the solitary journey of the boat. The sky is a calm gradient, shifting from soft oranges near the shore to the pale blues above. In the distance, a few slender poles emerge from the water, remnants of an old structure or natural formation. The mood of the scene is one of peace and solitude, with the boat journeying steadily through the quiet landscape. There is a sense of endless possibilities as the boat moves toward the unseen beyond the frame. The simplicity and stillness of the scene invite contemplation and reflection, encapsulating a perfect moment of quietude on the water.",
         "image_path": "images/mixkit-motorboat-on-a-large-lake-with-turquoise-blue-waters-4996.png"
+    },
+    {
+        "prompt": "A man wearing grey shorts jumps rope in a gym, weights and gym equipment in the background.",
+        "image_path": "images/gray_short_man.jpg"
+    },
+    {
+        "prompt": "Flying over a peninsula covered in bushy trees, while discovering the sea around it, painted a beautiful turquoise blue, on a sunny day.",
+        "image_path": "images/peninsula.jpg"
+    },
+    {
+        "prompt": "Skillful cyclist doing a wheelie on a bike while riding through a forest, on a dirt road, surrounded by many trees, in the morning.",
+        "image_path": "images/cyclist.jpg"
+    },
+    {
+        "prompt": "Some friends dancing and having fun together in circles, at a party surrounded by colored lights at a party, in a fancy old place, in a view from below them.",
+        "image_path": "images/friends.jpg"
     }
 ]

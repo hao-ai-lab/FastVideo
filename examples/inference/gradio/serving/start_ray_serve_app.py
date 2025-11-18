@@ -20,8 +20,10 @@ DEFAULT_BACKEND_PORT = 8000
 DEFAULT_FRONTEND_HOST = "0.0.0.0"
 DEFAULT_FRONTEND_PORT = 7860
 DEFAULT_OUTPUT_PATH = "outputs"
-DEFAULT_T2V_MODELS = "FastVideo/FastWan2.1-T2V-1.3B-Diffusers,FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers"
-DEFAULT_T2V_REPLICAS = "4,4"
+DEFAULT_T2V_MODELS = ""
+DEFAULT_T2V_REPLICAS = ""
+DEFAULT_I2V_MODELS = "FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers"
+DEFAULT_I2V_REPLICAS = "1"
 
 HEALTH_CHECK_TIMEOUT = 5
 HEALTH_CHECK_MAX_RETRIES = 100
@@ -100,6 +102,12 @@ class ServiceManager:
             "port": self.args.backend_port
         }
         
+        # Add I2V parameters if provided
+        if self.args.i2v_model_paths:
+            backend_args["i2v_model_paths"] = self.args.i2v_model_paths
+        if self.args.i2v_model_replicas:
+            backend_args["i2v_model_replicas"] = self.args.i2v_model_replicas
+        
         self.backend_process = self._start_service("ray_serve_backend.py", backend_args, "backend")
         return self.backend_process
     
@@ -110,6 +118,10 @@ class ServiceManager:
             "host": self.args.frontend_host,
             "port": self.args.frontend_port
         }
+        
+        # Add I2V parameters if provided
+        if self.args.i2v_model_paths:
+            frontend_args["i2v_model_paths"] = self.args.i2v_model_paths
         
         self.frontend_process = self._start_service("gradio_frontend.py", frontend_args, "frontend")
         return self.frontend_process
@@ -173,6 +185,9 @@ def print_startup_info(args: argparse.Namespace) -> None:
     print("=" * 50)
     print(f"T2V Models: {args.t2v_model_paths}")
     print(f"T2V Model Replicas: {args.t2v_model_replicas}")
+    if args.i2v_model_paths:
+        print(f"I2V Models: {args.i2v_model_paths}")
+        print(f"I2V Model Replicas: {args.i2v_model_replicas}")
     print(f"Output: {args.output_path}")
     print(f"Backend: http://{args.backend_host}:{args.backend_port}")
     print(f"Frontend: http://{args.frontend_host}:{args.frontend_port}")
@@ -190,6 +205,14 @@ def parse_arguments() -> argparse.Namespace:
                         type=str, 
                         default=DEFAULT_T2V_REPLICAS,
                         help="Comma separated list of number of replicas for the T2V model(s)")
+    parser.add_argument("--i2v_model_paths", 
+                        type=str,
+                        default=DEFAULT_I2V_MODELS,
+                        help="Comma separated list of paths to the I2V model(s)")
+    parser.add_argument("--i2v_model_replicas", 
+                        type=str, 
+                        default=DEFAULT_I2V_REPLICAS,
+                        help="Comma separated list of number of replicas for the I2V model(s)")
     parser.add_argument("--output_path", 
                         type=str, 
                         default=DEFAULT_OUTPUT_PATH,
