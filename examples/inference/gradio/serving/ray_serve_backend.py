@@ -100,8 +100,8 @@ def encode_video_to_base64(frames: List[np.ndarray], fps: int = DEFAULT_FPS) -> 
         return ""
 
 
-def save_image_from_base64(image_data: str, output_dir: str) -> Optional[str]:
-    """Save base64 image data to a temporary file and return the path."""
+def decode_image_from_base64(image_data: str) -> Optional[np.ndarray]:
+    """Decode base64 image data to numpy array."""
     if not image_data:
         return None
     
@@ -111,18 +111,11 @@ def save_image_from_base64(image_data: str, output_dir: str) -> Optional[str]:
             image_data = image_data.split(',')[1]
         
         image_bytes = base64.b64decode(image_data)
-        
-        # Save to temporary file
-        os.makedirs(output_dir, exist_ok=True)
-        temp_image_path = os.path.join(output_dir, f"temp_input_{int(time.time() * 1000)}.png")
-        
-        with open(temp_image_path, 'wb') as f:
-            f.write(image_bytes)
-        
-        return temp_image_path
+        image_array = imageio.imread(io.BytesIO(image_bytes))
+        return image_array
         
     except Exception as e:
-        print(f"Warning: Failed to save image: {e}")
+        print(f"Warning: Failed to decode image: {e}")
         return None
 
 
@@ -211,23 +204,23 @@ class BaseModelDeployment:
         
         params = prepare_sampling_params(video_request, self.default_params)
 
-        # Save image if provided (for I2V)
-        image_path = None
+        # Decode image if provided (for I2V)
+        image = None
         if video_request.image_data:
-            image_path = save_image_from_base64(video_request.image_data, self.output_path)
-            if image_path is None:
+            image = decode_image_from_base64(video_request.image_data)
+            if image is None:
                 return VideoGenerationResponse(
                     video_data=None,
                     seed=params.seed,
                     success=False,
-                    error_message="Failed to save input image",
+                    error_message="Failed to decode input image",
                 )
 
         inference_start_time = time.time()
         result = self.generator.generate_video(
             prompt=video_request.prompt,
             sampling_param=params,
-            image_path=image_path,
+            image=image,  # Pass image for I2V
             save_video=False,
             return_frames=False,
         )
@@ -272,7 +265,7 @@ class T2VModelDeployment(BaseModelDeployment):
 
 
 @serve.deployment(
-    ray_actor_options={"num_cpus": 16, "num_gpus": 1, "runtime_env": {"conda": "demo-fv"}},
+    ray_actor_options={"num_cpus": 2, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
 )
 class T2V14BModelDeployment(BaseModelDeployment):
     def __init__(self, t2v_14b_model_path: str, output_path: str = "outputs"):
@@ -284,7 +277,7 @@ class T2V14BModelDeployment(BaseModelDeployment):
 
 
 @serve.deployment(
-    ray_actor_options={"num_cpus": 15, "num_gpus": 1, "runtime_env": {"conda": "demo-fv"}},
+    ray_actor_options={"num_cpus": 2, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
 )
 class I2VModelDeployment(BaseModelDeployment):
     def __init__(self, i2v_model_path: str, output_path: str = "outputs"):
