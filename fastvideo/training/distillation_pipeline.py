@@ -729,9 +729,6 @@ class DistillationPipeline(TrainingPipeline):
                                      self.num_train_timestep, [1],
                                      device=self.device,
                                      dtype=torch.long)
-            world_group = get_world_group()
-            if world_group.world_size > 1:
-                world_group.broadcast(timestep, src=0)
 
             timestep = shift_timestep(
                 timestep,
@@ -844,9 +841,6 @@ class DistillationPipeline(TrainingPipeline):
                                             self.num_train_timestep, [1],
                                             device=self.device,
                                             dtype=torch.long)
-        world_group = get_world_group()
-        if world_group.world_size > 1:
-            world_group.broadcast(fake_score_timestep, src=0)
 
         fake_score_timestep = shift_timestep(
             fake_score_timestep,
