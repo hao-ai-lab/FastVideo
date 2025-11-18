@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
 import os
+import re
 
 import pytest
 
@@ -76,6 +77,13 @@ LORA_CONFIGS = [
 MODEL_TO_PARAMS = {
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WAN_LORA_PARAMS,
 }
+
+def _sanitize_filename_component(name: str) -> str:
+    """Sanitize filename to remove invalid characters (same logic as VideoGenerator)"""
+    sanitized = re.sub(r'[\\/:*?"<>|]', '', name)
+    sanitized = sanitized.strip().strip('.')
+    sanitized = re.sub(r'\s+', ' ', sanitized)
+    return sanitized or "video"
 
 @pytest.mark.parametrize("model_id", list(MODEL_TO_PARAMS.keys()))
 def test_merge_lora_weights(model_id):
@@ -156,14 +164,16 @@ def test_lora_inference_similarity(ATTENTION_BACKEND, model_id):
         generation_kwargs["negative_prompt"] = lora_config["negative_prompt"]
 
         generator.set_lora_adapter(lora_nickname=lora_nickname, lora_path=lora_path)
+        # Sanitize the filename before adding .mp4 extension to match VideoGenerator's behavior
         output_video_name = f"{lora_path.split('/')[-1]}_{prompt[:50]}"
-        generation_kwargs["output_path"] = output_dir
-        generation_kwargs["output_video_name"] = output_video_name
+        output_video_name = _sanitize_filename_component(output_video_name)
+        generated_video_path = os.path.join(output_dir, f"{output_video_name}.mp4")
+        generation_kwargs["output_path"] = generated_video_path
 
         generator.generate_video(prompt, **generation_kwargs)
 
         assert os.path.exists(
-            output_dir), f"Output video was not generated at {output_dir}"
+            generated_video_path), f"Output video was not generated at {generated_video_path}"
 
         reference_folder = os.path.join(script_dir, 'L40S_reference_videos', model_id.split('/')[-1], ATTENTION_BACKEND)
         
@@ -172,13 +182,25 @@ def test_lora_inference_similarity(ATTENTION_BACKEND, model_id):
             raise FileNotFoundError(
                 f"Reference video folder does not exist: {reference_folder}")
 
-        # Find the matching reference video for the switched LoRA
+        # Find the matching reference video - try exact match first, then fuzzy match
+        # The reference might have different sanitization (e.g., trailing spaces)
         reference_video_name = None
-
+        unsanitized_prefix = f"{lora_path.split('/')[-1]}_{prompt[:50]}"
+        
         for filename in os.listdir(reference_folder):
-            # Check if the filename starts with the expected output_video_name and ends with .mp4
-            if filename.startswith(output_video_name) and filename.endswith('.mp4'):
-                reference_video_name = filename  # Remove .mp4 extension to match the logic below
+            if not filename.endswith('.mp4'):
+                continue
+            
+            # Try exact match with sanitized name
+            if filename.startswith(output_video_name):
+                reference_video_name = filename
+                break
+            
+            # Try match with unsanitized prefix (for legacy reference videos)
+            # Remove .mp4 and compare the base names after sanitization
+            base_filename = filename[:-4]  # Remove .mp4
+            if _sanitize_filename_component(base_filename) == output_video_name:
+                reference_video_name = filename
                 break
 
         if not reference_video_name:
@@ -186,7 +208,6 @@ def test_lora_inference_similarity(ATTENTION_BACKEND, model_id):
             raise FileNotFoundError(f"Reference video missing for adapter {lora_path}")
 
         reference_video_path = os.path.join(reference_folder, reference_video_name)
-        generated_video_path = os.path.join(output_dir, output_video_name + ".mp4")
 
         logger.info(
             f"Computing SSIM between {reference_video_path} and {generated_video_path}"
