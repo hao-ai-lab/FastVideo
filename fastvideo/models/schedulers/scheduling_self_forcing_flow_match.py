@@ -86,6 +86,12 @@ class SelfForcingFlowMatchScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
             return (prev_sample, )
         return SelfForcingFlowMatchSchedulerOutput(prev_sample=prev_sample)
 
+    @staticmethod
+    def calculate_alpha_beta_high(sigma, sigma_bound):
+        alpha = (1 - sigma) / (1 - sigma_bound)
+        beta = torch.sqrt(sigma ** 2 - (alpha * sigma_bound) ** 2)
+        return alpha, beta
+        
     def add_noise(self, original_samples, noise, timestep):
         """
         Diffusion forward corruption process.
@@ -103,6 +109,32 @@ class SelfForcingFlowMatchScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
             (self.timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
         sigma = self.sigmas[timestep_id].reshape(-1, 1, 1, 1)
         sample = (1 - sigma) * original_samples + sigma * noise
+        return sample.type_as(noise)
+
+    def add_noise_high(self, original_samples, noise, timestep, boundary_timestep):
+        """
+        Diffusion forward corruption process.
+        Input:
+            - clean_latent: the clean latent with shape [B*T, C, H, W]
+            - noise: the noise with shape [B*T, C, H, W]
+            - timestep: the timestep with shape [B*T]
+        Output: the corrupted latent with shape [B*T, C, H, W]
+        """
+        if timestep.ndim == 2:
+            timestep = timestep.flatten(0, 1)
+        if boundary_timestep.ndim == 2:
+            boundary_timestep = boundary_timestep.flatten(0, 1)
+        self.sigmas = self.sigmas.to(noise.device)
+        self.timesteps = self.timesteps.to(noise.device)
+        timestep_id = torch.argmin(
+            (self.timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1)
+        sigma = self.sigmas[timestep_id].reshape(-1, 1, 1, 1)
+
+        boundary_timestep_id = torch.argmin(
+            (self.timesteps.unsqueeze(0) - boundary_timestep.unsqueeze(1)).abs(), dim=1)
+        sigma_boundary = self.sigmas[boundary_timestep_id].reshape(-1, 1, 1, 1)
+        alpha, beta = self.calculate_alpha_beta_high(sigma, sigma_boundary)
+        sample = alpha * original_samples + beta * noise
         return sample.type_as(noise)
 
     def training_target(self, sample, noise, timestep):
