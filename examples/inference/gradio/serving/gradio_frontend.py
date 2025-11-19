@@ -5,6 +5,7 @@ import base64
 import time
 import json
 from pathlib import Path
+import tempfile
 
 import gradio as gr
 
@@ -240,9 +241,12 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         return "I2V" in model_name
     
     def generate_video(
-        prompt, negative_prompt, use_negative_prompt, seed, guidance_scale,
-        num_frames, height, width, randomize_seed, model_selection, input_image, progress
+        prompt, negative_prompt, use_negative_prompt, guidance_scale,
+        num_frames, height, width, model_selection, input_image, progress
     ):
+        # Use default seed value (randomize_seed disabled)
+        seed = 1000
+        randomize_seed = False
         if not client.check_health():
             return None, f"Backend is not available. Please check if Ray Serve is running at {backend_url}", ""
         
@@ -342,14 +346,12 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         #         'width': params.width,
         #         'num_frames': params.num_frames,
         #         'guidance_scale': params.guidance_scale,
-        #         'seed': params.seed,
         #     }
         
         return {
             'height': 480,
             'width': 832,
             'num_frames': 73,
-            'seed': 1000,
         }
     
     # Get available models based on what's loaded
@@ -363,12 +365,12 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
     initial_values = get_default_values(default_model)
     initial_show_image = is_i2v_model(default_model)
     
-    with gr.Blocks(title="FastWan", theme=theme) as demo:
+    with gr.Blocks(title="CausalWan", theme=theme) as demo:
         gr.Image("assets/logos/logo.svg", show_label=False, container=False, height=80)
         gr.HTML("""
         <div style="text-align: center; margin-bottom: 10px;">
             <p style="font-size: 18px;"> Make Video Generation Go Blurrrrrrr </p>
-            <p style="font-size: 18px;"> <a href="https://github.com/hao-ai-lab/FastVideo/tree/main" target="_blank">Code</a> | <a href="https://hao-ai-lab.github.io/blogs/fastvideo_post_training/" target="_blank">Blog</a> | <a href="https://hao-ai-lab.github.io/FastVideo/" target="_blank">Docs</a>  </p>
+            <p style="font-size: 18px;"> <a href="https://github.com/hao-ai-lab/FastVideo/tree/main" target="_blank">Code</a> | <a href="https://hao-ai-lab.github.io/blogs/fastvideo_causalwan_preview/" target="_blank">Blog</a> | <a href="https://hao-ai-lab.github.io/FastVideo/" target="_blank">Docs</a>  </p>
         </div>
         """)
         
@@ -420,6 +422,14 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         with gr.Row(equal_height=False):
             with gr.Column(scale=1):
                 with gr.Tabs():
+                    with gr.Tab("Input Image", visible=initial_show_image) as image_tab:
+                        gr.Markdown("**Please make sure you upload a 480x832 image**")
+                        input_image = gr.Image(
+                            label="",
+                            type="filepath",
+                            height=400,
+                        )
+                    
                     with gr.Tab("Advanced Options"):
                         with gr.Group():
                             with gr.Row():
@@ -461,22 +471,8 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                                     visible=False,
                                 )
 
-                            seed = gr.Slider(
-                                label="Seed",
-                                minimum=0,
-                                maximum=1000000,
-                                step=1,
-                                value=initial_values['seed'],
-                            )
-                            randomize_seed = gr.Checkbox(label="Randomize seed", value=False)
-                            seed_output = gr.Number(label="Used Seed")
-                    
-                    with gr.Tab("Input Image", visible=initial_show_image) as image_tab:
-                        input_image = gr.Image(
-                            label="",
-                            type="filepath",
-                            height=400,
-                        )
+                            # randomize_seed = gr.Checkbox(label="Randomize seed", value=False)
+                            seed_output = gr.Number(label="Used Seed", value=1000)
         
             with gr.Column(scale=1):
                 result = gr.Video(
@@ -528,7 +524,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         
         gr.HTML("""
         <div style="text-align: center; margin-top: 10px; margin-bottom: 15px;">
-            <p style="font-size: 16px; margin: 0;">The compute for this demo is generously provided by NVIDIA. Note that this demo is meant as a preview of our distilled I2V model.</p>
+            <p style="font-size: 16px; margin: 0;">The compute for this demo is generously provided by <a href="https://www.gmicloud.ai/" target="_blank">GMI Cloud</a>.  Note that this demo is meant as a preview of our distilled I2V model. Outside of few-step distillation, we have not yet fully optimized it for speed. Stay tuned for updates!</p>
         </div>
         """)
         
@@ -552,7 +548,6 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                     gr.update(value=params.width),
                     gr.update(value=params.num_frames),
                     gr.update(value=params.guidance_scale),
-                    gr.update(value=params.seed),
                     gr.update(visible=show_image_input),
                 )
             
@@ -561,22 +556,21 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                 gr.update(value=832),
                 gr.update(value=20),
                 gr.update(value=3.0),
-                gr.update(value=1024),
                 gr.update(visible=show_image_input),
             )
         
         model_selection.change(
             fn=on_model_selection_change,
             inputs=model_selection,
-            outputs=[height, width, num_frames, guidance_scale, seed, image_tab],
+            outputs=[height, width, num_frames, guidance_scale, image_tab],
         )
         
         def handle_generation(*args, progress=None, request: gr.Request = None):
-            model_selection, prompt, negative_prompt, use_negative_prompt, seed, guidance_scale, num_frames, height, width, randomize_seed, input_image = args
+            model_selection, prompt, negative_prompt, use_negative_prompt, guidance_scale, num_frames, height, width, input_image = args
             
             result_path, seed_or_error, _ = generate_video(
-                prompt, negative_prompt, use_negative_prompt, seed, guidance_scale, 
-                num_frames, height, width, randomize_seed, model_selection, input_image, progress
+                prompt, negative_prompt, use_negative_prompt, guidance_scale, 
+                num_frames, height, width, model_selection, input_image, progress
             )
             
             if result_path and os.path.exists(result_path):
@@ -599,12 +593,11 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                 prompt,
                 negative_prompt,
                 use_negative_prompt,
-                seed,
                 guidance_scale,
                 num_frames,
                 height,
                 width,
-                randomize_seed,
+                # randomize_seed,
                 input_image,
             ],
             outputs=[result, seed_output, error_output],  # timing_display removed
@@ -694,23 +687,23 @@ def main():
             <meta charset="UTF-8" />
             <meta name="viewport" content="width=device-width, initial-scale=1.0" />
             
-            <title>FastWan</title>
-            <meta name="title" content="FastWan">
+            <title>CausalWan</title>
+            <meta name="title" content="CausalWan">
             <meta name="description" content="Make video generation go blurrrrrrr">
-            <meta name="keywords" content="FastVideo, video generation, AI, machine learning, FastWan">
+            <meta name="keywords" content="FastVideo, video generation, AI, machine learning, CausalWan">
             
             <meta property="og:type" content="website">
             <meta property="og:url" content="{base_url}/">
-            <meta property="og:title" content="FastWan">
+            <meta property="og:title" content="CausalWan">
             <meta property="og:description" content="Make video generation go blurrrrrrr">
             <meta property="og:image" content="{base_url}/logo.svg">
             <meta property="og:image:width" content="1200">
             <meta property="og:image:height" content="630">
-            <meta property="og:site_name" content="FastWan">
+            <meta property="og:site_name" content="CausalWan">
             
             <meta property="twitter:card" content="summary_large_image">
             <meta property="twitter:url" content="{base_url}/">
-            <meta property="twitter:title" content="FastWan">
+            <meta property="twitter:title" content="CausalWan">
             <meta property="twitter:description" content="Make video generation go blurrrrrrr">
             <meta property="twitter:image" content="{base_url}/logo.svg">
             <link rel="icon" type="image/png" sizes="32x32" href="/favicon.ico">
@@ -744,7 +737,9 @@ def main():
             os.path.abspath("outputs"), 
             os.path.abspath("fastvideo-logos"),
             os.path.abspath("prompts"),
-            os.path.abspath("images")
+            os.path.abspath("images"),
+            os.path.abspath(tempfile.gettempdir()),
+            os.path.abspath(os.path.join(tempfile.gettempdir(), "gradio")),
         ]
     )
     

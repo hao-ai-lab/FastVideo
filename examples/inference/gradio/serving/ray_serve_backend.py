@@ -100,8 +100,8 @@ def encode_video_to_base64(frames: List[np.ndarray], fps: int = DEFAULT_FPS) -> 
         return ""
 
 
-def decode_image_from_base64(image_data: str) -> Optional[np.ndarray]:
-    """Decode base64 image data to numpy array."""
+def save_image_from_base64(image_data: str, output_dir: str) -> Optional[str]:
+    """Save base64 image data to a temporary file and return the path."""
     if not image_data:
         return None
     
@@ -111,11 +111,18 @@ def decode_image_from_base64(image_data: str) -> Optional[np.ndarray]:
             image_data = image_data.split(',')[1]
         
         image_bytes = base64.b64decode(image_data)
-        image_array = imageio.imread(io.BytesIO(image_bytes))
-        return image_array
+        
+        # Save to temporary file
+        os.makedirs(output_dir, exist_ok=True)
+        temp_image_path = os.path.join(output_dir, f"temp_input_{int(time.time() * 1000)}.png")
+        
+        with open(temp_image_path, 'wb') as f:
+            f.write(image_bytes)
+        
+        return temp_image_path
         
     except Exception as e:
-        print(f"Warning: Failed to decode image: {e}")
+        print(f"Warning: Failed to save image: {e}")
         return None
 
 
@@ -186,35 +193,41 @@ class BaseModelDeployment:
             num_gpus=1,
             use_fsdp_inference=True,
             text_encoder_cpu_offload=config["text_encoder_cpu_offload"],
+            dmd_denoising_steps=[1000, 850, 700, 550, 350, 275, 200, 125], # TODO: hardocde for I2V
+            dit_precision="fp32",  # TODO: hardocde for I2V
             dit_cpu_offload=config["dit_cpu_offload"],
             vae_cpu_offload=config["vae_cpu_offload"],
             VSA_sparsity=config["VSA_sparsity"],
             enable_stage_verification=False,
         )
         self.default_params = SamplingParam.from_pretrained(self.model_path)
+        self.default_params.seed = 1000
+        self.default_params.num_frames = 73
+        self.default_params.width = 832
+        self.default_params.height = 480
 
     def generate_video(self, video_request: VideoGenerationRequest) -> VideoGenerationResponse:
         total_start_time = time.time()
         
         params = prepare_sampling_params(video_request, self.default_params)
 
-        # Decode image if provided (for I2V)
-        image = None
+        # Save image if provided (for I2V)
+        image_path = None
         if video_request.image_data:
-            image = decode_image_from_base64(video_request.image_data)
-            if image is None:
+            image_path = save_image_from_base64(video_request.image_data, self.output_path)
+            if image_path is None:
                 return VideoGenerationResponse(
                     video_data=None,
                     seed=params.seed,
                     success=False,
-                    error_message="Failed to decode input image",
+                    error_message="Failed to save input image",
                 )
 
         inference_start_time = time.time()
         result = self.generator.generate_video(
             prompt=video_request.prompt,
             sampling_param=params,
-            image=image,  # Pass image for I2V
+            image_path=image_path,
             save_video=False,
             return_frames=False,
         )
@@ -227,6 +240,13 @@ class BaseModelDeployment:
         encoding_time = time.time() - encoding_start_time
         
         total_time = time.time() - total_start_time
+        
+        # Clean up temporary image file
+        if image_path and os.path.exists(image_path):
+            try:
+                os.remove(image_path)
+            except Exception as e:
+                print(f"Warning: Failed to remove temporary image file {image_path}: {e}")
 
         return VideoGenerationResponse(
             video_data=video_data,
@@ -242,7 +262,7 @@ class BaseModelDeployment:
 
 
 @serve.deployment(
-    ray_actor_options={"num_cpus": 2, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
+    ray_actor_options={"num_cpus": 2, "num_gpus": 1, "runtime_env": {"conda": "demo-fv"}},
 )
 class T2VModelDeployment(BaseModelDeployment):
     def __init__(self, t2v_model_path: str, output_path: str = "outputs"):
@@ -252,7 +272,7 @@ class T2VModelDeployment(BaseModelDeployment):
 
 
 @serve.deployment(
-    ray_actor_options={"num_cpus": 16, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
+    ray_actor_options={"num_cpus": 16, "num_gpus": 1, "runtime_env": {"conda": "demo-fv"}},
 )
 class T2V14BModelDeployment(BaseModelDeployment):
     def __init__(self, t2v_14b_model_path: str, output_path: str = "outputs"):
@@ -264,7 +284,7 @@ class T2V14BModelDeployment(BaseModelDeployment):
 
 
 @serve.deployment(
-    ray_actor_options={"num_cpus": 15, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
+    ray_actor_options={"num_cpus": 15, "num_gpus": 1, "runtime_env": {"conda": "demo-fv"}},
 )
 class I2VModelDeployment(BaseModelDeployment):
     def __init__(self, i2v_model_path: str, output_path: str = "outputs"):

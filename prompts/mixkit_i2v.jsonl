@@ -78,5 +78,33 @@
     {
         "prompt": "Some friends dancing and having fun together in circles, at a party surrounded by colored lights at a party, in a fancy old place, in a view from below them.",
         "image_path": "images/friends.jpg"
+    },
+    {
+        "prompt": "A saxophonist wearing a blazer dances while playing a song in a park.",
+        "image_path": "images/saxophonist.jpg"
+    },
+    {
+        "prompt": "Romantic couple embracing and looking at each other in the middle of a forest, during a break on a road trip through nature.",
+        "image_path": "images/romance.jpg"
+    },
+    {
+        "prompt": "Man dressed in 80's style dances very happily in his kitchen while listening to music on his radio and drinking wine.",
+        "image_path": "images/80s_dance.jpg"
+    },
+    {
+        "prompt": "Pair of jazz musicians performing a song with their saxophone and trombone on an abandoned train.",
+        "image_path": "images/jazz.jpg"
+    },
+    {
+        "prompt": "A young woman with short hair wearing pink sunglasses chews gum and makes a bubble gum with the city in the background.",
+        "image_path": "images/pink.jpg"
+    },
+    {
+        "prompt": "Natural aerial landscape with a relief covered with abundant trees and vegetation and a thick layer of mist.",
+        "image_path": "images/natural.jpg"
+    },
+    {
+        "prompt": "Loving couple sitting on a log on the shore of a lake outside, sharing an affectionate hug.",
+        "image_path": "images/couple.jpg"
     }
 ]
