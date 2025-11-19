@@ -6,8 +6,10 @@ import time
 import json
 from pathlib import Path
 import tempfile
+from io import BytesIO
 
 import gradio as gr
+from PIL import Image
 
 from fastvideo.configs.sample.base import SamplingParam
 
@@ -85,28 +87,39 @@ def save_video_from_base64(video_data: str, output_dir: str, prompt: str) -> str
         return None
 
 
-def encode_image_to_base64(image_path: str) -> str:
-    """Encode an image file to base64 string."""
-    if not image_path or not os.path.exists(image_path):
+def encode_image_to_base64(image_input) -> str:
+    """Encode an image file path or in-memory image to a base64 string."""
+    if image_input is None:
         return None
     
+    mime_types = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+    }
+    
     try:
-        with open(image_path, 'rb') as f:
-            image_bytes = f.read()
+        if isinstance(image_input, str):
+            if not os.path.exists(image_input):
+                return None
+            
+            with open(image_input, 'rb') as f:
+                image_bytes = f.read()
+            
+            ext = os.path.splitext(image_input)[1].lower()
+            mime_type = mime_types.get(ext, 'image/jpeg')
+        elif isinstance(image_input, Image.Image):
+            buffer = BytesIO()
+            image_to_save = image_input.convert("RGB")
+            image_to_save.save(buffer, format="PNG")
+            image_bytes = buffer.getvalue()
+            mime_type = 'image/png'
+        else:
+            return None
         
         image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-        
-        # Determine image type from extension
-        ext = os.path.splitext(image_path)[1].lower()
-        mime_types = {
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.png': 'image/png',
-            '.gif': 'image/gif',
-            '.webp': 'image/webp',
-        }
-        mime_type = mime_types.get(ext, 'image/jpeg')
-        
         return f"data:{mime_type};base64,{image_base64}"
         
     except Exception as e:
@@ -426,7 +439,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
                         gr.Markdown("**Please make sure you upload a 480x832 image**")
                         input_image = gr.Image(
                             label="",
-                            type="filepath",
+                            type="pil",
                             height=400,
                         )
                     
@@ -512,7 +525,17 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             if example_label and example_label in example_labels:
                 index = example_labels.index(example_label)
                 selected_prompt = examples[index]
-                selected_image = example_images[index] if index < len(example_images) else None
+                selected_image_path = example_images[index] if index < len(example_images) else None
+                
+                if selected_image_path and os.path.exists(selected_image_path):
+                    try:
+                        with Image.open(selected_image_path) as img:
+                            selected_image = img.convert("RGB")
+                    except Exception:
+                        selected_image = None
+                else:
+                    selected_image = None
+                
                 return selected_prompt, selected_image
             return "", None
         
@@ -733,6 +756,7 @@ def main():
         app, 
         demo, 
         path="/gradio",
+        root_path="/gradio",
         allowed_paths=[
             os.path.abspath("outputs"), 
             os.path.abspath("fastvideo-logos"),
