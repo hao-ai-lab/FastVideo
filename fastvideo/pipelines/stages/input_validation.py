@@ -184,6 +184,45 @@ class InputValidationStage(PipelineStage):
 
             batch.video_latent = input_video
 
+        # Validate action control inputs (Matrix-Game)
+        if batch.mouse_cond is not None:
+            if batch.mouse_cond.dim() != 3 or batch.mouse_cond.shape[-1] != 2:
+                raise ValueError(
+                    f"mouse_cond must have shape (B, T, 2), but got {batch.mouse_cond.shape}"
+                )
+            logger.info("Action control: mouse_cond validated - shape %s",
+                       batch.mouse_cond.shape)
+
+        if batch.keyboard_cond is not None:
+            if batch.keyboard_cond.dim() != 3:
+                raise ValueError(
+                    f"keyboard_cond must have 3 dimensions (B, T, K), but got {batch.keyboard_cond.dim()}"
+                )
+            keyboard_dim = batch.keyboard_cond.shape[-1]
+            if keyboard_dim not in {2, 4, 7}:
+                raise ValueError(
+                    f"keyboard_cond last dimension must be 2, 4, or 7, but got {keyboard_dim}"
+                )
+            logger.info("Action control: keyboard_cond validated - shape %s (dim=%d)",
+                       batch.keyboard_cond.shape, keyboard_dim)
+
+        if batch.grid_sizes is not None:
+            if not isinstance(batch.grid_sizes, (list, tuple, torch.Tensor)):
+                raise ValueError(
+                    f"grid_sizes must be a list, tuple, or tensor"
+                )
+            if isinstance(batch.grid_sizes, torch.Tensor):
+                if batch.grid_sizes.numel() != 3:
+                    raise ValueError(
+                        f"grid_sizes must have 3 elements [F, H, W]"
+                    )
+            else:
+                if len(batch.grid_sizes) != 3:
+                    raise ValueError(
+                        f"grid_sizes must have 3 elements [F, H, W]"
+                    )
+            logger.info("Action control: grid_sizes validated - %s", batch.grid_sizes)
+
         return batch
 
     def verify_input(self, batch: ForwardBatch,

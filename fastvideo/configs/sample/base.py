@@ -21,6 +21,11 @@ class SamplingParam:
     # Video inputs
     video_path: str | None = None
 
+    # Action control inputs (Matrix-Game)
+    mouse_cond: Any | None = None      # Shape: (B, T, 2)
+    keyboard_cond: Any | None = None   # Shape: (B, T, K)
+    grid_sizes: Any | None = None      # Shape: (3,) [F,H,W]
+
     # Text inputs
     prompt: str | list[str] | None = None
     negative_prompt: str = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
