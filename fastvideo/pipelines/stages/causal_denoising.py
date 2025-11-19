@@ -142,9 +142,17 @@ class CausalDMDDenosingStage(DenoisingStage):
         pos_start_base = 0
 
         # Determine block sizes
-        block_sizes = [self.num_frames_per_block] * 7
-        block_sizes[0] = 1
+        if t % self.num_frames_per_block != 0:
+            raise ValueError(
+                "num_frames must be divisible by num_frames_per_block for causal DMD denoising"
+            )
+        num_blocks = t // self.num_frames_per_block
+        block_sizes = [self.num_frames_per_block] * num_blocks
         start_index = 0
+
+        # For now hardcode the first block to be 1 frame assuming the model is Wan2.2-MoE
+        if boundary_timestep is not None:
+            block_sizes[0] = 1
 
         first_frame_latent = None
         if batch.pil_image is not None:
