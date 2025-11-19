@@ -293,6 +293,11 @@ class DenoisingStage(PipelineStage):
 
                 # Expand latents for V2V/I2V
                 latent_model_input = latents.to(target_dtype)
+
+                # Check if this is a MatrixGame model by looking for action_config
+                is_matrixgame = (hasattr(current_model.config, 'action_config')
+                                 and current_model.config.action_config is not None)
+
                 if batch.video_latent is not None:
                     latent_model_input = torch.cat([
                         latent_model_input, batch.video_latent,
@@ -301,9 +306,18 @@ class DenoisingStage(PipelineStage):
                                                    dim=1).to(target_dtype)
                 elif batch.image_latent is not None:
                     assert not fastvideo_args.pipeline_config.ti2v_task, "image latents should not be provided for TI2V task"
-                    latent_model_input = torch.cat(
-                        [latent_model_input, batch.image_latent],
-                        dim=1).to(target_dtype)
+
+                    if is_matrixgame:
+                        # MatrixGame-specific: image_latent is cond_concat (20 channels)
+                        # Concatenate along channel dimension: latent (16) + cond_concat (20) = 36 channels
+                        latent_model_input = torch.cat(
+                            [latent_model_input, batch.image_latent],
+                            dim=1).to(target_dtype)
+                    else:
+                        # Standard Wan I2V: image_latent already contains mask+latent
+                        latent_model_input = torch.cat(
+                            [latent_model_input, batch.image_latent],
+                            dim=1).to(target_dtype)
 
                 assert not torch.isnan(
                     latent_model_input).any(), "latent_model_input contains nan"

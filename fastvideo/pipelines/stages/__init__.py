@@ -15,6 +15,7 @@ from fastvideo.pipelines.stages.denoising import (CosmosDenoisingStage,
                                                   DmdDenoisingStage)
 from fastvideo.pipelines.stages.encoding import EncodingStage
 from fastvideo.pipelines.stages.image_encoding import (ImageEncodingStage,
+                                                       MatrixGameImageEncodingStage,
                                                        RefImageEncodingStage,
                                                        ImageVAEEncodingStage,
                                                        VideoVAEEncodingStage)
@@ -41,6 +42,7 @@ __all__ = [
     "EncodingStage",
     "DecodingStage",
     "ImageEncodingStage",
+    "MatrixGameImageEncodingStage",
     "RefImageEncodingStage",
     "ImageVAEEncodingStage",
     "VideoVAEEncodingStage",

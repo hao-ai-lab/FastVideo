@@ -15,7 +15,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from safetensors.torch import load_file as safetensors_load_file
 from torch.distributed import init_device_mesh
-from transformers import AutoImageProcessor, AutoTokenizer
+from transformers import AutoImageProcessor, AutoTokenizer, CLIPImageProcessor
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
 from fastvideo.configs.models import EncoderConfig
@@ -360,7 +360,27 @@ class ImageProcessorLoader(ComponentLoader):
         """Load the image processor based on the model path, and inference args."""
         logger.info("Loading image processor from %s", model_path)
 
-        image_processor = AutoImageProcessor.from_pretrained(model_path, )
+        try:
+            image_processor = AutoImageProcessor.from_pretrained(model_path)
+        except ValueError as exc:
+            # Matrix-Game only include preprocessor_config.json
+            # with an image_processor_type but no model_type,
+            config_path = os.path.join(model_path, "preprocessor_config.json")
+            if (os.path.isfile(config_path)):
+                with open(config_path, "r", encoding="utf-8") as fp:
+                    config = json.load(fp)
+                processor_type = config.get("image_processor_type")
+                if processor_type == "CLIPImageProcessor":
+                    logger.warning(
+                        "AutoImageProcessor failed to load config without model_type, "
+                        "falling back to CLIPImageProcessor: %s", exc)
+                    image_processor = CLIPImageProcessor.from_pretrained(
+                        model_path)
+                else:
+                    raise
+            else:
+                raise
+
         logger.info("Loaded image processor: %s",
                     image_processor.__class__.__name__)
         return image_processor

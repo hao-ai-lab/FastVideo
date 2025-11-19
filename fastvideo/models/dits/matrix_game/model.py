@@ -17,18 +17,59 @@ from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import (_apply_rotary_emb,
                                                get_rotary_pos_embed)
-from fastvideo.layers.visual_embedding import PatchEmbed
+from fastvideo.layers.visual_embedding import PatchEmbed, TimestepEmbedder, ModulateProjection
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.models.dits.wanvideo import (WanI2VCrossAttention,
                                            WanT2VCrossAttention,
-                                           WanTimeTextImageEmbedding)
+                                           WanImageEmbedding)
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 # Import ActionModule
 from .action_module import ActionModule
 
 logger = init_logger(__name__)
+
+
+class MatrixGameTimeImageEmbedding(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        time_freq_dim: int,
+        image_embed_dim: int | None = None,
+    ):
+        super().__init__()
+
+        self.time_embedder = TimestepEmbedder(
+            dim, frequency_embedding_size=time_freq_dim, act_layer="silu")
+        self.time_modulation = ModulateProjection(dim,
+                                                  factor=6,
+                                                  act_layer="silu")
+        
+        self.image_embedder = None
+        if image_embed_dim is not None:
+            self.image_embedder = WanImageEmbedding(image_embed_dim, dim)
+
+    def forward(
+        self,
+        timestep: torch.Tensor,
+        encoder_hidden_states: torch.Tensor, # Kept for interface compatibility
+        encoder_hidden_states_image: torch.Tensor | None = None,
+        timestep_seq_len: int | None = None,
+    ):
+        temb = self.time_embedder(timestep, timestep_seq_len)
+        timestep_proj = self.time_modulation(temb)
+
+        # MatrixGame does not use text embeddings, so we ignore encoder_hidden_states
+        # and return None for the text embedding part
+        
+        if encoder_hidden_states_image is not None:
+            assert self.image_embedder is not None
+            encoder_hidden_states_image = self.image_embedder(
+                encoder_hidden_states_image)
+
+        return temb, timestep_proj, None, encoder_hidden_states_image
+
 
 
 class MatrixGameTransformerBlock(nn.Module):
@@ -200,7 +241,8 @@ class MatrixGameTransformerBlock(nn.Module):
                 hidden_states = self.action_model(
                     hidden_states,
                     grid_sizes[0], grid_sizes[1], grid_sizes[2],
-                    mouse_cond, keyboard_cond
+                    mouse_cond, keyboard_cond,
+                    num_frame_per_block=grid_sizes[0],
                 )
         # =================================================
 
@@ -243,15 +285,14 @@ class MatrixGameWanModel(BaseDiT):
                                           flatten=False)
 
         # 2. Condition embeddings
-        self.condition_embedder = WanTimeTextImageEmbedding(
+        self.condition_embedder = MatrixGameTimeImageEmbedding(
             dim=inner_dim,
             time_freq_dim=config.freq_dim,
-            text_embed_dim=config.text_dim,
             image_embed_dim=config.image_dim,
         )
 
         # 2.1. Get action config
-        self.action_config = getattr(config.arch_config, 'action_config', {})
+        self.action_config = getattr(config, 'action_config', {})
 
         # 3. Transformer blocks
         self.blocks = nn.ModuleList([
@@ -264,7 +305,7 @@ class MatrixGameWanModel(BaseDiT):
                 config.eps,
                 config.added_kv_proj_dim,
                 self._supported_attention_backends,
-                prefix=f"{config.prefix}.blocks.{i}",
+                prefix=f"{getattr(config, 'prefix', 'Wan')}.blocks.{i}",
                 action_config=self.action_config)
             for i in range(config.num_layers)
         ])
@@ -293,7 +334,7 @@ class MatrixGameWanModel(BaseDiT):
                 mouse_cond: Optional[torch.Tensor] = None,
                 keyboard_cond: Optional[torch.Tensor] = None,
                 **kwargs) -> torch.Tensor:
-        if not isinstance(encoder_hidden_states, torch.Tensor):
+        if encoder_hidden_states is not None and not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
         if isinstance(encoder_hidden_states_image,
                       list) and len(encoder_hidden_states_image) > 0:
@@ -333,9 +374,22 @@ class MatrixGameWanModel(BaseDiT):
             timestep, encoder_hidden_states, encoder_hidden_states_image)
         timestep_proj = timestep_proj.unflatten(1, (6, -1))
 
+        if encoder_hidden_states is not None:
+            if isinstance(encoder_hidden_states, list):
+                encoder_hidden_states = encoder_hidden_states[0]
+            elif encoder_hidden_states.ndim == 2:
+                encoder_hidden_states = encoder_hidden_states.unsqueeze(0)
+        else:
+            # encoder_hidden_states is None (e.g. no text encoder)
+            # MatrixGame uses image-action cross-attn.
+            pass
+
         if encoder_hidden_states_image is not None:
-            encoder_hidden_states = torch.concat(
-                [encoder_hidden_states_image, encoder_hidden_states], dim=1)
+            if encoder_hidden_states is not None:
+                encoder_hidden_states = torch.concat(
+                    [encoder_hidden_states_image, encoder_hidden_states], dim=1)
+            else:
+                encoder_hidden_states = encoder_hidden_states_image
 
         # This is [F, H, W] for the ActionModule
         grid_sizes = torch.tensor([

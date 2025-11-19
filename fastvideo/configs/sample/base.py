@@ -17,6 +17,7 @@ class SamplingParam:
 
     # Image inputs
     image_path: str | None = None
+    pil_image: Any | None = None
 
     # Video inputs
     video_path: str | None = None

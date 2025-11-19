@@ -14,7 +14,8 @@ from fastvideo.configs.pipelines.wan import (
     FastWan2_1_T2V_480P_Config, FastWan2_2_TI2V_5B_Config,
     Wan2_2_I2V_A14B_Config, Wan2_2_T2V_A14B_Config, Wan2_2_TI2V_5B_Config,
     WanI2V480PConfig, WanI2V720PConfig, WanT2V480PConfig, WanT2V720PConfig,
-    SelfForcingWanT2V480PConfig, WANV2VConfig, SelfForcingWan2_2_T2V480PConfig)
+    SelfForcingWanT2V480PConfig, WANV2VConfig, SelfForcingWan2_2_T2V480PConfig,
+    MatrixGameI2V480PConfig)
 # isort: on
 from fastvideo.logger import init_logger
 from fastvideo.utils import (maybe_download_model_index,
@@ -49,6 +50,7 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
 # For determining pipeline type from model ID
 PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     "hunyuan": lambda id: "hunyuan" in id.lower(),
+    "matrixgame": lambda id: "matrixgame" in id.lower(),
     "wanpipeline": lambda id: "wanpipeline" in id.lower(),
     "wanimagetovideo": lambda id: "wanimagetovideo" in id.lower(),
     "wandmdpipeline": lambda id: "wandmdpipeline" in id.lower(),
@@ -62,6 +64,7 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
 PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "hunyuan":
     HunyuanConfig,  # Base Hunyuan config as fallback for any Hunyuan variant
+    "matrixgame": MatrixGameI2V480PConfig,
     "wanpipeline":
     WanT2V480PConfig,  # Base Wan config as fallback for any Wan variant
     "wanimagetovideo": WanI2V480PConfig,

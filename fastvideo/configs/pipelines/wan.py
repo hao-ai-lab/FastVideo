@@ -6,6 +6,7 @@ import torch
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import WanVideoConfig
+from fastvideo.configs.models.dits.matrixgame import MatrixGameWanVideoConfig
 from fastvideo.configs.models.encoders import (BaseEncoderOutput,
                                                CLIPVisionConfig, T5Config,
                                                WAN2_1ControlCLIPVisionConfig)
@@ -186,3 +187,14 @@ class SelfForcingWan2_2_T2V480PConfig(Wan2_2_T2V_A14B_Config):
     dmd_denoising_steps: list[int] | None = field(
         default_factory=lambda: [1000, 850, 700, 550, 350, 275, 200, 125])
     warp_denoising_step: bool = True
+
+
+# =============================================
+# ============= Matrix Game ===================
+# =============================================
+@dataclass
+class MatrixGameI2V480PConfig(WanI2V480PConfig):
+    dit_config: DiTConfig = field(default_factory=MatrixGameWanVideoConfig)
+    
+    # same as original implementation
+    flow_shift: float | None = 5.0
