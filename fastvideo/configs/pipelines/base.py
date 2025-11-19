@@ -45,6 +45,7 @@ class PipelineConfig:
     embedded_cfg_scale: float = 6.0
     flow_shift: float | None = None
     disable_autocast: bool = False
+    is_causal: bool = False
 
     # Model configuration
     dit_config: DiTConfig = field(default_factory=DiTConfig)
