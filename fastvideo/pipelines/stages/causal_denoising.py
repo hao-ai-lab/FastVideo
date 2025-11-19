@@ -85,10 +85,10 @@ class CausalDMDDenosingStage(DenoisingStage):
 
         if fastvideo_args.pipeline_config.dit_config.boundary_ratio is not None:
             boundary_timestep = fastvideo_args.pipeline_config.dit_config.boundary_ratio * self.scheduler.num_train_timesteps
+            high_noise_timesteps = timesteps[timesteps >= boundary_timestep]
         else:
             boundary_timestep = None
-
-        high_noise_timesteps = timesteps[timesteps >= boundary_timestep]
+            high_noise_timesteps = None
 
         # Image kwargs (kept empty unless caller provides compatible args)
         image_kwargs: dict = {}
