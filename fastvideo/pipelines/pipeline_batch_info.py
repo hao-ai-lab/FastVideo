@@ -267,6 +267,30 @@ class TrainingBatch:
     latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     fake_score_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
 
+    # RL/GRPO-specific attributes
+    reward_scores: torch.Tensor | None = None  # Computed rewards from reward models
+    log_probs: torch.Tensor | None = None  # Current policy log probabilities
+    old_log_probs: torch.Tensor | None = None  # Old policy log probs (for importance ratio)
+    advantages: torch.Tensor | None = None  # GAE advantages
+    returns: torch.Tensor | None = None  # TD returns (advantages + values)
+    values: torch.Tensor | None = None  # Value function predictions
+    old_values: torch.Tensor | None = None  # Old value predictions (for clipping)
+
+    # RL loss components
+    policy_loss: float = 0.0  # GRPO/PPO policy loss
+    value_loss: float = 0.0  # Value function loss
+    kl_divergence: float = 0.0  # KL(new_policy || old_policy)
+    importance_ratio: float = 1.0  # exp(log_prob - old_log_prob)
+    clip_fraction: float = 0.0  # Fraction of ratios that were clipped
+
+    # RL metrics
+    advantage_mean: float = 0.0  # Mean advantage (should be ~0 after normalization)
+    advantage_std: float = 1.0  # Std of advantages
+    reward_mean: float = 0.0  # Mean reward across batch
+    reward_std: float = 0.0  # Std of rewards
+    value_mean: float = 0.0  # Mean value prediction
+    entropy: float = 0.0  # Policy entropy (for exploration)
+
 
 @dataclass
 class PreprocessBatch(ForwardBatch):

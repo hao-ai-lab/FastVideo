@@ -741,6 +741,67 @@ def get_current_fastvideo_args() -> FastVideoArgs:
 
 
 @dataclasses.dataclass
+class RLArgs:
+    """
+    Reinforcement Learning (RL) specific arguments
+
+    #TODO(Jiali) refactoring to separate config classes when implementing multiple algorithms.
+    """
+    # ============================================================================
+    # SHARED RL CONFIGURATION
+    rl_mode: bool = False  # Enable RL training mode
+    rl_algorithm: str = "grpo"  # RL algorithm to use: "grpo", "ppo", "dpo"
+
+    # Trajectory collection
+    rl_num_rollouts: int = 4  # Number of rollouts to collect per training step
+    rl_rollout_steps: str = "20,30"  # Random intermediate steps for sampling (comma-separated)
+    rl_noise_injection_min: int = 10  # Minimum timestep for noise injection
+    rl_noise_injection_max: int = 40  # Maximum timestep for noise injection
+    rl_use_sde_sampling: bool = True  # Use SDE sampling (Flow-GRPO-Fast)
+    rl_num_denoising_steps: int = 2  # Number of denoising steps per trajectory (1-2 for fast)
+
+    # Advantage estimation
+    rl_gamma: float = 0.99  # Discount factor for returns
+    rl_lambda: float = 0.95  # GAE lambda parameter
+    rl_use_gae: bool = True  # Use Generalized Advantage Estimation
+    rl_normalize_advantages: bool = True  # Normalize advantages before policy update
+
+    # Reward models
+    reward_model_paths: str = ""  # Comma-separated paths to reward models
+    reward_weights: str = ""  # Comma-separated weights for reward aggregation
+    reward_model_types: str = ""  # Comma-separated reward types (pickscore,geneval,ocr,etc)
+    value_model_path: str = ""  # Path to value model (can be empty to train from scratch)
+    value_model_share_backbone: bool = False  # Share transformer backbone between policy and value
+
+    # Training schedule
+    rl_policy_value_update_ratio: float = 1.0  # Ratio of policy:value updates (like distillation)
+    rl_warmup_steps: int = 1000  # Collect SFT-style data before starting RL
+    rl_collect_on_policy: bool = True  # Collect fresh rollouts each step (on-policy)
+
+    # ============================================================================
+    # ALGORITHM-SPECIFIC CONFIGURATION
+
+    # Policy optimization (GRPO/PPO shared)
+    rl_policy_clip_range: float = 0.2  # PPO-style clipping range for policy ratio
+    rl_value_clip_range: float = 0.2  # Value function clipping range
+    rl_num_policy_epochs: int = 1  # Number of policy update epochs (GRPO typically uses 1)
+    rl_num_value_epochs: int = 1  # Number of value function update epochs
+    rl_target_kl: float = 0.01  # Target KL divergence for early stopping
+    rl_entropy_coef: float = 0.0  # Entropy coefficient for exploration
+    rl_value_loss_coef: float = 0.5  # Value loss coefficient
+
+    # GRPO-specific (GRPO-Guard safety mechanisms)
+    rl_use_grpo_guard: bool = True  # Enable GRPO-Guard safety mechanisms
+    rl_ratio_norm_correction: bool = True  # RatioNorm: correct importance ratio bias
+    rl_gradient_reweighting: bool = True  # Reweight gradients across denoising steps
+    rl_max_importance_ratio: float = 10.0  # Clip importance ratios above this value
+
+    # DPO-specific (not used yet, add when implementing DPO)
+    # dpo_beta: float = 0.1  # DPO regularization parameter
+    # dpo_label_smoothing: float = 0.0  # Label smoothing for DPO loss
+
+
+@dataclasses.dataclass
 class TrainingArgs(FastVideoArgs):
     """
     Training arguments. Inherits from FastVideoArgs and adds training-specific
@@ -862,6 +923,9 @@ class TrainingArgs(FastVideoArgs):
     last_step_only: bool = False  # Only use the last timestep for training
     context_noise: int = 0  # Context noise level for cache updates
 
+    # Nested RL configuration
+    rl_args: RLArgs = dataclasses.field(default_factory=RLArgs)
+
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
         provided_args = clean_cli_args(args)
@@ -886,6 +950,20 @@ class TrainingArgs(FastVideoArgs):
                 kwargs[attr] = WorkloadType.from_string(
                     workload_type_value) if isinstance(
                         workload_type_value, str) else workload_type_value
+            elif attr == 'rl_args':
+                # Construct nested RLArgs from CLI arguments
+                rl_kwargs = {}
+                for rl_field in dataclasses.fields(RLArgs):
+                    rl_attr = rl_field.name
+                    if hasattr(args, rl_attr):
+                        rl_kwargs[rl_attr] = getattr(args, rl_attr)
+                    else:
+                        # Use default value from RLArgs
+                        if rl_field.default_factory is not dataclasses.MISSING:
+                            rl_kwargs[rl_attr] = rl_field.default_factory()
+                        elif rl_field.default is not dataclasses.MISSING:
+                            rl_kwargs[rl_attr] = rl_field.default
+                kwargs[attr] = RLArgs(**rl_kwargs)
             # Use getattr with default value from the dataclass for potentially missing attributes
             else:
                 # Get the field to check its default value
@@ -1283,6 +1361,136 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             default=TrainingArgs.context_noise,
                             help="Context noise level for cache updates")
+
+        # RL (Reinforcement Learning) arguments
+        parser.add_argument("--rl-mode",
+                            action=StoreBoolean,
+                            help="Enable RL training mode")
+        parser.add_argument("--rl-algorithm",
+                            type=str,
+                            default=RLArgs.rl_algorithm,
+                            choices=["grpo", "ppo", "dpo"],
+                            help="RL algorithm to use (grpo, ppo, dpo)")
+
+        # Trajectory collection (Flow-GRPO-Fast)
+        parser.add_argument("--rl-num-rollouts",
+                            type=int,
+                            default=RLArgs.rl_num_rollouts,
+                            help="Number of rollouts to collect per training step")
+        parser.add_argument("--rl-rollout-steps",
+                            type=str,
+                            default=RLArgs.rl_rollout_steps,
+                            help="Random intermediate steps for sampling (comma-separated)")
+        parser.add_argument("--rl-noise-injection-min",
+                            type=int,
+                            default=RLArgs.rl_noise_injection_min,
+                            help="Minimum timestep for noise injection")
+        parser.add_argument("--rl-noise-injection-max",
+                            type=int,
+                            default=RLArgs.rl_noise_injection_max,
+                            help="Maximum timestep for noise injection")
+        parser.add_argument("--rl-use-sde-sampling",
+                            action=StoreBoolean,
+                            help="Use SDE sampling (Flow-GRPO-Fast)")
+        parser.add_argument("--rl-num-denoising-steps",
+                            type=int,
+                            default=RLArgs.rl_num_denoising_steps,
+                            help="Number of denoising steps per trajectory (1-2 for fast)")
+
+        # Advantage estimation
+        parser.add_argument("--rl-gamma",
+                            type=float,
+                            default=RLArgs.rl_gamma,
+                            help="Discount factor for returns")
+        parser.add_argument("--rl-lambda",
+                            type=float,
+                            default=RLArgs.rl_lambda,
+                            help="GAE lambda parameter")
+        parser.add_argument("--rl-use-gae",
+                            action=StoreBoolean,
+                            help="Use Generalized Advantage Estimation")
+        parser.add_argument("--rl-normalize-advantages",
+                            action=StoreBoolean,
+                            help="Normalize advantages before policy update")
+
+        # Policy optimization (GRPO/PPO)
+        parser.add_argument("--rl-policy-clip-range",
+                            type=float,
+                            default=RLArgs.rl_policy_clip_range,
+                            help="PPO-style clipping range for policy ratio")
+        parser.add_argument("--rl-value-clip-range",
+                            type=float,
+                            default=RLArgs.rl_value_clip_range,
+                            help="Value function clipping range")
+        parser.add_argument("--rl-num-policy-epochs",
+                            type=int,
+                            default=RLArgs.rl_num_policy_epochs,
+                            help="Number of policy update epochs (GRPO typically uses 1)")
+        parser.add_argument("--rl-num-value-epochs",
+                            type=int,
+                            default=RLArgs.rl_num_value_epochs,
+                            help="Number of value function update epochs")
+        parser.add_argument("--rl-target-kl",
+                            type=float,
+                            default=RLArgs.rl_target_kl,
+                            help="Target KL divergence for early stopping")
+        parser.add_argument("--rl-entropy-coef",
+                            type=float,
+                            default=RLArgs.rl_entropy_coef,
+                            help="Entropy coefficient for exploration")
+        parser.add_argument("--rl-value-loss-coef",
+                            type=float,
+                            default=RLArgs.rl_value_loss_coef,
+                            help="Value loss coefficient")
+
+        # GRPO-Guard (safety mechanisms)
+        parser.add_argument("--rl-use-grpo-guard",
+                            action=StoreBoolean,
+                            help="Enable GRPO-Guard safety mechanisms")
+        parser.add_argument("--rl-ratio-norm-correction",
+                            action=StoreBoolean,
+                            help="RatioNorm: correct importance ratio bias")
+        parser.add_argument("--rl-gradient-reweighting",
+                            action=StoreBoolean,
+                            help="Reweight gradients across denoising steps")
+        parser.add_argument("--rl-max-importance-ratio",
+                            type=float,
+                            default=RLArgs.rl_max_importance_ratio,
+                            help="Clip importance ratios above this value")
+
+        # Reward models
+        parser.add_argument("--reward-model-paths",
+                            type=str,
+                            default=RLArgs.reward_model_paths,
+                            help="Comma-separated paths to reward models")
+        parser.add_argument("--reward-weights",
+                            type=str,
+                            default=RLArgs.reward_weights,
+                            help="Comma-separated weights for reward aggregation")
+        parser.add_argument("--reward-model-types",
+                            type=str,
+                            default=RLArgs.reward_model_types,
+                            help="Comma-separated reward types (pickscore,geneval,ocr,etc)")
+        parser.add_argument("--value-model-path",
+                            type=str,
+                            default=RLArgs.value_model_path,
+                            help="Path to value model (can be empty to train from scratch)")
+        parser.add_argument("--value-model-share-backbone",
+                            action=StoreBoolean,
+                            help="Share transformer backbone between policy and value")
+
+        # Training schedule
+        parser.add_argument("--rl-policy-value-update-ratio",
+                            type=float,
+                            default=RLArgs.rl_policy_value_update_ratio,
+                            help="Ratio of policy:value updates (like distillation)")
+        parser.add_argument("--rl-warmup-steps",
+                            type=int,
+                            default=RLArgs.rl_warmup_steps,
+                            help="Collect SFT-style data before starting RL")
+        parser.add_argument("--rl-collect-on-policy",
+                            action=StoreBoolean,
+                            help="Collect fresh rollouts each step (on-policy)")
 
         return parser
 
