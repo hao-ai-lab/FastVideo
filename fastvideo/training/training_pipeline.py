@@ -470,7 +470,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         #             local_main_process_only=False)
         with self.tracker.timed("timing/reduce_loss"):
             world_group = get_world_group()
-            world_group.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
+            avg_loss = world_group.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
         training_batch.total_loss += avg_loss.item()
 
         return training_batch
