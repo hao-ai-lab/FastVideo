@@ -218,70 +218,6 @@ class CausalDMDDenosingStage(DenoisingStage):
             block_sizes.pop(0)
             latents[:, :, :1, :, :] = first_frame_latent
 
-        first_frame_latent = None
-        if batch.pil_image is not None:
-            # Causal video gen directly replaces the first frame of the latent with
-            # the image latent instead of appending along the channel dim
-            assert self.vae is not None, "VAE is not provided for causal video gen task"
-            self.vae = self.vae.to(get_local_torch_device())
-            first_frame_latent = self.vae.encode(batch.pil_image).mean.float()
-            if (hasattr(self.vae, "shift_factor")
-                    and self.vae.shift_factor is not None):
-                if isinstance(self.vae.shift_factor, torch.Tensor):
-                    first_frame_latent -= self.vae.shift_factor.to(
-                        first_frame_latent.device, first_frame_latent.dtype)
-                else:
-                    first_frame_latent -= self.vae.shift_factor
-
-            if isinstance(self.vae.scaling_factor, torch.Tensor):
-                first_frame_latent = first_frame_latent * self.vae.scaling_factor.to(
-                    first_frame_latent.device, first_frame_latent.dtype)
-            else:
-                first_frame_latent = first_frame_latent * self.vae.scaling_factor
-
-            if fastvideo_args.vae_cpu_offload:
-                self.vae = self.vae.to("cpu")
-
-            # Fill the low noise and high noise kv cache with first_frame_latent and timestep 0
-            t_zero = torch.zeros([latents.shape[0], 1],
-                                 device=latents.device,
-                                 dtype=torch.long)
-            with torch.autocast(device_type="cuda",
-                                dtype=target_dtype,
-                                enabled=autocast_enabled), \
-                set_forward_context(current_timestep=0,
-                                    attn_metadata=None,
-                                    forward_batch=batch):
-                self.transformer(
-                    first_frame_latent.to(target_dtype),
-                    prompt_embeds,
-                    t_zero,
-                    kv_cache=kv_cache1,
-                    crossattn_cache=crossattn_cache,
-                    current_start=(pos_start_base + start_index) *
-                    self.frame_seq_length,
-                    start_frame=start_index,
-                    **image_kwargs,
-                    **pos_cond_kwargs,
-                )
-                if boundary_timestep is not None:
-                    self.transformer_2(
-                        first_frame_latent.to(target_dtype),
-                        prompt_embeds,
-                        t_zero,
-                        kv_cache=kv_cache2,
-                        crossattn_cache=crossattn_cache,
-                        current_start=(pos_start_base + start_index) *
-                        self.frame_seq_length,
-                        start_frame=start_index,
-                        **image_kwargs,
-                        **pos_cond_kwargs,
-                    )
-
-            start_index += 1
-            block_sizes.pop(0)
-            latents[:, :, :1, :, :] = first_frame_latent
-
         # DMD loop in causal blocks
         with self.progress_bar(total=len(block_sizes) *
                                len(timesteps)) as progress_bar:
@@ -448,6 +384,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                         )
+
                     self.transformer(
                         context_bcthw,
                         prompt_embeds,
@@ -460,6 +397,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                         **image_kwargs,
                         **pos_cond_kwargs,
                     )
+
                 start_index += current_num_frames
 
         batch.latents = latents
