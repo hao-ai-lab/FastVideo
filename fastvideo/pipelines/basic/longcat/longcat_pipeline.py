@@ -50,7 +50,7 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
         if transformer is None:
             return
         # If user toggles BSA via CLI/config
-        if getattr(pipeline_config, 'enable_bsa', False):
+        if pipeline_config.enable_bsa:
             # Build effective BSA params:
             # 1) from explicit CLI overrides if provided
             # 2) else from pipeline_config.bsa_params
@@ -161,6 +161,5 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
                 pipeline=self
             )
         )
-
 
 EntryClass = LongCatPipeline

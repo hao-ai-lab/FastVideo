@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 from collections.abc import Callable
 from dataclasses import dataclass, field
 import html
@@ -69,8 +71,8 @@ def longcat_preprocess_text(prompt: str) -> str:
 
 
 def umt5_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
-    """Postprocess UMT5/T5 encoder outputs to fixed length 512 embeddings.
-
+    """
+    Postprocess UMT5/T5 encoder outputs to fixed length 512 embeddings.
     """
     mask: torch.Tensor = outputs.attention_mask
     hidden_state: torch.Tensor = outputs.last_hidden_state
@@ -160,4 +162,3 @@ class LongCatT2V704PConfig(LongCatT2V480PConfig):
     
     # Enable BSA by default for 704p
     enable_bsa: bool = True
-    

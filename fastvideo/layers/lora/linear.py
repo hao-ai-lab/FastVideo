@@ -102,19 +102,12 @@ class BaseLayerWithLoRA(nn.Module):
                          A: torch.Tensor,
                          B: torch.Tensor,
                          lora_alpha: float | None = None,
-                         lora_alpha: float | None = None,
                          training_mode: bool = False,
                          lora_path: str | None = None) -> None:
         self.lora_A = torch.nn.Parameter(
             A)  # share storage with weights in the pipeline
         self.lora_B = torch.nn.Parameter(B)
         self.disable_lora = False
-
-        # Store rank and alpha directly
-        rank = A.shape[0]  # rank is the first dimension of A
-        self.lora_rank = rank
-        self.lora_alpha = int(lora_alpha) if lora_alpha is not None else rank
-
 
         # Store rank and alpha directly
         rank = A.shape[0]  # rank is the first dimension of A
