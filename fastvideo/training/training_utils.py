@@ -510,7 +510,7 @@ def load_checkpoint(transformer,
         return 0
 
     # Extract step number from checkpoint path
-    step = int(os.path.basename(checkpoint_path).split('-')[-1])
+    step = int(os.path.basename(os.path.normpath(checkpoint_path)).split('-')[-1])
 
     if rank == 0:
         logger.info("Loading checkpoint from step %s", step)
