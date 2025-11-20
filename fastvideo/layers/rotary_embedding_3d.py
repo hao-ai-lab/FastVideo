@@ -129,11 +129,11 @@ class RotaryPositionalEmbedding3D(nn.Module):
         
         # Broadcast and concatenate across all 3 dimensions
         freqs = broadcat(
-            (
+            [
                 freqs_t[:, None, None, :],  # [T, 1, 1, dim_t]
                 freqs_h[None, :, None, :],  # [1, H, 1, dim_h]
                 freqs_w[None, None, :, :],  # [1, 1, W, dim_w]
-            ),
+            ],
             dim=-1,
         )
         

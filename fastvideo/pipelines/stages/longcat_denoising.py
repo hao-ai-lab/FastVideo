@@ -25,7 +25,7 @@ class LongCatDenoisingStage(DenoisingStage):
     3. Batched CFG computation (unlike standard FastVideo separate passes)
     """
 
-    def optimized_scale(self, positive_flat, negative_flat):
+    def optimized_scale(self, positive_flat, negative_flat) -> torch.Tensor:
         """
         Calculate optimized scale from CFG-zero paper.
         
