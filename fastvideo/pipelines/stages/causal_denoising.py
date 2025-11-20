@@ -400,6 +400,10 @@ class CausalDMDDenosingStage(DenoisingStage):
 
                 start_index += current_num_frames
 
+        if boundary_timestep is not None:
+            num_frames_to_remove = self.num_frames_per_block - 1
+            latents = latents[:, :, :-num_frames_to_remove, :, :]
+
         batch.latents = latents
         return batch
 

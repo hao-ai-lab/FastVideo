@@ -26,7 +26,7 @@ def main():
     )
 
     sampling_param = SamplingParam.from_pretrained("FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers")
-    sampling_param.num_frames = 73
+    sampling_param.num_frames = 81
     sampling_param.width = 832
     sampling_param.height = 480
     sampling_param.seed = 1000
