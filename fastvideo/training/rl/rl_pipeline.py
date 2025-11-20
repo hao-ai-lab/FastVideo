@@ -13,18 +13,16 @@ import torch
 import torch.nn as nn
 from typing import Any
 
-from fastvideo.distributed import get_local_torch_device, get_sp_group, get_world_group
 from fastvideo.fastvideo_args import TrainingArgs
-from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.training.training_pipeline import TrainingPipeline
-from fastvideo.training.reward_models import (
+from fastvideo.training.rl.rewards import (
     create_reward_models,
     MultiRewardAggregator,
     ValueModel
 )
-from fastvideo.training.rl_utils import (
+from .rl_utils import (
     compute_gae,
     normalize_advantages,
     compute_grpo_policy_loss,
@@ -32,13 +30,10 @@ from fastvideo.training.rl_utils import (
     compute_policy_entropy,
     sample_random_timesteps,
     compute_reward_statistics,
-    check_early_stopping,
-    compute_log_probs_from_model_output,
-    check_for_nan_inf
+    check_early_stopping
 )
 from fastvideo.training.training_utils import (
     get_scheduler,
-    save_checkpoint,
     count_trainable
 )
 
@@ -208,7 +203,7 @@ class RLPipeline(TrainingPipeline):
         """
         logger.debug("Computing rewards from reward models")
 
-        # TODO: Implement actual reward computation
+        # TODO: Implement actual asynchronous reward computation
         # This requires decoding latents to videos and running reward models
         # For now, use dummy rewards
         batch_size = training_batch.latents.shape[0]
@@ -331,10 +326,10 @@ class RLPipeline(TrainingPipeline):
 
             # === RL-specific steps ===
 
-            # 1. Collect trajectories (get log probs from current policy)
+            # 1. Collect trajectories
             training_batch = self.collect_trajectories(training_batch)
 
-            # 2. Compute rewards (requires running reward models)
+            # 2. Compute rewards
             training_batch = self.compute_rewards(training_batch)
 
             # 3. Compute value predictions
@@ -343,7 +338,7 @@ class RLPipeline(TrainingPipeline):
             # 4. Compute advantages using GAE
             training_batch = self.compute_advantages(training_batch)
 
-            # 5. Compute policy loss (GRPO)
+            # 5. Compute policy loss (GRPO specific)
             if training_batch.log_probs is not None and training_batch.old_log_probs is not None:
                 policy_loss, policy_info = compute_grpo_policy_loss(
                     log_probs=training_batch.log_probs,

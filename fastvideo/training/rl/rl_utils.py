@@ -91,7 +91,7 @@ def normalize_advantages(
     std = advantages.std()
     return (advantages - mean) / (std + epsilon)
 
-
+#TODO(jiali): refactor into algorithm
 def compute_grpo_policy_loss(
     log_probs: torch.Tensor,
     old_log_probs: torch.Tensor,
