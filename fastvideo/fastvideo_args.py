@@ -779,7 +779,7 @@ class RLArgs:
     rl_collect_on_policy: bool = True  # Collect fresh rollouts each step (on-policy)
 
     # ============================================================================
-    # ALGORITHM-SPECIFIC CONFIGURATION
+    # GRPO-SPECIFIC CONFIGURATION
 
     # Policy optimization (GRPO/PPO shared)
     rl_policy_clip_range: float = 0.2  # PPO-style clipping range for policy ratio
