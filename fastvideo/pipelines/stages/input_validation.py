@@ -120,14 +120,14 @@ class InputValidationStage(PipelineStage):
             scale = max(ow / iw, oh / ih)
             img = img.resize((round(iw * scale), round(ih * scale)),
                              Image.LANCZOS)
-            logger.info("resized img height: %s, img width: %s", img.height,
-                        img.width)
 
             # center-crop
             x1 = (img.width - ow) // 2
             y1 = (img.height - oh) // 2
             img = img.crop((x1, y1, x1 + ow, y1 + oh))
             assert img.width == ow and img.height == oh
+            logger.info("final processed img height: %s, img width: %s", img.height,
+                        img.width)
 
             # to tensor
             img = TF.to_tensor(img).sub_(0.5).div_(0.5).to(
