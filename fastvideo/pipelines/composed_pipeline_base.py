@@ -310,18 +310,15 @@ class ComposedPipelineBase(ABC):
         logger.info("Loading required modules: %s", required_modules)
 
         modules = {}
-        for module_name, module_value in model_index.items():
-            # Check if module value is None before attempting to unpack
-            if module_value is None:
+        for module_name, (transformers_or_diffusers,
+                          architecture) in model_index.items():
+            if transformers_or_diffusers is None:
                 logger.warning(
                     "Module %s in model_index.json has null value, removing from required_config_modules",
                     module_name)
                 if module_name in self.required_config_modules:
                     self.required_config_modules.remove(module_name)
                 continue
-
-            # Now safe to unpack the tuple
-            transformers_or_diffusers, architecture = module_value
             if module_name not in required_modules:
                 logger.info("Skipping module %s", module_name)
                 continue
@@ -330,14 +327,16 @@ class ComposedPipelineBase(ABC):
                 modules[module_name] = loaded_modules[module_name]
                 continue
 
-            # Use alternate directory names if provided, but keep the module
-            # type (module_name) for selecting the correct loader.
-            load_subdir = self._extra_config_module_map.get(
-                module_name, module_name)
+            # we load the module from the extra config module map if it exists
+            if module_name in self._extra_config_module_map:
+                load_module_name = self._extra_config_module_map[module_name]
+            else:
+                load_module_name = module_name
 
-            component_model_path = os.path.join(self.model_path, load_subdir)
+            component_model_path = os.path.join(self.model_path,
+                                                load_module_name)
             module = PipelineComponentLoader.load_module(
-                module_name=module_name,
+                module_name=load_module_name,
                 component_model_path=component_model_path,
                 transformers_or_diffusers=transformers_or_diffusers,
                 fastvideo_args=fastvideo_args,

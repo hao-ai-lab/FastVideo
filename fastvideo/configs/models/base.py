@@ -52,8 +52,8 @@ class ModelConfig:
             if key in valid_fields:
                 setattr(arch_config, key, value)
             else:
-                logger.warning(f"{type(arch_config).__name__} has no field '{key}', skipping.")
-
+                raise AttributeError(
+                    f"{type(arch_config).__name__} has no field '{key}'")
 
         if hasattr(arch_config, "__post_init__"):
             arch_config.__post_init__()

@@ -100,4 +100,11 @@ class WanImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
                        stage=DecodingStage(vae=self.get_module("vae")))
 
 
-EntryClass = WanImageToVideoPipeline
+class MatrixGamePipeline(WanImageToVideoPipeline):
+    _required_config_modules = [
+        "vae", "transformer", "scheduler", 
+        "image_encoder", "image_processor"
+    ]
+
+
+EntryClass = [WanImageToVideoPipeline, MatrixGamePipeline]

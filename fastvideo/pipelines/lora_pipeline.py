@@ -27,8 +27,6 @@ class LoRAPipeline(ComposedPipelineBase):
     Pipeline that supports injecting LoRA adapters into the diffusion transformer.
     TODO: support training.
     """
-    # Map optional module names that may differ between configs and the expected pipeline keys.
-    _extra_config_module_map = {"image_processor": "feature_extractor"}
     lora_adapters: dict[str, dict[str, torch.Tensor]] = defaultdict(
         dict)  # state dicts of loaded lora adapters
     cur_adapter_name: str = ""
