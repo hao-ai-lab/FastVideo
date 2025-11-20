@@ -5,6 +5,7 @@ Input validation stage for diffusion pipelines.
 
 import torch
 import torchvision.transforms.functional as TF
+from PIL import Image
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -13,6 +14,7 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import (StageValidators,
                                                    VerificationResult)
+from fastvideo.utils import best_output_size
 
 logger = init_logger(__name__)
 
@@ -108,27 +110,25 @@ class InputValidationStage(PipelineStage):
                 or fastvideo_args.pipeline_config.is_causal
             ) and batch.pil_image is not None:
             img = batch.pil_image
-            # ih, iw = img.height, img.width
-            # patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
-            # vae_stride = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
-            # dh, dw = patch_size[1] * vae_stride, patch_size[2] * vae_stride
-            # max_area = 720 * 1280
-            # ow, oh = best_output_size(iw, ih, dw, dh, max_area)
+            ih, iw = img.height, img.width
+            patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
+            vae_stride = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
+            dh, dw = patch_size[1] * vae_stride, patch_size[2] * vae_stride
+            max_area = 480 * 832
+            ow, oh = best_output_size(iw, ih, dw, dh, max_area)
 
-            # scale = max(ow / iw, oh / ih)
-            # img = img.resize((round(iw * scale), round(ih * scale)),
-            #                  Image.LANCZOS)
-            # logger.info("resized img height: %s, img width: %s", img.height,
-            #             img.width)
+            scale = max(ow / iw, oh / ih)
+            img = img.resize((round(iw * scale), round(ih * scale)),
+                             Image.LANCZOS)
+            logger.info("resized img height: %s, img width: %s", img.height,
+                        img.width)
 
-            # # center-crop
-            # x1 = (img.width - ow) // 2
-            # y1 = (img.height - oh) // 2
-            # img = img.crop((x1, y1, x1 + ow, y1 + oh))
-            # assert img.width == ow and img.height == oh
-            logger.info("img height: %s, img width: %s", img.height, img.width)
-            oh = img.height
-            ow = img.width
+            # center-crop
+            x1 = (img.width - ow) // 2
+            y1 = (img.height - oh) // 2
+            img = img.crop((x1, y1, x1 + ow, y1 + oh))
+            assert img.width == ow and img.height == oh
+
             # to tensor
             img = TF.to_tensor(img).sub_(0.5).div_(0.5).to(
                 self.device).unsqueeze(1)
