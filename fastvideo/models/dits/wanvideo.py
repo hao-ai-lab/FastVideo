@@ -12,7 +12,7 @@ from fastvideo.attention import (DistributedAttention, DistributedAttention_VSA,
                                  LocalAttention)
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.configs.sample.wan import WanTeaCacheParams
-from fastvideo.distributed.parallel_state import get_sp_world_size
+from fastvideo.distributed.communication_op import sequence_model_parallel_all_gather, sequence_model_parallel_shard
 from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift,
                                         RMSNorm, ScaleResidual,
@@ -21,8 +21,7 @@ from fastvideo.layers.linear import ReplicatedLinear
 # from torch.nn import RMSNorm
 # TODO: RMSNorm ....
 from fastvideo.layers.mlp import MLP
-from fastvideo.layers.rotary_embedding import (_apply_rotary_emb,
-                                               get_rotary_pos_embed)
+from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
 from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed,
                                                TimestepEmbedder)
 from fastvideo.logger import init_logger
@@ -356,13 +355,7 @@ class WanTransformerBlock(nn.Module):
         key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
 
-        # Apply rotary embeddings
-        cos, sin = freqs_cis
-        query, key = _apply_rotary_emb(query, cos, sin,
-                                       is_neox_style=False), _apply_rotary_emb(
-                                           key, cos, sin, is_neox_style=False)
-
-        attn_output, _ = self.attn1(query, key, value)
+        attn_output, _ = self.attn1(query, key, value, freqs_cis=freqs_cis)
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)
@@ -504,15 +497,10 @@ class WanTransformerBlock_VSA(nn.Module):
         gate_compress = gate_compress.squeeze(1).unflatten(
             2, (self.num_attention_heads, -1))
 
-        # Apply rotary embeddings
-        cos, sin = freqs_cis
-        query, key = _apply_rotary_emb(query, cos, sin,
-                                       is_neox_style=False), _apply_rotary_emb(
-                                           key, cos, sin, is_neox_style=False)
-
         attn_output, _ = self.attn1(query,
                                     key,
                                     value,
+                                    freqs_cis = freqs_cis,
                                     gate_compress=gate_compress)
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
@@ -650,20 +638,19 @@ class WanTransformer3DModel(CachableDiT):
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
         freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (post_patch_num_frames * get_sp_world_size(), post_patch_height,
+            (post_patch_num_frames, post_patch_height,
              post_patch_width),
             self.hidden_size,
             self.num_attention_heads,
             rope_dim_list,
             dtype=torch.float32 if current_platform.is_mps() else torch.float64,
             rope_theta=10000)
-        freqs_cos = freqs_cos.to(hidden_states.device)
-        freqs_sin = freqs_sin.to(hidden_states.device)
-        freqs_cis = (freqs_cos.float(),
-                     freqs_sin.float()) if freqs_cos is not None else None
-
+        freqs_cis = (freqs_cos.to(hidden_states.device).float(),
+                     freqs_sin.to(hidden_states.device).float())
+        
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
+        hidden_states = sequence_model_parallel_shard(hidden_states, dim=1)
 
         # timestep shape: batch_size, or batch_size, seq_len (wan 2.2 ti2v)
         if timestep.dim() == 2:
@@ -727,6 +714,7 @@ class WanTransformer3DModel(CachableDiT):
             shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2, dim=1)
             
         hidden_states = self.norm_out(hidden_states, shift, scale)
+        hidden_states = sequence_model_parallel_all_gather(hidden_states, dim=1)
         hidden_states = self.proj_out(hidden_states)
 
         hidden_states = hidden_states.reshape(batch_size, post_patch_num_frames,

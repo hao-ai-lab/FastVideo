@@ -11,7 +11,7 @@ from fastvideo.distributed.parallel_state import (get_sp_parallel_rank,
 from fastvideo.forward_context import ForwardContext, get_forward_context
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
-
+from fastvideo.layers.rotary_embedding import _apply_rotary_emb
 
 class DistributedAttention(nn.Module):
     """Distributed attention layer.
@@ -64,6 +64,7 @@ class DistributedAttention(nn.Module):
         replicated_q: torch.Tensor | None = None,
         replicated_k: torch.Tensor | None = None,
         replicated_v: torch.Tensor | None = None,
+        freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
         
@@ -97,6 +98,10 @@ class DistributedAttention(nn.Module):
         qkv = sequence_model_parallel_all_to_all_4D(qkv,
                                                     scatter_dim=2,
                                                     gather_dim=1)
+        if freqs_cis is not None:
+            cos, sin = freqs_cis
+            # apply to q and k
+            qkv[:batch_size*2] = _apply_rotary_emb(qkv[:batch_size*2], cos, sin, is_neox_style=False)
         # Apply backend-specific preprocess_qkv
         qkv = self.attn_impl.preprocess_qkv(qkv, ctx_attn_metadata)
 
@@ -147,6 +152,7 @@ class DistributedAttention_VSA(DistributedAttention):
         replicated_k: torch.Tensor | None = None,
         replicated_v: torch.Tensor | None = None,
         gate_compress: torch.Tensor | None = None,
+        freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
         
@@ -173,6 +179,7 @@ class DistributedAttention_VSA(DistributedAttention):
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
 
+        batch_size, seq_len, num_heads, head_dim = q.shape
         # Stack QKV
         qkvg = torch.cat([q, k, v, gate_compress],
                          dim=0)  # [3, seq_len, num_heads, head_dim]
@@ -181,6 +188,10 @@ class DistributedAttention_VSA(DistributedAttention):
         qkvg = sequence_model_parallel_all_to_all_4D(qkvg,
                                                      scatter_dim=2,
                                                      gather_dim=1)
+
+        if freqs_cis is not None:
+            cos, sin = freqs_cis
+            qkvg[:batch_size*2] = _apply_rotary_emb(qkvg[:batch_size*2], cos, sin, is_neox_style=False)
 
         qkvg = self.attn_impl.preprocess_qkv(qkvg, ctx_attn_metadata)
 
@@ -244,6 +255,7 @@ class LocalAttention(nn.Module):
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
+        freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> torch.Tensor:
         """
         Apply local attention between query, key and value tensors.
@@ -262,6 +274,11 @@ class LocalAttention(nn.Module):
 
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
+
+        if freqs_cis is not None:
+            cos, sin = freqs_cis
+            q = _apply_rotary_emb(q, cos, sin, is_neox_style=False)
+            k = _apply_rotary_emb(k, cos, sin, is_neox_style=False)
 
         output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
         return output
