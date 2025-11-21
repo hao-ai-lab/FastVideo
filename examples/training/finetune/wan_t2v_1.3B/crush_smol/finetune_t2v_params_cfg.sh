@@ -9,7 +9,7 @@ MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 # DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
 DATA_DIR="data/crush-smol_processed_t2v/training_dataset/"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
-NUM_GPUS=4
+NUM_GPUS=2
 # export CUDA_VISIBLE_DEVICES=4,5
 
 
@@ -74,7 +74,7 @@ optimizer_args=(
 miscellaneous_args=(
   --inference_mode False
   --checkpoints_total_limit 3
-  --training_cfg_rate 0.0
+  --training_cfg_rate 0.1
   --multi_phased_distill_schedule "4000-1"
   --not_apply_cfg_solver
   --dit_precision "fp32"
