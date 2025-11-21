@@ -174,6 +174,9 @@ class FastVideoArgs:
     init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
     init_weights_from_safetensors_2: str = ""  # path to safetensors file for initial weight loading for transformer_2
 
+    # Self-forcing specific arguments
+    num_frame_per_block: int = 3
+
     # # DMD parameters
     # dmd_denoising_steps: List[int] | None = field(default=None)
 
@@ -432,6 +435,13 @@ class FastVideoArgs:
             "--init-weights-from-safetensors-2",
             type=str,
             help="Path to safetensors file for initial weight loading")
+
+        # Self-forcing specific arguments
+        parser.add_argument(
+            "--num-frame-per-block",
+            type=int,
+            default=FastVideoArgs.num_frame_per_block,
+            help="Number of frames per block for causal generation")
 
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)
@@ -751,7 +761,6 @@ class TrainingArgs(FastVideoArgs):
     warp_denoising_step: bool = False
 
     # Self-forcing specific arguments
-    num_frame_per_block: int = 3
     independent_first_frame: bool = False
     enable_gradient_masking: bool = True
     gradient_mask_last_n_frames: int = 21
@@ -1146,11 +1155,6 @@ class TrainingArgs(FastVideoArgs):
         )
 
         # Self-forcing specific arguments
-        parser.add_argument(
-            "--num-frame-per-block",
-            type=int,
-            default=TrainingArgs.num_frame_per_block,
-            help="Number of frames per block for causal generation")
         parser.add_argument(
             "--independent-first-frame",
             action=StoreBoolean,

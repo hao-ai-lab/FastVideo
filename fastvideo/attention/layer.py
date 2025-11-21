@@ -11,6 +11,9 @@ from fastvideo.distributed.parallel_state import (get_sp_parallel_rank,
 from fastvideo.forward_context import ForwardContext, get_forward_context
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 class DistributedAttention(nn.Module):
@@ -91,6 +94,7 @@ class DistributedAttention(nn.Module):
         ctx_attn_metadata = forward_context.attn_metadata
 
         # Stack QKV
+        logger.info(f"rank: {local_rank}, q: {q.shape}, k: {k.shape}, v: {v.shape}", local_main_process_only=False)
         qkv = torch.cat([q, k, v], dim=0)  # [3, seq_len, num_heads, head_dim]
 
         # Redistribute heads across sequence dimension
