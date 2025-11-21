@@ -861,20 +861,6 @@ def normalize_dit_input(model_type, latents, vae) -> torch.Tensor:
     else:
         raise NotImplementedError(f"model_type {model_type} not supported")
 
-
-def shard_latents_across_sp(latents: torch.Tensor,
-                            num_latent_t: int) -> torch.Tensor:
-    sp_world_size = get_sp_world_size()
-    rank_in_sp_group = get_sp_parallel_rank()
-    latents = latents[:, :, :num_latent_t]
-    if sp_world_size > 1:
-        latents = rearrange(latents,
-                            "b c (n s) h w -> b c n s h w",
-                            n=sp_world_size).contiguous()
-        latents = latents[:, :, rank_in_sp_group, :, :, :]
-    return latents
-
-
 def clip_grad_norm_while_handling_failing_dtensor_cases(
     parameters: torch.Tensor | list[torch.Tensor],
     max_norm: float,

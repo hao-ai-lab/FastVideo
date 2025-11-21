@@ -43,8 +43,7 @@ from fastvideo.training.trackers import (DummyTracker, TrackerType,
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, count_trainable, get_scheduler,
-    get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint,
-    shard_latents_across_sp)
+    get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint)
 from fastvideo.utils import (is_vmoba_available, is_vsa_available,
                              set_random_seed, shallow_asdict)
 
@@ -487,17 +486,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
             training_batch = self._prepare_dit_inputs(training_batch)
 
             # Shard latents across sp groups
-            training_batch.latents = shard_latents_across_sp(
-                training_batch.latents,
-                num_latent_t=self.training_args.num_latent_t)
+            training_batch.latents = training_batch.latents[:, :, :self.training_args.num_latent_t]
             # shard noisy_model_input to match
-            training_batch.noisy_model_input = shard_latents_across_sp(
-                training_batch.noisy_model_input,
-                num_latent_t=self.training_args.num_latent_t)
+            training_batch.noisy_model_input = training_batch.noisy_model_input[:, :, :self.training_args.num_latent_t]
             # shard noise to match latents
-            training_batch.noise = shard_latents_across_sp(
-                training_batch.noise,
-                num_latent_t=self.training_args.num_latent_t)
+            training_batch.noise = training_batch.noise[:, :, :self.training_args.num_latent_t]
 
             training_batch = self._build_attention_metadata(training_batch)
             training_batch = self._build_input_kwargs(training_batch)
