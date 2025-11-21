@@ -8,8 +8,6 @@ if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 os.environ["PYTHONPATH"] = current_dir + ":" + os.environ.get("PYTHONPATH", "")
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29512"
 import subprocess
 import torch
 import json
@@ -21,11 +19,20 @@ from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.utils import FlexibleArgumentParser
 from fastvideo.training.wan_training_pipeline import WanTrainingPipeline
 
-wandb_name = "mfu_calculation"
-
+MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+DATA_PATH = "data/crush-smol_processed_t2v/training_dataset/worker_1/worker_0/"
+VALIDATION_DATASET_FILE = "examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json"
+OUTPUT_DIR = Path("checkpoints/wan_t2v_finetune")
+PROFILER_TRACE_ROOT = Path("/mnt/fast-disks/hao_lab/ohm/profiler_traces/wan_t2v_finetune")
+WANDB_SUMMARY_FILE = OUTPUT_DIR / "tracker/wandb/latest-run/files/wandb-summary.json"
 
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "2"
+GRAD_ACCUM = "1"
+MASTER_PORT = "29504"
+
+os.environ["MASTER_ADDR"] = "localhost"
+os.environ["MASTER_PORT"] = MASTER_PORT
 
 
 def run_worker():
@@ -35,48 +42,47 @@ def run_worker():
     parser = TrainingArgs.add_cli_args(parser)
     parser = FastVideoArgs.add_cli_args(parser)
     
-    # Set the arguments as they are in finetune_v1_test.sh
+    # Set the arguments as they are in finetune_t2v.sh
     args = parser.parse_args([
-        "--model_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        "--model_path", MODEL_PATH,
         "--inference_mode", "False",
-        "--pretrained_model_name_or_path", "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
-        "--data_path", "data/crush-smol_processed_t2v/combined_parquet_dataset",
-        "--validation_dataset_file", "examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json",
-        "--train_batch_size", "2",
-        "--num_latent_t", "4",
-        "--num_gpus", NUM_GPUS_PER_NODE,
-        "--sp_size", "2",
-        "--tp_size", "1",
-        "--hsdp_replicate_dim", "1",
-        "--hsdp_shard_dim", "2",
-        "--train_sp_batch_size", "1",
+        "--pretrained_model_name_or_path", MODEL_PATH,
+        "--data_path", DATA_PATH,
         "--dataloader_num_workers", "1",
-        "--gradient_accumulation_steps", "2",
-        "--max_train_steps", "5",
-        "--learning_rate", "1e-6",
+        "--train_batch_size", "4",
+        "--train_sp_batch_size", "1",
+        "--gradient_accumulation_steps", GRAD_ACCUM,
+        "--num_latent_t", "20",
+        "--num_height", "720",
+        "--num_width", "1280",
+        "--num_frames", "77",
+        "--enable_gradient_checkpointing_type", "full",
+        "--max_train_steps", "20",
+        "--learning_rate", "5e-5",
         "--mixed_precision", "bf16",
-        "--weight_only_checkpointing_steps", "30",
-        "--training_state_checkpointing_steps", "30",
-        "--validation_steps", "10",
-        "--validation_sampling_steps", "8",
-        "--log_validation",
-        "--checkpoints_total_limit", "3",
-        "--ema_start_step", "0",
-        "--training_cfg_rate", "0.0",
-        "--output_dir", "data/wan_finetune_test",
-        "--tracker_project_name", "wan_finetune_ci",
-        "--wandb_run_name", wandb_name,
-        "--num_height", "480",
-        "--num_width", "832",
-        "--num_frames", "81",
-        "--flow_shift", "3",
-        "--validation_guidance_scale", "1.0",
+        "--weight_only_checkpointing_steps", "250",
+        "--training_state_checkpointing_steps", "250",
+        "--weight_decay", "1e-4",
+        "--max_grad_norm", "1.0",
         "--num_euler_timesteps", "50",
         "--multi_phased_distill_schedule", "4000-1",
-        "--weight_decay", "0.01",
         "--not_apply_cfg_solver",
+        "--training_cfg_rate", "0.1",
+        "--ema_start_step", "0",
         "--dit_precision", "fp32",
-        "--max_grad_norm", "1.0"
+        "--output_dir", str(OUTPUT_DIR),
+        "--tracker_project_name", "wan_t2v_finetune",
+        "--checkpoints_total_limit", "3",
+        "--validation_dataset_file", VALIDATION_DATASET_FILE,
+        "--validation_steps", "200",
+        "--validation_sampling_steps", "50",
+        "--validation_guidance_scale", "6.0",
+        #"--log_validation",
+        "--num_gpus", NUM_GPUS_PER_NODE,
+        "--sp_size", NUM_GPUS_PER_NODE,
+        "--tp_size", "1",
+        "--hsdp_replicate_dim", "1",
+        "--hsdp_shard_dim", NUM_GPUS_PER_NODE
     ])
     # Call the main training function
     pipeline = WanTrainingPipeline.from_pretrained(
@@ -108,7 +114,7 @@ def test_distributed_training():
         "torchrun",
         "--nnodes", NUM_NODES,
         "--nproc_per_node", NUM_GPUS_PER_NODE,
-        "--master_port", os.environ["MASTER_PORT"],
+        "--master_port", MASTER_PORT,
         str(current_file)
     ]
     process = subprocess.run(cmd, capture_output=True, text=True)
@@ -124,46 +130,54 @@ def test_distributed_training():
         print(f"Process failed with return code: {process.returncode}")
         raise subprocess.CalledProcessError(process.returncode, cmd, process.stdout, process.stderr)
 
-    summary_file = 'data/wan_finetune_test/tracker/wandb/latest-run/files/wandb-summary.json'
+    summary_file = WANDB_SUMMARY_FILE
 
-    wandb_summary = json.load(open(summary_file))
+    with summary_file.open() as f:
+        wandb_summary = json.load(f)
     
     # Calculate and print MFU metrics
     device_name = torch.cuda.get_device_name()
     try:
         # Get actual values from training run (logged from training_batch.raw_latent_shape)
-        batch_size = wandb_summary.get("batch_size", 2)
-        latent_t = wandb_summary.get("latent_shape_t", 4)
-        latent_h = wandb_summary.get("latent_shape_h", 60)
-        latent_w = wandb_summary.get("latent_shape_w", 104)
-        avg_step_time = wandb_summary.get("avg_step_time", 1.0)
-        
-        seq_len = latent_t * latent_h * latent_w
+        batch_size = wandb_summary.get("batch_size")
+        seq_len = wandb_summary.get("dit_seq_len")
+        context_len = wandb_summary.get("context_len")
+        avg_step_time = wandb_summary.get("avg_step_time")
+        hidden_dim = wandb_summary.get("hidden_dim")
+        num_layers = wandb_summary.get("num_layers")
+        ffn_dim = wandb_summary.get("ffn_dim")
+
 
         
-        # Model config (Wan 1.3B)
-        hidden_dim = 768
-        num_layers = 24
 
-        
-        # Calculate achieved FLOPs (forward + backward)
-        # Per layer, per batch, forward pass:
-        # - Linear ops (QKV, out_proj, MLP): 12 * hidden_dim^2 * seq_len
-        # - Attention ops (QK^T, Attn*V): 4 * seq_len^2 * hidden_dim
-        # Training multiplier: 3x (1 forward + 2 backward)
-        linear_flops = 12 * hidden_dim * hidden_dim * seq_len
-        attention_flops = 4 * seq_len * seq_len * hidden_dim
-        flops_per_layer = linear_flops + attention_flops
+        # FLOPs per layer (forward pass)
+        # - QKV + out proj: 8 * hidden_dim^2 * seq_len
+        # - Cross-attn proj: 4 * hidden_dim^2 * seq_len + 4 * hidden_dim^2 * context_len
+        # - MLP: 4 * hidden_dim * ffn_dim * seq_len
+        # - Self-attn matmuls: 4 * seq_len^2 * hidden_dim
+        # - Cross-attn matmuls: 4 * seq_len * context_len * hidden_dim
+        qkv_out_flops = 8 * hidden_dim * hidden_dim * seq_len
+        cross_attn_proj_flops = (
+            (4 * hidden_dim * hidden_dim * seq_len) +
+            (4 * hidden_dim * hidden_dim * context_len) 
+        )
+        mlp_flops = 4 * hidden_dim * ffn_dim * seq_len
+        self_attn_flops = 4 * seq_len * seq_len * hidden_dim
+        cross_attn_flops = 4 * seq_len * context_len * hidden_dim
+        flops_per_layer = (
+            qkv_out_flops + cross_attn_proj_flops + mlp_flops + self_attn_flops + cross_attn_flops
+        )
+
         achieved_flops = batch_size * flops_per_layer * num_layers * 3
 
         
         # Account for gradient accumulation (from config)
-        grad_accum = 2  # gradient_accumulation_steps = 2
-        achieved_flops *= grad_accum  # gradient_accumulation_steps = 2
+        grad_accum = int(GRAD_ACCUM)
+        achieved_flops *= grad_accum  
 
         # Peak FLOPs based on device
         if "H100" in device_name:
-            peak_flops_per_gpu = 1979e12
+            peak_flops_per_gpu = 989e12
         elif "A100" in device_name:
             peak_flops_per_gpu = 312e12
         elif "A40" in device_name:
