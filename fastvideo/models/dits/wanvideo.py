@@ -12,7 +12,7 @@ from fastvideo.attention import (DistributedAttention, DistributedAttention_VSA,
                                  LocalAttention)
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.configs.sample.wan import WanTeaCacheParams
-from fastvideo.distributed.parallel_state import get_sp_world_size
+from fastvideo.distributed.communication_op import sequence_model_parallel_all_gather, sequence_model_parallel_shard
 from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift,
                                         RMSNorm, ScaleResidual,
@@ -21,13 +21,14 @@ from fastvideo.layers.linear import ReplicatedLinear
 # from torch.nn import RMSNorm
 # TODO: RMSNorm ....
 from fastvideo.layers.mlp import MLP
-from fastvideo.layers.rotary_embedding import (_apply_rotary_emb,
-                                               get_rotary_pos_embed)
+from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
 from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed,
                                                TimestepEmbedder)
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import CachableDiT
 from fastvideo.platforms import AttentionBackendEnum, current_platform
+
+from fastvideo.distributed.parallel_state import get_sp_world_size
 
 logger = init_logger(__name__)
 
@@ -356,13 +357,7 @@ class WanTransformerBlock(nn.Module):
         key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
 
-        # Apply rotary embeddings
-        cos, sin = freqs_cis
-        query, key = _apply_rotary_emb(query, cos, sin,
-                                       is_neox_style=False), _apply_rotary_emb(
-                                           key, cos, sin, is_neox_style=False)
-
-        attn_output, _ = self.attn1(query, key, value)
+        attn_output, _ = self.attn1(query, key, value, freqs_cis=freqs_cis)
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)
@@ -504,15 +499,10 @@ class WanTransformerBlock_VSA(nn.Module):
         gate_compress = gate_compress.squeeze(1).unflatten(
             2, (self.num_attention_heads, -1))
 
-        # Apply rotary embeddings
-        cos, sin = freqs_cis
-        query, key = _apply_rotary_emb(query, cos, sin,
-                                       is_neox_style=False), _apply_rotary_emb(
-                                           key, cos, sin, is_neox_style=False)
-
         attn_output, _ = self.attn1(query,
                                     key,
                                     value,
+                                    freqs_cis = freqs_cis,
                                     gate_compress=gate_compress)
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
@@ -650,20 +640,22 @@ class WanTransformer3DModel(CachableDiT):
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
         freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (post_patch_num_frames * get_sp_world_size(), post_patch_height,
+            (post_patch_num_frames, post_patch_height,
              post_patch_width),
             self.hidden_size,
             self.num_attention_heads,
             rope_dim_list,
             dtype=torch.float32 if current_platform.is_mps() else torch.float64,
             rope_theta=10000)
-        freqs_cos = freqs_cos.to(hidden_states.device)
-        freqs_sin = freqs_sin.to(hidden_states.device)
-        freqs_cis = (freqs_cos.float(),
-                     freqs_sin.float()) if freqs_cos is not None else None
+        freqs_cis = (freqs_cos.to(hidden_states.device).float(),
+                     freqs_sin.to(hidden_states.device).float())
 
+        # print(f"hidden_states_sum before embed before sharding = {hidden_states.sum().item():.4f}, {hidden_states.shape},  Device: {hidden_states.device}")        
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
+        # print(f"hidden_states_sum after embed before sharding = {hidden_states.sum().item():.4f}, {hidden_states.shape},  Device: {hidden_states.device}")
+        hidden_states = sequence_model_parallel_shard(hidden_states, dim=1)
+        # print(f"hidden_states_sum after embed after sharding = {hidden_states.sum().item():.4f}, {hidden_states.shape}, Device: {hidden_states.device}")
 
         # timestep shape: batch_size, or batch_size, seq_len (wan 2.2 ti2v)
         if timestep.dim() == 2:
@@ -692,12 +684,21 @@ class WanTransformer3DModel(CachableDiT):
 
         assert encoder_hidden_states.dtype == orig_dtype
 
+        # if hidden_states.device.index == 0: 
+        #     s = lambda x: float(x.float().sum()) if isinstance(x, torch.Tensor) else None
+        #     print(
+        #         "temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image",
+        #         s(temb), s(timestep_proj), s(encoder_hidden_states), s(encoder_hidden_states_image)
+        #     )
+
+
         # 4. Transformer blocks
         # if caching is enabled, we might be able to skip the forward pass
         should_skip_forward = self.should_skip_forward_for_cached_states(
             timestep_proj=timestep_proj, temb=temb)
 
         if should_skip_forward:
+            print("skipping forward, cached")
             hidden_states = self.retrieve_cached_states(hidden_states)
         else:
             # if teacache is enabled, we need to cache the original hidden states
@@ -714,6 +715,9 @@ class WanTransformer3DModel(CachableDiT):
                     hidden_states = block(hidden_states, encoder_hidden_states,
                                           timestep_proj, freqs_cis)
             # if teacache is enabled, we need to cache the original hidden states
+            # if hidden_states.device.index == 0: 
+            #     print(f"hidden_states_sum after block = {hidden_states.sum().item():.4f}, {hidden_states.shape}, Device: {hidden_states.device}")
+
             if enable_teacache:
                 self.maybe_cache_states(hidden_states, original_hidden_states)
         # 5. Output norm, projection & unpatchify
@@ -727,14 +731,24 @@ class WanTransformer3DModel(CachableDiT):
             shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2, dim=1)
             
         hidden_states = self.norm_out(hidden_states, shift, scale)
+        hidden_states = sequence_model_parallel_all_gather(hidden_states, dim=1)
         hidden_states = self.proj_out(hidden_states)
 
+        # if hidden_states.device.index == 0: 
+        # print(f"hidden_states_sum after proj/norm = {hidden_states.sum().item():.4f}, {hidden_states.shape}, Device: {hidden_states.device}")
+
+        # sp_world_size = get_sp_world_size()
+        # post_patch_num_frames = post_patch_num_frames // sp_world_size
+        
         hidden_states = hidden_states.reshape(batch_size, post_patch_num_frames,
                                               post_patch_height,
                                               post_patch_width, p_t, p_h, p_w,
                                               -1)
         hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
         output = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
+
+        # if hidden_states.device.index == 0: 
+        # print(f"output = {output.sum().item():.4f}, {output.shape}, Device: {output.device}")
 
         return output
 
