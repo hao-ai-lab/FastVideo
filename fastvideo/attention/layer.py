@@ -94,7 +94,9 @@ class DistributedAttention(nn.Module):
         ctx_attn_metadata = forward_context.attn_metadata
 
         # Stack QKV
-        logger.info(f"rank: {local_rank}, q: {q.shape}, k: {k.shape}, v: {v.shape}", local_main_process_only=False)
+        logger.info(
+            f"rank: {local_rank}, q: {q.shape}, k: {k.shape}, v: {v.shape}",
+            local_main_process_only=False)
         qkv = torch.cat([q, k, v], dim=0)  # [3, seq_len, num_heads, head_dim]
 
         # Redistribute heads across sequence dimension

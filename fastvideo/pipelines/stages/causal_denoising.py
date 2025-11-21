@@ -1,7 +1,8 @@
 import torch  # type: ignore
 
-from fastvideo.distributed import (get_local_torch_device, sequence_model_parallel_all_gather,
-                                    get_sp_parallel_rank, get_sp_world_size)
+from fastvideo.distributed import (get_local_torch_device,
+                                   sequence_model_parallel_all_gather,
+                                   get_sp_parallel_rank, get_sp_world_size)
 from einops import rearrange
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
@@ -225,11 +226,13 @@ class CausalDMDDenosingStage(DenoisingStage):
         with self.progress_bar(total=len(block_sizes) *
                                len(timesteps)) as progress_bar:
             for idx, current_num_frames in enumerate(block_sizes):
-                logger.info(f"================================================")
+                logger.info("================================================")
                 logger.info(f"Block {idx}")
-                logger.info(f"================================================")
+                logger.info("================================================")
                 logger.info(f"Current num frames: {current_num_frames}")
-                logger.info(f"Processing block {start_index} to {start_index + current_num_frames}")
+                logger.info(
+                    f"Processing block {start_index} to {start_index + current_num_frames}"
+                )
                 logger.info(f"Latents shape: {latents.shape}")
                 current_latents = latents[:, :, start_index:start_index +
                                           current_num_frames, :, :]
@@ -238,20 +241,30 @@ class CausalDMDDenosingStage(DenoisingStage):
                 ), get_sp_parallel_rank()
                 sp_group = sp_world_size > 1
                 # logger.info(f"SP group: {sp_group}")
-                logger.info(f"before SP: Current latents shape: {current_latents.shape}")
+                logger.info(
+                    f"before SP: Current latents shape: {current_latents.shape}"
+                )
                 if sp_group:
                     current_latents = rearrange(current_latents,
-                                        "b c (n t) h w -> b c n t h w",
-                                        n=sp_world_size).contiguous()
-                    current_latents = current_latents[:, :, rank_in_sp_group, :, :, :]
-                    logger.info(f"after SP: Current latents shape: {current_latents.shape}")
+                                                "b c (n t) h w -> b c n t h w",
+                                                n=sp_world_size).contiguous()
+                    current_latents = current_latents[:, :,
+                                                      rank_in_sp_group, :, :, :]
+                    logger.info(
+                        f"after SP: Current latents shape: {current_latents.shape}"
+                    )
                 # Per-rank temporal offset (in frames) within this block when using SP
-                frames_per_rank = (current_num_frames // sp_world_size) if sp_group else current_num_frames
-                rank_offset_frames = (rank_in_sp_group * frames_per_rank) if sp_group else 0
+                frames_per_rank = (
+                    current_num_frames //
+                    sp_world_size) if sp_group else current_num_frames
+                rank_offset_frames = (rank_in_sp_group *
+                                      frames_per_rank) if sp_group else 0
                 # use BTCHW for DMD conversion routines
                 noise_latents_btchw = current_latents.permute(0, 2, 1, 3, 4)
                 video_raw_latent_shape = noise_latents_btchw.shape
-                logger.info(f"before DMD: Noise latents shape: {noise_latents_btchw.shape}")
+                logger.info(
+                    f"before DMD: Noise latents shape: {noise_latents_btchw.shape}"
+                )
                 for i, t_cur in enumerate(timesteps):
                     if boundary_timestep is not None and t_cur < boundary_timestep:
                         current_model = self.transformer_2
@@ -315,7 +328,8 @@ class CausalDMDDenosingStage(DenoisingStage):
                             crossattn_cache=crossattn_cache,
                             current_start=(pos_start_base + start_index + rank_offset_frames) *
                             self.frame_seq_length,
-                            start_frame=pos_start_base + start_index + rank_offset_frames,
+                            start_frame=pos_start_base + start_index +
+                            rank_offset_frames,
                             **image_kwargs,
                             **pos_cond_kwargs,
                         ).permute(0, 2, 1, 3, 4)
@@ -377,13 +391,21 @@ class CausalDMDDenosingStage(DenoisingStage):
                         progress_bar.update()
 
                 # Write back and advance
-                logger.info(f"before all gather: Current latents shape: {current_latents.shape}")
+                logger.info(
+                    f"before all gather: Current latents shape: {current_latents.shape}"
+                )
                 context_bcthw = current_latents.clone().to(target_dtype)
                 if sp_group:
-                    current_latents = sequence_model_parallel_all_gather(current_latents, dim=2)
-                    logger.info(f"after all gather: Current latents shape: {current_latents.shape}")
-                logger.info(f"start_index: {start_index}, current_num_frames: {current_num_frames}")
-                logger.info(f"before write back: Latents shape: {latents.shape}")
+                    current_latents = sequence_model_parallel_all_gather(
+                        current_latents, dim=2)
+                    logger.info(
+                        f"after all gather: Current latents shape: {current_latents.shape}"
+                    )
+                logger.info(
+                    f"start_index: {start_index}, current_num_frames: {current_num_frames}"
+                )
+                logger.info(
+                    f"before write back: Latents shape: {latents.shape}")
                 latents[:, :, start_index:start_index +
                         current_num_frames, :, :] = current_latents
                 logger.info(f"after write back: Latents shape: {latents.shape}")
@@ -424,7 +446,8 @@ class CausalDMDDenosingStage(DenoisingStage):
                         crossattn_cache=crossattn_cache,
                         current_start=(pos_start_base + start_index + rank_offset_frames) *
                         self.frame_seq_length,
-                        start_frame=pos_start_base + start_index + rank_offset_frames,
+                        start_frame=pos_start_base + start_index +
+                        rank_offset_frames,
                         **image_kwargs,
                         **pos_cond_kwargs,
                     )
