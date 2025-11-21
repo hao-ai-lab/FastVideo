@@ -9,7 +9,7 @@ MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 # DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
 DATA_DIR="data/crush-smol_processed_t2v/training_dataset/"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
-NUM_GPUS=4
+NUM_GPUS=2
 # export CUDA_VISIBLE_DEVICES=4,5
 
 
@@ -20,7 +20,7 @@ training_args=(
   --max_train_steps 50000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
+  --gradient_accumulation_steps 4
   # --num_latent_t 8
   --num_latent_t 20
   --num_height 480
@@ -54,7 +54,7 @@ dataset_args=(
 validation_args=(
   --log_validation 
   --validation_dataset_file $VALIDATION_DATASET_FILE
-  --validation_steps 500
+  --validation_steps 50
   --validation_sampling_steps "50" 
   --validation_guidance_scale "1.0"
 )
@@ -84,7 +84,7 @@ miscellaneous_args=(
 )
 
 torchrun \
-  --master_port 29511 \
+  --master_port 29512 \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
     fastvideo/training/wan_training_pipeline.py \
