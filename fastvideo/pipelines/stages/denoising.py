@@ -10,7 +10,6 @@ from collections.abc import Iterable
 from typing import Any
 
 import torch
-from einops import rearrange
 from tqdm.auto import tqdm
 
 from fastvideo.attention import get_attn_backend
@@ -1066,7 +1065,6 @@ class DmdDenoisingStage(DenoisingStage):
             fastvideo_args.pipeline_config.dmd_denoising_steps,
             dtype=torch.long,
             device=get_local_torch_device())
-
 
         # Run denoising loop
         with self.progress_bar(total=len(timesteps)) as progress_bar:

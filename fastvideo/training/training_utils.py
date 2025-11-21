@@ -10,13 +10,10 @@ from typing import Any
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
-from einops import rearrange
 from safetensors.torch import save_file
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 
-from fastvideo.distributed.parallel_state import (get_sp_parallel_rank,
-                                                  get_sp_world_size)
 from fastvideo.logger import init_logger
 from fastvideo.training.checkpointing_utils import (ModelWrapper,
                                                     OptimizerWrapper,
@@ -860,6 +857,7 @@ def normalize_dit_input(model_type, latents, vae) -> torch.Tensor:
         return latents
     else:
         raise NotImplementedError(f"model_type {model_type} not supported")
+
 
 def clip_grad_norm_while_handling_failing_dtensor_cases(
     parameters: torch.Tensor | list[torch.Tensor],

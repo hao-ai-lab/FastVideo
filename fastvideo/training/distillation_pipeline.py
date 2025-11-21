@@ -718,7 +718,7 @@ class DistillationPipeline(TrainingPipeline):
             noise = torch.randn(self.video_latent_shape,
                                 device=self.device,
                                 dtype=generator_pred_video.dtype)
-            
+
             noisy_latent = self.noise_scheduler.add_noise(
                 generator_pred_video.flatten(0, 1), noise.flatten(0, 1),
                 timestep).detach().unflatten(0,
