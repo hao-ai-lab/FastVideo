@@ -22,7 +22,7 @@ from fastvideo.logger import init_logger
 from fastvideo.models.vision_utils import load_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
-from fastvideo.pipelines.stages.utils import get_bucket_config
+from fastvideo.configs.pipelines.longcat import get_bucket_config
 
 logger = init_logger(__name__)
 

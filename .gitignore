@@ -30,7 +30,6 @@ env
 **/build/
 **.pyc
 **.txt
-add-longcat-video/
 *.log
 
 # Distribution / packaging
@@ -72,4 +71,3 @@ docs/distillation/examples/
 
 dmd_t2v_output/
 preprocess_output_text/
-weights/
