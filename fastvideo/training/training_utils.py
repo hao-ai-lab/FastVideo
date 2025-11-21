@@ -20,6 +20,10 @@ from fastvideo.training.checkpointing_utils import (ModelWrapper,
                                                     RandomStateWrapper,
                                                     SchedulerWrapper)
 
+from einops import rearrange
+from fastvideo.distributed.parallel_state import (get_sp_parallel_rank,
+                                                  get_sp_world_size)
+
 logger = init_logger(__name__)
 
 _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES = False
@@ -858,6 +862,15 @@ def normalize_dit_input(model_type, latents, vae) -> torch.Tensor:
     else:
         raise NotImplementedError(f"model_type {model_type} not supported")
 
+def shard_latents_across_sp(latents: torch.Tensor) -> torch.Tensor:
+    sp_world_size = get_sp_world_size()
+    rank_in_sp_group = get_sp_parallel_rank()
+    if sp_world_size > 1:
+        latents = rearrange(latents,
+                            "b c (n s) h w -> b c n s h w",
+                            n=sp_world_size).contiguous()
+        latents = latents[:, :, rank_in_sp_group, :, :, :]
+    return latents
 
 def clip_grad_norm_while_handling_failing_dtensor_cases(
     parameters: torch.Tensor | list[torch.Tensor],

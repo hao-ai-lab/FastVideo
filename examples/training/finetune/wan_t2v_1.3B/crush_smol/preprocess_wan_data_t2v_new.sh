@@ -6,6 +6,7 @@ DATASET_PATH="data/crush-smol/"
 OUTPUT_DIR="data/crush-smol_processed_t2v/"
 
 torchrun --nproc_per_node=$GPU_NUM \
+    --master_port 29513 \
     -m fastvideo.pipelines.preprocess.v1_preprocessing_new \
     --model_path $MODEL_PATH \
     --mode preprocess \

@@ -374,7 +374,7 @@ class DenoisingStage(PipelineStage):
                             # fastvideo_args=fastvideo_args
                     ):
                         # Run transformer
-                        noise_pred = current_model(
+                        noise_pred = current_model( 
                             latent_model_input,
                             prompt_embeds,
                             t_expand,
@@ -382,6 +382,7 @@ class DenoisingStage(PipelineStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                         )
+                        # print(f"noise_pred = {noise_pred.sum().item():.4f}, {noise_pred.shape}, Device: {noise_pred.device}")
 
                     if batch.do_classifier_free_guidance:
                         batch.is_cfg_negative = True
