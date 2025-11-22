@@ -20,6 +20,7 @@ import fastvideo.envs as envs
 from fastvideo.attention import (DistributedAttention,
                                  LocalAttention)
 from fastvideo.configs.models.dits import WanVideoConfig
+from fastvideo.distributed import sequence_model_parallel_all_gather
 from fastvideo.distributed.parallel_state import get_sp_world_size
 from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift,
@@ -59,7 +60,7 @@ class CausalWanSelfAttention(nn.Module):
         self.max_attention_size = 32760 if local_attn_size == -1 else local_attn_size * 1560
 
         # Scaled dot product attention
-        self.attn = LocalAttention(
+        self.attn = DistributedAttention(
             num_heads=num_heads,
             head_size=self.head_dim,
             dropout_rate=0,
@@ -92,6 +93,7 @@ class CausalWanSelfAttention(nn.Module):
         roped_key = _apply_rotary_emb(k, cos, sin, is_neox_style=False).type_as(v)
 
         if kv_cache is None:
+            assert False, "should not be used"
             # Padding for flex attention
             padded_length = math.ceil(q.shape[1] / 128) * 128 - q.shape[1]
             padded_roped_query = torch.cat(
@@ -121,44 +123,82 @@ class CausalWanSelfAttention(nn.Module):
             )[:, :, :-padded_length].transpose(2, 1)
         else:
             frame_seqlen = q.shape[1]
-            current_end = current_start + roped_query.shape[1]
             sink_tokens = self.sink_size * frame_seqlen
-            # If we are using local attention and the current KV cache size is larger than the local attention size, we need to truncate the KV cache
             kv_cache_size = kv_cache["k"].shape[1]
-            num_new_tokens = roped_query.shape[1]
-            if self.local_attn_size != -1 and (current_end > kv_cache["global_end_index"].item()) and (
-                    num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size):
-                # Calculate the number of new tokens added in this step
-                # Shift existing cache content left to discard oldest tokens
-                # Clone the source slice to avoid overlapping memory error
-                num_evicted_tokens = num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
-                num_rolled_tokens = kv_cache["local_end_index"].item() - num_evicted_tokens - sink_tokens
-                kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                    kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-                kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                    kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-                # Insert the new keys/values at the end
-                local_end_index = kv_cache["local_end_index"].item() + current_end - \
-                    kv_cache["global_end_index"].item() - num_evicted_tokens
-                local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
+            sp_world_size = max(get_sp_world_size(), 1)
+            num_new_tokens = roped_query.shape[1] * sp_world_size
+            from fastvideo.distributed.parallel_state import get_sp_group
+            sp_group = get_sp_group()
+            sp_rank = sp_group.rank_in_group
+            logger.info('rank: %s, num_new_tokens: %s', sp_rank, num_new_tokens, local_main_process_only=False)
+
+            prev_global_end = kv_cache["global_end_index"].item()
+            # prev_local_end = kv_cache["local_end_index"].item()
+            prev_local_end = current_start
+            # prev_local_end = 
+            # logger.info('prev_global_end: %s, prev_local_end: %s', prev_global_end, prev_local_end)
+
+            current_end = current_start + num_new_tokens
+            logger.info('rank: %s, current_end: %s', sp_rank, current_end, local_main_process_only=False)
+
+            assert self.local_attn_size == -1, "Local attention is not supported"
+            # if self.local_attn_size != -1 and (current_end > prev_global_end) and (
+            #         num_new_tokens + prev_local_end > kv_cache_size):
+            #     num_evicted_tokens = num_new_tokens + prev_local_end - kv_cache_size
+            #     num_rolled_tokens = prev_local_end - num_evicted_tokens - sink_tokens
+            #     if num_rolled_tokens > 0:
+            #         src_slice = slice(sink_tokens + num_evicted_tokens,
+            #                           sink_tokens + num_evicted_tokens + num_rolled_tokens)
+            #         dst_slice = slice(sink_tokens, sink_tokens + num_rolled_tokens)
+            #         kv_cache["k"][:, dst_slice] = kv_cache["k"][:, src_slice].clone()
+            #         kv_cache["v"][:, dst_slice] = kv_cache["v"][:, src_slice].clone()
+            #     prev_local_end = max(sink_tokens, prev_local_end - num_evicted_tokens)
+
+            # current_end = current_start + roped_query.shape[1]
+            local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
+            local_start_index = local_end_index - num_new_tokens
+            max_history_tokens = max(self.max_attention_size - num_new_tokens, 0)
+            history_len = min(prev_local_end, max_history_tokens)
+            history_start = prev_local_end - history_len
+            logger.info('rank: %s, local_start_index: %s, local_end_index: %s', sp_rank, local_start_index, local_end_index, local_main_process_only=False)
+            logger.info('rank: %s, history_len: %s', sp_rank, history_len, local_main_process_only=False)
+            logger.info('rank: %s, history_start: %s', sp_rank, history_start, local_main_process_only=False)
+            if history_len > 0:
+                k_history = kv_cache["k"][:, history_start:history_start + history_len]
+                v_history = kv_cache["v"][:, history_start:history_start + history_len]
+                logger.info('k_history: %s, v_history: %s', k_history.shape, v_history.shape, local_main_process_only=False)
             else:
-                # Assign new keys/values directly up to current_end
-                local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
-                local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"] = kv_cache["k"].detach()
-                kv_cache["v"] = kv_cache["v"].detach()
-                # logger.info("kv_cache['k'] is in comp graph: %s", kv_cache["k"].requires_grad or kv_cache["k"].grad_fn is not None)
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
-            x = self.attn(
+                k_history = None
+                v_history = None
+
+            attn_output, _, k_new, v_new = self.attn(
                 roped_query,
-                kv_cache["k"][:, max(0, local_end_index - self.max_attention_size):local_end_index],
-                kv_cache["v"][:, max(0, local_end_index - self.max_attention_size):local_end_index]
+                roped_key,
+                v,
+                k_cache=k_history,
+                v_cache=v_history,
+                return_current_kv=True,
             )
+
+            assert k_new.shape[1] == num_new_tokens == v_new.shape[1], "New keys and values must have the same number of tokens"
+            # assert actual_new_tokens == num_new_tokens, "Actual new tokens must match expected new tokens"
+            # num_new_tokens = actual_new_tokens
+            # current_end = current_start + num_new_tokens
+
+            new_k = k_new.detach().to(kv_cache["k"].dtype)
+            new_v = v_new.detach().to(kv_cache["v"].dtype)
+
+
+            kv_cache["k"] = kv_cache["k"].detach()
+            kv_cache["v"] = kv_cache["v"].detach()
+            kv_cache["k"][:, local_start_index:local_end_index] = new_k
+            kv_cache["v"][:, local_start_index:local_end_index] = new_v
+            logger.info('rank: %s, local_start_index: %s, local_end_index: %s', sp_rank, local_start_index, local_end_index, local_main_process_only=False)
+
+            x = attn_output
             kv_cache["global_end_index"].fill_(current_end)
             kv_cache["local_end_index"].fill_(local_end_index)
+            logger.info('FINAL rank: %s, global_end_index: %s, local_end_index: %s', sp_rank, kv_cache["global_end_index"], kv_cache["local_end_index"], local_main_process_only=False)
 
         return x
 

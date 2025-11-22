@@ -67,7 +67,10 @@ class DistributedAttention(nn.Module):
         replicated_q: torch.Tensor | None = None,
         replicated_k: torch.Tensor | None = None,
         replicated_v: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        k_cache: torch.Tensor | None = None,
+        v_cache: torch.Tensor | None = None,
+        return_current_kv: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
         """Forward pass for distributed attention.
         
         Args:
@@ -103,11 +106,23 @@ class DistributedAttention(nn.Module):
         qkv = sequence_model_parallel_all_to_all_4D(qkv,
                                                     scatter_dim=2,
                                                     gather_dim=1)
+        # q = sequence_model_parallel_all_to_all_4D(q,
+        #                                             scatter_dim=2,
+        #                                             gather_dim=1)
+        # k = sequence_model_parallel_all_to_all_4D(k,
+        #                                             scatter_dim=2,
+        #                                             gather_dim=1)
+        # v = sequence_model_parallel_all_to_all_4D(v,
+        #                                             scatter_dim=2,
+        #                                             gather_dim=1)
+
+
         # Apply backend-specific preprocess_qkv
         qkv = self.attn_impl.preprocess_qkv(qkv, ctx_attn_metadata)
 
         # Concatenate with replicated QKV if provided
         if replicated_q is not None:
+            assert False, "should not be used"
             assert replicated_k is not None and replicated_v is not None
             replicated_qkv = torch.cat(
                 [replicated_q, replicated_k, replicated_v],
@@ -118,9 +133,30 @@ class DistributedAttention(nn.Module):
                                             heads_per_rank]
             qkv = torch.cat([qkv, replicated_qkv], dim=1)
 
-        q, k, v = qkv.chunk(3, dim=0)
+        q, k_new, v_new = qkv.chunk(3, dim=0)
+        logger.info(
+            f"rank: {local_rank}, k_new: {k_new.shape}, v_new: {v_new.shape}",
+            local_main_process_only=False)
+        k_total = k_new
+        v_total = v_new
 
-        output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+        if k_cache is not None or v_cache is not None:
+            assert False, "KV cache is not supported"
+            assert k_cache is not None and v_cache is not None
+            assert k_cache.shape == v_cache.shape
+            logger.info(
+                f"rank: {local_rank}, k_cache: {k_cache.shape}, v_cache: {v_cache.shape}",
+                local_main_process_only=False)
+            assert k_cache.shape[2] == v_cache.shape[2], "Number of heads must be the same"
+            if k_cache.shape[1] > 0:
+                k_total = torch.cat([k_cache, k_new], dim=1)
+                v_total = torch.cat([v_cache, v_new], dim=1)
+                assert k_total.shape == v_total.shape, "Key and value shapes must be the same"
+
+        logger.info(
+            f"rank: {local_rank}, k_total: {k_total.shape}, v_total: {v_total.shape}",
+            local_main_process_only=False)
+        output = self.attn_impl.forward(q, k_total, v_total, ctx_attn_metadata)
 
         # Redistribute back if using sequence parallelism
         replicated_output = None
@@ -136,7 +172,10 @@ class DistributedAttention(nn.Module):
         output = sequence_model_parallel_all_to_all_4D(output,
                                                        scatter_dim=1,
                                                        gather_dim=2)
-        return output, replicated_output
+        if return_current_kv:
+            return output, replicated_output, k_new, v_new # [batch_size, seq_len, num_heads/sp_world_size, head_dim]
+        else:
+            return output, replicated_output, None, None
 
 
 class DistributedAttention_VSA(DistributedAttention):
@@ -153,7 +192,8 @@ class DistributedAttention_VSA(DistributedAttention):
         replicated_k: torch.Tensor | None = None,
         replicated_v: torch.Tensor | None = None,
         gate_compress: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        **kwargs,
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
         """Forward pass for distributed attention.
         
         Args:
@@ -170,8 +210,15 @@ class DistributedAttention_VSA(DistributedAttention):
                 - o (torch.Tensor): Output tensor after attention for the main sequence
                 - replicated_o (Optional[torch.Tensor]): Output tensor for replicated tokens, if provided
         """
-        # Check text tokens are not supported for VSA now
+        k_cache = kwargs.pop("k_cache", None)
+        v_cache = kwargs.pop("v_cache", None)
+        return_current_kv = kwargs.pop("return_current_kv", False)
+        assert not kwargs, f"Unexpected kwargs for DistributedAttention_VSA: {kwargs.keys()}"
+
+        # Check unsupported features
         assert replicated_q is None and replicated_k is None and replicated_v is None, "Replicated QKV is not supported for VSA now"
+        assert not return_current_kv, "return_current_kv is not supported for VSA attention"
+        assert k_cache is None and v_cache is None, "KV cache is not supported for VSA attention"
         # Check input shapes
         assert q.dim() == 4 and k.dim() == 4 and v.dim(
         ) == 4, "Expected 4D tensors"
@@ -203,7 +250,7 @@ class DistributedAttention_VSA(DistributedAttention):
         output = sequence_model_parallel_all_to_all_4D(output,
                                                        scatter_dim=1,
                                                        gather_dim=2)
-        return output, replicated_output
+        return output, replicated_output, None, None
 
 
 class LocalAttention(nn.Module):

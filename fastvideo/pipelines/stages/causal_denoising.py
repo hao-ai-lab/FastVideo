@@ -248,6 +248,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                     current_latents = rearrange(current_latents,
                                                 "b c (n t) h w -> b c n t h w",
                                                 n=sp_world_size).contiguous()
+                    logger.info(f"rearranged latents shape: {current_latents.shape}")
                     current_latents = current_latents[:, :,
                                                       rank_in_sp_group, :, :, :]
                     logger.info(
@@ -257,8 +258,10 @@ class CausalDMDDenosingStage(DenoisingStage):
                 frames_per_rank = (
                     current_num_frames //
                     sp_world_size) if sp_group else current_num_frames
+                # logger.info(f"frames_per_rank: {frames_per_rank}")
                 rank_offset_frames = (rank_in_sp_group *
                                       frames_per_rank) if sp_group else 0
+                # logger.info(f"rank {rank_in_sp_group} rank_offset_frames: {rank_offset_frames}", local_main_process_only=False)
                 # use BTCHW for DMD conversion routines
                 noise_latents_btchw = current_latents.permute(0, 2, 1, 3, 4)
                 video_raw_latent_shape = noise_latents_btchw.shape
@@ -320,16 +323,16 @@ class CausalDMDDenosingStage(DenoisingStage):
                             (latent_model_input.shape[0], 1),
                             device=latent_model_input.device,
                             dtype=torch.long)
+                        assert current_model is not None, "current_model is not initialized"
                         pred_noise_btchw = current_model(
                             latent_model_input,
                             prompt_embeds,
                             t_expanded_noise,
                             kv_cache=_get_kv_cache(t_cur),
                             crossattn_cache=crossattn_cache,
-                            current_start=(pos_start_base + start_index + rank_offset_frames) *
+                            current_start=(pos_start_base + start_index) *
                             self.frame_seq_length,
-                            start_frame=pos_start_base + start_index +
-                            rank_offset_frames,
+                            start_frame=start_index,
                             **image_kwargs,
                             **pos_cond_kwargs,
                         ).permute(0, 2, 1, 3, 4)
@@ -415,7 +418,10 @@ class CausalDMDDenosingStage(DenoisingStage):
                 t_context = torch.ones([latents.shape[0]],
                                        device=latents.device,
                                        dtype=torch.long) * int(context_noise)
-                # context_bcthw = current_latents.to(target_dtype)
+                context_bcthw = current_latents.to(target_dtype)
+                # context_frame_start = (pos_start_base + start_index)
+                # context_token_start = context_frame_start * self.frame_seq_length
+
                 with torch.autocast(device_type="cuda",
                                     dtype=target_dtype,
                                     enabled=autocast_enabled), \
@@ -425,6 +431,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                     t_expanded_context = t_context.unsqueeze(1)
 
                     if boundary_timestep is not None:
+                        assert self.transformer_2 is not None, "transformer_2 is not initialized"
                         self.transformer_2(
                             context_bcthw,
                             prompt_embeds,
@@ -444,10 +451,9 @@ class CausalDMDDenosingStage(DenoisingStage):
                         t_expanded_context,
                         kv_cache=kv_cache1,
                         crossattn_cache=crossattn_cache,
-                        current_start=(pos_start_base + start_index + rank_offset_frames) *
+                        current_start=(pos_start_base + start_index) *
                         self.frame_seq_length,
-                        start_frame=pos_start_base + start_index +
-                        rank_offset_frames,
+                        start_frame=start_index,
                         **image_kwargs,
                         **pos_cond_kwargs,
                     )
@@ -467,6 +473,9 @@ class CausalDMDDenosingStage(DenoisingStage):
         """
         kv_cache1 = []
         num_attention_heads = self.transformer.num_attention_heads
+        sp_world_size = get_sp_world_size()
+        assert num_attention_heads % max(sp_world_size, 1) == 0, "num_attention_heads must be divisible by sp_world_size"
+        heads_per_rank = num_attention_heads // max(sp_world_size, 1)
         attention_head_dim = self.transformer.attention_head_dim
         if self.local_attn_size != -1:
             kv_cache_size = self.local_attn_size * self.frame_seq_length
@@ -477,14 +486,14 @@ class CausalDMDDenosingStage(DenoisingStage):
             kv_cache1.append({
                 "k":
                 torch.zeros([
-                    batch_size, kv_cache_size, num_attention_heads,
+                    batch_size, kv_cache_size, heads_per_rank,
                     attention_head_dim
                 ],
                             dtype=dtype,
                             device=device),
                 "v":
                 torch.zeros([
-                    batch_size, kv_cache_size, num_attention_heads,
+                    batch_size, kv_cache_size, heads_per_rank,
                     attention_head_dim
                 ],
                             dtype=dtype,

@@ -20,7 +20,7 @@ def main():
     )
 
     sampling_param = SamplingParam.from_pretrained(model_name)
-    sampling_param.num_frames = 77
+    sampling_param.num_frames = 13
     prompt = (
         "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
         "wide with interest. The playful yet serene atmosphere is complemented by soft "
