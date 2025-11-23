@@ -93,7 +93,6 @@ class CausalWanSelfAttention(nn.Module):
         roped_key = _apply_rotary_emb(k, cos, sin, is_neox_style=False).type_as(v)
 
         if kv_cache is None:
-            assert False, "should not be used"
             # Padding for flex attention
             padded_length = math.ceil(q.shape[1] / 128) * 128 - q.shape[1]
             padded_roped_query = torch.cat(
@@ -127,19 +126,10 @@ class CausalWanSelfAttention(nn.Module):
             kv_cache_size = kv_cache["k"].shape[1]
             sp_world_size = max(get_sp_world_size(), 1)
             num_new_tokens = roped_query.shape[1] * sp_world_size
-            from fastvideo.distributed.parallel_state import get_sp_group
-            sp_group = get_sp_group()
-            sp_rank = sp_group.rank_in_group
-            logger.info('rank: %s, num_new_tokens: %s', sp_rank, num_new_tokens, local_main_process_only=False)
 
-            # prev_global_end = kv_cache["global_end_index"].item()
-            # prev_local_end = kv_cache["local_end_index"].item()
             prev_local_end = current_start
-            # prev_local_end = 
-            # logger.info('prev_global_end: %s, prev_local_end: %s', prev_global_end, prev_local_end)
 
             current_end = current_start + num_new_tokens
-            logger.info('rank: %s, current_end: %s', sp_rank, current_end, local_main_process_only=False)
 
             assert self.local_attn_size == -1, "Local attention is not supported"
             # if self.local_attn_size != -1 and (current_end > prev_global_end) and (
@@ -160,13 +150,9 @@ class CausalWanSelfAttention(nn.Module):
             max_history_tokens = max(self.max_attention_size - num_new_tokens, 0)
             history_len = min(prev_local_end, max_history_tokens)
             history_start = prev_local_end - history_len
-            logger.info('rank: %s, local_start_index: %s, local_end_index: %s', sp_rank, local_start_index, local_end_index, local_main_process_only=False)
-            logger.info('rank: %s, history_len: %s', sp_rank, history_len, local_main_process_only=False)
-            logger.info('rank: %s, history_start: %s', sp_rank, history_start, local_main_process_only=False)
             if history_len > 0:
                 k_history = kv_cache["k"][:, history_start:history_start + history_len]
                 v_history = kv_cache["v"][:, history_start:history_start + history_len]
-                logger.info('k_history: %s, v_history: %s', k_history.shape, v_history.shape, local_main_process_only=False)
             else:
                 k_history = None
                 v_history = None
@@ -193,12 +179,10 @@ class CausalWanSelfAttention(nn.Module):
             kv_cache["v"] = kv_cache["v"].detach()
             kv_cache["k"][:, local_start_index:local_end_index] = new_k
             kv_cache["v"][:, local_start_index:local_end_index] = new_v
-            logger.info('rank: %s, local_start_index: %s, local_end_index: %s', sp_rank, local_start_index, local_end_index, local_main_process_only=False)
 
             x = attn_output
             kv_cache["global_end_index"].fill_(current_end)
             kv_cache["local_end_index"].fill_(local_end_index)
-            logger.info('FINAL rank: %s, global_end_index: %s, local_end_index: %s', sp_rank, kv_cache["global_end_index"], kv_cache["local_end_index"], local_main_process_only=False)
 
         return x
 

@@ -121,9 +121,6 @@ class DistributedAttention(nn.Module):
             qkv = torch.cat([qkv, replicated_qkv], dim=1)
 
         q, k_new, v_new = qkv.chunk(3, dim=0)
-        logger.info(
-            f"rank: {local_rank}, k_new: {k_new.shape}, v_new: {v_new.shape}",
-            local_main_process_only=False)
         k_total = k_new
         v_total = v_new
 
@@ -131,9 +128,6 @@ class DistributedAttention(nn.Module):
             # assert False, "KV cache is not supported"
             assert k_cache is not None and v_cache is not None
             assert k_cache.shape == v_cache.shape
-            logger.info(
-                f"rank: {local_rank}, k_cache: {k_cache.shape}, v_cache: {v_cache.shape}",
-                local_main_process_only=False)
             assert k_cache.shape[2] == v_cache.shape[
                 2], "Number of heads must be the same"
             if k_cache.shape[1] > 0:

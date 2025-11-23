@@ -12,7 +12,7 @@ def main():
     generator = VideoGenerator.from_pretrained(
         model_name,
         # FastVideo will automatically handle distributed setup
-        num_gpus=2,
+        num_gpus=4,
         use_fsdp_inference=True,
         text_encoder_cpu_offload=False,
         dit_cpu_offload=False,
@@ -28,7 +28,7 @@ def main():
         "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
     )
     video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, sampling_param=sampling_param)
-    return
+    # return
     import time
     start_time = time.perf_counter()
     for i in range(10):
