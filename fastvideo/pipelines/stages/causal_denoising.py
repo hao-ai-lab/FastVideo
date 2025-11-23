@@ -222,46 +222,38 @@ class CausalDMDDenosingStage(DenoisingStage):
             block_sizes.pop(0)
             latents[:, :, :1, :, :] = first_frame_latent
 
+        # Setup noise generator for SP
+        sp_world_size = get_sp_world_size()
+        sp_rank = get_sp_parallel_rank()
+        sp_group = sp_world_size > 1
+        noise_generator = batch.generator[0] if isinstance(
+            batch.generator, list) else batch.generator
+
+        if sp_group:
+            try:
+                # Use initial_seed + rank to ensure diversity across ranks
+                seed = noise_generator.initial_seed()
+                noise_generator = torch.Generator(
+                    device=noise_generator.device).manual_seed(seed + sp_rank)
+            except Exception as e:
+                logger.warning(f"Could not create rank-specific generator: {e}")
+
         # DMD loop in causal blocks
         with self.progress_bar(total=len(block_sizes) *
                                len(timesteps)) as progress_bar:
             for idx, current_num_frames in enumerate(block_sizes):
-                logger.info("================================================")
-                logger.info(f"Block {idx}")
-                logger.info("================================================")
-                logger.info(f"Current num frames: {current_num_frames}")
-                logger.info(
-                    f"Processing block {start_index} to {start_index + current_num_frames}"
-                )
-                logger.info(f"Latents shape: {latents.shape}")
                 current_latents = latents[:, :, start_index:start_index +
                                           current_num_frames, :, :]
 
                 sp_world_size, rank_in_sp_group = get_sp_world_size(
                 ), get_sp_parallel_rank()
                 sp_group = sp_world_size > 1
-                # logger.info(f"SP group: {sp_group}")
-                logger.info(
-                    f"before SP: Current latents shape: {current_latents.shape}"
-                )
                 if sp_group:
                     current_latents = rearrange(current_latents,
                                                 "b c (n t) h w -> b c n t h w",
                                                 n=sp_world_size).contiguous()
-                    logger.info(f"rearranged latents shape: {current_latents.shape}")
                     current_latents = current_latents[:, :,
                                                       rank_in_sp_group, :, :, :]
-                    logger.info(
-                        f"after SP: Current latents shape: {current_latents.shape}"
-                    )
-                # Per-rank temporal offset (in frames) within this block when using SP
-                frames_per_rank = (
-                    current_num_frames //
-                    sp_world_size) if sp_group else current_num_frames
-                # logger.info(f"frames_per_rank: {frames_per_rank}")
-                rank_offset_frames = (rank_in_sp_group *
-                                      frames_per_rank) if sp_group else 0
-                # logger.info(f"rank {rank_in_sp_group} rank_offset_frames: {rank_offset_frames}", local_main_process_only=False)
                 # use BTCHW for DMD conversion routines
                 noise_latents_btchw = current_latents.permute(0, 2, 1, 3, 4)
                 video_raw_latent_shape = noise_latents_btchw.shape
@@ -360,12 +352,10 @@ class CausalDMDDenosingStage(DenoisingStage):
                             [1],
                             dtype=torch.long,
                             device=pred_video_btchw.device)
-                        noise = torch.randn(
-                            video_raw_latent_shape,
-                            dtype=pred_video_btchw.dtype,
-                            generator=(batch.generator[0] if isinstance(
-                                batch.generator, list) else
-                                       batch.generator)).to(self.device)
+                        noise = torch.randn(video_raw_latent_shape,
+                                            dtype=pred_video_btchw.dtype,
+                                            generator=noise_generator).to(
+                                                self.device)
                         noise_btchw = noise
                         if boundary_timestep is not None and i < len(
                                 high_noise_timesteps) - 1:
@@ -393,25 +383,6 @@ class CausalDMDDenosingStage(DenoisingStage):
                     if progress_bar is not None:
                         progress_bar.update()
 
-                # Write back and advance
-                logger.info(
-                    f"before all gather: Current latents shape: {current_latents.shape}"
-                )
-                context_bcthw = current_latents.clone().to(target_dtype)
-                if sp_group:
-                    current_latents = sequence_model_parallel_all_gather(
-                        current_latents, dim=2)
-                    logger.info(
-                        f"after all gather: Current latents shape: {current_latents.shape}"
-                    )
-                logger.info(
-                    f"start_index: {start_index}, current_num_frames: {current_num_frames}"
-                )
-                logger.info(
-                    f"before write back: Latents shape: {latents.shape}")
-                latents[:, :, start_index:start_index +
-                        current_num_frames, :, :] = current_latents
-                logger.info(f"after write back: Latents shape: {latents.shape}")
                 # Re-run with context timestep to update KV cache using clean context
                 context_noise = getattr(fastvideo_args.pipeline_config,
                                         "context_noise", 0)
@@ -419,8 +390,6 @@ class CausalDMDDenosingStage(DenoisingStage):
                                        device=latents.device,
                                        dtype=torch.long) * int(context_noise)
                 context_bcthw = current_latents.to(target_dtype)
-                # context_frame_start = (pos_start_base + start_index)
-                # context_token_start = context_frame_start * self.frame_seq_length
 
                 with torch.autocast(device_type="cuda",
                                     dtype=target_dtype,
@@ -458,6 +427,13 @@ class CausalDMDDenosingStage(DenoisingStage):
                         **pos_cond_kwargs,
                     )
 
+                if sp_group:
+                    current_latents = sequence_model_parallel_all_gather(
+                        current_latents, dim=2)
+
+                # Write back and advance
+                latents[:, :, start_index:start_index +
+                        current_num_frames, :, :] = current_latents
                 start_index += current_num_frames
 
         if boundary_timestep is not None:
@@ -474,7 +450,9 @@ class CausalDMDDenosingStage(DenoisingStage):
         kv_cache1 = []
         num_attention_heads = self.transformer.num_attention_heads
         sp_world_size = get_sp_world_size()
-        assert num_attention_heads % max(sp_world_size, 1) == 0, "num_attention_heads must be divisible by sp_world_size"
+        assert num_attention_heads % max(
+            sp_world_size,
+            1) == 0, "num_attention_heads must be divisible by sp_world_size"
         heads_per_rank = num_attention_heads // max(sp_world_size, 1)
         attention_head_dim = self.transformer.attention_head_dim
         if self.local_attn_size != -1:

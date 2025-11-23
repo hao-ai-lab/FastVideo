@@ -70,7 +70,8 @@ class DistributedAttention(nn.Module):
         k_cache: torch.Tensor | None = None,
         v_cache: torch.Tensor | None = None,
         return_current_kv: bool = False,
-    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None,
+               torch.Tensor | None]:
         """Forward pass for distributed attention.
         
         Args:
@@ -97,32 +98,18 @@ class DistributedAttention(nn.Module):
         ctx_attn_metadata = forward_context.attn_metadata
 
         # Stack QKV
-        logger.info(
-            f"rank: {local_rank}, q: {q.shape}, k: {k.shape}, v: {v.shape}",
-            local_main_process_only=False)
         qkv = torch.cat([q, k, v], dim=0)  # [3, seq_len, num_heads, head_dim]
 
         # Redistribute heads across sequence dimension
         qkv = sequence_model_parallel_all_to_all_4D(qkv,
                                                     scatter_dim=2,
                                                     gather_dim=1)
-        # q = sequence_model_parallel_all_to_all_4D(q,
-        #                                             scatter_dim=2,
-        #                                             gather_dim=1)
-        # k = sequence_model_parallel_all_to_all_4D(k,
-        #                                             scatter_dim=2,
-        #                                             gather_dim=1)
-        # v = sequence_model_parallel_all_to_all_4D(v,
-        #                                             scatter_dim=2,
-        #                                             gather_dim=1)
-
 
         # Apply backend-specific preprocess_qkv
         qkv = self.attn_impl.preprocess_qkv(qkv, ctx_attn_metadata)
 
         # Concatenate with replicated QKV if provided
         if replicated_q is not None:
-            assert False, "should not be used"
             assert replicated_k is not None and replicated_v is not None
             replicated_qkv = torch.cat(
                 [replicated_q, replicated_k, replicated_v],
@@ -141,21 +128,19 @@ class DistributedAttention(nn.Module):
         v_total = v_new
 
         if k_cache is not None or v_cache is not None:
-            assert False, "KV cache is not supported"
+            # assert False, "KV cache is not supported"
             assert k_cache is not None and v_cache is not None
             assert k_cache.shape == v_cache.shape
             logger.info(
                 f"rank: {local_rank}, k_cache: {k_cache.shape}, v_cache: {v_cache.shape}",
                 local_main_process_only=False)
-            assert k_cache.shape[2] == v_cache.shape[2], "Number of heads must be the same"
+            assert k_cache.shape[2] == v_cache.shape[
+                2], "Number of heads must be the same"
             if k_cache.shape[1] > 0:
                 k_total = torch.cat([k_cache, k_new], dim=1)
                 v_total = torch.cat([v_cache, v_new], dim=1)
                 assert k_total.shape == v_total.shape, "Key and value shapes must be the same"
 
-        logger.info(
-            f"rank: {local_rank}, k_total: {k_total.shape}, v_total: {v_total.shape}",
-            local_main_process_only=False)
         output = self.attn_impl.forward(q, k_total, v_total, ctx_attn_metadata)
 
         # Redistribute back if using sequence parallelism
@@ -166,6 +151,7 @@ class DistributedAttention(nn.Module):
             # TODO: make this asynchronous
             replicated_output = sequence_model_parallel_all_gather(
                 replicated_output.contiguous(), dim=2)
+
         # Apply backend-specific postprocess_output
         output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
 
@@ -173,7 +159,7 @@ class DistributedAttention(nn.Module):
                                                        scatter_dim=1,
                                                        gather_dim=2)
         if return_current_kv:
-            return output, replicated_output, k_new, v_new # [batch_size, seq_len, num_heads/sp_world_size, head_dim]
+            return output, replicated_output, k_new, v_new  # [batch_size, seq_len, num_heads/sp_world_size, head_dim]
         else:
             return output, replicated_output, None, None
 
@@ -193,7 +179,8 @@ class DistributedAttention_VSA(DistributedAttention):
         replicated_v: torch.Tensor | None = None,
         gate_compress: torch.Tensor | None = None,
         **kwargs,
-    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None,
+               torch.Tensor | None]:
         """Forward pass for distributed attention.
         
         Args:

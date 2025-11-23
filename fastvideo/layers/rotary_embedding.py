@@ -431,6 +431,7 @@ def get_rotary_pos_embed(
     shard_dim: int = 0,
     dtype: torch.dtype = torch.float32,
     start_frame: int = 0,
+    use_sp_shard: bool = True,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Generate rotary positional embeddings for the given sizes.
@@ -444,6 +445,8 @@ def get_rotary_pos_embed(
         theta_rescale_factor: Rescale factor for theta. Defaults to 1.0
         interpolation_factor: Factor to scale positions. Defaults to 1.0
         shard_dim: Which dimension to shard for sequence parallelism. Defaults to 0.
+        use_sp_shard: Whether to shard rotary embeddings for SP. Defaults to True.
+                      Set to False for Ulysses SP where all-to-all gives each rank the full sequence.
         
     Returns:
         Tuple of (cos, sin) tensors for rotary embeddings
@@ -463,6 +466,15 @@ def get_rotary_pos_embed(
     sp_group = get_sp_group()
     sp_rank = sp_group.rank_in_group
     sp_world_size = sp_group.world_size
+
+    # For Ulysses SP, don't shard rotary embeddings
+    if not use_sp_shard:
+        sp_rank = 0
+        sp_world_size = 1
+
+    logger.info(
+        f"sp_rank: {sp_rank}, sp_world_size: {sp_world_size}, use_sp_shard: {use_sp_shard}",
+        local_main_process_only=False)
 
     freqs_cos, freqs_sin = get_nd_rotary_pos_embed(
         rope_dim_list,
