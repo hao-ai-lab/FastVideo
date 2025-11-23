@@ -89,25 +89,6 @@ class CausalWanSelfAttention(nn.Module):
             cache_start = current_start
 
         cos, sin = freqs_cis
-        
-        # For Ulysses SP, slice rotary embeddings to match local sequence portion
-        # Each rank has a portion of the sequence, but freqs_cis is for the full sequence
-        from fastvideo.distributed.parallel_state import get_sp_group
-        sp_group = get_sp_group()
-        sp_world_size = sp_group.world_size
-        if sp_world_size > 1:
-            # Calculate this rank's slice of the sequence
-            local_seq_len = q.shape[1]  # sequence length on this rank
-            total_seq_len = local_seq_len * sp_world_size
-            rank_in_sp_group = sp_group.rank_in_group
-            start_idx = rank_in_sp_group * local_seq_len
-            end_idx = start_idx + local_seq_len
-            
-            # Slice the rotary embeddings to match local sequence
-            cos = cos[start_idx:end_idx]
-            sin = sin[start_idx:end_idx]
-            logger.info(f'rank: {rank_in_sp_group}, slicing RoPE from {start_idx}:{end_idx}, local_seq_len: {local_seq_len}', local_main_process_only=False)
-        
         roped_query = _apply_rotary_emb(q, cos, sin, is_neox_style=False).type_as(v)
         roped_key = _apply_rotary_emb(k, cos, sin, is_neox_style=False).type_as(v)
 
@@ -542,7 +523,7 @@ class CausalWanTransformer3DModel(BaseDiT):
             dtype=torch.float32 if current_platform.is_mps() else torch.float64,
             rope_theta=10000,
             start_frame=start_frame, # Assume that start_frame is 0 when kv_cache is None
-            use_sp_shard=False  # Don't shard rotary embeddings for Ulysses SP
+            # use_sp_shard=False  # Don't shard rotary embeddings for Ulysses SP
         )
         freqs_cos = freqs_cos.to(hidden_states.device)
         freqs_sin = freqs_sin.to(hidden_states.device)
