@@ -33,7 +33,10 @@ def broadcast(tensors: list[torch.Tensor], dim: int = -1) -> torch.Tensor:
     expanded_dims = [(t[0], (t[1], ) * num_tensors) for t in max_dims]
     expanded_dims.insert(dim, (dim, dims[dim]))
     expandable_shapes = list(zip(*[t[1] for t in expanded_dims], strict=False))
-    tensors = [t[0].expand(*t[1]) for t in zip(tensors, expandable_shapes, strict=False)]
+    tensors = [
+        t[0].expand(*t[1])
+        for t in zip(tensors, expandable_shapes, strict=False)
+    ]
 
     return torch.cat(tensors, dim=dim)
 
