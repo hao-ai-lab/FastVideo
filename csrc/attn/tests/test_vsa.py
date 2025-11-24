@@ -34,16 +34,16 @@ def pytorch_test(Q, K, V, block_sparse_mask, dO):
     )
 
 
-def block_sparse_kernel_test(Q, K, V, block_sparse_mask, variable_block_sizes, non_pad_index, dO):
+def block_sparse_kernel_test(Q, K, V, block_sparse_mask, variable_block_sizes, q_non_pad_index, kv_non_pad_index, q_num_blocks, kv_num_blocks, dO):
     Q = Q.detach().requires_grad_()
     K = K.detach().requires_grad_()
     V = V.detach().requires_grad_()
     
-    q_padded = vsa_pad(Q, non_pad_index, variable_block_sizes.shape[0], BLOCK_M)
-    k_padded = vsa_pad(K, non_pad_index, variable_block_sizes.shape[0], BLOCK_M)
-    v_padded = vsa_pad(V, non_pad_index, variable_block_sizes.shape[0], BLOCK_M)
+    q_padded = vsa_pad(Q, q_non_pad_index, q_num_blocks, BLOCK_M)
+    k_padded = vsa_pad(K, kv_non_pad_index, kv_num_blocks, BLOCK_M)
+    v_padded = vsa_pad(V, kv_non_pad_index, kv_num_blocks, BLOCK_M)
     output, _= block_sparse_attn(q_padded, k_padded, v_padded, block_sparse_mask, variable_block_sizes)
-    output = output[:, :, non_pad_index, :]
+    output = output[:, :, q_non_pad_index, :]
     output.backward(dO)
     return output, Q.grad, K.grad, V.grad
 
@@ -86,19 +86,21 @@ def check_correctness(h, d, num_blocks, k,  num_iterations=20, error_mode='all')
     S = int(variable_block_sizes.sum().item())
     padded_S = num_blocks * BLOCK_M
     non_pad_index = get_non_pad_index(variable_block_sizes, num_blocks, BLOCK_M)
-    block_mask = generate_block_sparse_mask_for_function(h, num_blocks, k, device)
-    full_mask = create_full_mask_from_block_mask(block_mask, variable_block_sizes, device)
+    block_mask = generate_block_sparse_mask_for_function(h, num_blocks, num_blocks, k, device)
+    full_mask = create_full_mask_from_block_mask(block_mask, variable_block_sizes, variable_block_sizes, device)
     for _ in range(num_iterations):
         Q = generate_tensor((1, h, S, d),  torch.bfloat16, device)
         K = generate_tensor((1, h, S, d), torch.bfloat16, device)
         V = generate_tensor((1, h, S, d),  torch.bfloat16, device)
         dO = generate_tensor((1, h, S, d), torch.bfloat16, device)
+        
+        print(Q.shape, K.shape, V.shape, dO.shape)
 
         # dO_padded = torch.zeros_like(dO_padded)
         # dO_padded[:, :, non_pad_index, :] = dO
 
         pt_o, pt_qg, pt_kg, pt_vg = pytorch_test(Q, K, V, full_mask, dO)
-        bs_o, bs_qg, bs_kg, bs_vg = block_sparse_kernel_test(Q, K, V, block_mask.unsqueeze(0), variable_block_sizes,non_pad_index, dO)
+        bs_o, bs_qg, bs_kg, bs_vg = block_sparse_kernel_test(Q, K, V, block_mask.unsqueeze(0), variable_block_sizes, non_pad_index, non_pad_index, num_blocks, num_blocks, dO)
         for name, (pt, bs) in zip(['gQ', 'gK', 'gV', 'gO'], [(pt_qg, bs_qg), (pt_kg, bs_kg), (pt_vg, bs_vg), (pt_o, bs_o)]):
             if bs is not None:
                 diff = pt - bs
@@ -112,6 +114,60 @@ def check_correctness(h, d, num_blocks, k,  num_iterations=20, error_mode='all')
 
     total_elements = h * S * d * num_iterations
     for name, data in results.items():
+        avg_diff = data['sum_diff'] / total_elements
+        max_diff = data['max_diff']
+        results[name] = {'avg_diff': avg_diff, 'max_diff': max_diff}
+
+    return results
+
+def check_correctness_qkdiff(h, d, num_q_blocks, num_kv_blocks, k, num_iterations=20, error_mode='all'):
+    results = {
+        'gO': {'sum_diff': 0.0, 'sum_abs': 0.0, 'max_diff': 0.0},
+        'gQ': {'sum_diff': 0.0, 'sum_abs': 0.0, 'max_diff': 0.0},
+        'gK': {'sum_diff': 0.0, 'sum_abs': 0.0, 'max_diff': 0.0},
+        'gV': {'sum_diff': 0.0, 'sum_abs': 0.0, 'max_diff': 0.0},
+    }
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    q_variable_block_sizes = generate_variable_block_sizes(num_q_blocks, device=device)
+    kv_variable_block_sizes = generate_variable_block_sizes(num_kv_blocks, device=device)
+    
+    S_q = int(q_variable_block_sizes.sum().item())
+    S_kv = int(kv_variable_block_sizes.sum().item())
+    
+    q_non_pad_index = get_non_pad_index(q_variable_block_sizes, num_q_blocks, BLOCK_M)
+    kv_non_pad_index = get_non_pad_index(kv_variable_block_sizes, num_kv_blocks, BLOCK_M)
+    
+    block_mask = generate_block_sparse_mask_for_function(h, num_q_blocks, num_kv_blocks, k, device)
+    full_mask = create_full_mask_from_block_mask(block_mask, q_variable_block_sizes, kv_variable_block_sizes, device)
+    
+    for _ in range(num_iterations):
+        Q = generate_tensor((1, h, S_q, d),  torch.bfloat16, device)
+        K = generate_tensor((1, h, S_kv, d), torch.bfloat16, device)
+        V = generate_tensor((1, h, S_kv, d),  torch.bfloat16, device)
+        dO = generate_tensor((1, h, S_q, d), torch.bfloat16, device)
+        
+        print(Q.shape, K.shape, V.shape, dO.shape)
+
+        pt_o, pt_qg, pt_kg, pt_vg = pytorch_test(Q, K, V, full_mask, dO)
+        bs_o, bs_qg, bs_kg, bs_vg = block_sparse_kernel_test(Q, K, V, block_mask.unsqueeze(0), kv_variable_block_sizes, q_non_pad_index, kv_non_pad_index, num_q_blocks, num_kv_blocks, dO)
+        
+        for name, (pt, bs) in zip(['gQ', 'gK', 'gV', 'gO'], [(pt_qg, bs_qg), (pt_kg, bs_kg), (pt_vg, bs_vg), (pt_o, bs_o)]):
+            if bs is not None:
+                diff = pt - bs
+                abs_diff = torch.abs(diff)
+                results[name]['sum_diff'] += torch.sum(abs_diff).item()
+                results[name]['sum_abs'] += torch.sum(torch.abs(pt)).item()
+                rel_max_diff = torch.max(abs_diff) / torch.mean(torch.abs(pt))
+                results[name]['max_diff'] = max(results[name]['max_diff'], rel_max_diff.item())
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    total_elements_q = h * S_q * d * num_iterations
+    total_elements_kv = h * S_kv * d * num_iterations
+    
+    for name, data in results.items():
+        total_elements = total_elements_q if name in ['gQ', 'gO'] else total_elements_kv
         avg_diff = data['sum_diff'] / total_elements
         max_diff = data['max_diff']
         results[name] = {'avg_diff': avg_diff, 'max_diff': max_diff}
@@ -147,10 +203,41 @@ def generate_error_graphs(h, d, error_mode='all'):
 
     print("-" * 150)
 
+def generate_error_graphs_qkdiff(h, d, error_mode='all'):
+    test_configs = [
+        {"num_q_blocks": 16, "num_kv_blocks": 32, "k": 2, "description": "Small Q, Med KV"},
+        {"num_q_blocks": 32, "num_kv_blocks": 16, "k": 4, "description": "Med Q, Small KV"},
+        {"num_q_blocks": 53, "num_kv_blocks": 32, "k": 6, "description": "Large Q, Med KV"},
+    ]
+    
+    print(f"\nError Analysis (QK Diff) for h={h}, d={d}, mode={error_mode}")
+    print("=" * 150)
+    print(f"{'Config':<20} {'Q Blks':<8} {'KV Blks':<8} {'K':<4} "
+          f"{'gQ Avg':<12} {'Rel gQ Max':<12} "
+          f"{'gK Avg':<12} {'Rel gK Max':<12} "
+          f"{'gV Avg':<12} {'Rel gV Max':<12} "
+          f"{'gO Avg':<12} {'Rel gO Max':<12}")
+    print("-" * 150)
+
+    for config in test_configs:
+        num_q_blocks = config["num_q_blocks"]
+        num_kv_blocks = config["num_kv_blocks"]
+        k = config["k"]
+        description = config["description"]
+        results = check_correctness_qkdiff(h, d, num_q_blocks, num_kv_blocks, k, error_mode=error_mode)
+        print(f"{description:<20} {num_q_blocks:<8} {num_kv_blocks:<8} {k:<4} "
+              f"{results['gQ']['avg_diff']:<12.6e} {results['gQ']['max_diff']:<12.6e} "
+              f"{results['gK']['avg_diff']:<12.6e} {results['gK']['max_diff']:<12.6e} "
+              f"{results['gV']['avg_diff']:<12.6e} {results['gV']['max_diff']:<12.6e} "
+              f"{results['gO']['avg_diff']:<12.6e} {results['gO']['max_diff']:<12.6e}")
+
+    print("-" * 150)
+
 if __name__ == "__main__":
     h, d = 16, 128
     print("Block Sparse Attention with Variable Block Sizes Analysis")
     print("=" * 60)
     for mode in ['backward']:
         generate_error_graphs(h, d, error_mode=mode)
+        generate_error_graphs_qkdiff(h, d, error_mode=mode)
     print("\nAnalysis completed for all modes.")
