@@ -16,24 +16,25 @@ def broadcast(tensors: list[torch.Tensor], dim: int = -1) -> torch.Tensor:
     """
     num_tensors = len(tensors)
     shape_lens = set(len(t.shape) for t in tensors)
-    assert len(shape_lens) == 1, "tensors must all have the same number of dimensions"
-    
+    assert len(
+        shape_lens) == 1, "tensors must all have the same number of dimensions"
+
     shape_len = list(shape_lens)[0]
     dim = (dim + shape_len) if dim < 0 else dim
-    
-    dims = list(zip(*[list(t.shape) for t in tensors]))
+
+    dims = list(zip(*[list(t.shape) for t in tensors], strict=False))
     expandable_dims = [(i, val) for i, val in enumerate(dims) if i != dim]
-    
+
     assert all(
-        len(set(t[1])) <= 2 for t in expandable_dims
-    ), "invalid dimensions for broadcastable concatenation"
-    
+        len(set(t[1])) <= 2 for t in
+        expandable_dims), "invalid dimensions for broadcastable concatenation"
+
     max_dims = [(t[0], max(t[1])) for t in expandable_dims]
-    expanded_dims = [(t[0], (t[1],) * num_tensors) for t in max_dims]
+    expanded_dims = [(t[0], (t[1], ) * num_tensors) for t in max_dims]
     expanded_dims.insert(dim, (dim, dims[dim]))
-    expandable_shapes = list(zip(*[t[1] for t in expanded_dims]))
-    tensors = [t[0].expand(*t[1]) for t in zip(tensors, expandable_shapes)]
-    
+    expandable_shapes = list(zip(*[t[1] for t in expanded_dims], strict=False))
+    tensors = [t[0].expand(*t[1]) for t in zip(tensors, expandable_shapes, strict=False)]
+
     return torch.cat(tensors, dim=dim)
 
 
@@ -69,7 +70,7 @@ class RotaryPositionalEmbedding3D(nn.Module):
         self.head_dim = head_dim
         assert self.head_dim % 8 == 0, "head_dim must be a multiple of 8 for 3D RoPE"
         self.base = base
-        
+
         # Cache for precomputed frequencies
         self.freqs_dict: dict[tuple, torch.Tensor] = {}
 
@@ -83,7 +84,8 @@ class RotaryPositionalEmbedding3D(nn.Module):
         if grid_size not in self.freqs_dict:
             self.freqs_dict[grid_size] = self.precompute_freqs_3d(grid_size)
 
-    def precompute_freqs_3d(self, grid_size: tuple[int, int, int]) -> torch.Tensor:
+    def precompute_freqs_3d(self, grid_size: tuple[int, int,
+                                                   int]) -> torch.Tensor:
         """
         Precompute 3D rotary frequencies.
         
@@ -94,39 +96,36 @@ class RotaryPositionalEmbedding3D(nn.Module):
             freqs: [T*H*W, head_dim] tensor of frequencies
         """
         num_frames, height, width = grid_size
-        
+
         # Split head_dim across 3 dimensions
         # Temporal gets the remainder to ensure exact division
         dim_t = self.head_dim - 4 * (self.head_dim // 6)
         dim_h = 2 * (self.head_dim // 6)
         dim_w = 2 * (self.head_dim // 6)
-        
+
         # Compute frequency bands for each dimension
-        freqs_t = 1.0 / (
-            self.base ** (torch.arange(0, dim_t, 2)[: (dim_t // 2)].float() / dim_t)
-        )
-        freqs_h = 1.0 / (
-            self.base ** (torch.arange(0, dim_h, 2)[: (dim_h // 2)].float() / dim_h)
-        )
-        freqs_w = 1.0 / (
-            self.base ** (torch.arange(0, dim_w, 2)[: (dim_w // 2)].float() / dim_w)
-        )
-        
+        freqs_t = 1.0 / (self.base**(
+            torch.arange(0, dim_t, 2)[:(dim_t // 2)].float() / dim_t))
+        freqs_h = 1.0 / (self.base**(
+            torch.arange(0, dim_h, 2)[:(dim_h // 2)].float() / dim_h))
+        freqs_w = 1.0 / (self.base**(
+            torch.arange(0, dim_w, 2)[:(dim_w // 2)].float() / dim_w))
+
         # Create position grids
         grid_t = torch.arange(num_frames, dtype=torch.float32)
         grid_h = torch.arange(height, dtype=torch.float32)
         grid_w = torch.arange(width, dtype=torch.float32)
-        
+
         # Compute frequencies for each position
         freqs_t = torch.einsum("..., f -> ... f", grid_t, freqs_t)
         freqs_h = torch.einsum("..., f -> ... f", grid_h, freqs_h)
         freqs_w = torch.einsum("..., f -> ... f", grid_w, freqs_w)
-        
+
         # Duplicate for complex pair representation
         freqs_t = repeat(freqs_t, "... n -> ... (n r)", r=2)
         freqs_h = repeat(freqs_h, "... n -> ... (n r)", r=2)
         freqs_w = repeat(freqs_w, "... n -> ... (n r)", r=2)
-        
+
         # Broadcast and concatenate across all 3 dimensions
         freqs = broadcast(
             [
@@ -136,10 +135,10 @@ class RotaryPositionalEmbedding3D(nn.Module):
             ],
             dim=-1,
         )
-        
+
         # Flatten spatial dimensions: [T, H, W, head_dim] -> [T*H*W, head_dim]
         freqs = rearrange(freqs, "T H W D -> (T H W) D")
-        
+
         return freqs
 
     def forward(
@@ -162,26 +161,26 @@ class RotaryPositionalEmbedding3D(nn.Module):
         # Register grid size if not cached
         if grid_size not in self.freqs_dict:
             self.register_grid_size(grid_size)
-        
+
         # Get cached frequencies
         freqs_cis = self.freqs_dict[grid_size].to(q.device)
-        
+
         # Cast to float32 for precision
         q_, k_ = q.float(), k.float()
         freqs_cis = freqs_cis.float()
-        
+
         # Compute cos and sin
         cos = freqs_cis.cos()
         sin = freqs_cis.sin()
-        
+
         # Reshape for broadcasting: [1, 1, seq_len, head_dim]
         cos = rearrange(cos, "n d -> 1 1 n d")
         sin = rearrange(sin, "n d -> 1 1 n d")
-        
+
         # Apply rotation
         q_ = (q_ * cos) + (rotate_half(q_) * sin)
         k_ = (k_ * cos) + (rotate_half(k_) * sin)
-        
+
         # Cast back to original dtype
         return q_.type_as(q), k_.type_as(k)
 
@@ -205,4 +204,3 @@ def apply_rotary_emb_3d(
         (q_rotated, k_rotated): Rotated tensors
     """
     return rope_module(q, k, grid_size)
-

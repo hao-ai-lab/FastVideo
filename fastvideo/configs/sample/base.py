@@ -4,6 +4,7 @@ from typing import Any
 
 from fastvideo.logger import init_logger
 from fastvideo.utils import StoreBoolean
+
 logger = init_logger(__name__)
 
 
@@ -230,7 +231,8 @@ class SamplingParam:
             "--t-thresh",
             type=float,
             default=SamplingParam.t_thresh,
-            help="Threshold for timestep scheduling in refinement (default: 0.5)",
+            help=
+            "Threshold for timestep scheduling in refinement (default: 0.5)",
         )
         parser.add_argument(
             "--spatial-refine-only",

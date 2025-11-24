@@ -119,15 +119,16 @@ class LongCatVideoArchConfig(DiTArchConfig):
 
     # Text padding behavior
     text_tokens_zero_pad: bool = True
-    
+
     # Block Sparse Attention (BSA)
     enable_bsa: bool = False
-    bsa_params: dict | None = field(default_factory=lambda: {
-        "sparsity": 0.9375,
-        "cdf_threshold": None,
-        "chunk_3d_shape_q": [4, 4, 4],
-        "chunk_3d_shape_k": [4, 4, 4],
-    })
+    bsa_params: dict | None = field(
+        default_factory=lambda: {
+            "sparsity": 0.9375,
+            "cdf_threshold": None,
+            "chunk_3d_shape_q": [4, 4, 4],
+            "chunk_3d_shape_k": [4, 4, 4],
+        })
 
     # LoRA exclusions
     exclude_lora_layers: list[str] = field(default_factory=lambda: [])

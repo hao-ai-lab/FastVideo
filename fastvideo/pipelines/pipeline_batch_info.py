@@ -96,7 +96,8 @@ class ForwardBatch:
     t_thresh: float = 0.5
     spatial_refine_only: bool = False
     num_cond_frames: int = 0
-    stage1_video: list[PIL.Image.Image] | None = None  # Loaded frames from refine_from
+    stage1_video: list[
+        PIL.Image.Image] | None = None  # Loaded frames from refine_from
 
     # Primary encoder embeddings
     prompt_embeds: list[torch.Tensor] = field(default_factory=list)

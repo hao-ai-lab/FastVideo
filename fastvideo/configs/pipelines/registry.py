@@ -65,8 +65,10 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
 # Fallback configs when exact match isn't found but architecture is detected
 PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "longcat": LongCatT2V480PConfig,
-    "hunyuan": HunyuanConfig,  # Base Hunyuan config as fallback for any Hunyuan variant
-    "wanpipeline": WanT2V480PConfig,  # Base Wan config as fallback for any Wan variant
+    "hunyuan":
+    HunyuanConfig,  # Base Hunyuan config as fallback for any Hunyuan variant
+    "wanpipeline":
+    WanT2V480PConfig,  # Base Wan config as fallback for any Wan variant
     "wanimagetovideo": WanI2V480PConfig,
     "wandmdpipeline": FastWan2_1_T2V_480P_Config,
     "wancausaldmdpipeline": SelfForcingWanT2V480PConfig,

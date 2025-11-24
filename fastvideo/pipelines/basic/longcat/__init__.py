@@ -4,5 +4,3 @@
 from fastvideo.pipelines.basic.longcat.longcat_pipeline import LongCatPipeline
 
 __all__ = ["LongCatPipeline"]
-
-

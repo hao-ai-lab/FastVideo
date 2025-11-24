@@ -322,27 +322,31 @@ class FastVideoArgs:
             "--lora-path",
             type=str,
             default=FastVideoArgs.lora_path,
-            help="Path to a LoRA adapter (directory or HF repo id). If set, LoRA will be applied at inference.",
+            help=
+            "Path to a LoRA adapter (directory or HF repo id). If set, LoRA will be applied at inference.",
         )
         parser.add_argument(
             "--lora-nickname",
             type=str,
             default=FastVideoArgs.lora_nickname,
-            help="Nickname to refer to the loaded LoRA adapter (useful for swapping).",
+            help=
+            "Nickname to refer to the loaded LoRA adapter (useful for swapping).",
         )
         parser.add_argument(
             "--lora-target-modules",
             nargs="+",
             type=str,
             default=FastVideoArgs.lora_target_modules,
-            help="Optional list of module name substrings to restrict LoRA injection (e.g. q_proj k_proj v_proj).",
+            help=
+            "Optional list of module name substrings to restrict LoRA injection (e.g. q_proj k_proj v_proj).",
         )
 
         # BSA runtime control (LongCat)
         parser.add_argument(
             "--enable-bsa",
             action=StoreBoolean,
-            help="Enable Block Sparse Attention (BSA) at runtime (overrides config).",
+            help=
+            "Enable Block Sparse Attention (BSA) at runtime (overrides config).",
         )
         parser.add_argument(
             "--bsa-sparsity",
