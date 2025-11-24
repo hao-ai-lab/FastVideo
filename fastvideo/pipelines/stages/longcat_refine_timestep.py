@@ -54,7 +54,7 @@ class LongCatRefineTimestepStage(PipelineStage):
         num_inference_steps = batch.num_inference_steps
         t_thresh = batch.t_thresh
 
-        logger.info(f"Preparing LongCat refinement timesteps (t_thresh={t_thresh})")
+        logger.info("Preparing LongCat refinement timesteps (t_thresh=%s)", t_thresh)
 
         # ------------------------------------------------------------------
         # 1) Match LongCatVideoPipeline.get_timesteps_sigmas (non-distill):
@@ -92,9 +92,10 @@ class LongCatRefineTimestepStage(PipelineStage):
         self.scheduler.sigmas = sigmas
 
         logger.info(
-            f"Refinement timesteps: {len(timesteps)} steps starting from t={t_thresh}"
+            "Refinement timesteps: %s steps starting from t=%s",
+            len(timesteps), t_thresh
         )
-        logger.info(f"First few timesteps: {timesteps[:5].tolist()}")
+        logger.info("First few timesteps: %s", timesteps[:5].tolist())
 
         # Store in batch so downstream stages (denoising) use the same schedule
         batch.timesteps = timesteps
