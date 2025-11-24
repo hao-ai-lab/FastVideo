@@ -112,17 +112,15 @@ For a more detailed guide, please see our [inference quick start](https://hao-ai
 - [Distillation Guide](https://hao-ai-lab.github.io/FastVideo/distillation/dmd/)
 <!-- - [Finetuning Guide](https://hao-ai-lab.github.io/FastVideo/training/finetune.html) -->
 
-## 📑 Development Plan
-<!-- - More distillation methods -->
-  <!-- - [ ] Add Distribution Matching Distillation -->
-More FastWan Models Coming Soon!
-- [ ] Add FastWan2.1-T2V-14B
-- [ ] Add FastWan2.2-T2V-14B
-- [ ] Add FastWan2.2-I2V-14B
-<!-- - Optimization features
-- Code updates -->
-  <!-- - [ ] fp8 support -->
-  <!-- - [ ] faster load model and save model support -->
+## Awesome work using FastVideo or our research projects
+
+- [SGLang](https://github.com/sgl-project/sglang/tree/main/python/sglang/multimodal_gen) SGLang's diffusion inference functionality is based  on a fork of FastVide on Sept. 24, 2025. ![GitHub Repo stars](https://github.com/sgl-project/sglang)
+- [DanceGRPO](https://github.com/XueZeyue/DanceGRPO): A  unified framework to adapt Group Relative Policy Optimization (GRPO) to visual generation paradigms. Code based on FastVideo. ![GitHub Repo stars](https://github.com/XueZeyue/DanceGRPO)
+- [SRPO](https://github.com/Tencent-Hunyuan/SRPO) A method to directly align the full diffusion trajectory with fine-grained human preference. Code based on FastVideo. ![GitHub Repo stars](https://github.com/Tencent-Hunyuan/SRPO)
+- [DCM](https://github.com/Vchitect/DCM) Dual-expert consistency model for efficient and high-quality video generation. Code based on FastVideo. ![GitHub Repo stars](https://github.com/Vchitect/DCM)
+- [Hunyuan Video 1.5](https://github.com/Tencent-Hunyuan/HunyuanVideo-1.5) A leading lightweight video generation model, where they proposed SSTA based on Sliding Tile Attention. ![GitHub Repo stars](https://github.com/Tencent-Hunyuan/HunyuanVideo-1.5)
+- [Kandinsky-5.0](https://github.com/kandinskylab/kandinsky-5) A family of diffusion models for video & image generation, where their NABLA attention include a Sliding Tile Attention branch. ![GitHub Repo stars](https://github.com/kandinskylab/kandinsky-5)
+- [LongCat Video](https://github.com/meituan-longcat/LongCat-Video) A foundational video generation model with 13.6B parameters with block-sparse attention similar to Video Sparse Attention. ![GitHub Repo stars](https://github.com/meituan-longcat/LongCat-Video)
 
 See details in [development roadmap](https://github.com/hao-ai-lab/FastVideo/issues/468).
 
