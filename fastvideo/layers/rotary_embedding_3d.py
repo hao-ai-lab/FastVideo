@@ -10,7 +10,7 @@ import torch.nn as nn
 from einops import rearrange, repeat
 
 
-def broadcat(tensors: list[torch.Tensor], dim: int = -1) -> torch.Tensor:
+def broadcast(tensors: list[torch.Tensor], dim: int = -1) -> torch.Tensor:
     """
     Broadcast and concatenate tensors along a dimension.
     """
@@ -128,7 +128,7 @@ class RotaryPositionalEmbedding3D(nn.Module):
         freqs_w = repeat(freqs_w, "... n -> ... (n r)", r=2)
         
         # Broadcast and concatenate across all 3 dimensions
-        freqs = broadcat(
+        freqs = broadcast(
             [
                 freqs_t[:, None, None, :],  # [T, 1, 1, dim_t]
                 freqs_h[None, :, None, :],  # [1, H, 1, dim_h]

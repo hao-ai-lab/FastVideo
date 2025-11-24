@@ -136,7 +136,7 @@ class LongCatT2V480PConfig(PipelineConfig):
     bsa_chunk_k: list[int] | None = None
     t_thresh: float | None = None  # refine stage default controlled by sampling args
 
-    # LongCat doesnot need flow_shift
+    # LongCat does not need flow_shift
     flow_shift: float | None = None
     dmd_denoising_steps: list[int] | None = None
 
