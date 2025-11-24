@@ -395,7 +395,8 @@ class CausalWanTransformer3DModel(BaseDiT):
         # Causal-specific
         self.block_mask = None
         self.num_frame_per_block = config.arch_config.num_frames_per_block
-        assert self.num_frame_per_block <= 3
+        self.num_frame_per_block = 4
+        # assert self.num_frame_per_block <= 3
         self.independent_first_frame = False
 
         self.__post_init__()
