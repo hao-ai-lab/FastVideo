@@ -112,9 +112,8 @@ class LatentPreparationStage(PipelineStage):
             if not (
                 getattr(batch, "refine_from", None) is not None
                 or getattr(batch, "stage1_video", None) is not None
-            ):
-                if hasattr(self.scheduler, "init_noise_sigma"):
-                    latents = latents * self.scheduler.init_noise_sigma
+            ) and hasattr(self.scheduler, "init_noise_sigma"):
+                latents = latents * self.scheduler.init_noise_sigma
 
         # Update batch with prepared latents
         batch.latents = latents

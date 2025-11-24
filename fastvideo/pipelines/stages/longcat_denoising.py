@@ -127,14 +127,13 @@ class LongCatDenoisingStage(DenoisingStage):
                     current_timestep=i,
                     attn_metadata=None,
                     forward_batch=batch,
-                ):
-                    with torch.autocast(device_type='cuda', dtype=target_dtype, enabled=autocast_enabled):
-                        noise_pred = self.transformer(
-                            hidden_states=latent_model_input,
-                            encoder_hidden_states=prompt_embeds_combined,
-                            timestep=timestep,
-                            encoder_attention_mask=prompt_attention_mask_combined,
-                        )
+                ), torch.autocast(device_type='cuda', dtype=target_dtype, enabled=autocast_enabled):
+                    noise_pred = self.transformer(
+                        hidden_states=latent_model_input,
+                        encoder_hidden_states=prompt_embeds_combined,
+                        timestep=timestep,
+                        encoder_attention_mask=prompt_attention_mask_combined,
+                    )
                 
                 # Apply CFG with optimized scale
                 if do_classifier_free_guidance:

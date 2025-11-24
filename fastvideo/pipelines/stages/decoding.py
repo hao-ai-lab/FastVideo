@@ -176,7 +176,7 @@ class DecodingStage(PipelineStage):
             if num_cond_frames_added > 0 or frames.shape[2] != new_frame_size:
                 # frames is [B, C, T, H, W], crop temporal dimension
                 frames = frames[:, :, num_cond_frames_added:num_cond_frames_added + new_frame_size, :, :]
-                logger.info(f"Cropped LongCat refinement padding: {num_cond_frames_added}:{num_cond_frames_added + new_frame_size}, final shape: {frames.shape}")
+                logger.info("Cropped LongCat refinement padding: %s:%s, final shape: %s", num_cond_frames_added, num_cond_frames_added + new_frame_size, frames.shape)
 
         # Update batch with decoded image
         batch.output = frames

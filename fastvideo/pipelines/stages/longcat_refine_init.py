@@ -84,11 +84,12 @@ class LongCatRefineInitStage(PipelineStage):
                 ]
 
             logger.info(
-                f"Initializing LongCat refinement from in-memory stage1_video ({len(pil_images)} frames)"
+                "Initializing LongCat refinement from in-memory stage1_video (%s frames)",
+                len(pil_images)
             )
         else:
             # Path-based refine: load video from disk (original design)
-            logger.info(f"Initializing LongCat refinement from file: {refine_from}")
+            logger.info("Initializing LongCat refinement from file: %s", refine_from)
             stage1_video_path = Path(refine_from)
             if not stage1_video_path.exists():
                 raise FileNotFoundError(f"Stage1 video not found: {refine_from}")
@@ -98,7 +99,8 @@ class LongCatRefineInitStage(PipelineStage):
                 str(stage1_video_path), return_fps=True
             )
             logger.info(
-                f"Loaded stage1 video: {len(pil_images)} frames @ {original_fps} fps"
+                "Loaded stage1 video: %s frames @ %s fps",
+                len(pil_images), original_fps
             )
 
         # Store in batch for reference (use PIL images, same as official demo)
@@ -112,7 +114,7 @@ class LongCatRefineInitStage(PipelineStage):
         
         # Calculate new frame count (temporal upsampling if not spatial_refine_only)
         new_num_frames = num_frames if spatial_refine_only else 2 * num_frames
-        logger.info(f"Refine mode: {'spatial only' if spatial_refine_only else 'spatial + temporal'}")
+        logger.info("Refine mode: %s", 'spatial only' if spatial_refine_only else 'spatial + temporal')
         
         # Update batch.num_frames to reflect the upsampled count
         batch.num_frames = new_num_frames
@@ -138,7 +140,7 @@ class LongCatRefineInitStage(PipelineStage):
                     factors.append([i, sp_size // i])
             cp_split_hw = min(factors, key=lambda x: abs(x[0] - x[1]))
             scale_factor_spatial *= max(cp_split_hw)
-            logger.info(f"SP split: sp_size={sp_size}, cp_split_hw={cp_split_hw}, max_split={max(cp_split_hw)}")
+            logger.info("SP split: sp_size=%s, cp_split_hw=%s, max_split=%s", sp_size, cp_split_hw, max(cp_split_hw))
         else:
             cp_split_hw = [1, 1]
         
@@ -153,9 +155,9 @@ class LongCatRefineInitStage(PipelineStage):
         closest_ratio = min(bucket_config.keys(), key=lambda x: abs(float(x) - input_ratio))
         height, width = bucket_config[closest_ratio][0]
         
-        logger.info(f"Input aspect ratio: {input_ratio:.2f} ({input_width}x{input_height})")
-        logger.info(f"Matched bucket ratio: {closest_ratio} -> resolution: {width}x{height}")
-        logger.info(f"Target: {width}x{height} @ {new_num_frames} frames (sp_size={sp_size}, scale_factor={scale_factor_spatial})")
+        logger.info("Input aspect ratio: %.2f (%sx%s)", input_ratio, input_width, input_height)
+        logger.info("Matched bucket ratio: %s -> resolution: %sx%s", closest_ratio, width, height)
+        logger.info("Target: %sx%s @ %s frames (sp_size=%s, scale_factor=%s)", width, height, new_num_frames, sp_size, scale_factor_spatial)
         
         # Override batch height/width with bucket-selected resolution
         batch.height = height
@@ -185,7 +187,7 @@ class LongCatRefineInitStage(PipelineStage):
         # Rescale to [-1, 1] for VAE
         video_up = video_up * 2.0 - 1.0
         
-        logger.info(f"Upsampled video shape: {video_up.shape}")
+        logger.info("Upsampled video shape: %s", video_up.shape)
         
         # Padding logic (exactly like LongCat lines 1237-1255)
         # Only pad temporal dimension to ensure BSA compatibility
@@ -205,11 +207,11 @@ class LongCatRefineInitStage(PipelineStage):
         num_noise_frames_added = num_noise_latents * vae_scale_factor_temporal - num_noise_frames
         
         if num_cond_frames_added > 0 or num_noise_frames_added > 0:
-            logger.info(f"Padding temporal dimension for BSA: cond_frames+={num_cond_frames_added}, noise_frames+={num_noise_frames_added}")
+            logger.info("Padding temporal dimension for BSA: cond_frames+=%s, noise_frames+=%s", num_cond_frames_added, num_noise_frames_added)
             pad_front = video_up[:, :, 0:1].repeat(1, 1, num_cond_frames_added, 1, 1)
             pad_back = video_up[:, :, -1:].repeat(1, 1, num_noise_frames_added, 1, 1)
             video_up = torch.cat([pad_front, video_up, pad_back], dim=2)
-            logger.info(f"Padded video shape: {video_up.shape}")
+            logger.info("Padded video shape: %s", video_up.shape)
         
         # Update batch with actual frame count after padding
         batch.num_frames = video_up.shape[2]
@@ -222,9 +224,9 @@ class LongCatRefineInitStage(PipelineStage):
         # Store num_cond_latents for denoising stage
         if num_cond_latents > 0:
             batch.num_cond_latents = num_cond_latents
-            logger.info(f"Will use num_cond_latents={num_cond_latents} during denoising")
+            logger.info("Will use num_cond_latents=%s during denoising", num_cond_latents)
         
-        logger.info(f"Padding info: cond+={num_cond_frames_added}, noise+={num_noise_frames_added}, original={new_num_frames}")
+        logger.info("Padding info: cond+=%s, noise+=%s, original=%s", num_cond_frames_added, num_noise_frames_added, new_num_frames)
         
         # VAE encode
         logger.info("Encoding stage1 video with VAE...")
@@ -260,14 +262,14 @@ class LongCatRefineInitStage(PipelineStage):
             # LongCat: (latents - mean) * (1/std)
             latent_up = (latent_up - latents_mean) * latents_std
         
-        logger.info(f"Encoded latent shape: {latent_up.shape}")
+        logger.info("Encoded latent shape: %s", latent_up.shape)
         
         # Mix with noise according to t_thresh
         # latent_up = (1 - t_thresh) * latent_up + t_thresh * noise
         noise = torch.randn_like(latent_up).contiguous()
         latent_up = (1 - t_thresh) * latent_up + t_thresh * noise
         
-        logger.info(f"Applied t_thresh={t_thresh} noise mixing")
+        logger.info("Applied t_thresh=%s noise mixing", t_thresh)
         
         # Store in batch
         batch.latents = latent_up.to(dtype)
