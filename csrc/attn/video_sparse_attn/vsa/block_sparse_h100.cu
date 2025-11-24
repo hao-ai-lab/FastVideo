@@ -679,6 +679,13 @@ block_sparse_attention_forward(
     CHECK_INPUT(k);
     CHECK_INPUT(v);
 
+    // q shape: (batch, qo_heads, seq_len, head_dim)
+    // k shape: (batch, kv_heads, seq_len, head_dim)
+    // v shape: (batch, kv_heads, seq_len, head_dim)
+    // q2k_block_sparse_index shape: (batch, qo_heads, num_q_blocks, max_kv_blocks_per_q)
+    // q2k_block_sparse_num shape: (batch, qo_heads, num_q_blocks, max_kv_blocks_per_q)
+    // block_size shape: (num_q_blocks) This does not need other dimensions because across all batch/heads the padding is the same.
+    
     auto batch    = q.size(0);
     auto seq_len  = q.size(2); 
     auto head_dim = q.size(3); 
