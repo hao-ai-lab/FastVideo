@@ -74,6 +74,7 @@ dependencies = [
     # Preprocessing Dependencies
     "torchcodec==0.5.0",
     "ray>=2.49.1",
+    "ftfy==6.3.1",
 ]
 
 [tool.uv]
