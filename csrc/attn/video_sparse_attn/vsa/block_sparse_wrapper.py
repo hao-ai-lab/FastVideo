@@ -102,14 +102,16 @@ if major == 9 and minor == 0:# check if H100
         k_padded: torch.Tensor, 
         v_padded: torch.Tensor, 
         block_map: torch.Tensor,
-        variable_block_sizes: torch.Tensor, 
+        q_variable_block_sizes: torch.Tensor,
+        kv_variable_block_sizes: torch.Tensor, 
         )-> Tuple[torch.Tensor, torch.Tensor]:
         q_padded = q_padded.contiguous()
         k_padded = k_padded.contiguous()
         v_padded = v_padded.contiguous()
         q2k_block_sparse_index, q2k_block_sparse_num = map_to_index(block_map)
-        variable_block_sizes = variable_block_sizes.int()
-        o_padded, lse_padded = block_sparse_fwd(q_padded, k_padded, v_padded, q2k_block_sparse_index, q2k_block_sparse_num, variable_block_sizes)
+        q_variable_block_sizes = q_variable_block_sizes.int()
+        kv_variable_block_sizes = kv_variable_block_sizes.int()
+        o_padded, lse_padded = block_sparse_fwd(q_padded, k_padded, v_padded, q2k_block_sparse_index, q2k_block_sparse_num, kv_variable_block_sizes)
         return o_padded, lse_padded
 
 
@@ -121,7 +123,8 @@ if major == 9 and minor == 0:# check if H100
         k_padded: torch.Tensor, 
         v_padded: torch.Tensor, 
         block_map: torch.Tensor,
-        variable_block_sizes: torch.Tensor, 
+        q_variable_block_sizes: torch.Tensor, 
+        kv_variable_block_sizes: torch.Tensor, 
     ) -> Tuple[torch.Tensor,  torch.Tensor]:
         q_padded, k_padded, v_padded = [x.contiguous() for x in (q_padded, k_padded, v_padded)]
         B, H, S, D = q_padded.shape
@@ -139,12 +142,13 @@ if major == 9 and minor == 0:# check if H100
         o_padded: torch.Tensor, 
         lse_padded: torch.Tensor, 
         block_map: torch.Tensor,
-        variable_block_sizes: torch.Tensor, 
+        q_variable_block_sizes: torch.Tensor,
+        kv_variable_block_sizes: torch.Tensor, 
         )-> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         grad_output_padded = grad_output_padded.contiguous()
         k2q_block_sparse_index, k2q_block_sparse_num = map_to_index(block_map.transpose(-1, -2))
         grad_q_padded, grad_k_padded, grad_v_padded = block_sparse_bwd(
-            q_padded, k_padded, v_padded, o_padded, lse_padded, grad_output_padded, k2q_block_sparse_index, k2q_block_sparse_num, variable_block_sizes
+            q_padded, k_padded, v_padded, o_padded, lse_padded, grad_output_padded, k2q_block_sparse_index, k2q_block_sparse_num, q_variable_block_sizes, kv_variable_block_sizes
         )
         grad_q_padded = grad_q_padded.to(grad_output_padded.dtype)
         grad_k_padded = grad_k_padded.to(grad_output_padded.dtype)
@@ -160,7 +164,8 @@ if major == 9 and minor == 0:# check if H100
         o_padded: torch.Tensor, 
         lse_padded: torch.Tensor, 
         block_map: torch.Tensor,
-        variable_block_sizes: torch.Tensor, 
+        q_variable_block_sizes: torch.Tensor, 
+        kv_variable_block_sizes: torch.Tensor, 
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         torch._check(grad_output_padded.dtype == torch.bfloat16)
         torch._check(lse_padded.dtype == torch.float32)
@@ -172,14 +177,14 @@ if major == 9 and minor == 0:# check if H100
 
 
     def backward_SM90(ctx, grad_output1, grad_output2):
-        q_padded, k_padded, v_padded, o_padded, lse_padded, block_map, variable_block_sizes= ctx.saved_tensors
-        dq, dk, dv = block_sparse_attn_backward_SM90(grad_output1, q_padded, k_padded, v_padded, o_padded, lse_padded, block_map, variable_block_sizes)
+        q_padded, k_padded, v_padded, o_padded, lse_padded, block_map, q_variable_block_sizes, kv_variable_block_sizes= ctx.saved_tensors
+        dq, dk, dv = block_sparse_attn_backward_SM90(grad_output1, q_padded, k_padded, v_padded, o_padded, lse_padded, block_map, q_variable_block_sizes, kv_variable_block_sizes)
         return dq, dk, dv, None, None
 
     def setup_context_SM90(ctx, inputs, output):
-        q_padded, k_padded, v_padded, block_map, variable_block_sizes = inputs
+        q_padded, k_padded, v_padded, block_map, q_variable_block_sizes, kv_variable_block_sizes = inputs
         o_padded, lse_padded = output
-        ctx.save_for_backward(q_padded, k_padded, v_padded, o_padded, lse_padded, block_map, variable_block_sizes)
+        ctx.save_for_backward(q_padded, k_padded, v_padded, o_padded, lse_padded, block_map, q_variable_block_sizes, kv_variable_block_sizes)
 
 
     block_sparse_attn_SM90.register_autograd(backward_SM90, setup_context=setup_context_SM90)

@@ -34,7 +34,7 @@ def pytorch_test(Q, K, V, block_sparse_mask, dO):
     )
 
 
-def block_sparse_kernel_test(Q, K, V, block_sparse_mask, variable_block_sizes, q_non_pad_index, kv_non_pad_index, q_num_blocks, kv_num_blocks, dO):
+def block_sparse_kernel_test(Q, K, V, block_sparse_mask, q_variable_block_sizes, kv_variable_block_sizes, q_non_pad_index, kv_non_pad_index, q_num_blocks, kv_num_blocks, dO):
     Q = Q.detach().requires_grad_()
     K = K.detach().requires_grad_()
     V = V.detach().requires_grad_()
@@ -42,7 +42,7 @@ def block_sparse_kernel_test(Q, K, V, block_sparse_mask, variable_block_sizes, q
     q_padded = vsa_pad(Q, q_non_pad_index, q_num_blocks, BLOCK_M)
     k_padded = vsa_pad(K, kv_non_pad_index, kv_num_blocks, BLOCK_M)
     v_padded = vsa_pad(V, kv_non_pad_index, kv_num_blocks, BLOCK_M)
-    output, _= block_sparse_attn(q_padded, k_padded, v_padded, block_sparse_mask, variable_block_sizes)
+    output, _= block_sparse_attn(q_padded, k_padded, v_padded, block_sparse_mask, q_variable_block_sizes, kv_variable_block_sizes)
     output = output[:, :, q_non_pad_index, :]
     output.backward(dO)
     return output, Q.grad, K.grad, V.grad
@@ -88,19 +88,21 @@ def check_correctness(h, d, num_blocks, k,  num_iterations=20, error_mode='all')
     non_pad_index = get_non_pad_index(variable_block_sizes, num_blocks, BLOCK_M)
     block_mask = generate_block_sparse_mask_for_function(h, num_blocks, num_blocks, k, device)
     full_mask = create_full_mask_from_block_mask(block_mask, variable_block_sizes, variable_block_sizes, device)
-    for _ in range(num_iterations):
+    for i in range(num_iterations):
         Q = generate_tensor((1, h, S, d),  torch.bfloat16, device)
         K = generate_tensor((1, h, S, d), torch.bfloat16, device)
         V = generate_tensor((1, h, S, d),  torch.bfloat16, device)
         dO = generate_tensor((1, h, S, d), torch.bfloat16, device)
         
-        print(Q.shape, K.shape, V.shape, dO.shape)
+        # if i == 0: print(f"[qkequal] Q: {Q.shape}, K: {K.shape}, V: {V.shape}, dO: {dO.shape}")
+        # if i == 0: print(f"[qkequal] block_mask: {block_mask.shape}")
+        # if i == 0: print(f"[qkequal] full_mask: {full_mask.shape}")
 
         # dO_padded = torch.zeros_like(dO_padded)
         # dO_padded[:, :, non_pad_index, :] = dO
 
         pt_o, pt_qg, pt_kg, pt_vg = pytorch_test(Q, K, V, full_mask, dO)
-        bs_o, bs_qg, bs_kg, bs_vg = block_sparse_kernel_test(Q, K, V, block_mask.unsqueeze(0), variable_block_sizes, non_pad_index, non_pad_index, num_blocks, num_blocks, dO)
+        bs_o, bs_qg, bs_kg, bs_vg = block_sparse_kernel_test(Q, K, V, block_mask.unsqueeze(0), variable_block_sizes, variable_block_sizes, non_pad_index, non_pad_index, num_blocks, num_blocks, dO)
         for name, (pt, bs) in zip(['gQ', 'gK', 'gV', 'gO'], [(pt_qg, bs_qg), (pt_kg, bs_kg), (pt_vg, bs_vg), (pt_o, bs_o)]):
             if bs is not None:
                 diff = pt - bs
@@ -147,10 +149,10 @@ def check_correctness_qkdiff(h, d, num_q_blocks, num_kv_blocks, k, num_iteration
         V = generate_tensor((1, h, S_kv, d),  torch.bfloat16, device)
         dO = generate_tensor((1, h, S_q, d), torch.bfloat16, device)
         
-        print(Q.shape, K.shape, V.shape, dO.shape)
+        # print(Q.shape, K.shape, V.shape, dO.shape)
 
         pt_o, pt_qg, pt_kg, pt_vg = pytorch_test(Q, K, V, full_mask, dO)
-        bs_o, bs_qg, bs_kg, bs_vg = block_sparse_kernel_test(Q, K, V, block_mask.unsqueeze(0), kv_variable_block_sizes, q_non_pad_index, kv_non_pad_index, num_q_blocks, num_kv_blocks, dO)
+        bs_o, bs_qg, bs_kg, bs_vg = block_sparse_kernel_test(Q, K, V, block_mask.unsqueeze(0), q_variable_block_sizes, kv_variable_block_sizes, q_non_pad_index, kv_non_pad_index, num_q_blocks, num_kv_blocks, dO)
         
         for name, (pt, bs) in zip(['gQ', 'gK', 'gV', 'gO'], [(pt_qg, bs_qg), (pt_kg, bs_kg), (pt_vg, bs_vg), (pt_o, bs_o)]):
             if bs is not None:
