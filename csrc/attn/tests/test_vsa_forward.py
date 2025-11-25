@@ -225,12 +225,12 @@ if __name__ == "__main__":
     avg_err_eq, max_rel_eq = run_forward_equal_qk(h, d, num_blocks=32, k=2)
     print(f"QK equal: avg |ΔO| = {avg_err_eq:.6e}, max rel ΔO = {max_rel_eq:.6e}")
 
-    # print("\nForward Block Sparse Attention Check (QK Different)")
-    # print("=" * 80)
-    # avg_err_diff, max_rel_diff = run_forward_qk_diff(
-    #     h, d, num_q_blocks=16, num_kv_blocks=32, k=2
-    # )
-    # print(
-    #     f"QK diff:  avg |ΔO| = {avg_err_diff:.6e}, max rel ΔO = {max_rel_diff:.6e}"
-    # )
+    print("\nForward Block Sparse Attention Check (QK Different)")
+    print("=" * 80)
+    avg_err_diff, max_rel_diff = run_forward_qk_diff(
+        h, d, num_q_blocks=32, num_kv_blocks=48, k=2
+    )
+    print(
+        f"QK diff:  avg |ΔO| = {avg_err_diff:.6e}, max rel ΔO = {max_rel_diff:.6e}"
+    )
 
