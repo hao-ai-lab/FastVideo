@@ -91,6 +91,7 @@ def maybe_load_fsdp_model(
     )
 
     logger.info("Loading model with default_dtype: %s", default_dtype)
+    logger.info("Loading model with cpu_offload: %s", cpu_offload)
     with set_default_dtype(default_dtype), torch.device("meta"):
         model = model_cls(**init_params)
 
@@ -222,7 +223,7 @@ def shard_model(
         )
 
     # Finally shard the entire model to account for any stragglers
-    fully_shard(model, **fsdp_kwargs)
+    # fully_shard(model, **fsdp_kwargs)
 
 
 # TODO(PY): device mesh for cfg parallel

@@ -7,10 +7,12 @@ from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
 def is_blocks(n: str, m) -> bool:
     return "blocks" in n and str.isdigit(n.split(".")[-1])
 
+def is_not_blocks(n: str, m) -> bool:
+    return "blocks" not in n and len(n.split(".")) == 1
 
 @dataclass
 class WanVideoArchConfig(DiTArchConfig):
-    _fsdp_shard_conditions: list = field(default_factory=lambda: [is_blocks])
+    _fsdp_shard_conditions: list = field(default_factory=lambda: [is_blocks, is_not_blocks])
 
     param_names_mapping: dict = field(
         default_factory=lambda: {
@@ -99,7 +101,9 @@ class WanVideoArchConfig(DiTArchConfig):
     local_attn_size: int = -1  # Window size for temporal local attention (-1 indicates global attention)
     sink_size: int = 0  # Size of the attention sink, we keep the first `sink_size` frames unchanged when rolling the KV cache
     num_frames_per_block: int = 3
+    # sliding_window_num_frames: int = 19
     sliding_window_num_frames: int = 21
+    # sliding_window_num_frames: int = 40
 
     def __post_init__(self):
         super().__post_init__()

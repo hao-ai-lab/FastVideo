@@ -293,6 +293,8 @@ class TextEncoderLoader(ComponentLoader):
                         mesh=mesh["offload"],
                         fsdp_shard_conditions=model._fsdp_shard_conditions,
                         pin_cpu_memory=fastvideo_args.pin_cpu_memory)
+            else:
+                raise ValueError("text_encoder_cpu_offload must be True")
             # We only enable strict check for non-quantized models
             # that have loaded weights tracking currently.
             # if loaded_weights is not None:
@@ -507,8 +509,9 @@ class SchedulerLoader(ComponentLoader):
         scheduler_cls, _ = ModelRegistry.resolve_model_cls(class_name)
 
         scheduler = scheduler_cls(**config)
-        if fastvideo_args.pipeline_config.flow_shift is not None:
-            scheduler.set_shift(fastvideo_args.pipeline_config.flow_shift)
+        assert config['shift'] == 12, "shift must be 12"
+        # if fastvideo_args.pipeline_config.flow_shift is not None:
+        #     scheduler.set_shift(fastvideo_args.pipeline_config.flow_shift)
         if fastvideo_args.pipeline_config.timesteps_scale is not None:
             scheduler.set_timesteps_scale(
                 fastvideo_args.pipeline_config.timesteps_scale)

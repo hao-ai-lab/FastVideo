@@ -19,6 +19,7 @@ from fastvideo.configs.sample.wan import (
     WanT2V_1_3B_SamplingParam,
     WanT2V_14B_SamplingParam,
     SelfForcingWanT2V480PConfig,
+    SelfForcingMoEWanT2V480PConfig,
 )
 # isort: on
 from fastvideo.logger import init_logger
@@ -55,7 +56,11 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
 
     # Causal Self-Forcing Wan2.1
     "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers": SelfForcingWanT2V480PConfig,
+    "rand0nmr/SFWan2.2-T2V-14B-Diffusers": SelfForcingWanT2V480PConfig,
     "rand0nmr/SFWan2.1-T2V-A1.3B-Diffusers": SelfForcingWanT2V480PConfig,
+
+    # Causal Self-Forcing Wan2.2 MoE
+    "rand0nmr/SFWan2.2-T2V-A14B-Diffusers": SelfForcingMoEWanT2V480PConfig,
     # Add other specific weight variants
 }
 

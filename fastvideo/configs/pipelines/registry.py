@@ -13,7 +13,7 @@ from fastvideo.configs.pipelines.wan import (
     FastWan2_1_T2V_480P_Config, FastWan2_2_TI2V_5B_Config,
     Wan2_2_I2V_A14B_Config, Wan2_2_T2V_A14B_Config, Wan2_2_TI2V_5B_Config,
     WanI2V480PConfig, WanI2V720PConfig, WanT2V480PConfig, WanT2V720PConfig,
-    SelfForcingWanT2V480PConfig, SelfForcingMoEWanT2V480PConfig)
+    SelfForcingWanT2V480PConfig, SelfForcingMoEWanT2V480PConfig, SelfForcingMoEWanT2V720PConfig)
 # isort: on
 from fastvideo.logger import init_logger
 from fastvideo.utils import (maybe_download_model_index,
@@ -37,6 +37,8 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "FastVideo/Wan2.1-VSA-T2V-14B-720P-Diffusers": WanT2V720PConfig,
     "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers": SelfForcingWanT2V480PConfig,
     "rand0nmr/SFWan2.1-T2V-A1.3B-Diffusers": SelfForcingMoEWanT2V480PConfig,
+    "rand0nmr/SFWan2.2-T2V-A14B-Diffusers": SelfForcingMoEWanT2V720PConfig,
+    "rand0nmr/SFWan2.2-T2V-14B-Diffusers": SelfForcingWanT2V480PConfig,
     "Wan-AI/Wan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_Config,
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": Wan2_2_T2V_A14B_Config,
     "Wan-AI/Wan2.2-I2V-A14B-Diffusers": Wan2_2_I2V_A14B_Config,

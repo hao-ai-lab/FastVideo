@@ -27,6 +27,7 @@ from fastvideo.training.distillation_pipeline import DistillationPipeline
 from fastvideo.training.training_utils import (EMA_FSDP,
                                                save_distillation_checkpoint)
 from fastvideo.utils import is_vsa_available, set_random_seed
+from copy import deepcopy
 
 logger = init_logger(__name__)
 
@@ -48,10 +49,14 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         """Initialize the self-forcing training pipeline."""
         logger.info("Initializing self-forcing distillation pipeline...")
 
+        # self.generator_ema: EMA_FSDP | None = None
+        # self.generator_ema_2: EMA_FSDP | None = None
+        
+        super().initialize_training_pipeline(training_args)
+
         self.generator_ema: EMA_FSDP | None = None
         self.generator_ema_2: EMA_FSDP | None = None
 
-        super().initialize_training_pipeline(training_args)
         try:
             logger.info("RANK: %s, entered initialize_training_pipeline",
                         self.global_rank,
@@ -61,7 +66,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         self.noise_scheduler = SelfForcingFlowMatchScheduler(
             num_inference_steps=1000,
-            shift=5.0,
+            shift=self.timestep_shift,
             sigma_min=0.0,
             extra_one_step=True,
             training=True)
@@ -89,13 +94,13 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
     def generate_and_sync_list(self, num_blocks: int, num_denoising_steps: int,
                                device: torch.device) -> list[int]:
         """Generate and synchronize random exit flags across distributed processes."""
-        logger.info(
-            "RANK: %s, enter generate_and_sync_list blocks=%s steps=%s device=%s",
-            self.global_rank,
-            num_blocks,
-            num_denoising_steps,
-            str(device),
-            local_main_process_only=False)
+        # logger.info(
+        #     "RANK: %s, enter generate_and_sync_list blocks=%s steps=%s device=%s",
+        #     self.global_rank,
+        #     num_blocks,
+        #     num_denoising_steps,
+        #     str(device),
+        #     local_main_process_only=False)
         rank = dist.get_rank() if dist.is_initialized() else 0
 
         if rank == 0:
@@ -113,12 +118,12 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             dist.broadcast(indices,
                            src=0)  # Broadcast the random indices to all ranks
         flags = indices.tolist()
-        logger.info(
-            "RANK: %s, exit generate_and_sync_list flags_len=%s first=%s",
-            self.global_rank,
-            len(flags),
-            flags[0] if len(flags) > 0 else None,
-            local_main_process_only=False)
+        # logger.info(
+        #     "RANK: %s, exit generate_and_sync_list flags_len=%s first=%s",
+        #     self.global_rank,
+        #     len(flags),
+        #     flags[0] if len(flags) > 0 else None,
+        #     local_main_process_only=False)
         return flags
 
     def generator_loss(
@@ -128,6 +133,12 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         Compute generator loss using DMD-style approach.
         The generator tries to fool the critic (fake_score_transformer).
         """
+        # Check that all params in self.transformer require grad is True
+        # for param in self.transformer.parameters():
+        #     assert param.requires_grad, "Param %s in transformer requires grad is False" % param.name
+        # if self.transformer_2 is not None:
+        #     for param in self.transformer_2.parameters():
+        #         assert param.requires_grad, "Param %s in transformer_2 requires grad is False" % param.name
         exit_flags = None
         # If the generator is MoE, randomly sample an exit timestep, and turn on training for one of the dits
         if self.boundary_timestep is not None and self.transformer_2 is not None:
@@ -139,20 +150,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             # logger.info("Exit timestep in generator_loss(): %s", exit_timestep)
             if exit_timestep < self.boundary_timestep:
                 self.train_transformer_2 = True
-                self._enable_training(self.transformer_2, self.optimizer_2)
-                self._disable_training(self.transformer, self.optimizer)
             else:
                 self.train_transformer_2 = False
-                self._enable_training(self.transformer, self.optimizer)
-                self._disable_training(self.transformer_2, self.optimizer_2)
         else: # Default to normal single-dit generator
             self.train_transformer_2 = False
-            self._enable_training(self.transformer, self.optimizer)
-
-        # Turns off training for fake score transformers
-        self._disable_training(self.fake_score_transformer, self.fake_score_optimizer)
-        if self.fake_score_transformer_2 is not None:
-            self._disable_training(self.fake_score_transformer_2, self.fake_score_optimizer_2)
 
         with set_forward_context(
                 current_timestep=training_batch.timesteps,
@@ -182,15 +183,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         Compute critic loss using flow matching between noise and generator output.
         The critic learns to predict the flow from noise to the generator's output.
         """
-        # Turns off training for all generators
-        self._disable_training(self.transformer, self.optimizer)
-        if self.transformer_2 is not None:
-            self._disable_training(self.transformer_2, self.optimizer_2)
-
-        # Turns on training for fake score transformers
-        self._enable_training(self.fake_score_transformer, self.fake_score_optimizer)
-        if self.fake_score_transformer_2 is not None:
-            self._enable_training(self.fake_score_transformer_2, self.fake_score_optimizer_2)
+        # for param in self.fake_score_transformer.parameters():
+        #     assert param.requires_grad, "Param %s in fake_score_transformer requires grad is False" % param.name
+        # if self.fake_score_transformer_2 is not None:
+        #     for param in self.fake_score_transformer_2.parameters():
+        #         assert param.requires_grad, "Param %s in fake_score_transformer_2 requires grad is False" % param.name
 
         updated_batch, flow_matching_loss = self.faker_score_forward(
             training_batch)
@@ -213,29 +210,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         batch_size = latents.shape[0]
         initial_latent = getattr(training_batch, 'image_latent', None)
 
-        # Dynamic frame generation logic (adapted from _run_generator)
-        num_training_frames = getattr(self.training_args, 'num_latent_t', 21)
-
-        # During training, the number of generated frames should be uniformly sampled from
-        # [21, self.num_training_frames], but still being a multiple of self.num_frame_per_block
-        min_num_frames = 20 if self.independent_first_frame else 21
-        max_num_frames = num_training_frames - 1 if self.independent_first_frame else num_training_frames
-        assert max_num_frames % self.num_frame_per_block == 0
-        assert min_num_frames % self.num_frame_per_block == 0
-        max_num_blocks = max_num_frames // self.num_frame_per_block
-        min_num_blocks = min_num_frames // self.num_frame_per_block
-
-        # Sample number of blocks and sync across processes
-        num_generated_blocks = torch.randint(min_num_blocks,
-                                             max_num_blocks + 1, (1, ),
-                                             device=self.device)
-        if dist.is_initialized():
-            dist.broadcast(num_generated_blocks, src=0)
-        num_generated_blocks = num_generated_blocks.item()
-        num_generated_frames = num_generated_blocks * self.num_frame_per_block
-        if self.independent_first_frame and initial_latent is None:
-            num_generated_frames += 1
-            min_num_frames += 1
+        num_generated_frames = getattr(self.training_args, 'num_latent_t', 21)
 
         # Create noise with dynamic shape
         if initial_latent is not None:
@@ -258,13 +233,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         batch_size, num_frames, num_channels, height, width = noise.shape
 
         # Block size calculation
-        if not self.independent_first_frame or (self.independent_first_frame
-                                                and initial_latent is not None):
-            assert num_frames % self.num_frame_per_block == 0
-            num_blocks = num_frames // self.num_frame_per_block
-        else:
-            assert (num_frames - 1) % self.num_frame_per_block == 0
-            num_blocks = (num_frames - 1) // self.num_frame_per_block
 
         num_input_frames = initial_latent.shape[
             1] if initial_latent is not None else 0
@@ -277,14 +245,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             [batch_size, num_output_frames, num_channels, height, width],
             device=noise.device,
             dtype=noise.dtype)
-
-        def get_model_device(model):
-            if model is None:
-                return "None"
-            try:
-                return next(model.parameters()).device
-            except (StopIteration, AttributeError):
-                return "Unknown"
 
         # Step 1: Initialize KV cache to all zeros
         cache_frames = num_generated_frames + num_input_frames
@@ -319,7 +279,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             current_start_frame += 1
 
         # Step 3: Temporal denoising loop
-        all_num_frames = [self.num_frame_per_block] * num_blocks
+        all_num_frames = [self.num_frame_per_block] * 7
+        # all_num_frames[0] = 1
         if self.independent_first_frame and initial_latent is None:
             all_num_frames = [1] + all_num_frames
         num_denoising_steps = len(self.denoising_step_list)
@@ -330,12 +291,13 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                                  device=noise.device)
         # if exit_flags is None:
         #     exit_flags = self.generate_and_sync_list(len(all_num_frames), 2, device=noise.device)
-            # exit_flags[0] += 2
+        #     exit_flags[0] += 2
         exit_timestep = self.denoising_step_list[exit_flags[0]].item()
 
         start_gradient_frame_index = max(0, num_output_frames - 21)
 
         high_noise_timesteps = self.denoising_step_list[self.denoising_step_list >= self.boundary_timestep]
+        assert len(high_noise_timesteps) == len(self.denoising_step_list) // 2, f"Incorrect number of high noise timesteps: {len(high_noise_timesteps)}"
 
         for block_index, current_num_frames in enumerate(all_num_frames):
             noisy_input = noise[:, current_start_frame -
@@ -381,7 +343,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             start_frame=current_start_frame).permute(
                                 0, 2, 1, 3, 4)
 
-                        if self.boundary_timestep is not None and current_timestep >= self.boundary_timestep:
+                        if self.boundary_timestep is not None and self.training_args.use_add_noise_high and current_timestep >= self.boundary_timestep:
                             denoised_pred = pred_noise_to_x_bound(
                                 pred_noise=pred_flow.flatten(0, 1),
                                 noise_input_latent=noisy_input.flatten(0, 1),
@@ -399,7 +361,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
                         next_timestep = self.denoising_step_list[index + 1]
 
-                        if self.boundary_timestep is not None and index < len(high_noise_timesteps) - 1:
+                        if self.boundary_timestep is not None and self.training_args.use_add_noise_high and index < len(high_noise_timesteps) - 1:
                             noisy_input = self.noise_scheduler.add_noise_high(
                                 denoised_pred.flatten(0, 1),
                                 torch.randn_like(denoised_pred.flatten(0, 1)),
@@ -412,8 +374,35 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                            device=noise.device,
                                            dtype=torch.long)).unflatten(
                                     0, denoised_pred.shape[:2])
-                        elif self.boundary_timestep is not None and index == len(high_noise_timesteps) - 1:
+                        elif self.boundary_timestep is not None and self.training_args.use_add_noise_high and index == len(high_noise_timesteps) - 1:
+                            assert exit_timestep < self.boundary_timestep, "exit timestep is greater than boundary timestep"
                             noisy_input = denoised_pred
+
+                            # Step 3.3: rerun with boundary timestep to update the high noise's cache
+                            # context_timestep = torch.ones_like(timestep) * self.boundary_timestep
+                            # context_denoised_pred = self.noise_scheduler.add_noise_high(
+                            #     denoised_pred.flatten(0, 1),
+                            #     torch.randn_like(denoised_pred.flatten(0, 1)),
+                            #     context_timestep,
+                            #     self.boundary_timestep * torch.ones_like(context_timestep)).unflatten(0, denoised_pred.shape[:2])
+
+                            # training_batch_bound = self._build_distill_input_kwargs(
+                            #     context_denoised_pred, context_timestep,
+                            #     training_batch.conditional_dict, training_batch)
+
+                            # current_model(
+                            #     hidden_states=training_batch_bound.
+                            #     input_kwargs['hidden_states'],
+                            #     encoder_hidden_states=training_batch_bound.
+                            #     input_kwargs['encoder_hidden_states'],
+                            #     timestep=training_batch_bound.input_kwargs['timestep'],
+                            #     encoder_hidden_states_image=training_batch_bound.
+                            #     input_kwargs.get('encoder_hidden_states_image'),
+                            #     kv_cache=kv_cache1,
+                            #     crossattn_cache=crossattn_cache,
+                            #     current_start=current_start_frame * self.frame_seq_length,
+                            #     start_frame=current_start_frame)
+
                         else:
                             noisy_input = self.noise_scheduler.add_noise(
                                 denoised_pred.flatten(0, 1),
@@ -424,7 +413,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                         dtype=torch.long)).unflatten(
                                             0, denoised_pred.shape[:2])
                 else:
-                    logger.info("Exit timestep in _generator_multi_step_simulation_forward(): %s", current_timestep)
+                    # logger.info("Exit timestep in _generator_multi_step_simulation_forward(): %s", current_timestep)
                     # Final prediction with gradient control
                     if current_start_frame < start_gradient_frame_index:
                         with torch.no_grad():
@@ -468,7 +457,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             start_frame=current_start_frame).permute(
                                 0, 2, 1, 3, 4)
 
-                    if self.boundary_timestep is not None and self.transformer_2 is not None and current_timestep >= self.boundary_timestep:
+                    if self.boundary_timestep is not None and self.training_args.use_add_noise_high and current_timestep >= self.boundary_timestep:
                         denoised_pred = pred_noise_to_x_bound(
                             pred_noise=pred_flow.flatten(0, 1),
                             noise_input_latent=noisy_input.flatten(0, 1),
@@ -479,7 +468,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             pred_noise=pred_flow.flatten(0, 1),
                             noise_input_latent=noisy_input.flatten(0, 1),
                             timestep=timestep,
-                            scheduler=self.noise_scheduler).unflatten(0, pred_flow.shape[:2])
+                            scheduler=self.noise_scheduler).unflatten(
+                                0, pred_flow.shape[:2])
                     else:
                         denoised_pred = pred_noise_to_pred_video(
                             pred_noise=pred_flow.flatten(0, 1),
@@ -487,14 +477,17 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             timestep=timestep,
                             scheduler=self.noise_scheduler).unflatten(
                                 0, pred_flow.shape[:2])
-                        clean_denoised_pred = denoised_pred
+                        clean_denoised_pred = None
                     break
+
+            assert exit_timestep == current_timestep, "exit timestep is not equal to current timestep"
 
             # Step 3.2: record the model's output
             output[:, current_start_frame:current_start_frame +
                    current_num_frames] = denoised_pred
-            clean_output[:, current_start_frame:current_start_frame +
-                   current_num_frames] = clean_denoised_pred
+            if clean_denoised_pred is not None:
+                clean_output[:, current_start_frame:current_start_frame +
+                    current_num_frames] = clean_denoised_pred
 
             # Step 3.3: rerun with timestep zero to update the cache
             if self.boundary_timestep is not None:
@@ -503,19 +496,23 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     current_model = self.transformer_2
                 else:
                     # For high noise expert, the context timestep should be the boundary timestep
-                    context_timestep = torch.ones_like(timestep) * self.boundary_timestep
+                    # context_timestep = torch.ones_like(timestep) * self.boundary_timestep
+                    context_timestep = torch.ones_like(timestep) * self.context_noise
                     current_model = self.transformer
             else:
                 context_timestep = torch.ones_like(timestep) * self.context_noise
                 current_model = self.transformer
 
-            if self.boundary_timestep is not None and self.transformer_2 is not None and current_timestep >= self.boundary_timestep:
-                # raise ValueError("Exit timestep is greater than boundary timestep")
-                denoised_pred = self.noise_scheduler.add_noise_high(
-                    denoised_pred.flatten(0, 1),
-                    torch.randn_like(denoised_pred.flatten(0, 1)),
-                    context_timestep,
-                    self.boundary_timestep * torch.ones_like(context_timestep)).unflatten(0, denoised_pred.shape[:2])
+            if self.boundary_timestep is not None and self.training_args.use_add_noise_high and current_timestep >= self.boundary_timestep:
+                # denoised_pred = self.noise_scheduler.add_noise_high(
+                #     denoised_pred.flatten(0, 1),
+                #     torch.randn_like(denoised_pred.flatten(0, 1)),
+                #     context_timestep,
+                #     self.boundary_timestep * torch.ones_like(context_timestep)).unflatten(0, denoised_pred.shape[:2])
+                denoised_pred = self.noise_scheduler.add_noise(
+                    clean_denoised_pred.flatten(0, 1),
+                    torch.randn_like(clean_denoised_pred.flatten(0, 1)),
+                    context_timestep).unflatten(0, clean_denoised_pred.shape[:2])
             else:
                 denoised_pred = self.noise_scheduler.add_noise(
                     denoised_pred.flatten(0, 1),
@@ -526,6 +523,20 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 training_batch_temp = self._build_distill_input_kwargs(
                     denoised_pred, context_timestep,
                     training_batch.conditional_dict, training_batch)
+
+                if self.boundary_timestep is not None and exit_timestep < self.boundary_timestep:
+                    self.transformer(
+                        hidden_states=training_batch_temp.
+                        input_kwargs['hidden_states'],
+                        encoder_hidden_states=training_batch_temp.
+                        input_kwargs['encoder_hidden_states'],
+                        timestep=training_batch_temp.input_kwargs['timestep'],
+                        encoder_hidden_states_image=training_batch_temp.
+                        input_kwargs.get('encoder_hidden_states_image'),
+                        kv_cache=kv_cache1,
+                        crossattn_cache=crossattn_cache,
+                        current_start=current_start_frame * self.frame_seq_length,
+                        start_frame=current_start_frame)
 
                 # context_timestep is 0 so we use transformer_2
                 # current_model = self.transformer_2 if self.transformer_2 is not None else self.transformer
@@ -591,16 +602,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         else:
             pred_image_or_video_last_21 = pred_image_or_video
 
-        # Set up gradient mask if we generated more than minimum frames
-        if num_generated_frames != min_num_frames:
-            # Currently, we do not use gradient for the first chunk, since it contains image latents
-            gradient_mask = torch.ones_like(pred_image_or_video_last_21,
-                                            dtype=torch.bool)
-            if self.independent_first_frame:
-                gradient_mask[:, :1] = False
-            else:
-                gradient_mask[:, :self.num_frame_per_block] = False
-
         # Apply gradient masking if needed
         final_output = pred_image_or_video_last_21.to(dtype)
         if gradient_mask is not None:
@@ -630,16 +631,19 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 min_num_frames, dtype=torch.float32, device=self.device)
 
         # Clean up caches - properly free GPU memory
-        # self._cleanup_simulation_caches(kv_cache1, crossattn_cache)
-        # gc.collect()
-        # torch.cuda.empty_cache()
+        self._cleanup_simulation_caches(kv_cache1, crossattn_cache)
+        gc.collect()
+        torch.cuda.empty_cache()
         # assert kv_cache1 is not None
         # assert crossattn_cache is not None
         # self._reset_simulation_caches(self.kv_cache1, self.crossattn_cache)
 
+        assert pred_image_or_video.shape[1] == 21, "pred_image_or_video must have 21 frames"
+
         if gradient_mask is not None:
             return final_output, exit_timestep
         else:
+            # return pred_image_or_video, exit_timestep
             return pred_image_or_video, clean_output, exit_timestep
 
     def _initialize_simulation_caches(
@@ -673,6 +677,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             max_num_frames = num_frames
         num_max_frames = max(max_num_frames, num_frames)
         kv_cache_size = num_max_frames * frame_seq_length
+        assert kv_cache_size == 1560 * 21, "kv_cache_size must be 1560 * 21"
 
         kv_cache = []
         for _ in range(num_transformer_blocks):
@@ -855,27 +860,32 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     (generator_loss / gradient_accumulation_steps).backward()
 
                 # Ensure that only one of the two transformers have received gradients
-                # if self.train_transformer_2:
-                #     # Assert that all gradients are None for transformer
-                #     raise ValueError("Transformer 2 is training")
-                #     assert all(p.grad is None for p in self.transformer.parameters())
-                #     grad_sum = 0
-                #     for n, p in self.transformer_2.named_parameters():
-                #         if p.grad is not None:
-                #             grad_sum += p.grad.sum().item()
-                #         else:
-                #             raise ValueError("Transformer 2 param %s has no gradient", n)
-                #     assert grad_sum != 0, "Transformer 2 did not receive gradients"
-                # else:
-                #     # raise ValueError("Transformer 2 is not training")
-                #     assert all(p.grad is None for p in self.transformer_2.parameters())
-                #     grad_norm = 0.0
-                #     for n, p in self.transformer.named_parameters():
-                #         if p.grad is not None:
-                #             grad_norm += p.grad.data.norm(2).item() ** 2
-                #         else:
-                #             raise ValueError("Transformer param %s has no gradient", n)
-                #     assert grad_norm > 0.0, "Transformer has 0 gradient norm"
+                if self.train_transformer_2:
+                    # Assert that all gradients are None for transformer
+                    assert all(p.grad is None for p in self.transformer.parameters())
+                    grad_sum = 0
+                    for n, p in self.transformer_2.named_parameters():
+                        if not p.requires_grad:
+                            logger.info("Transformer 2 param %s is not trainable", n)
+                            continue
+                        if p.grad is not None:
+                            grad_sum += p.grad.sum().item()
+                        else:
+                            raise ValueError("Transformer 2 param %s has no gradient", n)
+                    assert grad_sum != 0, "Transformer 2 did not receive gradients"
+                else:
+                    # raise ValueError("Transformer 2 is not training")
+                    assert all(p.grad is None for p in self.transformer_2.parameters())
+                    grad_norm = 0.0
+                    for n, p in self.transformer.named_parameters():
+                        if not p.requires_grad:
+                            logger.info("Transformer param %s is not trainable", n)
+                            continue
+                        if p.grad is not None:
+                            grad_norm += p.grad.data.norm(2).item() ** 2
+                        else:
+                            raise ValueError("Transformer param %s has no gradient", n)
+                    assert grad_norm > 0.0, "Transformer has 0 gradient norm"
 
                 total_generator_loss += generator_loss.detach().item()
                 generator_log_dict.update(gen_log_dict)
@@ -888,13 +898,31 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             if hasattr(
                     self, 'train_transformer_2'
             ) and self.train_transformer_2 and self.transformer_2 is not None:
-                self._clip_model_grad_norm_(batch_gen, self.transformer_2)
+                generator_grad_norm = self._clip_model_grad_norm_(batch_gen, self.transformer_2)
                 self.optimizer_2.step()
                 self.lr_scheduler_2.step()
             else:
-                self._clip_model_grad_norm_(batch_gen, self.transformer)
+                generator_grad_norm = self._clip_model_grad_norm_(batch_gen, self.transformer)
                 self.optimizer.step()
                 self.lr_scheduler.step()
+
+            if (self.current_trainstep >= self.training_args.ema_start_step) and \
+                    (self.generator_ema is None) and (self.training_args.ema_decay > 0):
+                self.generator_ema = EMA_FSDP(
+                    self.transformer, decay=self.training_args.ema_decay)
+                logger.info("Created generator EMA at step %s with decay=%s",
+                            self.current_trainstep, self.training_args.ema_decay)
+
+                # Create EMA for transformer_2 if it exists
+                if self.transformer_2 is not None and self.generator_ema_2 is None:
+                    self.generator_ema_2 = EMA_FSDP(
+                        self.transformer_2, decay=self.training_args.ema_decay)
+                    logger.info(
+                        "Created generator EMA_2 at step %s with decay=%s",
+                        self.current_trainstep, self.training_args.ema_decay)
+                
+                world_group = get_world_group()
+                world_group.barrier()
 
             if self.generator_ema is not None:
                 if hasattr(
@@ -913,13 +941,18 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             world_group.all_reduce(avg_generator_loss,
                                    op=torch.distributed.ReduceOp.AVG)
             training_batch.generator_loss = avg_generator_loss.item()
-            # training_batch.fake_score_loss = 0
-            # training_batch.total_loss = training_batch.generator_loss
-            # return training_batch
+            training_batch.generator_grad_norm = generator_grad_norm
+            training_batch.critic_grad_norm = 0.0
+            training_batch.fake_score_loss = 0
+            training_batch.total_loss = training_batch.generator_loss
+            training_batch.fake_score_latent_vis_dict = {
+                "fake_score_timestep": torch.tensor(0.0, device=self.device),
+            }
+            return training_batch
         else:
             training_batch.generator_loss = 0.0
+            training_batch.generator_grad_norm = 0.0
 
-        logger.debug("Training critic at step %s", self.current_trainstep)
         self.fake_score_optimizer.zero_grad()
         if self.fake_score_transformer_2 is not None:
             self.fake_score_optimizer_2.zero_grad()
@@ -948,25 +981,25 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                      attn_metadata=batch_critic.attn_metadata):
                 (critic_loss / gradient_accumulation_steps).backward()
 
-            # if self.train_fake_score_transformer_2:
-            #     assert all(p.grad is None for p in self.fake_score_transformer.parameters())
-            #     grad_sum = 0
-            #     for n, p in self.fake_score_transformer_2.named_parameters():
-            #         if p.grad is not None:
-            #             grad_sum += p.grad.sum().item()
-            #         else:
-            #             raise ValueError("Fake score transformer 2 param %s has no gradient", n)
-            #     assert grad_sum != 0, "Fake score transformer 2 did not receive gradients"
-            # else:
-            #     raise ValueError("Fake score transformer 2 is not training")
-            #     assert all(p.grad is None for p in self.fake_score_transformer_2.parameters())
-            #     grad_sum = 0
-            #     for n, p in self.fake_score_transformer.named_parameters():
-            #         if p.grad is not None:
-            #             grad_sum += p.grad.sum().item()
-            #         else:
-            #             raise ValueError("Fake score transformer param %s has no gradient", n)
-            #     assert grad_sum != 0, "Fake score transformer did not receive gradients"
+            if self.train_fake_score_transformer_2:
+                assert all(p.grad is None for p in self.fake_score_transformer.parameters())
+                grad_sum = 0
+                for n, p in self.fake_score_transformer_2.named_parameters():
+                    if p.grad is not None:
+                        grad_sum += p.grad.sum().item()
+                    else:
+                        raise ValueError("Fake score transformer 2 param %s has no gradient", n)
+                assert grad_sum != 0, "Fake score transformer 2 did not receive gradients"
+            else:
+                if self.fake_score_transformer_2 is not None:
+                    assert all(p.grad is None for p in self.fake_score_transformer_2.parameters())
+                grad_sum = 0
+                for n, p in self.fake_score_transformer.named_parameters():
+                    if p.grad is not None:
+                        grad_sum += p.grad.sum().item()
+                    else:
+                        raise ValueError("Fake score transformer param %s has no gradient", n)
+                assert grad_sum != 0, "Fake score transformer did not receive gradients"
 
             total_critic_loss += critic_loss.detach().item()
             critic_log_dict.update(crit_log_dict)
@@ -976,12 +1009,12 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     batch_critic.fake_score_latent_vis_dict)
 
         if self.train_fake_score_transformer_2 and self.fake_score_transformer_2 is not None:
-            self._clip_model_grad_norm_(batch_critic,
+            critic_grad_norm = self._clip_model_grad_norm_(batch_critic,
                                         self.fake_score_transformer_2)
             self.fake_score_optimizer_2.step()
             self.fake_score_lr_scheduler_2.step()
         else:
-            self._clip_model_grad_norm_(batch_critic,
+            critic_grad_norm = self._clip_model_grad_norm_(batch_critic,
                                         self.fake_score_transformer)
             self.fake_score_optimizer.step()
             self.fake_score_lr_scheduler.step()
@@ -993,7 +1026,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         world_group.all_reduce(avg_critic_loss,
                                op=torch.distributed.ReduceOp.AVG)
         training_batch.fake_score_loss = avg_critic_loss.item()
-
+        training_batch.critic_grad_norm = critic_grad_norm
         training_batch.total_loss = training_batch.generator_loss + training_batch.fake_score_loss
         return training_batch
 
@@ -1006,6 +1039,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,
                                        training_args: TrainingArgs, step: int):
         """Add visualization data to wandb logging and save frames to disk."""
+        self.vae = self.vae.to(get_local_torch_device(), dtype=torch.bfloat16)
         wandb_loss_dict = {}
 
         # Debug logging
@@ -1104,6 +1138,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                         video, fps=24, format="mp4")
                     del video, latents
 
+        self.vae = self.vae.to("cpu")
+
         # Log metadata
         if hasattr(
                 training_batch,
@@ -1165,8 +1201,15 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
-        self._log_validation(self.transformer, self.training_args,
+        assert self.transformer.scale_shift_table.requires_grad == False
+        if self.transformer_2 is not None:
+            assert self.transformer_2.scale_shift_table.requires_grad == False
+        validation_args = deepcopy(self.training_args)
+        self._log_validation(validation_args,
                              self.init_steps)
+        assert self.transformer.scale_shift_table.requires_grad == False
+        if self.transformer_2 is not None:
+            assert self.transformer_2.scale_shift_table.requires_grad == False
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -1198,20 +1241,23 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             self.current_trainstep = step
             training_batch.current_vsa_sparsity = current_vsa_sparsity
 
-            if (step >= self.training_args.ema_start_step) and \
-                    (self.generator_ema is None) and (self.training_args.ema_decay > 0):
-                self.generator_ema = EMA_FSDP(
-                    self.transformer, decay=self.training_args.ema_decay)
-                logger.info("Created generator EMA at step %s with decay=%s",
-                            step, self.training_args.ema_decay)
+            # if (step >= self.training_args.ema_start_step) and \
+            #         (self.generator_ema is None) and (self.training_args.ema_decay > 0):
+            #     self.generator_ema = EMA_FSDP(
+            #         self.transformer, decay=self.training_args.ema_decay)
+            #     logger.info("Created generator EMA at step %s with decay=%s",
+            #                 step, self.training_args.ema_decay)
 
-                # Create EMA for transformer_2 if it exists
-                if self.transformer_2 is not None and self.generator_ema_2 is None:
-                    self.generator_ema_2 = EMA_FSDP(
-                        self.transformer_2, decay=self.training_args.ema_decay)
-                    logger.info(
-                        "Created generator EMA_2 at step %s with decay=%s",
-                        step, self.training_args.ema_decay)
+            #     # Create EMA for transformer_2 if it exists
+            #     if self.transformer_2 is not None and self.generator_ema_2 is None:
+            #         self.generator_ema_2 = EMA_FSDP(
+            #             self.transformer_2, decay=self.training_args.ema_decay)
+            #         logger.info(
+            #             "Created generator EMA_2 at step %s with decay=%s",
+            #             step, self.training_args.ema_decay)
+                
+            #     world_group = get_world_group()
+            #     world_group.barrier()
 
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 training_batch = self.train_one_step(training_batch)
@@ -1219,7 +1265,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             total_loss = training_batch.total_loss
             generator_loss = training_batch.generator_loss
             fake_score_loss = training_batch.fake_score_loss
-            grad_norm = training_batch.grad_norm
+            generator_grad_norm = training_batch.generator_grad_norm
+            critic_grad_norm = training_batch.critic_grad_norm
 
             step_time = time.perf_counter() - start_time
             step_times.append(step_time)
@@ -1234,8 +1281,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 f"{fake_score_loss:.4f}",
                 "step_time":
                 f"{step_time:.2f}s",
-                "grad_norm":
-                grad_norm,
+                "generator_grad_norm":
+                generator_grad_norm,
+                "critic_grad_norm":
+                critic_grad_norm,
                 "ema":
                 "✓" if (self.generator_ema is not None and self.is_ema_ready())
                 else "✗",
@@ -1259,8 +1308,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     step_time,
                     "avg_step_time":
                     avg_step_time,
-                    "grad_norm":
-                    grad_norm,
+                    "generator_grad_norm":
+                    generator_grad_norm,
+                    "critic_grad_norm":
+                    critic_grad_norm,
                 }
                 if (step % self.dfake_gen_update_ratio == 0):
                     log_data["train_generator_loss"] = generator_loss
@@ -1340,6 +1391,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
                 if self.transformer:
                     self.transformer.train()
+                if getattr(self, 'transformer_2', None) is not None:
+                    self.transformer_2.train()
                 self.sp_group.barrier()
 
             if (self.training_args.weight_only_checkpointing_steps > 0
@@ -1372,11 +1425,13 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                                    None),
                     generator_ema_2=getattr(self, 'generator_ema_2', None))
 
-                if self.training_args.use_ema and self.is_ema_ready():
-                    self.save_ema_weights(self.training_args.output_dir, step)
+                # if self.training_args.use_ema and self.is_ema_ready():
+                #     self.save_ema_weights(self.training_args.output_dir, step)
+
+                self.sp_group.barrier()
 
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
-                self._log_validation(self.transformer, self.training_args, step)
+                self._log_validation(deepcopy(self.training_args), step)
                 gc.collect()
                 torch.cuda.empty_cache()
 
@@ -1412,9 +1467,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                            None),
             generator_ema_2=getattr(self, 'generator_ema_2', None))
 
-        if self.training_args.use_ema and self.is_ema_ready():
-            self.save_ema_weights(self.training_args.output_dir,
-                                  self.training_args.max_train_steps)
+        # if self.training_args.use_ema and self.is_ema_ready():
+        #     self.save_ema_weights(self.training_args.output_dir,
+        #                           self.training_args.max_train_steps)
 
         if get_sp_group():
             cleanup_dist_env_and_memory()

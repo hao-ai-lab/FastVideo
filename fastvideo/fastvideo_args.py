@@ -166,6 +166,8 @@ class FastVideoArgs:
 
     # MoE parameters used by Wan2.2
     boundary_ratio: float | None = 0.875
+    override_boundary_ratio: float | None = None
+    use_add_noise_high: bool = False
 
     @property
     def training_mode(self) -> bool:
@@ -410,6 +412,18 @@ class FastVideoArgs:
             type=str,
             default=FastVideoArgs.override_transformer_cls_name,
             help="Override transformer cls name",
+        )
+        parser.add_argument(
+            "--override-boundary-ratio",
+            type=float,
+            default=FastVideoArgs.override_boundary_ratio,
+            help="Override boundary ratio for MoE",
+        )
+        parser.add_argument(
+            "--use-add-noise-high",
+            action=StoreBoolean,
+            default=FastVideoArgs.use_add_noise_high,
+            help="Whether to use add_noise_high & pred_noise_to_x_bound for MoE",
         )
         # Add pipeline configuration arguments
         PipelineConfig.add_cli_args(parser)

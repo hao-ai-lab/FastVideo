@@ -102,25 +102,21 @@ class TrainingPipeline(LoRAPipeline, ABC):
         self.transformer_2 = self.get_module("transformer_2", None)
         self.seed = training_args.seed
         self.set_schemas()
+        self.set_trainable()
 
         # Set random seeds for deterministic training
         assert self.seed is not None, "seed must be set"
         set_random_seed(self.seed)
         self.transformer.train()
         self.transformer.requires_grad_(True)
+        self.transformer.scale_shift_table.requires_grad_(False)
         if training_args.enable_gradient_checkpointing_type is not None:
             self.transformer = apply_activation_checkpointing(
                 self.transformer,
                 checkpointing_type=training_args.
                 enable_gradient_checkpointing_type)
-            if self.transformer_2 is not None:
-                self.transformer_2 = apply_activation_checkpointing(
-                    self.transformer_2,
-                    checkpointing_type=training_args.
-                    enable_gradient_checkpointing_type)
 
         noise_scheduler = self.modules["scheduler"]
-        self.set_trainable()
         params_to_optimize = self.transformer.parameters()
         params_to_optimize = list(
             filter(lambda p: p.requires_grad, params_to_optimize))
@@ -153,6 +149,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
             # Ensure transformer_2 has trainable parameters before creating optimizer
             self.transformer_2.train()
             self.transformer_2.requires_grad_(True)
+            self.transformer_2.scale_shift_table.requires_grad_(False)
+            if training_args.enable_gradient_checkpointing_type is not None:
+                self.transformer_2 = apply_activation_checkpointing(
+                    self.transformer_2,
+                    checkpointing_type=training_args.
+                    enable_gradient_checkpointing_type)
             params_to_optimize_2 = self.transformer_2.parameters()
             params_to_optimize_2 = list(
                 filter(lambda p: p.requires_grad, params_to_optimize_2))
@@ -233,18 +235,20 @@ class TrainingPipeline(LoRAPipeline, ABC):
     def _enable_training(self, model: torch.nn.Module,
                          optimizer: torch.optim.Optimizer) -> None:
         """Enable training mode and gradients for the specified model."""
-        for param in model.parameters():
-            param.requires_grad = True
-        model.train()
+        # for param in model.parameters():
+        #     param.requires_grad = True
+        # model.train()
         # optimizer.zero_grad()
+        return
 
     def _disable_training(self, model: torch.nn.Module,
                           optimizer: torch.optim.Optimizer) -> None:
         """Disable training mode and gradients for the specified model."""
-        for param in model.parameters():
-            param.requires_grad = False
-        model.eval()
+        # for param in model.parameters():
+        #     param.requires_grad = False
+        # model.eval()
         # optimizer.zero_grad(set_to_none=True)
+        return
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         batch = next(self.train_loader_iter, None)  # type: ignore
@@ -714,6 +718,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
                                   validation_batch: dict[str, Any],
                                   num_inference_steps: int) -> ForwardBatch:
         sampling_param.prompt = validation_batch['prompt']
+        if 'image_path' in validation_batch:
+            sampling_param.image_path = validation_batch['image_path']
         sampling_param.height = training_args.num_height
         sampling_param.width = training_args.num_width
         sampling_param.num_inference_steps = num_inference_steps

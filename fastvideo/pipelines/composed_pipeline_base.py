@@ -71,7 +71,7 @@ class ComposedPipelineBase(ABC):
 
         # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
-        fastvideo_args.dit_cpu_offload = False
+        fastvideo_args.dit_cpu_offload = True
         self.modules = self.load_modules(fastvideo_args, loaded_modules)
 
     def set_trainable(self) -> None:

@@ -92,6 +92,9 @@ class PipelineConfig:
     # Compilation
     # enable_torch_compile: bool = False
 
+    # Self-Forcing parameters
+    is_causal: bool = False
+
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser,
                      prefix: str = "") -> FlexibleArgumentParser:

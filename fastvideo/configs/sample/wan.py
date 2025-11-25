@@ -167,4 +167,17 @@ class Wan2_2_I2V_A14B_SamplingParam(Wan2_2_Base_SamplingParam):
 # =============================================
 @dataclass
 class SelfForcingWanT2V480PConfig(WanT2V_1_3B_SamplingParam):
-    pass
+    height: int = 480
+    width: int = 832
+    num_frames: int = 81
+    fps: int = 16
+
+@dataclass
+class SelfForcingMoEWanT2V480PConfig(WanT2V_1_3B_SamplingParam):
+    height: int = 480
+    width: int = 832
+    # height: int = 720
+    # width: int = 1280
+    # num_frames: int = 157
+    num_frames: int = 81
+    fps: int = 16

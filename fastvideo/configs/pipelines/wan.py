@@ -164,11 +164,36 @@ class SelfForcingWanT2V480PConfig(WanT2V480PConfig):
     flow_shift: float | None = 5.0
     dmd_denoising_steps: list[int] | None = field(
         default_factory=lambda: [1000, 750, 500, 250])
+    # flow_shift: float | None = 12.0
+    # dmd_denoising_steps: list[int] | None = field(
+    #     default_factory=lambda: [1000,350,275,200,125])
     warp_denoising_step: bool = True
+
+    def __post_init__(self) -> None:
+        self.vae_config.load_encoder = True
+        self.vae_config.load_decoder = True
 
 @dataclass
 class SelfForcingMoEWanT2V480PConfig(SelfForcingWanT2V480PConfig):
     boundary_ratio: float | None = 0.875
 
     def __post_init__(self) -> None:
+        self.vae_config.load_encoder = True
+        self.vae_config.load_decoder = True
         self.dit_config.boundary_ratio = self.boundary_ratio
+
+@dataclass
+class SelfForcingMoEWanT2V720PConfig(SelfForcingMoEWanT2V480PConfig):
+    flow_shift: float | None = 12.0
+    dmd_denoising_steps: list[int] | None = field(
+        default_factory=lambda: [1000,850,700,550,350,275,200,125])
+    # dmd_denoising_steps: list[int] | None = field(
+    #     default_factory=lambda: [1000,850,350,275])
+    # flow_shift: float | None = 5.0
+    # dmd_denoising_steps: list[int] | None = field(
+    #     default_factory=lambda: [1000,850,800,750,570,450,350,250])
+
+    def __post_init__(self) -> None:
+        self.dit_config.boundary_ratio = self.boundary_ratio
+        self.vae_config.load_encoder = True
+        self.vae_config.load_decoder = True
