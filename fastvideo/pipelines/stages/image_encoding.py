@@ -110,8 +110,19 @@ class MatrixGameImageEncodingStage(ImageEncodingStage):
         assert batch.pil_image is not None
         self.image_encoder = self.image_encoder.to(get_local_torch_device())
 
+        image = batch.pil_image
+
+        # Handle tensor input from causal pipeline (InputValidationStage converts PIL to tensor)
+        if isinstance(image, torch.Tensor):
+            # Extract first frame if 5D: [B, C, F, H, W] -> [B, C, H, W]
+            if image.dim() == 5:
+                image = image[:, :, 0]
+            # CLIPImageProcessor expects values in [0, 1], tensor is in [-1, 1]
+            image = (image + 1.0) / 2.0
+            image = image.clamp(0, 1)
+
         image_inputs = self.image_processor(
-            images=batch.pil_image, return_tensors="pt").to(
+            images=image, return_tensors="pt").to(
                 get_local_torch_device())
 
         with set_forward_context(current_timestep=0, attn_metadata=None):
@@ -566,8 +577,10 @@ class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
         assert batch.pil_image is not None
 
         if fastvideo_args.mode == ExecutionMode.INFERENCE:
+            # Accept both PIL.Image and torch.Tensor
+            # Causal pipeline (is_causal=True) converts PIL to tensor in InputValidationStage
             assert batch.pil_image is not None and isinstance(
-                batch.pil_image, PIL.Image.Image)
+                batch.pil_image, (PIL.Image.Image, torch.Tensor))
             assert batch.height is not None and isinstance(batch.height, int)
             assert batch.width is not None and isinstance(batch.width, int)
             assert batch.num_frames is not None and isinstance(
@@ -585,6 +598,11 @@ class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
             num_frames = batch.num_frames[0]
             height = batch.height[0]
             width = batch.width[0]
+        else:
+            # Fallback for other modes
+            height = batch.height if isinstance(batch.height, int) else batch.height[0]
+            width = batch.width if isinstance(batch.width, int) else batch.width[0]
+            num_frames = batch.num_frames if isinstance(batch.num_frames, int) else batch.num_frames[0]
 
         self.vae = self.vae.to(get_local_torch_device())
 
@@ -594,24 +612,50 @@ class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
         latent_frames = (num_frames - 1) // self.vae.temporal_compression_ratio + 1
 
         image = batch.pil_image
-        image = self.preprocess(
-            image,
-            vae_scale_factor=self.vae.spatial_compression_ratio,
-            height=height,
-            width=width).to(get_local_torch_device(), dtype=torch.float32)
+        
+        # Handle tensor input from causal pipeline
+        if isinstance(image, torch.Tensor):
+            # Causal pipeline provides tensor in [B, C, F, H, W] format
+            if image.dim() == 5:
+                # Already 5D, extract first frame for conditioning
+                # Shape: [B, C, F, H, W] -> use first frame [B, C, 1, H, W]
+                first_frame = image[:, :, :1]  # Keep dim, [B, C, 1, H, W]
+                # Create video condition with first frame + zeros
+                video_condition = torch.cat([
+                    first_frame,
+                    first_frame.new_zeros(first_frame.shape[0], first_frame.shape[1], 
+                                          num_frames - 1, first_frame.shape[3], first_frame.shape[4])
+                ], dim=2)
+            elif image.dim() == 4:
+                # [B, C, H, W] -> need to add frame dim
+                image = image.unsqueeze(2)  # [B, C, 1, H, W]
+                video_condition = torch.cat([
+                    image,
+                    image.new_zeros(image.shape[0], image.shape[1], num_frames - 1,
+                                    image.shape[3], image.shape[4])
+                ], dim=2)
+            else:
+                raise ValueError(f"Unexpected tensor dimensions: {image.dim()}")
+            video_condition = video_condition.to(get_local_torch_device(), dtype=torch.float32)
+        else:
+            # PIL Image input - use preprocess
+            image = self.preprocess(
+                image,
+                vae_scale_factor=self.vae.spatial_compression_ratio,
+                height=height,
+                width=width).to(get_local_torch_device(), dtype=torch.float32)
 
-        # (B, C, H, W) -> (B, C, 1, H, W)
-        image = image.unsqueeze(2)
+            # (B, C, H, W) -> (B, C, 1, H, W)
+            image = image.unsqueeze(2)
 
-        # Create video tensor with first frame as image, rest as zeros
-        video_condition = torch.cat([
-            image,
-            image.new_zeros(image.shape[0], image.shape[1], num_frames - 1,
-                            image.shape[3], image.shape[4])
-        ], dim=2
-        )
-        video_condition = video_condition.to(device=get_local_torch_device(),
-                                             dtype=torch.float32)
+            # Create video tensor with first frame as image, rest as zeros
+            video_condition = torch.cat([
+                image,
+                image.new_zeros(image.shape[0], image.shape[1], num_frames - 1,
+                                image.shape[3], image.shape[4])
+            ], dim=2)
+            video_condition = video_condition.to(device=get_local_torch_device(),
+                                                 dtype=torch.float32)
 
         # Setup VAE precision
         vae_dtype = PRECISION_TO_TYPE[

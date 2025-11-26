@@ -1,5 +1,6 @@
 from fastvideo import VideoGenerator
 from fastvideo.configs.pipelines.wan import MatrixGameI2V480PConfig
+from fastvideo.models.dits.matrix_game.causal_model import CausalMatrixGameWanModel
 
 import json
 import os
@@ -11,6 +12,7 @@ import torch
 from PIL import Image
 
 OUTPUT_PATH = "outputs/matrixgame"
+
 
 def create_action_presets(num_frames: int, keyboard_dim: int = 4) -> Dict[str, Dict[str, torch.Tensor]]:
     presets = {}
@@ -128,7 +130,8 @@ def load_initial_image(image_path: str = None) -> Image.Image:
 
 
 def main():
-    model_path = "/workspace/Matrix-Game-2.0-Diffusers/base_model"
+    # model_path = "/workspace/Matrix-Game-2.0-Diffusers/base_model"
+    model_path = "/workspace/Matrix-Game-2.0-Diffusers/base_distilled_model"
     image_path = "/FastVideo/Matrix-Game/Matrix-Game-2/demo_images/universal/0002.png"
     action_preset = "forward_right"
     num_frames = 57  # Must be 4k+1

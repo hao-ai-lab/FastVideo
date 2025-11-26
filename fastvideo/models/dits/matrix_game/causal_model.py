@@ -3,13 +3,16 @@
 import math
 from typing import Any, Dict, Optional
 
+PYTEST_DONT_REWRITE = True
+
 import torch
 import torch.nn as nn
 import torch.distributed as dist
 
-from torch.nn.attention.flex_attention import create_block_mask, flex_attention, BlockMask
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.nn.attention.flex_attention import BlockMask
+from fastvideo.forward_context import get_forward_context
 
-# Compile flex_attention per FastVideo defaults
 flex_attention = torch.compile(
     flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
 
@@ -17,32 +20,72 @@ import fastvideo.envs as envs
 from fastvideo.attention import LocalAttention
 from fastvideo.configs.models.dits.matrixgame import MatrixGameWanVideoConfig
 from fastvideo.distributed.parallel_state import get_sp_world_size
-from fastvideo.layers.layernorm import (LayerNormScaleShift, 
-                                        RMSNorm, ScaleResidual, 
+from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift,
+                                        RMSNorm, ScaleResidual,
                                         ScaleResidualLayerNormScaleShift)
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import (_apply_rotary_emb,
                                                get_rotary_pos_embed)
-from fastvideo.layers.visual_embedding import (PatchEmbed)
+from fastvideo.layers.visual_embedding import PatchEmbed, TimestepEmbedder, ModulateProjection
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
-from fastvideo.models.dits.wanvideo import WanT2VCrossAttention, WanTimeTextImageEmbedding
+from fastvideo.models.dits.wanvideo import (WanI2VCrossAttention,
+                                           WanT2VCrossAttention,
+                                           WanImageEmbedding)
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 
-# Import ActionModule
 from .action_module import ActionModule
 
 logger = init_logger(__name__)
 
-class CausalWanSelfAttention(nn.Module):
+
+class CausalMatrixGameTimeImageEmbedding(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        time_freq_dim: int,
+        image_embed_dim: int | None = None,
+    ):
+        super().__init__()
+
+        self.time_embedder = TimestepEmbedder(
+            dim, frequency_embedding_size=time_freq_dim, act_layer="silu")
+        self.time_modulation = ModulateProjection(dim,
+                                                  factor=6,
+                                                  act_layer="silu")
+        
+        self.image_embedder = None
+        if image_embed_dim is not None:
+            self.image_embedder = WanImageEmbedding(image_embed_dim, dim)
+
+    def forward(
+        self,
+        timestep: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        encoder_hidden_states_image: torch.Tensor | None = None,
+        timestep_seq_len: int | None = None,
+    ):
+        temb = self.time_embedder(timestep, timestep_seq_len)
+        timestep_proj = self.time_modulation(temb)
+        
+        if encoder_hidden_states_image is not None:
+            assert self.image_embedder is not None
+            encoder_hidden_states_image = self.image_embedder(
+                encoder_hidden_states_image)
+
+        return temb, timestep_proj, None, encoder_hidden_states_image
+
+
+class CausalMatrixGameSelfAttention(nn.Module):
+
     def __init__(self,
                  dim: int,
                  num_heads: int,
                  local_attn_size: int = -1,
                  sink_size: int = 0,
-                 qk_norm=True,
-                 eps=1e-6) -> None:
+                 qk_norm: bool = True,
+                 eps: float = 1e-6) -> None:
         assert dim % num_heads == 0
         super().__init__()
         self.dim = dim
@@ -51,7 +94,8 @@ class CausalWanSelfAttention(nn.Module):
         self.local_attn_size = local_attn_size
         self.sink_size = sink_size
         self.qk_norm = qk_norm
-        self.max_attention_size = 32760 if local_attn_size == -1 else local_attn_size * 1560
+        self.eps = eps
+        self.max_attention_size = 15 * 1 * 880 if local_attn_size == -1 else local_attn_size * 880
 
         self.attn = LocalAttention(
             num_heads=num_heads,
@@ -62,16 +106,17 @@ class CausalWanSelfAttention(nn.Module):
             supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
                                           AttentionBackendEnum.TORCH_SDPA))
 
-    def forward(self, 
-                q: torch.Tensor,
-                k: torch.Tensor,
-                v: torch.Tensor,
-                freqs_cis: tuple[torch.Tensor, torch.Tensor],
-                block_mask: BlockMask,
-                kv_cache: dict | None = None,
-                current_start: int = 0,
-                cache_start: int | None = None):
-        
+    def forward(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        freqs_cis: tuple[torch.Tensor, torch.Tensor],
+        block_mask: BlockMask,
+        kv_cache: dict | None = None,
+        current_start: int = 0,
+        cache_start: int | None = None
+    ):
         if cache_start is None:
             cache_start = current_start
 
@@ -80,10 +125,9 @@ class CausalWanSelfAttention(nn.Module):
         roped_key = _apply_rotary_emb(k, cos, sin, is_neox_style=False).type_as(v)
 
         if kv_cache is None:
-            # Padding for flex attention
             padded_length = math.ceil(q.shape[1] / 128) * 128 - q.shape[1]
             padded_roped_query = torch.cat(
-                [roped_query, 
+                [roped_query,
                     torch.zeros([q.shape[0], padded_length, q.shape[2], q.shape[3]],
                                 device=q.device, dtype=v.dtype)],
                 dim=1
@@ -111,35 +155,31 @@ class CausalWanSelfAttention(nn.Module):
             frame_seqlen = q.shape[1]
             current_end = current_start + roped_query.shape[1]
             sink_tokens = self.sink_size * frame_seqlen
-            # If we are using local attention and the current KV cache size is larger than the local attention size, we need to truncate the KV cache
+
             kv_cache_size = kv_cache["k"].shape[1]
             num_new_tokens = roped_query.shape[1]
-            if self.local_attn_size != -1 and (current_end > kv_cache["global_end_index"].item()) and (
+
+            if (current_end > kv_cache["global_end_index"].item()) and (
                     num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size):
-                # Calculate the number of new tokens added in this step
-                # Shift existing cache content left to discard oldest tokens
-                # Clone the source slice to avoid overlapping memory error
+
                 num_evicted_tokens = num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
                 num_rolled_tokens = kv_cache["local_end_index"].item() - num_evicted_tokens - sink_tokens
                 kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
                     kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
                 kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
                     kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-                # Insert the new keys/values at the end
                 local_end_index = kv_cache["local_end_index"].item() + current_end - \
                     kv_cache["global_end_index"].item() - num_evicted_tokens
                 local_start_index = local_end_index - num_new_tokens
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
             else:
-                # Assign new keys/values directly up to current_end
                 local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
                 local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"] = kv_cache["k"].detach()
-                kv_cache["v"] = kv_cache["v"].detach()
-                # logger.info("kv_cache['k'] is in comp graph: %s", kv_cache["k"].requires_grad or kv_cache["k"].grad_fn is not None)
+
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
+
             x = self.attn(
                 roped_query,
                 kv_cache["k"][:, max(0, local_end_index - self.max_attention_size):local_end_index],
@@ -149,6 +189,7 @@ class CausalWanSelfAttention(nn.Module):
             kv_cache["local_end_index"].fill_(local_end_index)
 
         return x
+
 
 class CausalMatrixGameTransformerBlock(nn.Module):
 
@@ -164,19 +205,17 @@ class CausalMatrixGameTransformerBlock(nn.Module):
                  added_kv_proj_dim: int | None = None,
                  supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
                  prefix: str = "",
-                 # Matrix Game Params
-                 action_config: dict = {},
+                 action_config: Dict = {},
                  block_idx: int = 0):
         super().__init__()
 
-        # 1. Self-attention
         self.norm1 = nn.LayerNorm(dim, eps, elementwise_affine=False)
         self.to_q = ReplicatedLinear(dim, dim, bias=True)
         self.to_k = ReplicatedLinear(dim, dim, bias=True)
         self.to_v = ReplicatedLinear(dim, dim, bias=True)
 
         self.to_out = ReplicatedLinear(dim, dim, bias=True)
-        self.attn1 = CausalWanSelfAttention(
+        self.attn1 = CausalMatrixGameSelfAttention(
             dim,
             num_heads,
             local_attn_size=local_attn_size,
@@ -185,12 +224,12 @@ class CausalMatrixGameTransformerBlock(nn.Module):
             eps=eps)
         self.hidden_dim = dim
         self.num_attention_heads = num_heads
+        self.local_attn_size = local_attn_size
         dim_head = dim // num_heads
         if qk_norm == "rms_norm":
             self.norm_q = RMSNorm(dim_head, eps=eps)
             self.norm_k = RMSNorm(dim_head, eps=eps)
         elif qk_norm == "rms_norm_across_heads":
-            # LTX applies qk norm across all heads
             self.norm_q = RMSNorm(dim, eps=eps)
             self.norm_k = RMSNorm(dim, eps=eps)
         else:
@@ -204,12 +243,16 @@ class CausalMatrixGameTransformerBlock(nn.Module):
             elementwise_affine=True,
             dtype=torch.float32)
 
-        # 2. Cross-attention
-        # Only T2V for now
-        self.attn2 = WanT2VCrossAttention(dim,
-                                          num_heads,
-                                          qk_norm=qk_norm,
-                                          eps=eps)
+        if added_kv_proj_dim is not None:
+            self.attn2 = WanI2VCrossAttention(dim,
+                                              num_heads,
+                                              qk_norm=qk_norm,
+                                              eps=eps)
+        else:
+            self.attn2 = WanT2VCrossAttention(dim,
+                                              num_heads,
+                                              qk_norm=qk_norm,
+                                              eps=eps)
         self.cross_attn_residual_norm = ScaleResidualLayerNormScaleShift(
             dim,
             norm_type="layer",
@@ -217,16 +260,38 @@ class CausalMatrixGameTransformerBlock(nn.Module):
             elementwise_affine=False,
             dtype=torch.float32)
 
-        # ================= Action Module Init =================
-        self.action_model = None
-        if len(action_config) > 0 and block_idx in action_config.get('blocks', []):
-            self.action_model = ActionModule(**action_config, local_attn_size=local_attn_size)
-        # ======================================================
+        # self.use_action_module = len(action_config) > 0 and block_idx in action_config.get('blocks', [])
+        # if self.use_action_module:
+        #     self.action_model = ActionModule(**action_config, local_attn_size=local_attn_size)
+        # else:
+        #     self.action_model = None
+        if len(action_config) > 0 and block_idx in action_config.get("blocks", []):
+            self.action_model = ActionModule(
+                heads_num=action_config["heads_num"],
+                hidden_size=action_config["hidden_size"],
+                img_hidden_size=action_config["img_hidden_size"],
+                mouse_hidden_dim=action_config["mouse_hidden_dim"],
+                keyboard_hidden_dim=action_config["keyboard_hidden_dim"],
+                mouse_dim_in=action_config["mouse_dim_in"],
+                keyboard_dim_in=action_config["keyboard_dim_in"],
+                enable_mouse=action_config["enable_mouse"],
+                enable_keyboard=action_config["enable_keyboard"],
+                windows_size=action_config["windows_size"],
+                rope_theta=action_config["rope_theta"],
+                rope_dim_list=action_config["rope_dim_list"],
+                mouse_qk_dim_list=action_config["mouse_qk_dim_list"],
+                patch_size=action_config["patch_size"],
+                local_attn_size=local_attn_size,
+                qk_norm=action_config["qk_norm"],
+                qkv_bias=action_config["qkv_bias"],
+                vae_time_compression_ratio=action_config["vae_time_compression_ratio"],
+            )
+        else:
+            self.action_model = None
 
-        # 3. Feed-forward
         self.ffn = MLP(dim, ffn_dim, act_type="gelu_pytorch_tanh")
         self.mlp_residual = ScaleResidual()
-        
+
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
 
     def forward(
@@ -236,37 +301,34 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         temb: torch.Tensor,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         block_mask: BlockMask,
+        grid_sizes: Optional[torch.Tensor] = None,
+        mouse_cond: Optional[torch.Tensor] = None,
+        keyboard_cond: Optional[torch.Tensor] = None,
+        block_mask_mouse: Optional[BlockMask] = None,
+        block_mask_keyboard: Optional[BlockMask] = None,
+        num_frame_per_block: int = 1,
+        use_rope_keyboard: bool = True,
         kv_cache: dict | None = None,
+        kv_cache_mouse: dict | None = None,
+        kv_cache_keyboard: dict | None = None,
         crossattn_cache: dict | None = None,
         current_start: int = 0,
         cache_start: int | None = None,
-        # Matrix Game Args
-        grid_sizes: torch.Tensor | None = None,
-        mouse_cond: torch.Tensor | None = None,
-        keyboard_cond: torch.Tensor | None = None,
-        block_mask_mouse: BlockMask | None = None,
-        block_mask_keyboard: BlockMask | None = None,
-        kv_cache_mouse: dict | None = None,
-        kv_cache_keyboard: dict | None = None,
     ) -> torch.Tensor:
-        # hidden_states.shape: [batch_size, seq_length, inner_dim]
-        # temb.shape: [batch_size, num_frames, 6, inner_dim]
         if hidden_states.dim() == 4:
             hidden_states = hidden_states.squeeze(1)
+
+        assert temb.ndim == 4
         num_frames = temb.shape[1]
         frame_seqlen = hidden_states.shape[1] // num_frames
         bs, seq_length, _ = hidden_states.shape
-        # assert orig_dtype != torch.float32
+        orig_dtype = hidden_states.dtype
+
         e = self.scale_shift_table + temb
-        # e.shape: [batch_size, num_frames, 6, inner_dim]
-        shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
-            6, dim=2)
-        # *_msa.shape: [batch_size, num_frames, 1, inner_dim]
-        # assert shift_msa.dtype == torch.float32
-        
-        # 1. Self-attention
-        norm_hidden_states = (self.norm1(hidden_states).unflatten(
-            dim=1, sizes=(num_frames, frame_seqlen)) *
+        assert e.shape == (bs, num_frames, 6, self.hidden_dim)
+        shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(6, dim=2)
+
+        norm_hidden_states = (self.norm1(hidden_states).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) *
                               (1 + scale_msa) + shift_msa).flatten(1, 2)
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
@@ -290,7 +352,6 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         norm_hidden_states, hidden_states = self.self_attn_residual_norm(
             hidden_states, attn_output, gate_msa, null_shift, null_scale)
 
-        # 2. Cross-attention
         attn_output = self.attn2(norm_hidden_states,
                                  context=encoder_hidden_states,
                                  context_lens=None,
@@ -298,42 +359,37 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         norm_hidden_states, hidden_states = self.cross_attn_residual_norm(
             hidden_states, attn_output, 1, c_shift_msa, c_scale_msa)
 
-        # ================= Action Module Forward =================
-        if self.action_model is not None and (mouse_cond is not None
-                                               or keyboard_cond is not None):
-            dtype = hidden_states.dtype
+        if self.action_model is not None:
+            if mouse_cond is not None or keyboard_cond is not None:
+                start_frame = current_start // frame_seqlen if grid_sizes is not None else 0
+                hidden_states = self.action_model(
+                    hidden_states.to(encoder_hidden_states.dtype),
+                    grid_sizes[0], grid_sizes[1], grid_sizes[2],
+                    mouse_cond, keyboard_cond,
+                    block_mask_mouse, block_mask_keyboard,
+                    is_causal=True,
+                    kv_cache_mouse=kv_cache_mouse,
+                    kv_cache_keyboard=kv_cache_keyboard,
+                    start_frame=start_frame,
+                    use_rope_keyboard=use_rope_keyboard,
+                    num_frame_per_block=num_frame_per_block
+                )
 
-            # Unpack grid sizes [F, H, W]
-            f, h, w = grid_sizes[0].tolist()
-            start_frame = current_start // (h * w)
-
-            action_out = self.action_model(
-                norm_hidden_states.to(dtype),  # Input: Residual stream
-                f,
-                h,
-                w,
-                mouse_cond=mouse_cond,
-                keyboard_cond=keyboard_cond,
-                block_mask_mouse=block_mask_mouse,
-                block_mask_keyboard=block_mask_keyboard,
-                is_causal=True,
-                kv_cache_mouse=kv_cache_mouse,
-                kv_cache_keyboard=kv_cache_keyboard,
-                start_frame=start_frame,
-                num_frame_per_block=3)
-            hidden_states = action_out
-        # =========================================================
-
-        # 3. Feed-forward
-        ff_output = self.ffn(norm_hidden_states)
+        ff_output = self.ffn(
+            (self.norm1(hidden_states).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) *
+             (1 + scale_msa) + shift_msa).flatten(1, 2)
+        )
         hidden_states = self.mlp_residual(hidden_states, ff_output, c_gate_msa)
 
         return hidden_states
+
 
 _DEFAULT_MATRIXGAME_CONFIG = MatrixGameWanVideoConfig()
 
 
 class CausalMatrixGameWanModel(BaseDiT):
+    supports_action_input = True
+
     _fsdp_shard_conditions = _DEFAULT_MATRIXGAME_CONFIG._fsdp_shard_conditions
     _compile_conditions = _DEFAULT_MATRIXGAME_CONFIG._compile_conditions
     _supported_attention_backends = _DEFAULT_MATRIXGAME_CONFIG._supported_attention_backends
@@ -341,52 +397,56 @@ class CausalMatrixGameWanModel(BaseDiT):
     reverse_param_names_mapping = _DEFAULT_MATRIXGAME_CONFIG.reverse_param_names_mapping
     lora_param_names_mapping = _DEFAULT_MATRIXGAME_CONFIG.lora_param_names_mapping
 
-    def __init__(self, config: MatrixGameWanVideoConfig, hf_config: dict[str, Any]) -> None:
+    def __init__(self,
+                 config: MatrixGameWanVideoConfig,
+                 hf_config: dict[str, Any],
+                 **kwargs) -> None:
         super().__init__(config=config, hf_config=hf_config)
 
         inner_dim = config.num_attention_heads * config.attention_head_dim
         self.hidden_size = config.hidden_size
         self.num_attention_heads = config.num_attention_heads
+        self.attention_head_dim = config.attention_head_dim
+        self.in_channels = config.in_channels
+        self.out_channels = config.out_channels
+        self.num_channels_latents = config.num_channels_latents
         self.patch_size = config.patch_size
-        self.text_len = config.text_len
-        self.local_attn_size = config.local_attn_size
+        self.local_attn_size = getattr(config, 'local_attn_size', -1)
+        self.sink_size = getattr(config, 'sink_size', 0)
 
-        # 1. Patch & position embedding
         self.patch_embedding = PatchEmbed(in_chans=config.in_channels,
                                           embed_dim=inner_dim,
                                           patch_size=config.patch_size,
                                           flatten=False)
-        
-        # 2. Condition embeddings
-        self.condition_embedder = WanTimeTextImageEmbedding(
+
+        self.condition_embedder = CausalMatrixGameTimeImageEmbedding(
             dim=inner_dim,
             time_freq_dim=config.freq_dim,
-            text_embed_dim=config.text_dim,
             image_embed_dim=config.image_dim,
         )
 
-        # 2.1. Get Action Config
-        self.action_config = getattr(config.arch_config, 'action_config', {})
+        # self.action_config = getattr(config, 'action_config', {})
+        arch_cfg = getattr(config, "arch_config", None)
+        self.action_config = getattr(arch_cfg, "action_config", {}) if arch_cfg is not None else {}
 
-        # 3. Transformer blocks
         self.blocks = nn.ModuleList([
-            CausalMatrixGameTransformerBlock(inner_dim,
-                                        config.ffn_dim,
-                                        config.num_attention_heads,
-                                        config.local_attn_size,
-                                        config.sink_size,
-                                        config.qk_norm,
-                                        config.cross_attn_norm,
-                                        config.eps,
-                                        config.added_kv_proj_dim,
-                                        self._supported_attention_backends,
-                                        prefix=f"{config.prefix}.blocks.{i}",
-                                        action_config=self.action_config,
-                                        block_idx=i) 
+            CausalMatrixGameTransformerBlock(
+                inner_dim,
+                config.ffn_dim,
+                config.num_attention_heads,
+                self.local_attn_size,
+                self.sink_size,
+                config.qk_norm,
+                config.cross_attn_norm,
+                config.eps,
+                config.added_kv_proj_dim,
+                self._supported_attention_backends,
+                prefix=f"{getattr(config, 'prefix', 'Wan')}.blocks.{i}",
+                action_config=self.action_config,
+                block_idx=i)
             for i in range(config.num_layers)
         ])
 
-        # 4. Output norm & projection
         self.norm_out = LayerNormScaleShift(inner_dim,
                                             norm_type="layer",
                                             eps=config.eps,
@@ -398,36 +458,33 @@ class CausalMatrixGameWanModel(BaseDiT):
             torch.randn(1, 2, inner_dim) / inner_dim**0.5)
 
         self.gradient_checkpointing = False
-        self.block_mask = None
-        # Action Masks
-        self.block_mask_mouse = None
-        self.block_mask_keyboard = None
 
-        self.num_frame_per_block = config.arch_config.num_frames_per_block
+        self.block_mask = None
+        self.block_mask_keyboard = None
+        self.block_mask_mouse = None
+        self.use_rope_keyboard = True
+        self.num_frame_per_block = getattr(config, 'num_frame_per_block', 1)
+
         self.__post_init__()
 
     @staticmethod
-    def _prepare_blockwise_causal_attn_mask(device: torch.device | str,
-                                             num_frames: int,
-                                             frame_seqlen: int,
-                                             num_frame_per_block=1,
-                                             local_attn_size=-1) -> BlockMask:
+    def _prepare_blockwise_causal_attn_mask(
+        device: torch.device | str, num_frames: int = 9,
+        frame_seqlen: int = 880, num_frame_per_block: int = 1, local_attn_size: int = -1
+    ) -> BlockMask:
         total_length = num_frames * frame_seqlen
-        
-        # we do right padding to get to a multiple of 128
         padded_length = math.ceil(total_length / 128) * 128 - total_length
-        
+
         ends = torch.zeros(total_length + padded_length,
                            device=device, dtype=torch.long)
-        
-        # Block-wise causal mask will attend to all elements that are before the end of the current chunk
+
         frame_indices = torch.arange(
             start=0,
             end=total_length,
             step=frame_seqlen * num_frame_per_block,
             device=device
         )
-        
+
         for tmp in frame_indices:
             ends[tmp:tmp + frame_seqlen * num_frame_per_block] = tmp + \
                 frame_seqlen * num_frame_per_block
@@ -437,87 +494,153 @@ class CausalMatrixGameWanModel(BaseDiT):
                 return (kv_idx < ends[q_idx]) | (q_idx == kv_idx)
             else:
                 return ((kv_idx < ends[q_idx]) & (kv_idx >= (ends[q_idx] - local_attn_size * frame_seqlen))) | (q_idx == kv_idx)
-            # return ((kv_idx < total_length) & (q_idx < total_length))  | (q_idx == kv_idx) # bidirectional mask
 
         block_mask = create_block_mask(attention_mask, B=None, H=None, Q_LEN=total_length + padded_length,
                                        KV_LEN=total_length + padded_length, _compile=False, device=device)
 
         if not dist.is_initialized() or dist.get_rank() == 0:
-            print(
-                f" cache a block wise causal mask with block size of {num_frame_per_block} frames"
-            )
+            print(f" cache a block wise causal mask with block size of {num_frame_per_block} frames")
+
         return block_mask
 
     @staticmethod
-    def _prepare_blockwise_causal_attn_mask_action(
-            device: torch.device | str,
-            num_frames: int,
-            frame_seqlen: int = 1,
-            num_frame_per_block=1,
-            local_attn_size=-1) -> BlockMask:
-        total_length = num_frames * frame_seqlen
-        
-        # we do right padding to get to a multiple of 32
-        padded_length = math.ceil(total_length / 32) * 32 - total_length
-        padded_length_kv = math.ceil(num_frames / 32) * 32 - num_frames
-        ends = torch.zeros(total_length + padded_length,
+    def _prepare_blockwise_causal_attn_mask_keyboard(
+        device: torch.device | str, num_frames: int = 9,
+        frame_seqlen: int = 880, num_frame_per_block: int = 1, local_attn_size: int = -1
+    ) -> BlockMask:
+        total_length2 = num_frames * frame_seqlen
+        padded_length2 = math.ceil(total_length2 / 32) * 32 - total_length2
+        padded_length_kv2 = math.ceil(num_frames / 32) * 32 - num_frames
+        ends2 = torch.zeros(total_length2 + padded_length2,
                            device=device, dtype=torch.long)
 
-        # Block-wise causal mask will attend to all elements that are before the end of the current chunk
-        frame_indices = torch.arange(start=0,
-                                      end=total_length,
-                                      step=frame_seqlen * num_frame_per_block,
-                                      device=device)
-
+        frame_indices2 = torch.arange(
+            start=0,
+            end=total_length2,
+            step=frame_seqlen * num_frame_per_block,
+            device=device
+        )
         cnt = num_frame_per_block
-        for tmp in frame_indices:
-            ends[tmp:tmp + frame_seqlen *
-                 num_frame_per_block] = cnt
+        for tmp in frame_indices2:
+            ends2[tmp:tmp + frame_seqlen * num_frame_per_block] = cnt
             cnt += num_frame_per_block
 
-        def attention_mask(b, h, q_idx, kv_idx):
+        def attention_mask2(b, h, q_idx, kv_idx):
             if local_attn_size == -1:
-                return (kv_idx < ends[q_idx]) | (q_idx == kv_idx)
+                return (kv_idx < ends2[q_idx]) | (q_idx == kv_idx)
             else:
-                return ((kv_idx < ends[q_idx]) & (kv_idx >= (ends[q_idx] - local_attn_size))) | (q_idx == kv_idx)
-            # return ((kv_idx < total_length) & (q_idx < total_length))  | (q_idx == kv_idx) # bidirectional mask
+                return ((kv_idx < ends2[q_idx]) & (kv_idx >= (ends2[q_idx] - local_attn_size))) | (q_idx == kv_idx)
 
-        return create_block_mask(attention_mask, B=None,
-                                 H=None,
-                                 Q_LEN=total_length + padded_length,
-                                 KV_LEN=num_frames + padded_length_kv,
-                                 _compile=False,
-                                 device=device)
+        block_mask2 = create_block_mask(attention_mask2, B=None, H=None, Q_LEN=total_length2 + padded_length2,
+                                       KV_LEN=num_frames + padded_length_kv2, _compile=False, device=device)
+
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            print(f" cache a block wise causal mask for keyboard with block size of {num_frame_per_block} frames")
+
+        return block_mask2
+
+    @staticmethod
+    def _prepare_blockwise_causal_attn_mask_action(
+        device: torch.device | str, num_frames: int = 9,
+        frame_seqlen: int = 1, num_frame_per_block: int = 1, local_attn_size: int = -1
+    ) -> BlockMask:
+        total_length2 = num_frames * frame_seqlen
+        padded_length2 = math.ceil(total_length2 / 32) * 32 - total_length2
+        padded_length_kv2 = math.ceil(num_frames / 32) * 32 - num_frames
+        ends2 = torch.zeros(total_length2 + padded_length2,
+                           device=device, dtype=torch.long)
+
+        frame_indices2 = torch.arange(
+            start=0,
+            end=total_length2,
+            step=frame_seqlen * num_frame_per_block,
+            device=device
+        )
+        cnt = num_frame_per_block
+        for tmp in frame_indices2:
+            ends2[tmp:tmp + frame_seqlen * num_frame_per_block] = cnt
+            cnt += num_frame_per_block
+
+        def attention_mask2(b, h, q_idx, kv_idx):
+            if local_attn_size == -1:
+                return (kv_idx < ends2[q_idx]) | (q_idx == kv_idx)
+            else:
+                return ((kv_idx < ends2[q_idx]) & (kv_idx >= (ends2[q_idx] - local_attn_size))) | (q_idx == kv_idx)
+
+        block_mask2 = create_block_mask(attention_mask2, B=None, H=None, Q_LEN=total_length2 + padded_length2,
+                                       KV_LEN=num_frames + padded_length_kv2, _compile=False, device=device)
+
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            print(f" cache a block wise causal mask for action with block size of {num_frame_per_block} frames")
+
+        return block_mask2
 
     def _forward_inference(
-            self,
-            hidden_states: torch.Tensor,
-            encoder_hidden_states: torch.Tensor | list[torch.Tensor],
-            timestep: torch.LongTensor,
-            encoder_hidden_states_image: torch.Tensor
-            | list[torch.Tensor] | None = None,
-            kv_cache: dict = None,
-            crossattn_cache: dict = None,
-            current_start: int = 0,
-            cache_start: int = 0,
-            start_frame: int = 0,
-            # Matrix Game Inputs
-            mouse_cond: torch.Tensor | None = None,
-            keyboard_cond: torch.Tensor | None = None,
-            kv_cache_mouse: dict = None,
-            kv_cache_keyboard: dict = None,
-            **kwargs) -> torch.Tensor:
+        self,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor | list[torch.Tensor],
+        timestep: torch.LongTensor,
+        encoder_hidden_states_image: torch.Tensor | list[torch.Tensor] | None = None,
+        mouse_cond: Optional[torch.Tensor] = None,
+        keyboard_cond: Optional[torch.Tensor] = None,
+        kv_cache: dict = None,
+        kv_cache_mouse: dict = None,
+        kv_cache_keyboard: dict = None,
+        crossattn_cache: dict = None,
+        current_start: int = 0,
+        cache_start: int = 0,
+        start_frame: int = 0,
+        **kwargs
+    ) -> torch.Tensor:
+        if mouse_cond is not None or keyboard_cond is not None:
+            assert self.action_config is not None and len(self.action_config) > 0
 
-        from fastvideo.platforms import current_platform
-        
-        orig_dtype = hidden_states.dtype
-        if not isinstance(encoder_hidden_states, torch.Tensor):
+        if encoder_hidden_states is not None and not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
-        if isinstance(encoder_hidden_states_image,
-                      list) and len(encoder_hidden_states_image) > 0:
+        if isinstance(encoder_hidden_states_image, list) and len(encoder_hidden_states_image) > 0:
             encoder_hidden_states_image = encoder_hidden_states_image[0]
         else:
             encoder_hidden_states_image = None
+
+        ctx = get_forward_context()
+        batch = getattr(ctx, "forward_batch", None)
+        if batch is not None and getattr(batch, "image_latent", None) is not None:
+            image_latent = batch.image_latent
+            if isinstance(image_latent, torch.Tensor) and image_latent.ndim == 5 and hidden_states.ndim == 5:
+                _, _, num_frames, _, _ = hidden_states.shape
+                start = start_frame
+                end = start + num_frames
+                cond = image_latent
+                if cond.shape[2] >= end:
+                    cond = cond[:, :, start:end]
+                elif cond.shape[2] > start:
+                    cond = cond[:, :, start:]
+                    pad_frames = num_frames - cond.shape[2]
+                    if pad_frames > 0:
+                        pad = torch.zeros(
+                            cond.shape[0],
+                            cond.shape[1],
+                            pad_frames,
+                            cond.shape[3],
+                            cond.shape[4],
+                            device=cond.device,
+                            dtype=cond.dtype,
+                        )
+                        cond = torch.cat([cond, pad], dim=2)
+                else:
+                    pad = torch.zeros(
+                        cond.shape[0],
+                        cond.shape[1],
+                        num_frames,
+                        cond.shape[3],
+                        cond.shape[4],
+                        device=cond.device,
+                        dtype=cond.dtype,
+                    )
+                    cond = pad
+                hidden_states = torch.cat(
+                    [hidden_states, cond.to(dtype=hidden_states.dtype)], dim=1
+                )
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
@@ -525,94 +648,294 @@ class CausalMatrixGameWanModel(BaseDiT):
         post_patch_height = height // p_h
         post_patch_width = width // p_w
 
-        # Calculate Grid Sizes for ActionModule [F, H, W]
-        grid_sizes = torch.tensor(
-            [post_patch_num_frames, post_patch_height, post_patch_width],
-            device=hidden_states.device).unsqueeze(0)
-
-        # Get rotary embeddings
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
         freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (post_patch_num_frames * get_sp_world_size(), post_patch_height,
-             post_patch_width),
+            (post_patch_num_frames * get_sp_world_size(), post_patch_height, post_patch_width),
             self.hidden_size,
             self.num_attention_heads,
             rope_dim_list,
             dtype=torch.float32 if current_platform.is_mps() else torch.float64,
             rope_theta=10000,
-            start_frame=start_frame)
-        freqs_cis = (freqs_cos.to(hidden_states.device),
-                     freqs_sin.to(hidden_states.device)
-                     ) if freqs_cos is not None else None
+            start_frame=start_frame
+        )
+        freqs_cos = freqs_cos.to(hidden_states.device)
+        freqs_sin = freqs_sin.to(hidden_states.device)
+        freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
 
-        # Embeddings
         hidden_states = self.patch_embedding(hidden_states)
+        grid_sizes = torch.tensor([post_patch_num_frames, post_patch_height, post_patch_width],
+                                  device=hidden_states.device)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
-        # Condition Embeddings
-        encoder_hidden_states = torch.cat([
-            encoder_hidden_states,
-            encoder_hidden_states.new_zeros(
-                1, self.text_len - encoder_hidden_states.size(1),
-                encoder_hidden_states.size(2))
-        ],
-                                          dim=1)
-        temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
-            timestep.flatten(), encoder_hidden_states,
-            encoder_hidden_states_image)
-        timestep_proj = timestep_proj.unflatten(1, (6, self.hidden_size)).unflatten(
-            dim=0, sizes=timestep.shape)
+        if timestep.dim() == 2:
+            timestep = timestep.flatten()
+
+        temb, timestep_proj, encoder_hidden_states_text, encoder_hidden_states_image = self.condition_embedder(
+            timestep, encoder_hidden_states, encoder_hidden_states_image)
+        timestep_proj = timestep_proj.unflatten(1, (6, self.hidden_size)).unflatten(dim=0, sizes=(batch_size, post_patch_num_frames))
+
+        if encoder_hidden_states_text is not None:
+            if isinstance(encoder_hidden_states_text, list):
+                encoder_hidden_states_text = encoder_hidden_states_text[0]
+            elif encoder_hidden_states_text.ndim == 2:
+                encoder_hidden_states_text = encoder_hidden_states_text.unsqueeze(0)
 
         if encoder_hidden_states_image is not None:
-            encoder_hidden_states = torch.concat(
-                [encoder_hidden_states_image, encoder_hidden_states], dim=1)
-        encoder_hidden_states = encoder_hidden_states.to(
-            orig_dtype) if current_platform.is_mps() else encoder_hidden_states
+            if encoder_hidden_states_text is not None:
+                encoder_hidden_states = torch.concat(
+                    [encoder_hidden_states_image, encoder_hidden_states_text], dim=1)
+            else:
+                encoder_hidden_states = encoder_hidden_states_image
 
-        # Masks preparation
-        if (mouse_cond is not None) and self.block_mask_mouse is None:
+        if self.block_mask is None:
+            self.block_mask = self._prepare_blockwise_causal_attn_mask(
+                device=hidden_states.device,
+                num_frames=num_frames,
+                frame_seqlen=post_patch_height * post_patch_width,
+                num_frame_per_block=self.num_frame_per_block,
+                local_attn_size=self.local_attn_size
+            )
+        if self.block_mask_keyboard is None:
+            if not self.use_rope_keyboard:
+                self.block_mask_keyboard = self._prepare_blockwise_causal_attn_mask_keyboard(
+                    device=hidden_states.device,
+                    num_frames=num_frames,
+                    frame_seqlen=post_patch_height * post_patch_width,
+                    num_frame_per_block=self.num_frame_per_block,
+                    local_attn_size=self.local_attn_size
+                )
+            else:
+                self.block_mask_keyboard = self._prepare_blockwise_causal_attn_mask_action(
+                    device=hidden_states.device,
+                    num_frames=num_frames,
+                    frame_seqlen=1,
+                    num_frame_per_block=self.num_frame_per_block,
+                    local_attn_size=self.local_attn_size
+                )
+        if self.block_mask_mouse is None:
             self.block_mask_mouse = self._prepare_blockwise_causal_attn_mask_action(
-                hidden_states.device,
-                num_frames=post_patch_num_frames,
+                device=hidden_states.device,
+                num_frames=num_frames,
                 frame_seqlen=1,
                 num_frame_per_block=self.num_frame_per_block,
-                local_attn_size=self.local_attn_size)
-        if (keyboard_cond is not None) and self.block_mask_keyboard is None:
-            self.block_mask_keyboard = self._prepare_blockwise_causal_attn_mask_action(
-                hidden_states.device,
-                num_frames=post_patch_num_frames,
-                frame_seqlen=1,
-                num_frame_per_block=self.num_frame_per_block,
-                local_attn_size=self.local_attn_size)
+                local_attn_size=self.local_attn_size
+            )
+        if kv_cache is None:
+            kv_cache = [None] * len(self.blocks)
+        if kv_cache_mouse is None:
+            kv_cache_mouse = [None] * len(self.blocks)
+        if kv_cache_keyboard is None:
+            kv_cache_keyboard = [None] * len(self.blocks)
+        if crossattn_cache is None:
+            crossattn_cache = [None] * len(self.blocks)
 
-        # 4. Transformer blocks
+        hidden_states = self.causal_pos_embedder(
+            hidden_states,
+            timestep_proj,
+            post_patch_num_frames=post_patch_num_frames,
+            post_patch_height=post_patch_height,
+            post_patch_width=post_patch_width,
+            freqs_cis=freqs_cis,
+            mouse_cond=mouse_cond,
+            keyboard_cond=keyboard_cond,
+            block_mask=self.block_mask,
+            block_mask_mouse=self.block_mask_mouse,
+            block_mask_keyboard=self.block_mask_keyboard,
+            use_rope_keyboard=self.use_rope_keyboard,
+            num_frame_per_block=self.num_frame_per_block
+        )
+
         for block_index, block in enumerate(self.blocks):
-            # Extract caches
-            kvc = kv_cache[block_index] if kv_cache else None
-            cac = crossattn_cache[block_index] if crossattn_cache else None
-            kvc_m = kv_cache_mouse[block_index] if kv_cache_mouse else None
-            kvc_k = kv_cache_keyboard[block_index] if kv_cache_keyboard else None
+            if torch.is_grad_enabled() and self.gradient_checkpointing:
+                kwargs.update({
+                    "kv_cache": kv_cache[block_index],
+                    "kv_cache_mouse": kv_cache_mouse[block_index] if kv_cache_mouse else None,
+                    "kv_cache_keyboard": kv_cache_keyboard[block_index] if kv_cache_keyboard else None,
+                    "crossattn_cache": crossattn_cache[block_index] if crossattn_cache else None,
+                    "current_start": current_start,
+                    "cache_start": cache_start,
+                })
+                hidden_states = self._gradient_checkpointing_func(
+                    block, hidden_states, **kwargs)
+            else:
+                kwargs.update({
+                    "kv_cache": kv_cache[block_index],
+                    "kv_cache_mouse": kv_cache_mouse[block_index] if kv_cache_mouse else None,
+                    "kv_cache_keyboard": kv_cache_keyboard[block_index] if kv_cache_keyboard else None,
+                    "crossattn_cache": crossattn_cache[block_index] if crossattn_cache else None,
+                    "current_start": current_start,
+                    "cache_start": cache_start,
+                })
+                hidden_states = block(hidden_states, encoder_hidden_states, timestep_proj, freqs_cis,
+                                      block_mask=self.block_mask,
+                                      grid_sizes=grid_sizes,
+                                      mouse_cond=mouse_cond,
+                                      keyboard_cond=keyboard_cond,
+                                      **kwargs)
 
+        temb = temb.unflatten(dim=0, sizes=(batch_size, post_patch_num_frames)).unsqueeze(2)
+        shift, scale = (self.scale_shift_table.unsqueeze(1) + temb).chunk(2, dim=2)
+        hidden_states = self.norm_out(hidden_states, shift, scale)
+        hidden_states = self.proj_out(hidden_states)
+
+        hidden_states = self.unpatchify(hidden_states, grid_sizes)
+
+        return hidden_states
+
+
+    def _forward_train(
+        self,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor | list[torch.Tensor],
+        timestep: torch.LongTensor,
+        encoder_hidden_states_image: torch.Tensor | list[torch.Tensor] | None = None,
+        mouse_cond: Optional[torch.Tensor] = None,
+        keyboard_cond: Optional[torch.Tensor] = None,
+        **kwargs
+    ) -> torch.Tensor:
+        if mouse_cond is not None or keyboard_cond is not None:
+            assert self.action_config is not None and len(self.action_config) > 0
+
+        if encoder_hidden_states is not None and not isinstance(encoder_hidden_states, torch.Tensor):
+            encoder_hidden_states = encoder_hidden_states[0]
+        if isinstance(encoder_hidden_states_image, list) and len(encoder_hidden_states_image) > 0:
+            encoder_hidden_states_image = encoder_hidden_states_image[0]
+        else:
+            encoder_hidden_states_image = None
+
+        ctx = get_forward_context()
+        batch = getattr(ctx, "forward_batch", None)
+        if batch is not None and getattr(batch, "image_latent", None) is not None:
+            image_latent = batch.image_latent
+            if isinstance(image_latent, torch.Tensor) and image_latent.ndim == 5 and hidden_states.ndim == 5:
+                _, _, num_frames, _, _ = hidden_states.shape
+                cond = image_latent
+                if cond.shape[2] >= num_frames:
+                    cond = cond[:, :, :num_frames]
+                else:
+                    pad_frames = num_frames - cond.shape[2]
+                    pad = torch.zeros(
+                        cond.shape[0],
+                        cond.shape[1],
+                        pad_frames,
+                        cond.shape[3],
+                        cond.shape[4],
+                        device=cond.device,
+                        dtype=cond.dtype,
+                    )
+                    cond = torch.cat([cond, pad], dim=2)
+                hidden_states = torch.cat(
+                    [hidden_states, cond.to(dtype=hidden_states.dtype)], dim=1
+                )
+
+        batch_size, num_channels, num_frames, height, width = hidden_states.shape
+        p_t, p_h, p_w = self.patch_size
+        post_patch_num_frames = num_frames // p_t
+        post_patch_height = height // p_h
+        post_patch_width = width // p_w
+
+        d = self.hidden_size // self.num_attention_heads
+        rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
+        freqs_cos, freqs_sin = get_rotary_pos_embed(
+            (post_patch_num_frames * get_sp_world_size(), post_patch_height, post_patch_width),
+            self.hidden_size,
+            self.num_attention_heads,
+            rope_dim_list,
+            dtype=torch.float32 if current_platform.is_mps() else torch.float64,
+            rope_theta=10000
+        )
+        freqs_cos = freqs_cos.to(hidden_states.device)
+        freqs_sin = freqs_sin.to(hidden_states.device)
+        freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
+
+        if self.block_mask is None:
+            self.block_mask = self._prepare_blockwise_causal_attn_mask(
+                device=hidden_states.device,
+                num_frames=num_frames,
+                frame_seqlen=post_patch_height * post_patch_width,
+                num_frame_per_block=self.num_frame_per_block,
+                local_attn_size=self.local_attn_size
+            )
+        if self.block_mask_keyboard is None:
+            if not self.use_rope_keyboard:
+                self.block_mask_keyboard = self._prepare_blockwise_causal_attn_mask_keyboard(
+                    device=hidden_states.device,
+                    num_frames=num_frames,
+                    frame_seqlen=post_patch_height * post_patch_width,
+                    num_frame_per_block=self.num_frame_per_block,
+                    local_attn_size=self.local_attn_size
+                )
+            else:
+                self.block_mask_keyboard = self._prepare_blockwise_causal_attn_mask_action(
+                    device=hidden_states.device,
+                    num_frames=num_frames,
+                    frame_seqlen=1,
+                    num_frame_per_block=self.num_frame_per_block,
+                    local_attn_size=self.local_attn_size
+                )
+        if self.block_mask_mouse is None:
+            self.block_mask_mouse = self._prepare_blockwise_causal_attn_mask_action(
+                device=hidden_states.device,
+                num_frames=num_frames,
+                frame_seqlen=1,
+                num_frame_per_block=self.num_frame_per_block,
+                local_attn_size=self.local_attn_size
+            )
+
+        hidden_states = self.patch_embedding(hidden_states)
+        grid_sizes = torch.tensor([post_patch_num_frames, post_patch_height, post_patch_width],
+                                  device=hidden_states.device)
+        hidden_states = hidden_states.flatten(2).transpose(1, 2)
+
+        if timestep.dim() == 2:
+            timestep = timestep.flatten()
+
+        temb, timestep_proj, encoder_hidden_states_text, encoder_hidden_states_image = self.condition_embedder(
+            timestep, encoder_hidden_states, encoder_hidden_states_image)
+        timestep_proj = timestep_proj.unflatten(1, (6, self.hidden_size)).unflatten(dim=0, sizes=(batch_size, post_patch_num_frames))
+
+        if encoder_hidden_states_text is not None:
+            if isinstance(encoder_hidden_states_text, list):
+                encoder_hidden_states_text = encoder_hidden_states_text[0]
+            elif encoder_hidden_states_text.ndim == 2:
+                encoder_hidden_states_text = encoder_hidden_states_text.unsqueeze(0)
+
+        if encoder_hidden_states_image is not None:
+            if encoder_hidden_states_text is not None:
+                encoder_hidden_states = torch.concat(
+                    [encoder_hidden_states_image, encoder_hidden_states_text], dim=1)
+            else:
+                encoder_hidden_states = encoder_hidden_states_image
+        else:
+            encoder_hidden_states = encoder_hidden_states_text
+
+        kwargs = dict(
+            e=timestep_proj,
+            grid_sizes=grid_sizes,
+            freqs_cis=freqs_cis,
+            encoder_hidden_states=encoder_hidden_states,
+            mouse_cond=mouse_cond,
+            keyboard_cond=keyboard_cond,
+            block_mask=self.block_mask,
+            block_mask_mouse=self.block_mask_mouse,
+            block_mask_keyboard=self.block_mask_keyboard,
+            use_rope_keyboard=self.use_rope_keyboard,
+            num_frame_per_block=self.num_frame_per_block
+        )
+
+        for block in self.blocks:
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 hidden_states = self._gradient_checkpointing_func(
-                    block,
-                    hidden_states,
-                    encoder_hidden_states,
-                    timestep_proj,
-                    freqs_cis,
+                    block, hidden_states, encoder_hidden_states, timestep_proj, freqs_cis,
                     block_mask=self.block_mask,
-                    kv_cache=kvc,
-                    current_start=current_start,
-                    cache_start=cache_start,
-                    # Matrix Game Args
                     grid_sizes=grid_sizes,
                     mouse_cond=mouse_cond,
                     keyboard_cond=keyboard_cond,
                     block_mask_mouse=self.block_mask_mouse,
                     block_mask_keyboard=self.block_mask_keyboard,
-                    kv_cache_mouse=kvc_m,
-                    kv_cache_keyboard=kvc_k)
+                    num_frame_per_block=self.num_frame_per_block,
+                    use_rope_keyboard=self.use_rope_keyboard)
             else:
                 hidden_states = block(
                     hidden_states,
@@ -620,40 +943,61 @@ class CausalMatrixGameWanModel(BaseDiT):
                     timestep_proj,
                     freqs_cis,
                     block_mask=self.block_mask,
-                    kv_cache=kvc,
-                    crossattn_cache=cac,
-                    current_start=current_start,
-                    cache_start=cache_start,
-                    # Matrix Game Args
                     grid_sizes=grid_sizes,
                     mouse_cond=mouse_cond,
                     keyboard_cond=keyboard_cond,
                     block_mask_mouse=self.block_mask_mouse,
                     block_mask_keyboard=self.block_mask_keyboard,
-                    kv_cache_mouse=kvc_m,
-                    kv_cache_keyboard=kvc_k)
+                    num_frame_per_block=self.num_frame_per_block,
+                    use_rope_keyboard=self.use_rope_keyboard)
 
-        # 5. Output norm, projection & unpatchify
-        temb = temb.unflatten(dim=0, sizes=timestep.shape).unsqueeze(2)
-        shift, scale = (self.scale_shift_table.unsqueeze(1) + temb).chunk(2, 
-                                                                    dim=2)
+        temb = temb.unflatten(dim=0, sizes=(batch_size, post_patch_num_frames)).unsqueeze(2)
+        shift, scale = (self.scale_shift_table.unsqueeze(1) + temb).chunk(2, dim=2)
         hidden_states = self.norm_out(hidden_states, shift, scale)
         hidden_states = self.proj_out(hidden_states)
 
-        output = self.unpatchify(hidden_states, grid_sizes)
+        hidden_states = self.unpatchify(hidden_states, grid_sizes)
 
-        return torch.stack(output)
+        return hidden_states
 
     def forward(self, *args, **kwargs):
-        return self._forward_inference(*args, **kwargs)
+        if kwargs.get('kv_cache', None) is not None:
+            return self._forward_inference(*args, **kwargs)
+        else:
+            return self._forward_train(*args, **kwargs)
 
     def unpatchify(self, x, grid_sizes):
-        c = self.out_channels
-        out = []
-        for u, v in zip(x, grid_sizes.tolist()):
-            u = u[:math.prod(v)].view(*v, *self.patch_size, c)
-            u = u.permute(6, 0, 3, 1, 4, 2, 5)
-            # u = torch.einsum('fhwpqrc->cfphqwr', u.contiguous())
-            u = u.reshape(c, *[i * j for i, j in zip(v, self.patch_size)])
-            out.append(u)
-        return out
+        c = self.proj_out.out_features // math.prod(self.patch_size)
+        p_t, p_h, p_w = self.patch_size
+        f, h, w = grid_sizes.tolist()
+
+        x = x[:, :f * h * w].view(-1, f, h, w, p_t, p_h, p_w, c)
+        x = x.permute(0, 7, 1, 4, 2, 5, 3, 6)
+        x = x.reshape(-1, c, f * p_t, h * p_h, w * p_w)
+        return x
+
+    def init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+        nn.init.xavier_uniform_(self.patch_embedding.proj.weight.flatten(1))
+        for m in self.condition_embedder.time_embedder.mlp.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, std=.02)
+
+        nn.init.zeros_(self.proj_out.weight)
+
+        for block in self.blocks:
+            if block.action_model is not None:
+                try:
+                    nn.init.zeros_(block.action_model.proj_mouse.weight)
+                    if block.action_model.proj_mouse.bias is not None:
+                        nn.init.zeros_(block.action_model.proj_mouse.bias)
+                    nn.init.zeros_(block.action_model.proj_keyboard.weight)
+                    if block.action_model.proj_keyboard.bias is not None:
+                        nn.init.zeros_(block.action_model.proj_keyboard.bias)
+                except:
+                    pass

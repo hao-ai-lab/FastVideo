@@ -12,7 +12,8 @@ from transformers import CLIPImageProcessor, CLIPVisionConfig, CLIPVisionModel
 
 SOURCE_DIR = "/workspace/Matrix-Game-2.0"
 OUTPUT_DIR = "/workspace/Matrix-Game-2.0-Diffusers"
-MODEL_VARIANT = "base_model"
+# MODEL_VARIANT = "base_model"
+MODEL_VARIANT = "base_distilled_model"
 
 _param_names_mapping = {
     r"^head\.modulation": r"scale_shift_table",
@@ -68,7 +69,8 @@ MODEL_VARIANTS = {
 
 def create_model_index_json(action_config: Dict[str, Any]) -> Dict[str, Any]:
     return {
-        "_class_name": "MatrixGamePipeline",
+        # "_class_name": "MatrixGamePipeline",
+        "_class_name": "MatrixCausalGameDMDPipeline",
         "_diffusers_version": "0.33.1",
         "scheduler": ["diffusers", "UniPCMultistepScheduler"],
         "transformer": ["diffusers", "MatrixGameWanModel"],
@@ -83,7 +85,8 @@ def create_transformer_config(source_config: Dict[str, Any]) -> Dict[str, Any]:
     num_heads = source_config["num_heads"]
 
     transformer_config = {
-        "_class_name": "MatrixGameWanModel",
+        # "_class_name": "MatrixGameWanModel",
+        "_class_name": "CausalMatrixGameWanModel",
         "_diffusers_version": source_config.get("_diffusers_version", "0.33.1"),
         "hidden_size": dim,
         "num_attention_heads": num_heads,
@@ -101,8 +104,8 @@ def create_transformer_config(source_config: Dict[str, Any]) -> Dict[str, Any]:
         "text_dim": 0,
     }
 
-    if transformer_config["action_config"] and transformer_config["action_config"].get("keyboard_dim_in") == 4:
-        transformer_config["action_config"]["keyboard_dim_in"] = 6
+    # if transformer_config["action_config"] and transformer_config["action_config"].get("keyboard_dim_in") == 4:
+        # transformer_config["action_config"]["keyboard_dim_in"] = 6
 
     return {k: v for k, v in transformer_config.items() if v is not None}
 
@@ -161,13 +164,11 @@ def create_scheduler_config() -> Dict[str, Any]:
 
 
 def convert_vae_param_name(key: str) -> str:
-    # Top-level quant/post_quant conv mappings
     if key.startswith("conv1."):
         return key.replace("conv1.", "quant_conv.")
     if key.startswith("conv2."):
         return key.replace("conv2.", "post_quant_conv.")
 
-    # Encoder mappings
     if key.startswith("encoder."):
         if key.startswith("encoder.conv1."):
             key = key.replace("encoder.conv1.", "encoder.conv_in.")
@@ -186,7 +187,6 @@ def convert_vae_param_name(key: str) -> str:
                 key = key.replace(".2.residual.", ".resnets.1.")
             if ".1." in key:
                 key = key.replace("mid_block.1.", "mid_block.attentions.0.")
-            # Residual sub-path mappings
             if ".resnets.0.0.gamma" in key or ".resnets.1.0.gamma" in key:
                 key = key.replace(".0.gamma", ".norm1.gamma")
             elif ".resnets.0.2." in key or ".resnets.1.2." in key:
@@ -198,7 +198,6 @@ def convert_vae_param_name(key: str) -> str:
             if ".shortcut." in key:
                 key = key.replace(".shortcut.", ".conv_shortcut.")
 
-    # Decoder mappings
     if key.startswith("decoder."):
         if key.startswith("decoder.conv1."):
             key = key.replace("decoder.conv1.", "decoder.conv_in.")
@@ -212,7 +211,6 @@ def convert_vae_param_name(key: str) -> str:
             idx = int(parts[2])
             suffix = ".".join(parts[3:])
 
-            # Apply residual mappings to suffix
             if "residual.0.gamma" in suffix:
                 suffix = suffix.replace("residual.0.gamma", "norm1.gamma")
             elif "residual.2." in suffix:
@@ -224,7 +222,6 @@ def convert_vae_param_name(key: str) -> str:
             if "shortcut." in suffix:
                 suffix = suffix.replace("shortcut.", "conv_shortcut.")
 
-            # Map to up_blocks structure (num_res_blocks=2)
             if idx < 12:
                 stage = idx // 4
                 offset = idx % 4
@@ -246,7 +243,6 @@ def convert_vae_param_name(key: str) -> str:
                 key = key.replace(".2.residual.", ".resnets.1.")
             if ".1." in key:
                 key = key.replace("mid_block.1.", "mid_block.attentions.0.")
-            # Residual sub-path mappings
             if ".resnets.0.0.gamma" in key or ".resnets.1.0.gamma" in key:
                 key = key.replace(".0.gamma", ".norm1.gamma")
             elif ".resnets.0.2." in key or ".resnets.1.2." in key:
@@ -258,7 +254,6 @@ def convert_vae_param_name(key: str) -> str:
             if ".shortcut." in key:
                 key = key.replace(".shortcut.", ".conv_shortcut.")
 
-    # General residual block mappings
     if ".residual.0.gamma" in key:
         key = key.replace(".residual.0.gamma", ".norm1.gamma")
     elif ".residual.2." in key:
@@ -297,7 +292,6 @@ def convert_openclip_to_hf_clip(openclip_state: Dict[str, Any],
             return tensor
         return torch.tensor(tensor)
 
-    # Embeddings
     new_state["vision_model.embeddings.class_embedding"] = _tensor(
         "visual.cls_embedding").squeeze(0).squeeze(0)
     new_state["vision_model.embeddings.patch_embedding.weight"] = _tensor(
@@ -305,7 +299,6 @@ def convert_openclip_to_hf_clip(openclip_state: Dict[str, Any],
     new_state["vision_model.embeddings.position_embedding.weight"] = (
         _tensor("visual.pos_embedding").squeeze(0))
 
-    # Pre/post norm
     new_state["vision_model.pre_layrnorm.weight"] = _tensor(
         "visual.pre_norm.weight")
     new_state["vision_model.pre_layrnorm.bias"] = _tensor(
@@ -315,7 +308,6 @@ def convert_openclip_to_hf_clip(openclip_state: Dict[str, Any],
     new_state["vision_model.post_layernorm.bias"] = _tensor(
         "visual.post_norm.bias")
 
-    # Transformer blocks
     for idx in range(hf_model.config.num_hidden_layers):
         src_prefix = f"visual.transformer.{idx}"
         dst_prefix = f"vision_model.encoder.layers.{idx}"
@@ -449,13 +441,21 @@ def convert_checkpoint(
 
     state_dict = load_file(weights_path)
     new_state_dict = OrderedDict()
-    for k, v in state_dict.items():
-        new_key = k
+
+    for raw_key, v in state_dict.items():
+        if raw_key.startswith("model."):
+            key = raw_key[6:]
+        else:
+            key = raw_key
+
+        new_key = key
         for pattern, replacement in _param_names_mapping.items():
-            if re.match(pattern, k):
-                new_key = re.sub(pattern, replacement, k)
+            if re.match(pattern, key):
+                new_key = re.sub(pattern, replacement, key)
                 break
+
         new_state_dict[new_key] = v
+
     save_file(new_state_dict, transformer_dir / "diffusion_pytorch_model.safetensors")
 
     vae_dir = output_path / "vae"
