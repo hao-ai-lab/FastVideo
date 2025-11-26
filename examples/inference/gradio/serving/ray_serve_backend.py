@@ -26,7 +26,7 @@ SEED_RANGE_MAX = 1_000_000
 SUPPORTED_MODELS = [
     "FastVideo/FastWan2.1-T2V-1.3B-Diffusers", 
     "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
-    "FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers",
+    "FastVideo/CausalWan2.2-I2V-A14B-Preview-Diffusers",
 ]
 
 MODEL_CONFIGS = {
@@ -445,7 +445,7 @@ if __name__ == "__main__":
                         help="Comma separated list of number of replicas for the T2V model(s)")
     parser.add_argument("--i2v_model_paths",
                         type=str,
-                        default="FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers",
+                        default="FastVideo/CausalWan2.2-I2V-A14B-Preview-Diffusers",
                         help="Comma separated list of paths to the I2V model(s)")
     parser.add_argument("--i2v_model_replicas",
                         type=str,

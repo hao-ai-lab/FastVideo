@@ -17,7 +17,7 @@ from fastvideo.configs.sample.base import SamplingParam
 MODEL_PATH_MAPPING = {
     "FastWan2.1-T2V-1.3B": "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
     "FastWan2.2-TI2V-5B-FullAttn": "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
-    "CausalWan2.2-I2V-A14B-Preview": "FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers",
+    "CausalWan2.2-I2V-A14B-Preview": "FastVideo/CausalWan2.2-I2V-A14B-Preview-Diffusers",
 }
 
 
@@ -638,7 +638,7 @@ def main():
                         default="",
                         help="Comma separated list of paths to the T2V model(s)")
     parser.add_argument("--i2v_model_paths", type=str,
-                        default="FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers",
+                        default="FastVideo/CausalWan2.2-I2V-A14B-Preview-Diffusers",
                         help="Comma separated list of paths to the I2V model(s)")
     parser.add_argument("--host", type=str, default="0.0.0.0",
                         help="Host to bind to")
