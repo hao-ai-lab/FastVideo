@@ -880,8 +880,19 @@ block_sparse_attention_backward(torch::Tensor q,
     CHECK_INPUT(o);
     CHECK_INPUT(og);
 
+    // q: [batch, qo_heads, q_seq_len, head_dim]
+    // k: [batch, kv_heads, kv_seq_len, head_dim]
+    // v: [batch, kv_heads, kv_seq_len, head_dim]
+    // o: [batch, qo_heads, q_seq_len, head_dim]
+    // l_vec: [batch, qo_heads, q_seq_len, 1]
+    // og: [batch, qo_heads, q_seq_len, head_dim]
+    // k2q_block_sparse_index: [batch, kv_heads, num_kv_blocks, max_num_q_blocks]
+    // k2q_block_sparse_num: [batch, kv_heads, num_kv_blocks]
+    // block_size: [num_kv_blocks]
+
     auto batch    = q.size(0);
-    auto seq_len  = q.size(2);
+    auto q_seq_len  = q.size(2);
+    auto kv_seq_len = k.size(2);
     auto head_dim = q.size(3);
     auto max_q_blocks_per_kv = k2q_block_sparse_index.size(3);
     TORCH_CHECK(k2q_block_sparse_index.size(2) == block_size.size(0), "k2q_block_sparse_index.size(2) must match block_size.size(0)");
