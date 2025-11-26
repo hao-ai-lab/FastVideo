@@ -14,6 +14,7 @@ edit_uri: edit/main/docs/
 # Configuration
 theme:
   name: material
+  favicon: assets/logos/icon_simple.svg
   palette:
     - scheme: default
       toggle:
