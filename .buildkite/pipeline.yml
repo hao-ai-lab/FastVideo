@@ -222,3 +222,14 @@ steps:
                   - TEST_TYPE=unit_test
                 agents:
                   queue: "default"
+            - path:
+                - "scripts/lora_extraction/**"
+                - "pyproject.toml"
+                - "docker/Dockerfile.python3.12"
+              config:
+                command: "timeout 60m .buildkite/scripts/pr_test.sh"
+                label: "LoRA Extraction Tests"
+                env:
+                  - TEST_TYPE=lora_extraction
+                agents:
+                  queue: "default"
