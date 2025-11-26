@@ -94,7 +94,7 @@ def check_correctness(h, d, num_blocks, k,  num_iterations=20, error_mode='all')
         V = generate_tensor((1, h, S, d),  torch.bfloat16, device)
         dO = generate_tensor((1, h, S, d), torch.bfloat16, device)
         
-        print(Q.shape, K.shape, V.shape, dO.shape)
+        # print(Q.shape, K.shape, V.shape, dO.shape)
 
         # dO_padded = torch.zeros_like(dO_padded)
         # dO_padded[:, :, non_pad_index, :] = dO
@@ -147,7 +147,7 @@ def check_correctness_qkdiff(h, d, num_q_blocks, num_kv_blocks, k, num_iteration
         V = generate_tensor((1, h, S_kv, d),  torch.bfloat16, device)
         dO = generate_tensor((1, h, S_q, d), torch.bfloat16, device)
         
-        print(Q.shape, K.shape, V.shape, dO.shape)
+        # print(Q.shape, K.shape, V.shape, dO.shape)
 
         pt_o, pt_qg, pt_kg, pt_vg = pytorch_test(Q, K, V, full_mask, dO)
         bs_o, bs_qg, bs_kg, bs_vg = block_sparse_kernel_test(Q, K, V, block_mask.unsqueeze(0), kv_variable_block_sizes, q_non_pad_index, kv_non_pad_index, num_q_blocks, num_kv_blocks, dO)
@@ -208,6 +208,8 @@ def generate_error_graphs_qkdiff(h, d, error_mode='all'):
         {"num_q_blocks": 16, "num_kv_blocks": 32, "k": 2, "description": "Small Q, Med KV"},
         {"num_q_blocks": 32, "num_kv_blocks": 16, "k": 4, "description": "Med Q, Small KV"},
         {"num_q_blocks": 53, "num_kv_blocks": 32, "k": 6, "description": "Large Q, Med KV"},
+        {"num_q_blocks": 16, "num_kv_blocks": 48, "k": 2, "description": "Small Q, Large KV"},
+        {"num_q_blocks": 48, "num_kv_blocks": 16, "k": 2, "description": "Large Q, Small KV"},
     ]
     
     print(f"\nError Analysis (QK Diff) for h={h}, d={d}, mode={error_mode}")
@@ -239,5 +241,5 @@ if __name__ == "__main__":
     print("=" * 60)
     for mode in ['backward']:
         generate_error_graphs(h, d, error_mode=mode)
-        # generate_error_graphs_qkdiff(h, d, error_mode=mode)
+        generate_error_graphs_qkdiff(h, d, error_mode=mode)
     print("\nAnalysis completed for all modes.")
