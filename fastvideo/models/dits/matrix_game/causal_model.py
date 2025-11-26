@@ -590,6 +590,7 @@ class CausalMatrixGameWanModel(BaseDiT):
         current_start: int = 0,
         cache_start: int = 0,
         start_frame: int = 0,
+        num_frame_per_block: int = None,
         **kwargs
     ) -> torch.Tensor:
         if mouse_cond is not None or keyboard_cond is not None:
@@ -601,6 +602,8 @@ class CausalMatrixGameWanModel(BaseDiT):
             encoder_hidden_states_image = encoder_hidden_states_image[0]
         else:
             encoder_hidden_states_image = None
+            
+        effective_num_frame_per_block = num_frame_per_block if num_frame_per_block is not None else self.num_frame_per_block
 
         ctx = get_forward_context()
         batch = getattr(ctx, "forward_batch", None)
@@ -774,7 +777,7 @@ class CausalMatrixGameWanModel(BaseDiT):
                                       keyboard_cond=keyboard_cond,
                                       block_mask_mouse=self.block_mask_mouse,
                                       block_mask_keyboard=self.block_mask_keyboard,
-                                      num_frame_per_block=self.num_frame_per_block,
+                                      num_frame_per_block=effective_num_frame_per_block,
                                       use_rope_keyboard=self.use_rope_keyboard,
                                       **kwargs)
 

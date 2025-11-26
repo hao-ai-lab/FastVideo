@@ -894,6 +894,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
 
         vae_time_compression_ratio = 4
         end_frame_idx = 1 + vae_time_compression_ratio * (start_index + num_frames - 1)
+        action_kwargs['num_frame_per_block'] = num_frames
         
         # DEBUG: Print action slicing info
         print(f"DENOISING_STAGE DEBUG: start_index={start_index}, num_frames={num_frames}, "
