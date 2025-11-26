@@ -1,102 +1,332 @@
+"""Extract FastVideo-style LoRA adapters from a fine-tuned model by SVDing (FT - base).
+
+Usage:
+    python scripts/lora_extraction/extract_lora.py \
+        --base <base_model> --ft <fine_tuned_model> --out adapter.safetensors --rank 16
+        
+example: python extract_lora.py \
+        --base Wan-AI/Wan2.2-TI2V-5B-Diffusers \ 
+        --ft FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers \ 
+        --out fastvideo_adapter.safetensors \ 
+        --rank 16
+"""
+
+from __future__ import annotations
+
 import os
+# Set distributed env BEFORE any fastvideo imports
+os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
+os.environ.setdefault("MASTER_PORT", "29500")
+os.environ.setdefault("WORLD_SIZE", "1")
+os.environ.setdefault("RANK", "0")
+os.environ.setdefault("LOCAL_RANK", "0")
+
+import argparse
+import sys
+import logging
+from pathlib import Path
+from typing import Dict, Optional
+
 import torch
 from tqdm import tqdm
-import diffusers
-from diffusers import DiffusionPipeline
 
-# Configuration
-BASE_MODEL = "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
-FINETUNED_MODEL = "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers"
-OUTPUT_PATH = "fastwan2.2_transformer_lora.pt"
-CHECKPOINT_PATH = "lora_checkpoint.pt"
-RANK = 16
+# Optional safetensors support
+_HAVE_SAFETENSORS = True
+try:
+    from safetensors.torch import save_file as safetensors_save  # type: ignore
+except Exception:
+    _HAVE_SAFETENSORS = False
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-torch_dtype = torch.float16 if device == "cuda" else torch.float32
-print(f"Using device: {device}")
+# Configure minimal logging
+LOG = logging.getLogger("extract_lora")
 
-# Setup for Wan models in Diffusers
-setattr(diffusers, "WanDMDPipeline", diffusers.WanPipeline)
 
-# Load base model on CPU
-print("\nLoading base model (CPU)")
-base_pipe = DiffusionPipeline.from_pretrained(
-    BASE_MODEL,
-    torch_dtype=torch.float32,
-    low_cpu_mem_usage=True,
-)
-base_pipe.to("cpu")
-base_state_dict = base_pipe.transformer.state_dict()
-del base_pipe
-torch.cuda.empty_cache()
-print("Base model weights cached on CPU.")
+def configure_logging(level: str = "INFO") -> None:
+    handler = logging.StreamHandler()
+    fmt = "%(asctime)s %(levelname)s %(message)s"
+    handler.setFormatter(logging.Formatter(fmt, datefmt="%Y-%m-%d %H:%M:%S"))
+    LOG.addHandler(handler)
+    LOG.setLevel(level)
 
-# Load fine-tuned model on GPU
-print("\nLoading fine-tuned model (GPU)")
-finetuned_pipe = DiffusionPipeline.from_pretrained(
-    FINETUNED_MODEL,
-    torch_dtype=torch_dtype,
-)
-finetuned_pipe.to(device)
-ft_transformer = finetuned_pipe.transformer
 
-# Initialize LoRA extraction state
-lora_dict = {}
-start_idx = 0
+def get_pipeline_class_for_model(model_path: str):
+    """Return appropriate FastVideo Pipeline class for the model."""
+    from fastvideo.utils import maybe_download_model_index  # local import
+    from fastvideo.pipelines.pipeline_registry import get_pipeline_registry, PipelineType
+    from fastvideo.fastvideo_args import WorkloadType
 
-if os.path.exists(CHECKPOINT_PATH):
-    print(f"Resuming from checkpoint: {CHECKPOINT_PATH}")
-    checkpoint = torch.load(CHECKPOINT_PATH, map_location="cpu")
-    lora_dict = checkpoint["lora_dict"]
-    start_idx = checkpoint["index"]
+    config = maybe_download_model_index(model_path)
+    pipeline_name = config.get("_class_name")
+    if pipeline_name is None:
+        raise ValueError(f"Model config for {model_path} missing _class_name (diffusers format expected).")
 
-ft_state_dict = ft_transformer.state_dict()
-keys = sorted(ft_state_dict.keys())
-print(f"\nTotal parameters to inspect: {len(keys)}")
+    pipeline_registry = get_pipeline_registry(PipelineType.BASIC)
+    pipeline_cls = pipeline_registry.resolve_pipeline_cls(pipeline_name, PipelineType.BASIC, WorkloadType.T2V)
+    return pipeline_cls
 
-mean_deltas = []
-progress_bar = tqdm(enumerate(keys), total=len(keys), desc="Extracting LoRA deltas")
 
-for i, key in progress_bar:
-    if i < start_idx:
-        continue
-    if key not in base_state_dict or not key.endswith("weight"):
-        continue
-    if any(substr in key for substr in ["norm", "bias", "embedding"]):
-        continue
+def load_transformer_state_dict_from_model(
+    model_path: str,
+    num_gpus: int = 1,
+    dit_cpu_offload: bool = True,
+    vae_cpu_offload: bool = True,
+    text_encoder_cpu_offload: bool = True,
+    pin_cpu_memory: bool = True,
+) -> Dict[str, torch.Tensor]:
+    """Load pipeline and extract transformer.state_dict as CPU tensors."""
+    pipeline_cls = get_pipeline_class_for_model(model_path)
+    pipeline = pipeline_cls.from_pretrained(
+        model_path,
+        num_gpus=num_gpus,
+        inference_mode=True,
+        dit_cpu_offload=dit_cpu_offload,
+        vae_cpu_offload=vae_cpu_offload,
+        text_encoder_cpu_offload=text_encoder_cpu_offload,
+        pin_cpu_memory=pin_cpu_memory,
+    )
 
-    W_base = base_state_dict[key].to(device, dtype=torch.float32)
-    W_ft = ft_state_dict[key].to(device, dtype=torch.float32)
-    if W_base.shape != W_ft.shape:
-        continue
+    # Try to locate transformer in several typical attributes
+    transformer = getattr(pipeline, "transformer", None)
+    if transformer is None:
+        modules = getattr(pipeline, "modules", None)
+        if isinstance(modules, dict):
+            transformer = modules.get("transformer")
+    if transformer is None:
+        pipeline_attr = getattr(pipeline, "pipeline", None)
+        transformer = getattr(pipeline_attr, "transformer", None) if pipeline_attr else None
+    if transformer is None:
+        raise RuntimeError("Transformer not found in pipeline. Expected pipeline.transformer or pipeline.modules['transformer'].")
 
-    delta = W_ft - W_base
-    mean_abs = delta.abs().mean().item()
-    mean_deltas.append(mean_abs)
+    state_dict = transformer.state_dict()
 
-    if i % 25 == 0:
-        print(f"\n[{i}/{len(keys)}] {key}: mean|delta|={mean_abs:.5f}")
-
+    # DTensor safe handling
     try:
-        U, S, Vh = torch.linalg.svd(delta, full_matrices=False)
-        rank = min(RANK, S.size(0))
-        A = (U[:, :rank] * S[:rank].sqrt()).half().cpu()
-        B = (Vh[:rank, :].T * S[:rank].sqrt()).half().cpu()
-        lora_dict[key] = {"A": A, "B": B}
-    except Exception as e:
-        print(f"Skipping {key} due to error: {e}")
-        continue
+        from torch.distributed.tensor import DTensor  # type: ignore
+        _HAS_DTENSOR = True
+    except Exception:
+        DTensor = None  # type: ignore
+        _HAS_DTENSOR = False
 
-    del W_base, W_ft, delta, U, S, Vh
+    state_dict_cpu: Dict[str, torch.Tensor] = {}
+    for k, v in state_dict.items():
+        if _HAS_DTENSOR and isinstance(v, DTensor):  # type: ignore
+            state_dict_cpu[k] = v.to_local().detach().cpu().contiguous()
+        else:
+            state_dict_cpu[k] = v.detach().cpu().contiguous()
+
+    # cleanup
+    try:
+        del pipeline, transformer
+    except Exception:
+        pass
     torch.cuda.empty_cache()
+    return state_dict_cpu
 
-    if i % 50 == 0 and i > 0:
-        torch.save({"index": i, "lora_dict": lora_dict}, CHECKPOINT_PATH)
-        print(f"Checkpoint saved at {i}")
 
-# Final save
-torch.save(lora_dict, OUTPUT_PATH)
-print("\nLoRA extraction complete.")
-print(f"Average |delta| magnitude: {sum(mean_deltas)/len(mean_deltas):.5f}")
-if os.path.exists(CHECKPOINT_PATH):
-    os.remove(CHECKPOINT_PATH)
+def is_extractable_weight(key: str) -> bool:
+    """Return True if key represents a weight suitable for LoRA extraction."""
+    if not key.endswith("weight"):
+        return False
+    low = key.lower()
+    for skip in ("norm", "bias", "embedding"):
+        if skip in low:
+            return False
+    return True
+
+
+def save_adapter_state(adapter_state: Dict[str, torch.Tensor], out_path: Path) -> None:
+    """Save adapter state dict to safetensors (if available) or torch.save."""
+    cleaned = {k: v.detach().cpu().contiguous() for k, v in adapter_state.items()}
+    out_str = str(out_path)
+    if out_path.suffix == ".safetensors" and _HAVE_SAFETENSORS:
+        safetensors_save(cleaned, out_str)
+    else:
+        torch.save(cleaned, out_str)
+
+
+def build_adapter_from_states(
+    base_sd: Dict[str, torch.Tensor],
+    ft_sd: Dict[str, torch.Tensor],
+    rank: int,
+    full_rank: bool,
+    min_delta: float,
+    checkpoint_interval: int,
+    checkpoint_path: Optional[Path],
+    resume_from: int = 0,
+) -> Dict[str, torch.Tensor]:
+    """Compute low-rank LoRA adapters by SVD on (ft - base) for extractable weights."""
+    # DTensor detection
+    try:
+        from torch.distributed.tensor import DTensor  # type: ignore
+        _HAS_DTENSOR = True
+    except Exception:
+        DTensor = None  # type: ignore
+        _HAS_DTENSOR = False
+
+    keys = sorted(ft_sd.keys())
+    adapter_state: Dict[str, torch.Tensor] = {}
+    processed = 0
+    mean_deltas = []
+
+    for idx, key in enumerate(tqdm(keys, desc="scanning keys", unit="keys")):
+        if idx < resume_from:
+            continue
+        if not is_extractable_weight(key):
+            continue
+        if key not in base_sd:
+            continue
+
+        Wb_raw = base_sd[key]
+        Wf_raw = ft_sd[key]
+
+        # Convert DTensor if present
+        if _HAS_DTENSOR and isinstance(Wb_raw, DTensor):  # type: ignore
+            Wb = Wb_raw.to_local().detach().cpu().to(torch.float32).contiguous()
+        else:
+            Wb = Wb_raw.detach().cpu().to(torch.float32).contiguous()
+
+        if _HAS_DTENSOR and isinstance(Wf_raw, DTensor):  # type: ignore
+            Wf = Wf_raw.to_local().detach().cpu().to(torch.float32).contiguous()
+        else:
+            Wf = Wf_raw.detach().cpu().to(torch.float32).contiguous()
+
+        if Wb.shape != Wf.shape:
+            continue
+
+        delta = (Wf - Wb).contiguous()
+        mean_abs = float(delta.abs().mean().item())
+        mean_deltas.append(mean_abs)
+        if mean_abs < min_delta:
+            continue
+
+        # SVD (CPU)
+        try:
+            U, S, Vh = torch.linalg.svd(delta, full_matrices=False)
+        except RuntimeError:
+            # skip layers that fail SVD
+            continue
+
+        max_rank = S.numel()
+        chosen_rank = max_rank if full_rank or rank <= 0 else min(rank, max_rank)
+        if chosen_rank == 0:
+            continue
+
+        S_sqrt = torch.sqrt(S[:chosen_rank].to(torch.float32))
+        U_r = U[:, :chosen_rank].to(torch.float32)    # (out, r)
+        Vh_r = Vh[:chosen_rank, :].to(torch.float32)  # (r, in)
+
+        lora_B = (U_r * S_sqrt.unsqueeze(0)).contiguous()        # (out, r)
+        tmp = (Vh_r.T * S_sqrt.unsqueeze(0)).contiguous()       # (in, r)
+        lora_A = tmp.T.contiguous()                              # (r, in)
+
+        base_name = key[:-len(".weight")]
+        a_key = f"{base_name}.lora_A.weight"
+        b_key = f"{base_name}.lora_B.weight"
+        rank_key = f"{base_name}.lora_rank"
+        alpha_key = f"{base_name}.lora_alpha"
+
+        adapter_state[a_key] = lora_A.cpu()
+        adapter_state[b_key] = lora_B.cpu()
+        adapter_state[rank_key] = torch.tensor([chosen_rank], dtype=torch.int32)
+        adapter_state[alpha_key] = torch.tensor([float(chosen_rank)], dtype=torch.float32)
+
+        processed += 1
+
+        # checkpoint periodically
+        if checkpoint_path and checkpoint_interval > 0 and (idx + 1) % checkpoint_interval == 0:
+            try:
+                torch.save({"index": idx + 1, "adapter": adapter_state}, str(checkpoint_path))
+            except Exception:
+                # non-fatal; continue
+                pass
+
+        # free local large tensors
+        del delta, U, S, Vh, U_r, Vh_r, tmp, lora_A, lora_B
+
+    # final checkpoint
+    if checkpoint_path:
+        try:
+            torch.save({"index": len(keys), "adapter": adapter_state}, str(checkpoint_path))
+        except Exception:
+            pass
+
+    avg_delta = (sum(mean_deltas) / len(mean_deltas)) if mean_deltas else 0.0
+    LOG.info("Extraction complete: processed_keys=%d, extracted_layers=%d, avg_abs_delta=%.6e",
+             len(keys), processed, avg_delta)
+    return adapter_state
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Extract FastVideo-style LoRA adapter (CPU SVD).")
+    p.add_argument("--base", required=True, help="Base model id or local path")
+    p.add_argument("--ft", required=True, help="Fine-tuned model id or local path")
+    p.add_argument("--out", default="fastvideo_adapter.safetensors", help="Output adapter file (.safetensors or .pt)")
+    p.add_argument("--rank", type=int, default=16, help="Truncated SVD rank; <=0 for full rank")
+    p.add_argument("--full-rank", action="store_true", help="Use full SVD rank for every layer")
+    p.add_argument("--min-delta", type=float, default=1e-8, help="Minimum mean abs delta to consider a layer changed")
+    p.add_argument("--checkpoint", default="extract_lora_checkpoint.pt", help="Checkpoint path to resume/save progress")
+    p.add_argument("--resume", action="store_true", help="Resume from checkpoint if available")
+    p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+    return p.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    configure_logging(args.log_level)
+
+    # ensure fastvideo import
+    try:
+        import fastvideo  # noqa: F401
+    except Exception as exc:
+        LOG.error("Failed to import fastvideo: %s", exc)
+        sys.exit(2)
+
+    out_path = Path(args.out)
+    checkpoint_path = Path(args.checkpoint) if args.checkpoint else None
+
+    # load state_dicts
+    LOG.info("Loading base model: %s", args.base)
+    base_sd = load_transformer_state_dict_from_model(args.base)
+
+    LOG.info("Loading fine-tuned model: %s", args.ft)
+    ft_sd = load_transformer_state_dict_from_model(args.ft)
+
+    resume_idx = 0
+    adapter_existing: Dict[str, torch.Tensor] = {}
+    if args.resume and checkpoint_path and checkpoint_path.exists():
+        try:
+            ck = torch.load(str(checkpoint_path), map_location="cpu")
+            adapter_existing = ck.get("adapter", {}) or {}
+            resume_idx = int(ck.get("index", 0) or 0)
+            LOG.info("Resuming from checkpoint index=%d with %d existing entries", resume_idx, len(adapter_existing))
+        except Exception:
+            adapter_existing = {}
+
+    adapter_state = dict(adapter_existing) if adapter_existing else {}
+    new_adapter = build_adapter_from_states(
+        base_sd=base_sd,
+        ft_sd=ft_sd,
+        rank=args.rank,
+        full_rank=args.full_rank,
+        min_delta=args.min_delta,
+        checkpoint_interval=50,
+        checkpoint_path=checkpoint_path,
+        resume_from=resume_idx,
+    )
+    adapter_state.update(new_adapter)
+
+    # final save
+    save_adapter_state(adapter_state, out_path)
+
+    # cleanup checkpoint if present
+    if checkpoint_path and checkpoint_path.exists():
+        try:
+            checkpoint_path.unlink()
+        except Exception:
+            pass
+
+    LOG.info("Saved adapter to %s (entries=%d)", str(out_path), len(adapter_state) // 4)
+
+
+if __name__ == "__main__":
+    main()

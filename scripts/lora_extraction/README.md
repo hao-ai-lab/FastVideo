@@ -1,58 +1,68 @@
-# LoRA Extraction and Verification Scripts
+# LoRA Extraction and Merging
 
-This folder contains utility scripts for **extracting, verifying, and comparing LoRA adapters** between a base diffusion model and its fine-tuned version.  
-It was developed for FastVideo models built on the [Wan 2.2 TI2V architecture](https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B-Diffusers).
+Tools for extracting and merging LoRA adapters for FastVideo models.
 
----
+## Extract LoRA Adapter
 
-## Scripts Overview
-
-### 1. `extract_lora.py`
-Extracts LoRA adapter matrices by computing the weight deltas between the **base model** and the **fine-tuned model**, then performing low-rank decomposition.
-
-**Default configuration:**
-- Base model: `Wan-AI/Wan2.2-TI2V-5B-Diffusers`
-- Finetuned model: `FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers`
-- Rank: 16
-- Outputs LoRA checkpoint at `fastwan2.2_transformer_lora.pt`
-
-Supports checkpointing for large model runs to avoid restarting on failure.
-
----
-
-### 2. `verify_lora.py`
-Loads the extracted LoRA weights and re-applies them to the base model to verify equivalence to the fine-tuned model numerically.
-
----
-
-### 3. `compare_lora_outputs.py`
-Compares visual outputs (e.g. generated frames or videos) between:
-- Base model  
-- Fine-tuned model  
-- Base + Extracted LoRA  
-
-to validate that the extracted LoRA produces comparable results.
-
----
-
-## Usage
-
-Run extraction:
 ```bash
-python scripts/lora_extraction/extract_lora.py
+python extract_lora.py \
+  --base Wan-AI/Wan2.2-TI2V-5B-Diffusers \
+  --ft FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers \
+  --out adapter_r32.safetensors \
+  --rank 32
 ```
 
-Resume from a saved checkpoint:
+**Options:**
+- `--base`: Base model (HuggingFace ID or local path)
+- `--ft`: Fine-tuned model (HuggingFace ID or local path)
+- `--out`: Output adapter file
+- `--rank`: LoRA rank (16, 32, 64, 128)
+- `--full-rank`: Extract full-rank adapter (optional)
+
+## Merge Adapter
+
 ```bash
-python scripts/lora_extraction/extract_lora.py --resume
+python merge_lora.py \
+  --base Wan-AI/Wan2.2-TI2V-5B-Diffusers \
+  --adapter adapter_r32.safetensors \
+  --ft FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers \
+  --output merged_model
 ```
 
-Verify:
+**Options:**
+- `--base`: Base model (HuggingFace ID or local path)
+- `--adapter`: LoRA adapter file (.safetensors)
+- `--ft`: Fine-tuned model (for configuration)
+- `--output`: Output directory
+
+## Validate Quality (Optional)
+
 ```bash
-python scripts/lora_extraction/verify_lora.py
+python lora_inference_comparison.py \
+  --base merged_model \
+  --ft FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers \
+  --adapter NONE \
+  --output-dir results \
+  --prompt "A cat sitting on a windowsill" \
+  --seed 42 \
+  --height 480 \
+  --width 480 \
+  --num-frames 49 \
+  --num-inference-steps 32 \
+  --compute-ssim \
+  --compute-lpips
 ```
 
-Compare outputs:
-```bash
-python scripts/lora_extraction/compare_lora_outputs.py
-```
+**Options:**
+- `--base`: Merged model or base model path
+- `--ft`: Fine-tuned model (reference)
+- `--adapter`: Path to adapter or NONE
+- `--output-dir`: Output directory
+- `--prompt`: Text prompt (default: "A cat sitting on a windowsill")
+- `--seed`: Random seed (default: 42)
+- `--height`: Video height (default: 480)
+- `--width`: Video width (default: 832)
+- `--num-frames`: Number of frames (default: 49)
+- `--num-inference-steps`: Inference steps (default: 32)
+- `--compute-ssim`: Compute SSIM metric
+- `--compute-lpips`: Compute LPIPS metric
