@@ -1,0 +1,80 @@
+FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+SHELL ["/bin/bash", "-c"]
+
+WORKDIR /FastVideo
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    git \
+    ca-certificates \
+    openssh-server \
+    zsh \
+    vim \
+    curl \
+    gcc-11 \
+    g++-11 \
+    clang-11 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up C++20 compilers for ThunderKittens
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
+
+# Set CUDA environment variables
+ENV CUDA_HOME=/usr/local/cuda-12.8
+ENV PATH=${CUDA_HOME}/bin:${PATH}
+ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
+
+# Install Miniconda and create conda environment
+COPY Miniconda3-latest-Linux-x86_64.sh /tmp/miniconda.sh
+RUN bash /tmp/miniconda.sh -b -p /opt/conda && rm /tmp/miniconda.sh
+ENV PATH=/opt/conda/bin:${PATH}
+RUN /opt/conda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+RUN /opt/conda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+RUN /opt/conda/bin/conda update -y -n base conda && \
+    /opt/conda/bin/conda create -y -n fastvideo python=3.12 && \
+    /opt/conda/bin/conda clean -afy
+ENV PATH=/opt/conda/envs/fastvideo/bin:/opt/conda/bin:${PATH}
+
+# Copy just the pyproject.toml first to leverage Docker cache
+COPY pyproject.toml ./
+
+# Create a dummy README to satisfy the installation
+RUN echo "# Placeholder" > README.md
+
+# Install project dependencies inside the conda environment
+RUN source /opt/conda/etc/profile.d/conda.sh && \
+    conda activate fastvideo && \
+    pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir .[dev] && \
+    pip install --no-cache-dir flash-attn==2.8.3 --no-build-isolation
+
+COPY . .
+
+# Install dependencies using pip inside conda env and set up shell configuration
+RUN source /opt/conda/etc/profile.d/conda.sh && \
+    conda activate fastvideo && \
+    pip install --no-cache-dir -e .[dev] && \
+    git config --unset-all http.https://github.com/.extraheader || true && \
+    echo 'source /opt/conda/etc/profile.d/conda.sh && conda activate fastvideo' >> /root/.bashrc && \
+    echo 'if [ -n "$ZSH_VERSION" ] && [ -f ~/.zshrc ]; then . ~/.zshrc; elif [ -f ~/.bashrc ]; then . ~/.bashrc; fi' > /root/.profile
+
+# Install STA (Sliding Tile Attention)
+RUN source /opt/conda/etc/profile.d/conda.sh && \
+    conda activate fastvideo && \
+    cd csrc/attn/sliding_tile_attn && \
+    git submodule update --init --recursive && \
+    python setup.py install
+
+# Install VSA 
+RUN source /opt/conda/etc/profile.d/conda.sh && \
+    conda activate fastvideo && \
+    cd csrc/attn/video_sparse_attn && \
+    git submodule update --init --recursive && \
+    python setup.py install
+
+EXPOSE 22
+
+ENTRYPOINT ["/bin/bash", "-lc", "source /opt/conda/etc/profile.d/conda.sh && conda activate fastvideo && exec /FastVideo/examples/inference/gradio/start.sh"]

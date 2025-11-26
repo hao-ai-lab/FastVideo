@@ -200,7 +200,7 @@ class BaseModelDeployment:
 
 
 @serve.deployment(
-    ray_actor_options={"num_cpus": 2, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
+    ray_actor_options={"num_cpus": 15, "num_gpus": 1, "runtime_env": {"conda": "fastvideo"}},
 )
 class T2VModelDeployment(BaseModelDeployment):
     def __init__(self, t2v_model_path: str, output_path: str = "outputs"):
@@ -210,7 +210,7 @@ class T2VModelDeployment(BaseModelDeployment):
 
 
 @serve.deployment(
-    ray_actor_options={"num_cpus": 16, "num_gpus": 1, "runtime_env": {"conda": "fv"}},
+    ray_actor_options={"num_cpus": 16, "num_gpus": 1, "runtime_env": {"conda": "fastvideo"}},
 )
 class T2V14BModelDeployment(BaseModelDeployment):
     def __init__(self, t2v_14b_model_path: str, output_path: str = "outputs"):
@@ -227,7 +227,7 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
-@serve.deployment(num_replicas=50, ray_actor_options={"num_cpus": 2})
+@serve.deployment(num_replicas=1, ray_actor_options={"num_cpus": 2})
 @serve.ingress(app)
 class FastVideoAPI:
 
