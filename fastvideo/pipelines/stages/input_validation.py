@@ -111,20 +111,28 @@ class InputValidationStage(PipelineStage):
             ) and batch.pil_image is not None:
             img = batch.pil_image
             ih, iw = img.height, img.width
-            patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
-            vae_stride = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
-            dh, dw = patch_size[1] * vae_stride, patch_size[2] * vae_stride
-            max_area = 480 * 832
-            ow, oh = best_output_size(iw, ih, dw, dh, max_area)
+            
+            pipeline_class_name = type(fastvideo_args.pipeline_config).__name__
+            if 'MatrixGame' in pipeline_class_name or 'MatrixCausal' in pipeline_class_name:
+                oh, ow = batch.height, batch.width
+                img = img.resize((ow, oh), Image.LANCZOS)
+            else:
+                # Standard Wan logic
+                patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
+                vae_stride = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
+                dh, dw = patch_size[1] * vae_stride, patch_size[2] * vae_stride
+                max_area = 480 * 832
+                ow, oh = best_output_size(iw, ih, dw, dh, max_area)
 
-            scale = max(ow / iw, oh / ih)
-            img = img.resize((round(iw * scale), round(ih * scale)),
-                             Image.LANCZOS)
+                scale = max(ow / iw, oh / ih)
+                img = img.resize((round(iw * scale), round(ih * scale)),
+                                Image.LANCZOS)
 
-            # center-crop
-            x1 = (img.width - ow) // 2
-            y1 = (img.height - oh) // 2
-            img = img.crop((x1, y1, x1 + ow, y1 + oh))
+                # center-crop
+                x1 = (img.width - ow) // 2
+                y1 = (img.height - oh) // 2
+                img = img.crop((x1, y1, x1 + ow, y1 + oh))
+
             assert img.width == ow and img.height == oh
             logger.info("final processed img height: %s, img width: %s",
                         img.height, img.width)

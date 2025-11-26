@@ -209,6 +209,18 @@ class ActionModule(nn.Module):
         # Defined freqs_cis early so it's available for both mouse and keyboard
         freqs_cis = (self.freqs_cos, self.freqs_sin)
 
+        # DEBUG: Print values for assertion debugging
+        cond1 = N_feats == tt and ((is_causal and kv_cache_mouse == None) or not is_causal)
+        cond2_lhs = (N_frames - 1) // self.vae_time_compression_ratio + 1
+        cond2_rhs = start_frame + num_frame_per_block
+        cond2 = cond2_lhs == cond2_rhs and is_causal
+        print(f"ACTION_MODULE DEBUG: N_frames={N_frames}, N_feats={N_feats}, tt={tt}, "
+              f"start_frame={start_frame}, num_frame_per_block={num_frame_per_block}, "
+              f"is_causal={is_causal}, kv_cache_mouse_is_none={kv_cache_mouse is None}")
+        print(f"  Cond1: N_feats==tt -> {N_feats}=={tt} -> {N_feats == tt}, kv_cache check -> {cond1}")
+        print(f"  Cond2: {cond2_lhs} == {cond2_rhs} -> {cond2_lhs == cond2_rhs}, final -> {cond2}")
+        print(f"  Assertion will pass: {cond1 or cond2}")
+
         assert (N_feats == tt and ((is_causal and kv_cache_mouse == None) or not is_causal)) or ((N_frames - 1) // self.vae_time_compression_ratio + 1 == start_frame + num_frame_per_block and is_causal)
         
         if self.enable_mouse and mouse_condition is not None:

@@ -730,21 +730,21 @@ class CausalMatrixGameWanModel(BaseDiT):
         if crossattn_cache is None:
             crossattn_cache = [None] * len(self.blocks)
 
-        hidden_states = self.causal_pos_embedder(
-            hidden_states,
-            timestep_proj,
-            post_patch_num_frames=post_patch_num_frames,
-            post_patch_height=post_patch_height,
-            post_patch_width=post_patch_width,
-            freqs_cis=freqs_cis,
-            mouse_cond=mouse_cond,
-            keyboard_cond=keyboard_cond,
-            block_mask=self.block_mask,
-            block_mask_mouse=self.block_mask_mouse,
-            block_mask_keyboard=self.block_mask_keyboard,
-            use_rope_keyboard=self.use_rope_keyboard,
-            num_frame_per_block=self.num_frame_per_block
-        )
+        # hidden_states = self.causal_pos_embedder(
+        #     hidden_states,
+        #     timestep_proj,
+        #     post_patch_num_frames=post_patch_num_frames,
+        #     post_patch_height=post_patch_height,
+        #     post_patch_width=post_patch_width,
+        #     freqs_cis=freqs_cis,
+        #     mouse_cond=mouse_cond,
+        #     keyboard_cond=keyboard_cond,
+        #     block_mask=self.block_mask,
+        #     block_mask_mouse=self.block_mask_mouse,
+        #     block_mask_keyboard=self.block_mask_keyboard,
+        #     use_rope_keyboard=self.use_rope_keyboard,
+        #     num_frame_per_block=self.num_frame_per_block
+        # )
 
         for block_index, block in enumerate(self.blocks):
             if torch.is_grad_enabled() and self.gradient_checkpointing:
@@ -772,6 +772,10 @@ class CausalMatrixGameWanModel(BaseDiT):
                                       grid_sizes=grid_sizes,
                                       mouse_cond=mouse_cond,
                                       keyboard_cond=keyboard_cond,
+                                      block_mask_mouse=self.block_mask_mouse,
+                                      block_mask_keyboard=self.block_mask_keyboard,
+                                      num_frame_per_block=self.num_frame_per_block,
+                                      use_rope_keyboard=self.use_rope_keyboard,
                                       **kwargs)
 
         temb = temb.unflatten(dim=0, sizes=(batch_size, post_patch_num_frames)).unsqueeze(2)
