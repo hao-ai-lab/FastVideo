@@ -468,6 +468,15 @@ class CausalDMDDenosingStage(DenoisingStage):
 
         del kv_cache1
         del crossattn_cache
+        for module in self.transformer.modules():
+            for name, buf in module._buffers.items():
+                if "k_cache" in name or "v_cache" in name:
+                    module._buffers[name] = None
+        if getattr(self, "transformer_2", None) is not None:
+            for module in self.transformer_2.modules():
+                for name, buf in module._buffers.items():
+                    if "k_cache" in name or "v_cache" in name:
+                        module._buffers[name] = None
         gc.collect()
         torch.cuda.empty_cache()
 

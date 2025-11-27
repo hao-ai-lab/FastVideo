@@ -980,7 +980,7 @@ class DistillationPipeline(TrainingPipeline):
                 "training_batch_dmd_fwd_clean_latent":
                 training_batch.latents,
                 "generator_pred_video":
-                clean_original_latent.detach(),
+                original_latent.detach(),
                 "real_score_pred_video":
                 real_score_pred_video.detach(),
                 "faker_score_pred_video":
@@ -1104,6 +1104,7 @@ class DistillationPipeline(TrainingPipeline):
                 boundary_timestep=torch.ones_like(fake_score_timestep) * self.boundary_timestep,
                 scheduler=self.noise_scheduler).unflatten(0, fake_score_pred_noise.shape[:2])
             flow_matching_loss = torch.mean((pred_video - generator_pred_video)**2)
+        # else:
         elif self.boundary_timestep is not None and self.training_args.use_add_noise_high and exit_timestep < self.boundary_timestep:
             pred_video = pred_noise_to_pred_video(
                 pred_noise=fake_score_pred_noise.flatten(0, 1),
@@ -1116,12 +1117,20 @@ class DistillationPipeline(TrainingPipeline):
             target = fake_score_noise - generator_pred_video
             flow_matching_loss = torch.mean((fake_score_pred_noise - target)**2)
 
-        training_batch.fake_score_latent_vis_dict = {
-            "training_batch_fakerscore_fwd_clean_latent":
-            training_batch.latents,
-            "generator_pred_video": clean_generator_pred_video,
-            "fake_score_timestep": fake_score_timestep,
-        }
+        if moe_use_add_noise_high:
+            training_batch.fake_score_latent_vis_dict = {
+                "training_batch_fakerscore_fwd_clean_latent":
+                training_batch.latents,
+                "generator_pred_video": clean_generator_pred_video,
+                "fake_score_timestep": fake_score_timestep,
+            }
+        else:
+            training_batch.fake_score_latent_vis_dict = {
+                "training_batch_fakerscore_fwd_clean_latent":
+                training_batch.latents,
+                "generator_pred_video": generator_pred_video,
+                "fake_score_timestep": fake_score_timestep,
+            }
 
         return training_batch, flow_matching_loss
 

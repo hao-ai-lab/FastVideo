@@ -632,6 +632,17 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         # Clean up caches - properly free GPU memory
         self._cleanup_simulation_caches(kv_cache1, crossattn_cache)
+        # Iterate over all buffers in self.transformer and set them to None
+        if self.current_trainstep % self.dfake_gen_update_ratio != 0:
+            for module in self.transformer.modules():
+                for name, buf in module._buffers.items():
+                    if "k_cache" in name or "v_cache" in name:
+                        module._buffers[name] = None
+            if self.transformer_2 is not None:
+                for module in self.transformer_2.modules():
+                    for name, buf in module._buffers.items():
+                        if "k_cache" in name or "v_cache" in name:
+                            module._buffers[name] = None
         gc.collect()
         torch.cuda.empty_cache()
         # assert kv_cache1 is not None
