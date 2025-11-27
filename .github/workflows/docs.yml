@@ -3,8 +3,18 @@ name: Deploy Documentation
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'requirements-mkdocs.txt'
+      - '.github/workflows/docs.yml'
   pull_request:
     branches: [ main ]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'requirements-mkdocs.txt'
+      - '.github/workflows/docs.yml'
 
 permissions:
   contents: read

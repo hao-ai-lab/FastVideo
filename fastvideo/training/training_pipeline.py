@@ -470,7 +470,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         #             local_main_process_only=False)
         with self.tracker.timed("timing/reduce_loss"):
             world_group = get_world_group()
-            world_group.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
+            avg_loss = world_group.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
         training_batch.total_loss += avg_loss.item()
 
         return training_batch
@@ -764,6 +764,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
         sampling_param.width = training_args.num_width
         sampling_param.num_inference_steps = num_inference_steps
         sampling_param.data_type = "video"
+        if training_args.validation_guidance_scale:
+            sampling_param.guidance_scale = float(
+                training_args.validation_guidance_scale)
         assert self.seed is not None
         sampling_param.seed = self.seed
 
