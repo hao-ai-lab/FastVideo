@@ -439,12 +439,14 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         norm_hidden_states, hidden_states = self.self_attn_residual_norm(
             hidden_states, attn_output, gate_msa, null_shift, null_scale)
 
-        attn_output = self.attn2(norm_hidden_states,
+        # use unnormalized hidden_states for cross-attention
+        # official uses norm3=Identity
+        attn_output = self.attn2(hidden_states,
                                  context=encoder_hidden_states,
                                  context_lens=None,
                                  crossattn_cache=crossattn_cache)
-        norm_hidden_states, hidden_states = self.cross_attn_residual_norm(
-            hidden_states, attn_output, 1, c_shift_msa, c_scale_msa)
+        # residual connection
+        hidden_states = hidden_states + attn_output
 
         if self.action_model is not None:
             if mouse_cond is not None or keyboard_cond is not None:

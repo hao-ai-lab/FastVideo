@@ -16,31 +16,58 @@ OUTPUT_DIR = "/workspace/Matrix-Game-2.0-Diffusers"
 MODEL_VARIANT = "base_distilled_model"
 
 _param_names_mapping = {
-    r"^head\.modulation": r"scale_shift_table",
+    # Patch embedding: add .proj in the middle
+    r"^patch_embedding\.weight$": r"patch_embedding.proj.weight",
+    r"^patch_embedding\.bias$": r"patch_embedding.proj.bias",
+    
+    # Head: head.head -> proj_out, head.modulation -> scale_shift_table
     r"^head\.head\.(.*)$": r"proj_out.\1",
+    r"^head\.modulation$": r"scale_shift_table",
+    
+    # Image embedding: img_emb.proj.0/1/3/4 -> image_embedder structure
     r"^img_emb\.proj\.0\.(.*)$": r"condition_embedder.image_embedder.norm1.\1",
-    r"^img_emb\.proj\.1\.(.*)$": r"condition_embedder.image_embedder.ff.net.0.proj.\1",
-    r"^img_emb\.proj\.3\.(.*)$": r"condition_embedder.image_embedder.ff.net.2.\1",
+    r"^img_emb\.proj\.1\.(.*)$": r"condition_embedder.image_embedder.ff.fc_in.\1",
+    r"^img_emb\.proj\.3\.(.*)$": r"condition_embedder.image_embedder.ff.fc_out.\1",
     r"^img_emb\.proj\.4\.(.*)$": r"condition_embedder.image_embedder.norm2.\1",
-    r"^time_embedding\.0\.(.*)$": r"condition_embedder.time_embedder.linear_1.\1",
-    r"^time_embedding\.2\.(.*)$": r"condition_embedder.time_embedder.linear_2.\1",
-    r"^time_projection\.1\.(.*)$": r"condition_embedder.time_proj.\1",
-    r"^blocks\.(\d+)\.self_attn\.q\.(.*)$": r"blocks.\1.attn1.to_q.\2",
-    r"^blocks\.(\d+)\.self_attn\.k\.(.*)$": r"blocks.\1.attn1.to_k.\2",
-    r"^blocks\.(\d+)\.self_attn\.v\.(.*)$": r"blocks.\1.attn1.to_v.\2",
-    r"^blocks\.(\d+)\.self_attn\.o\.(.*)$": r"blocks.\1.attn1.to_out.0.\2",
-    r"^blocks\.(\d+)\.self_attn\.norm_q\.(.*)$": r"blocks.\1.attn1.norm_q.\2",
-    r"^blocks\.(\d+)\.self_attn\.norm_k\.(.*)$": r"blocks.\1.attn1.norm_k.\2",
+    
+    # Time embedding: time_embedding.0 -> time_embedder.mlp.fc_in
+    #                 time_embedding.2 -> time_embedder.mlp.fc_out
+    r"^time_embedding\.0\.(.*)$": r"condition_embedder.time_embedder.mlp.fc_in.\1",
+    r"^time_embedding\.2\.(.*)$": r"condition_embedder.time_embedder.mlp.fc_out.\1",
+    
+    # Time projection: time_projection.1 -> time_modulation.linear
+    r"^time_projection\.1\.(.*)$": r"condition_embedder.time_modulation.linear.\1",
+    
+    # Self-attention: blocks.{i}.self_attn.q/k/v/o -> blocks.{i}.to_q/k/v/out
+    r"^blocks\.(\d+)\.self_attn\.q\.(.*)$": r"blocks.\1.to_q.\2",
+    r"^blocks\.(\d+)\.self_attn\.k\.(.*)$": r"blocks.\1.to_k.\2",
+    r"^blocks\.(\d+)\.self_attn\.v\.(.*)$": r"blocks.\1.to_v.\2",
+    r"^blocks\.(\d+)\.self_attn\.o\.(.*)$": r"blocks.\1.to_out.\2",
+    
+    # Self-attention norm: blocks.{i}.self_attn.norm_q/k -> blocks.{i}.norm_q/k
+    r"^blocks\.(\d+)\.self_attn\.norm_q\.(.*)$": r"blocks.\1.norm_q.\2",
+    r"^blocks\.(\d+)\.self_attn\.norm_k\.(.*)$": r"blocks.\1.norm_k.\2",
+    
+    # Cross-attention: blocks.{i}.cross_attn.q/k/v/o -> blocks.{i}.attn2.to_q/k/v/out
     r"^blocks\.(\d+)\.cross_attn\.q\.(.*)$": r"blocks.\1.attn2.to_q.\2",
     r"^blocks\.(\d+)\.cross_attn\.k\.(.*)$": r"blocks.\1.attn2.to_k.\2",
     r"^blocks\.(\d+)\.cross_attn\.v\.(.*)$": r"blocks.\1.attn2.to_v.\2",
-    r"^blocks\.(\d+)\.cross_attn\.o\.(.*)$": r"blocks.\1.attn2.to_out.0.\2",
+    r"^blocks\.(\d+)\.cross_attn\.o\.(.*)$": r"blocks.\1.attn2.to_out.\2",
+    
+    # Cross-attention norm: blocks.{i}.cross_attn.norm_q/k -> blocks.{i}.attn2.norm_q/k
     r"^blocks\.(\d+)\.cross_attn\.norm_q\.(.*)$": r"blocks.\1.attn2.norm_q.\2",
     r"^blocks\.(\d+)\.cross_attn\.norm_k\.(.*)$": r"blocks.\1.attn2.norm_k.\2",
-    r"^blocks\.(\d+)\.ffn\.0\.(.*)$": r"blocks.\1.ffn.net.0.proj.\2",
-    r"^blocks\.(\d+)\.ffn\.2\.(.*)$": r"blocks.\1.ffn.net.2.\2",
-    r"^blocks\.(\d+)\.modulation": r"blocks.\1.scale_shift_table",
-    r"^blocks\.(\d+)\.norm3\.(.*)$": r"blocks.\1.norm2.\2",
+    
+    # FFN: blocks.{i}.ffn.0 -> blocks.{i}.ffn.fc_in
+    #      blocks.{i}.ffn.2 -> blocks.{i}.ffn.fc_out
+    r"^blocks\.(\d+)\.ffn\.0\.(.*)$": r"blocks.\1.ffn.fc_in.\2",
+    r"^blocks\.(\d+)\.ffn\.2\.(.*)$": r"blocks.\1.ffn.fc_out.\2",
+    
+    # Block modulation: blocks.{i}.modulation -> blocks.{i}.scale_shift_table
+    r"^blocks\.(\d+)\.modulation$": r"blocks.\1.scale_shift_table",
+    
+    # Block norm3: blocks.{i}.norm3 -> blocks.{i}.self_attn_residual_norm.norm
+    r"^blocks\.(\d+)\.norm3\.(.*)$": r"blocks.\1.self_attn_residual_norm.norm.\2",
 }
 
 MODEL_VARIANTS = {
@@ -426,6 +453,9 @@ def convert_checkpoint(
 
     state_dict = load_file(weights_path)
     new_state_dict = OrderedDict()
+    
+    skipped_keys = []
+    converted_keys = []
 
     for raw_key, v in state_dict.items():
         if raw_key.startswith("model."):
@@ -436,10 +466,30 @@ def convert_checkpoint(
         new_key = key
         for pattern, replacement in _param_names_mapping.items():
             if re.match(pattern, key):
+                if replacement is None:
+                    # Skip this parameter
+                    skipped_keys.append(raw_key)
+                    new_key = None
+                    break
                 new_key = re.sub(pattern, replacement, key)
+                if new_key != key:
+                    converted_keys.append((key, new_key))
                 break
 
-        new_state_dict[new_key] = v
+        if new_key is not None:
+            new_state_dict[new_key] = v
+
+    print(f"\nConverted {len(converted_keys)} parameter names:")
+    for old, new in converted_keys[:10]:  # Show first 10
+        print(f"  {old} -> {new}")
+    if len(converted_keys) > 10:
+        print(f"  ... and {len(converted_keys) - 10} more")
+    
+    print(f"\nSkipped {len(skipped_keys)} parameters:")
+    for key in skipped_keys[:10]:  # Show first 10
+        print(f"  {key}")
+    if len(skipped_keys) > 10:
+        print(f"  ... and {len(skipped_keys) - 10} more")
 
     save_file(new_state_dict, transformer_dir / "diffusion_pytorch_model.safetensors")
 
