@@ -66,6 +66,7 @@ class DistributedAttention(nn.Module):
         replicated_k: torch.Tensor | None = None,
         replicated_v: torch.Tensor | None = None,
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
+        attention_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
         
@@ -76,6 +77,7 @@ class DistributedAttention(nn.Module):
             replicated_q (Optional[torch.Tensor]): Replicated query tensor, typically for text tokens
             replicated_k (Optional[torch.Tensor]): Replicated key tensor
             replicated_v (Optional[torch.Tensor]): Replicated value tensor
+            attention_mask (Optional[torch.Tensor]): Attention mask [batch_size, seq_len]
             
         Returns:
             Tuple[torch.Tensor, Optional[torch.Tensor]]: A tuple containing:
@@ -91,17 +93,26 @@ class DistributedAttention(nn.Module):
 
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
-
+        
         # Stack QKV
-        qkv = torch.cat([q, k, v], dim=0)  # [3, seq_len, num_heads, head_dim]
+        qkv = torch.cat([q, k, v], dim=0)  # [3*batch, seq_len, num_heads, head_dim]
 
         # Redistribute heads across sequence dimension
         qkv = sequence_model_parallel_all_to_all_4D(qkv,
                                                     scatter_dim=2,
                                                     gather_dim=1)
+        
+        # After all-to-all, each rank has the full sequence but only a subset of heads
+        # The attention mask should now apply to the full sequence length
+        # Since mask is [batch, full_seq_len], it's already in the correct format
+
+        # LOAY TODO, instead of slicing repeatedly maintain an original qkv and rewrite into that
+        if attention_mask is not None:
+            valid_seq_len = (attention_mask[0] == 1).sum().item()
+            qkv = qkv[:, :valid_seq_len, :, :]
+
         if freqs_cis is not None:
             cos, sin = freqs_cis
-            # apply to q and k
             qkv[:batch_size * 2] = _apply_rotary_emb(qkv[:batch_size * 2],
                                                      cos,
                                                      sin,
@@ -136,9 +147,14 @@ class DistributedAttention(nn.Module):
         # Apply backend-specific postprocess_output
         output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
 
+        if attention_mask is not None:
+            pad_len = (attention_mask[0] == 0).sum().item()
+            output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad_len))
+
         output = sequence_model_parallel_all_to_all_4D(output,
                                                        scatter_dim=1,
                                                        gather_dim=2)
+
         return output, replicated_output
 
 
@@ -157,6 +173,7 @@ class DistributedAttention_VSA(DistributedAttention):
         replicated_v: torch.Tensor | None = None,
         gate_compress: torch.Tensor | None = None,
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
+        attention_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
         
@@ -168,6 +185,7 @@ class DistributedAttention_VSA(DistributedAttention):
             replicated_q (Optional[torch.Tensor]): Replicated query tensor, typically for text tokens
             replicated_k (Optional[torch.Tensor]): Replicated key tensor
             replicated_v (Optional[torch.Tensor]): Replicated value tensor
+            attention_mask (Optional[torch.Tensor]): Attention mask [batch_size, seq_len]
             
         Returns:
             Tuple[torch.Tensor, Optional[torch.Tensor]]: A tuple containing:
@@ -182,16 +200,31 @@ class DistributedAttention_VSA(DistributedAttention):
 
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
+        
+        # Get attention mask if present
+        original_attention_mask = attention_mask
 
         batch_size, seq_len, num_heads, head_dim = q.shape
         # Stack QKV
         qkvg = torch.cat([q, k, v, gate_compress],
-                         dim=0)  # [3, seq_len, num_heads, head_dim]
+                         dim=0)  # [4*batch, seq_len, num_heads, head_dim]
 
         # Redistribute heads across sequence dimension
+        # Before: [4*batch, shard_seq_len, num_heads, head_dim]
+        # After:  [4*batch, full_seq_len, shard_num_heads, head_dim]
         qkvg = sequence_model_parallel_all_to_all_4D(qkvg,
                                                      scatter_dim=2,
                                                      gather_dim=1)
+        
+        # After all-to-all, each rank has the full sequence but only a subset of heads
+        # The attention mask should now apply to the full sequence length
+
+        if freqs_cis is not None:
+            cos, sin = freqs_cis
+            qkvg[:batch_size * 2] = _apply_rotary_emb(qkvg[:batch_size * 2],
+                                                      cos,
+                                                      sin,
+                                                      is_neox_style=False)
 
         if freqs_cis is not None:
             cos, sin = freqs_cis
@@ -211,6 +244,10 @@ class DistributedAttention_VSA(DistributedAttention):
 
         # Apply backend-specific postprocess_output
         output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
+        
+        # Restore original mask before second all-to-all
+        if original_attention_mask is not None:
+            attention_mask = original_attention_mask
 
         output = sequence_model_parallel_all_to_all_4D(output,
                                                        scatter_dim=1,
