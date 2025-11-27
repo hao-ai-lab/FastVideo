@@ -7,10 +7,13 @@ export TOKENIZERS_PARALLELISM=false
 
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 # DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
-DATA_DIR="data/crush-smol_processed_t2v/training_dataset/"
+DATA_DIR="data/crush-smol_processed_t2v_480_816/training_dataset/"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 NUM_GPUS=4
 # export CUDA_VISIBLE_DEVICES=4,5
+
+echo "Data is being loaded from the 480*816 directory. Proceed?"
+read  # waits for user to press Enter
 
 
 # Training arguments
@@ -21,10 +24,11 @@ training_args=(
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  # --num_latent_t 8
-  --num_latent_t 20
+  --num_latent_t 21
+  # --num_latent_t 20
   --num_height 480
-  --num_width 832
+  --num_width 816
+  # --num_width 832
   --num_frames 81
   --enable_gradient_checkpointing_type "full"
 )
@@ -54,7 +58,7 @@ dataset_args=(
 validation_args=(
   --log_validation 
   --validation_dataset_file $VALIDATION_DATASET_FILE
-  --validation_steps 500
+  --validation_steps 250
   --validation_sampling_steps "50" 
   --validation_guidance_scale "1.0"
 )
@@ -84,7 +88,7 @@ miscellaneous_args=(
 )
 
 torchrun \
-  --master_port 29511 \
+  --master_port 29510 \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
     fastvideo/training/wan_training_pipeline.py \
