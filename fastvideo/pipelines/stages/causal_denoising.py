@@ -894,19 +894,13 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
 
         vae_time_compression_ratio = 4
         end_frame_idx = 1 + vae_time_compression_ratio * (start_index + num_frames - 1)
-        action_kwargs['num_frame_per_block'] = num_frames
-        
-        # DEBUG: Print action slicing info
-        print(f"DENOISING_STAGE DEBUG: start_index={start_index}, num_frames={num_frames}, "
-              f"end_frame_idx={end_frame_idx}, num_frame_per_block={self.num_frame_per_block}")
-        
         if hasattr(batch, 'mouse_cond') and batch.mouse_cond is not None:
             action_kwargs['mouse_cond'] = batch.mouse_cond[:, :end_frame_idx]
-            print(f"  mouse_cond sliced: {batch.mouse_cond.shape} -> {action_kwargs['mouse_cond'].shape}")
         if hasattr(batch, 'keyboard_cond') and batch.keyboard_cond is not None:
             action_kwargs['keyboard_cond'] = batch.keyboard_cond[:, :end_frame_idx]
-            print(f"  keyboard_cond sliced: {batch.keyboard_cond.shape} -> {action_kwargs['keyboard_cond'].shape}")
 
+        # CRITICAL: Pass num_frame_per_block to model - this should be num_frames (current block size)
+        action_kwargs['num_frame_per_block'] = num_frames
         return action_kwargs
 
     def _initialize_kv_cache(self, batch_size: int, dtype: torch.dtype, device: torch.device) -> list[dict]:

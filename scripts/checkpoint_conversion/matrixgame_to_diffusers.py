@@ -72,7 +72,7 @@ def create_model_index_json(action_config: Dict[str, Any]) -> Dict[str, Any]:
         # "_class_name": "MatrixGamePipeline",
         "_class_name": "MatrixCausalGameDMDPipeline",
         "_diffusers_version": "0.33.1",
-        "scheduler": ["diffusers", "UniPCMultistepScheduler"],
+        "scheduler": ["diffusers", "SelfForcingFlowMatchScheduler"],
         "transformer": ["diffusers", "MatrixGameWanModel"],
         "vae": ["diffusers", "AutoencoderKLWan"],
         "image_encoder": ["transformers", "CLIPVisionModel"],
@@ -134,32 +134,17 @@ def create_vae_config() -> Dict[str, Any]:
 
 def create_scheduler_config() -> Dict[str, Any]:
     return {
-        "_class_name": "UniPCMultistepScheduler",
+        "_class_name": "SelfForcingFlowMatchScheduler",
         "_diffusers_version": "0.33.1",
-        "beta_end": 0.02,
-        "beta_schedule": "linear",
-        "beta_start": 0.0001,
-        "disable_corrector": [],
-        "dynamic_thresholding_ratio": 0.995,
-        "final_sigmas_type": "zero",
-        "flow_shift": 5.0,
-        "lower_order_final": True,
         "num_train_timesteps": 1000,
-        "predict_x0": True,
-        "prediction_type": "flow_prediction",
-        "rescale_betas_zero_snr": False,
-        "sample_max_value": 1.0,
-        "solver_order": 2,
-        "solver_p": None,
-        "solver_type": "bh2",
-        "steps_offset": 0,
-        "thresholding": False,
-        "timestep_spacing": "linspace",
-        "trained_betas": None,
-        "use_beta_sigmas": False,
-        "use_exponential_sigmas": False,
-        "use_flow_sigmas": True,
-        "use_karras_sigmas": False
+        "num_inference_steps": 1000,
+        "shift": 5.0,
+        "sigma_max": 1.0,
+        "sigma_min": 0.0,
+        "inverse_timesteps": False,
+        "extra_one_step": True,
+        "reverse_sigmas": False,
+        "training": True
     }
 
 

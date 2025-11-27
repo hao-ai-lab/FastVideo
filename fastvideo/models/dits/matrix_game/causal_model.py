@@ -120,6 +120,21 @@ class CausalMatrixGameSelfAttention(nn.Module):
         if cache_start is None:
             cache_start = current_start
 
+        logger.info("DEBUG_ATTN_SHAPES: q=%s k=%s v=%s local_attn_size=%s sink_size=%s",
+                    tuple(q.shape), tuple(k.shape), tuple(v.shape),
+                    self.local_attn_size, self.sink_size)
+        if block_mask is not None:
+            try:
+                dense_mask = block_mask.to_dense()
+                h = min(4, dense_mask.shape[-2])
+                w = min(4, dense_mask.shape[-1])
+                logger.info("DEBUG_ATTN_MASK: shape=%s preview=%s",
+                            tuple(dense_mask.shape),
+                            dense_mask[..., :h, :w])
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.warning("DEBUG_ATTN_MASK: Unable to inspect block mask: %s",
+                               exc)
+
         cos, sin = freqs_cis
         roped_query = _apply_rotary_emb(q, cos, sin, is_neox_style=False).type_as(v)
         roped_key = _apply_rotary_emb(k, cos, sin, is_neox_style=False).type_as(v)
@@ -180,11 +195,103 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
 
-            x = self.attn(
+            # FIX: Use flex_attention with proper frame-level causal mask instead of LocalAttention
+            # This ensures that within a block, frames can only attend to previous frames
+            # (frame-level causal), not future frames within the same block.
+            # 
+            # IMPORTANT: Within the same frame, all tokens can attend to each other (bidirectional).
+            # Only across frames is it causal.
+            
+            # Get the KV slice we'll attend to
+            kv_start = max(0, local_end_index - self.max_attention_size)
+            k_for_attn = kv_cache["k"][:, kv_start:local_end_index]
+            v_for_attn = kv_cache["v"][:, kv_start:local_end_index]
+            
+            kv_len = k_for_attn.shape[1]
+            q_len = roped_query.shape[1]
+            
+            # DEBUG: Log cache state
+            logger.info("DEBUG_KV_CACHE: current_start=%d current_end=%d local_start=%d local_end=%d kv_start=%d kv_len=%d q_len=%d global_idx=%d",
+                        current_start, current_end, local_start_index, local_end_index, kv_start, kv_len, q_len,
+                        kv_cache["global_end_index"].item())
+            
+            # history_len = number of tokens in KV cache that are from previous blocks
+            history_len = kv_len - q_len
+            
+            # frame_seqlen is the number of tokens per frame (already computed above)
+            # But we need to pass it to the mask function
+            frame_seq = frame_seqlen  # tokens per frame
+            
+            # Pad for flex_attention (requires multiples of 128)
+            padded_q_len = math.ceil(q_len / 128) * 128
+            padded_kv_len = math.ceil(kv_len / 128) * 128
+            
+            q_pad = padded_q_len - q_len
+            kv_pad = padded_kv_len - kv_len
+            
+            padded_q = torch.cat([
                 roped_query,
-                kv_cache["k"][:, max(0, local_end_index - self.max_attention_size):local_end_index],
-                kv_cache["v"][:, max(0, local_end_index - self.max_attention_size):local_end_index]
+                torch.zeros([roped_query.shape[0], q_pad, roped_query.shape[2], roped_query.shape[3]],
+                           device=roped_query.device, dtype=roped_query.dtype)
+            ], dim=1) if q_pad > 0 else roped_query
+            
+            padded_k = torch.cat([
+                k_for_attn,
+                torch.zeros([k_for_attn.shape[0], kv_pad, k_for_attn.shape[2], k_for_attn.shape[3]],
+                           device=k_for_attn.device, dtype=k_for_attn.dtype)
+            ], dim=1) if kv_pad > 0 else k_for_attn
+            
+            padded_v = torch.cat([
+                v_for_attn,
+                torch.zeros([v_for_attn.shape[0], kv_pad, v_for_attn.shape[2], v_for_attn.shape[3]],
+                           device=v_for_attn.device, dtype=v_for_attn.dtype)
+            ], dim=1) if kv_pad > 0 else v_for_attn
+            
+            # Create FRAME-level causal mask:
+            # - All tokens in history are always visible
+            # - For current block: tokens in frame i can see all tokens in frames 0..i (within current block)
+            # - Within the same frame, all tokens can attend to each other
+            
+            def frame_level_causal_mask(b, h, q_idx, kv_idx):
+                # q_idx: 0-based index in query (0 to q_len-1 for current block tokens)
+                # kv_idx: 0-based index in KV (0 to kv_len-1, where 0 to history_len-1 is history)
+                
+                # Always allow attention to history
+                is_history = kv_idx < history_len
+                
+                # For current block tokens:
+                # q_idx -> frame index in current block: q_idx // frame_seq
+                # kv_idx -> frame index in current block: (kv_idx - history_len) // frame_seq
+                # Allow if kv's frame index <= q's frame index
+                
+                q_frame = q_idx // frame_seq
+                kv_frame = (kv_idx - history_len) // frame_seq
+                
+                is_valid_current = (kv_idx >= history_len) & (kv_frame <= q_frame)
+                
+                return is_history | is_valid_current
+            
+            causal_block_mask = create_block_mask(
+                frame_level_causal_mask, 
+                B=None, H=None, 
+                Q_LEN=padded_q_len, 
+                KV_LEN=padded_kv_len, 
+                _compile=False, 
+                device=roped_query.device
             )
+            
+            x = flex_attention(
+                query=padded_q.transpose(2, 1),
+                key=padded_k.transpose(2, 1),
+                value=padded_v.transpose(2, 1),
+                block_mask=causal_block_mask
+            )
+            
+            # Remove padding
+            if q_pad > 0:
+                x = x[:, :, :-q_pad]
+            x = x.transpose(2, 1)
+            
             kv_cache["global_end_index"].fill_(current_end)
             kv_cache["local_end_index"].fill_(local_end_index)
 
@@ -377,7 +484,8 @@ class CausalMatrixGameTransformerBlock(nn.Module):
 
         ff_output = self.ffn(
             (self.norm1(hidden_states).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) *
-             (1 + scale_msa) + shift_msa).flatten(1, 2)
+            #  (1 + scale_msa) + shift_msa).flatten(1, 2)
+            (1 + c_scale_msa) + c_shift_msa).flatten(1, 2)
         )
         hidden_states = self.mlp_residual(hidden_states, ff_output, c_gate_msa)
 
@@ -590,9 +698,12 @@ class CausalMatrixGameWanModel(BaseDiT):
         current_start: int = 0,
         cache_start: int = 0,
         start_frame: int = 0,
-        num_frame_per_block: int = None,
         **kwargs
     ) -> torch.Tensor:
+        # Extract num_frame_per_block from kwargs if passed by causal_denoising.py
+        # This allows dynamic block sizes (e.g., 1 for first frame, 3 for subsequent)
+        effective_num_frame_per_block = kwargs.pop('num_frame_per_block', self.num_frame_per_block)
+        
         if mouse_cond is not None or keyboard_cond is not None:
             assert self.action_config is not None and len(self.action_config) > 0
 
@@ -602,23 +713,31 @@ class CausalMatrixGameWanModel(BaseDiT):
             encoder_hidden_states_image = encoder_hidden_states_image[0]
         else:
             encoder_hidden_states_image = None
-            
-        effective_num_frame_per_block = num_frame_per_block if num_frame_per_block is not None else self.num_frame_per_block
 
         ctx = get_forward_context()
         batch = getattr(ctx, "forward_batch", None)
+        
+        # DEBUG: Log image_latent status
+        has_image_latent = batch is not None and getattr(batch, "image_latent", None) is not None
+        logger.info("DEBUG_IMAGE_LATENT: has_batch=%s has_image_latent=%s start_frame=%s hidden_states_shape=%s",
+                    batch is not None, has_image_latent, start_frame, tuple(hidden_states.shape) if hidden_states is not None else None)
+        
         if batch is not None and getattr(batch, "image_latent", None) is not None:
             image_latent = batch.image_latent
+            logger.info("DEBUG_IMAGE_LATENT: image_latent_shape=%s", tuple(image_latent.shape))
             if isinstance(image_latent, torch.Tensor) and image_latent.ndim == 5 and hidden_states.ndim == 5:
                 _, _, num_frames, _, _ = hidden_states.shape
                 start = start_frame
                 end = start + num_frames
                 cond = image_latent
+                logger.info("DEBUG_COND_SLICE: start=%d end=%d cond_frames=%d", start, end, cond.shape[2])
                 if cond.shape[2] >= end:
                     cond = cond[:, :, start:end]
+                    logger.info("DEBUG_COND_SLICE: used slice [%d:%d], cond_shape=%s", start, end, tuple(cond.shape))
                 elif cond.shape[2] > start:
                     cond = cond[:, :, start:]
                     pad_frames = num_frames - cond.shape[2]
+                    logger.info("DEBUG_COND_SLICE: partial slice from %d, pad_frames=%d", start, pad_frames)
                     if pad_frames > 0:
                         pad = torch.zeros(
                             cond.shape[0],
@@ -631,6 +750,7 @@ class CausalMatrixGameWanModel(BaseDiT):
                         )
                         cond = torch.cat([cond, pad], dim=2)
                 else:
+                    logger.warning("DEBUG_COND_SLICE: ALL ZEROS - start=%d exceeds cond_frames=%d", start, cond.shape[2])
                     pad = torch.zeros(
                         cond.shape[0],
                         cond.shape[1],
@@ -644,6 +764,7 @@ class CausalMatrixGameWanModel(BaseDiT):
                 hidden_states = torch.cat(
                     [hidden_states, cond.to(dtype=hidden_states.dtype)], dim=1
                 )
+                logger.info("DEBUG_HIDDEN_CONCAT: hidden_states_shape after concat=%s", tuple(hidden_states.shape))
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
@@ -758,6 +879,7 @@ class CausalMatrixGameWanModel(BaseDiT):
                     "crossattn_cache": crossattn_cache[block_index] if crossattn_cache else None,
                     "current_start": current_start,
                     "cache_start": cache_start,
+                    "num_frame_per_block": effective_num_frame_per_block,
                 })
                 hidden_states = self._gradient_checkpointing_func(
                     block, hidden_states, **kwargs)

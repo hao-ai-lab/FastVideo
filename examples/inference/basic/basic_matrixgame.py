@@ -202,7 +202,14 @@ def main():
         seed=seed,
         output_path=str(Path(OUTPUT_PATH) / f"output_{action_preset}.mp4"),
         save_video=True,
+        return_frames=True,
     )
+
+    # Persist raw frames alongside the mp4 for downstream inspection
+    frames_dir = Path(OUTPUT_PATH) / f"{action_preset}_frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    for idx, frame in enumerate(video):
+        Image.fromarray(frame).save(frames_dir / f"frame_{idx:04d}.png")
 
 if __name__ == "__main__":
     main()
