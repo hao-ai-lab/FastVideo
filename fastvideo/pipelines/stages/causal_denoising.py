@@ -632,76 +632,16 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         if boundary_timestep is not None:
             block_sizes[0] = 1
 
-        first_frame_latent = None
-        if batch.pil_image is not None:
-            assert self.vae is not None, "VAE is not provided for causal video gen task"
-            self.vae = self.vae.to(get_local_torch_device())
-            first_frame_latent = self.vae.encode(batch.pil_image).mean.float()
-            if hasattr(self.vae, "shift_factor") and self.vae.shift_factor is not None:
-                if isinstance(self.vae.shift_factor, torch.Tensor):
-                    first_frame_latent -= self.vae.shift_factor.to(
-                        first_frame_latent.device, first_frame_latent.dtype)
-                else:
-                    first_frame_latent -= self.vae.shift_factor
-
-            if isinstance(self.vae.scaling_factor, torch.Tensor):
-                first_frame_latent = first_frame_latent * self.vae.scaling_factor.to(
-                    first_frame_latent.device, first_frame_latent.dtype)
-            else:
-                first_frame_latent = first_frame_latent * self.vae.scaling_factor
-
-            if fastvideo_args.vae_cpu_offload:
-                self.vae = self.vae.to("cpu")
-
-            t_zero = torch.zeros([latents.shape[0], 1],
-                                 device=latents.device,
-                                 dtype=torch.long)
-
-            action_kwargs = self._prepare_action_kwargs(batch, start_index, 1)
-
-            with torch.autocast(device_type="cuda",
-                                dtype=target_dtype,
-                                enabled=autocast_enabled), \
-                set_forward_context(current_timestep=0,
-                                    attn_metadata=None,
-                                    forward_batch=batch):
-                model_kwargs = {
-                    "kv_cache": kv_cache1,
-                    "crossattn_cache": crossattn_cache,
-                    "current_start": (pos_start_base + start_index) * self.frame_seq_length,
-                    "start_frame": start_index,
-                }
-                if self.use_action_module:
-                    model_kwargs.update({
-                        "kv_cache_mouse": kv_cache_mouse,
-                        "kv_cache_keyboard": kv_cache_keyboard,
-                    })
-                    model_kwargs.update(action_kwargs)
-
-                self.transformer(
-                    first_frame_latent.to(target_dtype),
-                    prompt_embeds,
-                    t_zero,
-                    **image_kwargs,
-                    **pos_cond_kwargs,
-                    **model_kwargs,
-                )
-                if boundary_timestep is not None and self.transformer_2 is not None:
-                    self.transformer_2(
-                        first_frame_latent.to(target_dtype),
-                        prompt_embeds,
-                        t_zero,
-                        kv_cache=kv_cache2,
-                        crossattn_cache=crossattn_cache,
-                        current_start=(pos_start_base + start_index) * self.frame_seq_length,
-                        start_frame=start_index,
-                        **image_kwargs,
-                        **pos_cond_kwargs,
-                    )
-
-            start_index += 1
-            block_sizes.pop(0)
-            latents[:, :, :1, :, :] = first_frame_latent
+        # NOTE: Unlike other models, MatrixGame does NOT process the first frame separately.
+        # The first frame information is already encoded in batch.image_latent (cond_concat)
+        # and will be used by the model via channel concatenation: torch.cat([x, cond_concat], dim=1)
+        # This is consistent with the official Matrix-Game-2 implementation which does not use initial_latent.
+        # 
+        # Processing the first frame separately here would cause:
+        # 1. block_sizes.pop(0) removes one block from processing
+        # 2. start_index += 1 skips frames
+        # 3. Last frames (e.g., 13-14 for 15 latent frames) never get processed
+        # 4. Those frames remain as random noise, causing the "frame 49 crash" bug
 
         with self.progress_bar(total=len(block_sizes) * len(timesteps)) as progress_bar:
             for current_num_frames in block_sizes:
