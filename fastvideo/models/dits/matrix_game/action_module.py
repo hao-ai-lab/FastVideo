@@ -9,8 +9,6 @@ from .posemb_layers import apply_rotary_emb, get_nd_rotary_pos_embed
 import math
 from torch.nn.attention.flex_attention import flex_attention
 
-from fastvideo.logger import init_logger
-
 try:
     import flash_attn_interface
     FLASH_ATTN_3_AVAILABLE = True
@@ -23,7 +21,6 @@ DISABLE_COMPILE = False  # get os env
 flex_attention = torch.compile(
     flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
     
-logger = init_logger(__name__)
 
 class WanRMSNorm(nn.Module):
     def __init__(self, dim, eps=1e-5):
@@ -204,43 +201,13 @@ class ActionModule(nn.Module):
         '''
         assert use_rope_keyboard == True
 
-        def _cache_state(cache_obj):
-            if cache_obj is None:
-                return "None"
-            if isinstance(cache_obj, dict) and "k" in cache_obj:
-                return f"k{tuple(cache_obj['k'].shape)} v{tuple(cache_obj['v'].shape)}"
-            return f"type={type(cache_obj).__name__}"
-
         B, N_frames, C = keyboard_condition.shape
         assert tt*th*tw == x.shape[1]
         assert ((N_frames - 1) + self.vae_time_compression_ratio) % self.vae_time_compression_ratio == 0
         N_feats = int((N_frames - 1) / self.vae_time_compression_ratio) + 1
-        logger.info(
-            "DEBUG_ACTION_MOD_ENTRY: x_shape=%s, mouse_enabled=%s, keyboard_enabled=%s, "
-            "tt=%s, th=%s, tw=%s, start_frame=%s, num_frame_per_block=%s, is_causal=%s",
-            tuple(x.shape), self.enable_mouse, self.enable_keyboard, tt, th, tw,
-            start_frame, num_frame_per_block, is_causal)
-        logger.info("DEBUG_KV_STATUS: mouse_cache=%s keyboard_cache=%s",
-                    _cache_state(kv_cache_mouse), _cache_state(kv_cache_keyboard))
         
         # Defined freqs_cis early so it's available for both mouse and keyboard
         freqs_cis = (self.freqs_cos, self.freqs_sin)
-
-        # DEBUG: Print values for assertion debugging
-        cond1 = N_feats == tt and ((is_causal and kv_cache_mouse == None) or not is_causal)
-        cond2_lhs = (N_frames - 1) // self.vae_time_compression_ratio + 1
-        cond2_rhs = start_frame + num_frame_per_block
-        cond2 = cond2_lhs == cond2_rhs and is_causal
-        logger.info(
-            "DEBUG_COND_CHECK: N_frames=%s N_feats=%s tt=%s start_frame=%s num_frame_per_block=%s "
-            "is_causal=%s -> Cond1=%s Cond2=%s (lhs=%s rhs=%s)",
-            N_frames, N_feats, tt, start_frame, num_frame_per_block, is_causal,
-            cond1, cond2, cond2_lhs, cond2_rhs)
-        if not cond1:
-            logger.warning("DEBUG_COND_FAIL: Cond1 failed (N_feats vs tt mismatch or cache issue)")
-        if is_causal and not cond2:
-            logger.warning("DEBUG_COND_FAIL: Cond2 failed (window alignment mismatch)")
-        logger.info("DEBUG_ASSERT_STATE: assertion_pass=%s", cond1 or cond2)
 
         assert (N_feats == tt and ((is_causal and kv_cache_mouse == None) or not is_causal)) or ((N_frames - 1) // self.vae_time_compression_ratio + 1 == start_frame + num_frame_per_block and is_causal)
         

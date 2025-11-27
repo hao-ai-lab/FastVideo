@@ -120,21 +120,6 @@ class CausalMatrixGameSelfAttention(nn.Module):
         if cache_start is None:
             cache_start = current_start
 
-        logger.info("DEBUG_ATTN_SHAPES: q=%s k=%s v=%s local_attn_size=%s sink_size=%s",
-                    tuple(q.shape), tuple(k.shape), tuple(v.shape),
-                    self.local_attn_size, self.sink_size)
-        if block_mask is not None:
-            try:
-                dense_mask = block_mask.to_dense()
-                h = min(4, dense_mask.shape[-2])
-                w = min(4, dense_mask.shape[-1])
-                logger.info("DEBUG_ATTN_MASK: shape=%s preview=%s",
-                            tuple(dense_mask.shape),
-                            dense_mask[..., :h, :w])
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.warning("DEBUG_ATTN_MASK: Unable to inspect block mask: %s",
-                               exc)
-
         cos, sin = freqs_cis
         roped_query = _apply_rotary_emb(q, cos, sin, is_neox_style=False).type_as(v)
         roped_key = _apply_rotary_emb(k, cos, sin, is_neox_style=False).type_as(v)
@@ -195,11 +180,11 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
 
-            # FIX: Use flex_attention with proper frame-level causal mask instead of LocalAttention
+            # Flex_attention with frame-level causal mask 
             # This ensures that within a block, frames can only attend to previous frames
             # (frame-level causal), not future frames within the same block.
             # 
-            # IMPORTANT: Within the same frame, all tokens can attend to each other (bidirectional).
+            # Within the same frame, all tokens can attend to each other (bidirectional).
             # Only across frames is it causal.
             
             # Get the KV slice we'll attend to
@@ -209,11 +194,6 @@ class CausalMatrixGameSelfAttention(nn.Module):
             
             kv_len = k_for_attn.shape[1]
             q_len = roped_query.shape[1]
-            
-            # DEBUG: Log cache state
-            logger.info("DEBUG_KV_CACHE: current_start=%d current_end=%d local_start=%d local_end=%d kv_start=%d kv_len=%d q_len=%d global_idx=%d",
-                        current_start, current_end, local_start_index, local_end_index, kv_start, kv_len, q_len,
-                        kv_cache["global_end_index"].item())
             
             # history_len = number of tokens in KV cache that are from previous blocks
             history_len = kv_len - q_len
@@ -716,28 +696,19 @@ class CausalMatrixGameWanModel(BaseDiT):
 
         ctx = get_forward_context()
         batch = getattr(ctx, "forward_batch", None)
-        
-        # DEBUG: Log image_latent status
-        has_image_latent = batch is not None and getattr(batch, "image_latent", None) is not None
-        logger.info("DEBUG_IMAGE_LATENT: has_batch=%s has_image_latent=%s start_frame=%s hidden_states_shape=%s",
-                    batch is not None, has_image_latent, start_frame, tuple(hidden_states.shape) if hidden_states is not None else None)
-        
+
         if batch is not None and getattr(batch, "image_latent", None) is not None:
             image_latent = batch.image_latent
-            logger.info("DEBUG_IMAGE_LATENT: image_latent_shape=%s", tuple(image_latent.shape))
             if isinstance(image_latent, torch.Tensor) and image_latent.ndim == 5 and hidden_states.ndim == 5:
                 _, _, num_frames, _, _ = hidden_states.shape
                 start = start_frame
                 end = start + num_frames
                 cond = image_latent
-                logger.info("DEBUG_COND_SLICE: start=%d end=%d cond_frames=%d", start, end, cond.shape[2])
                 if cond.shape[2] >= end:
                     cond = cond[:, :, start:end]
-                    logger.info("DEBUG_COND_SLICE: used slice [%d:%d], cond_shape=%s", start, end, tuple(cond.shape))
                 elif cond.shape[2] > start:
                     cond = cond[:, :, start:]
                     pad_frames = num_frames - cond.shape[2]
-                    logger.info("DEBUG_COND_SLICE: partial slice from %d, pad_frames=%d", start, pad_frames)
                     if pad_frames > 0:
                         pad = torch.zeros(
                             cond.shape[0],
@@ -750,7 +721,6 @@ class CausalMatrixGameWanModel(BaseDiT):
                         )
                         cond = torch.cat([cond, pad], dim=2)
                 else:
-                    logger.warning("DEBUG_COND_SLICE: ALL ZEROS - start=%d exceeds cond_frames=%d", start, cond.shape[2])
                     pad = torch.zeros(
                         cond.shape[0],
                         cond.shape[1],
@@ -764,7 +734,6 @@ class CausalMatrixGameWanModel(BaseDiT):
                 hidden_states = torch.cat(
                     [hidden_states, cond.to(dtype=hidden_states.dtype)], dim=1
                 )
-                logger.info("DEBUG_HIDDEN_CONCAT: hidden_states_shape after concat=%s", tuple(hidden_states.shape))
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
