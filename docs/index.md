@@ -30,17 +30,10 @@ FastVideo has the following features:
   - [TeaCache](https://arxiv.org/pdf/2411.19108)
   - [Sage Attention](https://arxiv.org/abs/2410.02367)
 - E2E post-training support
-<<<<<<< Updated upstream
   - Data preprocessing pipeline for video data
   - [Sparse distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/) for Wan2.1 and Wan2.2 using [Video Sparse Attention](https://arxiv.org/pdf/2505.13389) and [Distribution Matching Distillation](https://tianweiy.github.io/dmd2/)
   - Support full finetuning and LoRA finetuning for state-of-the-art open video DiTs.
   - Scalable training with FSDP2, sequence parallelism, and selective activation checkpointing, with near linear scaling to 64 GPUs.
-=======
-  - Data preprocessing pipeline for video data.
-  - [Sparse distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/) for Wan2.1 and Wan2.2 using [Video Sparse Attention](https://arxiv.org/pdf/2505.13389) and [Distribution Matching Distillation](https://tianweiy.github.io/dmd2/)
-  - Support full finetuning and LoRA finetuning for state-of-the-art open video DiTs.
-  - Scalable training with FSDP2, sequence parallelism, and selective activation checkpointing, with near linear scaling to 64 GPUs.
->>>>>>> Stashed changes
 
 ## Documentation
 
