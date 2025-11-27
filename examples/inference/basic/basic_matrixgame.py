@@ -2,10 +2,9 @@ from fastvideo import VideoGenerator
 from fastvideo.configs.pipelines.wan import MatrixGameI2V480PConfig
 from fastvideo.models.dits.matrix_game.causal_model import CausalMatrixGameWanModel
 
-import json
 import os
+import random
 from pathlib import Path
-from typing import Dict
 
 import numpy as np
 import torch
@@ -14,112 +13,85 @@ from PIL import Image
 OUTPUT_PATH = "outputs/matrixgame"
 
 
-def create_action_presets(num_frames: int, keyboard_dim: int = 4) -> Dict[str, Dict[str, torch.Tensor]]:
-    presets = {}
+def create_action_presets(num_frames: int, keyboard_dim: int = 4):
+    if keyboard_dim != 4:
+        raise ValueError("This demo only supports the universal (4-keyboard) Matrix-Game model.")
+    if num_frames % 4 != 1:
+        raise ValueError("Matrix-Game conditioning expects num_frames to be 4k+1.")
 
-    if keyboard_dim == 4:  # Base model (forward, back, left, right)
-        # Forward only
-        keyboard = torch.zeros(num_frames, 4)
-        keyboard[:, 0] = 1  # forward
-        mouse = torch.zeros(num_frames, 2)
-        presets["forward"] = {"keyboard": keyboard, "mouse": mouse}
+    num_samples_per_action = 4
+    actions_single_action = ["forward", "left", "right"]
+    actions_double_action = ["forward_left", "forward_right"]
+    actions_single_camera = ["camera_l", "camera_r"]
+    actions_to_test = (
+        actions_double_action * 5 + actions_single_camera * 5 + actions_single_action * 5
+    )
+    for action in (actions_single_action + actions_double_action):
+        for camera in actions_single_camera:
+            actions_to_test.append(f"{action}_{camera}")
 
-        # Forward + turn right
-        keyboard = torch.zeros(num_frames, 4)
-        keyboard[:, 0] = 1  # forward
-        keyboard[:, 3] = 1  # right
-        mouse = torch.zeros(num_frames, 2)
-        mouse[:, 1] = 0.1  # camera right
-        presets["forward_right"] = {"keyboard": keyboard, "mouse": mouse}
+    base_action = actions_single_action + actions_single_camera
+    keyboard_idx = {"forward": 0, "back": 1, "left": 2, "right": 3}
+    cam_value = 0.1
+    camera_value_map = {
+        "camera_up": [cam_value, 0],
+        "camera_down": [-cam_value, 0],
+        "camera_l": [0, -cam_value],
+        "camera_r": [0, cam_value],
+        "camera_ur": [cam_value, cam_value],
+        "camera_ul": [cam_value, -cam_value],
+        "camera_dr": [-cam_value, cam_value],
+        "camera_dl": [-cam_value, -cam_value],
+    }
 
-        # Forward + turn left
-        keyboard = torch.zeros(num_frames, 4)
-        keyboard[:, 0] = 1  # forward
-        keyboard[:, 2] = 1  # left
-        mouse = torch.zeros(num_frames, 2)
-        mouse[:, 1] = -0.1  # camera left
-        presets["forward_left"] = {"keyboard": keyboard, "mouse": mouse}
+    # Build the per-action snippets
+    data = []
+    for action_name in actions_to_test:
+        keyboard_condition = torch.zeros((num_samples_per_action, 4))
+        mouse_condition = torch.zeros((num_samples_per_action, 2))
 
-        # Circle motion (forward + rotating camera)
-        keyboard = torch.zeros(num_frames, 4)
-        keyboard[:, 0] = 1  # forward
-        mouse = torch.zeros(num_frames, 2)
-        # Gradually rotate camera
-        angle = torch.linspace(0, 2 * np.pi, num_frames)
-        mouse[:, 0] = 0.1 * torch.sin(angle)  # y (vertical)
-        mouse[:, 1] = 0.1 * torch.cos(angle)  # x (horizontal)
-        mouse[:, 1] = 0.1 * torch.cos(angle)  # x (horizontal)
-        presets["circle"] = {"keyboard": keyboard, "mouse": mouse}
+        for sub_act in base_action:
+            if sub_act not in action_name:
+                continue
+            if sub_act in camera_value_map:
+                mouse_condition = torch.tensor(
+                    [camera_value_map[sub_act] for _ in range(num_samples_per_action)],
+                    dtype=mouse_condition.dtype,
+                )
+            elif sub_act in keyboard_idx:
+                keyboard_condition[:, keyboard_idx[sub_act]] = 1
 
-    elif keyboard_dim == 6:  # Base model with 6 keys (WASD + 2 unknown/unused)
-        # Forward only
-        keyboard = torch.zeros(num_frames, 6)
-        keyboard[:, 0] = 1  # forward
-        mouse = torch.zeros(num_frames, 2)
-        presets["forward"] = {"keyboard": keyboard, "mouse": mouse}
+        data.append(
+            {
+                "keyboard_condition": keyboard_condition,
+                "mouse_condition": mouse_condition,
+            }
+        )
 
-        # Forward + turn right
-        keyboard = torch.zeros(num_frames, 6)
-        keyboard[:, 0] = 1  # forward
-        keyboard[:, 3] = 1  # right
-        mouse = torch.zeros(num_frames, 2)
-        mouse[:, 1] = 0.1  # camera right
-        presets["forward_right"] = {"keyboard": keyboard, "mouse": mouse}
+    # Combine the snippets into the frame-by-frame conditioning
+    keyboard_condition = torch.zeros((num_frames, keyboard_dim))
+    mouse_condition = torch.zeros((num_frames, 2))
+    current_frame = 0
+    selections = [12]
 
-        # Forward + turn left
-        keyboard = torch.zeros(num_frames, 6)
-        keyboard[:, 0] = 1  # forward
-        keyboard[:, 2] = 1  # left
-        mouse = torch.zeros(num_frames, 2)
-        mouse[:, 1] = -0.1  # camera left
-        presets["forward_left"] = {"keyboard": keyboard, "mouse": mouse}
+    while current_frame < num_frames:
+        rd_frame = selections[random.randint(0, len(selections) - 1)]
+        entry = data[random.randint(0, len(data) - 1)]
+        key_seq = entry["keyboard_condition"]
+        mouse_seq = entry["mouse_condition"]
 
-        # Circle motion (forward + rotating camera)
-        keyboard = torch.zeros(num_frames, 6)
-        keyboard[:, 0] = 1  # forward
-        mouse = torch.zeros(num_frames, 2)
-        # Gradually rotate camera
-        angle = torch.linspace(0, 2 * np.pi, num_frames)
-        mouse[:, 0] = 0.1 * torch.sin(angle)  # y (vertical)
-        mouse[:, 1] = 0.1 * torch.cos(angle)  # x (horizontal)
-        presets["circle"] = {"keyboard": keyboard, "mouse": mouse}
+        if current_frame == 0:
+            keyboard_condition[:1] = key_seq[:1]
+            mouse_condition[:1] = mouse_seq[:1]
+            current_frame = 1
+        else:
+            rd_frame = min(rd_frame, num_frames - current_frame)
+            repeat_time = rd_frame // 4
+            keyboard_condition[current_frame:current_frame + rd_frame] = key_seq.repeat(repeat_time, 1)
+            mouse_condition[current_frame:current_frame + rd_frame] = mouse_seq.repeat(repeat_time, 1)
+            current_frame += rd_frame
 
-    elif keyboard_dim == 2:  # GTA model (forward, back)
-        # Forward only
-        keyboard = torch.zeros(num_frames, 2)
-        keyboard[:, 0] = 1  # forward
-        mouse = torch.zeros(num_frames, 2)
-        presets["forward"] = {"keyboard": keyboard, "mouse": mouse}
-
-        # Forward + turn right
-        keyboard = torch.zeros(num_frames, 2)
-        keyboard[:, 0] = 1  # forward
-        mouse = torch.zeros(num_frames, 2)
-        mouse[:, 1] = 0.1  # camera right
-        presets["forward_right"] = {"keyboard": keyboard, "mouse": mouse}
-
-    elif keyboard_dim == 7:  # Temple Run model (nomove, jump, slide, turnleft, turnright, leftside, rightside)
-        # Jump sequence
-        keyboard = torch.zeros(num_frames, 7)
-        # Alternate between nomove and jump
-        keyboard[::8, 0] = 1  # nomove
-        keyboard[1::8, 1] = 1  # jump
-        presets["jump"] = {"keyboard": keyboard}
-
-        # Slide sequence
-        keyboard = torch.zeros(num_frames, 7)
-        keyboard[::8, 0] = 1  # nomove
-        keyboard[1::8, 2] = 1  # slide
-        presets["slide"] = {"keyboard": keyboard}
-
-        # Turn left/right sequence
-        keyboard = torch.zeros(num_frames, 7)
-        keyboard[:num_frames//3, 3] = 1  # turn left
-        keyboard[num_frames//3:2*num_frames//3, 0] = 1  # nomove
-        keyboard[2*num_frames//3:, 4] = 1  # turn right
-        presets["turn_sequence"] = {"keyboard": keyboard}
-
-    return presets
+    return {"keyboard": keyboard_condition, "mouse": mouse_condition}
 
 
 def load_initial_image(image_path: str = None) -> Image.Image:
@@ -133,42 +105,18 @@ def main():
     # model_path = "/workspace/Matrix-Game-2.0-Diffusers/base_model"
     model_path = "/workspace/Matrix-Game-2.0-Diffusers/base_distilled_model"
     image_path = "/FastVideo/Matrix-Game/Matrix-Game-2/demo_images/universal/0002.png"
-    action_preset = "forward_right"
-    num_frames = 57  # Must be 4k+1
+    num_output_frames = 150
+    num_frames = (num_output_frames - 1) * 4 + 1  # 4k+1 actual video frames
     seed = 42
-
-    if (num_frames - 1) % 4 != 0:
-        raise ValueError(f"num_frames must be 4k+1, got {num_frames}")
 
     os.makedirs(OUTPUT_PATH, exist_ok=True)
     torch.manual_seed(seed)
     np.random.seed(seed)
+    random.seed(seed)
 
-    # Load model config to determine keyboard_dim
-    config_path = Path(model_path) / "transformer" / "config.json"
-    if not config_path.exists():
-        raise FileNotFoundError(f"Model config not found: {config_path}")
-
-    with open(config_path) as f:
-        model_config = json.load(f)
-
-    action_config = model_config.get("action_config")
-    if not action_config:
-        raise ValueError("Model does not have action_config. Is this a Matrix-Game model?")
-
-    keyboard_dim = action_config.get("keyboard_dim_in", 4)
-
-    action_presets = create_action_presets(num_frames, keyboard_dim)
-
-    if action_preset not in action_presets:
-        print(f"Warning: Preset '{action_preset}' not available for keyboard_dim={keyboard_dim}")
-        print(f"Available presets: {list(action_presets.keys())}")
-        action_preset = list(action_presets.keys())[0]
-        print(f"Using: {action_preset}")
-
-    actions = action_presets[action_preset]
+    actions = create_action_presets(num_frames, keyboard_dim=4)
     keyboard_cond = actions["keyboard"]
-    mouse_cond = actions.get("mouse", torch.zeros(num_frames, 2))
+    mouse_cond = actions["mouse"]
 
     initial_image = load_initial_image(image_path)
 
@@ -189,6 +137,7 @@ def main():
     latent_f = (num_frames - 1) // 4 + 1
     grid_sizes = torch.tensor([latent_f, latent_h, latent_w])
 
+    output_path = Path(OUTPUT_PATH) / "output.mp4"
     video = generator.generate_video(
         prompt="",
         pil_image=initial_image,
@@ -200,16 +149,9 @@ def main():
         width=640,
         num_inference_steps=50,
         seed=seed,
-        output_path=str(Path(OUTPUT_PATH) / f"output_{action_preset}.mp4"),
+        output_path=str(output_path),
         save_video=True,
-        return_frames=True,
     )
-
-    # Persist raw frames alongside the mp4 for downstream inspection
-    frames_dir = Path(OUTPUT_PATH) / f"{action_preset}_frames"
-    frames_dir.mkdir(parents=True, exist_ok=True)
-    for idx, frame in enumerate(video):
-        Image.fromarray(frame).save(frames_dir / f"frame_{idx:04d}.png")
 
 if __name__ == "__main__":
     main()
