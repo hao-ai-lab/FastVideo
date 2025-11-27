@@ -516,6 +516,18 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         except Exception:
             self.local_attn_size = -1
 
+        assert self.local_attn_size != -1, (
+            f"local_attn_size must be set for Matrix-Game causal inference, "
+            f"got {self.local_attn_size}. Check MatrixGameWanVideoArchConfig."
+        )
+        assert self.num_frame_per_block > 0, (
+            f"num_frame_per_block must be positive, got {self.num_frame_per_block}"
+        )
+        
+        logger.info(f"MatrixGame causal inference initialized: "
+                   f"local_attn_size={self.local_attn_size}, "
+                   f"num_frame_per_block={self.num_frame_per_block}")
+
         self.action_config = getattr(self.transformer, 'action_config', {})
         self.use_action_module = len(self.action_config) > 0
 

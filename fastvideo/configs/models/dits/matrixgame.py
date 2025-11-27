@@ -67,6 +67,11 @@ class MatrixGameWanVideoArchConfig(WanVideoArchConfig):
             "vae_time_compression_ratio": 4,
             "windows_size": 3,
         })
+    
+    # Hardcoded as model config doesn't contain these.
+    local_attn_size: int = 6
+    num_frames_per_block: int = 3
+
 
 @dataclass
 class MatrixGameWanVideoConfig(WanVideoConfig):

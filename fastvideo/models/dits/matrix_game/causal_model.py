@@ -501,8 +501,10 @@ class CausalMatrixGameWanModel(BaseDiT):
         self.out_channels = config.out_channels
         self.num_channels_latents = config.num_channels_latents
         self.patch_size = config.patch_size
-        self.local_attn_size = getattr(config, 'local_attn_size', -1)
-        self.sink_size = getattr(config, 'sink_size', 0)
+
+        arch_cfg = getattr(config, "arch_config", None)
+        self.local_attn_size = getattr(arch_cfg, 'local_attn_size', getattr(config, 'local_attn_size', -1)) if arch_cfg else getattr(config, 'local_attn_size', -1)
+        self.sink_size = getattr(arch_cfg, 'sink_size', getattr(config, 'sink_size', 0)) if arch_cfg else getattr(config, 'sink_size', 0)
 
         self.patch_embedding = PatchEmbed(in_chans=config.in_channels,
                                           embed_dim=inner_dim,
@@ -515,7 +517,6 @@ class CausalMatrixGameWanModel(BaseDiT):
             image_embed_dim=config.image_dim,
         )
 
-        # self.action_config = getattr(config, 'action_config', {})
         arch_cfg = getattr(config, "arch_config", None)
         self.action_config = getattr(arch_cfg, "action_config", {}) if arch_cfg is not None else {}
 
@@ -553,7 +554,8 @@ class CausalMatrixGameWanModel(BaseDiT):
         self.block_mask_keyboard = None
         self.block_mask_mouse = None
         self.use_rope_keyboard = True
-        self.num_frame_per_block = getattr(config, 'num_frame_per_block', 1)
+
+        self.num_frame_per_block = getattr(arch_cfg, 'num_frames_per_block', getattr(config, 'num_frame_per_block', 1)) if arch_cfg else getattr(config, 'num_frame_per_block', 1)
 
         self.__post_init__()
 
