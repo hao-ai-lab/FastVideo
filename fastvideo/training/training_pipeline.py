@@ -656,28 +656,22 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     "grad_norm": grad_norm,
                     "vsa_sparsity": current_vsa_sparsity,
                 }
-                # Log actual batch shape for MFU calculation
-                if (hasattr(training_batch, 'raw_latent_shape')
-                        and training_batch.raw_latent_shape is not None):
-                    metrics["batch_size"] = int(
-                        training_batch.raw_latent_shape[0])
+                metrics["batch_size"] = int(training_batch.raw_latent_shape[0])
 
-                    patch_t, patch_h, patch_w = self.training_args.pipeline_config.dit_config.patch_size
-                    seq_len = (
-                        training_batch.raw_latent_shape[2] // patch_t) * (
-                            training_batch.raw_latent_shape[3] // patch_h) * (
-                                training_batch.raw_latent_shape[4] // patch_w)
-                    context_len = int(
-                        training_batch.encoder_hidden_states.shape[1])
+                patch_t, patch_h, patch_w = self.training_args.pipeline_config.dit_config.patch_size
+                seq_len = (training_batch.raw_latent_shape[2] // patch_t) * (
+                    training_batch.raw_latent_shape[3] //
+                    patch_h) * (training_batch.raw_latent_shape[4] // patch_w)
+                context_len = int(training_batch.encoder_hidden_states.shape[1])
 
-                    metrics["dit_seq_len"] = int(seq_len)
-                    metrics["context_len"] = context_len
+                metrics["dit_seq_len"] = int(seq_len)
+                metrics["context_len"] = context_len
 
-                    arch_config = self.training_args.pipeline_config.dit_config.arch_config
+                arch_config = self.training_args.pipeline_config.dit_config.arch_config
 
-                    metrics["hidden_dim"] = arch_config.hidden_size
-                    metrics["num_layers"] = arch_config.num_layers
-                    metrics["ffn_dim"] = arch_config.ffn_dim
+                metrics["hidden_dim"] = arch_config.hidden_size
+                metrics["num_layers"] = arch_config.num_layers
+                metrics["ffn_dim"] = arch_config.ffn_dim
 
                 self.tracker.log(metrics, step)
             if step % self.training_args.training_state_checkpointing_steps == 0:

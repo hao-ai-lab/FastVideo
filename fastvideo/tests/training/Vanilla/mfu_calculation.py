@@ -77,12 +77,13 @@ def run_worker():
         "--validation_steps", "200",
         "--validation_sampling_steps", "50",
         "--validation_guidance_scale", "6.0",
+        #"--enable_torch_compile",
         #"--log_validation",
         "--num_gpus", NUM_GPUS_PER_NODE,
         "--sp_size", NUM_GPUS_PER_NODE,
         "--tp_size", "1",
-        "--hsdp_replicate_dim", "1",
-        "--hsdp_shard_dim", NUM_GPUS_PER_NODE
+        "--hsdp_replicate_dim", NUM_GPUS_PER_NODE,
+        "--hsdp_shard_dim", "1"
     ])
     # Call the main training function
     pipeline = WanTrainingPipeline.from_pretrained(
@@ -168,7 +169,8 @@ def test_distributed_training():
             qkv_out_flops + cross_attn_proj_flops + mlp_flops + self_attn_flops + cross_attn_flops
         )
 
-        achieved_flops = batch_size * flops_per_layer * num_layers * 3
+        # With full activation checkpointing: 1 forward + 3 backward (1 recompute + 2 gradient)
+        achieved_flops = batch_size * flops_per_layer * num_layers * 4
 
         
         # Account for gradient accumulation (from config)
