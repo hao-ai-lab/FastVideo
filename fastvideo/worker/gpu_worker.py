@@ -48,22 +48,25 @@ class Worker:
         # This env var set by Ray causes exceptions with graph building.
         os.environ.pop("NCCL_ASYNC_ERROR_HANDLING", None)
 
+        # Set environment variables BEFORE calling get_local_torch_device()
+        # so that each worker uses the correct device
+        if self.fastvideo_args.distributed_executor_backend == "mp":
+            os.environ["LOCAL_RANK"] = str(self.local_rank)
+        os.environ["RANK"] = str(self.rank)
+        os.environ["WORLD_SIZE"] = str(self.fastvideo_args.num_gpus)
+
         # Platform-agnostic device initialization
         self.device = get_local_torch_device()
 
         from fastvideo.platforms import current_platform
 
-        # _check_if_gpu_supports_dtype(self.model_config.dtype)
+        # Set the CUDA device BEFORE any CUDA calls
         if current_platform.is_cuda_alike():
-            self.init_gpu_memory = torch.cuda.mem_get_info()[0]
+            torch.cuda.set_device(self.device)
+            self.init_gpu_memory = torch.cuda.mem_get_info(self.device)[0]
         else:
             # For MPS, we can't get memory info the same way
             self.init_gpu_memory = 0
-
-        if self.fastvideo_args.distributed_executor_backend == "mp":
-            os.environ["LOCAL_RANK"] = str(self.local_rank)
-        os.environ["RANK"] = str(self.rank)
-        os.environ["WORLD_SIZE"] = str(self.fastvideo_args.num_gpus)
 
         # Initialize the distributed environment.
         maybe_init_distributed_environment_and_model_parallel(
