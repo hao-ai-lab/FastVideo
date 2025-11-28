@@ -8,8 +8,6 @@
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
-#SBATCH --output=outputs/slurm/%j.out
-#SBATCH --error=outputs/slurm/%j.err
 #SBATCH --exclusive
 
 # Check required variables
@@ -63,12 +61,15 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 BASE_OUTPUT_DIR="/mnt/sharefs/users/yonghao.zhuang/d2-logs/fd/outputs/$(TZ=America/Los_Angeles date +%Y%m%d_%H%M%S)"
 LOG_DIR="$BASE_OUTPUT_DIR/logs"
 NSYS_LOG_DIR="$BASE_OUTPUT_DIR/nsys"
-mkdir -p $BASE_OUTPUT_DIR
-mkdir -p $LOG_DIR
-mkdir -p $NSYS_LOG_DIR
+mkdir -p "$BASE_OUTPUT_DIR" "$LOG_DIR" "$NSYS_LOG_DIR"
 echo "Base output directory: $BASE_OUTPUT_DIR"
 echo "Log directory: $LOG_DIR"
 echo "NSYS log directory: $NSYS_LOG_DIR"
+
+ENABLE_NSYS_PROFILING=${ENABLE_NSYS_PROFILING:-1}
+NSYS_RANK0_ONLY=${NSYS_RANK0_ONLY:-1}
+echo "ENABLE_NSYS_PROFILING=${ENABLE_NSYS_PROFILING}"
+echo "NSYS_RANK0_ONLY=${NSYS_RANK0_ONLY}"
 
 # Configs
 
@@ -92,8 +93,8 @@ training_args=(
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  # --num_latent_t 21
-  --num_latent_t 8
+  --num_latent_t 21
+  # --num_latent_t 8
   --num_height 480
   --num_width 832
   --num_frames 81
@@ -169,33 +170,67 @@ dmd_args=(
 RDZVID=$(date +%s%N)
 echo "Rendezvous ID: $RDZVID"
 
-set -e -x
+
 # TODO: this triton cache dir needs to be different per-process. I want this variable to be set when the process is running. Likely we will need srun to run with `bash -lc ...` to set this inside of a srun command.
+  
+
+
+# Pre-compose the torchrun command as an array
+torchrun_cmd=(
+  torchrun
+    --nnodes "$NUM_NODES"
+    --nproc_per_node "$NUM_GPUS_PER_NODE"
+    --rdzv_id "$RDZVID"
+    --rdzv_backend c10d
+    --rdzv_endpoint "$MASTER_ADDR:$MASTER_PORT"
+    fastvideo/training/wan_distillation_pipeline.py
+    "${parallel_args[@]}"
+    "${model_args[@]}"
+    "${dataset_args[@]}"
+    "${training_args[@]}"
+    "${optimizer_args[@]}"
+    "${validation_args[@]}"
+    "${miscellaneous_args[@]}"
+    "${dmd_args[@]}"
+)
+
+nsys_cmd=(
+  nsys
+    profile
+    --show-output=true
+    --force-overwrite=true
+    -o "${NSYS_LOG_DIR}/%h.nsys-rep"
+    -t cuda,nvtx
+)
+
+nsys_cmd_decl=$(declare -p nsys_cmd)
+
   # --output="$LOG_DIR/%x_%j_task%t.out" \
   # --error="$LOG_DIR/%x_%j_task%t.err" \
 
+set -e -x
+srun \
+    -N "$NUM_NODES" -G "$NUM_GPUS" --jobid "$JOBID" \
+    --cpus-per-task=128 --mem=1440G \
+  bash -c '
+    set -e
+    '"$nsys_cmd_decl"'
+    export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
 
-# srun -N $NUM_NODES -G $NUM_GPUS_PER_NODE --jobid $JOBID -w $MASTER_ADDR --cpus-per-task=128 --mem=1440G bash -lc "hostname"
+    should_profile=${ENABLE_NSYS_PROFILING}
+    if [[ "${ENABLE_NSYS_PROFILING}" == "1" && "${NSYS_RANK0_ONLY}" == "1" && "${SLURM_PROCID}" != "0" ]]; then
+      should_profile=0
+    fi
 
-# srun -N $NUM_NODES -G $NUM_GPUS --jobid $JOBID --cpus-per-task=128 --mem=1440G hostname
-
-# export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
-srun -N $NUM_NODES -G $NUM_GPUS --jobid $JOBID --cpus-per-task=128 --mem=1440G \
-  nsys profile --show-output=true --force-overwrite=true -o ${NSYS_LOG_DIR}/%h.nsys-rep -t cuda,nvtx \
-  torchrun \
-    --nnodes $NUM_NODES \
-    --nproc_per_node $NUM_GPUS_PER_NODE \
-    --rdzv_id "$RDZVID" \
-    --rdzv_backend=c10d \
-    --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
-    fastvideo/training/wan_distillation_pipeline.py \
-    "${parallel_args[@]}" \
-    "${model_args[@]}" \
-    "${dataset_args[@]}" \
-    "${training_args[@]}" \
-    "${optimizer_args[@]}" \
-    "${validation_args[@]}" \
-    "${miscellaneous_args[@]}" \
-    "${dmd_args[@]}"
+    log_file="'"${LOG_DIR}"'"/${SLURM_PROCID}.out
+    if [[ "${should_profile}" == "1" ]]; then
+      echo "Profiling with NSYS on rank ${SLURM_PROCID}"
+      "${nsys_cmd[@]}" "$@" 2>&1 | tee "${log_file}"
+    else
+      echo "Running without NSYS on rank ${SLURM_PROCID}"
+      "$@" 2>&1 | tee "${log_file}"
+    fi
+  ' _ "${torchrun_cmd[@]}"
 
 
+# log_file="'"${LOG_DIR}"'"/${SLURM_PROCID}.out

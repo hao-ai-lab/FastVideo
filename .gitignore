@@ -70,3 +70,8 @@ docs/distillation/examples/
 
 dmd_t2v_output/
 preprocess_output_text/
+
+
+outputs 
+outputs/
+*.log

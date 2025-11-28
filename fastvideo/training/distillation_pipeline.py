@@ -7,6 +7,7 @@ import time
 from abc import abstractmethod
 from collections import deque
 from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import imageio
@@ -43,9 +44,26 @@ from fastvideo.training.training_utils import (
 from fastvideo.utils import (is_vsa_available, maybe_download_model,
                              set_random_seed, verify_model_config_and_directory)
 
+try:
+    from torch.cuda import nvtx
+except ImportError:  # pragma: no cover - CPU-only environments
+    nvtx = None
+
 vsa_available = is_vsa_available()
 
 logger = init_logger(__name__)
+
+
+@contextmanager
+def nvtx_range(message: str):
+    """
+    Lightweight NVTX range helper that is a no-op when torch.cuda.nvtx is unavailable.
+    """
+    if nvtx is None:
+        yield
+    else:
+        with nvtx.range(message):
+            yield
 
 
 class DistillationPipeline(TrainingPipeline):
@@ -947,120 +965,143 @@ class DistillationPipeline(TrainingPipeline):
                                               'gradient_accumulation_steps', 1)
         batches = []
         # Collect N batches for gradient accumulation
-        for _ in range(gradient_accumulation_steps):
-            batch = self._prepare_distillation(training_batch)
-            batch = self._get_next_batch(batch)
-            batch = self._normalize_dit_input(batch)
-            batch = self._prepare_dit_inputs(batch)
-            batch = self._build_attention_metadata(batch)
-            batch.attn_metadata_vsa = copy.deepcopy(batch.attn_metadata)
-            if batch.attn_metadata is not None:
-                batch.attn_metadata.VSA_sparsity = 0.0  # type: ignore
-            batches.append(batch)
+        with nvtx_range("prepare_microbatches"):
+            for _ in range(gradient_accumulation_steps):
+                batch = self._prepare_distillation(training_batch)
+                batch = self._get_next_batch(batch)
+                batch = self._normalize_dit_input(batch)
+                batch = self._prepare_dit_inputs(batch)
+                batch = self._build_attention_metadata(batch)
+                batch.attn_metadata_vsa = copy.deepcopy(batch.attn_metadata)
+                if batch.attn_metadata is not None:
+                    batch.attn_metadata.VSA_sparsity = 0.0  # type: ignore
+                batches.append(batch)
 
-        self.optimizer.zero_grad()
+        with nvtx_range("generator_zero_grad"):
+            self.optimizer.zero_grad()
         total_dmd_loss = 0.0
         dmd_latent_vis_dict = {}
         fake_score_latent_vis_dict = {}
         if (self.current_trainstep % self.generator_update_interval == 0):
-            for batch in batches:
-                batch_gen = copy.deepcopy(batch)
+            with nvtx_range("generator_step"):
+                for batch_idx, batch in enumerate(batches):
+                    batch_gen = copy.deepcopy(batch)
+                    with nvtx_range(f"generator_microbatch[{batch_idx}]"):
+                        with set_forward_context(
+                                current_timestep=batch_gen.timesteps,
+                                attn_metadata=batch_gen.attn_metadata_vsa):
+                            if self.training_args.simulate_generator_forward:
+                                with nvtx_range("generator_forward_sim"):
+                                    generator_pred_video = self._generator_multi_step_simulation_forward(
+                                        batch_gen)
+                            else:
+                                with nvtx_range("generator_forward"):
+                                    generator_pred_video = self._generator_forward(
+                                        batch_gen)
 
-                with set_forward_context(
-                        current_timestep=batch_gen.timesteps,
-                        attn_metadata=batch_gen.attn_metadata_vsa):
-                    if self.training_args.simulate_generator_forward:
-                        generator_pred_video = self._generator_multi_step_simulation_forward(
-                            batch_gen)
-                    else:
-                        generator_pred_video = self._generator_forward(
-                            batch_gen)
+                        with nvtx_range("dmd_forward"), set_forward_context(
+                                current_timestep=batch_gen.timesteps,
+                                attn_metadata=batch_gen.attn_metadata):
+                            dmd_loss = self._dmd_forward(
+                                generator_pred_video=generator_pred_video,
+                                training_batch=batch_gen)
 
-                with set_forward_context(current_timestep=batch_gen.timesteps,
-                                         attn_metadata=batch_gen.attn_metadata):
-                    dmd_loss = self._dmd_forward(
-                        generator_pred_video=generator_pred_video,
-                        training_batch=batch_gen)
+                        with nvtx_range("generator_backward"), set_forward_context(
+                                current_timestep=batch_gen.timesteps,
+                                attn_metadata=batch_gen.attn_metadata_vsa):
+                            (dmd_loss / gradient_accumulation_steps).backward()
+                        total_dmd_loss += dmd_loss.detach().item()
 
-                with set_forward_context(
-                        current_timestep=batch_gen.timesteps,
-                        attn_metadata=batch_gen.attn_metadata_vsa):
-                    (dmd_loss / gradient_accumulation_steps).backward()
-                total_dmd_loss += dmd_loss.detach().item()
+                with nvtx_range("generator_post_step"):
+                    # Only clip gradients for the model that is currently training
+                    self._clip_model_grad_norm_(batch_gen, self.transformer)
+                    for param in self.transformer.parameters():
+                        # check if the gradient is not None and not zero
+                        assert param.grad is not None and param.grad.abs(
+                        ).sum() > 0
+                    self.optimizer.step()
+                    self.optimizer.zero_grad(set_to_none=True)
 
-            # Only clip gradients for the model that is currently training
-            self._clip_model_grad_norm_(batch_gen, self.transformer)
-            for param in self.transformer.parameters():
-                # check if the gradient is not None and not zero
-                assert param.grad is not None and param.grad.abs().sum() > 0
-            self.optimizer.step()
-            self.optimizer.zero_grad(set_to_none=True)
+                    if self.generator_ema is not None:
+                        self.generator_ema.update(self.transformer)
+                    if self.generator_ema_2 is not None:
+                        self.generator_ema_2.update(self.transformer_2)
 
-            if self.generator_ema is not None:
-                self.generator_ema.update(self.transformer)
-            if self.generator_ema_2 is not None:
-                self.generator_ema_2.update(self.transformer_2)
-
-            avg_dmd_loss = torch.tensor(total_dmd_loss /
-                                        gradient_accumulation_steps,
-                                        device=self.device)
-            world_group = get_world_group()
-            world_group.all_reduce(avg_dmd_loss,
-                                   op=torch.distributed.ReduceOp.AVG)
-            training_batch.generator_loss = avg_dmd_loss.item()
-            dmd_latent_vis_dict = batch_gen.dmd_latent_vis_dict
+                with nvtx_range("generator_reduce_loss"):
+                    avg_dmd_loss = torch.tensor(total_dmd_loss /
+                                                gradient_accumulation_steps,
+                                                device=self.device)
+                    world_group = get_world_group()
+                    world_group.all_reduce(avg_dmd_loss,
+                                           op=torch.distributed.ReduceOp.AVG)
+                training_batch.generator_loss = avg_dmd_loss.item()
+                dmd_latent_vis_dict = batch_gen.dmd_latent_vis_dict
         else:
             training_batch.generator_loss = 0.0
 
-        self.fake_score_optimizer.zero_grad()
-        if self.fake_score_transformer_2 is not None:
-            self.fake_score_optimizer_2.zero_grad()
+        with nvtx_range("fake_score_zero_grad"):
+            self.fake_score_optimizer.zero_grad()
+            if self.fake_score_transformer_2 is not None:
+                self.fake_score_optimizer_2.zero_grad()
         total_fake_score_loss = 0.0
-        for batch in batches:
-            batch_fake = copy.deepcopy(batch)
-            batch_fake, fake_score_loss = self.faker_score_forward(batch_fake)
-            with set_forward_context(current_timestep=batch_fake.timesteps,
-                                     attn_metadata=batch_fake.attn_metadata):
-                (fake_score_loss / gradient_accumulation_steps).backward()
-            total_fake_score_loss += fake_score_loss.detach().item()
-            fake_score_latent_vis_dict.update(
-                batch_fake.fake_score_latent_vis_dict)
-        if self.train_fake_score_transformer_2 and self.fake_score_transformer_2 is not None:
-            self._clip_model_grad_norm_(batch_fake,
-                                        self.fake_score_transformer_2)
-        else:
-            self._clip_model_grad_norm_(batch_fake, self.fake_score_transformer)
+        with nvtx_range("fake_score_step"):
+            for batch_idx, batch in enumerate(batches):
+                batch_fake = copy.deepcopy(batch)
+                with nvtx_range(f"fake_score_microbatch_{batch_idx}"):
+                    with nvtx_range("fake_score_forward"):
+                        batch_fake, fake_score_loss = self.faker_score_forward(
+                            batch_fake)
+                    with nvtx_range("fake_score_backward"), set_forward_context(
+                            current_timestep=batch_fake.timesteps,
+                            attn_metadata=batch_fake.attn_metadata):
+                        (fake_score_loss /
+                         gradient_accumulation_steps).backward()
+                    total_fake_score_loss += fake_score_loss.detach().item()
+                    fake_score_latent_vis_dict.update(
+                        batch_fake.fake_score_latent_vis_dict)
+            with nvtx_range("fake_score_post_step"):
+                if self.train_fake_score_transformer_2 and self.fake_score_transformer_2 is not None:
+                    self._clip_model_grad_norm_(batch_fake,
+                                                self.fake_score_transformer_2)
+                else:
+                    self._clip_model_grad_norm_(batch_fake,
+                                                self.fake_score_transformer)
 
-        # Check gradients for fake score transformer
-        for param in self.fake_score_transformer.parameters():
-            if param.requires_grad:
-                assert param.grad is not None and param.grad.abs().sum() > 0
+                # Check gradients for fake score transformer
+                for param in self.fake_score_transformer.parameters():
+                    if param.requires_grad:
+                        assert param.grad is not None and param.grad.abs(
+                        ).sum() > 0
 
-        # Check gradients for fake score transformer_2 if available
-        if self.train_fake_score_transformer_2 and self.fake_score_transformer_2 is not None:
-            for param in self.fake_score_transformer_2.parameters():
-                if param.requires_grad:
-                    assert param.grad is not None and param.grad.abs().sum() > 0
+                # Check gradients for fake score transformer_2 if available
+                if self.train_fake_score_transformer_2 and self.fake_score_transformer_2 is not None:
+                    for param in self.fake_score_transformer_2.parameters():
+                        if param.requires_grad:
+                            assert param.grad is not None and param.grad.abs(
+                            ).sum() > 0
 
-        if self.train_fake_score_transformer_2 and self.fake_score_transformer_2 is not None:
-            self.fake_score_optimizer_2.step()
-            self.fake_score_lr_scheduler_2.step()
-        else:
-            self.fake_score_optimizer.step()
-            self.fake_score_lr_scheduler.step()
+                if self.train_fake_score_transformer_2 and self.fake_score_transformer_2 is not None:
+                    self.fake_score_optimizer_2.step()
+                    self.fake_score_lr_scheduler_2.step()
+                else:
+                    self.fake_score_optimizer.step()
+                    self.fake_score_lr_scheduler.step()
 
-        # Step the appropriate scheduler
-        self.lr_scheduler.step()
+        with nvtx_range("scheduler_step"):
+            # Step the appropriate scheduler
+            self.lr_scheduler.step()
 
-        self.fake_score_optimizer.zero_grad(set_to_none=True)
-        if self.fake_score_transformer_2 is not None:
-            self.fake_score_optimizer_2.zero_grad(set_to_none=True)
-        avg_fake_score_loss = torch.tensor(total_fake_score_loss /
-                                           gradient_accumulation_steps,
-                                           device=self.device)
-        world_group = get_world_group()
-        world_group.all_reduce(avg_fake_score_loss,
-                               op=torch.distributed.ReduceOp.AVG)
+        with nvtx_range("fake_score_zero_grad_post"):
+            self.fake_score_optimizer.zero_grad(set_to_none=True)
+            if self.fake_score_transformer_2 is not None:
+                self.fake_score_optimizer_2.zero_grad(set_to_none=True)
+        with nvtx_range("fake_score_reduce_loss"):
+            avg_fake_score_loss = torch.tensor(total_fake_score_loss /
+                                               gradient_accumulation_steps,
+                                               device=self.device)
+            world_group = get_world_group()
+            world_group.all_reduce(avg_fake_score_loss,
+                                   op=torch.distributed.ReduceOp.AVG)
         training_batch.fake_score_loss = avg_fake_score_loss.item()
         training_batch.dmd_latent_vis_dict = dmd_latent_vis_dict
         training_batch.fake_score_latent_vis_dict = batch_fake.fake_score_latent_vis_dict
