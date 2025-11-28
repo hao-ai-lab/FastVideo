@@ -470,7 +470,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         #             local_main_process_only=False)
         with self.tracker.timed("timing/reduce_loss"):
             world_group = get_world_group()
-            world_group.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
+            avg_loss = world_group.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
         training_batch.total_loss += avg_loss.item()
 
         return training_batch
@@ -656,6 +656,23 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     "grad_norm": grad_norm,
                     "vsa_sparsity": current_vsa_sparsity,
                 }
+                metrics["batch_size"] = int(training_batch.raw_latent_shape[0])
+
+                patch_t, patch_h, patch_w = self.training_args.pipeline_config.dit_config.patch_size
+                seq_len = (training_batch.raw_latent_shape[2] // patch_t) * (
+                    training_batch.raw_latent_shape[3] //
+                    patch_h) * (training_batch.raw_latent_shape[4] // patch_w)
+                context_len = int(training_batch.encoder_hidden_states.shape[1])
+
+                metrics["dit_seq_len"] = int(seq_len)
+                metrics["context_len"] = context_len
+
+                arch_config = self.training_args.pipeline_config.dit_config.arch_config
+
+                metrics["hidden_dim"] = arch_config.hidden_size
+                metrics["num_layers"] = arch_config.num_layers
+                metrics["ffn_dim"] = arch_config.ffn_dim
+
                 self.tracker.log(metrics, step)
             if step % self.training_args.training_state_checkpointing_steps == 0:
                 with self.profiler_controller.region(
@@ -741,6 +758,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
         sampling_param.width = training_args.num_width
         sampling_param.num_inference_steps = num_inference_steps
         sampling_param.data_type = "video"
+        if training_args.validation_guidance_scale:
+            sampling_param.guidance_scale = float(
+                training_args.validation_guidance_scale)
         assert self.seed is not None
         sampling_param.seed = self.seed
 

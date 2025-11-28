@@ -7,7 +7,8 @@ mkdocstrings-python>=1.8.0
 mkdocs-mermaid2-plugin>=1.1.0
 mkdocs-git-revision-date-localized-plugin>=1.2.0
 mkdocs-git-committers-plugin-2>=1.1.0
-mkdocs-macros-plugin>=0.8.0 
+mkdocs-macros-plugin>=0.8.0
 pymdown-extensions>=10.0
 mkdocs-api-autonav
 mkdocs-autorefs
+mdx-truly-sane-lists
