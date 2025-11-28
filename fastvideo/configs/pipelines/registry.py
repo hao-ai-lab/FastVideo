@@ -8,6 +8,7 @@ from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
+from fastvideo.configs.pipelines.ltx import LTXConfig
 
 # isort: off
 from fastvideo.configs.pipelines.wan import (
@@ -44,6 +45,7 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "Wan-AI/Wan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_Config,
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": Wan2_2_T2V_A14B_Config,
     "Wan-AI/Wan2.2-I2V-A14B-Diffusers": Wan2_2_I2V_A14B_Config,
+    "Lightricks/LTX-Video": LTXConfig,
     "nvidia/Cosmos-Predict2-2B-Video2World": CosmosConfig,
     # Add other specific weight variants
 }
@@ -56,6 +58,7 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     "wandmdpipeline": lambda id: "wandmdpipeline" in id.lower(),
     "wancausaldmdpipeline": lambda id: "wancausaldmdpipeline" in id.lower(),
     "stepvideo": lambda id: "stepvideo" in id.lower(),
+    "ltx": lambda id: "ltx" in id.lower(),
     "cosmos": lambda id: "cosmos" in id.lower(),
     # Add other pipeline architecture detectors
 }
@@ -69,7 +72,8 @@ PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "wanimagetovideo": WanI2V480PConfig,
     "wandmdpipeline": FastWan2_1_T2V_480P_Config,
     "wancausaldmdpipeline": SelfForcingWanT2V480PConfig,
-    "stepvideo": StepVideoT2VConfig
+    "stepvideo": StepVideoT2VConfig,
+    "ltx": LTXConfig,
     # Other fallbacks by architecture
 }
 
@@ -109,7 +113,6 @@ def get_pipeline_config_cls_from_name(
     # First try exact match for specific weights
     if pipeline_name_or_path in PIPE_NAME_TO_CONFIG:
         pipeline_config_cls = PIPE_NAME_TO_CONFIG[pipeline_name_or_path]
-
     # Try partial matches (for local paths that might include the weight ID)
     for registered_id, config_class in PIPE_NAME_TO_CONFIG.items():
         if registered_id in pipeline_name_or_path:
