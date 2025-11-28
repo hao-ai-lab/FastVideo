@@ -48,10 +48,10 @@ plugins:
         on_pre_build: "docs.generate_examples:on_pre_build_hook"
   - autorefs
   - api-autonav:
-      modules: ["fastvideo"] 
+      modules: ["fastvideo"]
       api_root_uri: "api"
       exclude:
-        - "re:fastvideo\\._.*"  
+        - "re:fastvideo\\._.*"
   - mkdocstrings:
       handlers:
         python:
@@ -76,7 +76,7 @@ plugins:
           inventories:
           - https://docs.python.org/3/objects.inv
 
-  
+
 # Markdown extensions
 markdown_extensions:
   - pymdownx.highlight:
@@ -106,6 +106,7 @@ markdown_extensions:
   - pymdownx.tilde
   - toc:
       permalink: true
+  - mdx_truly_sane_lists
 
 # Page tree
 nav:
