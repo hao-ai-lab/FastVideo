@@ -126,6 +126,10 @@ case "$TEST_TYPE" in
         log "Running unit tests..."
         MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_unit_test"
         ;;
+    "lora_extraction")
+        log "Running LoRA extraction tests..."
+        MODAL_COMMAND="$MODAL_ENV HF_API_KEY=$HF_API_KEY python3 -m modal run $MODAL_TEST_FILE::run_lora_extraction_tests"
+        ;;
     *)
         log "Error: Unknown test type: $TEST_TYPE"
         exit 1
