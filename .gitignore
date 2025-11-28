@@ -30,7 +30,6 @@ env
 **/build/
 **.pyc
 **.txt
-.cache/
 
 # Distribution / packaging
 build/
