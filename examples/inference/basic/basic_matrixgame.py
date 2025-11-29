@@ -137,8 +137,8 @@ def main():
     latent_f = (num_frames - 1) // 4 + 1
     grid_sizes = torch.tensor([latent_f, latent_h, latent_w])
 
-    output_path = Path(OUTPUT_PATH) / "output.mp4"
-    video = generator.generate_video(
+    output_path = str(Path(OUTPUT_PATH) / "output.mp4")
+    video_output = generator.generate_video(
         prompt="",
         pil_image=initial_image,
         mouse_cond=mouse_cond.unsqueeze(0),
@@ -149,8 +149,30 @@ def main():
         width=640,
         num_inference_steps=50,
         seed=seed,
-        output_path=str(output_path),
+        output_path=output_path,
         save_video=True,
+    )
+
+    # Generate video with icons
+    from fastvideo.models.dits.matrix_game.visualize import process_video
+    
+    frames = video_output["frames"]
+    config = (
+        keyboard_cond.cpu().numpy(),
+        mouse_cond.cpu().numpy()
+    )
+    mouse_icon_path = "/FastVideo/Matrix-Game/Matrix-Game-2/assets/images/mouse.png"
+    output_icon_path = str(Path(OUTPUT_PATH) / "output_icon.mp4")
+    
+    print(f"Generating video with icons to {output_icon_path}...")
+    process_video(
+        frames,
+        output_icon_path,
+        config,
+        mouse_icon_path,
+        mouse_scale=0.1,
+        process_icon=True,
+        mode="universal"
     )
 
 if __name__ == "__main__":
