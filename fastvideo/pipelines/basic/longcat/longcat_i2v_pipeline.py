@@ -4,6 +4,11 @@ LongCat Image-to-Video pipeline implementation.
 
 This module implements I2V (Image-to-Video) generation for LongCat using Tier 3
 conditioning with timestep masking, num_cond_latents support, and RoPE skipping.
+
+Supports:
+- Basic I2V (50 steps, guidance_scale=4.0)
+- Distilled I2V with LoRA (16 steps, guidance_scale=1.0)
+- Refinement I2V for 720p upscaling (with refinement LoRA + BSA)
 """
 
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -18,6 +23,8 @@ from fastvideo.pipelines.stages import (
 from fastvideo.pipelines.stages.longcat_image_vae_encoding import LongCatImageVAEEncodingStage
 from fastvideo.pipelines.stages.longcat_i2v_latent_preparation import LongCatI2VLatentPreparationStage
 from fastvideo.pipelines.stages.longcat_i2v_denoising import LongCatI2VDenoisingStage
+from fastvideo.pipelines.stages.longcat_refine_init import LongCatRefineInitStage
+from fastvideo.pipelines.stages.longcat_refine_timestep import LongCatRefineTimestepStage
 
 logger = init_logger(__name__)
 
@@ -98,23 +105,32 @@ class LongCatImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
                            tokenizers=[self.get_module("tokenizer")],
                        ))
 
-        # 3. Image VAE encoding (NEW for I2V)
+        # 3. Image VAE encoding (for I2V - skipped in refinement mode)
         self.add_stage(
             stage_name="image_vae_encoding_stage",
             stage=LongCatImageVAEEncodingStage(vae=self.get_module("vae")))
 
-        # 4. Timestep preparation
+        # 4. Refinement initialization (skipped if not refining)
+        self.add_stage(stage_name="longcat_refine_init_stage",
+                       stage=LongCatRefineInitStage(vae=self.get_module("vae")))
+
+        # 5. Timestep preparation (generic)
         self.add_stage(stage_name="timestep_preparation_stage",
                        stage=TimestepPreparationStage(
                            scheduler=self.get_module("scheduler")))
 
-        # 5. Latent preparation with I2V conditioning
+        # 6. Refinement timestep override (skipped if not refining)
+        self.add_stage(stage_name="longcat_refine_timestep_stage",
+                       stage=LongCatRefineTimestepStage(
+                           scheduler=self.get_module("scheduler")))
+
+        # 7. Latent preparation with I2V conditioning
         self.add_stage(stage_name="latent_preparation_stage",
                        stage=LongCatI2VLatentPreparationStage(
                            scheduler=self.get_module("scheduler"),
                            transformer=self.get_module("transformer")))
 
-        # 6. Denoising with I2V support
+        # 8. Denoising with I2V support
         self.add_stage(stage_name="denoising_stage",
                        stage=LongCatI2VDenoisingStage(
                            transformer=self.get_module("transformer"),
@@ -123,7 +139,7 @@ class LongCatImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
                            vae=self.get_module("vae"),
                            pipeline=self))
 
-        # 7. Decoding
+        # 9. Decoding
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae"),
                                            pipeline=self))

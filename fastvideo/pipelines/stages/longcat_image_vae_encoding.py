@@ -43,6 +43,14 @@ class LongCatImageVAEEncodingStage(PipelineStage):
     ) -> ForwardBatch:
         """Encode image to latent for I2V conditioning."""
 
+        # Skip image encoding for refinement tasks - we're refining an existing video
+        if getattr(batch, 'stage1_video', None) is not None or getattr(
+                batch, 'refine_from', None) is not None:
+            logger.info(
+                "Skipping image encoding - refinement mode (using stage1_video)"
+            )
+            return batch
+
         # 1. Get image from batch
         image = batch.pil_image  # PIL.Image
         if image is None:
@@ -107,8 +115,9 @@ class LongCatImageVAEEncodingStage(PipelineStage):
         batch.image_latent = latent
         batch.num_cond_frames = 1
 
-        logger.info(f"I2V: Encoded image to latent shape {latent.shape}, "
-                    f"num_cond_latents={batch.num_cond_latents}")
+        logger.info(
+            "I2V: Encoded image to latent shape %s, num_cond_latents=%s",
+            latent.shape, batch.num_cond_latents)
 
         # Offload VAE if needed
         if fastvideo_args.vae_cpu_offload:
