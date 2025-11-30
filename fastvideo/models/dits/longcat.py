@@ -268,10 +268,15 @@ class LongCatSelfAttention(nn.Module):
         self,
         x: torch.Tensor,              # [B, N, C]
         latent_shape: tuple,          # (T, H, W)
+        num_cond_latents: int = 0,    # Number of conditioning latent frames (for I2V)
         **kwargs
     ) -> torch.Tensor:
         """
         Forward pass with 3D RoPE and optional BSA.
+        
+        For I2V mode (num_cond_latents > 0):
+        - Conditioned tokens only attend to themselves
+        - Noise tokens attend to ALL tokens (cond + noise)
         """
         B, N, C = x.shape
         T, H, W = latent_shape
@@ -300,6 +305,47 @@ class LongCatSelfAttention(nn.Module):
         # Transpose back: [B, N, num_heads, head_dim] or [B, H, N, D] for BSA
         q = q_rope.transpose(1, 2)
         k = k_rope.transpose(1, 2)
+
+        # === I2V Split Attention ===
+        # For I2V, conditioned tokens and noise tokens are processed separately
+        if num_cond_latents > 0:
+            # Calculate number of conditioned tokens (cond_latents * spatial_tokens_per_frame)
+            num_cond_tokens = num_cond_latents * (N // T)
+            
+            # Conditioned tokens: only attend to themselves (same seq length, use self.attn)
+            q_cond = q[:, :num_cond_tokens].contiguous()
+            k_cond = k[:, :num_cond_tokens].contiguous()
+            v_cond = v[:, :num_cond_tokens].contiguous()
+            out_cond, _ = self.attn(q_cond, k_cond, v_cond)
+            
+            # Noise tokens: attend to ALL tokens (different seq lengths!)
+            # Need to use flash attention directly since q has different length than k/v
+            q_noise = q[:, num_cond_tokens:].contiguous()  # [B, N_noise, num_heads, head_dim]
+            # k, v are full: [B, N, num_heads, head_dim]
+            
+            # Transpose for flash attention: [B, num_heads, seq, head_dim]
+            q_noise_t = q_noise.transpose(1, 2)
+            k_t = k.transpose(1, 2)
+            v_t = v.transpose(1, 2)
+            
+            # Use scaled dot product attention (handles different q/kv lengths)
+            out_noise_t = torch.nn.functional.scaled_dot_product_attention(
+                q_noise_t, k_t, v_t, 
+                attn_mask=None,
+                dropout_p=0.0,
+                is_causal=False
+            )  # [B, num_heads, N_noise, head_dim]
+            
+            # Transpose back: [B, N_noise, num_heads, head_dim]
+            out_noise = out_noise_t.transpose(1, 2)
+            
+            # Merge conditioned and noise outputs
+            out = torch.cat([out_cond, out_noise], dim=1)
+            
+            # Reshape and project out
+            out = out.reshape(B, N, C)
+            out, _ = self.to_out(out)
+            return out
 
         # === Attention: BSA or standard ===
         if self.enable_bsa and T > 1:  # Only use BSA for multi-frame videos
@@ -394,6 +440,8 @@ class LongCatCrossAttention(nn.Module):
         self,
         x: torch.Tensor,              # [B, N_img, C]
         context: torch.Tensor,        # [B, N_text, C]
+        latent_shape: tuple = None,   # (T, H, W) - needed for I2V
+        num_cond_latents: int = 0,    # Number of conditioning latent frames (for I2V)
         **kwargs
     ) -> torch.Tensor:
         """
@@ -402,9 +450,57 @@ class LongCatCrossAttention(nn.Module):
         Args:
             x: Image tokens [B, N_img, C]
             context: Text tokens [B, N_text, C] (standard padded format)
+            latent_shape: (T, H, W) - needed for calculating num_cond_tokens
+            num_cond_latents: Number of conditioning latent frames (for I2V)
+            
+        For I2V mode (num_cond_latents > 0):
+        - Conditioned tokens get ZERO cross-attention output
+        - Only noise tokens get cross-attention with text
         """
         B, N_img, C = x.shape
 
+        # === I2V: Only noise tokens get cross-attention ===
+        if num_cond_latents > 0 and latent_shape is not None:
+            T, H, W = latent_shape
+            num_cond_tokens = num_cond_latents * (N_img // T)
+            
+            # Only process noise tokens
+            x_noise = x[:, num_cond_tokens:]  # [B, N_noise, C]
+            
+            # Project Q, K, V for noise tokens only
+            q, _ = self.to_q(x_noise)
+            k, _ = self.to_k(context)
+            v, _ = self.to_v(context)
+            
+            N_text = context.shape[1]
+            N_noise = x_noise.shape[1]
+
+            # Reshape to heads
+            q = q.view(B, N_noise, self.num_heads, self.head_dim)
+            k = k.view(B, N_text, self.num_heads, self.head_dim)
+            v = v.view(B, N_text, self.num_heads, self.head_dim)
+
+            # Per-head RMS normalization
+            q = self.q_norm(q)
+            k = self.k_norm(k)
+
+            # Run cross-attention
+            out_noise = self.attn(q, k, v)  # [B, N_noise, num_heads, head_dim]
+            out_noise = out_noise.reshape(B, N_noise, C)
+            out_noise, _ = self.to_out(out_noise)
+            
+            # Conditioned tokens get zero output
+            out_cond = torch.zeros(
+                (B, num_cond_tokens, C), 
+                dtype=out_noise.dtype, 
+                device=out_noise.device
+            )
+            
+            # Merge
+            out = torch.cat([out_cond, out_noise], dim=1)
+            return out
+
+        # === Standard cross-attention ===
         # Project Q, K, V (standard cross-attention like WanVideo/StepVideo/Cosmos)
         q, _ = self.to_q(x)
         k, _ = self.to_k(context)
@@ -568,10 +664,15 @@ class LongCatTransformerBlock(nn.Module):
         context: torch.Tensor,        # [B, N_text, C]
         t: torch.Tensor,              # [B, T, C_t]
         latent_shape: tuple,          # (T, H, W)
+        num_cond_latents: int = 0,    # Number of conditioning latent frames (for I2V)
         **kwargs
     ) -> torch.Tensor:
         """
         Forward pass with AdaLN modulation.
+        
+        Args:
+            num_cond_latents: For I2V, number of conditioning latent frames.
+                              These frames use split attention behavior.
         """
         B, N, C = x.shape
         T, H, W = latent_shape
@@ -592,7 +693,11 @@ class LongCatTransformerBlock(nn.Module):
         x_norm = modulate_fp32(self.norm_attn, x.view(B, T, -1, C), shift_msa, scale_msa)
         x_norm = x_norm.view(B, N, C)
 
-        attn_out = self.self_attn(x_norm, latent_shape=latent_shape)
+        attn_out = self.self_attn(
+            x_norm, 
+            latent_shape=latent_shape,
+            num_cond_latents=num_cond_latents
+        )
 
         # Residual with gating (CRITICAL: FP32 like original, then cast back)
         with torch.amp.autocast(device_type='cuda', dtype=torch.float32):
@@ -601,7 +706,12 @@ class LongCatTransformerBlock(nn.Module):
 
         # === Cross-Attention ===
         x_norm_cross = self.norm_cross(x)
-        cross_out = self.cross_attn(x_norm_cross, context)
+        cross_out = self.cross_attn(
+            x_norm_cross, 
+            context,
+            latent_shape=latent_shape,
+            num_cond_latents=num_cond_latents
+        )
         x = x + cross_out
 
         # === FFN ===
@@ -789,6 +899,7 @@ class LongCatTransformer3DModel(CachableDiT):
         encoder_attention_mask: torch.Tensor | None = None,  # [B, N_text]
         encoder_hidden_states_image: torch.Tensor | list[torch.Tensor] | None = None,
         guidance: float | None = None,         # Unused, for API compatibility
+        num_cond_latents: int = 0,             # For I2V: number of conditioning latent frames
         **kwargs
     ) -> torch.Tensor:
         """
@@ -796,6 +907,11 @@ class LongCatTransformer3DModel(CachableDiT):
         
         NOTE: This follows FastVideo convention:
               (hidden_states, encoder_hidden_states, timestep)
+              
+        Args:
+            num_cond_latents: For I2V, number of conditioning latent frames.
+                              These frames are treated as "clean" (timestep=0)
+                              and use split attention behavior.
         """
         B, _, T, H, W = hidden_states.shape
 
@@ -829,7 +945,8 @@ class LongCatTransformer3DModel(CachableDiT):
         for i, block in enumerate(self.blocks):
             x = block(
                 x, context, t,
-                latent_shape=(N_t, N_h, N_w)
+                latent_shape=(N_t, N_h, N_w),
+                num_cond_latents=num_cond_latents
             )
 
         # 5. Output projection
