@@ -40,6 +40,49 @@ from .action_module import ActionModule
 logger = init_logger(__name__)
 
 
+def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
+    """MatrixGame's RoPE implementation for comparison."""
+    n, c = x.size(2), x.size(3) // 2
+
+    # split freqs
+    freqs = freqs.split([c - 2 * (c // 3), c // 3, c // 3], dim=1)
+
+    # loop over samples
+    output = []
+    f, h, w = grid_sizes.tolist()
+    
+    for i in range(len(x)):
+        seq_len = f * h * w
+
+        # precompute multipliers
+        x_i = torch.view_as_complex(x[i, :seq_len].to(torch.float64).reshape(
+            seq_len, n, -1, 2))
+        freqs_i = torch.cat([
+            freqs[0][start_frame:start_frame + f].view(f, 1, 1, -1).expand(f, h, w, -1),
+            freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
+            freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1)
+        ],
+            dim=-1).reshape(seq_len, 1, -1)
+
+        # apply rotary embedding
+        x_i = torch.view_as_real(x_i * freqs_i).flatten(2)
+        x_i = torch.cat([x_i, x[i, seq_len:]])
+
+        # append to collection
+        output.append(x_i)
+    return torch.stack(output).type_as(x)
+
+
+def rope_params(max_seq_len, dim):
+    """MatrixGame's rope_params: create frequency table."""
+    theta = 10000.0
+    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2).float() / dim))
+    t = torch.arange(max_seq_len)
+    freqs = torch.outer(t, freqs).float()
+    freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
+    return freqs_cis
+
+
 class CausalMatrixGameTimeImageEmbedding(nn.Module):
     def __init__(
         self,
@@ -95,7 +138,8 @@ class CausalMatrixGameSelfAttention(nn.Module):
         self.sink_size = sink_size
         self.qk_norm = qk_norm
         self.eps = eps
-        self.max_attention_size = 15 * 1 * 880 if local_attn_size == -1 else local_attn_size * 880
+        # Don't hardcode 880 here - compute dynamically in forward with actual frame_seqlen
+        # self.max_attention_size = 15 * 1 * 880 if local_attn_size == -1 else local_attn_size * 880
 
         self.attn = LocalAttention(
             num_heads=num_heads,
@@ -115,14 +159,30 @@ class CausalMatrixGameSelfAttention(nn.Module):
         block_mask: BlockMask,
         kv_cache: dict | None = None,
         current_start: int = 0,
-        cache_start: int | None = None
+        cache_start: int | None = None,
+        grid_sizes: torch.Tensor | None = None
     ):
         if cache_start is None:
             cache_start = current_start
 
-        cos, sin = freqs_cis
-        roped_query = _apply_rotary_emb(q, cos, sin, is_neox_style=False).type_as(v)
-        roped_key = _apply_rotary_emb(k, cos, sin, is_neox_style=False).type_as(v)
+        # Calculate start_frame for causal mode
+        if kv_cache is not None and grid_sizes is not None:
+            frame_seqlen = int(grid_sizes[1] * grid_sizes[2])
+            start_frame = current_start // frame_seqlen
+        else:
+            start_frame = 0
+        
+        # Compute freqs on-the-fly (simple and stupid)
+        d = self.head_dim
+        freqs = torch.cat([
+            rope_params(1024, d - 4 * (d // 6)),
+            rope_params(1024, 2 * (d // 6)),
+            rope_params(1024, 2 * (d // 6))
+        ], dim=1).to(q.device)
+        
+        # Use MatrixGame's RoPE
+        roped_query = causal_rope_apply(q, grid_sizes, freqs, start_frame=start_frame).type_as(v)
+        roped_key = causal_rope_apply(k, grid_sizes, freqs, start_frame=start_frame).type_as(v)
 
         if kv_cache is None:
             padded_length = math.ceil(q.shape[1] / 128) * 128 - q.shape[1]
@@ -152,9 +212,20 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 block_mask=block_mask
             )[:, :, :-padded_length].transpose(2, 1)
         else:
-            frame_seqlen = q.shape[1]
+            # Calculate frame_seqlen correctly from grid_sizes (single frame token count)
+            if grid_sizes is not None:
+                frame_seqlen = int(grid_sizes[1] * grid_sizes[2])
+            else:
+                # Fallback: assume q.shape[1] is single frame (shouldn't happen in causal mode)
+                frame_seqlen = q.shape[1]
+                logger.warning("grid_sizes not provided, using q.shape[1] as frame_seqlen")
+            
             current_end = current_start + roped_query.shape[1]
             sink_tokens = self.sink_size * frame_seqlen
+            
+            # Compute max_attention_size dynamically based on actual frame_seqlen
+            max_attention_size = (15 * frame_seqlen if self.local_attn_size == -1 
+                                 else self.local_attn_size * frame_seqlen)
 
             kv_cache_size = kv_cache["k"].shape[1]
             num_new_tokens = roped_query.shape[1]
@@ -188,7 +259,7 @@ class CausalMatrixGameSelfAttention(nn.Module):
             # Only across frames is it causal.
             
             # Get the KV slice we'll attend to
-            kv_start = max(0, local_end_index - self.max_attention_size)
+            kv_start = max(0, local_end_index - max_attention_size)
             k_for_attn = kv_cache["k"][:, kv_start:local_end_index]
             v_for_attn = kv_cache["v"][:, kv_start:local_end_index]
             
@@ -227,29 +298,17 @@ class CausalMatrixGameSelfAttention(nn.Module):
                            device=v_for_attn.device, dtype=v_for_attn.dtype)
             ], dim=1) if kv_pad > 0 else v_for_attn
             
-            # Create FRAME-level causal mask:
-            # - All tokens in history are always visible
-            # - For current block: tokens in frame i can see all tokens in frames 0..i (within current block)
-            # - Within the same frame, all tokens can attend to each other
+            # Create BLOCK-wise attention mask (bidirectional within blocks, like MatrixGame):
+            # - Since k_for_attn already contains only [History + Current Block],
+            #   we don't need frame-level causality - just mask padding
+            # - MatrixGame uses attention() without mask in cached path = full bidirectional
             
             def frame_level_causal_mask(b, h, q_idx, kv_idx):
-                # q_idx: 0-based index in query (0 to q_len-1 for current block tokens)
-                # kv_idx: 0-based index in KV (0 to kv_len-1, where 0 to history_len-1 is history)
-                
-                # Always allow attention to history
-                is_history = kv_idx < history_len
-                
-                # For current block tokens:
-                # q_idx -> frame index in current block: q_idx // frame_seq
-                # kv_idx -> frame index in current block: (kv_idx - history_len) // frame_seq
-                # Allow if kv's frame index <= q's frame index
-                
-                q_frame = q_idx // frame_seq
-                kv_frame = (kv_idx - history_len) // frame_seq
-                
-                is_valid_current = (kv_idx >= history_len) & (kv_frame <= q_frame)
-                
-                return is_history | is_valid_current
+                # Allow full bidirectional attention to all valid tokens
+                # Only mask out padding
+                is_valid_q = q_idx < q_len
+                is_valid_k = kv_idx < kv_len
+                return is_valid_q & is_valid_k
             
             causal_block_mask = create_block_mask(
                 frame_level_causal_mask, 
@@ -430,7 +489,7 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
 
-        attn_output = self.attn1(query, key, value, freqs_cis, block_mask, kv_cache, current_start, cache_start)
+        attn_output = self.attn1(query, key, value, freqs_cis, block_mask, kv_cache, current_start, cache_start, grid_sizes)
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)

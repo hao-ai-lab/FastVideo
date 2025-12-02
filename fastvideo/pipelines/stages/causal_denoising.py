@@ -546,7 +546,6 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         self.frame_seq_length = latent_seq_length // patch_ratio
 
         independent_first_frame = getattr(self.transformer, 'independent_first_frame', False)
-
         timesteps = torch.tensor(
             fastvideo_args.pipeline_config.dmd_denoising_steps,
             dtype=torch.long).cpu()
@@ -660,6 +659,8 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 current_latents = latents[:, :, start_index:start_index + current_num_frames, :, :]
                 noise_latents_btchw = current_latents.permute(0, 2, 1, 3, 4)
                 video_raw_latent_shape = noise_latents_btchw.shape
+                
+                logger.info(f"block start {start_index} len {current_num_frames} noisy_input mean {float(current_latents.mean()):.4f} std {float(current_latents.std()):.4f}")
 
                 action_kwargs = self._prepare_action_kwargs(batch, start_index, current_num_frames)
 
@@ -747,6 +748,8 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                             noise_input_latent=noise_latents.flatten(0, 1),
                             timestep=t_expand,
                             scheduler=self.scheduler).unflatten(0, pred_noise_btchw.shape[:2])
+                    
+                    logger.info(f"step {i} timestep {int(t_cur)} pred mean {float(pred_video_btchw.mean()):.4f} std {float(pred_video_btchw.std()):.4f}")
 
                     if i < len(timesteps) - 1:
                         next_timestep = timesteps[i + 1] * torch.ones(
