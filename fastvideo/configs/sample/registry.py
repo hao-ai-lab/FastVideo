@@ -6,6 +6,7 @@ from typing import Any
 from fastvideo.configs.sample.hunyuan import (FastHunyuanSamplingParam,
                                               HunyuanSamplingParam)
 from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
+from fastvideo.configs.sample.ltx import LTXSamplingParam
 
 from fastvideo.configs.sample.cosmos import Cosmos_Predict2_2B_Video2World_SamplingParam
 
@@ -86,6 +87,9 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     Cosmos_Predict2_2B_Video2World_SamplingParam,
 
     # Add other specific weight variants
+
+    #LTX
+    "Lightricks/LTX-Video": LTXSamplingParam,
 }
 
 # For determining pipeline type from model ID
@@ -94,6 +98,7 @@ SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
     "wanpipeline": lambda id: "wanpipeline" in id.lower(),
     "wanimagetovideo": lambda id: "wanimagetovideo" in id.lower(),
     "stepvideo": lambda id: "stepvideo" in id.lower(),
+    "ltx": lambda id: "ltx" in id.lower(),
     "wandmdpipeline": lambda id: "wandmdpipeline" in id.lower(),
     "wancausaldmdpipeline": lambda id: "wancausaldmdpipeline" in id.lower(),
     # Add other pipeline architecture detectors
@@ -109,6 +114,7 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
     "wandmdpipeline": FastWanT2V480P_SamplingParam,
     "wancausaldmdpipeline": SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam,
     "stepvideo": StepVideoT2VSamplingParam,
+    "ltx": LTXSamplingParam,
     # Other fallbacks by architecture
 }
 
