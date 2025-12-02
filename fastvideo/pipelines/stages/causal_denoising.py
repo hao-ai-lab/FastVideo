@@ -662,6 +662,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 
                 logger.info(f"block start {start_index} len {current_num_frames} noisy_input mean {float(current_latents.mean()):.4f} std {float(current_latents.std()):.4f}")
 
+
                 action_kwargs = self._prepare_action_kwargs(batch, start_index, current_num_frames)
 
                 for i, t_cur in enumerate(timesteps):
@@ -754,12 +755,8 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     if i < len(timesteps) - 1:
                         next_timestep = timesteps[i + 1] * torch.ones(
                             [1], dtype=torch.long, device=pred_video_btchw.device)
-                        noise = torch.randn(
-                            video_raw_latent_shape,
-                            dtype=pred_video_btchw.dtype,
-                            generator=(batch.generator[0] if isinstance(
-                                batch.generator, list) else batch.generator)).to(self.device)
-                        noise_btchw = noise
+                        # Use global RNG like MatrixGame (torch.randn_like without generator)
+                        noise_btchw = torch.randn_like(pred_video_btchw)
                         if boundary_timestep is not None and high_noise_timesteps is not None and i < len(high_noise_timesteps) - 1:
                             noise_latents_btchw = self.scheduler.add_noise_high(
                                 pred_video_btchw.flatten(0, 1),

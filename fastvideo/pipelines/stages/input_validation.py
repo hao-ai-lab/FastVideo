@@ -39,6 +39,11 @@ class InputValidationStage(PipelineStage):
         assert seed is not None
         seeds = [seed + i for i in range(num_videos_per_prompt)]
         batch.seeds = seeds
+        
+        # Set global random state to match MatrixGame's behavior
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        
         # Peiyuan: using GPU seed will cause A100 and H100 to generate different results...
         batch.generator = [
             torch.Generator("cpu").manual_seed(seed) for seed in seeds

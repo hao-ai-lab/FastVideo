@@ -127,10 +127,10 @@ class LatentPreparationStage(PipelineStage):
             )
         # Generate or use provided latents
         if latents is None:
-            latents = randn_tensor(shape,
-                                   generator=generator,
-                                   device=device,
-                                   dtype=dtype)
+            # Use torch.randn with global random state (set by torch.manual_seed in InputValidationStage)
+            # This matches MatrixGame's behavior exactly
+            latents = torch.randn(shape, device=device, dtype=torch.float32)
+            latents = latents.to(dtype)
         else:
             latents = latents.to(device)
 
