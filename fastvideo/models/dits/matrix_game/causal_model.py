@@ -140,6 +140,7 @@ class CausalMatrixGameSelfAttention(nn.Module):
         self.eps = eps
         # Don't hardcode 880 here - compute dynamically in forward with actual frame_seqlen
         # self.max_attention_size = 15 * 1 * 880 if local_attn_size == -1 else local_attn_size * 880
+        self._freqs_cache = None
 
         self.attn = LocalAttention(
             num_heads=num_heads,
@@ -172,15 +173,16 @@ class CausalMatrixGameSelfAttention(nn.Module):
         else:
             start_frame = 0
         
-        # Compute freqs on-the-fly (simple and stupid)
-        d = self.head_dim
-        freqs = torch.cat([
-            rope_params(1024, d - 4 * (d // 6)),
-            rope_params(1024, 2 * (d // 6)),
-            rope_params(1024, 2 * (d // 6))
-        ], dim=1).to(q.device)
+        if self._freqs_cache is None or self._freqs_cache.device != q.device:
+            d = self.head_dim
+            self._freqs_cache = torch.cat([
+                rope_params(1024, d - 4 * (d // 6)),
+                rope_params(1024, 2 * (d // 6)),
+                rope_params(1024, 2 * (d // 6))
+            ], dim=1).to(q.device)
         
-        # Use MatrixGame's RoPE
+        freqs = self._freqs_cache
+        
         roped_query = causal_rope_apply(q, grid_sizes, freqs, start_frame=start_frame).type_as(v)
         roped_key = causal_rope_apply(k, grid_sizes, freqs, start_frame=start_frame).type_as(v)
 
@@ -220,6 +222,10 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 frame_seqlen = q.shape[1]
                 logger.warning("grid_sizes not provided, using q.shape[1] as frame_seqlen")
             
+            logger.info(f"[Attn] current_start={current_start}, start_frame={start_frame}")
+            logger.info(f"[Attn] roped_query: mean={roped_query.float().mean():.6f}, std={roped_query.float().std():.6f}")
+            logger.info(f"[Attn] roped_key: mean={roped_key.float().mean():.6f}, std={roped_key.float().std():.6f}")
+            
             current_end = current_start + roped_query.shape[1]
             sink_tokens = self.sink_size * frame_seqlen
             
@@ -251,85 +257,21 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
 
-            # Flex_attention with frame-level causal mask 
-            # This ensures that within a block, frames can only attend to previous frames
-            # (frame-level causal), not future frames within the same block.
-            # 
-            # Within the same frame, all tokens can attend to each other (bidirectional).
-            # Only across frames is it causal.
+            logger.info(f"[KVCache] global_end={kv_cache['global_end_index'].item()}, local_end={kv_cache['local_end_index'].item()}")
             
-            # Get the KV slice we'll attend to
             kv_start = max(0, local_end_index - max_attention_size)
             k_for_attn = kv_cache["k"][:, kv_start:local_end_index]
             v_for_attn = kv_cache["v"][:, kv_start:local_end_index]
             
-            kv_len = k_for_attn.shape[1]
-            q_len = roped_query.shape[1]
+            logger.info(f"[KVCache] k_slice: mean={k_for_attn.float().mean():.6f}, std={k_for_attn.float().std():.6f}")
             
-            # history_len = number of tokens in KV cache that are from previous blocks
-            history_len = kv_len - q_len
+            x = torch.nn.functional.scaled_dot_product_attention(
+                roped_query.transpose(1, 2),
+                k_for_attn.transpose(1, 2),
+                v_for_attn.transpose(1, 2),
+            ).transpose(1, 2)
             
-            # frame_seqlen is the number of tokens per frame (already computed above)
-            # But we need to pass it to the mask function
-            frame_seq = frame_seqlen  # tokens per frame
-            
-            # Pad for flex_attention (requires multiples of 128)
-            padded_q_len = math.ceil(q_len / 128) * 128
-            padded_kv_len = math.ceil(kv_len / 128) * 128
-            
-            q_pad = padded_q_len - q_len
-            kv_pad = padded_kv_len - kv_len
-            
-            padded_q = torch.cat([
-                roped_query,
-                torch.zeros([roped_query.shape[0], q_pad, roped_query.shape[2], roped_query.shape[3]],
-                           device=roped_query.device, dtype=roped_query.dtype)
-            ], dim=1) if q_pad > 0 else roped_query
-            
-            padded_k = torch.cat([
-                k_for_attn,
-                torch.zeros([k_for_attn.shape[0], kv_pad, k_for_attn.shape[2], k_for_attn.shape[3]],
-                           device=k_for_attn.device, dtype=k_for_attn.dtype)
-            ], dim=1) if kv_pad > 0 else k_for_attn
-            
-            padded_v = torch.cat([
-                v_for_attn,
-                torch.zeros([v_for_attn.shape[0], kv_pad, v_for_attn.shape[2], v_for_attn.shape[3]],
-                           device=v_for_attn.device, dtype=v_for_attn.dtype)
-            ], dim=1) if kv_pad > 0 else v_for_attn
-            
-            # Create BLOCK-wise attention mask (bidirectional within blocks, like MatrixGame):
-            # - Since k_for_attn already contains only [History + Current Block],
-            #   we don't need frame-level causality - just mask padding
-            # - MatrixGame uses attention() without mask in cached path = full bidirectional
-            
-            def frame_level_causal_mask(b, h, q_idx, kv_idx):
-                # Allow full bidirectional attention to all valid tokens
-                # Only mask out padding
-                is_valid_q = q_idx < q_len
-                is_valid_k = kv_idx < kv_len
-                return is_valid_q & is_valid_k
-            
-            causal_block_mask = create_block_mask(
-                frame_level_causal_mask, 
-                B=None, H=None, 
-                Q_LEN=padded_q_len, 
-                KV_LEN=padded_kv_len, 
-                _compile=False, 
-                device=roped_query.device
-            )
-            
-            x = flex_attention(
-                query=padded_q.transpose(2, 1),
-                key=padded_k.transpose(2, 1),
-                value=padded_v.transpose(2, 1),
-                block_mask=causal_block_mask
-            )
-            
-            # Remove padding
-            if q_pad > 0:
-                x = x[:, :, :-q_pad]
-            x = x.transpose(2, 1)
+            logger.info(f"[Attn] output: mean={x.float().mean():.6f}, std={x.float().std():.6f}")
             
             kv_cache["global_end_index"].fill_(current_end)
             kv_cache["local_end_index"].fill_(local_end_index)

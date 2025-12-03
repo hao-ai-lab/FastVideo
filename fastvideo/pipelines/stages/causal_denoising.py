@@ -828,6 +828,8 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                         **pos_cond_kwargs,
                         **context_model_kwargs,
                     )
+                    
+                    logger.info(f"=== Context Update: Block {start_index} ===")
 
                 start_index += current_num_frames
 
