@@ -36,6 +36,7 @@ from fastvideo.models.dits.wanvideo import (WanI2VCrossAttention,
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 from .action_module import ActionModule
+from .model import MatrixGameCrossAttention
 
 logger = init_logger(__name__)
 
@@ -332,7 +333,7 @@ class CausalMatrixGameTransformerBlock(nn.Module):
             dtype=torch.float32)
 
         if added_kv_proj_dim is not None:
-            self.attn2 = WanI2VCrossAttention(dim,
+            self.attn2 = MatrixGameCrossAttention(dim,
                                               num_heads,
                                               qk_norm=qk_norm,
                                               eps=eps)

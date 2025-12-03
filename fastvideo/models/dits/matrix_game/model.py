@@ -71,6 +71,86 @@ class MatrixGameTimeImageEmbedding(nn.Module):
         return temb, timestep_proj, None, encoder_hidden_states_image
 
 
+class MatrixGameCrossAttention(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        num_heads: int,
+        window_size=(-1, -1),
+        qk_norm=True,
+        eps=1e-6,
+        supported_attention_backends: tuple[AttentionBackendEnum, ...]
+        | None = None
+    ) -> None:
+        super().__init__()
+        
+        assert dim % num_heads == 0
+        self.dim = dim
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+        self.qk_norm = qk_norm
+        self.eps = eps
+        
+        self.to_q = ReplicatedLinear(dim, dim)
+        self.norm_q = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
+        
+        self.to_k = ReplicatedLinear(dim, dim)
+        self.to_v = ReplicatedLinear(dim, dim)
+        self.norm_k = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
+        
+        self.add_k_proj = ReplicatedLinear(dim, dim)
+        self.add_v_proj = ReplicatedLinear(dim, dim)
+        self.norm_added_k = RMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
+        
+        self.to_out = ReplicatedLinear(dim, dim)
+        
+        from fastvideo.attention import LocalAttention
+        self.attn = LocalAttention(
+            num_heads=num_heads,
+            head_size=self.head_dim,
+            dropout_rate=0,
+            softmax_scale=None,
+            causal=False,
+            supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
+                                          AttentionBackendEnum.TORCH_SDPA))
+
+    def forward(self, x, context, context_lens=None, crossattn_cache=None):
+        context_img = context[:, :257]
+        context_text = context[:, 257:]
+        
+        b, n, d = x.size(0), self.num_heads, self.head_dim
+        q = self.norm_q(self.to_q(x)[0]).view(b, -1, n, d)
+
+        if crossattn_cache is not None:
+            if not crossattn_cache["is_init"]:
+                k_img = self.norm_added_k(self.add_k_proj(context_img)[0]).view(b, -1, n, d)
+                v_img = self.add_v_proj(context_img)[0].view(b, -1, n, d)
+                
+                crossattn_cache["k"] = k_img
+                crossattn_cache["v"] = v_img
+                crossattn_cache["is_init"] = True
+            else:
+                k_img = crossattn_cache["k"]
+                v_img = crossattn_cache["v"]
+        else:
+            k_img = self.norm_added_k(self.add_k_proj(context_img)[0]).view(b, -1, n, d)
+            v_img = self.add_v_proj(context_img)[0].view(b, -1, n, d)
+
+        img_x = self.attn(q, k_img, v_img)
+
+        if context_text.shape[1] > 0:
+            k = self.norm_k(self.to_k(context_text)[0]).view(b, -1, n, d)
+            v = self.to_v(context_text)[0].view(b, -1, n, d)
+            text_x = self.attn(q, k, v)
+        else:
+            text_x = 0
+
+        x = text_x + img_x
+        
+        x = x.flatten(2)
+        x, _ = self.to_out(x)
+        return x
+
 
 class MatrixGameTransformerBlock(nn.Module):
     
