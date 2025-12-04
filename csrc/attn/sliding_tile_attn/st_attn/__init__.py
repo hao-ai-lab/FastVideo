@@ -2,17 +2,23 @@ import math
 
 import torch
 from torch.utils.checkpoint import detach_variable
-try:
-    from st_attn_cuda import sta_fwd
-except ImportError:
+
+major, minor = torch.cuda.get_device_capability(0)
+if major == 9 and minor == 0:# check if H100
+    try:
+        from st_attn_cuda import sta_fwd
+    except ImportError:
+        sta_fwd = None
+else:
+    from st_attn.st_attn_triton import sliding_tile_attention_triton
     sta_fwd = None
 
-def sliding_tile_attention(q_all, k_all, v_all, window_size, text_length, has_text=True, dit_seq_shape='30x48x80'):
+def sliding_tile_attention_SM90(q_all, k_all, v_all, window_size, text_length, has_text=True, dit_seq_shape='30x48x80'):
     seq_length = q_all.shape[2]
     dit_seq_shape_mapping = {
         '30x48x80':1,
         '36x48x48':2,
-        '18x48x80':3, 
+        '18x48x80':3,
     }
     if has_text:
         assert q_all.shape[
@@ -47,3 +53,9 @@ def sliding_tile_attention(q_all, k_all, v_all, window_size, text_length, has_te
     if has_text:
         _ = sta_fwd(q_all, k_all, v_all, hidden_states, 3, 3, 3, text_length, True, True, kernel_aspect_ratio_flag)
     return hidden_states[:, :, :seq_length]
+
+def sliding_tile_attention(q_all, k_all, v_all, window_size, text_length, has_text=True, dit_seq_shape='30x48x80'):
+    if major == 9 and minor == 0:# check if H100
+        return sliding_tile_attention_SM90(q_all, k_all, v_all, window_size, text_length, has_text, dit_seq_shape)
+    else:
+        return sliding_tile_attention_triton(q_all, k_all, v_all, window_size, text_length, has_text, dit_seq_shape)

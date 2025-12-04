@@ -2,18 +2,26 @@
 # Attention Kernel Used in FastVideo
 
 ## Sliding Tile Attention (STA)
-We only support H100 for STA.
+We support H100 (via TK) and any other GPU (via triton) for STA.
 
 ### Installation
 ```bash
 pip install st_attn
-``` 
+```
 
 Install from source:
 
 ```bash
 git submodule update --init --recursive
 python setup.py install
+```
+
+If you want to skip the compilation of the TK kernel and only use the Triton version, try below:
+
+```bash
+SKIP_SM90_EXT=1 python setup.py install
+or
+SKIP_SM90_EXT=1 pip install --no-build-isolation .
 ```
 
 If you encounter error during installation, try below:
@@ -30,7 +38,7 @@ sudo apt install clang-11
 (If you use CUDA12.8)
 ```bash
 export CUDA_HOME=/usr/local/cuda-12.8
-export PATH=${CUDA_HOME}/bin:${PATH} 
+export PATH=${CUDA_HOME}/bin:${PATH}
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 ```
 
@@ -43,7 +51,7 @@ bash scripts/inference/v1_inference_wan_STA.sh
 If you want to use sliding tile attention in your custom model:
 ```python
 from st_attn import sliding_tile_attention
-# assuming video size (T, H, W) = (30, 48, 80), text tokens = 256 with padding. 
+# assuming video size (T, H, W) = (30, 48, 80), text tokens = 256 with padding.
 # q, k, v: [batch_size, num_heads, seq_length, head_dim], seq_length = T*H*W + 256
 # a tile is a cube of size (6, 8, 8)
 # window_size in tiles: [(window_t, window_h, window_w), (..)...]. For example, window size (3, 3, 3) means a query can attend to (3x6, 3x8, 3x8) = (18, 24, 24) tokens out of the total 30x48x80 video.
@@ -58,7 +66,6 @@ out = sliding_tile_attention(q, k, v, window_size, 0, False)
 ### Test
 ```bash
 python ../tests/test_sta.py # test STA
-python ../tests/test_vsa.py # test VSA
 ```
 ### Benchmark
 ```bash
@@ -67,7 +74,7 @@ python ../benchmarks/bench_sta.py
 
 
 ### How Does STA Work?
-We give a demo for 2D STA with window size (6,6) operating on a (10, 10) image. 
+We give a demo for 2D STA with window size (6,6) operating on a (10, 10) image.
 
 
 https://github.com/user-attachments/assets/f3b6dd79-7b43-4b60-a0fa-3d6495ec5747
@@ -82,7 +89,7 @@ Here is a diagram of how the window is configured and passed through the FastVid
 
 
 ## Why is STA Fast?
-2D/3D Sliding Window Attention (SWA) creates many mixed blocks in the attention map. Even though mixed blocks have less output value,a mixed block is significantly slower than a dense block due to the GPU-unfriendly masking operation. 
+2D/3D Sliding Window Attention (SWA) creates many mixed blocks in the attention map. Even though mixed blocks have less output value,a mixed block is significantly slower than a dense block due to the GPU-unfriendly masking operation.
 
 STA removes mixed blocks.
 
