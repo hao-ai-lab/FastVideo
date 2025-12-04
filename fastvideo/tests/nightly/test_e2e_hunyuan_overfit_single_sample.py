@@ -6,6 +6,8 @@ import subprocess
 import sys
 from fastvideo.tests.ssim.test_inference_similarity import compute_video_ssim_torchvision
 
+# Example of using Hunyuan preprocessing and training pipeline
+
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
 
@@ -22,7 +24,7 @@ LOCAL_PREPROCESSED_DATA_DIR = Path(os.path.join(DATA_DIR, "cats_processed_t2v_hu
 
 
 # training
-NUM_GPUS_PER_NODE_TRAINING = "1"
+NUM_GPUS_PER_NODE_TRAINING = "4"
 TRAINING_ENTRY_FILE_PATH = "fastvideo/training/hunyuan_training_pipeline.py"
 # New preprocessing pipeline creates files in training_dataset/worker_0/worker_0/
 LOCAL_TRAINING_DATA_DIR = os.path.join(LOCAL_PREPROCESSED_DATA_DIR, "training_dataset", "worker_0", "worker_0")
