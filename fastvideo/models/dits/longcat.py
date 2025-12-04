@@ -269,14 +269,18 @@ class LongCatSelfAttention(nn.Module):
         x: torch.Tensor,              # [B, N, C]
         latent_shape: tuple,          # (T, H, W)
         num_cond_latents: int = 0,    # Number of conditioning latent frames (for I2V)
+        return_kv: bool = False,      # Return K/V for caching
         **kwargs
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | tuple:
         """
         Forward pass with 3D RoPE and optional BSA.
         
         For I2V mode (num_cond_latents > 0):
         - Conditioned tokens only attend to themselves
         - Noise tokens attend to ALL tokens (cond + noise)
+        
+        Args:
+            return_kv: If True, return (output, (k_cache, v_cache)) for KV caching
         """
         B, N, C = x.shape
         T, H, W = latent_shape
@@ -294,6 +298,12 @@ class LongCatSelfAttention(nn.Module):
         # Per-head RMS normalization
         q = self.q_norm(q)
         k = self.k_norm(k)
+
+        # Save pre-RoPE K/V for cache if requested (before RoPE is applied)
+        if return_kv:
+            # [B, N, num_heads, head_dim] -> [B, num_heads, N, head_dim]
+            k_cache = k.transpose(1, 2).clone()
+            v_cache = v.transpose(1, 2).clone()
 
         # For RoPE: need [B, num_heads, N, head_dim]
         q_rope = q.transpose(1, 2)
@@ -345,6 +355,9 @@ class LongCatSelfAttention(nn.Module):
             # Reshape and project out
             out = out.reshape(B, N, C)
             out, _ = self.to_out(out)
+            
+            if return_kv:
+                return out, (k_cache, v_cache)
             return out
 
         # === Attention: BSA or standard ===
@@ -391,6 +404,96 @@ class LongCatSelfAttention(nn.Module):
             out, _ = self.attn(q, k, v)
 
         # Reshape and project out
+        out = out.reshape(B, N, C)
+        out, _ = self.to_out(out)
+
+        if return_kv:
+            return out, (k_cache, v_cache)
+        return out
+
+    def forward_with_kv_cache(
+        self,
+        x: torch.Tensor,              # [B, N_noise, C] - only noise tokens
+        latent_shape: tuple,          # (T_noise, H, W) - shape for noise only
+        num_cond_latents: int,        # Number of conditioning latent frames
+        kv_cache: tuple,              # (k_cond, v_cond) - [B, heads, N_cond, head_dim]
+    ) -> torch.Tensor:
+        """
+        Forward using cached K/V from conditioning frames.
+        
+        x contains only NOISE tokens.
+        kv_cache contains pre-computed K/V for CONDITIONING tokens.
+        
+        CRITICAL: RoPE positions for noise tokens must start AFTER conditioning.
+        We achieve this by padding Q with dummy tokens for conditioning positions,
+        applying RoPE to the full sequence, then extracting only noise token Q.
+        """
+        B, N, C = x.shape
+        T, H, W = latent_shape
+
+        k_cache, v_cache = kv_cache
+
+        # Handle batch size mismatch (cache might be smaller for CFG)
+        # When using CFG, latent_model_input is doubled [neg, pos], but cache is for original batch
+        if k_cache.shape[0] != B:
+            # Expand cache to match input batch size
+            # For CFG: repeat the cache for both negative and positive branches
+            repeat_factor = B // k_cache.shape[0]
+            k_cache = k_cache.repeat(repeat_factor, 1, 1, 1)
+            v_cache = v_cache.repeat(repeat_factor, 1, 1, 1)
+
+        # Project to Q/K/V for noise tokens
+        q, _ = self.to_q(x)
+        k, _ = self.to_k(x)
+        v, _ = self.to_v(x)
+
+        # Reshape to heads: [B, N, num_heads, head_dim]
+        q = q.view(B, N, self.num_heads, self.head_dim)
+        k = k.view(B, N, self.num_heads, self.head_dim)
+        v = v.view(B, N, self.num_heads, self.head_dim)
+
+        # Per-head RMS normalization
+        q = self.q_norm(q)
+        k = self.k_norm(k)
+
+        # Transpose for RoPE: [B, heads, N, head_dim]
+        q_rope = q.transpose(1, 2)
+        k_rope = k.transpose(1, 2)
+        v = v.transpose(1, 2)
+
+        # CRITICAL: Apply RoPE with correct positional offset
+        # Noise frame queries need positions starting from num_cond_latents
+        # Following the original LongCat approach:
+        # 1. Pad Q with dummy tokens matching k_cache shape
+        # 2. Apply RoPE to full sequence (T_cond + T_noise)
+        # 3. Extract only the noise portion of Q
+        
+        # Create dummy Q padding to fill conditioning positions
+        # k_cache shape: [B, heads, N_cond, head_dim]
+        q_padding = torch.cat([torch.empty_like(k_cache), q_rope], dim=2).contiguous()
+        
+        # Concatenate cached K with noise K for RoPE
+        k_full = torch.cat([k_cache, k_rope], dim=2)
+        v_full = torch.cat([v_cache, v], dim=2)
+        
+        # Apply RoPE to full sequence (includes both cond and noise positions)
+        # Grid size: (T_cond + T_noise, H, W)
+        full_T = num_cond_latents + T
+        q_padding, k_full = self.rope_3d(q_padding, k_full, grid_size=(full_T, H, W))
+        
+        # Extract only the noise portion of Q (last N tokens)
+        q_rope = q_padding[:, :, -N:].contiguous()
+
+        # Run attention: Q_noise attends to full K/V (cond + noise)
+        out = torch.nn.functional.scaled_dot_product_attention(
+            q_rope, k_full, v_full,
+            attn_mask=None,
+            dropout_p=0.0,
+            is_causal=False
+        )  # [B, heads, N_noise, head_dim]
+
+        # Transpose back: [B, N_noise, heads, head_dim]
+        out = out.transpose(1, 2)
         out = out.reshape(B, N, C)
         out, _ = self.to_out(out)
 
@@ -665,14 +768,20 @@ class LongCatTransformerBlock(nn.Module):
         t: torch.Tensor,              # [B, T, C_t]
         latent_shape: tuple,          # (T, H, W)
         num_cond_latents: int = 0,    # Number of conditioning latent frames (for I2V)
+        return_kv: bool = False,      # Return K/V for caching
+        kv_cache: tuple | None = None,  # Pre-computed K/V cache
+        skip_crs_attn: bool = False,  # Skip cross-attention (for cache init)
         **kwargs
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | tuple:
         """
         Forward pass with AdaLN modulation.
         
         Args:
             num_cond_latents: For I2V, number of conditioning latent frames.
                               These frames use split attention behavior.
+            return_kv: If True, return (x, (k_cache, v_cache))
+            kv_cache: Pre-computed K/V from conditioning frames
+            skip_crs_attn: If True, skip cross-attention (used during cache init)
         """
         B, N, C = x.shape
         T, H, W = latent_shape
@@ -693,26 +802,47 @@ class LongCatTransformerBlock(nn.Module):
         x_norm = modulate_fp32(self.norm_attn, x.view(B, T, -1, C), shift_msa, scale_msa)
         x_norm = x_norm.view(B, N, C)
 
-        attn_out = self.self_attn(
-            x_norm, 
-            latent_shape=latent_shape,
-            num_cond_latents=num_cond_latents
-        )
+        # Handle KV cache
+        if kv_cache is not None:
+            # Move cache to device if offloaded
+            kv_cache = (kv_cache[0].to(x.device), kv_cache[1].to(x.device))
+            attn_out = self.self_attn.forward_with_kv_cache(
+                x_norm,
+                latent_shape=latent_shape,
+                num_cond_latents=num_cond_latents,
+                kv_cache=kv_cache,
+            )
+            kv_cache_new = None  # Don't return cache when using cache
+        else:
+            attn_result = self.self_attn(
+                x_norm, 
+                latent_shape=latent_shape,
+                num_cond_latents=num_cond_latents,
+                return_kv=return_kv,
+            )
+            if return_kv:
+                attn_out, kv_cache_new = attn_result
+            else:
+                attn_out = attn_result
+                kv_cache_new = None
 
         # Residual with gating (CRITICAL: FP32 like original, then cast back)
         with torch.amp.autocast(device_type='cuda', dtype=torch.float32):
             x = x + (gate_msa * attn_out.view(B, T, -1, C)).view(B, N, C)
         x = x.to(x_orig_dtype)
 
-        # === Cross-Attention ===
-        x_norm_cross = self.norm_cross(x)
-        cross_out = self.cross_attn(
-            x_norm_cross, 
-            context,
-            latent_shape=latent_shape,
-            num_cond_latents=num_cond_latents
-        )
-        x = x + cross_out
+        # === Cross-Attention (skip if requested) ===
+        if not skip_crs_attn:
+            x_norm_cross = self.norm_cross(x)
+            # When using KV cache, no need for num_cond_latents in cross-attn
+            cross_num_cond = 0 if kv_cache is not None else num_cond_latents
+            cross_out = self.cross_attn(
+                x_norm_cross, 
+                context,
+                latent_shape=latent_shape,
+                num_cond_latents=cross_num_cond
+            )
+            x = x + cross_out
 
         # === FFN ===
         x_norm_ffn = modulate_fp32(self.norm_ffn, x.view(B, T, -1, C), shift_mlp, scale_mlp)
@@ -725,6 +855,8 @@ class LongCatTransformerBlock(nn.Module):
             x = x + (gate_mlp * ffn_out.view(B, T, -1, C)).view(B, N, C)
         x = x.to(x_orig_dtype)
 
+        if return_kv:
+            return x, kv_cache_new
         return x
 
 
@@ -900,8 +1032,13 @@ class LongCatTransformer3DModel(CachableDiT):
         encoder_hidden_states_image: torch.Tensor | list[torch.Tensor] | None = None,
         guidance: float | None = None,         # Unused, for API compatibility
         num_cond_latents: int = 0,             # For I2V: number of conditioning latent frames
+        # === KV Cache Parameters ===
+        return_kv: bool = False,               # If True, return (output, kv_cache_dict)
+        kv_cache_dict: dict | None = None,     # Pre-computed {block_idx: (k, v)}
+        skip_crs_attn: bool = False,           # Skip cross-attention (for cache init)
+        offload_kv_cache: bool = False,        # Move cache to CPU after compute
         **kwargs
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | tuple[torch.Tensor, dict]:
         """
         Forward pass with FastVideo parameter ordering.
         
@@ -912,6 +1049,10 @@ class LongCatTransformer3DModel(CachableDiT):
             num_cond_latents: For I2V, number of conditioning latent frames.
                               These frames are treated as "clean" (timestep=0)
                               and use split attention behavior.
+            return_kv: If True, return (output, kv_cache_dict)
+            kv_cache_dict: Pre-computed K/V cache {block_idx: (k, v)}
+            skip_crs_attn: If True, skip cross-attention (for cache init)
+            offload_kv_cache: If True, move cache to CPU after compute
         """
         B, _, T, H, W = hidden_states.shape
 
@@ -941,13 +1082,31 @@ class LongCatTransformer3DModel(CachableDiT):
             encoder_attention_mask=encoder_attention_mask
         )  # [B, N_text, C]
 
-        # 4. Transformer blocks
+        # 4. Transformer blocks with optional KV cache
+        kv_cache_dict_ret = {} if return_kv else None
+        
         for i, block in enumerate(self.blocks):
-            x = block(
+            # Get cache for this block if available
+            block_kv_cache = kv_cache_dict.get(i, None) if kv_cache_dict else None
+            
+            block_out = block(
                 x, context, t,
                 latent_shape=(N_t, N_h, N_w),
-                num_cond_latents=num_cond_latents
+                num_cond_latents=num_cond_latents,
+                return_kv=return_kv,
+                kv_cache=block_kv_cache,
+                skip_crs_attn=skip_crs_attn,
             )
+            
+            if return_kv:
+                x, kv_cache = block_out
+                # Store cache
+                if offload_kv_cache:
+                    kv_cache_dict_ret[i] = (kv_cache[0].cpu(), kv_cache[1].cpu())
+                else:
+                    kv_cache_dict_ret[i] = (kv_cache[0].contiguous(), kv_cache[1].contiguous())
+            else:
+                x = block_out
 
         # 5. Output projection
         output = self.final_layer(x, t, latent_shape=(N_t, N_h, N_w))
@@ -958,6 +1117,8 @@ class LongCatTransformer3DModel(CachableDiT):
         # Cast to float32 for better accuracy (as per original)
         output = output.to(torch.float32)
 
+        if return_kv:
+            return output, kv_cache_dict_ret
         return output
 
     def unpatchify(self, x: torch.Tensor, N_t: int, N_h: int, N_w: int) -> torch.Tensor:
