@@ -117,7 +117,7 @@ test = [
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
 
 rocm = [
-    "amd-smi",
+    "amdsmi",
 ]
 
 [project.scripts]

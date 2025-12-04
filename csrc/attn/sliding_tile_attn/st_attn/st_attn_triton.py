@@ -11,8 +11,7 @@ def is_hip():
     target = triton.runtime.driver.active.get_current_target()
     return target.backend == 'hip'
 
-
-def get_cuda_autotune_config():
+def get_common_autotune_config():
     configs = [
         triton.Config({'BLOCK_Q': BLOCK_Q, 'BLOCK_KV': BLOCK_KV}, num_stages=s, num_warps=w) \
         for BLOCK_Q in [32, 64, 128]\
@@ -21,17 +20,16 @@ def get_cuda_autotune_config():
         for w in [4, 8]\
     ]
     return configs
+
+
+def get_cuda_autotune_config():
+    # cuda and hip can use differnt autotune configs
+    return get_common_autotune_config()
 
 
 def get_hip_autotune_config():
-    configs = [
-        triton.Config({'BLOCK_Q': BLOCK_Q, 'BLOCK_KV': BLOCK_KV}, num_stages=s, num_warps=w) \
-        for BLOCK_Q in [32, 64, 128]\
-        for BLOCK_KV in [32, 64, 128]\
-        for s in [1, 2, 3, 4]\
-        for w in [4, 8]\
-    ]
-    return configs
+    # cuda and hip can use differnt autotune configs
+    return get_common_autotune_config()
 
 
 def get_autotune_config():
@@ -42,9 +40,9 @@ def get_autotune_config():
 
 
 @triton.jit
-def clamp_int(value, min, max):
-    ret = tl.where(value > max, max, value)
-    ret = tl.where(ret < min, min, ret)
+def clamp_int(value, min_val, max_val):
+    ret = tl.where(value > max_val, max_val, value)
+    ret = tl.where(ret < min_val, min_val, ret)
     return ret
 
 
