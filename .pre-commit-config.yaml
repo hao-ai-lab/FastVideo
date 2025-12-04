@@ -10,6 +10,7 @@ exclude: |
     demo/.*|
     predict\.py|
     scripts/.*|
+    prompts/.*|
     fastvideo/data_preprocess/.*|
     fastvideo/dataset/.*|
     fastvideo/models/.*|

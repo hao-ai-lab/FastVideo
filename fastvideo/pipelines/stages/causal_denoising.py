@@ -4,7 +4,7 @@ from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.models.utils import pred_noise_to_pred_video
+from fastvideo.models.utils import pred_noise_to_pred_video, pred_noise_to_x_bound
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.denoising import DenoisingStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
@@ -34,13 +34,16 @@ class CausalDMDDenosingStage(DenoisingStage):
     Denoising stage for causal diffusion.
     """
 
-    def __init__(self, transformer, scheduler, transformer_2=None) -> None:
+    def __init__(self,
+                 transformer,
+                 scheduler,
+                 transformer_2=None,
+                 vae=None) -> None:
         super().__init__(transformer, scheduler, transformer_2)
         # KV and cross-attention cache state (initialized on first forward)
         self.transformer = transformer
         self.transformer_2 = transformer_2
-        self.kv_cache1: list | None = None
-        self.crossattn_cache: list | None = None
+        self.vae = vae
         # Model-dependent constants (aligned with causal_inference.py assumptions)
         self.num_transformer_blocks = len(self.transformer.blocks)
         self.num_frames_per_block = self.transformer.config.arch_config.num_frames_per_block
@@ -80,6 +83,13 @@ class CausalDMDDenosingStage(DenoisingStage):
             timesteps = scheduler_timesteps[1000 - timesteps]
         timesteps = timesteps.to(get_local_torch_device())
 
+        if fastvideo_args.pipeline_config.dit_config.boundary_ratio is not None:
+            boundary_timestep = fastvideo_args.pipeline_config.dit_config.boundary_ratio * self.scheduler.num_train_timesteps
+            high_noise_timesteps = timesteps[timesteps >= boundary_timestep]
+        else:
+            boundary_timestep = None
+            high_noise_timesteps = None
+
         # Image kwargs (kept empty unless caller provides compatible args)
         image_kwargs: dict = {}
 
@@ -103,113 +113,110 @@ class CausalDMDDenosingStage(DenoisingStage):
         assert torch.isnan(prompt_embeds[0]).sum() == 0
 
         # Initialize or reset caches
-        if self.kv_cache1 is None:
-            self._initialize_kv_cache(batch_size=latents.shape[0],
-                                      dtype=target_dtype,
-                                      device=latents.device)
-            self._initialize_crossattn_cache(
-                batch_size=latents.shape[0],
-                max_text_len=fastvideo_args.pipeline_config.
-                text_encoder_configs[0].arch_config.text_len,
-                dtype=target_dtype,
-                device=latents.device)
-        else:
-            assert self.crossattn_cache is not None
-            # reset cross-attention cache
-            for block_index in range(self.num_transformer_blocks):
-                self.crossattn_cache[block_index][
-                    "is_init"] = False  # type: ignore
-            # reset kv cache pointers
-            for block_index in range(len(self.kv_cache1)):
-                self.kv_cache1[block_index][
-                    "global_end_index"] = torch.tensor(  # type: ignore
-                        [0],
-                        dtype=torch.long,
-                        device=latents.device)
-                self.kv_cache1[block_index][
-                    "local_end_index"] = torch.tensor(  # type: ignore
-                        [0],
-                        dtype=torch.long,
-                        device=latents.device)
+        kv_cache1 = self._initialize_kv_cache(batch_size=latents.shape[0],
+                                              dtype=target_dtype,
+                                              device=latents.device)
+        kv_cache2 = None
+        if boundary_timestep is not None:
+            # Initialize the low noise kv cache
+            kv_cache2 = self._initialize_kv_cache(batch_size=latents.shape[0],
+                                                  dtype=target_dtype,
+                                                  device=latents.device)
 
-        # Optional: cache context features from provided image latents prior to generation
-        current_start_frame = 0
-        if getattr(batch, "image_latent", None) is not None:
-            image_latent = batch.image_latent
-            assert image_latent is not None
-            input_frames = image_latent.shape[2]
-            # timestep zero (or configured context noise) for cache warm-up
-            t_zero = torch.zeros([latents.shape[0]],
-                                 device=latents.device,
-                                 dtype=torch.long)
-            if independent_first_frame and input_frames >= 1:
-                # warm-up with the very first frame independently
-                image_first_btchw = image_latent[:, :, :1, :, :].to(
-                    target_dtype).permute(0, 2, 1, 3, 4)
-                with torch.autocast(device_type="cuda",
-                                    dtype=target_dtype,
-                                    enabled=autocast_enabled):
-                    _ = self.transformer(
-                        image_first_btchw,
-                        prompt_embeds,
-                        t_zero,
-                        kv_cache=self.kv_cache1,
-                        crossattn_cache=self.crossattn_cache,
-                        current_start=current_start_frame *
-                        self.frame_seq_length,
-                        **image_kwargs,
-                        **pos_cond_kwargs,
-                    )
-                current_start_frame += 1
-                remaining_frames = input_frames - 1
-            else:
-                remaining_frames = input_frames
+        def _get_kv_cache(timestep: float) -> list[dict]:
+            if boundary_timestep is not None:
+                if timestep >= boundary_timestep:
+                    return kv_cache1
+                else:
+                    assert kv_cache2 is not None, "kv_cache2 is not initialized"
+                    return kv_cache2
+            return kv_cache1
 
-            # process remaining input frames in blocks of num_frame_per_block
-            while remaining_frames > 0:
-                block = min(self.num_frames_per_block, remaining_frames)
-                ref_btchw = image_latent[:, :, current_start_frame:
-                                         current_start_frame +
-                                         block, :, :].to(target_dtype).permute(
-                                             0, 2, 1, 3, 4)
-                with torch.autocast(device_type="cuda",
-                                    dtype=target_dtype,
-                                    enabled=autocast_enabled):
-                    _ = self.transformer(
-                        ref_btchw,
-                        prompt_embeds,
-                        t_zero,
-                        kv_cache=self.kv_cache1,
-                        crossattn_cache=self.crossattn_cache,
-                        current_start=current_start_frame *
-                        self.frame_seq_length,
-                        **image_kwargs,
-                        **pos_cond_kwargs,
-                    )
-                current_start_frame += block
-                remaining_frames -= block
+        crossattn_cache = self._initialize_crossattn_cache(
+            batch_size=latents.shape[0],
+            max_text_len=fastvideo_args.pipeline_config.text_encoder_configs[0].
+            arch_config.text_len,
+            dtype=target_dtype,
+            device=latents.device)
 
-        # Base position offset from any cache warm-up
-        pos_start_base = current_start_frame
+        pos_start_base = 0
 
         # Determine block sizes
-        if not independent_first_frame or (independent_first_frame
-                                           and batch.image_latent is not None):
-            if t % self.num_frames_per_block != 0:
-                raise ValueError(
-                    "num_frames must be divisible by num_frames_per_block for causal DMD denoising"
+        if t % self.num_frames_per_block != 0:
+            raise ValueError(
+                "num_frames must be divisible by num_frames_per_block for causal DMD denoising"
+            )
+        num_blocks = t // self.num_frames_per_block
+        block_sizes = [self.num_frames_per_block] * num_blocks
+        start_index = 0
+
+        # For now hardcode the first block to be 1 frame assuming the model is Wan2.2-MoE
+        if boundary_timestep is not None:
+            block_sizes[0] = 1
+
+        first_frame_latent = None
+        if batch.pil_image is not None:
+            # Causal video gen directly replaces the first frame of the latent with
+            # the image latent instead of appending along the channel dim
+            assert self.vae is not None, "VAE is not provided for causal video gen task"
+            self.vae = self.vae.to(get_local_torch_device())
+            first_frame_latent = self.vae.encode(batch.pil_image).mean.float()
+            if (hasattr(self.vae, "shift_factor")
+                    and self.vae.shift_factor is not None):
+                if isinstance(self.vae.shift_factor, torch.Tensor):
+                    first_frame_latent -= self.vae.shift_factor.to(
+                        first_frame_latent.device, first_frame_latent.dtype)
+                else:
+                    first_frame_latent -= self.vae.shift_factor
+
+            if isinstance(self.vae.scaling_factor, torch.Tensor):
+                first_frame_latent = first_frame_latent * self.vae.scaling_factor.to(
+                    first_frame_latent.device, first_frame_latent.dtype)
+            else:
+                first_frame_latent = first_frame_latent * self.vae.scaling_factor
+
+            if fastvideo_args.vae_cpu_offload:
+                self.vae = self.vae.to("cpu")
+
+            # Fill the low noise and high noise kv cache with first_frame_latent and timestep 0
+            t_zero = torch.zeros([latents.shape[0], 1],
+                                 device=latents.device,
+                                 dtype=torch.long)
+            with torch.autocast(device_type="cuda",
+                                dtype=target_dtype,
+                                enabled=autocast_enabled), \
+                set_forward_context(current_timestep=0,
+                                    attn_metadata=None,
+                                    forward_batch=batch):
+                self.transformer(
+                    first_frame_latent.to(target_dtype),
+                    prompt_embeds,
+                    t_zero,
+                    kv_cache=kv_cache1,
+                    crossattn_cache=crossattn_cache,
+                    current_start=(pos_start_base + start_index) *
+                    self.frame_seq_length,
+                    start_frame=start_index,
+                    **image_kwargs,
+                    **pos_cond_kwargs,
                 )
-            num_blocks = t // self.num_frames_per_block
-            block_sizes = [self.num_frames_per_block] * num_blocks
-            start_index = 0
-        else:
-            if (t - 1) % self.num_frames_per_block != 0:
-                raise ValueError(
-                    "(num_frames - 1) must be divisible by num_frame_per_block when independent_first_frame=True"
-                )
-            num_blocks = (t - 1) // self.num_frames_per_block
-            block_sizes = [1] + [self.num_frames_per_block] * num_blocks
-            start_index = 0
+                if boundary_timestep is not None:
+                    self.transformer_2(
+                        first_frame_latent.to(target_dtype),
+                        prompt_embeds,
+                        t_zero,
+                        kv_cache=kv_cache2,
+                        crossattn_cache=crossattn_cache,
+                        current_start=(pos_start_base + start_index) *
+                        self.frame_seq_length,
+                        start_frame=start_index,
+                        **image_kwargs,
+                        **pos_cond_kwargs,
+                    )
+
+            start_index += 1
+            block_sizes.pop(0)
+            latents[:, :, :1, :, :] = first_frame_latent
 
         # DMD loop in causal blocks
         with self.progress_bar(total=len(block_sizes) *
@@ -222,7 +229,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                 video_raw_latent_shape = noise_latents_btchw.shape
 
                 for i, t_cur in enumerate(timesteps):
-                    if self.transformer_2 is not None and fastvideo_args.pipeline_config.dit_config.boundary_ratio is not None and t_cur < fastvideo_args.pipeline_config.dit_config.boundary_ratio * self.scheduler.num_train_timesteps:
+                    if boundary_timestep is not None and t_cur < boundary_timestep:
                         current_model = self.transformer_2
                     else:
                         current_model = self.transformer
@@ -280,8 +287,8 @@ class CausalDMDDenosingStage(DenoisingStage):
                             latent_model_input,
                             prompt_embeds,
                             t_expanded_noise,
-                            kv_cache=self.kv_cache1,
-                            crossattn_cache=self.crossattn_cache,
+                            kv_cache=_get_kv_cache(t_cur),
+                            crossattn_cache=crossattn_cache,
                             current_start=(pos_start_base + start_index) *
                             self.frame_seq_length,
                             start_frame=start_index,
@@ -290,12 +297,22 @@ class CausalDMDDenosingStage(DenoisingStage):
                         ).permute(0, 2, 1, 3, 4)
 
                     # Convert pred noise to pred video with FM Euler scheduler utilities
-                    pred_video_btchw = pred_noise_to_pred_video(
-                        pred_noise=pred_noise_btchw.flatten(0, 1),
-                        noise_input_latent=noise_latents.flatten(0, 1),
-                        timestep=t_expand,
-                        scheduler=self.scheduler).unflatten(
-                            0, pred_noise_btchw.shape[:2])
+                    if boundary_timestep is not None and t_cur >= boundary_timestep:
+                        pred_video_btchw = pred_noise_to_x_bound(
+                            pred_noise=pred_noise_btchw.flatten(0, 1),
+                            noise_input_latent=noise_latents.flatten(0, 1),
+                            timestep=t_expand,
+                            boundary_timestep=torch.ones_like(t_expand) *
+                            boundary_timestep,
+                            scheduler=self.scheduler).unflatten(
+                                0, pred_noise_btchw.shape[:2])
+                    else:
+                        pred_video_btchw = pred_noise_to_pred_video(
+                            pred_noise=pred_noise_btchw.flatten(0, 1),
+                            noise_input_latent=noise_latents.flatten(0, 1),
+                            timestep=t_expand,
+                            scheduler=self.scheduler).unflatten(
+                                0, pred_noise_btchw.shape[:2])
 
                     if i < len(timesteps) - 1:
                         next_timestep = timesteps[i + 1] * torch.ones(
@@ -309,11 +326,23 @@ class CausalDMDDenosingStage(DenoisingStage):
                                 batch.generator, list) else
                                        batch.generator)).to(self.device)
                         noise_btchw = noise
-                        noise_latents_btchw = self.scheduler.add_noise(
-                            pred_video_btchw.flatten(0, 1),
-                            noise_btchw.flatten(0, 1),
-                            next_timestep).unflatten(0,
-                                                     pred_video_btchw.shape[:2])
+                        if boundary_timestep is not None and i < len(
+                                high_noise_timesteps) - 1:
+                            noise_latents_btchw = self.scheduler.add_noise_high(
+                                pred_video_btchw.flatten(0, 1),
+                                noise_btchw.flatten(0, 1), next_timestep,
+                                torch.ones_like(next_timestep) *
+                                boundary_timestep).unflatten(
+                                    0, pred_video_btchw.shape[:2])
+                        elif boundary_timestep is not None and i == len(
+                                high_noise_timesteps) - 1:
+                            noise_latents_btchw = pred_video_btchw
+                        else:
+                            noise_latents_btchw = self.scheduler.add_noise(
+                                pred_video_btchw.flatten(0, 1),
+                                noise_btchw.flatten(0, 1),
+                                next_timestep).unflatten(
+                                    0, pred_video_btchw.shape[:2])
                         current_latents = noise_latents_btchw.permute(
                             0, 2, 1, 3, 4)
                     else:
@@ -341,24 +370,44 @@ class CausalDMDDenosingStage(DenoisingStage):
                                         attn_metadata=attn_metadata,
                                         forward_batch=batch):
                     t_expanded_context = t_context.unsqueeze(1)
-                    _ = current_model(
+
+                    if boundary_timestep is not None:
+                        self.transformer_2(
+                            context_bcthw,
+                            prompt_embeds,
+                            t_expanded_context,
+                            kv_cache=kv_cache2,
+                            crossattn_cache=crossattn_cache,
+                            current_start=(pos_start_base + start_index) *
+                            self.frame_seq_length,
+                            start_frame=start_index,
+                            **image_kwargs,
+                            **pos_cond_kwargs,
+                        )
+
+                    self.transformer(
                         context_bcthw,
                         prompt_embeds,
                         t_expanded_context,
-                        kv_cache=self.kv_cache1,
-                        crossattn_cache=self.crossattn_cache,
+                        kv_cache=kv_cache1,
+                        crossattn_cache=crossattn_cache,
                         current_start=(pos_start_base + start_index) *
                         self.frame_seq_length,
                         start_frame=start_index,
                         **image_kwargs,
                         **pos_cond_kwargs,
                     )
+
                 start_index += current_num_frames
+
+        if boundary_timestep is not None:
+            num_frames_to_remove = self.num_frames_per_block - 1
+            latents = latents[:, :, :-num_frames_to_remove, :, :]
 
         batch.latents = latents
         return batch
 
-    def _initialize_kv_cache(self, batch_size, dtype, device) -> None:
+    def _initialize_kv_cache(self, batch_size, dtype, device) -> list[dict]:
         """
         Initialize a Per-GPU KV cache aligned with the Wan model assumptions.
         """
@@ -392,10 +441,10 @@ class CausalDMDDenosingStage(DenoisingStage):
                 torch.tensor([0], dtype=torch.long, device=device),
             })
 
-        self.kv_cache1 = kv_cache1
+        return kv_cache1
 
     def _initialize_crossattn_cache(self, batch_size, max_text_len, dtype,
-                                    device) -> None:
+                                    device) -> list[dict]:
         """
         Initialize a Per-GPU cross-attention cache aligned with the Wan model assumptions.
         """
@@ -421,7 +470,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                 "is_init":
                 False,
             })
-        self.crossattn_cache = crossattn_cache
+        return crossattn_cache
 
     def verify_input(self, batch: ForwardBatch,
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
