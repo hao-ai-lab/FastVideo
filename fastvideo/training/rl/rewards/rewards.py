@@ -6,87 +6,20 @@ IMPORTANT: This module is designed exclusively for VIDEO generation models.
 All reward models must operate on video sequences [B, T, C, H, W], not single frames.
 
 This module provides:
-1. Abstract base class for VIDEO reward models
-2. Multi-reward aggregation for video
-3. Value model wrapper
-4. Integration with FastVideo video generation infrastructure
-
-Scope: VIDEO ONLY - No image-only reward models
+1. Multi-reward aggregation for video
+2. Value model wrapper
+3. Integration with FastVideo video generation infrastructure
 """
 
-from abc import ABC, abstractmethod
 from typing import Any
 
 import torch
 import torch.nn as nn
 
 from fastvideo.logger import init_logger
-
+from fastvideo.training.rl.rewards.ocr import OcrScorerVideo
+from fastvideo.training.rl.rewards.base import BaseRewardModel
 logger = init_logger(__name__)
-
-
-class BaseRewardModel(ABC, nn.Module):
-    """
-    Abstract base class for VIDEO reward models.
-
-    All VIDEO reward models should inherit from this class and implement
-    the compute_reward() method.
-
-    IMPORTANT: Reward models must process FULL VIDEO SEQUENCES, not individual frames.
-    Input shape is [B, T, C, H, W] where T is the temporal (frame) dimension.
-
-    For video-specific rewards, consider:
-    - Temporal coherence across frames
-    - Motion quality and smoothness
-    - Video-text alignment (not just frame-text)
-    - Multi-frame aesthetic quality
-    """
-
-    def __init__(self, model_path: str | None = None, device: str = "cuda"):
-        super().__init__()
-        self.model_path = model_path
-        self.device = device
-
-    @abstractmethod
-    def compute_reward(
-        self,
-        videos: torch.Tensor,  # [B, T, C, H, W] decoded video sequences
-        prompts: list[str],  # Text prompts describing videos
-        **kwargs: Any
-    ) -> torch.Tensor:
-        """
-        Compute rewards for generated VIDEO sequences.
-
-        IMPORTANT: This method must process the FULL temporal sequence [B, T, C, H, W].
-        Do NOT evaluate individual frames independently and average.
-
-        Args:
-            videos: Decoded video tensors [B, T, C, H, W] in range [0, 1]
-                   B = batch size
-                   T = number of frames (temporal dimension)
-                   C = channels (typically 3 for RGB)
-                   H, W = height, width
-            prompts: List of text prompts (length B) describing each video
-            **kwargs: Additional model-specific arguments
-
-        Returns:
-            rewards: Tensor of shape [B] with reward scores for each video sequence
-
-        Example:
-            >>> videos = torch.rand(4, 17, 3, 256, 256)  # 4 videos, 17 frames each
-            >>> prompts = ["A cat jumping", "A dog running", ...]
-            >>> rewards = model.compute_reward(videos, prompts)
-            >>> rewards.shape  # torch.Size([4])
-        """
-        raise NotImplementedError("Subclasses must implement compute_reward()")
-
-    @abstractmethod
-    def load_model(self) -> None:
-        """Load the reward model from checkpoint."""
-        raise NotImplementedError("Subclasses must implement load_model()")
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(model_path={self.model_path})"
 
 
 class MultiRewardAggregator(nn.Module):
@@ -304,9 +237,7 @@ class DummyRewardModel(BaseRewardModel):
 
 
 def create_reward_models(
-    reward_model_paths: str,
-    reward_weights: str,
-    reward_model_types: str,
+    reward_models: dict,
     device: str = "cuda"
 ) -> MultiRewardAggregator:
     """
@@ -316,19 +247,19 @@ def create_reward_models(
     (PickScore, ImageReward, GenEval, etc.) are NOT supported.
 
     Args:
-        reward_model_paths: Comma-separated paths to VIDEO reward models
-        reward_weights: Comma-separated weights for aggregation
-        reward_model_types: Comma-separated VIDEO reward types
+        reward_models: dictionary of reward model names to weights
+                      Example: {"paddle_ocr": 0.5, "video_score": 0.5}
         device: Device to load models on
 
     Returns:
         MultiRewardAggregator with loaded VIDEO reward models
 
-    Supported VIDEO Reward Types (Phase 2+):
-        - "video_score": Video aesthetic quality (multi-frame)
-        - "video_text_alignment": CLIP-based video-text similarity
-        - "temporal_coherence": Frame-to-frame consistency
-        - "motion_quality": Motion smoothness and realism
+    Supported VIDEO Reward Types:
+        - "paddle_ocr": PaddleOCR multi-frame video text recognition
+        - "video_score": Video aesthetic quality (multi-frame) - TODO
+        - "video_text_alignment": CLIP-based video-text similarity - TODO
+        - "temporal_coherence": Frame-to-frame consistency - TODO
+        - "motion_quality": Motion smoothness and realism - TODO
         - "dummy": Random rewards for testing (VIDEO-aware)
 
     NOT Supported (Image-Only):
@@ -339,45 +270,33 @@ def create_reward_models(
 
     Example:
         >>> models = create_reward_models(
-        ...     reward_model_paths="/path/to/video_score,/path/to/video_clip",
-        ...     reward_weights="0.5,0.5",
-        ...     reward_model_types="video_score,video_text_alignment",
+        ...     reward_models={
+        ...         "paddle_ocr": 0.5,
+        ...         "video_text_alignment": 0.5
+        ...     },
         ...     device="cuda"
         ... )
     """
-    if not reward_model_paths:
-        logger.warning("No reward models specified, using DummyRewardModel (VIDEO)")
-        return MultiRewardAggregator([DummyRewardModel()], [1.0])
 
-    paths = [p.strip() for p in reward_model_paths.split(",")]
-    types = [t.strip() for t in reward_model_types.split(",")]
 
-    if reward_weights:
-        weights = [float(w.strip()) for w in reward_weights.split(",")]
-    else:
-        weights = [1.0 / len(paths)] * len(paths)
+    assert reward_models, "No reward models specified. Please select at least 1 reward model"
 
-    assert len(paths) == len(types), \
-        f"Number of paths ({len(paths)}) must match number of types ({len(types)})"
+    types = [t.strip() for t in reward_models.keys()]
+    weights = list(reward_models.values())
 
-    assert len(paths) == len(weights), \
-        f"Number of paths ({len(paths)}) must match number of weights ({len(weights)})"
-
-    # Validate that no image-only reward types are specified
-    image_only_types = {"pickscore", "imagereward", "geneval", "aesthetic_predictor"}
-    for reward_type in types:
-        if reward_type.lower() in image_only_types:
-            raise ValueError(
-                f"Image-only reward type '{reward_type}' is not supported. "
-                f"This RL implementation is VIDEO-ONLY. "
-                f"Please use video-specific reward models instead."
-            )
+    assert len(types) == len(weights), \
+        f"Number of models ({len(types)}) must match number of weights ({len(weights)})"
 
     # Create reward models based on types
-    reward_models: list[BaseRewardModel] = []
-    for path, reward_type in zip(paths, types, strict=False):
+    models_list: list[BaseRewardModel] = []
+    for reward_type in types:
         if reward_type == "dummy":
             model = DummyRewardModel()
+
+        elif reward_type == "paddle_ocr":
+            logger.info("Creating PaddleOCR reward model")
+            model = OcrScorerVideo(device=device)
+
         elif reward_type == "video_score":
             # TODO: Implement VideoScore reward model (Phase 2)
             logger.warning(
@@ -409,11 +328,11 @@ def create_reward_models(
             )
             model = DummyRewardModel()
 
-        reward_models.append(model)
+        models_list.append(model)
 
     logger.info(
         "Created MultiRewardAggregator with %d VIDEO reward models",
-        len(reward_models)
+        len(models_list)
     )
 
-    return MultiRewardAggregator(reward_models, weights, normalize_rewards=True)
+    return MultiRewardAggregator(models_list, weights, normalize_rewards=True)
