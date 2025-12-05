@@ -1,4 +1,4 @@
-from .reward_models import (
+from .rewards import (
     create_reward_models,
     MultiRewardAggregator,
     ValueModel
