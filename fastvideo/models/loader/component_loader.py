@@ -320,37 +320,27 @@ class TextEncoderLoader(ComponentLoader):
         return model.eval()
 
 
-class ImageEncoderLoader(TextEncoderLoader):
-
+class ImageEncoderLoader(ComponentLoader):
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
-        """Load the text encoders based on the model path, and inference args."""
-        # model_config: PretrainedConfig = get_hf_config(
-        #     model=model_path,
-        #     trust_remote_code=fastvideo_args.trust_remote_code,
-        #     revision=fastvideo_args.revision,
-        #     model_override_args=None,
-        # )
-        with open(os.path.join(model_path, "config.json")) as f:
-            model_config = json.load(f)
-        model_config.pop("_name_or_path", None)
-        model_config.pop("transformers_version", None)
-        model_config.pop("torch_dtype", None)
-        model_config.pop("model_type", None)
-        logger.info("HF Model config: %s", model_config)
-
-        encoder_config = fastvideo_args.pipeline_config.image_encoder_config
-        encoder_config.update_model_arch(model_config)
-
+        """Load the image encoder using HuggingFace transformers."""
+        from transformers import CLIPVisionModel as HFCLIPVisionModel        
         from fastvideo.platforms import current_platform
 
         if fastvideo_args.image_encoder_cpu_offload:
             target_device = torch.device("mps") if current_platform.is_mps() else torch.device("cpu")
         else:
             target_device = get_local_torch_device()
-        # TODO(will): add support for other dtypes
-        return self.load_model(
-            model_path, encoder_config, target_device, fastvideo_args,
-            fastvideo_args.pipeline_config.image_encoder_precision)
+        
+        # Load HuggingFace CLIPVisionModel directly
+        precision = fastvideo_args.pipeline_config.image_encoder_precision
+        dtype = PRECISION_TO_TYPE.get(precision, torch.bfloat16)
+
+        model = HFCLIPVisionModel.from_pretrained(
+            model_path,
+            torch_dtype=dtype
+        ).to(target_device)
+
+        return model.eval()
 
 
 class ImageProcessorLoader(ComponentLoader):

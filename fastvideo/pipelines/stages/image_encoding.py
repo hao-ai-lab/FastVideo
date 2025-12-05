@@ -101,6 +101,9 @@ class ImageEncodingStage(PipelineStage):
 
 
 class MatrixGameImageEncodingStage(ImageEncodingStage):
+    CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073]
+    CLIP_STD = [0.26862954, 0.26130258, 0.27577711]
+    
     @torch.no_grad()
     def forward(
         self,
@@ -112,24 +115,42 @@ class MatrixGameImageEncodingStage(ImageEncodingStage):
 
         image = batch.pil_image
 
-        # Handle tensor input from causal pipeline (InputValidationStage converts PIL to tensor)
         if isinstance(image, torch.Tensor):
-            # Extract first frame if 5D: [B, C, F, H, W] -> [B, C, H, W]
             if image.dim() == 5:
-                image = image[:, :, 0]
-            # CLIPImageProcessor expects values in [0, 1], tensor is in [-1, 1]
-            image = (image + 1.0) / 2.0
-            image = image.clamp(0, 1)
-
-        image_inputs = self.image_processor(
-            images=image, return_tensors="pt").to(
-                get_local_torch_device())
+                image = image[:, :, 0] # Extract first frame: [B, C, T, H, W] -> [B, C, H, W]
+        else:
+            from torchvision import transforms as T
+            transform = T.Compose([
+                T.ToTensor(),  # [0, 1]
+                T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),  # -> [-1, 1]
+            ])
+            image = transform(image).unsqueeze(0)  # [1, C, H, W]
+        
+        device = get_local_torch_device()
+        image = image.to(device)
+        
+        # F.interpolate with bicubic
+        image = torch.nn.functional.interpolate(
+            image, 
+            size=(224, 224), 
+            mode='bicubic', 
+            align_corners=False
+        )
+        
+        #  [-1, 1] to [0, 1]
+        image = image * 0.5 + 0.5
+        
+        # CLIP normalization
+        mean = torch.tensor(self.CLIP_MEAN, device=device, dtype=image.dtype).view(1, 3, 1, 1)
+        std = torch.tensor(self.CLIP_STD, device=device, dtype=image.dtype).view(1, 3, 1, 1)
+        image = (image - mean) / std
 
         with set_forward_context(current_timestep=0, attn_metadata=None):
-            outputs = self.image_encoder(output_hidden_states=True,
-                                         **image_inputs)
-            if outputs.hidden_states is not None and len(
-                    outputs.hidden_states) >= 2:
+            outputs = self.image_encoder(
+                pixel_values=image,
+                output_hidden_states=True
+            )
+            if outputs.hidden_states is not None and len(outputs.hidden_states) >= 2:
                 image_embeds = outputs.hidden_states[-2]
             else:
                 image_embeds = outputs.last_hidden_state

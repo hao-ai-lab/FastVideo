@@ -222,11 +222,7 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 # Fallback: assume q.shape[1] is single frame (shouldn't happen in causal mode)
                 frame_seqlen = q.shape[1]
                 logger.warning("grid_sizes not provided, using q.shape[1] as frame_seqlen")
-            
-            logger.info(f"[Attn] current_start={current_start}, start_frame={start_frame}")
-            logger.info(f"[Attn] roped_query: mean={roped_query.float().mean():.6f}, std={roped_query.float().std():.6f}")
-            logger.info(f"[Attn] roped_key: mean={roped_key.float().mean():.6f}, std={roped_key.float().std():.6f}")
-            
+
             current_end = current_start + roped_query.shape[1]
             sink_tokens = self.sink_size * frame_seqlen
             
@@ -258,22 +254,16 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
 
-            logger.info(f"[KVCache] global_end={kv_cache['global_end_index'].item()}, local_end={kv_cache['local_end_index'].item()}")
-            
             kv_start = max(0, local_end_index - max_attention_size)
             k_for_attn = kv_cache["k"][:, kv_start:local_end_index]
             v_for_attn = kv_cache["v"][:, kv_start:local_end_index]
-            
-            logger.info(f"[KVCache] k_slice: mean={k_for_attn.float().mean():.6f}, std={k_for_attn.float().std():.6f}")
-            
+
             x = torch.nn.functional.scaled_dot_product_attention(
                 roped_query.transpose(1, 2),
                 k_for_attn.transpose(1, 2),
                 v_for_attn.transpose(1, 2),
             ).transpose(1, 2)
-            
-            logger.info(f"[Attn] output: mean={x.float().mean():.6f}, std={x.float().std():.6f}")
-            
+
             kv_cache["global_end_index"].fill_(current_end)
             kv_cache["local_end_index"].fill_(local_end_index)
 
@@ -441,9 +431,8 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         norm_hidden_states, hidden_states = self.self_attn_residual_norm(
             hidden_states, attn_output, gate_msa, null_shift, null_scale)
 
-        # use unnormalized hidden_states for cross-attention
-        # official uses norm3=Identity
-        attn_output = self.attn2(hidden_states,
+        # norm3 weights are loaded into self_attn_residual_norm.norm
+        attn_output = self.attn2(norm_hidden_states,
                                  context=encoder_hidden_states,
                                  context_lens=None,
                                  crossattn_cache=crossattn_cache)
@@ -1028,10 +1017,26 @@ class CausalMatrixGameWanModel(BaseDiT):
             num_frame_per_block=self.num_frame_per_block
         )
 
-        for block in self.blocks:
+        # Initialize kv_cache, kv_cache_mouse, kv_cache_keyboard, crossattn_cache if not provided
+        kv_cache = kwargs.pop("kv_cache", [None] * len(self.blocks))
+        kv_cache_mouse = kwargs.pop("kv_cache_mouse", [None] * len(self.blocks))
+        kv_cache_keyboard = kwargs.pop("kv_cache_keyboard", [None] * len(self.blocks))
+        crossattn_cache = kwargs.pop("crossattn_cache", [None] * len(self.blocks))
+
+        for i, block in enumerate(self.blocks):
+            block_crossattn_cache = None
+            if crossattn_cache is not None:
+                if crossattn_cache[i] is None:
+                    crossattn_cache[i] = {"is_init": False}
+                block_crossattn_cache = crossattn_cache[i]
+
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 hidden_states = self._gradient_checkpointing_func(
                     block, hidden_states, encoder_hidden_states, timestep_proj, freqs_cis,
+                    kv_cache=kv_cache[i],
+                    kv_cache_mouse=kv_cache_mouse[i],
+                    kv_cache_keyboard=kv_cache_keyboard[i],
+                    crossattn_cache=block_crossattn_cache,
                     block_mask=self.block_mask,
                     grid_sizes=grid_sizes,
                     mouse_cond=mouse_cond,
@@ -1046,6 +1051,10 @@ class CausalMatrixGameWanModel(BaseDiT):
                     encoder_hidden_states,
                     timestep_proj,
                     freqs_cis,
+                    kv_cache=kv_cache[i],
+                    kv_cache_mouse=kv_cache_mouse[i],
+                    kv_cache_keyboard=kv_cache_keyboard[i],
+                    crossattn_cache=block_crossattn_cache,
                     block_mask=self.block_mask,
                     grid_sizes=grid_sizes,
                     mouse_cond=mouse_cond,

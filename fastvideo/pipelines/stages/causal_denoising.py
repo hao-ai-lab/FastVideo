@@ -570,19 +570,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 image_embed.to(target_dtype) for image_embed in image_embeds
             ]
 
-        image_kwargs = self.prepare_extra_func_kwargs(
-            self.transformer.forward,
-            {
-                "encoder_hidden_states_image": image_embeds,
-            },
-        )
-
-        pos_cond_kwargs = self.prepare_extra_func_kwargs(
-            self.transformer.forward,
-            {
-                "encoder_attention_mask": batch.prompt_attention_mask,
-            },
-        )
+        # directly set the kwarg.
+        image_kwargs = {"encoder_hidden_states_image": image_embeds}
+        pos_cond_kwargs = {}
 
         if st_attn_available and self.attn_backend == SlidingTileAttentionBackend:
             self.prepare_sta_param(batch, fastvideo_args)
@@ -620,13 +610,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     return kv_cache2
             return kv_cache1
 
-        text_len = 512
-        if hasattr(fastvideo_args.pipeline_config, 'text_encoder_configs') and len(fastvideo_args.pipeline_config.text_encoder_configs) > 0:
-            text_len = fastvideo_args.pipeline_config.text_encoder_configs[0].arch_config.text_len
-
         crossattn_cache = self._initialize_crossattn_cache(
             batch_size=latents.shape[0],
-            max_text_len=text_len,
+            max_text_len=257, # 1 CLS + 256 patch tokens
             dtype=target_dtype,
             device=latents.device)
 
@@ -643,25 +629,17 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         if boundary_timestep is not None:
             block_sizes[0] = 1
 
-        # NOTE: Unlike other models, MatrixGame does NOT process the first frame separately.
+        # NOTE: MatrixGame does NOT process the first frame separately.
         # The first frame information is already encoded in batch.image_latent (cond_concat)
         # and will be used by the model via channel concatenation: torch.cat([x, cond_concat], dim=1)
-        # This is consistent with the official Matrix-Game-2 implementation which does not use initial_latent.
-        # 
-        # Processing the first frame separately here would cause:
-        # 1. block_sizes.pop(0) removes one block from processing
-        # 2. start_index += 1 skips frames
-        # 3. Last frames (e.g., 13-14 for 15 latent frames) never get processed
-        # 4. Those frames remain as random noise, causing the "frame 49 crash" bug
 
         with self.progress_bar(total=len(block_sizes) * len(timesteps)) as progress_bar:
             for current_num_frames in block_sizes:
                 current_latents = latents[:, :, start_index:start_index + current_num_frames, :, :]
                 noise_latents_btchw = current_latents.permute(0, 2, 1, 3, 4)
                 video_raw_latent_shape = noise_latents_btchw.shape
-                
-                logger.info(f"block start {start_index} len {current_num_frames} noisy_input mean {float(current_latents.mean()):.4f} std {float(current_latents.std()):.4f}")
 
+                # NOTE: crossattn_cache should NOT be reset between blocks!
 
                 action_kwargs = self._prepare_action_kwargs(batch, start_index, current_num_frames)
 
@@ -749,8 +727,6 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                             noise_input_latent=noise_latents.flatten(0, 1),
                             timestep=t_expand,
                             scheduler=self.scheduler).unflatten(0, pred_noise_btchw.shape[:2])
-                    
-                    logger.info(f"step {i} timestep {int(t_cur)} pred mean {float(pred_video_btchw.mean()):.4f} std {float(pred_video_btchw.std()):.4f}")
 
                     if i < len(timesteps) - 1:
                         next_timestep = timesteps[i + 1] * torch.ones(
@@ -828,8 +804,6 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                         **pos_cond_kwargs,
                         **context_model_kwargs,
                     )
-                    
-                    logger.info(f"=== Context Update: Block {start_index} ===")
 
                 start_index += current_num_frames
 

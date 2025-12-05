@@ -581,11 +581,30 @@ class CLIPVisionModel(ImageEncoder):
         self,
         pixel_values: torch.Tensor,
         feature_sample_layers: list[int] | None = None,
+        output_hidden_states: bool = False,
         **kwargs,
     ) -> BaseEncoderOutput:
-        last_hidden_state = self.vision_model(pixel_values,
-                                              feature_sample_layers)
-        return BaseEncoderOutput(last_hidden_state=last_hidden_state)
+        if output_hidden_states: # return all hidden states
+            hidden_states = self.vision_model.embeddings(pixel_values)
+            hidden_states = self.vision_model.pre_layrnorm(hidden_states)
+
+            hidden_states_tuple = [hidden_states]
+            for layer in self.vision_model.encoder.layers:
+                hidden_states = layer(hidden_states)
+                hidden_states_tuple.append(hidden_states)
+
+            last_hidden_state = hidden_states_tuple[-1]
+
+            if self.vision_model.post_layernorm is not None:
+                last_hidden_state = self.vision_model.post_layernorm(last_hidden_state)
+            
+            return BaseEncoderOutput(
+                last_hidden_state=last_hidden_state,
+                hidden_states=tuple(hidden_states_tuple)
+            )
+        else:
+            last_hidden_state = self.vision_model(pixel_values, feature_sample_layers)
+            return BaseEncoderOutput(last_hidden_state=last_hidden_state)
 
     @property
     def device(self):
