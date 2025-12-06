@@ -74,9 +74,9 @@ def run_vae_tests():
 def run_transformer_tests():
     run_test("hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/transformers -vs")
 
-@app.function(gpu="L40S:2", image=image, timeout=2700)
+@app.function(gpu="L40S:2", image=image, timeout=2700, secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})])
 def run_ssim_tests():
-    run_test("pytest ./fastvideo/tests/ssim -vs")
+    run_test("hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/ssim -vs")
 
 @app.function(gpu="L40S:4", image=image, timeout=900, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
 def run_training_tests():

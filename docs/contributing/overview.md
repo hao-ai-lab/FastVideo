@@ -70,3 +70,7 @@ uv pip install ninja
 
 python setup.py install
 ```
+
+## Testing
+
+Please refer to the [Testing Guide](testing.md) for more information on how to add and run tests in FastVideo.
