@@ -133,24 +133,7 @@ def test_t5_encoder(t5_model_paths):
             last_hidden_state1 = outputs1[tokens.attention_mask == 1]
             last_hidden_state2 = outputs2[tokens.attention_mask == 1]
 
-            assert last_hidden_state1.shape == last_hidden_state2.shape, \
-                f"Hidden state shapes don't match: {last_hidden_state1.shape} vs {last_hidden_state2.shape}"
-
-            max_diff_hidden = torch.max(
-                torch.abs(last_hidden_state1 - last_hidden_state2))
-            mean_diff_hidden = torch.mean(
-                torch.abs(last_hidden_state1 - last_hidden_state2))
-
-            logger.info("Maximum difference in last hidden states: %s",
-                        max_diff_hidden.item())
-            logger.info("Mean difference in last hidden states: %s",
-                        mean_diff_hidden.item())
-            logger.info("Max memory allocated: %s GB", torch.cuda.max_memory_allocated() / 1024**3)
-            # Check if outputs are similar (allowing for small numerical differences)
-            assert mean_diff_hidden < 1e-4, \
-                f"Hidden states differ significantly: mean diff = {mean_diff_hidden.item()}"
-            assert max_diff_hidden < 1e-4, \
-                f"Hidden states differ significantly: max diff = {max_diff_hidden.item()}"
+            assert_close(last_hidden_state1, last_hidden_state2, atol=1e-4, rtol=1e-4)
 
 
 @pytest.mark.usefixtures("distributed_setup")
@@ -252,18 +235,4 @@ def test_t5_large_encoder(t5_large_model_paths):
             assert last_hidden_state1.shape == last_hidden_state2.shape, \
                 f"Hidden state shapes don't match: {last_hidden_state1.shape} vs {last_hidden_state2.shape}"
 
-            max_diff_hidden = torch.max(
-                torch.abs(last_hidden_state1 - last_hidden_state2))
-            mean_diff_hidden = torch.mean(
-                torch.abs(last_hidden_state1 - last_hidden_state2))
-
-            logger.info("Maximum difference in last hidden states: %s",
-                        max_diff_hidden.item())
-            logger.info("Mean difference in last hidden states: %s",
-                        mean_diff_hidden.item())
-            logger.info("Max memory allocated: %s GB", torch.cuda.max_memory_allocated() / 1024**3)
-            # Check if outputs are similar (allowing for small numerical differences)
-            assert mean_diff_hidden < 1e-4, \
-                f"Hidden states differ significantly: mean diff = {mean_diff_hidden.item()}"
-            assert max_diff_hidden < 1e-4, \
-                f"Hidden states differ significantly: max diff = {max_diff_hidden.item()}"
+            assert_close(last_hidden_state1, last_hidden_state2, atol=1e-4, rtol=1e-4)

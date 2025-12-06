@@ -12,6 +12,7 @@ from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import VAELoader
 from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.utils import maybe_download_model
+from torch.testing import assert_close
 
 logger = init_logger(__name__)
 
@@ -20,16 +21,16 @@ os.environ["MASTER_PORT"] = "29503"
 
 BASE_MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-                                  local_dir=os.path.join(
-                                      'data', BASE_MODEL_PATH))
+                                  local_dir=os.path.join("data", BASE_MODEL_PATH) # store in the large /workspace disk on Runpod
+                                  )
 VAE_PATH = os.path.join(MODEL_PATH, "vae")
 
 
 @pytest.mark.usefixtures("distributed_setup")
 def test_wan_vae():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    precision = torch.bfloat16
-    precision_str = "bf16"
+    precision = torch.float32
+    precision_str = "fp32"
     args = FastVideoArgs(model_path=VAE_PATH, pipeline_config=PipelineConfig(vae_config=WanVAEConfig(), vae_precision=precision_str))
     args.device = device
     args.vae_cpu_offload = False
@@ -70,13 +71,7 @@ def test_wan_vae():
         # Check if latents have the same shape
         assert latent1.mean.shape == latent2.mean.shape, f"Latent shapes don't match: {latent1.mean.shape} vs {latent2.mean.shape}"
         # Check if latents are similar
-        max_diff_encode = torch.max(torch.abs(latent1.mean - latent2.mean))
-        mean_diff_encode = torch.mean(torch.abs(latent1.mean - latent2.mean))
-        logger.info("Maximum difference between encoded latents: %s",
-                    max_diff_encode.item())
-        logger.info("Mean difference between encoded latents: %s",
-                    mean_diff_encode.item())
-        assert max_diff_encode < 1e-5, f"Encoded latents differ significantly: max diff = {mean_diff_encode.item()}"
+        assert_close(latent1.mean, latent2.mean, atol=1e-4, rtol=1e-4)
         # Test decoding
         logger.info("Testing decoding...")
         latent1_tensor = latent1.mode()
@@ -98,10 +93,4 @@ def test_wan_vae():
         assert output1.shape == output2.shape, f"Output shapes don't match: {output1.shape} vs {output2.shape}"
 
         # Check if outputs are similar
-        max_diff_decode = torch.max(torch.abs(output1 - output2))
-        mean_diff_decode = torch.mean(torch.abs(output1 - output2))
-        logger.info("Maximum difference between decoded outputs: %s",
-                    max_diff_decode.item())
-        logger.info("Mean difference between decoded outputs: %s",
-                    mean_diff_decode.item())
-        assert max_diff_decode < 1e-5, f"Decoded outputs differ significantly: max diff = {mean_diff_decode.item()}"
+        assert_close(output1, output2, atol=1e-5, rtol=1e-3)

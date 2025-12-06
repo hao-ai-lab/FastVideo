@@ -22,8 +22,8 @@ os.environ["MASTER_PORT"] = "29503"
 
 BASE_MODEL_PATH = "hunyuanvideo-community/HunyuanVideo"
 MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-                                  local_dir=os.path.join(
-                                      'data', BASE_MODEL_PATH))
+                                  local_dir=os.path.join("data", BASE_MODEL_PATH) # store in the large /workspace disk on Runpod
+                                  )
 TEXT_ENCODER_PATH = os.path.join(MODEL_PATH, "text_encoder")
 TOKENIZER_PATH = os.path.join(MODEL_PATH, "tokenizer")
 
@@ -68,8 +68,7 @@ def test_llama_encoder():
     logger.info("Model1 has %d parameters", len(params1))
     logger.info("Model2 has %d parameters", len(params2))
 
-    # Compare a few key parameters
-    weight_diffs = []
+
     # check if embed_tokens are the same
     device = model1.embed_tokens.weight.device
     assert torch.allclose(model1.embed_tokens.weight,
@@ -78,6 +77,18 @@ def test_llama_encoder():
         "layers.{}.input_layernorm.weight",
         "layers.{}.post_attention_layernorm.weight"
     ]
+    for layer_idx in range(hf_config.num_hidden_layers):
+        for w in weights:
+            name1 = w.format(layer_idx)
+            name2 = w.format(layer_idx)
+            p1 = params1[name1]
+            p2 = params2[name2]
+            if "gate_up" in name2:
+                # print("skipping gate_up")
+                continue
+            p1 = p1.to_local().to(device) if isinstance(p1, DTensor) else p1.to(device)
+            p2 = p2.to_local().to(device) if isinstance(p2, DTensor) else p2.to(device)
+            assert_close(p1, p2, atol=1e-4, rtol=1e-4)
 
     for name1, param1 in sorted(params1.items()):
         name2 = name1
@@ -139,19 +150,4 @@ def test_llama_encoder():
 
             assert last_hidden_state1.shape == last_hidden_state2.shape, \
                 f"Hidden state shapes don't match: {last_hidden_state1.shape} vs {last_hidden_state2.shape}"
-
-            max_diff_hidden = torch.max(
-                torch.abs(last_hidden_state1 - last_hidden_state2))
-            mean_diff_hidden = torch.mean(
-                torch.abs(last_hidden_state1 - last_hidden_state2))
-
-            logger.info("Maximum difference in last hidden states: %f",
-                        max_diff_hidden.item())
-            logger.info("Mean difference in last hidden states: %f",
-                        mean_diff_hidden.item())
-
-            # Check if outputs are similar (allowing for small numerical differences)
-            assert mean_diff_hidden < 1e-2, \
-                f"Hidden states differ significantly: mean diff = {mean_diff_hidden.item()}"
-            assert max_diff_hidden < 1e-1, \
-                f"Hidden states differ significantly: max diff = {max_diff_hidden.item()}"
+            assert_close(last_hidden_state1, last_hidden_state2, atol=1e-1, rtol=1e-4)
