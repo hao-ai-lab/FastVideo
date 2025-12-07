@@ -6,26 +6,19 @@ Compares FastVideo's Cosmos25Transformer3DModel with the official MinimalV1LVGDi
 import os
 import sys
 
-import numpy as np
 import pytest
 import torch
 
 # Add cosmos-predict2.5 to Python path for loading reference model
-# cosmos-predict2.5 is a sibling directory to FastVideo at video/cosmos-predict2.5
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
-# From test file: video/FastVideo/fastvideo/tests/transformers/
-# Go up 4 levels to reach: video/
-# Then join with: cosmos-predict2.5
+
 COSMOS_PREDICT2_5_PATH = os.path.join(TEST_DIR, '..', '..', '..', '..', 'cosmos-predict2.5')
 COSMOS_PREDICT2_5_PATH = os.path.normpath(COSMOS_PREDICT2_5_PATH)
 if os.path.exists(COSMOS_PREDICT2_5_PATH) and COSMOS_PREDICT2_5_PATH not in sys.path:
     sys.path.insert(0, COSMOS_PREDICT2_5_PATH)
 
-from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.forward_context import set_forward_context
-from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.loader.component_loader import TransformerLoader
 from fastvideo.utils import maybe_download_model
 # Use Cosmos 2.5 specific config
 from fastvideo.configs.models.dits.cosmos2_5 import Cosmos25VideoConfig
@@ -46,17 +39,11 @@ os.environ["MASTER_PORT"] = "29505"
 # COSMOS 2.5 model path - update this based on the actual HuggingFace model ID
 # The model has subdirectories: base/pre-trained, base/post-trained, auto/multiview, robot/action-cond
 BASE_MODEL_PATH = "nvidia/Cosmos-Predict2.5-2B"
-# Use base/post-trained for the general-purpose model
-CHECKPOINT_SUBDIR = "base/post-trained"  # or "base/pre-trained", "auto/multiview", etc.
-# Checkpoint filename in the subdirectory
+CHECKPOINT_SUBDIR = "base/post-trained"
 CHECKPOINT_FILENAME = "81edfebe-bd6a-4039-8c1d-737df1a790bf_ema_bf16.pt"
 
-# Download model to relative path: data/<BASE_MODEL_PATH>/
-# This returns a relative path from the current working directory (repo root)
-MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-                                  local_dir=os.path.join(
-                                      'data', BASE_MODEL_PATH))
-# Transformer path may be at root or in checkpoint subdirectory
+
+MODEL_PATH = maybe_download_model(BASE_MODEL_PATH, local_dir=None)
 TRANSFORMER_PATH = os.path.join(MODEL_PATH, CHECKPOINT_SUBDIR, "transformer")
 if not os.path.exists(TRANSFORMER_PATH):
     # Try without subdirectory
@@ -73,13 +60,11 @@ def load_reference_cosmos25_model(checkpoint_path: str, device, dtype):
         from cosmos_predict2._src.predict2.networks.minimal_v1_lvg_dit import MinimalV1LVGDiT
         
         # COSMOS 2.5 2B model configuration
-        # Note: MinimalV1LVGDiT adds 1 channel for condition mask in __init__
-        # So we pass in_channels=16, it becomes 17, then concat_padding_mask adds 1 → 18 total
         model_config = {
             'max_img_h': 240,
             'max_img_w': 240,
             'max_frames': 128,
-            'in_channels': 16,  # Will become 17 after MinimalV1LVGDiT adds condition mask, then 18 with concat_padding_mask
+            'in_channels': 16, 
             'out_channels': 16,
             'patch_spatial': 2,
             'patch_temporal': 1,
@@ -98,10 +83,10 @@ def load_reference_cosmos25_model(checkpoint_path: str, device, dtype):
             'rope_t_extrapolation_ratio': 1.0,
             'extra_per_block_abs_pos_emb': False,
             'rope_enable_fps_modulation': False,
-            'use_crossattn_projection': True,  # Enable projection to match checkpoint
-            'crossattn_proj_in_channels': 100352,  # Qwen 7B embedding dimension
+            'use_crossattn_projection': True,  
+            'crossattn_proj_in_channels': 100352, 
             'concat_padding_mask': True,
-            'atten_backend': 'torch',  # Use PyTorch backend for testing
+            'atten_backend': 'torch',
         }
         
         model = MinimalV1LVGDiT(**model_config)
@@ -212,8 +197,8 @@ def test_cosmos25_transformer():
         adaln_lora_dim=256,
         use_adaln_lora=True,
         concat_padding_mask=True,
-        extra_pos_embed_type=None,  # or "learnable" if using learnable pos emb
-        use_crossattn_projection=True,  # Enable to match official model
+        extra_pos_embed_type=None,  
+        use_crossattn_projection=True, 
         rope_enable_fps_modulation=False,
         qk_norm="rms_norm",
     )
@@ -250,9 +235,6 @@ def test_cosmos25_transformer():
     fastvideo_model.eval()
     
     # Construct checkpoint path using relative paths
-    # Path structure: <MODEL_PATH>/<CHECKPOINT_SUBDIR>/<CHECKPOINT_FILENAME>
-    # Example: data/nvidia/Cosmos-Predict2.5-2B/base/post-trained/81edfebe-bd6a-4039-8c1d-737df1a790bf_ema_bf16.pt
-    # All paths are relative to the repository root (no absolute paths used)
     checkpoint_file = os.path.join(MODEL_PATH, CHECKPOINT_SUBDIR, CHECKPOINT_FILENAME)
     
     if not os.path.exists(checkpoint_file):
@@ -287,7 +269,6 @@ def test_cosmos25_transformer():
             model_state, param_names_mapping_fn
         )
         
-        # Filter out keys that shouldn't be loaded (e.g., pos_embedder.* computed dynamically)
         # Only load keys that exist in the model
         model_param_names = set(fastvideo_model.state_dict().keys())
         filtered_state_dict = {
@@ -354,7 +335,7 @@ def test_cosmos25_transformer():
     encoder_hidden_states = torch.randn(
         batch_size,
         seq_len,
-        100352,  # Qwen 7B embedding dimension (matches crossattn_proj input)
+        100352,  
         device=device,
         dtype=precision
     )
@@ -458,8 +439,6 @@ def test_cosmos25_transformer():
         logger.info(f"Mean difference: {mean_diff.item():.6f}")
         logger.info(f"Relative difference: {relative_diff.item():.6f}")
         
-        # Note: Both models now use the same crossattn_projection (100352 → 1024) with
-        # 100K-dim input embeddings, so they should match much more closely.
         
         # Allow for some numerical differences due to implementation details
         assert max_diff < 1e-1, f"Maximum difference too large: {max_diff.item()}"

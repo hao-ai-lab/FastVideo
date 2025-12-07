@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from fastvideo.attention import DistributedAttention, LocalAttention
 from fastvideo.configs.models.dits.cosmos2_5 import Cosmos25VideoConfig
 from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import RMSNorm
@@ -14,6 +15,7 @@ from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import apply_rotary_emb
 from fastvideo.layers.visual_embedding import Timesteps
 from fastvideo.models.dits.base import BaseDiT
+from fastvideo.platforms import AttentionBackendEnum
 
 
 class Cosmos25PatchEmbed(nn.Module):
@@ -89,19 +91,13 @@ class Cosmos25TimestepEmbedding(nn.Module):
             emb: Standard embedding (B, T, D)
             adaln_lora: AdaLN-LoRA parameters (B, T, 3D) or None
         """
-        # print(f"    [FastVideo TimestepEmbedding] Input sample: shape={sample.shape}, sum={sample.float().sum():.6f}, dtype={sample.dtype}")
-        # print(f"    [FastVideo TimestepEmbedding] linear_1.weight: sum={self.linear_1.weight.float().sum():.6f}, dtype={self.linear_1.weight.dtype}")
         emb = self.linear_1(sample)
-        # print(f"    [FastVideo TimestepEmbedding] After linear_1: sum={emb.float().sum():.6f}, dtype={emb.dtype}")
         emb = self.activation(emb)
         emb = self.linear_2(emb)
-        # print(f"    [FastVideo TimestepEmbedding] After linear_2: sum={emb.float().sum():.6f}")
 
         if self.use_adaln_lora:
             adaln_lora = emb  # (B, T, 3D)
             emb_standard = sample  # Use input as standard embedding
-            # print(f"    [FastVideo TimestepEmbedding] adaln_lora: sum={adaln_lora.float().sum():.6f}")
-            # print(f"    [FastVideo TimestepEmbedding] emb_standard: sum={emb_standard.float().sum():.6f}")
         else:
             emb_standard = emb
             adaln_lora = None
@@ -206,6 +202,7 @@ class Cosmos25SelfAttention(nn.Module):
         num_heads: int,
         qk_norm: bool = True,
         eps: float = 1e-6,
+        supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
     ) -> None:
         assert dim % num_heads == 0
         super().__init__()
@@ -220,6 +217,35 @@ class Cosmos25SelfAttention(nn.Module):
 
         self.norm_q = RMSNorm(self.head_dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = RMSNorm(self.head_dim, eps=eps) if qk_norm else nn.Identity()
+
+        # Use DistributedAttention for flexible backend support (torch SDPA / FlashAttention)
+        # For single-GPU (non-distributed), use LocalAttention to avoid distributed requirements
+        if supported_attention_backends is None:
+            supported_attention_backends = (AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA)
+        
+        # Check if distributed environment is initialized
+        try:
+            from fastvideo.distributed.parallel_state import model_parallel_is_initialized
+            use_distributed = torch.distributed.is_initialized() and model_parallel_is_initialized()
+        except:
+            use_distributed = False
+        
+        if use_distributed:
+            self.attn = DistributedAttention(
+                num_heads=num_heads,
+                head_size=self.head_dim,
+                causal=False,
+                supported_attention_backends=supported_attention_backends,
+                prefix="self_attn"
+            )
+        else:
+            self.attn = LocalAttention(
+                num_heads=num_heads,
+                head_size=self.head_dim,
+                causal=False,
+                supported_attention_backends=supported_attention_backends,
+            )
+        self._use_distributed = use_distributed
 
     def forward(
         self,
@@ -251,13 +277,19 @@ class Cosmos25SelfAttention(nn.Module):
             query = apply_rotary_emb(query, (cos, sin), use_real=True, use_real_unbind_dim=-2)
             key = apply_rotary_emb(key, (cos, sin), use_real=True, use_real_unbind_dim=-2)
 
-        # Attention computation
-        attn_output = torch.nn.functional.scaled_dot_product_attention(
-            query, key, value, dropout_p=0.0, is_causal=False
-        )
+        # Attention computation using DistributedAttention or LocalAttention
+        # Both expect (B, S, H, D_h), so transpose first
+        query = query.transpose(1, 2)  # (B, H, S, D_h) -> (B, S, H, D_h)
+        key = key.transpose(1, 2)
+        value = value.transpose(1, 2)
+        
+        if self._use_distributed:
+            attn_output, _ = self.attn(query, key, value)
+        else:
+            attn_output = self.attn(query, key, value)
 
-        # Reshape back: (B, H, S, D_h) -> (B, S, H*D_h)
-        attn_output = attn_output.transpose(1, 2).flatten(-2, -1)
+        # Reshape back: (B, S, H, D_h) -> (B, S, H*D_h)
+        attn_output = attn_output.flatten(-2, -1)
 
         # Output projection
         attn_output = self.to_out(attn_output)
@@ -276,6 +308,7 @@ class Cosmos25CrossAttention(nn.Module):
         num_heads: int,
         qk_norm: bool = True,
         eps: float = 1e-6,
+        supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
     ) -> None:
         assert dim % num_heads == 0
         super().__init__()
@@ -291,6 +324,35 @@ class Cosmos25CrossAttention(nn.Module):
 
         self.norm_q = RMSNorm(self.head_dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = RMSNorm(self.head_dim, eps=eps) if qk_norm else nn.Identity()
+
+        # Use DistributedAttention for flexible backend support (torch SDPA / FlashAttention)
+        # For single-GPU (non-distributed), use LocalAttention to avoid distributed requirements
+        if supported_attention_backends is None:
+            supported_attention_backends = (AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA)
+        
+        # Check if distributed environment is initialized
+        try:
+            from fastvideo.distributed.parallel_state import model_parallel_is_initialized
+            use_distributed = torch.distributed.is_initialized() and model_parallel_is_initialized()
+        except:
+            use_distributed = False
+        
+        if use_distributed:
+            self.attn = DistributedAttention(
+                num_heads=num_heads,
+                head_size=self.head_dim,
+                causal=False,
+                supported_attention_backends=supported_attention_backends,
+                prefix="cross_attn"
+            )
+        else:
+            self.attn = LocalAttention(
+                num_heads=num_heads,
+                head_size=self.head_dim,
+                causal=False,
+                supported_attention_backends=supported_attention_backends,
+            )
+        self._use_distributed = use_distributed
 
     def forward(
         self,
@@ -317,18 +379,17 @@ class Cosmos25CrossAttention(nn.Module):
         query = self.norm_q(query)
         key = self.norm_k(key)
 
-        # Reshape for attention: (B, S, H, D_h) -> (B, H, S, D_h)
-        query = query.transpose(1, 2)
-        key = key.transpose(1, 2)
-        value = value.transpose(1, 2)
+        # Note: Both DistributedAttention and LocalAttention expect (B, S, H, D_h), which is what we already have
+        # No need to transpose to (B, H, S, D_h) format
 
-        # Attention computation
-        attn_output = torch.nn.functional.scaled_dot_product_attention(
-            query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-        )
+        # Attention computation using DistributedAttention or LocalAttention
+        if self._use_distributed:
+            attn_output, _ = self.attn(query, key, value)
+        else:
+            attn_output = self.attn(query, key, value)
 
-        # Reshape back
-        attn_output = attn_output.transpose(1, 2).flatten(-2, -1)
+        # Reshape back: (B, S, H, D_h) -> (B, S, H*D_h)
+        attn_output = attn_output.flatten(-2, -1)
 
         # Output projection
         attn_output = self.to_out(attn_output)
@@ -351,6 +412,7 @@ class Cosmos25TransformerBlock(nn.Module):
         adaln_lora_dim: int = 256,
         use_adaln_lora: bool = True,
         qk_norm: bool = True,
+        supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
     ) -> None:
         super().__init__()
 
@@ -364,13 +426,17 @@ class Cosmos25TransformerBlock(nn.Module):
 
         # Attention and MLP layers
         self.attn1 = Cosmos25SelfAttention(
-            dim=hidden_size, num_heads=num_attention_heads, qk_norm=qk_norm
+            dim=hidden_size,
+            num_heads=num_attention_heads,
+            qk_norm=qk_norm,
+            supported_attention_backends=supported_attention_backends,
         )
         self.attn2 = Cosmos25CrossAttention(
             dim=hidden_size,
             cross_attention_dim=cross_attention_dim,
             num_heads=num_attention_heads,
             qk_norm=qk_norm,
+            supported_attention_backends=supported_attention_backends,
         )
         self.mlp = MLP(hidden_size, int(hidden_size * mlp_ratio), act_type="gelu", bias=False)
 
@@ -429,7 +495,6 @@ class Cosmos25TransformerBlock(nn.Module):
         B, T, H, W, D = hidden_states.shape
 
         # Step 1: Compute ALL modulation parameters once (matches official model)
-        # This is the key fix - we process embedded_timestep only once per block
         if self.use_adaln_lora and adaln_lora is not None:
             shift_self_attn, scale_self_attn, gate_self_attn = (
                 self.adaln_modulation_self_attn(embedded_timestep) + adaln_lora
@@ -586,10 +651,6 @@ class Cosmos25RotaryPosEmbed(nn.Module):
         cos = torch.cos(freqs)  # (THW, D)
         sin = torch.sin(freqs)  # (THW, D)
         
-        # Debug: print shapes
-        # print(f"[RoPE Debug] T={T}, H={H}, W={W}, THW={T*H*W}")
-        # print(f"[RoPE Debug] freqs shape: {freqs.shape}, cos shape: {cos.shape}, sin shape: {sin.shape}")
-
         return cos, sin
 
 
@@ -797,6 +858,7 @@ class Cosmos25Transformer3DModel(BaseDiT):
                 adaln_lora_dim=self.adaln_lora_dim,
                 use_adaln_lora=self.use_adaln_lora,
                 qk_norm=(config.qk_norm == "rms_norm"),
+                supported_attention_backends=config._supported_attention_backends,
             )
             for i in range(config.num_layers)
         ])
@@ -862,9 +924,9 @@ class Cosmos25Transformer3DModel(BaseDiT):
         post_patch_height = height // p_h
         post_patch_width = width // p_w
         
-        # print(f"[FastVideo] Before patch_embed: sum={hidden_states.float().sum():.6f}")
+        
         hidden_states = self.patch_embed(hidden_states)  # (B, T', H', W', D)
-        # print(f"[FastVideo] After patch_embed: sum={hidden_states.float().sum():.6f}")
+       
 
         # 4. Generate RoPE embeddings (after patchify, using patch dimensions)
         rope_emb = self.rope(hidden_states, fps=fps)
@@ -890,11 +952,10 @@ class Cosmos25Transformer3DModel(BaseDiT):
 
         # 7. Apply cross-attention projection (if used)
         if self.use_crossattn_projection:
-            # print(f"[FastVideo] Before crossattn_proj: sum={encoder_hidden_states.float().sum():.6f}")
             encoder_hidden_states = self.crossattn_proj(encoder_hidden_states)
-            # print(f"[FastVideo] After crossattn_proj: sum={encoder_hidden_states.float().sum():.6f}")
+            
         
-        # print(f"[FastVideo] Before transformer blocks: hidden_states sum={hidden_states.float().sum():.6f}")
+        
 
         # Prepare attention mask
         if attention_mask is not None:
