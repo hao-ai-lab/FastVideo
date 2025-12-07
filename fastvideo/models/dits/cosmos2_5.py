@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 import torch
 import torch.nn as nn
+from torchvision import transforms
 
 from fastvideo.attention import DistributedAttention, LocalAttention
 from fastvideo.configs.models.dits.cosmos2_5 import Cosmos25VideoConfig
@@ -16,6 +17,7 @@ from fastvideo.layers.rotary_embedding import apply_rotary_emb
 from fastvideo.layers.visual_embedding import Timesteps
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
+
 
 
 class Cosmos25PatchEmbed(nn.Module):
@@ -579,7 +581,7 @@ class Cosmos25RotaryPosEmbed(nn.Module):
     ) -> None:
         super().__init__()
 
-        self.max_size = [size // patch for size, patch in zip(max_size, patch_size, strict=False)]
+        self.max_size = [size // patch for size, patch in zip(max_size, patch_size, strict=True)]
         self.patch_size = patch_size
         self.base_fps = base_fps
         self.enable_fps_modulation = enable_fps_modulation
@@ -668,7 +670,7 @@ class Cosmos25LearnablePositionalEmbed(nn.Module):
     ) -> None:
         super().__init__()
 
-        self.max_size = [size // patch for size, patch in zip(max_size, patch_size, strict=False)]
+        self.max_size = [size // patch for size, patch in zip(max_size, patch_size, strict=True)]
         self.patch_size = patch_size
         self.eps = eps
 
@@ -907,7 +909,6 @@ class Cosmos25Transformer3DModel(BaseDiT):
 
         # 2. Concatenate padding mask if needed
         if self.concat_padding_mask and padding_mask is not None:
-            from torchvision import transforms
             padding_mask = transforms.functional.resize(
                 padding_mask,
                 list(hidden_states.shape[-2:]),
