@@ -89,7 +89,7 @@ To add a new SSIM test, follow these steps:
 To run the SSIM tests locally:
 
 ```bash
-pytest fastvideo/tests/ssim/test_inference_similarity.py -vs
+pytest fastvideo/tests/ssim/ -vs
 ```
 
 Ensure you have the necessary GPUs available as defined in your test parameters.
