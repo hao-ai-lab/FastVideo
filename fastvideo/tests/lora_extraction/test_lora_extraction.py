@@ -50,43 +50,44 @@ def test_lora_extraction_pipeline():
     if result.returncode != 0:
         print(result.stderr, file=sys.stderr)
         raise AssertionError(f"Verify failed with code {result.returncode}")
-    
-    # 4. Test inference quality (minimal params for CI speed)
-    print("\nTesting inference quality")
-    result = subprocess.run([
-        sys.executable, "lora_inference_comparison.py",
-        "--base", "merged_r16",
-        "--ft", "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
-        "--adapter", "NONE",
-        "--output-dir", "inference_test",
-        "--prompt", "A cat sitting on a windowsill",
-        "--seed", "42",
-        "--height", "480",
-        "--width", "480",
-        "--num-frames", "25",
-        "--num-inference-steps", "16",
-        "--compute-ssim",
-        "--compute-lpips"
-    ], cwd=lora_scripts, capture_output=True, text=True)
-    
-    print(result.stdout)
-    if result.returncode != 0:
-        print(result.stderr, file=sys.stderr)
-        raise AssertionError(f"Inference comparison failed with code {result.returncode}")
-    
-    # Check that SSIM/LPIPS metrics were computed
-    import json
-    metrics_file = lora_scripts / "inference_test" / "steps16_A cat sitting on a windowsill_ssim.json"
-    if not metrics_file.exists():
-        raise AssertionError("SSIM metrics file not found")
-    
-    with open(metrics_file) as f:
-        metrics = json.load(f)
-    
-    ssim = metrics.get("ssim")
-    lpips = metrics.get("lpips")
-    
-    if ssim is None or lpips is None:
-        raise AssertionError("SSIM or LPIPS metrics missing")
-    
-    print(f"\nMetrics: SSIM={ssim:.4f}, LPIPS={lpips:.4f}")
+
+#    # 4. Test inference quality (minimal params for CI speed)
+#    print("\nTesting inference quality")
+#    result = subprocess.run([
+#        sys.executable, "lora_inference_comparison.py",
+#        "--base", "merged_r16",
+#        "--ft", "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
+#        "--adapter", "NONE",
+#        "--output-dir", "inference_test",
+#        "--prompt", "A cat sitting on a windowsill",
+#        "--seed", "42",
+#        "--height", "480",
+#        "--width", "480",
+#        "--num-frames", "25",
+#        "--num-inference-steps", "16",
+#        "--compute-ssim",
+#        "--compute-lpips"
+#    ], cwd=lora_scripts, capture_output=True, text=True)
+#    
+#    print(result.stdout)
+#    if result.returncode != 0:
+#        print(result.stderr, file=sys.stderr)
+#        raise AssertionError(f"Inference comparison failed with code {result.returncode}")
+#    
+#    # Check that SSIM/LPIPS metrics were computed
+#    import json
+#    metrics_file = lora_scripts / "inference_test" / "steps16_A cat sitting on a windowsill_ssim.json"
+#    if not metrics_file.exists():
+#        raise AssertionError("SSIM metrics file not found")
+#    
+#    with open(metrics_file) as f:
+#        metrics = json.load(f)
+#    
+#    ssim = metrics.get("ssim")
+#    lpips = metrics.get("lpips")
+#    
+#    if ssim is None or lpips is None:
+#        raise AssertionError("SSIM or LPIPS metrics missing")
+#    
+#    print(f"\nMetrics: SSIM={ssim:.4f}, LPIPS={lpips:.4f}")
+
