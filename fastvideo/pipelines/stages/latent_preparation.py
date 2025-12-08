@@ -28,10 +28,14 @@ class LatentPreparationStage(PipelineStage):
     denoised during the diffusion process.
     """
 
-    def __init__(self, scheduler, transformer) -> None:
+    def __init__(self,
+                 scheduler,
+                 transformer,
+                 use_btchw_layout: bool = False) -> None:
         super().__init__()
         self.scheduler = scheduler
         self.transformer = transformer
+        self.use_btchw_layout = use_btchw_layout
 
     def forward(
         self,
@@ -78,15 +82,26 @@ class LatentPreparationStage(PipelineStage):
             raise ValueError("Height and width must be provided")
 
         # Calculate latent shape
-        shape = (
-            batch_size,
-            self.transformer.num_channels_latents,
-            num_frames,
-            height // fastvideo_args.pipeline_config.vae_config.arch_config.
-            spatial_compression_ratio,
-            width // fastvideo_args.pipeline_config.vae_config.arch_config.
-            spatial_compression_ratio,
-        )
+        if self.use_btchw_layout:
+            shape = (
+                batch_size,
+                num_frames,
+                self.transformer.num_channels_latents,
+                height // fastvideo_args.pipeline_config.vae_config.arch_config.
+                spatial_compression_ratio,
+                width // fastvideo_args.pipeline_config.vae_config.arch_config.
+                spatial_compression_ratio,
+            )
+        else:
+            shape = (
+                batch_size,
+                self.transformer.num_channels_latents,
+                num_frames,
+                height // fastvideo_args.pipeline_config.vae_config.arch_config.
+                spatial_compression_ratio,
+                width // fastvideo_args.pipeline_config.vae_config.arch_config.
+                spatial_compression_ratio,
+            )
 
         # Validate generator if it's a list
         if isinstance(generator, list) and len(generator) != batch_size:
