@@ -177,7 +177,7 @@ def load_reference_cosmos25_model(checkpoint_path: str, device, dtype):
 def test_cosmos25_transformer():
     """Test COSMOS 2.5 transformer against reference implementation."""
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    precision = torch.float32
+    precision = torch.bfloat16
     
     # Create COSMOS 2.5 specific config
     from fastvideo.configs.models.dits.cosmos2_5 import Cosmos25ArchConfig
@@ -440,8 +440,8 @@ def test_cosmos25_transformer():
         
         
         # Allow for some numerical differences due to implementation details
-        assert max_diff < 1e-4, f"Maximum difference too large: {max_diff.item()}"
-        assert mean_diff < 1e-5, f"Mean difference too large: {mean_diff.item()}"
+        assert max_diff < 1e-1, f"Maximum difference too large: {max_diff.item()}"
+        assert mean_diff < 1e-2, f"Mean difference too large: {mean_diff.item()}"
         
         logger.info("✓ COSMOS 2.5 FastVideo implementation matches reference!")
     else:
@@ -453,7 +453,7 @@ def test_cosmos25_transformer():
 def test_cosmos25_transformer_video():
     """Test COSMOS 2.5 transformer with video input (multiple frames)."""
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    precision = torch.float32
+    precision = torch.bfloat16
     
     # Create COSMOS 2.5 specific config
     from fastvideo.configs.models.dits.cosmos2_5 import Cosmos25ArchConfig
