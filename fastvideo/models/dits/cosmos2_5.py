@@ -225,29 +225,14 @@ class Cosmos25SelfAttention(nn.Module):
         if supported_attention_backends is None:
             supported_attention_backends = (AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA)
         
-        # Check if distributed environment is initialized
-        try:
-            from fastvideo.distributed.parallel_state import model_parallel_is_initialized
-            use_distributed = torch.distributed.is_initialized() and model_parallel_is_initialized()
-        except:
-            use_distributed = False
-        
-        if use_distributed:
-            self.attn = DistributedAttention(
-                num_heads=num_heads,
-                head_size=self.head_dim,
-                causal=False,
-                supported_attention_backends=supported_attention_backends,
-                prefix="self_attn"
-            )
-        else:
-            self.attn = LocalAttention(
-                num_heads=num_heads,
-                head_size=self.head_dim,
-                causal=False,
-                supported_attention_backends=supported_attention_backends,
-            )
-        self._use_distributed = use_distributed
+        # Always use DistributedAttention (requires distributed environment to be initialized)
+        self.attn = DistributedAttention(
+            num_heads=num_heads,
+            head_size=self.head_dim,
+            causal=False,
+            supported_attention_backends=supported_attention_backends,
+            prefix="self_attn"
+        )
 
     def forward(
         self,
@@ -285,11 +270,8 @@ class Cosmos25SelfAttention(nn.Module):
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
         
-        if self._use_distributed:
-            attn_output, _ = self.attn(query, key, value)
-        else:
-            attn_output = self.attn(query, key, value)
-
+        
+        attn_output, _ = self.attn(query, key, value)
         # Reshape back: (B, S, H, D_h) -> (B, S, H*D_h)
         attn_output = attn_output.flatten(-2, -1)
 
@@ -327,34 +309,17 @@ class Cosmos25CrossAttention(nn.Module):
         self.norm_q = RMSNorm(self.head_dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = RMSNorm(self.head_dim, eps=eps) if qk_norm else nn.Identity()
 
-        # Use DistributedAttention for flexible backend support (torch SDPA / FlashAttention)
-        # For single-GPU (non-distributed), use LocalAttention to avoid distributed requirements
         if supported_attention_backends is None:
             supported_attention_backends = (AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA)
         
-        # Check if distributed environment is initialized
-        try:
-            from fastvideo.distributed.parallel_state import model_parallel_is_initialized
-            use_distributed = torch.distributed.is_initialized() and model_parallel_is_initialized()
-        except:
-            use_distributed = False
-        
-        if use_distributed:
-            self.attn = DistributedAttention(
-                num_heads=num_heads,
-                head_size=self.head_dim,
-                causal=False,
-                supported_attention_backends=supported_attention_backends,
-                prefix="cross_attn"
-            )
-        else:
-            self.attn = LocalAttention(
-                num_heads=num_heads,
-                head_size=self.head_dim,
-                causal=False,
-                supported_attention_backends=supported_attention_backends,
-            )
-        self._use_distributed = use_distributed
+        # Use LocalAttention for cross-attention since text embeddings are not sharded
+        # in sequence parallelism (replicated across ranks)
+        self.attn = LocalAttention(
+            num_heads=num_heads,
+            head_size=self.head_dim,
+            causal=False,
+            supported_attention_backends=supported_attention_backends,
+        )
 
     def forward(
         self,
@@ -381,14 +346,8 @@ class Cosmos25CrossAttention(nn.Module):
         query = self.norm_q(query)
         key = self.norm_k(key)
 
-        # Note: Both DistributedAttention and LocalAttention expect (B, S, H, D_h), which is what we already have
-        # No need to transpose to (B, H, S, D_h) format
-
-        # Attention computation using DistributedAttention or LocalAttention
-        if self._use_distributed:
-            attn_output, _ = self.attn(query, key, value)
-        else:
-            attn_output = self.attn(query, key, value)
+        # LocalAttention expects (B, S, H, D_h), which is what we already have
+        attn_output = self.attn(query, key, value)
 
         # Reshape back: (B, S, H, D_h) -> (B, S, H*D_h)
         attn_output = attn_output.flatten(-2, -1)
