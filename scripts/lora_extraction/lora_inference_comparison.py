@@ -220,34 +220,73 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
-    configure_logging(args.log_level)
+def compare_inference(
+    base: str,
+    ft: str,
+    adapter: Optional[str],
+    output_dir: str,
+    prompt: str = "A cat sitting on a windowsill",
+    seed: int = 42,
+    height: int = 480,
+    width: int = 832,
+    num_frames: int = 49,
+    num_inference_steps: int = 32,
+    guidance_scale: float = 5.0,
+    flow_shift: Optional[float] = None,
+    embedded_guidance_scale: Optional[float] = None,
+    compute_ssim: bool = False,
+    compute_lpips: bool = False,
+    log_level: str = "INFO",
+) -> dict:
+    """Compare inference between fine-tuned model and merged/base+adapter model.
+    
+    Args:
+        base: Base or merged model ID/path
+        ft: Fine-tuned model ID/path
+        adapter: LoRA adapter path (or NONE for merged model)
+        output_dir: Output directory for videos
+        prompt: Generation prompt
+        seed: Random seed
+        height: Video height
+        width: Video width
+        num_frames: Number of frames
+        num_inference_steps: Inference steps
+        guidance_scale: CFG scale
+        flow_shift: Flow shift
+        embedded_guidance_scale: Embedded guidance scale
+        compute_ssim: Compute SSIM metric
+        compute_lpips: Compute LPIPS metric
+        log_level: Logging level
+        
+    Returns:
+        Dictionary with metric results
+    """
+    configure_logging(log_level)
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     try:
-        adapter_path = _validate_adapter(args.adapter)
+        adapter_path = _validate_adapter(adapter)
     except Exception as exc:
         logger.error("Adapter validation failed: %s", exc)
         sys.exit(2)
 
     # 1) generate with fine-tuned model (reference)
-    logger.info("Generating reference (fine-tuned): %s", args.ft)
+    logger.info("Generating reference (fine-tuned): %s", ft)
     try:
         ft_video = generate_with_model(
-            model_path=args.ft,
-            output_dir=args.output_dir,
+            model_path=ft,
+            output_dir=output_dir,
             output_name="fine_tuned",
-            prompt=args.prompt,
-            seed=args.seed,
+            prompt=prompt,
+            seed=seed,
             lora_path=None,
-            height=args.height,
-            width=args.width,
-            num_frames=args.num_frames,
-            num_inference_steps=args.num_inference_steps,
-            guidance_scale=args.guidance_scale,
-            flow_shift=args.flow_shift,
-            embedded_guidance_scale=args.embedded_guidance_scale,
+            height=height,
+            width=width,
+            num_frames=num_frames,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            flow_shift=flow_shift,
+            embedded_guidance_scale=embedded_guidance_scale,
         )
         logger.info("Reference video saved: %s", ft_video)
     except Exception as exc:
@@ -257,22 +296,22 @@ def main() -> None:
     # 2) generate with merged model OR base + adapter
     use_merged = adapter_path is None
     mode = "merged model" if use_merged else "base+adapter"
-    logger.info("Generating target (%s): %s", mode, args.base)
+    logger.info("Generating target (%s): %s", mode, base)
     try:
         target_video = generate_with_model(
-            model_path=args.base,
-            output_dir=args.output_dir,
+            model_path=base,
+            output_dir=output_dir,
             output_name="merged_model" if use_merged else "base_plus_lora",
-            prompt=args.prompt,
-            seed=args.seed,
+            prompt=prompt,
+            seed=seed,
             lora_path=None if use_merged else adapter_path,
-            height=args.height,
-            width=args.width,
-            num_frames=args.num_frames,
-            num_inference_steps=args.num_inference_steps,
-            guidance_scale=args.guidance_scale,
-            flow_shift=args.flow_shift,
-            embedded_guidance_scale=args.embedded_guidance_scale,
+            height=height,
+            width=width,
+            num_frames=num_frames,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            flow_shift=flow_shift,
+            embedded_guidance_scale=embedded_guidance_scale,
         )
         logger.info("Target video saved: %s", target_video)
     except Exception as exc:
@@ -280,14 +319,39 @@ def main() -> None:
         sys.exit(4)
 
     # 3) compute metrics
-    if args.compute_ssim or args.compute_lpips:
-        results = compute_metrics(args.output_dir, ft_video, target_video, args.num_inference_steps, args.prompt, args.compute_ssim, args.compute_lpips)
+    results = {}
+    if compute_ssim or compute_lpips:
+        results = compute_metrics(output_dir, ft_video, target_video, num_inference_steps, prompt, compute_ssim, compute_lpips)
         if results.get("mean_ssim") is not None:
             logger.info("Mean SSIM: %.4f", results["mean_ssim"])
         if results.get("mean_lpips") is not None:
             logger.info("Mean LPIPS: %.4f", results["mean_lpips"])
 
-    logger.info("Comparison complete. Videos in: %s", args.output_dir)
+    logger.info("Comparison complete. Videos in: %s", output_dir)
+    return results
+
+
+def main() -> None:
+    """CLI wrapper for compare_inference."""
+    args = parse_args()
+    compare_inference(
+        base=args.base,
+        ft=args.ft,
+        adapter=args.adapter,
+        output_dir=args.output_dir,
+        prompt=args.prompt,
+        seed=args.seed,
+        height=args.height,
+        width=args.width,
+        num_frames=args.num_frames,
+        num_inference_steps=args.num_inference_steps,
+        guidance_scale=args.guidance_scale,
+        flow_shift=args.flow_shift,
+        embedded_guidance_scale=args.embedded_guidance_scale,
+        compute_ssim=args.compute_ssim,
+        compute_lpips=args.compute_lpips,
+        log_level=args.log_level,
+    )
 
 
 if __name__ == "__main__":

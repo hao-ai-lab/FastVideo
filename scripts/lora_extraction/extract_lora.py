@@ -270,9 +270,31 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
-    configure_logging(args.log_level)
+def extract_lora_adapter(
+    base: str,
+    ft: str,
+    out: str,
+    rank: int = 32,
+    full_rank: bool = False,
+    min_delta: float = 1e-6,
+    checkpoint: Optional[str] = None,
+    resume: bool = False,
+    log_level: str = "INFO",
+) -> None:
+    """Extract LoRA adapter from fine-tuned model.
+    
+    Args:
+        base: Base model path or HuggingFace ID
+        ft: Fine-tuned model path or HuggingFace ID
+        out: Output adapter file path
+        rank: LoRA rank (default: 32)
+        full_rank: Extract full-rank adapter
+        min_delta: Minimum delta for extraction
+        checkpoint: Checkpoint file path
+        resume: Resume from checkpoint
+        log_level: Logging level
+    """
+    configure_logging(log_level)
 
     # ensure fastvideo import
     try:
@@ -281,19 +303,19 @@ def main() -> None:
         LOG.error("Failed to import fastvideo: %s", exc)
         sys.exit(2)
 
-    out_path = Path(args.out)
-    checkpoint_path = Path(args.checkpoint) if args.checkpoint else None
+    out_path = Path(out)
+    checkpoint_path = Path(checkpoint) if checkpoint else None
 
     # load state_dicts
-    LOG.info("Loading base model: %s", args.base)
-    base_sd = load_transformer_state_dict_from_model(args.base)
+    LOG.info("Loading base model: %s", base)
+    base_sd = load_transformer_state_dict_from_model(base)
 
-    LOG.info("Loading fine-tuned model: %s", args.ft)
-    ft_sd = load_transformer_state_dict_from_model(args.ft)
+    LOG.info("Loading fine-tuned model: %s", ft)
+    ft_sd = load_transformer_state_dict_from_model(ft)
 
     resume_idx = 0
     adapter_existing: Dict[str, torch.Tensor] = {}
-    if args.resume and checkpoint_path and checkpoint_path.exists():
+    if resume and checkpoint_path and checkpoint_path.exists():
         try:
             ck = torch.load(str(checkpoint_path), map_location="cpu")
             adapter_existing = ck.get("adapter", {}) or {}
@@ -306,9 +328,9 @@ def main() -> None:
     new_adapter = build_adapter_from_states(
         base_sd=base_sd,
         ft_sd=ft_sd,
-        rank=args.rank,
-        full_rank=args.full_rank,
-        min_delta=args.min_delta,
+        rank=rank,
+        full_rank=full_rank,
+        min_delta=min_delta,
         checkpoint_interval=50,
         checkpoint_path=checkpoint_path,
         resume_from=resume_idx,
@@ -326,6 +348,22 @@ def main() -> None:
             pass
 
     LOG.info("Saved adapter to %s (entries=%d)", str(out_path), len(adapter_state) // 4)
+
+
+def main() -> None:
+    """CLI wrapper for extract_lora_adapter."""
+    args = parse_args()
+    extract_lora_adapter(
+        base=args.base,
+        ft=args.ft,
+        out=args.out,
+        rank=args.rank,
+        full_rank=args.full_rank,
+        min_delta=args.min_delta,
+        checkpoint=args.checkpoint,
+        resume=args.resume,
+        log_level=args.log_level,
+    )
 
 
 if __name__ == "__main__":

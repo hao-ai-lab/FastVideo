@@ -281,7 +281,43 @@ def save_merged_model(merged_sd: dict, base_model_path: str, ft_model_path: str,
     LOG.info(f"Saved to {output_dir} ({file_size_mb:.0f} MB, {len(hf_merged_sd)} params)")
 
 
+def merge_lora(
+    base: str,
+    adapter: str,
+    ft: str,
+    output: str,
+    log_level: str = "INFO",
+) -> None:
+    """Merge LoRA adapter into base model.
+    
+    Args:
+        base: Base model ID or path
+        adapter: LoRA adapter .safetensors file
+        ft: Finetuned model ID (for config)
+        output: Output directory
+        log_level: Logging level
+    """
+    configure_logging(log_level)
+    
+    LOG.info(f"Base: {base}")
+    LOG.info(f"Adapter: {adapter}")
+    LOG.info(f"Output: {output}")
+    
+    reverse_mapping = get_reverse_param_mapping(base)
+    
+    LOG.info(f"Loading base model: {base}")
+    base_sd = load_transformer_state_dict_from_model(base)
+    LOG.info(f"Loaded { len(base_sd)} parameters")
+    
+    adapter_sd = load_adapter(adapter)
+    merged_sd = merge_lora_into_base(base_sd, adapter_sd)
+    
+    save_merged_model(merged_sd, base, ft, output, reverse_mapping)
+    LOG.info("Merge complete")
+
+
 def main():
+    """CLI wrapper for merge_lora."""
     parser = argparse.ArgumentParser(description="Merge LoRA adapter into base model")
     parser.add_argument("--base", required=True, help="Base model ID or path")
     parser.add_argument("--adapter", required=True, help="LoRA adapter .safetensors file")
@@ -290,23 +326,13 @@ def main():
     parser.add_argument("--log-level", default="INFO", help="Logging level")
     args = parser.parse_args()
     
-    configure_logging(args.log_level)
-    
-    LOG.info(f"Base: {args.base}")
-    LOG.info(f"Adapter: {args.adapter}")
-    LOG.info(f"Output: {args.output}")
-    
-    reverse_mapping = get_reverse_param_mapping(args.base)
-    
-    LOG.info(f"Loading base model: {args.base}")
-    base_sd = load_transformer_state_dict_from_model(args.base)
-    LOG.info(f"Loaded {len(base_sd)} parameters")
-    
-    adapter = load_adapter(args.adapter)
-    merged_sd = merge_lora_into_base(base_sd, adapter)
-    
-    save_merged_model(merged_sd, args.base, args.ft, args.output, reverse_mapping)
-    LOG.info("Merge complete")
+    merge_lora(
+        base=args.base,
+        adapter=args.adapter,
+        ft=args.ft,
+        output=args.output,
+        log_level=args.log_level,
+    )
 
 
 if __name__ == "__main__":
