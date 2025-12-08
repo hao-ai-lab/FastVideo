@@ -1012,6 +1012,259 @@ class CosmosDenoisingStage(DenoisingStage):
         return result
 
 
+class LTXDenoisingStage(DenoisingStage):
+    """
+    Denoising stage for LTX Video
+    """
+
+    def __init__(self, transformer, scheduler, pipeline=None, vae=None) -> None:
+        super().__init__(transformer,
+                         scheduler,
+                         pipeline,
+                         transformer_2=None,
+                         vae=vae)
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        """
+        Run the LTX denoising loop.
+        
+        Args:
+            batch: The current batch information.
+            fastvideo_args: The inference arguments.
+            
+        Returns:
+            The batch with denoised latents.
+        """
+        pipeline = self.pipeline() if self.pipeline else None
+        if not fastvideo_args.model_loaded["transformer"]:
+            loader = TransformerLoader()
+            self.transformer = loader.load(
+                fastvideo_args.model_paths["transformer"], fastvideo_args)
+            if pipeline:
+                pipeline.add_module("transformer", self.transformer)
+            fastvideo_args.model_loaded["transformer"] = True
+
+        # Prepare extra step kwargs for scheduler
+        extra_step_kwargs = self.prepare_extra_func_kwargs(
+            self.scheduler.step,
+            {
+                "generator": batch.generator,
+                "eta": batch.eta
+            },
+        )
+
+        # Setup precision and autocast settings
+        target_dtype = torch.bfloat16
+        autocast_enabled = (target_dtype != torch.float32
+                            ) and not fastvideo_args.disable_autocast
+
+        # Get timesteps
+        timesteps = batch.timesteps
+        if timesteps is None:
+            raise ValueError("Timesteps must be provided")
+        num_inference_steps = batch.num_inference_steps
+        num_warmup_steps = len(
+            timesteps) - num_inference_steps * self.scheduler.order
+
+        # Get latents (already packed for LTX)
+        latents = batch.latents  # Shape: [B, sequence_length, channels]
+
+        # Extract and prepare embeddings
+        prompt_embeds = batch.prompt_embeds
+        if isinstance(prompt_embeds, list) and len(prompt_embeds) > 0:
+            prompt_embeds = prompt_embeds[0]
+
+        assert not torch.isnan(
+            prompt_embeds).any(), "prompt_embeds contains nan"
+
+        # Extract attention mask
+        prompt_attention_mask = None
+        if batch.prompt_attention_mask:
+            if isinstance(batch.prompt_attention_mask, list) and len(
+                    batch.prompt_attention_mask) > 0:
+                prompt_attention_mask = batch.prompt_attention_mask[0]
+            else:
+                prompt_attention_mask = batch.prompt_attention_mask
+
+            if prompt_attention_mask is not None:
+                prompt_attention_mask = prompt_attention_mask.bool()
+
+        # Handle CFG
+        if batch.do_classifier_free_guidance:
+            neg_prompt_embeds = batch.negative_prompt_embeds
+            if isinstance(neg_prompt_embeds,
+                          list) and len(neg_prompt_embeds) > 0:
+                neg_prompt_embeds = neg_prompt_embeds[0]
+
+            negative_prompt_attention_mask = None
+            if batch.negative_attention_mask:
+                if isinstance(batch.negative_attention_mask, list) and len(
+                        batch.negative_attention_mask) > 0:
+                    negative_prompt_attention_mask = batch.negative_attention_mask[
+                        0]
+                else:
+                    negative_prompt_attention_mask = batch.negative_attention_mask
+
+                if negative_prompt_attention_mask is not None:
+                    negative_prompt_attention_mask = negative_prompt_attention_mask.bool(
+                    )
+
+            # Concatenate for single forward pass (LTX style)
+            prompt_embeds = torch.cat([neg_prompt_embeds, prompt_embeds], dim=0)
+            if prompt_attention_mask is not None and negative_prompt_attention_mask is not None:
+                prompt_attention_mask = torch.cat(
+                    [negative_prompt_attention_mask, prompt_attention_mask],
+                    dim=0)
+
+        # Get LTX-specific dimensions from batch.extra
+        ltx_data = batch.extra.get('ltx', {})
+        latent_num_frames = ltx_data.get('latent_num_frames', 21)
+        latent_height = ltx_data.get('latent_height', 16)
+        latent_width = ltx_data.get('latent_width', 22)
+        frame_rate = ltx_data.get('frame_rate', 25)
+
+        # Calculate RoPE interpolation scale
+        rope_interpolation_scale = (
+            8 / frame_rate,  # vae_temporal_compression_ratio / frame_rate
+            32,  # vae_spatial_compression_ratio
+            32,  # vae_spatial_compression_ratio
+        )
+
+        # Initialize trajectory lists
+        trajectory_timesteps: list[torch.Tensor] = []
+        trajectory_latents: list[torch.Tensor] = []
+
+        # Run denoising loop
+        with self.progress_bar(total=num_inference_steps) as progress_bar:
+            for i, t in enumerate(timesteps):
+                # Skip if interrupted
+                if hasattr(self, 'interrupt') and self.interrupt:
+                    continue
+
+                # Expand latents for CFG if needed
+                if batch.do_classifier_free_guidance:
+                    latent_model_input = torch.cat([latents] * 2)
+                else:
+                    latent_model_input = latents
+
+                latent_model_input = latent_model_input.to(target_dtype)
+
+                # Scale model input
+                latent_model_input = self.scheduler.scale_model_input(
+                    latent_model_input, t)
+
+                # Expand timestep
+                timestep = t.expand(latent_model_input.shape[0])
+
+                # Run transformer (single forward pass for CFG)
+                with torch.autocast(device_type="cuda",
+                                    dtype=target_dtype,
+                                    enabled=autocast_enabled):
+                    noise_pred = self.transformer(
+                        hidden_states=latent_model_input,
+                        encoder_hidden_states=prompt_embeds,
+                        timestep=timestep,
+                        encoder_attention_mask=prompt_attention_mask,
+                        num_frames=latent_num_frames,
+                        height=latent_height,
+                        width=latent_width,
+                        rope_interpolation_scale=rope_interpolation_scale,
+                        return_dict=False,
+                    )[0]
+
+                noise_pred = noise_pred.float()
+
+                # Apply CFG if needed
+                if batch.do_classifier_free_guidance:
+                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                    noise_pred = noise_pred_uncond + batch.guidance_scale * (
+                        noise_pred_text - noise_pred_uncond)
+
+                    if batch.guidance_rescale > 0:
+                        noise_pred = self.rescale_noise_cfg(
+                            noise_pred,
+                            noise_pred_text,
+                            guidance_rescale=batch.guidance_rescale)
+
+                # Compute the previous noisy sample
+                latents = self.scheduler.step(noise_pred,
+                                              t,
+                                              latents,
+                                              **extra_step_kwargs,
+                                              return_dict=False)[0]
+
+                # Save trajectory if needed
+                if batch.return_trajectory_latents:
+                    trajectory_timesteps.append(t)
+                    trajectory_latents.append(latents)
+
+                # Update progress bar
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and
+                    (i + 1) % self.scheduler.order == 0
+                        and progress_bar is not None):
+                    progress_bar.update()
+
+        # Handle trajectory tensors
+        if trajectory_latents:
+            trajectory_tensor = torch.stack(trajectory_latents, dim=1)
+            trajectory_timesteps_tensor = torch.stack(trajectory_timesteps,
+                                                      dim=0)
+            batch.trajectory_timesteps = trajectory_timesteps_tensor.cpu()
+            batch.trajectory_latents = trajectory_tensor.cpu()
+
+        # Update batch with final latents
+        batch.latents = latents
+
+        # Deallocate transformer on MPS if needed
+        if torch.backends.mps.is_available():
+            logger.info("Memory before deallocating transformer: %s",
+                        torch.mps.current_allocated_memory())
+            del self.transformer
+            if pipeline is not None and "transformer" in pipeline.modules:
+                del pipeline.modules["transformer"]
+            fastvideo_args.model_loaded["transformer"] = False
+            logger.info("Memory after deallocating transformer: %s",
+                        torch.mps.current_allocated_memory())
+
+        return batch
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify LTX denoising stage inputs."""
+        result = VerificationResult()
+        result.add_check("timesteps", batch.timesteps,
+                         [V.is_tensor, V.min_dims(1)])
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(3)])  # Packed format
+        result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
+        result.add_check("num_inference_steps", batch.num_inference_steps,
+                         V.positive_int)
+        result.add_check("guidance_scale", batch.guidance_scale,
+                         V.positive_float)
+        result.add_check("eta", batch.eta, V.non_negative_float)
+        result.add_check("generator", batch.generator,
+                         V.generator_or_list_generators)
+        result.add_check("do_classifier_free_guidance",
+                         batch.do_classifier_free_guidance, V.bool_value)
+        result.add_check(
+            "negative_prompt_embeds", batch.negative_prompt_embeds, lambda x:
+            not batch.do_classifier_free_guidance or V.list_not_empty(x))
+        return result
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify LTX denoising stage outputs."""
+        result = VerificationResult()
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(3)])  # Packed format
+        return result
+
+
 class DmdDenoisingStage(DenoisingStage):
     """
     Denoising stage for DMD.
