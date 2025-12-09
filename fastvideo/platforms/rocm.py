@@ -80,7 +80,7 @@ class RocmPlatform(Platform):
 
         elif selected_backend == AttentionBackendEnum.SLIDING_TILE_ATTN:
             try:
-                from st_attn import sliding_tile_attention # noqa: F401
+                from st_attn import sliding_tile_attention  # noqa: F401
 
                 from fastvideo.attention.backends.sliding_tile_attn import (  # noqa: F401
                     SlidingTileAttentionBackend)
