@@ -21,4 +21,5 @@ torchrun --nproc_per_node=$GPU_NUM \
     --samples_per_file 8 \
     --flush_frequency 8 \
     --video_length_tolerance_range 5 \
-    --preprocess_task "t2v" 
+    --preprocess_task "t2v" \
+    --num_gpus $GPU_NUM

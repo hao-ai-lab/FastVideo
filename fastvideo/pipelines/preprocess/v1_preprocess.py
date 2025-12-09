@@ -1,5 +1,4 @@
 import argparse
-import os
 from typing import Any
 
 from fastvideo import PipelineConfig
@@ -23,9 +22,9 @@ logger = init_logger(__name__)
 
 def main(args) -> None:
     args.model_path = maybe_download_model(args.model_path)
-    maybe_init_distributed_environment_and_model_parallel(1, 1)
-    num_gpus = int(os.environ["WORLD_SIZE"])
-    assert num_gpus == 1, "Only support 1 GPU"
+    maybe_init_distributed_environment_and_model_parallel(1, args.num_gpus)
+    # num_gpus = int(os.environ["WORLD_SIZE"])
+    # assert num_gpus == 1, "Only support 1 GPU"
 
     pipeline_config = PipelineConfig.from_pretrained(args.model_path)
 
@@ -132,6 +131,7 @@ if __name__ == "__main__":
         help=
         "The output directory where the model predictions and checkpoints will be written.",
     )
+    parser.add_argument("--num_gpus", type=int, default=1)
 
     args = parser.parse_args()
     main(args)
