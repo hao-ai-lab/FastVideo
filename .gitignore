@@ -12,6 +12,8 @@ wandb/
 *.gif
 *.pth
 *.pt
+benchmarks/fvd/fvd-cache
+benchmarks/fvd/validate_fvd.py
 cache_dir/
 wandb/
 venv/
