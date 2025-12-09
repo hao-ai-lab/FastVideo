@@ -1,7 +1,7 @@
 from fvd import FVDConfig, compute_fvd_with_config
 from pathlib import Path
 
-# Get script directory 
+# Get script directory
 script_dir = Path(__file__).parent.resolve()
 
 clip_strategy = 'beginning'  # Options: 'uniform', 'random', 'beginning', 'end', 'all'
@@ -14,11 +14,11 @@ cfg = FVDConfig(
     batch_size=32,
     device='cuda',
     seed=42,
-    cache_real_features=str(script_dir / f'fvd-cache/{clip_strategy}'),  
+    cache_real_features=str(script_dir / f'fvd-cache/{clip_strategy}'),
 )
 
-real_dir = "/workspace/FastVideo/benchmarks/data/real_videos"
-gen_dir = "/workspace/FastVideo/benchmarks/data/generated_videos"
+real_dir = "benchmarks/data/real_videos"
+gen_dir = "benchmarks/data/generated_videos"
 
 results = compute_fvd_with_config(real_dir, gen_dir, cfg, verbose=True)
 print(f"FVD = {results['fvd']:.2f}")
