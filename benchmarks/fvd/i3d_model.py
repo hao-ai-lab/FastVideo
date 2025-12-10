@@ -33,7 +33,7 @@ class I3DFeatureExtractor(nn.Module):
         else:
             self.device = torch.device(device)
 
-        # Set cache directory for HuggingFace Hub
+        self.cache_dir: str | None
         if cache_dir is not None:
             self.cache_dir = str(Path(cache_dir).resolve())
         else:
@@ -48,26 +48,23 @@ class I3DFeatureExtractor(nn.Module):
     def _load_model(self) -> torch.nn.Module:
         """Download and load I3D TorchScript model from Hugging Face Hub."""
         print(f"Loading I3D model from Hugging Face Hub ({self.REPO_ID})...")
-        
+
         try:
             # Download model from Hugging Face Hub
-            model_path = hf_hub_download(
-                repo_id=self.REPO_ID,
-                filename=self.MODEL_FILENAME,
-                cache_dir=self.cache_dir
-            )
-            
+            model_path = hf_hub_download(repo_id=self.REPO_ID,
+                                         filename=self.MODEL_FILENAME,
+                                         cache_dir=self.cache_dir)
+
             # Load directly to chosen device
             model = torch.jit.load(model_path, map_location=self.device)
             print("I3D model loaded successfully")
             return model
-            
+
         except Exception as e:
             raise RuntimeError(
                 f"Failed to load I3D model from Hugging Face Hub. Error: {e}\n"
                 f"Ensure you have internet connection and huggingface_hub installed:\n"
-                f"pip install huggingface_hub"
-            ) from e
+                f"pip install huggingface_hub") from e
 
     def preprocess(self, videos: torch.Tensor) -> torch.Tensor:
         """
@@ -91,7 +88,10 @@ class I3DFeatureExtractor(nn.Module):
         # Resize to 224x224 if needed
         if H != 224 or W != 224:
             videos = videos.reshape(B * T, C, H, W)
-            videos = F.interpolate(videos, size=(224, 224), mode='bilinear', align_corners=False)
+            videos = F.interpolate(videos,
+                                   size=(224, 224),
+                                   mode='bilinear',
+                                   align_corners=False)
             videos = videos.reshape(B, T, C, 224, 224)
 
         # Convert to [B, C, T, H, W] format
@@ -127,7 +127,10 @@ class I3DFeatureExtractor(nn.Module):
             batch = self.preprocess(batch)  # Now returns [B, C, T, H, W]
 
             # Use the HF model without rescale/resize (we handle it in preprocess)
-            features = self.model(batch, rescale=False, resize=False, return_features=True)
+            features = self.model(batch,
+                                  rescale=False,
+                                  resize=False,
+                                  return_features=True)
 
             all_features.append(features.cpu())
 
@@ -137,4 +140,3 @@ class I3DFeatureExtractor(nn.Module):
                  videos: torch.Tensor,
                  batch_size: int = 32) -> torch.Tensor:
         return self.extract_features(videos, batch_size=batch_size)
-        

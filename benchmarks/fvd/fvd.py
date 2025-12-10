@@ -109,14 +109,12 @@ class FVDConfig:
         Long video with FPS subsampling: 2048 videos, 128 frames (every 8th).
         Used for very long videos - samples every 8th frame
         """
-        return cls(
-            num_videos=2048,
-            num_frames_per_clip=16,  
-            frame_stride=8,          
-            clip_strategy='beginning',
-            use_streaming=True
-        )
-        
+        return cls(num_videos=2048,
+                   num_frames_per_clip=16,
+                   frame_stride=8,
+                   clip_strategy='beginning',
+                   use_streaming=True)
+
     @classmethod
     def quick_test(cls) -> 'FVDConfig':
         """Quick test config: 100 videos, 16 frames."""
