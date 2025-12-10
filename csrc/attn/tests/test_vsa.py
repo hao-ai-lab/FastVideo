@@ -64,7 +64,7 @@ def generate_tensor(shape, dtype, device):
     tensor = torch.randn(shape, dtype=dtype, device=device)
     return tensor
 
-def generate_variable_block_sizes(num_blocks, min_size=32, max_size=64, device="cuda"):
+def generate_variable_block_sizes(num_blocks, min_size=16, max_size=64, device="cuda"):
     return torch.randint(min_size, max_size + 1, (num_blocks,), device=device, dtype=torch.int32)
 
 
