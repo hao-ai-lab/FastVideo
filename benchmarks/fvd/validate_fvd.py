@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 import shutil
 import random
-from benchmarks.fvd.fvd import compute_fvd_with_config, FVDConfig
+from fvd import compute_fvd_with_config, FVDConfig
 
 script_path = Path(__file__).resolve()
 fastvideo_root = script_path.parent.parent.parent
@@ -85,7 +85,7 @@ def validate_fvd(subset_a: Path, subset_b: Path, num_videos: int):
 
 
 def main() -> None:
-    bair_dir = Path('/workspace/FastVideo/benchmarks/data/bair_full_videos')
+    bair_dir = Path('benchmarks/data/bair_full_videos')
 
     subset_a, subset_b, count = split_videos(bair_dir,
                                              n_per_subset=128,
