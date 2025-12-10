@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from pathlib import Path
-import requests
+from huggingface_hub import hf_hub_download
 from tqdm import tqdm
 from contextlib import suppress
 
@@ -16,7 +16,8 @@ class I3DFeatureExtractor(nn.Module):
     trained on Kinetics-400.
     """
 
-    MODEL_URL = 'https://www.dropbox.com/s/ge9e5ujwgetktms/i3d_torchscript.pt?dl=1'
+    REPO_ID = 'flateon/FVD-I3D-torchscript'
+    MODEL_FILENAME = 'i3d_torchscript.pt'
 
     def __init__(self,
                  device: str = 'cuda',
@@ -26,19 +27,17 @@ class I3DFeatureExtractor(nn.Module):
         self.device_str = device
         if device == 'cuda' and not torch.cuda.is_available():
             print(
-                "Warning: CUDA requested but not available — falling back to CPU"
+                "Warning: CUDA requested but not available – falling back to CPU"
             )
             self.device = torch.device('cpu')
         else:
             self.device = torch.device(device)
 
-        if cache_dir is None:
-            self.cache_dir = Path(
-                __file__).resolve().parent / 'cache_dir' / 'i3d'  # Changed
+        # Set cache directory for HuggingFace Hub
+        if cache_dir is not None:
+            self.cache_dir = str(Path(cache_dir).resolve())
         else:
-            self.cache_dir = Path(cache_dir)  # Changed
-
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+            self.cache_dir = None  # Use HF default cache
 
         self.model = self._load_model()
         self.model.eval()
@@ -47,51 +46,27 @@ class I3DFeatureExtractor(nn.Module):
             self.model.to(self.device)
 
     def _load_model(self) -> torch.nn.Module:
-        """Download and load I3D TorchScript model."""
-        model_path = self.cache_dir / 'i3d_torchscript.pt'
-
-        if not model_path.exists():
-            print(f"Downloading I3D model to {model_path}...")
-            self._download_model(model_path)
-        else:
-            print(f"Loading I3D model from {model_path}")
-
+        """Download and load I3D TorchScript model from Hugging Face Hub."""
+        print(f"Loading I3D model from Hugging Face Hub ({self.REPO_ID})...")
+        
         try:
-            # load directly to chosen device if possible
-            model = torch.jit.load(str(model_path), map_location=self.device)
+            # Download model from Hugging Face Hub
+            model_path = hf_hub_download(
+                repo_id=self.REPO_ID,
+                filename=self.MODEL_FILENAME,
+                cache_dir=self.cache_dir
+            )
+            
+            # Load directly to chosen device
+            model = torch.jit.load(model_path, map_location=self.device)
             print("I3D model loaded successfully")
             return model
-        except Exception as e:
-            print(f"Error loading model: {e}. Re-downloading...")
-            with suppress(Exception):
-                model_path.unlink(missing_ok=True)
-            self._download_model(model_path)
-            return torch.jit.load(str(model_path), map_location=self.device)
-
-    def _download_model(self, save_path: Path):
-        """Download I3D model from Dropbox"""
-        try:
-            response = requests.get(self.MODEL_URL, stream=True, timeout=60)
-            response.raise_for_status()
-
-            total_size = int(response.headers.get('content-length', 0))
-
-            with open(save_path, 'wb') as f, tqdm(
-                    desc="Downloading I3D",
-                    total=total_size,
-                    unit='B',
-                    unit_scale=True,
-                    unit_divisor=1024,
-            ) as pbar:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-                    pbar.update(len(chunk))
-
-            print(f"Model downloaded to {save_path}")
+            
         except Exception as e:
             raise RuntimeError(
-                f"Failed to download I3D model. Error: {e}\n"
-                f"Download manually from {self.MODEL_URL} and save to {save_path}"
+                f"Failed to load I3D model from Hugging Face Hub. Error: {e}\n"
+                f"Ensure you have internet connection and huggingface_hub installed:\n"
+                f"pip install huggingface_hub"
             ) from e
 
     def preprocess(self, videos: torch.Tensor) -> torch.Tensor:
@@ -102,28 +77,25 @@ class I3DFeatureExtractor(nn.Module):
             videos: [B, T, C, H, W], values in [0, 255]
         
         Returns:
-            Preprocessed videos [B, T, C, 224, 224]
+            Preprocessed videos [B, C, T, 224, 224] (normalized and resized)
         """
         B, T, C, H, W = videos.shape
 
         if T < 10:
             raise ValueError(f"I3D requires at least 10 frames, got {T}")
 
-        # Resize to 224x224
-        if H != 224 or W != 224:
-            videos = videos.view(B * T, C, H, W)
-            videos = F.interpolate(videos,
-                                   size=(224, 224),
-                                   mode='bilinear',
-                                   align_corners=False)
-            videos = videos.view(B, T, C, 224, 224)
-
-        # Normalize to [0, 1]
+        # Normalize to [0, 1] if needed
         if videos.max() > 1.0:
             videos = videos / 255.0
 
-        # Normalize to [-1, 1]
-        videos = videos * 2.0 - 1.0
+        # Resize to 224x224 if needed
+        if H != 224 or W != 224:
+            videos = videos.reshape(B * T, C, H, W)
+            videos = F.interpolate(videos, size=(224, 224), mode='bilinear', align_corners=False)
+            videos = videos.reshape(B, T, C, 224, 224)
+
+        # Convert to [B, C, T, H, W] format
+        videos = videos.permute(0, 2, 1, 3, 4).contiguous()
 
         return videos
 
@@ -136,7 +108,7 @@ class I3DFeatureExtractor(nn.Module):
         Extract I3D features
         
         Args:
-            videos: [N, T, C, H, W]
+            videos: [N, T, C, H, W], values in [0, 255]
             batch_size: Batch size for processing
             verbose: Show progress bar
         
@@ -152,16 +124,11 @@ class I3DFeatureExtractor(nn.Module):
 
         for i in iterator:
             batch = videos[i:i + batch_size].to(self.device)
-            batch = self.preprocess(batch)
+            batch = self.preprocess(batch)  # Now returns [B, C, T, H, W]
 
-            # I3D expects [B, C, T, H, W]
-            batch = batch.permute(0, 2, 1, 3,
-                                  4)  # [B, T, C, H, W] to [B, C, T, H, W]
+            # Use the HF model without rescale/resize (we handle it in preprocess)
+            features = self.model(batch, rescale=False, resize=False, return_features=True)
 
-            features = self.model(batch)
-
-            features = torch.log(
-                features + 1e-10)  # Convert to log space from probabilities
             all_features.append(features.cpu())
 
         return torch.cat(all_features, dim=0)
