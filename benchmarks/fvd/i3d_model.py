@@ -137,3 +137,4 @@ class I3DFeatureExtractor(nn.Module):
                  videos: torch.Tensor,
                  batch_size: int = 32) -> torch.Tensor:
         return self.extract_features(videos, batch_size=batch_size)
+        
