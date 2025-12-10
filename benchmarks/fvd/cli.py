@@ -125,15 +125,13 @@ Examples:
 
     # Create config
     if args.protocol:
-        # Use preset protocol
-        if args.protocol == 'fvd2048_16f':
-            config = FVDConfig.fvd2048_16f()
-        elif args.protocol == 'fvd2048_128f':
-            config = FVDConfig.fvd2048_128f()
-        elif args.protocol == 'fvd2048_128f_subsample8':
-            config = FVDConfig.fvd2048_128f_subsample8()
-        elif args.protocol == 'quick_test':
-            config = FVDConfig.quick_test()
+        protocol_map = {
+            'fvd2048_16f': FVDConfig.fvd2048_16f,
+            'fvd2048_128f': FVDConfig.fvd2048_128f,
+            'fvd2048_128f_subsample8': FVDConfig.fvd2048_128f_subsample8,
+            'quick_test': FVDConfig.quick_test,
+        }
+        config = protocol_map[args.protocol]()
 
         # Override device and caching from args
         config.device = args.device
