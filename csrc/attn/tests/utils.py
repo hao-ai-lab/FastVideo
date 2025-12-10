@@ -23,7 +23,8 @@ def generate_block_sparse_mask_for_function(h, num_q_blocks, num_kv_blocks, k, d
     return block_sparse_mask
 
 
-def create_full_mask_from_block_mask(block_sparse_mask, q_variable_block_sizes, kv_variable_block_sizes, device="cuda"):
+def create_full_mask_from_block_mask(block_sparse_mask, q_variable_block_sizes, 
+                                     kv_variable_block_sizes, device="cuda"):
     """
     Convert block-level sparse mask to full attention mask.
     
