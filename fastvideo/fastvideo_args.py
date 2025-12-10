@@ -767,9 +767,7 @@ class RLArgs:
     rl_normalize_advantages: bool = True  # Normalize advantages before policy update
 
     # Reward models
-    reward_model_paths: str = ""  # Comma-separated paths to reward models
-    reward_weights: str = ""  # Comma-separated weights for reward aggregation
-    reward_model_types: str = ""  # Comma-separated reward types (pickscore,geneval,ocr,etc)
+    reward_models: dict[str, float] = field(default_factory=dict)  # reward models (names, weight)
     value_model_path: str = ""  # Path to value model (can be empty to train from scratch)
     value_model_share_backbone: bool = False  # Share transformer backbone between policy and value
 
