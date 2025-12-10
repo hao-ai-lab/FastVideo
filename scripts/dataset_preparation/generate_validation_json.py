@@ -4,17 +4,37 @@ import os
 import random
 
 
-def generate_merged_validation_json(input_dir, output_file):
-    # read in video2caption.json
-    with open(os.path.join(input_dir, "video2caption_replace.json"), "r") as f:
+def generate_merged_validation_json(args):
+    input_file = args.input_file
+    output_validation_file = args.output_validation_file
+    
+    if args.output_train_file:
+        output_train_file = args.output_train_file
+    else:
+        base, ext = os.path.splitext(input_file)
+        output_train_file = f"{base}_train{ext}"
+
+    # read in input json
+    print(f"Reading from {input_file}")
+    with open(input_file, "r") as f:
         video2caption = json.load(f)
 
     # count how many elements are in the list
     num_elements = len(video2caption)
-    print(f"Number of elements in video2caption.json: {num_elements}")
+    print(f"Number of elements in input file: {num_elements}")
 
-    # randomly sample 64 elements from the list
-    sampled_elements = random.sample(video2caption, 64)
+    # randomly sample elements from the list
+    num_sample = min(args.num_elements, num_elements)
+    indices = set(random.sample(range(num_elements), num_sample))
+    
+    sampled_elements = []
+    remaining_elements = []
+    
+    for i in range(num_elements):
+        if i in indices:
+            sampled_elements.append(video2caption[i])
+        else:
+            remaining_elements.append(video2caption[i])
 
     # Transform sampled elements into validation.json format
     validation_data = []
@@ -23,10 +43,10 @@ def generate_merged_validation_json(input_dir, output_file):
         validation_entry = {
             "caption": element["cap"],
             "video_path": element.get("path", ""),
-            "num_inference_steps": 40,
-            "height": 480,
-            "width": 832,
-            "num_frames": 77
+            "num_inference_steps": args.num_inference_steps,
+            "height": args.height,
+            "width": args.width,
+            "num_frames": args.num_frames
         }
         validation_data.append(validation_entry)
 
@@ -36,18 +56,25 @@ def generate_merged_validation_json(input_dir, output_file):
     }
 
     # Write the validation JSON to the output file
-    with open(output_file, "w") as f:
+    with open(output_validation_file, "w") as f:
         json.dump(validation_json, f, indent=2)
     
-    print(f"Generated validation JSON with {len(validation_data)} entries and saved to {output_file}")
+    print(f"Generated validation JSON with {len(validation_data)} entries and saved to {output_validation_file}")
+
+    # Write the remaining JSON to the output train file
+    with open(output_train_file, "w") as f:
+        json.dump(remaining_elements, f, indent=2)
+    
+    print(f"Saved remaining {len(remaining_elements)} entries to {output_train_file}")
 
 
 def main():
     parser = argparse.ArgumentParser()
-    # dataset_type: "mixkit"
+    # dataset_type: "merged"
     parser.add_argument("--dataset_type", choices=["merged"], required=True)
-    parser.add_argument("--input_dir", type=str, required=True)
-    parser.add_argument("--output_file", type=str, required=True)
+    parser.add_argument("--input_file", type=str, required=True, help="Path to input json file")
+    parser.add_argument("--output_validation_file", type=str, required=True, help="Path to output validation json file")
+    parser.add_argument("--output_train_file", type=str, help="Path to output train json file (remaining data). Defaults to {input_filename}_train.json")
     parser.add_argument("--num_elements", type=int, default=64)
     parser.add_argument("--num_frames", type=int, default=77)
     parser.add_argument("--height", type=int, default=480)
@@ -56,7 +83,7 @@ def main():
     args = parser.parse_args()
 
     if args.dataset_type == "merged":
-        generate_merged_validation_json(args.input_dir, args.output_file)
+        generate_merged_validation_json(args)
 
 
 if __name__ == "__main__":

@@ -83,6 +83,9 @@ class PreprocessConfig:
     speed_factor: float = 1.0
     drop_short_ratio: float = 1.0
     do_temporal_sample: bool = False
+    enable_smart_resize: bool = False
+    smart_resize_max_area: int | None = None
+    hw_aspect_threshold: float = 1.5
 
     # Model configuration
     training_cfg_rate: float = 0.0
@@ -184,6 +187,23 @@ class PreprocessConfig:
             action=StoreBoolean,
             default=PreprocessConfig.do_temporal_sample,
             help="Whether to do temporal sampling")
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}enable-smart-resize",
+            action=StoreBoolean,
+            default=PreprocessConfig.enable_smart_resize,
+            help="Whether to enable smart resizing")
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}smart-resize-max-area",
+            type=int,
+            default=PreprocessConfig.smart_resize_max_area,
+            help="Maximum area for smart resizing")
+        preprocess_args.add_argument(
+            f"--{prefix_with_dot}hw-aspect-threshold",
+            type=float,
+            default=PreprocessConfig.hw_aspect_threshold,
+            help=
+            "Height/Width aspect ratio threshold. Allowed range is [1/threshold * target_aspect, threshold * target_aspect]."
+        )
 
         # Model Training configuration
         preprocess_args.add_argument(f"--{prefix_with_dot}training-cfg-rate",

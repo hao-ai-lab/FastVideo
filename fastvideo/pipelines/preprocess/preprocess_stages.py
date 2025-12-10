@@ -5,13 +5,19 @@ from typing import cast
 import numpy as np
 import torch
 import torchvision
+import torchvision.transforms.functional as TF
+from PIL import Image
 from einops import rearrange
 from torchvision import transforms
 
 from fastvideo.configs.configs import VideoLoaderType
 from fastvideo.dataset.transform import (CenterCropResizeVideo,
-                                         TemporalRandomCrop)
+                                         TemporalRandomCrop, best_output_size)
 from fastvideo.fastvideo_args import FastVideoArgs, WorkloadType
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
+
 from fastvideo.pipelines.pipeline_batch_info import (ForwardBatch,
                                                      PreprocessBatch)
 from fastvideo.pipelines.stages.base import PipelineStage
@@ -41,6 +47,7 @@ class VideoTransformStage(PipelineStage):
         batch = cast(PreprocessBatch, batch)
         assert isinstance(batch.fps, list)
         assert isinstance(batch.num_frames, list)
+        assert fastvideo_args.preprocess_config is not None
 
         if batch.data_type != "video":
             return batch
@@ -49,6 +56,14 @@ class VideoTransformStage(PipelineStage):
             raise ValueError("Video loader is not set")
 
         video_pixel_batch = []
+        pil_image_batch = []
+
+        enable_smart_resize = fastvideo_args.preprocess_config.enable_smart_resize
+        smart_resize_max_area = fastvideo_args.preprocess_config.smart_resize_max_area
+        if smart_resize_max_area is None:
+            smart_resize_max_area = 480 * 832
+
+        calculated_size = None
 
         for i in range(len(batch.video_loader)):
             frame_interval = batch.fps[i] / self.train_fps
@@ -73,8 +88,55 @@ class VideoTransformStage(PipelineStage):
                 raise ValueError(
                     f"Invalid video loader type: {fastvideo_args.preprocess_config.video_loader_type}"
                 )
-            video = self.video_transform(video)
-            video_pixel_batch.append(video)
+
+            if enable_smart_resize:
+                if calculated_size is None:
+                    _, _, h_in, w_in = video.shape
+                    # Get config values
+                    patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
+                    vae_stride = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
+                    dh, dw = patch_size[1] * vae_stride, patch_size[
+                        2] * vae_stride
+
+                    ow, oh = best_output_size(w_in, h_in, dw, dh,
+                                              smart_resize_max_area)
+                    calculated_size = (oh, ow)
+                    logger.info(
+                        f"Smart resize: input=({h_in}, {w_in}), output=({oh}, {ow})"
+                    )
+
+                # Resize video frames using CenterCropResizeVideo (efficient)
+                processed_video = CenterCropResizeVideo(calculated_size)(video)
+                video_pixel_batch.append(processed_video)
+
+                # Process pil_image (condition) with high quality Lanczos if I2V
+                if fastvideo_args.workload_type == WorkloadType.I2V:
+                    # Extract first frame
+                    img_tensor = video[0]  # C, H, W
+                    img = TF.to_pil_image(img_tensor)
+                    iw, ih = img.width, img.height
+                    ow, oh = calculated_size[1], calculated_size[0]
+
+                    # Smart Resize logic for PIL image
+                    scale = max(ow / iw, oh / ih)
+                    resampling = Image.Resampling.LANCZOS if hasattr(
+                        Image, 'Resampling') else Image.LANCZOS
+                    img = img.resize((round(iw * scale), round(ih * scale)),
+                                     resampling)
+
+                    # center-crop
+                    x1 = (img.width - ow) // 2
+                    y1 = (img.height - oh) // 2
+                    img = img.crop((x1, y1, x1 + ow, y1 + oh))
+
+                    # to tensor and normalize [-1, 1]
+                    img_t = TF.to_tensor(img).sub_(0.5).div_(0.5).unsqueeze(
+                        0)  # 1, C, H, W
+                    pil_image_batch.append(img_t)
+
+            else:
+                video = self.video_transform(video)
+                video_pixel_batch.append(video)
 
         video_pixel_values = torch.stack(video_pixel_batch)
         video_pixel_values = rearrange(video_pixel_values,
@@ -82,7 +144,12 @@ class VideoTransformStage(PipelineStage):
         video_pixel_values = video_pixel_values.to(torch.uint8)
 
         if fastvideo_args.workload_type == WorkloadType.I2V:
-            batch.pil_image = video_pixel_values[:, :, 0, :, :]
+            if enable_smart_resize and len(pil_image_batch) > 0:
+                batch.pil_image = torch.cat(
+                    pil_image_batch, dim=0).to(self.device if hasattr(
+                        self, 'device') else video_pixel_values.device)
+            else:
+                batch.pil_image = video_pixel_values[:, :, 0, :, :]
 
         video_pixel_values = video_pixel_values.float() / 255.0
         batch.latents = video_pixel_values

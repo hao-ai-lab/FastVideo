@@ -71,6 +71,7 @@ class PreprocessingDataValidator:
 
         for name, validator in self.validators.items():
             if not validator(batch):
+                logger.info(f"Failed validation for {name}")
                 self.filter_counts[name] += 1
                 return False
 
@@ -87,6 +88,8 @@ class PreprocessingDataValidator:
         """Validate resolution constraints"""
 
         aspect = self.max_height / self.max_width
+        height = None
+        width = None
         if batch["resolution"] is not None:
             height = batch["resolution"].get("height", None)
             width = batch["resolution"].get("width", None)
@@ -113,14 +116,22 @@ class PreprocessingDataValidator:
         if (batch["num_frames"] / batch["fps"]
                 > self.video_length_tolerance_range *
             (self.num_frames / self.train_fps * self.speed_factor)):
+            logger.info("Failed in 1")
             return False
 
         frame_interval = batch["fps"] / self.train_fps
         start_frame_idx = 0
         frame_indices = np.arange(start_frame_idx, batch["num_frames"],
                                   frame_interval).astype(int)
-        return not (len(frame_indices) < self.num_frames
-                    and random.random() < self.drop_short_ratio)
+        logger.info("Failed in 2")
+        logger.info(f"frame_indices: {frame_indices}")
+        logger.info(f"self.num_frames: {self.num_frames}")
+        logger.info(f"self.drop_short_ratio: {self.drop_short_ratio}")
+        print(f"len(frame_indices): {len(frame_indices)}")
+        result = not (len(frame_indices) < self.num_frames
+                      and random.random() < self.drop_short_ratio)
+        logger.info(f"Failed in 3: {result}")
+        return result
 
     def log_validation_stats(self):
         info = ""
@@ -280,9 +291,46 @@ def build_dataset(preprocess_config: PreprocessConfig, split: str,
         dataset = dataset.shard(num_shards=get_world_size(),
                                 index=get_world_rank())
     elif preprocess_config.dataset_type == DatasetType.MERGED:
-        metadata_json_path = os.path.join(preprocess_config.dataset_path,
-                                          "videos2caption.json")
-        video_folder = os.path.join(preprocess_config.dataset_path, "videos")
+        merge_txt_path = os.path.join(preprocess_config.dataset_path,
+                                      "merge.txt")
+        if os.path.exists(merge_txt_path):
+            logger.info(f"Found merge.txt at {merge_txt_path}")
+            with open(merge_txt_path) as f:
+                line = f.read().strip()
+                if "," not in line:
+                    raise ValueError(
+                        f"Invalid format in {merge_txt_path}: expected 'video_folder,metadata_json_path'"
+                    )
+                video_folder, metadata_json_path = line.split(",", 1)
+                video_folder = video_folder.strip()
+                metadata_json_path = metadata_json_path.strip()
+
+                if not os.path.isabs(video_folder):
+                    video_folder = os.path.join(preprocess_config.dataset_path,
+                                                video_folder)
+                if not os.path.isabs(metadata_json_path):
+                    metadata_json_path = os.path.join(
+                        preprocess_config.dataset_path, metadata_json_path)
+        else:
+            logger.info(
+                f"merge.txt not found at {merge_txt_path}, using default paths")
+            metadata_json_path = os.path.join(preprocess_config.dataset_path,
+                                              "videos2caption.json")
+            video_folder = os.path.join(preprocess_config.dataset_path,
+                                        "videos")
+
+        if not os.path.exists(metadata_json_path):
+            logger.error(f"Metadata file not found: {metadata_json_path}")
+            raise FileNotFoundError(
+                f"Metadata file not found: {metadata_json_path}")
+
+        if not os.path.exists(video_folder):
+            logger.error(f"Video folder not found: {video_folder}")
+            raise FileNotFoundError(f"Video folder not found: {video_folder}")
+
+        logger.info(f"Using metadata file: {metadata_json_path}")
+        logger.info(f"Using video folder: {video_folder}")
+
         dataset = load_dataset("json",
                                data_files=metadata_json_path,
                                split=split)
@@ -293,9 +341,18 @@ def build_dataset(preprocess_config: PreprocessConfig, split: str,
         if "path" in column_names:
             dataset = dataset.rename_column("path", "name")
 
-        dataset = dataset.filter(validator)
+        print(f"Length of dataset before filtering: {len(dataset)}")
+        if len(dataset) > 0:
+            print(f"DEBUG: First item in dataset: {dataset[0]}")
+
+        # Disable caching to ensure our print statements run
+        dataset = dataset.filter(validator, load_from_cache_file=False)
+
+        validator.log_validation_stats()
+        print(f"Length of dataset after filtering: {len(dataset)}")
         dataset = dataset.shard(num_shards=get_world_size(),
                                 index=get_world_rank())
+        print(f"Length of dataset after sharding: {len(dataset)}")
 
         # add video column
         def add_video_column(item: dict[str, Any]) -> dict[str, Any]:
@@ -303,6 +360,7 @@ def build_dataset(preprocess_config: PreprocessConfig, split: str,
             return item
 
         dataset = dataset.map(add_video_column)
+        print(f"Length of dataset after mapping: {len(dataset)}")
         if preprocess_config.video_loader_type == VideoLoaderType.TORCHCODEC:
             dataset = dataset.cast_column("video", Video())
     else:

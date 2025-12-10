@@ -152,3 +152,44 @@ class TemporalRandomCrop:
         begin_index = random.randint(0, rand_end)
         end_index = min(begin_index + self.size, total_frames)
         return begin_index, end_index
+
+
+def best_output_size(
+    width: int,
+    height: int,
+    width_stride: int,
+    height_stride: int,
+    max_area: int,
+) -> tuple[int, int]:
+    """
+    Calculate the best output size (width, height) given the original dimensions, strides and max area.
+    The aspect ratio is preserved as much as possible.
+    
+    Args:
+        width (int): Original width
+        height (int): Original height
+        width_stride (int): Width stride requirement
+        height_stride (int): Height stride requirement
+        max_area (int): Maximum allowed area (width * height)
+
+    Returns:
+        tuple[int, int]: (new_width, new_height)
+    """
+    aspect_ratio = width / height
+
+    # Scale dimensions if they exceed max_area
+    current_area = width * height
+    if current_area > max_area:
+        scale = (max_area / current_area)**0.5
+        width = int(width * scale)
+        height = int(height * scale)
+
+    # Round to the nearest multiple of stride
+    width = round(width / width_stride) * width_stride
+    height = round(height / height_stride) * height_stride
+
+    # Ensure dimensions are at least one stride
+    width = max(width, width_stride)
+    height = max(height, height_stride)
+
+    return width, height

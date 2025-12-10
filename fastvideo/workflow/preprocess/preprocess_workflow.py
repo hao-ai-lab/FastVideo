@@ -40,6 +40,7 @@ class PreprocessWorkflow(WorkflowBase):
             video_length_tolerance_range=preprocess_config.
             video_length_tolerance_range,
             drop_short_ratio=preprocess_config.drop_short_ratio,
+            hw_aspect_threshold=preprocess_config.hw_aspect_threshold,
         )
         self.add_component("raw_data_validator", raw_data_validator)
 
