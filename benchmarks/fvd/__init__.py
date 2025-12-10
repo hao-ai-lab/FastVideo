@@ -6,15 +6,15 @@ FastVideo Frechet Video Distance (FVD) Benchmark Module.
     >>> print(f"FVD: {results['fvd']:.2f}")
 """
 
-from fvd import (
+from .fvd import (
     compute_fvd,
     compute_fvd_with_config,
     compute_frechet_distance,
     compute_statistics,
     FVDConfig,
 )
-from i3d_model import I3DFeatureExtractor
-from video_utils import (
+from .i3d_model import I3DFeatureExtractor
+from .video_utils import (
     load_video_auto,
     sample_clips_from_video,
     load_video_clips_streaming,

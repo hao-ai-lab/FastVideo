@@ -3,7 +3,7 @@ import json
 import sys
 from pathlib import Path
 
-from fvd import compute_fvd_with_config, FVDConfig
+from .fvd import compute_fvd_with_config, FVDConfig
 
 
 def main() -> int:

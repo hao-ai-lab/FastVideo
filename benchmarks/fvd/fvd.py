@@ -6,8 +6,8 @@ from collections.abc import Iterator
 import pickle
 from dataclasses import dataclass, field
 
-from i3d_model import I3DFeatureExtractor
-from video_utils import ClipSamplingStrategy, load_video_clips_streaming
+from .i3d_model import I3DFeatureExtractor
+from .video_utils import ClipSamplingStrategy, load_video_clips_streaming
 
 
 def compute_statistics(features: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
