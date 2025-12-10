@@ -5,6 +5,7 @@ Evaluate generated video quality using FVD with the I3D feature extractor.
 ## Quick Start
 
 **Run the benchmark:**
+
 ```bash
 bash benchmarks/scripts/run.sh
 ```
@@ -21,6 +22,7 @@ That's it! The script auto-installs dependencies and runs the benchmark.
 For more control without editing Python files, use the CLI.
 
 **First-time setup** (one-time per pod/environment):
+
 ```bash
 bash benchmarks/scripts/setup_fvd.sh
 ```
@@ -40,6 +42,7 @@ python -m benchmarks.fvd.cli \
 ```
 
 **Standard protocols:**
+
 ```bash
 # Use predefined protocols
 python -m benchmarks.fvd.cli \
@@ -49,6 +52,7 @@ python -m benchmarks.fvd.cli \
 ```
 
 **Feature caching** (speed up repeated evaluations):
+
 ```bash
 python -m benchmarks.fvd.cli \
     --real-path data/real/ \
@@ -69,6 +73,7 @@ Run `python -m benchmarks.fvd.cli --help` for all options.
 ## Configuration Options
 
 Key options in `FVDConfig`:
+
 ```python
 num_videos=2048,              # Videos to evaluate
 num_frames_per_clip=16,       # Frames per clip
