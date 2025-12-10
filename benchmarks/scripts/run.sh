@@ -4,4 +4,4 @@
 pip install -q opencv-python-headless
 
 # 2. Run FVD script
-python /workspace/FastVideo/benchmarks/fvd/run_fvd.py
+python benchmarks/fvd/run_fvd.py
