@@ -219,8 +219,7 @@ def load_or_compute_features(videos: str | Path | torch.Tensor,
                              extractor: I3DFeatureExtractor,
                              config: FVDConfig,
                              cache_path: str | None = None,
-                             cache_name: str = "real_features",
-                             is_real: bool = False) -> np.ndarray:
+                             cache_name: str = "real_features") -> np.ndarray:
     """Load features from cache or compute (with streaming support)"""
 
     if cache_path is not None:
@@ -405,8 +404,7 @@ def compute_fvd_with_config(real_videos: str | Path | torch.Tensor,
         extractor=extractor,
         config=config,
         cache_path=config.cache_real_features,
-        cache_name="real_features",
-        is_real=True)
+        cache_name="real_features")
 
     if verbose:
         print(f"\n{'='*70}")
@@ -417,8 +415,7 @@ def compute_fvd_with_config(real_videos: str | Path | torch.Tensor,
                                             extractor=extractor,
                                             config=config,
                                             cache_path=None,
-                                            cache_name="gen_features",
-                                            is_real=False)
+                                            cache_name="gen_features")
 
     if verbose:
         print(f"\nReal videos/clips: {len(real_features)}")
