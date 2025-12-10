@@ -178,7 +178,6 @@ def extract_features_streaming(video_generator: Iterator[torch.Tensor],
 
     for clip_count, clip in enumerate(video_generator):
         batch.append(clip)
-        clip_count += 1
 
         # Process batch when full
         if len(batch) == batch_size:
