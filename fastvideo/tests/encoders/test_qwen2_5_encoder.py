@@ -106,14 +106,19 @@ def test_qwen2_5_encoder(qwen_model_path):
             
             # HF Forward
             # AutoModel for Qwen2.5-VL usually returns BaseModelOutputWithPast
-            outputs1 = model1(**tokens).last_hidden_state
+            outputs1 = model1(
+                input_ids=tokens.input_ids,
+                attention_mask=tokens.attention_mask,
+                output_hidden_states=True
+            ).hidden_states[-3]
             
             # FastVideo Forward
             with set_forward_context(current_timestep=0, attn_metadata=None):
                 outputs2 = model2(
                     input_ids=tokens.input_ids,
-                    attention_mask=tokens.attention_mask
-                ).last_hidden_state
+                    attention_mask=tokens.attention_mask,
+                    output_hidden_states=True
+                ).hidden_states[-3]
                 
             # Compare
             # Filter padding for comparison if needed, but here we just check raw output matching
