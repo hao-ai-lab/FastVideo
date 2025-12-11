@@ -11,7 +11,21 @@ print(f"Using image: {image_tag}")
 image = (
     modal.Image.from_registry(image_tag, add_python="3.12")
     .run_commands("rm -rf /FastVideo")
-    .apt_install("cmake", "pkg-config", "build-essential", "curl", "libssl-dev", "ffmpeg")
+    .apt_install(
+        "cmake",
+        "pkg-config",
+        "build-essential",
+        "gcc-11",
+        "g++-11",
+        "clang-11",
+        "curl",
+        "libssl-dev",
+        "ffmpeg",
+        "git",
+    )
+    .run_commands(
+        "update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11"
+    )
     .run_commands("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable")
     .run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc")
     .env({
@@ -52,8 +66,11 @@ def run_test(pytest_command: str):
     git clone {git_repo} /FastVideo &&
     cd /FastVideo &&
     {checkout_command} &&
+    git submodule update --init --recursive &&
+    export THUNDERKITTENS_ROOT=csrc/attn/video_sparse_attn/tk &&
+    export CC=gcc-11 && export CXX=g++-11 &&
     uv pip install -e .[test] &&
-    cd csrc/attn/video_sparse_attn/ &&
+    cd csrc/attn/video_sparse_attn &&
     python setup.py install &&
     cd ../../.. &&
     {pytest_command}
