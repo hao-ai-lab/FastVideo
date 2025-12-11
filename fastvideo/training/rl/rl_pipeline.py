@@ -2,8 +2,11 @@
 """
 RL training pipeline for FastVideo.
 
-This module currently implements reinforcement learning training using GRPO (Group Relative Policy Optimization)
-and related algorithms. It extends the base TrainingPipeline with RL-specific functionality:
+This module implements reinforcement learning training using pluggable algorithms
+(GRPO, PPO, DPO). It extends the base TrainingPipeline with RL-specific functionality.
+
+The pipeline separates algorithm logic from pipeline infrastructure, allowing
+easy switching between different RL algorithms.
 
 Reference:
     Flow-GRPO: https://github.com/yifan123/flow_grpo
@@ -22,15 +25,13 @@ from fastvideo.training.rl.rewards import (
     MultiRewardAggregator,
     ValueModel
 )
+from fastvideo.training.rl.algorithms import (
+    BaseRLAlgorithm,
+    create_algorithm,
+)
 from .rl_utils import (
-    compute_gae,
-    normalize_advantages,
-    compute_grpo_policy_loss,
-    compute_value_loss,
-    compute_policy_entropy,
     sample_random_timesteps,
     compute_reward_statistics,
-    check_early_stopping
 )
 from fastvideo.training.training_utils import (
     get_scheduler,
@@ -42,15 +43,22 @@ logger = init_logger(__name__)
 
 class RLPipeline(TrainingPipeline):
     """
-    RL training pipeline using GRPO for flow matching models.
+    RL training pipeline for flow matching models.
 
     This pipeline implements online reinforcement learning for video generation models.
-    It follows the Flow-GRPO approach with:
-    - Fast trajectory collection (1-2 denoising steps)
-    - Multi-reward aggregation
-    - GRPO policy optimization
-    - GRPO-Guard safety mechanisms
+    It supports multiple RL algorithms through a pluggable architecture:
+    - GRPO (Group Relative Policy Optimization) with GRPO-Guard safety
+    - PPO (Proximal Policy Optimization) #TODO
+    - DPO (Direct Preference Optimization) #TODO
+
+    The algorithm is selected via the `rl_algorithm` configuration and handles:
+    - Advantage computation
+    - Policy loss computation
+    - Value loss computation (if applicable)
     """
+
+    # Algorithm instance that implements train_one_step logic
+    algorithm: BaseRLAlgorithm
 
     def __init__(
         self,
@@ -81,22 +89,34 @@ class RLPipeline(TrainingPipeline):
         )
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
-        """Initialize the RL training pipeline with reward and value models."""
-        # First initialize base pipeline (transformer, optimizer, dataloader, etc.)
+        """Initialize the RL training pipeline with algorithm, reward and value models."""
         super().initialize_training_pipeline(training_args)
 
         logger.info("Initializing RL-specific components...")
 
-        # Initialize reward models
-        self.reward_models = create_reward_models(
-            reward_model_paths=training_args.rl_args.reward_model_paths,
-            reward_weights=training_args.rl_args.reward_weights,
-            reward_model_types=training_args.rl_args.reward_model_types,
-            device=str(self.device)
+        # Initialize the RL algorithm
+        self.algorithm = create_algorithm(
+            algorithm_name=training_args.rl_args.rl_algorithm,
+            config=training_args.rl_args
         )
-        logger.info("Loaded reward models: %s", self.reward_models)
+        logger.info("Using RL algorithm: %s", self.algorithm.name)
 
-        # Initialize value model
+        # Initialize reward models (excludes DPO)
+        if not self.algorithm.name == "dpo":
+            self.reward_models = create_reward_models(
+                reward_models=training_args.rl_args.reward_models,
+                device=str(self.device)
+            )
+            logger.info("Loaded reward models: %s", self.reward_models)
+
+        # Initialize value model if algorithm requires it
+        if self.algorithm.requires_value_model:
+            self._initialize_value_model(training_args)
+
+        logger.info("RL pipeline initialization complete")
+
+    def _initialize_value_model(self, training_args: TrainingArgs) -> None:
+        """Initialize the value model and its optimizer."""
         if training_args.rl_args.value_model_share_backbone:
             # Share transformer backbone with policy
             logger.info("Value model will share backbone with policy transformer")
@@ -139,8 +159,6 @@ class RLPipeline(TrainingPipeline):
             logger.info("Created separate optimizer and scheduler for value model")
             logger.info("Value model trainable parameters: %s B",
                        round(count_trainable(self.value_model) / 1e9, 3))
-
-        logger.info("RL pipeline initialization complete")
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         """Initialize validation pipeline for RL (similar to base implementation)."""
@@ -206,6 +224,7 @@ class RLPipeline(TrainingPipeline):
         # TODO: Implement actual asynchronous reward computation
         # This requires decoding latents to videos and running reward models
         # For now, use dummy rewards
+        rewards = self.reward_models.compute_reward(training_batch.latents, training_batch.input_kwargs["prompts"])
         batch_size = training_batch.latents.shape[0]
         dummy_rewards = torch.randn(batch_size, device=training_batch.latents.device) * 0.1 + 0.5
         training_batch.reward_scores = dummy_rewards.clamp(0.0, 1.0)
@@ -231,6 +250,9 @@ class RLPipeline(TrainingPipeline):
         Returns:
             Updated training_batch with value predictions
         """
+        if not self.algorithm.requires_value_model:
+            return training_batch
+
         logger.debug("Computing value predictions")
 
         # TODO: Implement actual value computation
@@ -247,7 +269,7 @@ class RLPipeline(TrainingPipeline):
 
     def compute_advantages(self, training_batch: TrainingBatch) -> TrainingBatch:
         """
-        Compute advantages using GAE-lambda.
+        Compute advantages using the algorithm's implementation.
 
         Args:
             training_batch: Training batch with rewards and values
@@ -255,32 +277,25 @@ class RLPipeline(TrainingPipeline):
         Returns:
             Updated training_batch with advantages and returns
         """
-        logger.debug("Computing advantages using GAE")
+        if training_batch.reward_scores is None:
+            raise ValueError("Rewards must be computed before advantages")
 
-        # For single-step (Flow-GRPO-Fast), we have simple advantage computation
-        # advantages = rewards - values
-        # In multi-step, we'd use GAE with gamma and lambda
+        # Get values (use zeros if algorithm doesn't use value model)
+        if training_batch.values is not None:
+            values = training_batch.values
+        else:
+            values = torch.zeros_like(training_batch.reward_scores)
 
-        if training_batch.reward_scores is None or training_batch.values is None:
-            raise ValueError("Rewards and values must be computed before advantages")
+        # For single-step, next_value = current_value
+        next_values = values
 
-        # Simple advantage for single-step
-        # For multi-step, use compute_gae()
-        rewards = training_batch.reward_scores
-        values = training_batch.values
-        next_values = values  # For single-step, next_value = current_value
-
-        advantages, returns = compute_gae(
-            rewards=rewards,
+        # Delegate to algorithm for advantage computation
+        advantages, returns = self.algorithm.compute_advantages(
+            rewards=training_batch.reward_scores,
             values=values,
             next_values=next_values,
-            gamma=self.training_args.rl_args.rl_gamma,
-            lambda_=self.training_args.rl_args.rl_lambda
+            dones=None
         )
-
-        # Normalize advantages
-        if self.training_args.rl_args.rl_normalize_advantages:
-            advantages = normalize_advantages(advantages)
 
         training_batch.advantages = advantages
         training_batch.returns = returns
@@ -295,15 +310,18 @@ class RLPipeline(TrainingPipeline):
 
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
         """
-        Train one step using RL/GRPO algorithm.
+        Train one step using the configured RL algorithm.
 
-        This overrides the base class train_one_step to implement RL-specific logic:
+        This method orchestrates the training step while delegating
+        algorithm-specific loss computation to the algorithm instance.
+
+        Steps:
         1. Collect trajectories with current policy
         2. Compute rewards
-        3. Compute values
+        3. Compute values (if algorithm requires)
         4. Compute advantages
-        5. Update policy with GRPO loss
-        6. Update value function
+        5. Compute losses using algorithm
+        6. Update policy and value function
 
         Args:
             training_batch: Current training batch
@@ -332,57 +350,34 @@ class RLPipeline(TrainingPipeline):
             # 2. Compute rewards
             training_batch = self.compute_rewards(training_batch)
 
-            # 3. Compute value predictions
+            # 3. Compute value predictions (if algorithm requires)
             training_batch = self.compute_values(training_batch)
 
-            # 4. Compute advantages using GAE
+            # 4. Compute advantages using algorithm
             training_batch = self.compute_advantages(training_batch)
 
-            # 5. Compute policy loss (GRPO specific)
+            # 5. Compute losses using algorithm
             if training_batch.log_probs is not None and training_batch.old_log_probs is not None:
-                policy_loss, policy_info = compute_grpo_policy_loss(
-                    log_probs=training_batch.log_probs,
-                    old_log_probs=training_batch.old_log_probs,
-                    advantages=training_batch.advantages,
-                    clip_range=self.training_args.rl_args.rl_policy_clip_range,
-                    use_ratio_norm=self.training_args.rl_args.rl_ratio_norm_correction,
-                    max_importance_ratio=self.training_args.rl_args.rl_max_importance_ratio
-                )
+                # Use the algorithm to compute all losses
+                algorithm_output = self.algorithm.compute_loss(training_batch)
 
-                training_batch.policy_loss = policy_info["policy_loss"]
-                training_batch.kl_divergence = policy_info["kl_divergence"]
-                training_batch.importance_ratio = policy_info["importance_ratio_mean"]
-                training_batch.clip_fraction = policy_info["clip_fraction"]
+                # Extract metrics from algorithm output
+                if algorithm_output.metrics:
+                    training_batch.policy_loss = algorithm_output.metrics.get("policy_loss", 0.0)
+                    training_batch.kl_divergence = algorithm_output.metrics.get("kl_divergence", 0.0)
+                    training_batch.importance_ratio = algorithm_output.metrics.get("importance_ratio_mean", 1.0)
+                    training_batch.clip_fraction = algorithm_output.metrics.get("clip_fraction", 0.0)
+                    training_batch.value_loss = algorithm_output.metrics.get("value_loss", 0.0)
+                    training_batch.entropy = algorithm_output.metrics.get("entropy", 0.0)
 
-                # Backward pass for policy
-                (policy_loss / self.training_args.gradient_accumulation_steps).backward()
+                # Backward pass with scaled loss
+                if algorithm_output.total_loss is not None:
+                    scaled_loss = algorithm_output.total_loss / self.training_args.gradient_accumulation_steps
+                    scaled_loss.backward()
 
-            # 6. Compute value loss
-            if training_batch.values is not None and training_batch.returns is not None:
-                value_loss, value_info = compute_value_loss(
-                    values=training_batch.values,
-                    returns=training_batch.returns,
-                    old_values=training_batch.old_values,
-                    clip_range=self.training_args.rl_args.rl_value_clip_range,
-                    use_clipping=True
-                )
-
-                training_batch.value_loss = value_info["value_loss"]
-
-                # Backward pass for value
-                value_loss_scaled = value_loss * self.training_args.rl_args.rl_value_loss_coef
-                (value_loss_scaled / self.training_args.gradient_accumulation_steps).backward()
-
-            # 7. Entropy bonus (optional)
-            if self.training_args.rl_args.rl_entropy_coef > 0.0 and training_batch.log_probs is not None:
-                entropy = compute_policy_entropy(training_batch.log_probs)
-                training_batch.entropy = entropy.item()
-                entropy_loss = -self.training_args.rl_args.rl_entropy_coef * entropy
-                (entropy_loss / self.training_args.gradient_accumulation_steps).backward()
-
-            # Accumulate total loss
-            total_loss = training_batch.policy_loss + training_batch.value_loss
-            training_batch.total_loss += total_loss
+                # Accumulate total loss
+                if algorithm_output.total_loss is not None:
+                    training_batch.total_loss += algorithm_output.total_loss.item()
 
         # Clip gradients
         training_batch = self._clip_grad_norm(training_batch)
@@ -397,7 +392,7 @@ class RLPipeline(TrainingPipeline):
                 self.value_scheduler.step()
 
         # Check for early stopping based on KL divergence
-        if check_early_stopping(training_batch.kl_divergence, self.training_args.rl_args.rl_target_kl):
+        if self.algorithm.check_early_stopping(training_batch.kl_divergence):
             logger.warning(
                 "Early stopping at step %d due to high KL divergence",
                 training_batch.current_timestep
@@ -411,8 +406,10 @@ class RLPipeline(TrainingPipeline):
         for param in self.transformer.parameters():
             param.requires_grad = True
 
-        # Value model is trainable if not sharing backbone
-        if self.value_model is not None and not self.training_args.rl_args.value_model_share_backbone:
+        # Value model is trainable if not sharing backbone and algorithm requires it
+        if (self.value_model is not None and
+            self.algorithm.requires_value_model and
+            not self.training_args.rl_args.value_model_share_backbone):
             for param in self.value_model.parameters():
                 param.requires_grad = True
 
