@@ -53,6 +53,9 @@ def run_test(pytest_command: str):
     cd /FastVideo &&
     {checkout_command} &&
     uv pip install -e .[test] &&
+    cd csrc/attn/video_sparse_attn/ &&
+    python setup.py install &&
+    cd ../../.. &&
     {pytest_command}
     """
     
