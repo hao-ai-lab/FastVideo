@@ -37,25 +37,23 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """Initialize LongCat-specific components."""
-        # LongCat uses FlowMatchEulerDiscreteScheduler which is already loaded
-        # from the model_index.json, so no need to override
 
         # Enable BSA (Block Sparse Attention) if configured
         pipeline_config = fastvideo_args.pipeline_config
         transformer = self.get_module("transformer", None)
         if transformer is None:
-            return
+            raise RuntimeError("Transformer module not found during initializing LongCat pipeline.")
         # If user toggles BSA via CLI/config
         if pipeline_config.enable_bsa:
             # Build effective BSA params:
             # 1) from explicit CLI overrides if provided
             # 2) else from pipeline_config.bsa_params
             # 3) else fall back to reasonable defaults
-            bsa_params_cfg = getattr(pipeline_config, 'bsa_params', None) or {}
-            sparsity = getattr(pipeline_config, 'bsa_sparsity', None)
-            cdf_threshold = getattr(pipeline_config, 'bsa_cdf_threshold', None)
-            chunk_q = getattr(pipeline_config, 'bsa_chunk_q', None)
-            chunk_k = getattr(pipeline_config, 'bsa_chunk_k', None)
+            bsa_params_cfg = pipeline_config.bsa_params
+            sparsity = pipeline_config.bsa_sparsity
+            cdf_threshold = pipeline_config.bsa_cdf_threshold
+            chunk_q = pipeline_config.bsa_chunk_q
+            chunk_k = pipeline_config.bsa_chunk_k
 
             effective_bsa_params = dict(bsa_params_cfg) if isinstance(
                 bsa_params_cfg, dict) else {}
