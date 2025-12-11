@@ -62,7 +62,8 @@ class WanImageToVideoDmdPipeline(LoRAPipeline, ComposedPipelineBase):
         self.add_stage(stage_name="latent_preparation_stage",
                        stage=LatentPreparationStage(
                            scheduler=self.get_module("scheduler"),
-                           transformer=self.get_module("transformer")))
+                           transformer=self.get_module("transformer"),
+                           use_btchw_layout=True))
 
         self.add_stage(stage_name="image_latent_preparation_stage",
                        stage=ImageVAEEncodingStage(vae=self.get_module("vae")))
