@@ -1095,7 +1095,6 @@ class DmdDenoisingStage(DenoisingStage):
         # Get latents and embeddings
         assert batch.latents is not None, "latents must be provided"
         latents = batch.latents
-        latents = latents.permute(0, 2, 1, 3, 4)
 
         video_raw_latent_shape = latents.shape
         prompt_embeds = batch.prompt_embeds
