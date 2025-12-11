@@ -67,7 +67,7 @@ def run_test(pytest_command: str):
     cd /FastVideo &&
     {checkout_command} &&
     git submodule update --init --recursive &&
-    export THUNDERKITTENS_ROOT=csrc/attn/video_sparse_attn/tk &&
+    export THUNDERKITTENS_ROOT=/FastVideo/csrc/attn/video_sparse_attn/tk &&
     export CC=gcc-11 && export CXX=g++-11 &&
     uv pip install -e .[test] &&
     cd csrc/attn/video_sparse_attn &&
