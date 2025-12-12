@@ -66,6 +66,7 @@ class VideoTransformStage(PipelineStage):
         calculated_size = None
 
         for i in range(len(batch.video_loader)):
+            # logger.info(f"Processing video {i+1}/{len(batch.video_loader)}")
             frame_interval = batch.fps[i] / self.train_fps
             start_frame_idx = 0
             frame_indices = np.arange(start_frame_idx, batch.num_frames[i],
@@ -78,8 +79,28 @@ class VideoTransformStage(PipelineStage):
                 else:
                     frame_indices = frame_indices[:self.num_frames]
 
+            logger.info(
+                f"Frame indices selected (count={len(frame_indices)}): [{frame_indices[0]}, ..., {frame_indices[-1]}]"
+            )
+
             if fastvideo_args.preprocess_config.video_loader_type == VideoLoaderType.TORCHCODEC:
-                video = batch.video_loader[i].get_frames_at(frame_indices).data
+                try:
+                    video = batch.video_loader[i].get_frames_at(
+                        frame_indices).data
+                except Exception as e:
+                    # Try to get filename if available in PreprocessBatch
+                    video_path = "unknown"
+                    print(f"batch: {batch}")
+                    if isinstance(batch, PreprocessBatch) and hasattr(
+                            batch, 'video_file_name') and i < len(
+                                batch.video_file_name):
+                        video_path = batch.video_file_name[i]
+
+                    logger.error(
+                        f"Failed to load frames for video {video_path}: {e}")
+                    logger.error(
+                        f"Attempting to load frame indices: {frame_indices}")
+                    raise e
             elif fastvideo_args.preprocess_config.video_loader_type == VideoLoaderType.TORCHVISION:
                 video, _, _ = torchvision.io.read_video(batch.video_loader[i],
                                                         output_format="TCHW")
@@ -88,6 +109,8 @@ class VideoTransformStage(PipelineStage):
                 raise ValueError(
                     f"Invalid video loader type: {fastvideo_args.preprocess_config.video_loader_type}"
                 )
+
+            logger.info(f"Video tensor shape after loading: {video.shape}")
 
             if enable_smart_resize:
                 if calculated_size is None:
@@ -107,6 +130,9 @@ class VideoTransformStage(PipelineStage):
 
                 # Resize video frames using CenterCropResizeVideo (efficient)
                 processed_video = CenterCropResizeVideo(calculated_size)(video)
+                logger.info(
+                    f"Processed video shape after resize: {processed_video.shape}"
+                )
                 video_pixel_batch.append(processed_video)
 
                 # Process pil_image (condition) with high quality Lanczos if I2V
@@ -129,9 +155,9 @@ class VideoTransformStage(PipelineStage):
                     y1 = (img.height - oh) // 2
                     img = img.crop((x1, y1, x1 + ow, y1 + oh))
 
-                    # to tensor and normalize [-1, 1]
-                    img_t = TF.to_tensor(img).sub_(0.5).div_(0.5).unsqueeze(
-                        0)  # 1, C, H, W
+                    # to tensor [0, 255] uint8
+                    img_t = torch.from_numpy(np.array(img)).permute(
+                        2, 0, 1).unsqueeze(0)
                     pil_image_batch.append(img_t)
 
             else:
@@ -139,6 +165,8 @@ class VideoTransformStage(PipelineStage):
                 video_pixel_batch.append(video)
 
         video_pixel_values = torch.stack(video_pixel_batch)
+        logger.info(
+            f"Final stacked video batch shape: {video_pixel_values.shape}")
         video_pixel_values = rearrange(video_pixel_values,
                                        "b t c h w -> b c t h w")
         video_pixel_values = video_pixel_values.to(torch.uint8)

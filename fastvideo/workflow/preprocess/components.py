@@ -97,12 +97,15 @@ class PreprocessingDataValidator:
         if height is None or width is None:
             return False
 
-        return self._filter_resolution(
+        ret = self._filter_resolution(
             height,
             width,
             max_h_div_w_ratio=self.hw_aspect_threshold * aspect,
             min_h_div_w_ratio=1 / self.hw_aspect_threshold * aspect,
         )
+        if not ret:
+            logger.info(f"failed in resolution: {batch['caption']}")
+        return ret
 
     def _filter_resolution(self, h: int, w: int, max_h_div_w_ratio: float,
                            min_h_div_w_ratio: float) -> bool:
@@ -119,18 +122,15 @@ class PreprocessingDataValidator:
             logger.info("Failed in 1")
             return False
 
-        frame_interval = batch["fps"] / self.train_fps
+        frame_interval = (batch["fps"] / self.train_fps) * self.speed_factor
         start_frame_idx = 0
         frame_indices = np.arange(start_frame_idx, batch["num_frames"],
                                   frame_interval).astype(int)
-        logger.info("Failed in 2")
-        logger.info(f"frame_indices: {frame_indices}")
-        logger.info(f"self.num_frames: {self.num_frames}")
-        logger.info(f"self.drop_short_ratio: {self.drop_short_ratio}")
-        print(f"len(frame_indices): {len(frame_indices)}")
+        # logger.info("Failed in 2")
         result = not (len(frame_indices) < self.num_frames
                       and random.random() < self.drop_short_ratio)
-        logger.info(f"Failed in 3: {result}")
+        if not result:
+            logger.info(f"failed in frame_sampling: {batch['caption']}")
         return result
 
     def log_validation_stats(self):
