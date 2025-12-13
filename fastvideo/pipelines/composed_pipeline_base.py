@@ -126,22 +126,32 @@ class ComposedPipelineBase(ABC):
                     fsdp_module_cls = FSDPModule
                 except Exception:  # pragma: no cover - FSDP not always available
                     fsdp_module_cls = None
+
+                compile_kwargs = self.fastvideo_args.torch_compile_kwargs or {}
                 if fsdp_module_cls is not None and isinstance(
                         transformer_module, fsdp_module_cls):
                     logger.info(
                         "Transformer is already FSDP-wrapped; skipping torch.compile in pipeline"
                     )
                 else:
-                    compile_kwargs = self.fastvideo_args.torch_compile_kwargs or {}
                     logger.info("Enabling torch.compile for DiT with kwargs=%s",
                                 compile_kwargs)
                     self.modules["transformer"] = torch.compile(
                         transformer_module, **compile_kwargs)
-                    if "transformer_2" in self.modules:
-                        transformer_module_2 = self.modules["transformer_2"]
+                if "transformer_2" in self.modules:
+                    transformer_module_2 = self.modules["transformer_2"]
+                    if fsdp_module_cls is not None and isinstance(
+                            transformer_module_2, fsdp_module_cls):
+                        logger.info(
+                            "Transformer_2 is already FSDP-wrapped; skipping torch.compile in pipeline"
+                        )
+                    else:
+                        logger.info(
+                            "Enabling torch.compile for Transformer_2 with kwargs=%s",
+                            compile_kwargs)
                         self.modules["transformer_2"] = torch.compile(
                             transformer_module_2, **compile_kwargs)
-                    logger.info("Torch Compile enabled for DiT")
+                logger.info("Torch Compile enabled for DiT")
 
         if not self.fastvideo_args.training_mode:
             logger.info("Creating pipeline stages...")

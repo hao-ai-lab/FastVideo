@@ -151,9 +151,9 @@ class LoRAPipeline(ComposedPipelineBase):
         if self.lora_initialized:
             return
         self.lora_initialized = True
-        converted_count = 0
         for transformer_name, transformer_module in self.trainable_transformer_modules.items(
         ):
+            converted_count = 0
             if transformer_name not in self.lora_layers:
                 self.lora_layers[transformer_name] = {}
             logger.info("Converting %s to LoRA Transformer", transformer_name)
