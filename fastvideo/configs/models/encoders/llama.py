@@ -56,6 +56,15 @@ class LlamaArchConfig(TextEncoderArchConfig):
         default_factory=lambda:
         [_is_transformer_layer, _is_embeddings, _is_final_norm])
 
+    tokenizer_kwargs: dict = field(
+        default_factory=lambda: {
+            "padding": "max_length",
+            "truncation": True,
+            "max_length": 256,
+            "return_tensors": "pt",
+        }
+    )
+
 
 @dataclass
 class LlamaConfig(TextEncoderConfig):
