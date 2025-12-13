@@ -51,21 +51,28 @@ for k in kernels:
         source_files.append(sources[k]['source_files'][target])
     cpp_flags.append(f'-DTK_COMPILE_{k.replace(" ", "_").upper()}')
 
+ext_modules = []
+
+if os.environ.get("SKIP_SM90_EXT", "0") != "1":
+    ext_modules.append(
+        CUDAExtension('st_attn_cuda',
+                  sources=source_files,
+                  extra_compile_args={
+                      'cxx': cpp_flags,
+                      'nvcc': cuda_flags
+                  },
+                  libraries=['cuda'])
+    )
+else:
+    print("ENV SKIP_SM90_EXT=1, skip st_attn_cuda compile")
+
 setup(name=PACKAGE_NAME,
       version=VERSION,
       author=AUTHOR,
       description=DESCRIPTION,
       url=URL,
       packages=find_packages(),
-      ext_modules=[
-          CUDAExtension('st_attn_cuda',
-                        sources=source_files,
-                        extra_compile_args={
-                            'cxx': cpp_flags,
-                            'nvcc': cuda_flags
-                        },
-                        libraries=['cuda'])
-      ],
+      ext_modules=ext_modules,
       cmdclass={'build_ext': BuildExtension},
       classifiers=[
           "Programming Language :: Python :: 3",
