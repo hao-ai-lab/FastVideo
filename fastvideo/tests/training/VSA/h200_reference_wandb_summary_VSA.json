@@ -1,0 +1,18 @@
+{
+  "step_time": 0.8274769484996796,
+  "avg_step_time": 1.4095150619745254,
+  "timing/optimizer_step": 0.02941332757472992,
+  "grad_norm": 0.24477368593215942,
+  "timing/forward_backward": 0.693624597042799,
+  "_timestamp": 1765590605.595408,
+  "timing/prepare_dit_inputs": 0.009604107588529587,
+  "learning_rate": 1e-05,
+  "train_loss": 0.30774877965450287,
+  "_step": 5,
+  "timing/normalize_input": 0.0003825277090072632,
+  "vsa_sparsity": 0.05,
+  "timing/clip_grad_norm": 0.025074530392885208,
+  "_runtime": 90.44591733,
+  "timing/get_next_batch": 0.0055067278444767,
+  "timing/reduce_loss": 0.00021916255354881287,
+}
