@@ -61,7 +61,7 @@ def run_worker():
         "--num_width", "512",
         "--num_frames", "13",
         "--flow_shift", "3",
-        "--validation_guidance_scale", "1.0",
+        "--validation_guidance_scale", "3.0",
         "--num_euler_timesteps", "50",
         "--weight_decay", "0.01",
         "--dit_precision", "fp32",

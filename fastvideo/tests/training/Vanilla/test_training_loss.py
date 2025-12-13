@@ -65,7 +65,7 @@ def run_worker():
         "--num_width", "832",
         "--num_frames", "81",
         "--flow_shift", "3",
-        "--validation_guidance_scale", "1.0",
+        "--validation_guidance_scale", "3.0",
         "--num_euler_timesteps", "50",
         "--multi_phased_distill_schedule", "4000-1",
         "--weight_decay", "0.01",
