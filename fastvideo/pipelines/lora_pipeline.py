@@ -32,9 +32,6 @@ class LoRAPipeline(ComposedPipelineBase):
     )  # state dicts of loaded lora adapters (includes lora_A, lora_B, and lora_alpha)
     cur_adapter_name: str = ""
     cur_adapter_path: str = ""
-    # do not need to include moe related transformers
-    trainable_transformer_names: list[str] = ["transformer"]
-    trainable_transformer_modules: dict[str, torch.nn.Module] = {}
     lora_layers: dict[str, dict[str, BaseLayerWithLoRA]] = {}
     fastvideo_args: FastVideoArgs | TrainingArgs
     exclude_lora_layers: dict[str, list[str]] = {}
@@ -67,6 +64,9 @@ class LoRAPipeline(ComposedPipelineBase):
                 self.trainable_transformer_modules[
                     secondary_transformer_name] = self.modules[
                         secondary_transformer_name]
+
+        logger.info("trainable_transformer_modules: %s",
+                    self.trainable_transformer_modules.keys())
 
         for transformer_name, transformer_module in self.trainable_transformer_modules.items(
         ):
@@ -131,12 +131,11 @@ class LoRAPipeline(ComposedPipelineBase):
             super().set_trainable()
             return
 
+        device_mesh = init_device_mesh("cuda", (dist.get_world_size(), 1),
+                                       mesh_dim_names=["fake", "replicate"])
         for transformer_name, transformer_module in self.trainable_transformer_modules.items(
         ):
-            logger.info("Setting %s to requires_grad=False", transformer_name)
             transformer_module.requires_grad_(False)
-            device_mesh = init_device_mesh("cuda", (dist.get_world_size(), 1),
-                                           mesh_dim_names=["fake", "replicate"])
             if transformer_name in self.lora_layers:
                 set_lora_grads(self.lora_layers[transformer_name], device_mesh)
             else:

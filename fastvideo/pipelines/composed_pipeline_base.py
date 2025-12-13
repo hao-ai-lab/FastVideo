@@ -43,6 +43,9 @@ class ComposedPipelineBase(ABC):
     training_args: TrainingArgs | None = None
     fastvideo_args: FastVideoArgs | TrainingArgs | None = None
     modules: dict[str, Any] = {}
+    # do not need to include moe related transformers
+    trainable_transformer_names: list[str] = ["transformer"]
+    trainable_transformer_modules: dict[str, torch.nn.Module] = {}
     post_init_called: bool = False
 
     # TODO(will): args should support both inference args and training args
@@ -87,13 +90,13 @@ class ComposedPipelineBase(ABC):
     def set_trainable(self) -> None:
         # Only train DiT
         if getattr(self.fastvideo_args, "training_mode", False):
-            for name, module in self.modules.items():
+            for name, module in self.trainable_transformer_modules.items():
+                logger.info("Setting %s to requires_grad=True", name)
                 if not isinstance(module, torch.nn.Module):
+                    logger.info(
+                        "Skipping %s because it is not a torch.nn.Module", name)
                     continue
-                if "transformer" in name:
-                    module.requires_grad_(True)
-                else:
-                    module.requires_grad_(False)
+                module.requires_grad_(True)
 
     def post_init(self) -> None:
         assert self.fastvideo_args is not None, "fastvideo_args must be set"

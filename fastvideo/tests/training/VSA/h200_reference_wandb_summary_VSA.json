@@ -14,5 +14,5 @@
   "timing/clip_grad_norm": 0.025074530392885208,
   "_runtime": 90.44591733,
   "timing/get_next_batch": 0.0055067278444767,
-  "timing/reduce_loss": 0.00021916255354881287,
+  "timing/reduce_loss": 0.00021916255354881287
 }

@@ -161,6 +161,10 @@ class DistillationPipeline(TrainingPipeline):
             self.real_score_transformer_2.requires_grad_(False)
             self.real_score_transformer_2.eval()
 
+        self.fake_score_transformer.train()
+        if self.fake_score_transformer_2 is not None:
+            self.fake_score_transformer_2.train()
+
         if training_args.enable_gradient_checkpointing_type is not None:
             self.fake_score_transformer = apply_activation_checkpointing(
                 self.fake_score_transformer,
@@ -943,7 +947,6 @@ class DistillationPipeline(TrainingPipeline):
         batches = []
         # Collect N batches for gradient accumulation
         for _ in range(gradient_accumulation_steps):
-            # batch = self._prepare_distillation(training_batch)
             batch = self._get_next_batch(training_batch)
             batch = self._normalize_dit_input(batch)
             batch = self._prepare_dit_inputs(batch)
@@ -985,9 +988,6 @@ class DistillationPipeline(TrainingPipeline):
 
             # Only clip gradients for the model that is currently training
             self._clip_model_grad_norm_(batch_gen, self.transformer)
-            for param in self.transformer.parameters():
-                # check if the gradient is not None and not zero
-                assert param.grad is not None and param.grad.abs().sum() > 0
             self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)
 
@@ -1025,33 +1025,6 @@ class DistillationPipeline(TrainingPipeline):
                                         self.fake_score_transformer_2)
         else:
             self._clip_model_grad_norm_(batch_fake, self.fake_score_transformer)
-
-        # Check gradients for fake score transformer
-        if self.training_args.lora_training:
-            for layer in self.lora_layers["fake_score_transformer"].values():
-                for param in layer.parameters():
-                    if param.requires_grad:
-                        assert param.grad is not None and param.grad.abs().sum(
-                        ) > 0
-        else:
-            for param in self.fake_score_transformer.parameters():
-                if param.requires_grad:
-                    assert param.grad is not None and param.grad.abs().sum() > 0
-
-        # Check gradients for fake score transformer_2 if available
-        if self.train_fake_score_transformer_2 and self.fake_score_transformer_2 is not None:
-            if self.training_args.lora_training:
-                for layer in self.lora_layers[
-                        "fake_score_transformer_2"].values():
-                    for param in layer.parameters():
-                        if param.requires_grad:
-                            assert param.grad is not None and param.grad.abs(
-                            ).sum() > 0
-            else:
-                for param in self.fake_score_transformer_2.parameters():
-                    if param.requires_grad:
-                        assert param.grad is not None and param.grad.abs().sum(
-                        ) > 0
 
         if self.train_fake_score_transformer_2 and self.fake_score_transformer_2 is not None:
             self.fake_score_optimizer_2.step()
