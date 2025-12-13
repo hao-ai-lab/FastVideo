@@ -133,6 +133,10 @@ class ComposedPipelineBase(ABC):
                                 compile_kwargs)
                     self.modules["transformer"] = torch.compile(
                         transformer_module, **compile_kwargs)
+                    if "transformer_2" in self.modules:
+                        transformer_module_2 = self.modules["transformer_2"]
+                        self.modules["transformer_2"] = torch.compile(
+                            transformer_module_2, **compile_kwargs)
                     logger.info("Torch Compile enabled for DiT")
 
         if not self.fastvideo_args.training_mode:

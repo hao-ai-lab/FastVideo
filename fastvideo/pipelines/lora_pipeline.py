@@ -32,10 +32,12 @@ class LoRAPipeline(ComposedPipelineBase):
     )  # state dicts of loaded lora adapters (includes lora_A, lora_B, and lora_alpha)
     cur_adapter_name: str = ""
     cur_adapter_path: str = ""
-    lora_layers: dict[str, BaseLayerWithLoRA] = {}
-    lora_layers_critic: dict[str, BaseLayerWithLoRA] = {}
+    # do not need to include moe related transformers
+    trainable_transformer_names: list[str] = ["transformer"]
+    trainable_transformer_modules: dict[str, torch.nn.Module] = {}
+    lora_layers: dict[str, dict[str, BaseLayerWithLoRA]] = {}
     fastvideo_args: FastVideoArgs | TrainingArgs
-    exclude_lora_layers: list[str] = []
+    exclude_lora_layers: dict[str, list[str]] = {}
     device: torch.device = get_local_torch_device()
     lora_target_modules: list[str] | None = None
     lora_path: str | None = None
@@ -47,8 +49,29 @@ class LoRAPipeline(ComposedPipelineBase):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.device = get_local_torch_device()
-        self.exclude_lora_layers = self.modules[
-            "transformer"].config.arch_config.exclude_lora_layers
+        # build list of trainable transformers
+        for transformer_name in self.trainable_transformer_names:
+            if transformer_name in self.modules and self.modules[
+                    transformer_name] is not None:
+                self.trainable_transformer_modules[
+                    transformer_name] = self.modules[transformer_name]
+            # check for transformer_2 in case of Wan2.2 MoE or fake_score_transformer_2
+            if transformer_name.endswith("_2"):
+                raise ValueError(
+                    f"trainable_transformer_name override in pipelines should not include _2 suffix: {transformer_name}"
+                )
+
+            secondary_transformer_name = transformer_name + "_2"
+            if secondary_transformer_name in self.modules and self.modules[
+                    secondary_transformer_name] is not None:
+                self.trainable_transformer_modules[
+                    secondary_transformer_name] = self.modules[
+                        secondary_transformer_name]
+
+        for transformer_name, transformer_module in self.trainable_transformer_modules.items(
+        ):
+            self.exclude_lora_layers[
+                transformer_name] = transformer_module.config.arch_config.exclude_lora_layers
         self.lora_target_modules = self.fastvideo_args.lora_target_modules
         self.lora_path = self.fastvideo_args.lora_path
         self.lora_nickname = self.fastvideo_args.lora_nickname
@@ -67,6 +90,14 @@ class LoRAPipeline(ComposedPipelineBase):
                     "q_proj", "k_proj", "v_proj", "o_proj", "to_q", "to_k",
                     "to_v", "to_out", "to_qkv"
                 ]
+                logger.info(
+                    "Using default lora_target_modules for all transformers: %s",
+                    self.lora_target_modules)
+            else:
+                logger.warning(
+                    "Using custom lora_target_modules for all transformers, which may not be intended: %s",
+                    self.lora_target_modules)
+
             self.convert_to_lora_layers()
         # Inference
         elif not self.training_mode and self.lora_path is not None:
@@ -100,13 +131,18 @@ class LoRAPipeline(ComposedPipelineBase):
             super().set_trainable()
             return
 
-        self.modules["transformer"].requires_grad_(False)
-        if "fake_score_transformer" in self.modules:
-            self.modules["fake_score_transformer"].requires_grad_(False)
-        device_mesh = init_device_mesh("cuda", (dist.get_world_size(), 1),
-                                       mesh_dim_names=["fake", "replicate"])
-        set_lora_grads(self.lora_layers, device_mesh)
-        set_lora_grads(self.lora_layers_critic, device_mesh)
+        for transformer_name, transformer_module in self.trainable_transformer_modules.items(
+        ):
+            logger.info("Setting %s to requires_grad=False", transformer_name)
+            transformer_module.requires_grad_(False)
+            device_mesh = init_device_mesh("cuda", (dist.get_world_size(), 1),
+                                           mesh_dim_names=["fake", "replicate"])
+            if transformer_name in self.lora_layers:
+                set_lora_grads(self.lora_layers[transformer_name], device_mesh)
+            else:
+                raise ValueError(
+                    f"Transformer {transformer_name} should be trainable but not found in lora_layers"
+                )
 
     def convert_to_lora_layers(self) -> None:
         """
@@ -116,45 +152,32 @@ class LoRAPipeline(ComposedPipelineBase):
             return
         self.lora_initialized = True
         converted_count = 0
-        for name, layer in self.modules["transformer"].named_modules():
-            if not self.is_target_layer(name):
-                continue
-
-            excluded = False
-            for exclude_layer in self.exclude_lora_layers:
-                if exclude_layer in name:
-                    excluded = True
-                    break
-            if excluded:
-                continue
-
-            layer = get_lora_layer(layer,
-                                   lora_rank=self.lora_rank,
-                                   lora_alpha=self.lora_alpha,
-                                   training_mode=self.training_mode)
-            if layer is not None:
-                self.lora_layers[name] = layer
-                replace_submodule(self.modules["transformer"], name, layer)
-                converted_count += 1
-        logger.info("Converted %d layers to LoRA layers", converted_count)
-
-        if "fake_score_transformer" in self.modules:
-            for name, layer in self.modules[
-                    "fake_score_transformer"].named_modules():
+        for transformer_name, transformer_module in self.trainable_transformer_modules.items(
+        ):
+            if transformer_name not in self.lora_layers:
+                self.lora_layers[transformer_name] = {}
+            logger.info("Converting %s to LoRA Transformer", transformer_name)
+            for name, layer in transformer_module.named_modules():
                 if not self.is_target_layer(name):
                     continue
+
+                excluded = False
+                for exclude_layer in self.exclude_lora_layers[transformer_name]:
+                    if exclude_layer in name:
+                        excluded = True
+                        break
+                if excluded:
+                    continue
+
                 layer = get_lora_layer(layer,
                                        lora_rank=self.lora_rank,
                                        lora_alpha=self.lora_alpha,
                                        training_mode=self.training_mode)
                 if layer is not None:
-                    self.lora_layers_critic[name] = layer
-                    replace_submodule(self.modules["fake_score_transformer"],
-                                      name, layer)
+                    self.lora_layers[transformer_name][name] = layer
+                    replace_submodule(transformer_module, name, layer)
                     converted_count += 1
-            logger.info(
-                "Converted %d layers to LoRA layers in the critic model",
-                converted_count)
+            logger.info("Converted %d layers to LoRA layers", converted_count)
 
     def set_lora_adapter(self,
                          lora_nickname: str,
@@ -238,39 +261,45 @@ class LoRAPipeline(ComposedPipelineBase):
 
         # Merge the new adapter
         adapted_count = 0
-        for name, layer in self.lora_layers.items():
-            lora_A_name = name + ".lora_A"
-            lora_B_name = name + ".lora_B"
-            lora_alpha_name = name + ".lora_alpha"
-            if lora_A_name in self.lora_adapters[lora_nickname]\
-                and lora_B_name in self.lora_adapters[lora_nickname]:
-                # Get alpha value for this layer (defaults to None if not present)
-                lora_A = self.lora_adapters[lora_nickname][lora_A_name]
-                lora_B = self.lora_adapters[lora_nickname][lora_B_name]
-                # Simple lookup - alpha stored with same naming scheme as lora_A/lora_B
-                alpha = self.lora_adapters[lora_nickname].get(
-                    lora_alpha_name) if adapter_updated else None
+        for transformer_name, transformer_lora_layers in self.lora_layers.items(
+        ):
+            for name, layer in transformer_lora_layers.items():
+                lora_A_name = name + ".lora_A"
+                lora_B_name = name + ".lora_B"
+                lora_alpha_name = name + ".lora_alpha"
+                if lora_A_name in self.lora_adapters[lora_nickname]\
+                    and lora_B_name in self.lora_adapters[lora_nickname]:
+                    # Get alpha value for this layer (defaults to None if not present)
+                    lora_A = self.lora_adapters[lora_nickname][lora_A_name]
+                    lora_B = self.lora_adapters[lora_nickname][lora_B_name]
+                    # Simple lookup - alpha stored with same naming scheme as lora_A/lora_B
+                    alpha = self.lora_adapters[lora_nickname].get(
+                        lora_alpha_name) if adapter_updated else None
 
-                layer.set_lora_weights(
-                    lora_A,
-                    lora_B,
-                    lora_alpha=alpha,
-                    training_mode=self.fastvideo_args.training_mode,
-                    lora_path=lora_path)
-                adapted_count += 1
-            else:
-                if rank == 0:
-                    logger.warning(
-                        "LoRA adapter %s does not contain the weights for layer %s. LoRA will not be applied to it.",
-                        lora_path, name)
-                layer.disable_lora = True
+                    layer.set_lora_weights(
+                        lora_A,
+                        lora_B,
+                        lora_alpha=alpha,
+                        training_mode=self.fastvideo_args.training_mode,
+                        lora_path=lora_path)
+                    adapted_count += 1
+                else:
+                    if rank == 0:
+                        logger.warning(
+                            "LoRA adapter %s does not contain the weights for layer %s. LoRA will not be applied to it.",
+                            lora_path, name)
+                    layer.disable_lora = True
         logger.info("Rank %d: LoRA adapter %s applied to %d layers", rank,
                     lora_path, adapted_count)
 
     def merge_lora_weights(self) -> None:
-        for name, layer in self.lora_layers.items():
-            layer.merge_lora_weights()
+        for transformer_name, transformer_lora_layers in self.lora_layers.items(
+        ):
+            for name, layer in transformer_lora_layers.items():
+                layer.merge_lora_weights()
 
     def unmerge_lora_weights(self) -> None:
-        for name, layer in self.lora_layers.items():
-            layer.unmerge_lora_weights()
+        for transformer_name, transformer_lora_layers in self.lora_layers.items(
+        ):
+            for name, layer in transformer_lora_layers.items():
+                layer.unmerge_lora_weights()

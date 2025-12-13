@@ -7,7 +7,7 @@ import time
 from abc import abstractmethod
 from collections import deque
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, cast
 
 import imageio
 import numpy as np
@@ -58,6 +58,10 @@ class DistillationPipeline(TrainingPipeline):
         "transformer",
         "vae",
     ]
+    # used by lora training
+    trainable_transformer_names: list[str] = [
+        "transformer", "fake_score_transformer"
+    ]
     validation_pipeline: ComposedPipelineBase
     train_dataloader: StatefulDataLoader
     train_loader_iter: Iterator[dict[str, Any]]
@@ -71,6 +75,65 @@ class DistillationPipeline(TrainingPipeline):
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         raise RuntimeError(
             "create_pipeline_stages should not be called for training pipeline")
+
+    def load_modules(self,
+                     fastvideo_args: FastVideoArgs,
+                     loaded_modules: dict[str, torch.nn.Module] | None = None):
+        modules = super().load_modules(fastvideo_args, loaded_modules)
+        training_args = cast(TrainingArgs, fastvideo_args)
+
+        if training_args.real_score_model_path:
+            logger.info("Loading real score transformer from: %s",
+                        training_args.real_score_model_path)
+            training_args.override_transformer_cls_name = "WanTransformer3DModel"
+            # TODO(will): can use deepcopy instead if the model is the same
+            self.real_score_transformer = self.load_module_from_path(
+                training_args.real_score_model_path, "transformer",
+                training_args)
+            modules["real_score_transformer"] = self.real_score_transformer
+            try:
+                self.real_score_transformer_2 = self.load_module_from_path(
+                    training_args.real_score_model_path, "transformer_2",
+                    training_args)
+                logger.info("Loaded real score transformer_2 for MoE support")
+                modules[
+                    "real_score_transformer_2"] = self.real_score_transformer_2
+            except Exception:
+                logger.info(
+                    "real score transformer_2 not found, using single transformer"
+                )
+                self.real_score_transformer_2 = None
+        else:
+            raise ValueError(
+                "real_score_model_path is required for DMD distillation pipeline"
+            )
+
+        if training_args.fake_score_model_path:
+            logger.info("Loading fake score transformer from: %s",
+                        training_args.fake_score_model_path)
+            training_args.override_transformer_cls_name = "WanTransformer3DModel"
+            self.fake_score_transformer = self.load_module_from_path(
+                training_args.fake_score_model_path, "transformer",
+                training_args)
+            modules["fake_score_transformer"] = self.fake_score_transformer
+            try:
+                self.fake_score_transformer_2 = self.load_module_from_path(
+                    training_args.fake_score_model_path, "transformer_2",
+                    training_args)
+                logger.info("Loaded fake score transformer_2 for MoE support")
+                modules[
+                    "fake_score_transformer_2"] = self.fake_score_transformer_2
+            except Exception:
+                logger.info(
+                    "fake score transformer_2 not found, using single transformer"
+                )
+                self.fake_score_transformer_2 = None
+        else:
+            raise ValueError(
+                "fake_score_model_path is required for DMD distillation pipeline"
+            )
+
+        return modules
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         """Initialize the distillation training pipeline with multiple models."""
@@ -91,64 +154,12 @@ class DistillationPipeline(TrainingPipeline):
         else:
             self.boundary_timestep = None
 
-        if training_args.real_score_model_path:
-            logger.info("Loading real score transformer from: %s",
-                        training_args.real_score_model_path)
-            training_args.override_transformer_cls_name = "WanTransformer3DModel"
-            self.real_score_transformer = self.load_module_from_path(
-                training_args.real_score_model_path, "transformer",
-                training_args)
-            try:
-                self.real_score_transformer_2 = self.load_module_from_path(
-                    training_args.real_score_model_path, "transformer_2",
-                    training_args)
-                logger.info("Loaded real score transformer_2 for MoE support")
-            except Exception:
-                logger.info(
-                    "real score transformer_2 not found, using single transformer"
-                )
-                self.real_score_transformer_2 = None
-        else:
-            self.real_score_transformer = self.get_module(
-                "real_score_transformer")
-            self.real_score_transformer_2 = self.get_module(
-                "real_score_transformer_2")
-
-        if training_args.fake_score_model_path:
-            logger.info("Loading fake score transformer from: %s",
-                        training_args.fake_score_model_path)
-            training_args.override_transformer_cls_name = "WanTransformer3DModel"
-            self.fake_score_transformer = self.load_module_from_path(
-                training_args.fake_score_model_path, "transformer",
-                training_args)
-            try:
-                self.fake_score_transformer_2 = self.load_module_from_path(
-                    training_args.fake_score_model_path, "transformer_2",
-                    training_args)
-                logger.info("Loaded fake score transformer_2 for MoE support")
-            except Exception:
-                logger.info(
-                    "fake score transformer_2 not found, using single transformer"
-                )
-                self.fake_score_transformer_2 = None
-        else:
-            self.fake_score_transformer = self.get_module(
-                "fake_score_transformer")
-            self.fake_score_transformer_2 = self.get_module(
-                "fake_score_transformer_2")
-
+        # make sure the real score transformer is not trainable
         self.real_score_transformer.requires_grad_(False)
         self.real_score_transformer.eval()
         if self.real_score_transformer_2 is not None:
             self.real_score_transformer_2.requires_grad_(False)
             self.real_score_transformer_2.eval()
-
-        # Set training modes for fake score transformers (trainable)
-        self.fake_score_transformer.requires_grad_(True)
-        self.fake_score_transformer.train()
-        if self.fake_score_transformer_2 is not None:
-            self.fake_score_transformer_2.requires_grad_(True)
-            self.fake_score_transformer_2.train()
 
         if training_args.enable_gradient_checkpointing_type is not None:
             self.fake_score_transformer = apply_activation_checkpointing(
@@ -348,22 +359,6 @@ class DistillationPipeline(TrainingPipeline):
         """Initialize validation pipeline - must be implemented by subclasses."""
         raise NotImplementedError(
             "Distillation pipelines must implement this method")
-
-    def _prepare_distillation(self,
-                              training_batch: TrainingBatch) -> TrainingBatch:
-        """Prepare training environment for distillation."""
-        self.transformer.requires_grad_(True)
-        self.transformer.train()
-        if self.transformer_2 is not None:
-            self.transformer_2.requires_grad_(True)
-            self.transformer_2.train()
-        self.fake_score_transformer.requires_grad_(True)
-        self.fake_score_transformer.train()
-        if self.fake_score_transformer_2 is not None:
-            self.fake_score_transformer_2.requires_grad_(True)
-            self.fake_score_transformer_2.train()
-
-        return training_batch
 
     def apply_ema_to_model(self, model):
         """Apply EMA weights to the model for validation or inference."""
@@ -948,8 +943,8 @@ class DistillationPipeline(TrainingPipeline):
         batches = []
         # Collect N batches for gradient accumulation
         for _ in range(gradient_accumulation_steps):
-            batch = self._prepare_distillation(training_batch)
-            batch = self._get_next_batch(batch)
+            # batch = self._prepare_distillation(training_batch)
+            batch = self._get_next_batch(training_batch)
             batch = self._normalize_dit_input(batch)
             batch = self._prepare_dit_inputs(batch)
             batch = self._build_attention_metadata(batch)
@@ -1032,15 +1027,31 @@ class DistillationPipeline(TrainingPipeline):
             self._clip_model_grad_norm_(batch_fake, self.fake_score_transformer)
 
         # Check gradients for fake score transformer
-        for param in self.fake_score_transformer.parameters():
-            if param.requires_grad:
-                assert param.grad is not None and param.grad.abs().sum() > 0
+        if self.training_args.lora_training:
+            for layer in self.lora_layers["fake_score_transformer"].values():
+                for param in layer.parameters():
+                    if param.requires_grad:
+                        assert param.grad is not None and param.grad.abs().sum(
+                        ) > 0
+        else:
+            for param in self.fake_score_transformer.parameters():
+                if param.requires_grad:
+                    assert param.grad is not None and param.grad.abs().sum() > 0
 
         # Check gradients for fake score transformer_2 if available
         if self.train_fake_score_transformer_2 and self.fake_score_transformer_2 is not None:
-            for param in self.fake_score_transformer_2.parameters():
-                if param.requires_grad:
-                    assert param.grad is not None and param.grad.abs().sum() > 0
+            if self.training_args.lora_training:
+                for layer in self.lora_layers[
+                        "fake_score_transformer_2"].values():
+                    for param in layer.parameters():
+                        if param.requires_grad:
+                            assert param.grad is not None and param.grad.abs(
+                            ).sum() > 0
+            else:
+                for param in self.fake_score_transformer_2.parameters():
+                    if param.requires_grad:
+                        assert param.grad is not None and param.grad.abs().sum(
+                        ) > 0
 
         if self.train_fake_score_transformer_2 and self.fake_score_transformer_2 is not None:
             self.fake_score_optimizer_2.step()
