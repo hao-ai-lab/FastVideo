@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
+import math
 
 import numpy as np
 import pytest
 import torch
-from diffusers import WanTransformer3DModel
-from torch.testing import assert_close
+from fastvideo.tests.third_party.wan.modules.causal_model import CausalWanModel
 
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.forward_context import set_forward_context
@@ -22,16 +22,15 @@ logger = init_logger(__name__)
 os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
-BASE_MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+BASE_MODEL_PATH = "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers"
 MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-                                  local_dir=os.path.join("data", BASE_MODEL_PATH) # store in the large /workspace disk on Runpod
-                                  )
+                                  local_dir=os.path.join(
+                                      'data', BASE_MODEL_PATH))
 TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
 
 
-@pytest.mark.skip(reason="aligned against original Wan now")
 @pytest.mark.usefixtures("distributed_setup")
-def test_wan_transformer():
+def test_train_ori_causal_wan_transformer():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     precision = torch.bfloat16
     precision_str = "bf16"
@@ -43,9 +42,19 @@ def test_wan_transformer():
     loader = TransformerLoader()
     model2 = loader.load(TRANSFORMER_PATH, args).to(dtype=precision)
 
-    model1 = WanTransformer3DModel.from_pretrained(
-        TRANSFORMER_PATH, device=device,
+    model1 = CausalWanModel.from_pretrained(
+        "/mnt/weka/home/hao.zhang/wei/Self-Forcing/wan_models/Wan2.1-T2V-1.3B", device=device,
         torch_dtype=precision).to(device, dtype=precision).requires_grad_(False)
+    causal_state_dict = torch.load("/mnt/weka/home/hao.zhang/wei/Self-Forcing/checkpoints/self_forcing_dmd.pt")["generator_ema"]
+    new_state_dict = {}
+    for k, v in causal_state_dict.items():
+        if k.startswith("model."):
+            new_state_dict[k.replace("model.", "")] = v
+    causal_state_dict = new_state_dict
+    model1.load_state_dict(causal_state_dict)
+
+    model1.num_frame_per_block = 3
+    model2.num_frame_per_block = 3
 
     total_params = sum(p.numel() for p in model1.parameters())
     # Calculate weight sum for model1 (converting to float64 to avoid overflow)
@@ -76,7 +85,10 @@ def test_wan_transformer():
 
     # Create identical inputs for both models
     batch_size = 1
-    seq_len = 30
+    text_seq_len = 30
+    seq_len = math.ceil((160 * 90) /
+                            (2 * 2) *
+                            21)
 
     # Video latents [B, C, T, H, W]
     hidden_states = torch.randn(batch_size,
@@ -89,37 +101,44 @@ def test_wan_transformer():
 
     # Text embeddings [B, L, D] (including global token)
     encoder_hidden_states = torch.randn(batch_size,
-                                        seq_len + 1,
+                                        text_seq_len + 1,
                                         4096,
                                         device=device,
                                         dtype=precision)
 
     # Timestep
-    timestep = torch.tensor([500], device=device, dtype=precision)
+    timestep = torch.randint(0, 1000, (batch_size, 21), device=device, dtype=torch.long)
+    logger.info("timestep: %s", timestep)
 
     forward_batch = ForwardBatch(
         data_type="dummy",
     )
 
-    with torch.amp.autocast('cuda', dtype=precision):
-        output1 = model1(
-            hidden_states=hidden_states,
-            encoder_hidden_states=encoder_hidden_states,
-            timestep=timestep,
-            return_dict=False,
-        )[0]
-        with set_forward_context(
-                current_timestep=0,
-                attn_metadata=None,
-                forward_batch=forward_batch,
-        ):
-            output2 = model2(hidden_states=hidden_states,
-                             encoder_hidden_states=encoder_hidden_states,
-                             timestep=timestep)
+    # with torch.amp.autocast('cuda', dtype=precision):
+    output1 = model1(
+        x=hidden_states,
+        context=encoder_hidden_states,
+        t=timestep,
+        seq_len=seq_len,
+    )
+    with set_forward_context(
+            current_timestep=0,
+            attn_metadata=None,
+            forward_batch=forward_batch,
+    ):
+        output2 = model2(hidden_states=hidden_states,
+                            encoder_hidden_states=encoder_hidden_states,
+                            timestep=timestep)
 
     # Check if outputs have the same shape
     assert output1.shape == output2.shape, f"Output shapes don't match: {output1.shape} vs {output2.shape}"
     assert output1.dtype == output2.dtype, f"Output dtype don't match: {output1.dtype} vs {output2.dtype}"
 
     # Check if outputs are similar (allowing for small numerical differences)
-    assert_close(output1, output2, atol=1e-1, rtol=1e-2)
+    max_diff = torch.max(torch.abs(output1 - output2))
+    mean_diff = torch.mean(torch.abs(output1 - output2))
+    logger.info("Max Diff: %s", max_diff.item())
+    logger.info("Mean Diff: %s", mean_diff.item())
+    assert max_diff < 1e-4, f"Maximum difference between outputs: {max_diff.item()}"
+    # mean diff
+    assert mean_diff < 1e-4, f"Mean difference between outputs: {mean_diff.item()}"
