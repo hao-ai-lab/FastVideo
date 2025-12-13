@@ -236,24 +236,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
             "Training pipelines must implement this method")
 
     def _prepare_training(self, training_batch: TrainingBatch) -> TrainingBatch:
-        self.transformer.train()
         self.optimizer.zero_grad()
         if self.transformer_2 is not None:
-            self.transformer_2.train()
             self.optimizer_2.zero_grad()
         training_batch.total_loss = 0.0
         return training_batch
-
-    def _enable_training(self, model: torch.nn.Module,
-                         optimizer: torch.optim.Optimizer) -> None:
-        """Enable training mode and gradients for the specified model."""
-        model.train()
-        optimizer.zero_grad()
-
-    def _disable_training(self, model: torch.nn.Module,
-                          optimizer: torch.optim.Optimizer) -> None:
-        """Disable training mode and gradients for the specified model."""
-        optimizer.zero_grad(set_to_none=True)
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         with self.tracker.timed("timing/get_next_batch"):
@@ -304,15 +291,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
                                 device=latents.device,
                                 dtype=latents.dtype)
             timesteps = self._sample_timesteps(batch_size, latents.device)
-
-            # Enable training for the model that will be trained next and disable the other
-            if self.train_transformer_2:
-                self._enable_training(self.transformer_2, self.optimizer_2)
-                self._disable_training(self.transformer, self.optimizer)
-            else:
-                self._enable_training(self.transformer, self.optimizer)
-                if self.transformer_2 is not None:
-                    self._disable_training(self.transformer_2, self.optimizer_2)
 
             if self.training_args.sp_size > 1:
                 # Make sure that the timesteps are the same across all sp processes.

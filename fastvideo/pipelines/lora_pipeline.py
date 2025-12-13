@@ -135,6 +135,7 @@ class LoRAPipeline(ComposedPipelineBase):
                                        mesh_dim_names=["fake", "replicate"])
         for transformer_name, transformer_module in self.trainable_transformer_modules.items(
         ):
+            transformer_module.train()
             transformer_module.requires_grad_(False)
             if transformer_name in self.lora_layers:
                 set_lora_grads(self.lora_layers[transformer_name], device_mesh)

@@ -161,10 +161,6 @@ class DistillationPipeline(TrainingPipeline):
             self.real_score_transformer_2.requires_grad_(False)
             self.real_score_transformer_2.eval()
 
-        self.fake_score_transformer.train()
-        if self.fake_score_transformer_2 is not None:
-            self.fake_score_transformer_2.train()
-
         if training_args.enable_gradient_checkpointing_type is not None:
             self.fake_score_transformer = apply_activation_checkpointing(
                 self.fake_score_transformer,

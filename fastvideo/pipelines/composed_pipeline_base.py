@@ -97,6 +97,7 @@ class ComposedPipelineBase(ABC):
                         "Skipping %s because it is not a torch.nn.Module", name)
                     continue
                 module.requires_grad_(True)
+                module.train()
 
     def post_init(self) -> None:
         assert self.fastvideo_args is not None, "fastvideo_args must be set"
