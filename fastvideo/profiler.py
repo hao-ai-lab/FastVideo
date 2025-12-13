@@ -208,6 +208,11 @@ def get_or_create_profiler(trace_dir: str | None) -> TorchProfilerController:
         profile_memory=envs.FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY,
         with_stack=envs.FASTVIDEO_TORCH_PROFILER_WITH_STACK,
         with_flops=envs.FASTVIDEO_TORCH_PROFILER_WITH_FLOPS,
+        schedule=torch.profiler.schedule(
+            wait=envs.FASTVIDEO_TORCH_PROFILER_WAIT_STEPS,
+            warmup=envs.FASTVIDEO_TORCH_PROFILER_WARMUP_STEPS,
+            active=envs.FASTVIDEO_TORCH_PROFILER_ACTIVE_STEPS,
+        ),
         on_trace_ready=torch.profiler.tensorboard_trace_handler(trace_dir,
                                                                 use_gzip=True),
     )
