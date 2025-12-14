@@ -1,0 +1,23 @@
+{
+  "step_time": 1.171190332621336,
+  "vsa_sparsity": 0,
+  "_step": 5,
+  "avg_step_time": 1.2594494499266147,
+  "timing/forward_backward": 0.6414474211633205,
+  "timing/reduce_loss": 0.00025020167231559753,
+  "_runtime": 58.873311423,
+  "batch_size": 2,
+  "timing/prepare_dit_inputs": 0.011771254241466522,
+  "timing/normalize_input": 0.0005782917141914368,
+  "learning_rate": 1e-06,
+  "hidden_dim": 1536,
+  "train_loss": 0.13831664621829987,
+  "_timestamp": 1765589891.5887935,
+  "context_len": 512,
+  "grad_norm": 0.0643853023648262,
+  "ffn_dim": 8960,
+  "timing/optimizer_step": 0.02862849459052086,
+  "dit_seq_len": 6240,
+  "timing/clip_grad_norm": 0.02274264767765999,
+  "timing/get_next_batch": 0.40074965357780457
+}
