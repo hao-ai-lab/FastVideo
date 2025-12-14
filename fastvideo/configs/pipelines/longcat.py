@@ -131,6 +131,10 @@ class LongCatT2V480PConfig(PipelineConfig):
     enable_bsa: bool = False
     use_distill: bool = False
     enhance_hf: bool = False
+    # Optional BSA parameter dict (kept for backward/phase-1 compatibility).
+    # `LongCatPipeline.initialize_pipeline()` uses this as a base and then applies
+    # CLI overrides (bsa_sparsity / bsa_chunk_{q,k} / bsa_cdf_threshold).
+    bsa_params: dict | None = None
     # BSA runtime overrides (preferred over bsa_params if provided via CLI)
     bsa_sparsity: float | None = None
     bsa_cdf_threshold: float | None = None
