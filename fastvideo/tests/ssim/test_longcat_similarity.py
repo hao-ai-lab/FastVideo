@@ -30,7 +30,7 @@ def _resolve_longcat_paths() -> tuple[str, str | None, str | None]:
 
     Skips if required local paths are missing.
     """
-    model_path = os.getenv("FASTVIDEO_LONGCAT_MODEL_PATH", "weights/longcat-for-fastvideo")
+    model_path = os.getenv("FASTVIDEO_LONGCAT_MODEL_PATH", "weights/longcat-native")
     if _looks_like_local_path(model_path) and not os.path.exists(model_path):
         pytest.skip(
             f"LongCat model path not found: {model_path}. "
@@ -61,6 +61,8 @@ if "A40" in device_name:
     device_reference_folder = "A40" + device_reference_folder_suffix
 elif "L40S" in device_name:
     device_reference_folder = "L40S" + device_reference_folder_suffix
+elif "H100" in device_name: # temporary
+    device_reference_folder = "H100" + device_reference_folder_suffix
 else:
     raise ValueError(f"Unsupported device for ssim tests: {device_name}")
 
