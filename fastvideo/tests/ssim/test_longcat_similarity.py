@@ -30,7 +30,7 @@ def _resolve_longcat_paths() -> tuple[str, str | None, str | None]:
 
     Skips if required local paths are missing.
     """
-    model_path = os.getenv("FASTVIDEO_LONGCAT_MODEL_PATH", "weights/longcat-native")
+    model_path = os.getenv("FASTVIDEO_LONGCAT_MODEL_PATH", "weights/longcat-for-fastvideo")
     if _looks_like_local_path(model_path) and not os.path.exists(model_path):
         pytest.skip(
             f"LongCat model path not found: {model_path}. "
