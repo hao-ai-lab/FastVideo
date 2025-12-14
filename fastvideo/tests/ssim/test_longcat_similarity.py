@@ -41,12 +41,9 @@ def _resolve_longcat_paths() -> tuple[str, str | None, str | None]:
     distill_lora_path = os.getenv("FASTVIDEO_LONGCAT_LORA_PATH", default_distill_lora)
 
     if distill_lora_path and _looks_like_local_path(distill_lora_path) and not os.path.exists(distill_lora_path):
-        # Distill SSIM test is intended to exercise the distilled LoRA;
-        # if it's missing locally, skip rather than silently testing base.
-        pytest.skip(
-            f"LongCat distilled LoRA path not found: {distill_lora_path}. "
-            "Set FASTVIDEO_LONGCAT_LORA_PATH or generate the distilled adapter."
-        )
+        # Don't skip globally here: base test should still be able to run.
+        # The distill/refine tests will skip if the LoRA is missing.
+        distill_lora_path = None
 
     default_refine_lora = os.path.join(model_path, "lora", "refinement")
     refine_lora_path = os.getenv("FASTVIDEO_LONGCAT_REFINE_LORA_PATH", default_refine_lora)
@@ -80,6 +77,23 @@ LONGCAT_DISTILL_PARAMS = {
     "fps": 15,
     "seed": 42,
     "negative_prompt": "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards",
+}
+
+LONGCAT_BASE_PARAMS = {
+    # Base (non-LoRA) LongCat generation at 480p.
+    # Mirrors `scripts/inference/v1_inference_longcat.sh` but uses fewer steps
+    # to keep SSIM runtime reasonable.
+    "num_gpus": 1,
+    "sp_size": 1,
+    "tp_size": 1,
+    "height": 480,
+    "width": 832,
+    "num_frames": 93,
+    "num_inference_steps": 20,
+    "guidance_scale": 4.0,
+    "fps": 15,
+    "seed": 42,
+    "negative_prompt": LONGCAT_DISTILL_PARAMS["negative_prompt"],
 }
 
 LONGCAT_REFINE_PARAMS = {
@@ -119,12 +133,22 @@ LONGCAT_TEST_PROMPTS = [
     "A young woman with long, flowing hair sits on a park bench, her eyes closed and her face relaxed. The background features a lush green park with trees and flowers, creating a peaceful and serene atmosphere. The lighting is soft and natural, with a warm glow from the sun filtering through the trees. Mid-shot framing, with a focus on the woman's face and the peaceful park.",
 ]
 
+_MAX_PROMPTS = int(os.getenv("FASTVIDEO_SSIM_MAX_PROMPTS", "1"))
+if _MAX_PROMPTS <= 0:
+    _MAX_PROMPTS = 1
+TEST_PROMPTS = LONGCAT_TEST_PROMPTS[:_MAX_PROMPTS]
 
-@pytest.mark.parametrize("prompt", LONGCAT_TEST_PROMPTS)
+
+@pytest.mark.parametrize("prompt", TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN", "TORCH_SDPA"])
 def test_longcat_distill_similarity(prompt: str, ATTENTION_BACKEND: str):
     """Generate LongCat (distilled) video and compare with reference via MS-SSIM."""
     model_path, distill_lora_path, _ = _resolve_longcat_paths()
+    if distill_lora_path is None:
+        pytest.skip(
+            "LongCat distilled LoRA path not found. "
+            "Set FASTVIDEO_LONGCAT_LORA_PATH or place it under <model_path>/lora/distilled."
+        )
 
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
 
@@ -150,8 +174,7 @@ def test_longcat_distill_similarity(prompt: str, ATTENTION_BACKEND: str):
     }
 
     generator = VideoGenerator.from_pretrained(model_path=model_path, **init_kwargs)
-    if distill_lora_path:
-        generator.set_lora_adapter(lora_nickname="distilled", lora_path=distill_lora_path)
+    generator.set_lora_adapter(lora_nickname="distilled", lora_path=distill_lora_path)
 
     generator.generate_video(
         prompt,
@@ -221,11 +244,101 @@ def test_longcat_distill_similarity(prompt: str, ATTENTION_BACKEND: str):
         f"for {model_id} with backend {ATTENTION_BACKEND}")
 
 
-@pytest.mark.parametrize("prompt", LONGCAT_TEST_PROMPTS)
+@pytest.mark.parametrize("prompt", TEST_PROMPTS)
+@pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN", "TORCH_SDPA"])
+def test_longcat_base_similarity(prompt: str, ATTENTION_BACKEND: str):
+    """Generate LongCat base (no LoRA) video and compare with reference via MS-SSIM."""
+    model_path, _, _ = _resolve_longcat_paths()
+
+    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    model_id = "LongCat-native-base"
+    output_dir = os.path.join(script_dir, "generated_videos", model_id, ATTENTION_BACKEND)
+    os.makedirs(output_dir, exist_ok=True)
+
+    output_video_stem = _sanitize_filename_component(prompt[:100].strip())
+    generated_video_path = os.path.join(output_dir, f"{output_video_stem}.mp4")
+
+    init_kwargs = {
+        "num_gpus": LONGCAT_BASE_PARAMS["num_gpus"],
+        "sp_size": LONGCAT_BASE_PARAMS["sp_size"],
+        "tp_size": LONGCAT_BASE_PARAMS["tp_size"],
+        "dit_cpu_offload": True,
+        "enable_bsa": False,
+    }
+    generator = VideoGenerator.from_pretrained(model_path=model_path, **init_kwargs)
+    generator.generate_video(
+        prompt,
+        output_path=generated_video_path,
+        height=LONGCAT_BASE_PARAMS["height"],
+        width=LONGCAT_BASE_PARAMS["width"],
+        num_frames=LONGCAT_BASE_PARAMS["num_frames"],
+        num_inference_steps=LONGCAT_BASE_PARAMS["num_inference_steps"],
+        guidance_scale=LONGCAT_BASE_PARAMS["guidance_scale"],
+        fps=LONGCAT_BASE_PARAMS["fps"],
+        seed=LONGCAT_BASE_PARAMS["seed"],
+        negative_prompt=LONGCAT_BASE_PARAMS["negative_prompt"],
+    )
+    generator.shutdown()
+
+    assert os.path.exists(
+        generated_video_path), f"Output video was not generated at {generated_video_path}"
+
+    reference_folder = os.path.join(script_dir, device_reference_folder, model_id, ATTENTION_BACKEND)
+    if not os.path.exists(reference_folder):
+        logger.error("Reference folder missing")
+        raise FileNotFoundError(
+            f"Reference video folder does not exist: {reference_folder}")
+
+    reference_video_name = None
+    for filename in os.listdir(reference_folder):
+        if not filename.endswith(".mp4"):
+            continue
+        base_filename = filename[:-4]
+        if base_filename.startswith(output_video_stem) or _sanitize_filename_component(
+                base_filename) == output_video_stem:
+            reference_video_name = filename
+            break
+    if not reference_video_name:
+        logger.error(
+            f"Reference video not found for prompt: {prompt[:100]} with backend: {ATTENTION_BACKEND}"
+        )
+        raise FileNotFoundError("Reference video missing")
+
+    reference_video_path = os.path.join(reference_folder, reference_video_name)
+    logger.info(
+        f"Computing SSIM between {reference_video_path} and {generated_video_path}"
+    )
+    ssim_values = compute_video_ssim_torchvision(reference_video_path,
+                                                 generated_video_path,
+                                                 use_ms_ssim=True)
+    mean_ssim = ssim_values[0]
+    logger.info(f"SSIM mean value: {mean_ssim}")
+
+    success = write_ssim_results(output_dir, ssim_values, reference_video_path,
+                                 generated_video_path,
+                                 LONGCAT_BASE_PARAMS["num_inference_steps"],
+                                 prompt)
+    if not success:
+        logger.error("Failed to write SSIM results to file")
+
+    min_acceptable_ssim = 0.93
+    assert mean_ssim >= min_acceptable_ssim, (
+        f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
+        f"for {model_id} with backend {ATTENTION_BACKEND}")
+
+
+@pytest.mark.parametrize("prompt", TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
 def test_longcat_refine_similarity(prompt: str, ATTENTION_BACKEND: str):
     """Generate LongCat refinement (480p->720p) and compare with reference via MS-SSIM."""
     model_path, distill_lora_path, refine_lora_path = _resolve_longcat_paths()
+    if distill_lora_path is None:
+        pytest.skip(
+            "LongCat distilled LoRA path not found (required for stage1 in refine test). "
+            "Set FASTVIDEO_LONGCAT_LORA_PATH or place it under <model_path>/lora/distilled."
+        )
     if refine_lora_path is None:
         pytest.skip(
             "LongCat refinement LoRA path not found. "
