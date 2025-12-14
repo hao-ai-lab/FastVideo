@@ -88,7 +88,7 @@ class LoRAPipeline(ComposedPipelineBase):
             if self.lora_target_modules is None:
                 self.lora_target_modules = [
                     "q_proj", "k_proj", "v_proj", "o_proj", "to_q", "to_k",
-                    "to_v", "to_out", "to_qkv"
+                    "to_v", "to_out", "to_qkv", "to_gate_compress"
                 ]
                 logger.info(
                     "Using default lora_target_modules for all transformers: %s",
