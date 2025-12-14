@@ -25,33 +25,49 @@ def _looks_like_local_path(path: str) -> bool:
     return path.startswith(("/", "./", "../", "weights/", "data/"))
 
 
-def _resolve_longcat_paths() -> tuple[str, str | None, str | None]:
-    """Return (model_path, distill_lora_path_or_none, refine_lora_path_or_none).
+def _resolve_longcat_model_path() -> str:
+    """Resolve LongCat model path.
 
-    Skips if required local paths are missing.
+    NOTE: This function is intentionally strict: if the path looks local but
+    does not exist, it raises immediately (no silent skip).
     """
     model_path = os.getenv("FASTVIDEO_LONGCAT_MODEL_PATH", "weights/longcat-native")
     if _looks_like_local_path(model_path) and not os.path.exists(model_path):
-        pytest.skip(
+        raise FileNotFoundError(
             f"LongCat model path not found: {model_path}. "
             "Set FASTVIDEO_LONGCAT_MODEL_PATH to your converted weights folder."
         )
+    return model_path
 
+
+def _resolve_longcat_distill_lora_path(model_path: str) -> str:
+    """Resolve distilled LoRA path for LongCat distill/refine stage1.
+
+    Strict: if the path looks local but does not exist, raise immediately.
+    """
     default_distill_lora = os.path.join(model_path, "lora", "distilled")
-    distill_lora_path = os.getenv("FASTVIDEO_LONGCAT_LORA_PATH", default_distill_lora)
+    lora_path = os.getenv("FASTVIDEO_LONGCAT_LORA_PATH", default_distill_lora)
+    if _looks_like_local_path(lora_path) and not os.path.exists(lora_path):
+        raise FileNotFoundError(
+            f"LongCat distilled LoRA path not found: {lora_path}. "
+            "Set FASTVIDEO_LONGCAT_LORA_PATH or place it under <model_path>/lora/distilled."
+        )
+    return lora_path
 
-    if distill_lora_path and _looks_like_local_path(distill_lora_path) and not os.path.exists(distill_lora_path):
-        # Don't skip globally here: base test should still be able to run.
-        # The distill/refine tests will skip if the LoRA is missing.
-        distill_lora_path = None
 
+def _resolve_longcat_refine_lora_path(model_path: str) -> str:
+    """Resolve refinement LoRA path for LongCat refine stage.
+
+    Strict: if the path looks local but does not exist, raise immediately.
+    """
     default_refine_lora = os.path.join(model_path, "lora", "refinement")
-    refine_lora_path = os.getenv("FASTVIDEO_LONGCAT_REFINE_LORA_PATH", default_refine_lora)
-    # Refinement SSIM test needs the refinement LoRA; if missing, it will skip at runtime.
-    if refine_lora_path and _looks_like_local_path(refine_lora_path) and not os.path.exists(refine_lora_path):
-        refine_lora_path = None
-
-    return model_path, distill_lora_path, refine_lora_path
+    lora_path = os.getenv("FASTVIDEO_LONGCAT_REFINE_LORA_PATH", default_refine_lora)
+    if _looks_like_local_path(lora_path) and not os.path.exists(lora_path):
+        raise FileNotFoundError(
+            f"LongCat refinement LoRA path not found: {lora_path}. "
+            "Set FASTVIDEO_LONGCAT_REFINE_LORA_PATH or place it under <model_path>/lora/refinement."
+        )
+    return lora_path
 
 
 device_name = torch.cuda.get_device_name()
@@ -145,12 +161,8 @@ TEST_PROMPTS = LONGCAT_TEST_PROMPTS[:_MAX_PROMPTS]
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN", "TORCH_SDPA"])
 def test_longcat_distill_similarity(prompt: str, ATTENTION_BACKEND: str):
     """Generate LongCat (distilled) video and compare with reference via MS-SSIM."""
-    model_path, distill_lora_path, _ = _resolve_longcat_paths()
-    if distill_lora_path is None:
-        pytest.skip(
-            "LongCat distilled LoRA path not found. "
-            "Set FASTVIDEO_LONGCAT_LORA_PATH or place it under <model_path>/lora/distilled."
-        )
+    model_path = _resolve_longcat_model_path()
+    distill_lora_path = _resolve_longcat_distill_lora_path(model_path)
 
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
 
@@ -250,7 +262,7 @@ def test_longcat_distill_similarity(prompt: str, ATTENTION_BACKEND: str):
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN", "TORCH_SDPA"])
 def test_longcat_base_similarity(prompt: str, ATTENTION_BACKEND: str):
     """Generate LongCat base (no LoRA) video and compare with reference via MS-SSIM."""
-    model_path, _, _ = _resolve_longcat_paths()
+    model_path = _resolve_longcat_model_path()
 
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -335,18 +347,9 @@ def test_longcat_base_similarity(prompt: str, ATTENTION_BACKEND: str):
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
 def test_longcat_refine_similarity(prompt: str, ATTENTION_BACKEND: str):
     """Generate LongCat refinement (480p->720p) and compare with reference via MS-SSIM."""
-    model_path, distill_lora_path, refine_lora_path = _resolve_longcat_paths()
-    if distill_lora_path is None:
-        pytest.skip(
-            "LongCat distilled LoRA path not found (required for stage1 in refine test). "
-            "Set FASTVIDEO_LONGCAT_LORA_PATH or place it under <model_path>/lora/distilled."
-        )
-    if refine_lora_path is None:
-        pytest.skip(
-            "LongCat refinement LoRA path not found. "
-            "Set FASTVIDEO_LONGCAT_REFINE_LORA_PATH or place it under "
-            "<model_path>/lora/refinement."
-        )
+    model_path = _resolve_longcat_model_path()
+    distill_lora_path = _resolve_longcat_distill_lora_path(model_path)
+    refine_lora_path = _resolve_longcat_refine_lora_path(model_path)
 
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
 
