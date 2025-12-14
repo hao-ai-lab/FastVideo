@@ -22,7 +22,8 @@ from fastvideo.configs.models.dits.matrixgame import MatrixGameWanVideoConfig
 from fastvideo.distributed.parallel_state import get_sp_world_size
 from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift,
                                         RMSNorm, ScaleResidual,
-                                        ScaleResidualLayerNormScaleShift)
+                                        ScaleResidualLayerNormScaleShift,
+                                        WanLayerNorm)
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import (_apply_rotary_emb,
@@ -74,14 +75,18 @@ def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
     return torch.stack(output).type_as(x)
 
 
-def rope_params(max_seq_len, dim):
-    """MatrixGame's rope_params: create frequency table."""
-    theta = 10000.0
-    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2).float() / dim))
-    t = torch.arange(max_seq_len)
-    freqs = torch.outer(t, freqs).float()
-    freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
-    return freqs_cis
+def rope_params(max_seq_len, dim, theta=10000):
+    """MatrixGame's rope_params: create frequency table.
+    
+    Uses float64 precision to match Official implementation exactly.
+    """
+    assert dim % 2 == 0
+    freqs = torch.outer(
+        torch.arange(max_seq_len),
+        1.0 / torch.pow(theta,
+                        torch.arange(0, dim, 2).to(torch.float64).div(dim)))
+    freqs = torch.polar(torch.ones_like(freqs), freqs)
+    return freqs
 
 
 class CausalMatrixGameTimeImageEmbedding(nn.Module):
@@ -288,7 +293,7 @@ class CausalMatrixGameTransformerBlock(nn.Module):
                  block_idx: int = 0):
         super().__init__()
 
-        self.norm1 = nn.LayerNorm(dim, eps, elementwise_affine=False)
+        self.norm1 = WanLayerNorm(dim, eps, elementwise_affine=False)
         self.to_q = ReplicatedLinear(dim, dim, bias=True)
         self.to_k = ReplicatedLinear(dim, dim, bias=True)
         self.to_v = ReplicatedLinear(dim, dim, bias=True)
@@ -402,6 +407,8 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         frame_seqlen = hidden_states.shape[1] // num_frames
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
+        # Convert to float32 for computation to match Official precision
+        hidden_states = hidden_states.float()
 
         e = self.scale_shift_table + temb
         assert e.shape == (bs, num_frames, 6, self.hidden_dim)
@@ -442,8 +449,9 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         if self.action_model is not None:
             if mouse_cond is not None or keyboard_cond is not None:
                 start_frame = current_start // frame_seqlen if grid_sizes is not None else 0
+
                 hidden_states = self.action_model(
-                    hidden_states.to(encoder_hidden_states.dtype),
+                    hidden_states,
                     grid_sizes[0], grid_sizes[1], grid_sizes[2],
                     mouse_cond, keyboard_cond,
                     block_mask_mouse, block_mask_keyboard,
@@ -455,6 +463,7 @@ class CausalMatrixGameTransformerBlock(nn.Module):
                     num_frame_per_block=num_frame_per_block
                 )
 
+
         ff_output = self.ffn(
             (self.norm1(hidden_states).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) *
             #  (1 + scale_msa) + shift_msa).flatten(1, 2)
@@ -462,7 +471,8 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         )
         hidden_states = self.mlp_residual(hidden_states, ff_output, c_gate_msa)
 
-        return hidden_states
+        # Convert back to original dtype before return
+        return hidden_states.to(orig_dtype)
 
 
 _DEFAULT_MATRIXGAME_CONFIG = MatrixGameWanVideoConfig()

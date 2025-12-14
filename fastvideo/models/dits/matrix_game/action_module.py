@@ -1,20 +1,18 @@
-# Copy from https://github.com/SkyworkAI/Matrix-Game/blob/main/Matrix-Game-2/wan/modules/action_module.py
+# SPDX-License-Identifier: Apache-2.0
+# Adapted from https://github.com/SkyworkAI/Matrix-Game
 
 from typing import Any, List, Tuple, Optional, Union, Dict
 from einops import rearrange
-from flash_attn import flash_attn_func
 import torch
 import torch.nn as nn
 from .posemb_layers import apply_rotary_emb, get_nd_rotary_pos_embed
 import math
 from torch.nn.attention.flex_attention import flex_attention
 
-try:
-    import flash_attn_interface
-    FLASH_ATTN_3_AVAILABLE = True
-except:
-    from flash_attn import flash_attn_func
-    FLASH_ATTN_3_AVAILABLE = False
+from fastvideo.attention import LocalAttention
+from fastvideo.layers.linear import ReplicatedLinear
+from fastvideo.layers.layernorm import FP32LayerNorm
+from fastvideo.platforms import AttentionBackendEnum
 
 
 DISABLE_COMPILE = False  # get os env
@@ -86,11 +84,11 @@ class ActionModule(nn.Module):
                 torch.nn.Linear(mouse_dim_in * vae_time_compression_ratio * windows_size + img_hidden_size, c, bias=True),
                 torch.nn.GELU(approximate="tanh"),
                 torch.nn.Linear(c, c),
-                torch.nn.LayerNorm(c),
+                FP32LayerNorm(c, elementwise_affine=True),
             )
             
             head_dim = c // heads_num
-            self.t_qkv = nn.Linear(c, c*3, bias=qkv_bias)
+            self.t_qkv = ReplicatedLinear(c, c*3, bias=qkv_bias)
             self.img_attn_q_norm = (
                 WanRMSNorm(head_dim, eps=1e-6)
                 if qk_norm
@@ -101,7 +99,7 @@ class ActionModule(nn.Module):
                 if qk_norm
                 else nn.Identity()
             )
-            self.proj_mouse = nn.Linear(c, img_hidden_size, bias=qkv_bias)
+            self.proj_mouse = ReplicatedLinear(c, img_hidden_size, bias=qkv_bias)
 
         if self.enable_keyboard:
             head_dim_key = keyboard_hidden_dim // heads_num
@@ -116,9 +114,25 @@ class ActionModule(nn.Module):
                 else nn.Identity()
             )
             
-            self.mouse_attn_q = nn.Linear(img_hidden_size, keyboard_hidden_dim, bias=qkv_bias)
-            self.keyboard_attn_kv = nn.Linear(hidden_size * windows_size * vae_time_compression_ratio, keyboard_hidden_dim * 2, bias=qkv_bias)
-            self.proj_keyboard = nn.Linear(keyboard_hidden_dim, img_hidden_size, bias=qkv_bias)
+            self.mouse_attn_q = ReplicatedLinear(img_hidden_size, keyboard_hidden_dim, bias=qkv_bias)
+            self.keyboard_attn_kv = ReplicatedLinear(hidden_size * windows_size * vae_time_compression_ratio, keyboard_hidden_dim * 2, bias=qkv_bias)
+            self.proj_keyboard = ReplicatedLinear(keyboard_hidden_dim, img_hidden_size, bias=qkv_bias)
+
+        self.mouse_attn_layer = LocalAttention(
+            num_heads=heads_num,
+            head_size=mouse_hidden_dim // heads_num,
+            causal=False,
+            supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
+                                          AttentionBackendEnum.TORCH_SDPA)
+        ) if self.enable_mouse else None
+
+        self.keyboard_attn_layer = LocalAttention(
+            num_heads=heads_num,
+            head_size=keyboard_hidden_dim // heads_num,
+            causal=False,
+            supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
+                                          AttentionBackendEnum.TORCH_SDPA)
+        ) if self.enable_keyboard else None
 
         self.vae_time_compression_ratio = vae_time_compression_ratio
         self.windows_size = windows_size
@@ -237,7 +251,7 @@ class ActionModule(nn.Module):
             group_mouse = torch.cat([hidden_states, group_mouse], dim = -1)
             group_mouse = self.mouse_mlp(group_mouse)
             # qkv
-            mouse_qkv = self.t_qkv(group_mouse)
+            mouse_qkv, _ = self.t_qkv(group_mouse)
             q, k, v = rearrange(mouse_qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num) # BHW F H C
             q = self.img_attn_q_norm(q).to(v)
             k = self.img_attn_k_norm(k).to(v)        
@@ -305,32 +319,21 @@ class ActionModule(nn.Module):
                     kv_cache_mouse["k"][:, local_start_index:local_end_index] = k
                     kv_cache_mouse["v"][:, local_start_index:local_end_index] = v
 
-                    if FLASH_ATTN_3_AVAILABLE:
-                        attn, attn_prob = flash_attn_interface.flash_attn_func(
-                            q,
-                            kv_cache_mouse["k"][:, max(0, local_end_index - max_attention_size):local_end_index],
-                            kv_cache_mouse["v"][:, max(0, local_end_index - max_attention_size):local_end_index],
-                        )
-                    else:
-                        attn = flash_attn_func(
-                            q,
-                            kv_cache_mouse["k"][:, max(0, local_end_index - max_attention_size):local_end_index],
-                            kv_cache_mouse["v"][:, max(0, local_end_index - max_attention_size):local_end_index],
-                        )
+                    attn = self.mouse_attn_layer(
+                        q,
+                        kv_cache_mouse["k"][:, max(0, local_end_index - max_attention_size):local_end_index],
+                        kv_cache_mouse["v"][:, max(0, local_end_index - max_attention_size):local_end_index],
+                    )
                     kv_cache_mouse["global_end_index"].fill_(current_end)
                     kv_cache_mouse["local_end_index"].fill_(local_end_index)
             else:
-                attn = flash_attn_func(
-                        q, # 880, f, 16, 64
-                        k, # 880, f, 16, 64
-                        v, # 880, f, 16, 64
-                    )
+                attn = self.mouse_attn_layer(q, k, v)
             # Compute cu_squlens and max_seqlen for flash attention
             # qk norm
             attn = rearrange(attn, '(b S) T h d -> b (T S) (h d)',b=B)
             
             hidden_states = rearrange(x, "(B S) T C -> B (T S) C", B=B)
-            attn = self.proj_mouse(attn)
+            attn, _ = self.proj_mouse(attn)
             
             hidden_states = hidden_states + attn
         
@@ -347,8 +350,8 @@ class ActionModule(nn.Module):
             group_keyboard = torch.stack(group_keyboard, dim = 1) # B F RW C
             group_keyboard = group_keyboard.reshape(shape=(group_keyboard.shape[0],group_keyboard.shape[1],-1))
             # apply cross attn
-            mouse_q = self.mouse_attn_q(hidden_states)
-            keyboard_kv = self.keyboard_attn_kv(group_keyboard)
+            mouse_q, _ = self.mouse_attn_q(hidden_states)
+            keyboard_kv, _ = self.keyboard_attn_kv(group_keyboard)
 
             B, L, HD = mouse_q.shape
             D = HD // self.heads_num
@@ -432,28 +435,16 @@ class ActionModule(nn.Module):
                         kv_cache_keyboard["k"][:, local_start_index:local_end_index] = k[:1]
                         kv_cache_keyboard["v"][:, local_start_index:local_end_index] = v[:1]
 
-                        if FLASH_ATTN_3_AVAILABLE:
-                            attn, attn_prob = flash_attn_interface.flash_attn_func(
-                                q,
-                                kv_cache_keyboard["k"][:, max(0, local_end_index - max_attention_size):local_end_index].repeat(S, 1, 1, 1),
-                                kv_cache_keyboard["v"][:, max(0, local_end_index - max_attention_size):local_end_index].repeat(S, 1, 1, 1),
-                            )
-                        else:
-                            attn = flash_attn_func(
-                                q,
-                                kv_cache_keyboard["k"][:, max(0, local_end_index - max_attention_size):local_end_index].repeat(S, 1, 1, 1),
-                                kv_cache_keyboard["v"][:, max(0, local_end_index - max_attention_size):local_end_index].repeat(S, 1, 1, 1),
-                            )
+                        attn = self.keyboard_attn_layer(
+                            q,
+                            kv_cache_keyboard["k"][:, max(0, local_end_index - max_attention_size):local_end_index].repeat(S, 1, 1, 1),
+                            kv_cache_keyboard["v"][:, max(0, local_end_index - max_attention_size):local_end_index].repeat(S, 1, 1, 1),
+                        )
 
                         kv_cache_keyboard["global_end_index"].fill_(current_end)
                         kv_cache_keyboard["local_end_index"].fill_(local_end_index)
                 else:
-                    attn = flash_attn_func(
-                            q, # 1, f*880, 16, 64
-                            k, # 1, f, 16, 64
-                            v, # 1, f, 16, 64
-                            causal=False,
-                        )
+                    attn = self.keyboard_attn_layer(q, k, v)
                 attn = rearrange(attn, '(B S) T H D -> B (T S) (H D)', S=S)
             else:
                 if is_causal:
@@ -513,22 +504,16 @@ class ActionModule(nn.Module):
                             local_start_index = local_end_index - num_new_tokens
                         kv_cache_keyboard["k"][:, local_start_index:local_end_index] = k
                         kv_cache_keyboard["v"][:, local_start_index:local_end_index] = v
-                        attn = flash_attn_func(
+                        attn = self.keyboard_attn_layer(
                             q,
                             kv_cache_keyboard["k"][:, max(0, local_end_index - max_attention_size):local_end_index],
                             kv_cache_keyboard["v"][:, max(0, local_end_index - max_attention_size):local_end_index],
-                            # causal=is_causal
                         )
                         kv_cache_keyboard["global_end_index"].fill_(current_end)
                         kv_cache_keyboard["local_end_index"].fill_(local_end_index)
                 else:
-                    attn = flash_attn_func(
-                            q, # 1, f*880, 16, 64
-                            k, # 1, f, 16, 64
-                            v, # 1, f, 16, 64
-                            # causal=is_causal,
-                        )
+                    attn = self.keyboard_attn_layer(q, k, v)
                 attn = rearrange(attn, 'B L H D -> B L (H D)')
-            attn = self.proj_keyboard(attn)
+            attn, _ = self.proj_keyboard(attn)
             hidden_states = hidden_states + attn
         return hidden_states

@@ -54,7 +54,7 @@ class MatrixGameWanVideoArchConfig(WanVideoArchConfig):
             "heads_num": 16,
             "hidden_size": 128,
             "img_hidden_size": 1536,
-            "keyboard_dim_in": 6,
+            "keyboard_dim_in": 4,
             "keyboard_hidden_dim": 1024,
             "mouse_dim_in": 2,
             "mouse_hidden_dim": 1024,
@@ -67,9 +67,8 @@ class MatrixGameWanVideoArchConfig(WanVideoArchConfig):
             "vae_time_compression_ratio": 4,
             "windows_size": 3,
         })
-    
-    # Hardcoded as model config doesn't contain these.
-    local_attn_size: int = 6
+
+    local_attn_size: int = -1
     num_frames_per_block: int = 3
 
 
