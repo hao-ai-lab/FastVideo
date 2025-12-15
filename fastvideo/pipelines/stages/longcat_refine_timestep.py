@@ -47,8 +47,7 @@ class LongCatRefineTimestepStage(PipelineStage):
         """
         # Only apply if this is a refinement task
         # Trigger when either a refine_from path or in-memory stage1_video is provided
-        if batch.refine_from is None and getattr(batch, "stage1_video",
-                                                 None) is None:
+        if batch.refine_from is None and batch.stage1_video is None:
             return batch
 
         device = get_local_torch_device()

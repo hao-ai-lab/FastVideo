@@ -58,7 +58,7 @@ class LongCatRefineInitStage(PipelineStage):
             The batch with initialized latents for refinement.
         """
         refine_from = batch.refine_from
-        in_memory_stage1 = getattr(batch, "stage1_video", None)
+        in_memory_stage1 = batch.stage1_video
 
         # Only run for refinement tasks: either a path (refine_from) or in-memory video is provided
         if refine_from is None and in_memory_stage1 is None:
