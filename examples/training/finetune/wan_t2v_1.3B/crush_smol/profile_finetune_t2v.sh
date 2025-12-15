@@ -11,6 +11,18 @@ VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 NUM_GPUS=4
 # export CUDA_VISIBLE_DEVICES=4,5
 
+mkdir -p ../profiler_traces/wan_t2v_finetune/
+
+# Torch Profiler Configuration
+export FASTVIDEO_TORCH_PROFILE_REGIONS="profiler_region_training_train_one_step"
+export FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES=1
+export FASTVIDEO_TORCH_PROFILER_WITH_STACK=1  
+export FASTVIDEO_TORCH_PROFILER_WITH_FLOPS=1
+export FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY=1
+export FASTVIDEO_TORCH_PROFILER_WAIT_STEPS=2
+export FASTVIDEO_TORCH_PROFILER_WARMUP_STEPS=1
+export FASTVIDEO_TORCH_PROFILER_ACTIVE_STEPS=1
+export FASTVIDEO_TORCH_PROFILER_DIR="../profiler_traces/wan_t2v_finetune/"
 
 # Training arguments
 training_args=(
@@ -54,7 +66,7 @@ validation_args=(
   --validation_dataset_file $VALIDATION_DATASET_FILE
   --validation_steps 200
   --validation_sampling_steps "50" 
-  --validation_guidance_scale "3.0"
+  --validation_guidance_scale "6.0"
 )
 
 # Optimizer arguments
@@ -84,6 +96,7 @@ miscellaneous_args=(
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
+  --master_port 29502 \
     fastvideo/training/wan_training_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
