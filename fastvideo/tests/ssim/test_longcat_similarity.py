@@ -70,6 +70,73 @@ def _resolve_longcat_refine_lora_path(model_path: str) -> str:
     return lora_path
 
 
+def _get_generated_video_path(script_dir: str, model_id: str, attention_backend: str,
+                             prompt: str):
+    output_dir = os.path.join(script_dir, "generated_videos", model_id, attention_backend)
+    output_video_stem = _sanitize_filename_component(prompt[:100].strip())
+    generated_video_path = os.path.join(output_dir, f"{output_video_stem}.mp4")
+    return output_dir, output_video_stem, generated_video_path
+
+
+def _should_reuse_existing_video(path: str) -> bool:
+    if not os.path.exists(path):
+        return False
+    # Avoid reusing empty/corrupted files from failed runs.
+    try:
+        return os.path.getsize(path) > 0
+    except OSError:
+        return False
+
+
+def _ensure_longcat_distill_video(prompt: str, attention_backend: str, model_path: str,
+                                  distill_lora_path: str):
+    """Ensure the LongCat distill (stage1) video exists and return its path.
+
+    This is shared by the distill SSIM test and the refine SSIM test (stage1 input).
+    Set FASTVIDEO_SSIM_FORCE_REGEN=1 to always regenerate.
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    model_id = "LongCat-native-distill"
+
+    output_dir, output_video_stem, generated_video_path = _get_generated_video_path(
+        script_dir, model_id, attention_backend, prompt
+    )
+    os.makedirs(output_dir, exist_ok=True)
+
+    force_regen = os.getenv("FASTVIDEO_SSIM_FORCE_REGEN", "").strip() in {"1", "true", "True"}
+    if not force_regen and _should_reuse_existing_video(generated_video_path):
+        logger.info(f"Reusing existing distill video: {generated_video_path}")
+        return output_dir, output_video_stem, generated_video_path
+
+    init_kwargs = {
+        "num_gpus": LONGCAT_DISTILL_PARAMS["num_gpus"],
+        "sp_size": LONGCAT_DISTILL_PARAMS["sp_size"],
+        "tp_size": LONGCAT_DISTILL_PARAMS["tp_size"],
+        # Keep defaults consistent with most tests (memory friendly).
+        "dit_cpu_offload": True,
+        # Explicitly disable BSA for the distill stage (matches official scripts).
+        "enable_bsa": False,
+    }
+
+    generator = VideoGenerator.from_pretrained(model_path=model_path, **init_kwargs)
+    generator.set_lora_adapter(lora_nickname="distilled", lora_path=distill_lora_path)
+    generator.generate_video(
+        prompt,
+        output_path=generated_video_path,
+        height=LONGCAT_DISTILL_PARAMS["height"],
+        width=LONGCAT_DISTILL_PARAMS["width"],
+        num_frames=LONGCAT_DISTILL_PARAMS["num_frames"],
+        num_inference_steps=LONGCAT_DISTILL_PARAMS["num_inference_steps"],
+        guidance_scale=LONGCAT_DISTILL_PARAMS["guidance_scale"],
+        fps=LONGCAT_DISTILL_PARAMS["fps"],
+        seed=LONGCAT_DISTILL_PARAMS["seed"],
+        negative_prompt=LONGCAT_DISTILL_PARAMS["negative_prompt"],
+    )
+    generator.shutdown()
+
+    return output_dir, output_video_stem, generated_video_path
+
+
 device_name = torch.cuda.get_device_name()
 device_reference_folder_suffix = "_reference_videos"
 
@@ -116,7 +183,10 @@ LONGCAT_BASE_PARAMS = {
 
 LONGCAT_REFINE_PARAMS = {
     "num_gpus": 4,
-    "sp_size": 1,
+    # Refinement doubles frames (unless spatial_refine_only=True) and runs at higher
+    # resolution, so SP sharding is important to keep per-GPU activation memory
+    # under control on 4x 48GB-class GPUs.
+    "sp_size": 4,
     "tp_size": 1,
     "height": 720,
     "width": 1280,
@@ -167,43 +237,13 @@ def test_longcat_distill_similarity(prompt: str, ATTENTION_BACKEND: str):
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
-
     model_id = "LongCat-native-distill"
-    base_output_dir = os.path.join(script_dir, "generated_videos", model_id)
-    output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Use an explicit file path to match VideoGenerator's sanitization behavior.
-    output_video_stem = _sanitize_filename_component(prompt[:100].strip())
-    generated_video_path = os.path.join(output_dir, f"{output_video_stem}.mp4")
-
-    init_kwargs = {
-        "num_gpus": LONGCAT_DISTILL_PARAMS["num_gpus"],
-        "sp_size": LONGCAT_DISTILL_PARAMS["sp_size"],
-        "tp_size": LONGCAT_DISTILL_PARAMS["tp_size"],
-        # Keep defaults consistent with most tests (memory friendly).
-        "dit_cpu_offload": True,
-        # Explicitly disable BSA for the distill stage (matches official scripts).
-        "enable_bsa": False,
-    }
-
-    generator = VideoGenerator.from_pretrained(model_path=model_path, **init_kwargs)
-    generator.set_lora_adapter(lora_nickname="distilled", lora_path=distill_lora_path)
-
-    generator.generate_video(
-        prompt,
-        output_path=generated_video_path,
-        height=LONGCAT_DISTILL_PARAMS["height"],
-        width=LONGCAT_DISTILL_PARAMS["width"],
-        num_frames=LONGCAT_DISTILL_PARAMS["num_frames"],
-        num_inference_steps=LONGCAT_DISTILL_PARAMS["num_inference_steps"],
-        guidance_scale=LONGCAT_DISTILL_PARAMS["guidance_scale"],
-        fps=LONGCAT_DISTILL_PARAMS["fps"],
-        seed=LONGCAT_DISTILL_PARAMS["seed"],
-        negative_prompt=LONGCAT_DISTILL_PARAMS["negative_prompt"],
+    output_dir, output_video_stem, generated_video_path = _ensure_longcat_distill_video(
+        prompt=prompt,
+        attention_backend=ATTENTION_BACKEND,
+        model_path=model_path,
+        distill_lora_path=distill_lora_path,
     )
-
-    generator.shutdown()
 
     assert os.path.exists(
         generated_video_path), f"Output video was not generated at {generated_video_path}"
@@ -355,39 +395,13 @@ def test_longcat_refine_similarity(prompt: str, ATTENTION_BACKEND: str):
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # --- Stage 1 (distill): generate a 480p base video to refine from ---
-    stage1_model_id = "LongCat-native-distill"
-    stage1_dir = os.path.join(script_dir, "generated_videos", stage1_model_id,
-                              ATTENTION_BACKEND)
-    os.makedirs(stage1_dir, exist_ok=True)
-
-    stage1_video_stem = _sanitize_filename_component(prompt[:100].strip())
-    stage1_video_path = os.path.join(stage1_dir, f"{stage1_video_stem}.mp4")
-
-    stage1_init_kwargs = {
-        "num_gpus": LONGCAT_DISTILL_PARAMS["num_gpus"],
-        "sp_size": LONGCAT_DISTILL_PARAMS["sp_size"],
-        "tp_size": LONGCAT_DISTILL_PARAMS["tp_size"],
-        "dit_cpu_offload": True,
-        "enable_bsa": False,
-    }
-    stage1_generator = VideoGenerator.from_pretrained(model_path=model_path,
-                                                      **stage1_init_kwargs)
-    stage1_generator.set_lora_adapter(lora_nickname="distilled",
-                                      lora_path=distill_lora_path)
-    stage1_generator.generate_video(
-        prompt,
-        output_path=stage1_video_path,
-        height=LONGCAT_DISTILL_PARAMS["height"],
-        width=LONGCAT_DISTILL_PARAMS["width"],
-        num_frames=LONGCAT_DISTILL_PARAMS["num_frames"],
-        num_inference_steps=LONGCAT_DISTILL_PARAMS["num_inference_steps"],
-        guidance_scale=LONGCAT_DISTILL_PARAMS["guidance_scale"],
-        fps=LONGCAT_DISTILL_PARAMS["fps"],
-        seed=LONGCAT_DISTILL_PARAMS["seed"],
-        negative_prompt=LONGCAT_DISTILL_PARAMS["negative_prompt"],
+    # --- Stage 1 (distill): reuse if already generated; otherwise generate ---
+    _, stage1_video_stem, stage1_video_path = _ensure_longcat_distill_video(
+        prompt=prompt,
+        attention_backend=ATTENTION_BACKEND,
+        model_path=model_path,
+        distill_lora_path=distill_lora_path,
     )
-    stage1_generator.shutdown()
 
     assert os.path.exists(stage1_video_path), (
         f"Stage1 video was not generated at {stage1_video_path}")
@@ -406,9 +420,10 @@ def test_longcat_refine_similarity(prompt: str, ATTENTION_BACKEND: str):
         "sp_size": LONGCAT_REFINE_PARAMS["sp_size"],
         "tp_size": LONGCAT_REFINE_PARAMS["tp_size"],
         "dit_cpu_offload": True,
-        "vae_cpu_offload": False,
+        # VAE can be large at 720p decode/encode paths; keep it CPU-offloaded.
+        "vae_cpu_offload": True,
         "text_encoder_cpu_offload": True,
-        "pin_cpu_memory": False,
+        "pin_cpu_memory": True,
         "enable_bsa": LONGCAT_REFINE_PARAMS["enable_bsa"],
         "bsa_sparsity": LONGCAT_REFINE_PARAMS["bsa_sparsity"],
         "bsa_chunk_q": LONGCAT_REFINE_PARAMS["bsa_chunk_q"],
