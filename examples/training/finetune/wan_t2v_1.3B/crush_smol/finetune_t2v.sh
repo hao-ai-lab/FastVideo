@@ -54,7 +54,7 @@ validation_args=(
   --validation_dataset_file $VALIDATION_DATASET_FILE
   --validation_steps 200
   --validation_sampling_steps "50" 
-  --validation_guidance_scale "3.0"
+  --validation_guidance_scale "6.0"
 )
 
 # Optimizer arguments
@@ -91,4 +91,4 @@ torchrun \
     "${training_args[@]}" \
     "${optimizer_args[@]}" \
     "${validation_args[@]}" \
-    "${miscellaneous_args[@]}"
+    "${miscellaneous_args[@]}" 
