@@ -191,7 +191,7 @@ class LoRAPipeline(ComposedPipelineBase):
                 # Extract weights (lora_A, lora_B, and lora_alpha)
                 name = name.replace("diffusion_model.", "")
                 name = name.replace(".weight", "")
-                
+
                 if "lora_alpha" in name:
                     # Store alpha with minimal mapping - same processing as lora_A/lora_B
                     # but store in lora_adapters with ".lora_alpha" suffix
@@ -203,7 +203,7 @@ class LoRAPipeline(ComposedPipelineBase):
                     self.lora_adapters[lora_nickname][alpha_key] = weight.item(
                     ) if weight.numel() == 1 else float(weight.mean())
                     continue
-                
+
                 name, _, _ = lora_param_names_mapping_fn(name)
                 target_name, merge_index, num_params_to_merge = param_names_mapping_fn(
                     name)

@@ -42,7 +42,9 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
         pipeline_config = fastvideo_args.pipeline_config
         transformer = self.get_module("transformer", None)
         if transformer is None:
-            raise RuntimeError("Transformer module not found during initializing LongCat pipeline.")
+            raise RuntimeError(
+                "Transformer module not found during initializing LongCat pipeline."
+            )
         # If user toggles BSA via CLI/config
         if pipeline_config.enable_bsa:
             # Build effective BSA params:
