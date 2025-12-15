@@ -91,4 +91,4 @@ torchrun \
     "${training_args[@]}" \
     "${optimizer_args[@]}" \
     "${validation_args[@]}" \
-    "${miscellaneous_args[@]}" 
+    "${miscellaneous_args[@]}"
