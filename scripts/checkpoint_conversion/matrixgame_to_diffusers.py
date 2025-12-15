@@ -111,6 +111,9 @@ def create_transformer_config(source_config: Dict[str, Any]) -> Dict[str, Any]:
     dim = source_config["dim"]
     num_heads = source_config["num_heads"]
 
+    is_distilled = "action_config" in source_config and source_config.get("action_config")
+    default_local_attn_size = 6 if is_distilled else -1
+
     transformer_config = {
         # "_class_name": "MatrixGameWanModel",
         "_class_name": "CausalMatrixGameWanModel",
@@ -129,10 +132,11 @@ def create_transformer_config(source_config: Dict[str, Any]) -> Dict[str, Any]:
         "action_config": source_config.get("action_config"),
         "image_dim": 1280,
         "text_dim": 0,
+        # Causal inference parameters - use config value if present, otherwise use smart defaults
+        "local_attn_size": source_config.get("local_attn_size", default_local_attn_size),
+        "sink_size": source_config.get("sink_size", 0),
+        "text_len": source_config.get("text_len", 512),
     }
-
-    # if transformer_config["action_config"] and transformer_config["action_config"].get("keyboard_dim_in") == 4:
-        # transformer_config["action_config"]["keyboard_dim_in"] = 6
 
     return {k: v for k, v in transformer_config.items() if v is not None}
 

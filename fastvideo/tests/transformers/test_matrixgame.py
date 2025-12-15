@@ -93,7 +93,9 @@ def test_matrixgame_transformer():
 
     # Set num_frame_per_block to match actual latent_frames for action_model
     model.num_frame_per_block = latent_frames
-    # Clear cached block masks so they regenerate with correct num_frame_per_block
+    # Force full attention mode
+    model.local_attn_size = -1
+    # Clear cached block masks so they regenerate with correct settings
     model.block_mask = None
     model.block_mask_mouse = None
     model.block_mask_keyboard = None

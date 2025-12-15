@@ -69,7 +69,11 @@ class MatrixGameWanVideoArchConfig(WanVideoArchConfig):
         })
 
     local_attn_size: int = -1
+    sink_size: int = 0
     num_frames_per_block: int = 3
+    text_len: int = 512
+    text_dim: int = 0
+    image_dim: int = 1280
 
 
 @dataclass

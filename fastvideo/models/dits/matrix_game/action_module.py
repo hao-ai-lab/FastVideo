@@ -5,35 +5,72 @@ from typing import Any, List, Tuple, Optional, Union, Dict
 from einops import rearrange
 import torch
 import torch.nn as nn
-from .posemb_layers import apply_rotary_emb, get_nd_rotary_pos_embed
 import math
 from torch.nn.attention.flex_attention import flex_attention
 
 from fastvideo.attention import LocalAttention
 from fastvideo.layers.linear import ReplicatedLinear
-from fastvideo.layers.layernorm import FP32LayerNorm
+from fastvideo.layers.layernorm import FP32LayerNorm, RMSNorm
+from fastvideo.layers.rotary_embedding import (
+    get_nd_rotary_pos_embed as _fv_get_nd_rotary_pos_embed,
+    _apply_rotary_emb,
+)
 from fastvideo.platforms import AttentionBackendEnum
 
 
-DISABLE_COMPILE = False  # get os env
+DISABLE_COMPILE = False
 flex_attention = torch.compile(
     flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
+
+
+def _get_nd_rotary_pos_embed_matrixgame(
+    rope_dim_list,
+    rope_sizes,
+    theta: float = 10000.0,
+    theta_rescale_factor: float = 1.0,
+):
+    cos, sin = _fv_get_nd_rotary_pos_embed(
+        rope_dim_list,
+        rope_sizes,
+        theta=theta,
+        theta_rescale_factor=theta_rescale_factor,
+        dtype=torch.float32,
+    )
+    # Move to CUDA and convert from [S, D/2] to [S, D] format
+    device = torch.cuda.current_device()
+    cos = cos.to(device).repeat_interleave(2, dim=1)
+    sin = sin.to(device).repeat_interleave(2, dim=1)
+    return cos, sin
+
+
+def _apply_rotary_emb_qk(
+    xq: torch.Tensor,
+    xk: torch.Tensor,
+    freqs_cos: torch.Tensor,
+    freqs_sin: torch.Tensor,
+    start_offset: int = 0,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    seq_len = xq.shape[1]
     
+    # Slice frequencies based on offset
+    cos = freqs_cos[start_offset:start_offset + seq_len]  # [S, D]
+    sin = freqs_sin[start_offset:start_offset + seq_len]  # [S, D]
+    
+    # Move to device
+    cos = cos.to(xq.device)
+    sin = sin.to(xq.device)
+    
+    # Convert from [S, D] (interleaved) back to [S, D/2]
+    cos_half = cos[:, ::2]  # [S, D/2]
+    sin_half = sin[:, ::2]  # [S, D/2]
 
-class WanRMSNorm(nn.Module):
-    def __init__(self, dim, eps=1e-5):
-        super().__init__()
-        self.dim = dim
-        self.eps = eps
-        self.weight = nn.Parameter(torch.ones(dim))
+    # xq/xk are [B, S, H, D], need to reshape for each batch
+    B, S, H, D = xq.shape
 
-    def forward(self, x):
-        r"""
-        Args:
-            x(Tensor): Shape [B, L, C]
-        """
-        return x * torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
-
+    xq_out = _apply_rotary_emb(xq, cos_half, sin_half, is_neox_style=False)
+    xk_out = _apply_rotary_emb(xk, cos_half, sin_half, is_neox_style=False)
+    
+    return xq_out, xk_out
 
 class ActionModule(nn.Module):
     """
@@ -74,28 +111,32 @@ class ActionModule(nn.Module):
         self.rope_dim_list = rope_dim_list
         self.rope_theta = rope_theta
         if self.enable_keyboard:
-            self.keyboard_embed = nn.Sequential(nn.Linear(keyboard_dim_in, hidden_size, bias=True), nn.SiLU(), nn.Linear(hidden_size, hidden_size, bias=True))
+            self.keyboard_embed = nn.Sequential(
+                nn.Linear(keyboard_dim_in, hidden_size, bias=True),
+                nn.SiLU(),
+                nn.Linear(hidden_size, hidden_size, bias=True)
+            )
 
         self.mouse_qk_dim_list = mouse_qk_dim_list
         self.heads_num = heads_num
         if self.enable_mouse:
             c = mouse_hidden_dim
-            self.mouse_mlp = torch.nn.Sequential(
-                torch.nn.Linear(mouse_dim_in * vae_time_compression_ratio * windows_size + img_hidden_size, c, bias=True),
-                torch.nn.GELU(approximate="tanh"),
-                torch.nn.Linear(c, c),
+            self.mouse_mlp = nn.Sequential(
+                nn.Linear(mouse_dim_in * vae_time_compression_ratio * windows_size + img_hidden_size, c, bias=True),
+                nn.GELU(approximate="tanh"),
+                nn.Linear(c, c),
                 FP32LayerNorm(c, elementwise_affine=True),
             )
             
             head_dim = c // heads_num
             self.t_qkv = ReplicatedLinear(c, c*3, bias=qkv_bias)
             self.img_attn_q_norm = (
-                WanRMSNorm(head_dim, eps=1e-6)
+                RMSNorm(head_dim, eps=1e-6)
                 if qk_norm
                 else nn.Identity()
             )
             self.img_attn_k_norm = (
-                WanRMSNorm(head_dim, eps=1e-6)
+                RMSNorm(head_dim, eps=1e-6)
                 if qk_norm
                 else nn.Identity()
             )
@@ -104,12 +145,12 @@ class ActionModule(nn.Module):
         if self.enable_keyboard:
             head_dim_key = keyboard_hidden_dim // heads_num
             self.key_attn_q_norm = (
-                WanRMSNorm(head_dim_key, eps=1e-6)
+                RMSNorm(head_dim_key, eps=1e-6)
                 if qk_norm
                 else nn.Identity()
             )
             self.key_attn_k_norm = (
-                WanRMSNorm(head_dim_key, eps=1e-6)
+                RMSNorm(head_dim_key, eps=1e-6)
                 if qk_norm
                 else nn.Identity()
             )
@@ -137,7 +178,9 @@ class ActionModule(nn.Module):
         self.vae_time_compression_ratio = vae_time_compression_ratio
         self.windows_size = windows_size
         self.patch_size = patch_size
-        self.freqs_cos, self.freqs_sin = self.get_rotary_pos_embed(7500, self.patch_size[1], self.patch_size[2], 64, self.mouse_qk_dim_list, start_offset=0)
+        # Lazy initialization: freqs will be created on first forward pass
+        self._freqs_cos = None
+        self._freqs_sin = None
 
     def patchify(self, x, patch_size):
         """
@@ -198,11 +241,11 @@ class ActionModule(nn.Module):
         assert (
             sum(rope_dim_list) == head_dim
         ), "sum(rope_dim_list) should equal to head_dim of attention layer"
-        freqs_cos, freqs_sin = get_nd_rotary_pos_embed(
+        # Use Matrix-Game wrapper for FastVideo's function
+        freqs_cos, freqs_sin = _get_nd_rotary_pos_embed_matrixgame(
             rope_dim_list,
             rope_sizes,
             theta=self.rope_theta,
-            use_real=True,
             theta_rescale_factor=1,
         )
         return freqs_cos[-video_length*rope_sizes[1]*rope_sizes[2]//self.patch_size[0]:], freqs_sin[-video_length*rope_sizes[1]*rope_sizes[2]//self.patch_size[0]:]
@@ -220,8 +263,15 @@ class ActionModule(nn.Module):
         assert ((N_frames - 1) + self.vae_time_compression_ratio) % self.vae_time_compression_ratio == 0
         N_feats = int((N_frames - 1) / self.vae_time_compression_ratio) + 1
         
+        # Lazy initialization of freqs on first forward pass
+        if self._freqs_cos is None or self._freqs_sin is None:
+            self._freqs_cos, self._freqs_sin = self.get_rotary_pos_embed(
+                7500, self.patch_size[1], self.patch_size[2], 64, 
+                self.mouse_qk_dim_list, start_offset=0
+            )
+        
         # Defined freqs_cis early so it's available for both mouse and keyboard
-        freqs_cis = (self.freqs_cos, self.freqs_sin)
+        freqs_cis = (self._freqs_cos, self._freqs_sin)
 
         assert (N_feats == tt and ((is_causal and kv_cache_mouse == None) or not is_causal)) or ((N_frames - 1) // self.vae_time_compression_ratio + 1 == start_frame + num_frame_per_block and is_causal)
         
@@ -261,7 +311,7 @@ class ActionModule(nn.Module):
             # freqs_cis = (self.freqs_cos, self.freqs_sin)
             
             
-            q, k = apply_rotary_emb(q, k, freqs_cis, start_offset = start_frame, head_first=False)
+            q, k = _apply_rotary_emb_qk(q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame)
             ## TODO: adding cache here
             if is_causal:
                 if kv_cache_mouse is None:
@@ -372,7 +422,7 @@ class ActionModule(nn.Module):
                 B, TS, H, D = q.shape
                 T_ = TS // S 
                 q = q.view(B, T_, S, H, D).transpose(1, 2).reshape(B * S, T_, H, D)
-                q, k = apply_rotary_emb(q, k, freqs_cis, start_offset = start_frame,head_first=False)
+                q, k = _apply_rotary_emb_qk(q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame)
 
                 k1, k2, k3, k4 = k.shape
                 k = k.expand(S, k2, k3, k4)
