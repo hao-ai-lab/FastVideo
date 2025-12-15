@@ -84,7 +84,7 @@ else:
 
 
 LONGCAT_DISTILL_PARAMS = {
-    "num_gpus": 2,
+    "num_gpus": 4,
     "sp_size": 1,
     "tp_size": 1,
     "height": 480,
@@ -101,7 +101,7 @@ LONGCAT_BASE_PARAMS = {
     # Base (non-LoRA) LongCat generation at 480p.
     # Mirrors `scripts/inference/v1_inference_longcat.sh` but uses fewer steps
     # to keep SSIM runtime reasonable.
-    "num_gpus": 2,
+    "num_gpus": 4,
     "sp_size": 1,
     "tp_size": 1,
     "height": 480,
@@ -115,7 +115,7 @@ LONGCAT_BASE_PARAMS = {
 }
 
 LONGCAT_REFINE_PARAMS = {
-    "num_gpus": 2,
+    "num_gpus": 4,
     "sp_size": 1,
     "tp_size": 1,
     "height": 720,
