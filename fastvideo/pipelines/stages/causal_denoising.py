@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Any
 
 import torch  # type: ignore
 
@@ -634,12 +635,19 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         # and will be used by the model via channel concatenation: torch.cat([x, cond_concat], dim=1)
 
         with self.progress_bar(total=len(block_sizes) * len(timesteps)) as progress_bar:
-            for current_num_frames in block_sizes:
+            for block_idx, current_num_frames in enumerate(block_sizes):
                 current_latents = latents[:, :, start_index:start_index + current_num_frames, :, :]
                 noise_latents_btchw = current_latents.permute(0, 2, 1, 3, 4)
                 video_raw_latent_shape = noise_latents_btchw.shape
 
+
                 # NOTE: crossattn_cache should NOT be reset between blocks!
+
+                if hasattr(batch, 'streaming_action_callback') and batch.streaming_action_callback is not None:
+                    user_action = batch.streaming_action_callback(block_idx, start_index, current_num_frames)
+                    if user_action is not None:
+                        batch = self._update_action_conditions_from_callback(
+                            batch, user_action, start_index, current_num_frames)
 
                 action_kwargs = self._prepare_action_kwargs(batch, start_index, current_num_frames)
 
@@ -815,7 +823,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         batch.latents = latents
         return batch
 
-    def _prepare_action_kwargs(self, batch: ForwardBatch, start_index: int, num_frames: int) -> Dict[str, Any]:
+    def _prepare_action_kwargs(self, batch: ForwardBatch, start_index: int, num_frames: int) -> dict[str, Any]:
         action_kwargs = {}
         if not self.use_action_module:
             return action_kwargs
@@ -830,6 +838,44 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         # CRITICAL: Pass num_frame_per_block to model - this should be num_frames (current block size)
         action_kwargs['num_frame_per_block'] = num_frames
         return action_kwargs
+
+    def _update_action_conditions_from_callback(
+        self, 
+        batch: ForwardBatch, 
+        user_action: dict[str, Any],
+        start_index: int,
+        num_frames: int
+    ) -> ForwardBatch:
+        vae_time_compression_ratio = 4
+        
+        if start_index == 0:
+            video_frame_start = 0
+            video_frame_count = 1 + vae_time_compression_ratio * (num_frames - 1)
+        else:
+            video_frame_start = 1 + vae_time_compression_ratio * (start_index - 1)
+            video_frame_count = vae_time_compression_ratio * num_frames
+        
+        video_frame_end = video_frame_start + video_frame_count
+        
+        if 'keyboard' in user_action and batch.keyboard_cond is not None:
+            keyboard_action = user_action['keyboard']
+            if keyboard_action.dim() == 1:
+                keyboard_action = keyboard_action.unsqueeze(0)
+            total_video_frames = batch.keyboard_cond.shape[1]
+            for frame_idx in range(video_frame_start, total_video_frames):
+                batch.keyboard_cond[:, frame_idx] = keyboard_action.to(
+                    batch.keyboard_cond.device, batch.keyboard_cond.dtype)
+        
+        if 'mouse' in user_action and batch.mouse_cond is not None:
+            mouse_action = user_action['mouse']
+            if mouse_action.dim() == 1:
+                mouse_action = mouse_action.unsqueeze(0)
+            total_video_frames = batch.mouse_cond.shape[1]
+            for frame_idx in range(video_frame_start, total_video_frames):
+                batch.mouse_cond[:, frame_idx] = mouse_action.to(
+                    batch.mouse_cond.device, batch.mouse_cond.dtype)
+        
+        return batch
 
     def _initialize_kv_cache(self, batch_size: int, dtype: torch.dtype, device: torch.device) -> list[dict]:
         kv_cache = []

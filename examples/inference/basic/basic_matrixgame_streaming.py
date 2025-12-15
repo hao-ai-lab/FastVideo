@@ -1,11 +1,13 @@
 from fastvideo import VideoGenerator
 from fastvideo.configs.pipelines.wan import MatrixGameI2V480PConfig
-from fastvideo.models.dits.matrix_game.utils import create_action_presets
+from fastvideo.models.dits.matrix_game.utils import (
+    collect_actions_interactively, get_default_actions, StreamingCallback
+)
 
 import torch
 
 
-OUTPUT_PATH = "outputs/matrixgame"
+OUTPUT_PATH = "outputs/matrixgame_streaming"
 
 
 def main():
@@ -17,18 +19,20 @@ def main():
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True,
-        pipeline_config=MatrixGameI2V480PConfig()
+        pipeline_config=MatrixGameI2V480PConfig(),
     )
 
-    num_frames = 597
-    actions = create_action_presets(num_frames, keyboard_dim=4)
-    grid_sizes = torch.tensor([150, 44, 80])
+    action_sequence = collect_actions_interactively()
+    num_blocks = len(action_sequence)
+    num_output_latents = num_blocks * 3
+    num_frames = (num_output_latents - 1) * 4 + 1
+    grid_sizes = torch.tensor([num_output_latents, 44, 80])
 
     generator.generate_video(
         prompt="",
         image_path="https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/universal/0002.png",
-        mouse_cond=actions["mouse"].unsqueeze(0),
-        keyboard_cond=actions["keyboard"].unsqueeze(0),
+        mouse_cond=torch.zeros((1, num_frames, 2)),
+        keyboard_cond=torch.zeros((1, num_frames, 4)),
         grid_sizes=grid_sizes,
         num_frames=num_frames,
         height=352,
@@ -36,6 +40,7 @@ def main():
         num_inference_steps=50,
         output_path=OUTPUT_PATH,
         save_video=True,
+        streaming_action_callback=StreamingCallback(action_sequence),
     )
 
 
