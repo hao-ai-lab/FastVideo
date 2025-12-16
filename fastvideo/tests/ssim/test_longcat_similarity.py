@@ -12,7 +12,6 @@ from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_res
 
 logger = init_logger(__name__)
 
-
 def _sanitize_filename_component(name: str) -> str:
     """Sanitize filename to remove invalid characters (same logic as VideoGenerator)."""
     sanitized = re.sub(r'[\\/:*?"<>|]', '', name)
