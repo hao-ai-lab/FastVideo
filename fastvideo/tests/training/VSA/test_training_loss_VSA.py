@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 import json
 from huggingface_hub import snapshot_download
+import torch
 
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
@@ -12,7 +13,8 @@ from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.utils import FlexibleArgumentParser
 
 wandb_name = "test_training_loss_VSA"
-reference_wandb_summary_file = "fastvideo/tests/training/VSA/reference_wandb_summary_VSA.json"
+l40s_reference_wandb_summary_file = "fastvideo/tests/training/VSA/reference_wandb_summary_VSA.json"
+h200_reference_wandb_summary_file = "fastvideo/tests/training/VSA/h200_reference_wandb_summary_VSA.json"
 
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "2"
@@ -61,7 +63,7 @@ def run_worker():
         "--num_width", "512",
         "--num_frames", "13",
         "--flow_shift", "3",
-        "--validation_guidance_scale", "1.0",
+        "--validation_guidance_scale", "3.0",
         "--num_euler_timesteps", "50",
         "--weight_decay", "0.01",
         "--dit_precision", "fp32",
@@ -103,6 +105,14 @@ def test_distributed_training():
     process = subprocess.run(cmd, check=True)
 
     summary_file = 'data/wan_finetune_test_VSA/tracker/wandb/latest-run/files/wandb-summary.json'
+
+    device_name = torch.cuda.get_device_name()
+    if "L40S" in device_name:
+        reference_wandb_summary_file = l40s_reference_wandb_summary_file
+    elif "H200" in device_name:
+        reference_wandb_summary_file = h200_reference_wandb_summary_file
+    else:
+        raise ValueError(f"Unknown device: {device_name}")
 
     reference_wandb_summary = json.load(open(reference_wandb_summary_file))
     wandb_summary = json.load(open(summary_file))
