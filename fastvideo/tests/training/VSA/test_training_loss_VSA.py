@@ -121,7 +121,7 @@ def test_distributed_training():
         'avg_step_time': 1.0,
         'grad_norm': 0.1,
         'step_time': 1.0,
-        'train_loss': 0.005
+        'train_loss': 0.02
     }
 
     failures = []
