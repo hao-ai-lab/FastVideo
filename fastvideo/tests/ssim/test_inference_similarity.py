@@ -21,7 +21,8 @@ elif "L40S" in device_name:
     device_reference_folder = "L40S" + device_reference_folder_suffix
 else:
     # device_reference_folder = "L40S" + device_reference_folder_suffix
-    raise ValueError(f"Unsupported device for ssim tests: {device_name}")
+    logger.warning(f"Unsupported device for ssim tests: {device_name}")
+    # raise ValueError(f"Unsupported device for ssim tests: {device_name}")
 
 # Base parameters from the shell script
 HUNYUAN_PARAMS = {

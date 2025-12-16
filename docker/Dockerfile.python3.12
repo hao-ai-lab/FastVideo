@@ -43,7 +43,7 @@ RUN source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
     uv pip install --no-cache-dir --upgrade pip && \
     uv pip install --no-cache-dir .[dev] && \
-    uv pip install --no-cache-dir flash-attn==2.8.3 --no-build-isolation
+    uv pip install --no-cache-dir https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.5.4/flash_attn-2.8.3%2Bcu128torch2.9-cp312-cp312-linux_x86_64.whl
 
 COPY . .
 
