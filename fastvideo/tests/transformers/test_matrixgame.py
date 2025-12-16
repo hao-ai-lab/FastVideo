@@ -15,7 +15,8 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.utils import maybe_download_model
+
+from fastvideo.models.loader.matrixgame_conversion import maybe_convert_matrixgame
 
 logger = init_logger(__name__)
 
@@ -23,36 +24,15 @@ os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29505"
 os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
-BASE_MODEL_PATH = os.environ.get(
-    "MATRIX_GAME_BASE_MODEL", "/workspace/Matrix-Game-2.0-Diffusers"
-)
-MODEL_VARIANT = os.environ.get("MATRIX_GAME_VARIANT", "base_distilled_model")
+BASE_MODEL_PATH = "Skywork/Matrix-Game-2.0"
+MODEL_PATH = maybe_convert_matrixgame(BASE_MODEL_PATH)
+TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
 REFERENCE_LATENT = -112914.0136833489
-
-
-def _resolve_transformer_path() -> str:
-    if os.path.exists(BASE_MODEL_PATH):
-        model_root = BASE_MODEL_PATH
-    else:
-        model_root = maybe_download_model(
-            BASE_MODEL_PATH, local_dir=os.path.join("data", BASE_MODEL_PATH)
-        )
-
-    candidate = os.path.join(model_root, MODEL_VARIANT, "transformer")
-    if not os.path.isdir(candidate):
-        fallback = os.path.join(model_root, "transformer")
-        if os.path.isdir(fallback):
-            candidate = fallback
-        else:
-            raise FileNotFoundError(
-                f"Could not locate transformer weights under {candidate} or {fallback}"
-            )
-    return candidate
 
 
 @pytest.mark.usefixtures("distributed_setup")
 def test_matrixgame_transformer():
-    transformer_path = _resolve_transformer_path()
+    transformer_path = TRANSFORMER_PATH
 
     sp_rank = get_sp_parallel_rank()
     sp_world_size = get_sp_world_size()
@@ -150,5 +130,5 @@ def test_matrixgame_transformer():
     logger.info(f"Reference latent: {REFERENCE_LATENT}, Current latent: {latent}")
     logger.info(f"Absolute diff: {diff}, Relative diff: {relative_diff * 100:.4f}%")
 
-    # The 0.28% diff now
+    # The 0.19% diff now
     assert relative_diff < 0.005, f"Output latents differ significantly: relative diff = {relative_diff * 100:.4f}% (max allowed: 0.5%)"

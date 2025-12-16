@@ -320,27 +320,44 @@ class TextEncoderLoader(ComponentLoader):
         return model.eval()
 
 
-class ImageEncoderLoader(ComponentLoader):
+class ImageEncoderLoader(TextEncoderLoader):
+
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
-        """Load the image encoder using HuggingFace transformers."""
-        from transformers import CLIPVisionModel as HFCLIPVisionModel        
+        """Load the image encoder based on the model path, and inference args."""
         from fastvideo.platforms import current_platform
 
         if fastvideo_args.image_encoder_cpu_offload:
             target_device = torch.device("mps") if current_platform.is_mps() else torch.device("cpu")
         else:
             target_device = get_local_torch_device()
-        
-        # Load HuggingFace CLIPVisionModel directly
-        precision = fastvideo_args.pipeline_config.image_encoder_precision
-        dtype = PRECISION_TO_TYPE.get(precision, torch.bfloat16)
 
-        model = HFCLIPVisionModel.from_pretrained(
-            model_path,
-            torch_dtype=dtype
-        ).to(target_device)
+        # MatrixGame's CLIP config has fields incompatible with FastVideo's CLIPVisionArchConfig
+        # Use HFCLIPVisionModel directly for MatrixGame to avoid config parsing issues
+        pipeline_class_name = type(fastvideo_args.pipeline_config).__name__
+        if "MatrixGame" in pipeline_class_name:
+            from transformers import CLIPVisionModel as HFCLIPVisionModel
+            precision = fastvideo_args.pipeline_config.image_encoder_precision
+            dtype = PRECISION_TO_TYPE.get(precision, torch.bfloat16)
+            model = HFCLIPVisionModel.from_pretrained(
+                model_path, torch_dtype=dtype
+            ).to(target_device)
+            return model.eval()
 
-        return model.eval()
+        # Standard path for other models (Wan I2V, TI2V, etc.)
+        with open(os.path.join(model_path, "config.json")) as f:
+            model_config = json.load(f)
+        model_config.pop("_name_or_path", None)
+        model_config.pop("transformers_version", None)
+        model_config.pop("torch_dtype", None)
+        model_config.pop("model_type", None)
+        logger.info("HF Model config: %s", model_config)
+
+        encoder_config = fastvideo_args.pipeline_config.image_encoder_config
+        encoder_config.update_model_arch(model_config)
+
+        return self.load_model(
+            model_path, encoder_config, target_device, fastvideo_args,
+            fastvideo_args.pipeline_config.image_encoder_precision)
 
 
 class ImageProcessorLoader(ComponentLoader):
@@ -357,7 +374,7 @@ class ImageProcessorLoader(ComponentLoader):
             # with an image_processor_type but no model_type,
             config_path = os.path.join(model_path, "preprocessor_config.json")
             if (os.path.isfile(config_path)):
-                with open(config_path, "r", encoding="utf-8") as fp:
+                with open(config_path, encoding="utf-8") as fp:
                     config = json.load(fp)
                 processor_type = config.get("image_processor_type")
                 if processor_type == "CLIPImageProcessor":

@@ -129,14 +129,6 @@ class FP32LayerNorm(nn.LayerNorm):
         ).to(origin_dtype)
 
 
-class WanLayerNorm(nn.LayerNorm):
-    def __init__(self, dim: int, eps: float = 1e-6, elementwise_affine: bool = False):
-        super().__init__(dim, elementwise_affine=elementwise_affine, eps=eps)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return super().forward(x).type_as(x)
-
-
 class ScaleResidualLayerNormScaleShift(nn.Module):
     """
     Fused operation that combines:

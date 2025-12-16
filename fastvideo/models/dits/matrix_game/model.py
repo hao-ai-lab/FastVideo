@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import math
-from typing import Any, Dict, Optional
+from typing import Any
 
 import torch
 import torch.nn as nn
 
-import fastvideo.envs as envs
 from fastvideo.attention import DistributedAttention
 from fastvideo.configs.models.dits.matrixgame import MatrixGameWanVideoConfig
 from fastvideo.distributed.parallel_state import get_sp_world_size
@@ -122,8 +121,9 @@ class MatrixGameTransformerBlock(nn.Module):
                  supported_attention_backends: tuple[AttentionBackendEnum, ...]
                  | None = None,
                  prefix: str = "",
-                 action_config: Dict = {}): # Add action_config
+                 action_config: dict | None = None):
         super().__init__()
+        action_config = action_config or {}
 
         # 1. Self-attention
         self.norm1 = FP32LayerNorm(dim, eps, elementwise_affine=False)
@@ -201,9 +201,9 @@ class MatrixGameTransformerBlock(nn.Module):
         temb: torch.Tensor,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         # Action Module specific args
-        grid_sizes: Optional[torch.Tensor] = None,
-        mouse_cond: Optional[torch.Tensor] = None,
-        keyboard_cond: Optional[torch.Tensor] = None,
+        grid_sizes: torch.Tensor | None = None,
+        mouse_cond: torch.Tensor | None = None,
+        keyboard_cond: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if hidden_states.dim() == 4:
             hidden_states = hidden_states.squeeze(1)
@@ -368,8 +368,8 @@ class MatrixGameWanModel(BaseDiT):
                 encoder_hidden_states_image: torch.Tensor
                 | list[torch.Tensor] | None = None,
                 # Action inputs
-                mouse_cond: Optional[torch.Tensor] = None,
-                keyboard_cond: Optional[torch.Tensor] = None,
+                mouse_cond: torch.Tensor | None = None,
+                keyboard_cond: torch.Tensor | None = None,
                 **kwargs) -> torch.Tensor:
         if encoder_hidden_states is not None and not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]

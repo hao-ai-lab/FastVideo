@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-# Adapted from https://github.com/SkyworkAI/Matrix-Game
+# Adapted from Matrix-Game: https://github.com/SkyworkAI/Matrix-Game/blob/main/Matrix-Game-2/wan/modules/action_module.py
 
-from typing import Any, List, Tuple, Optional, Union, Dict
 from einops import rearrange
 import torch
 import torch.nn as nn
@@ -36,10 +35,9 @@ def _get_nd_rotary_pos_embed_matrixgame(
         theta_rescale_factor=theta_rescale_factor,
         dtype=torch.float32,
     )
-    # Move to CUDA and convert from [S, D/2] to [S, D] format
-    device = torch.cuda.current_device()
-    cos = cos.to(device).repeat_interleave(2, dim=1)
-    sin = sin.to(device).repeat_interleave(2, dim=1)
+    # convert from [S, D/2] to [S, D] format
+    cos = cos.repeat_interleave(2, dim=1)
+    sin = sin.repeat_interleave(2, dim=1)
     return cos, sin
 
 
@@ -49,7 +47,7 @@ def _apply_rotary_emb_qk(
     freqs_cos: torch.Tensor,
     freqs_sin: torch.Tensor,
     start_offset: int = 0,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     seq_len = xq.shape[1]
     
     # Slice frequencies based on offset
@@ -90,20 +88,23 @@ class ActionModule(nn.Module):
         vae_time_compression_ratio: int = 4, 
         windows_size: int = 3,
         heads_num: int = 16,
-        patch_size: list = [1, 2, 2],
+        patch_size: list | None = None,
         qk_norm: bool = True,
         qkv_bias: bool = False,
-        rope_dim_list: list = [8, 28, 28],
+        rope_dim_list: list | None = None,
         rope_theta = 256,
-        mouse_qk_dim_list = [8, 28, 28],
+        mouse_qk_dim_list: list | None = None,
         enable_mouse = True,
         enable_keyboard = True,
         local_attn_size = 6,
-        blocks = [],
+        blocks: list | None = None,
     ):
-        device = None
-        
         super().__init__()
+        # Initialize mutable defaults
+        patch_size = patch_size if patch_size is not None else [1, 2, 2]
+        rope_dim_list = rope_dim_list if rope_dim_list is not None else [8, 28, 28]
+        mouse_qk_dim_list = mouse_qk_dim_list if mouse_qk_dim_list is not None else [8, 28, 28]
+        blocks = blocks if blocks is not None else []
         self.local_attn_size = local_attn_size
         self.enable_mouse = enable_mouse
         self.enable_keyboard = enable_keyboard
@@ -256,7 +257,7 @@ class ActionModule(nn.Module):
         mouse_condition: B, N_frames, C1
         keyboard_condition: B, N_frames, C2
         '''
-        assert use_rope_keyboard == True
+        assert use_rope_keyboard
 
         B, N_frames, C = keyboard_condition.shape
         assert tt*th*tw == x.shape[1]
@@ -273,7 +274,7 @@ class ActionModule(nn.Module):
         # Defined freqs_cis early so it's available for both mouse and keyboard
         freqs_cis = (self._freqs_cos, self._freqs_sin)
 
-        assert (N_feats == tt and ((is_causal and kv_cache_mouse == None) or not is_causal)) or ((N_frames - 1) // self.vae_time_compression_ratio + 1 == start_frame + num_frame_per_block and is_causal)
+        assert (N_feats == tt and ((is_causal and kv_cache_mouse is None) or not is_causal)) or ((N_frames - 1) // self.vae_time_compression_ratio + 1 == start_frame + num_frame_per_block and is_causal)
         
         if self.enable_mouse and mouse_condition is not None:
             hidden_states = rearrange(x, "B (T S) C -> (B S) T C", T=tt, S=th*tw) # 65*272*480 -> 17*(272//16)*(480//16) -> 8670
@@ -528,7 +529,6 @@ class ActionModule(nn.Module):
                         current_end = current_start + k.shape[1]
                         assert k.shape[1] == num_frame_per_block
                         sink_size = 0
-                        local_attn_size = self.local_attn_size
                         max_attention_size = self.local_attn_size
                         sink_tokens = sink_size * 1
                         kv_cache_size = kv_cache_keyboard["k"].shape[1]

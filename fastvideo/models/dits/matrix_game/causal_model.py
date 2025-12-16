@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import math
-from typing import Any, Dict, Optional
+from typing import Any
 
 PYTEST_DONT_REWRITE = True
 
@@ -16,23 +16,19 @@ from fastvideo.forward_context import get_forward_context
 flex_attention = torch.compile(
     flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
 
-import fastvideo.envs as envs
 from fastvideo.attention import LocalAttention
 from fastvideo.configs.models.dits.matrixgame import MatrixGameWanVideoConfig
 from fastvideo.distributed.parallel_state import get_sp_world_size
 from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift,
                                         RMSNorm, ScaleResidual,
-                                        ScaleResidualLayerNormScaleShift,
-                                        WanLayerNorm)
+                                        ScaleResidualLayerNormScaleShift)
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
-from fastvideo.layers.rotary_embedding import (_apply_rotary_emb,
-                                               get_rotary_pos_embed)
+from fastvideo.layers.rotary_embedding import (get_rotary_pos_embed)
 from fastvideo.layers.visual_embedding import PatchEmbed, TimestepEmbedder, ModulateProjection
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
-from fastvideo.models.dits.wanvideo import (WanI2VCrossAttention,
-                                           WanT2VCrossAttention,
+from fastvideo.models.dits.wanvideo import (WanT2VCrossAttention,
                                            WanImageEmbedding)
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 
@@ -289,11 +285,12 @@ class CausalMatrixGameTransformerBlock(nn.Module):
                  added_kv_proj_dim: int | None = None,
                  supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
                  prefix: str = "",
-                 action_config: Dict = {},
+                 action_config: dict | None = None,
                  block_idx: int = 0):
         super().__init__()
+        action_config = action_config or {}
 
-        self.norm1 = WanLayerNorm(dim, eps, elementwise_affine=False)
+        self.norm1 = FP32LayerNorm(dim, eps, elementwise_affine=False)
         self.to_q = ReplicatedLinear(dim, dim, bias=True)
         self.to_k = ReplicatedLinear(dim, dim, bias=True)
         self.to_v = ReplicatedLinear(dim, dim, bias=True)
@@ -385,11 +382,11 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         temb: torch.Tensor,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         block_mask: BlockMask,
-        grid_sizes: Optional[torch.Tensor] = None,
-        mouse_cond: Optional[torch.Tensor] = None,
-        keyboard_cond: Optional[torch.Tensor] = None,
-        block_mask_mouse: Optional[BlockMask] = None,
-        block_mask_keyboard: Optional[BlockMask] = None,
+        grid_sizes: torch.Tensor | None = None,
+        mouse_cond: torch.Tensor | None = None,
+        keyboard_cond: torch.Tensor | None = None,
+        block_mask_mouse: BlockMask | None = None,
+        block_mask_keyboard: BlockMask | None = None,
         num_frame_per_block: int = 1,
         use_rope_keyboard: bool = True,
         kv_cache: dict | None = None,
@@ -674,8 +671,8 @@ class CausalMatrixGameWanModel(BaseDiT):
         encoder_hidden_states: torch.Tensor | list[torch.Tensor],
         timestep: torch.LongTensor,
         encoder_hidden_states_image: torch.Tensor | list[torch.Tensor] | None = None,
-        mouse_cond: Optional[torch.Tensor] = None,
-        keyboard_cond: Optional[torch.Tensor] = None,
+        mouse_cond: torch.Tensor | None = None,
+        keyboard_cond: torch.Tensor | None = None,
         kv_cache: dict = None,
         kv_cache_mouse: dict = None,
         kv_cache_keyboard: dict = None,
@@ -893,8 +890,8 @@ class CausalMatrixGameWanModel(BaseDiT):
         encoder_hidden_states: torch.Tensor | list[torch.Tensor],
         timestep: torch.LongTensor,
         encoder_hidden_states_image: torch.Tensor | list[torch.Tensor] | None = None,
-        mouse_cond: Optional[torch.Tensor] = None,
-        keyboard_cond: Optional[torch.Tensor] = None,
+        mouse_cond: torch.Tensor | None = None,
+        keyboard_cond: torch.Tensor | None = None,
         **kwargs
     ) -> torch.Tensor:
         if mouse_cond is not None or keyboard_cond is not None:
@@ -1084,7 +1081,7 @@ class CausalMatrixGameWanModel(BaseDiT):
         return hidden_states
 
     def forward(self, *args, **kwargs):
-        if kwargs.get('kv_cache', None) is not None:
+        if kwargs.get('kv_cache') is not None:
             return self._forward_inference(*args, **kwargs)
         else:
             return self._forward_train(*args, **kwargs)
@@ -1122,5 +1119,5 @@ class CausalMatrixGameWanModel(BaseDiT):
                     nn.init.zeros_(block.action_model.proj_keyboard.weight)
                     if block.action_model.proj_keyboard.bias is not None:
                         nn.init.zeros_(block.action_model.proj_keyboard.bias)
-                except:
+                except AttributeError:
                     pass

@@ -309,7 +309,6 @@ def process_video(input_video, output_video, config, mouse_icon_path,
                   mouse_scale=1.0, mouse_rotation=0, process_icon=True, mode='universal'):
     key_data, mouse_data = parse_config(config, mode=mode)
     fps = 12
-    frame_count = len(input_video)
 
     mouse_icon = cv2.imread(mouse_icon_path, cv2.IMREAD_UNCHANGED)
 
