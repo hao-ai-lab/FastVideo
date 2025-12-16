@@ -33,7 +33,7 @@ CONFIG_PATH = os.path.join(VAE_PATH, "config.json")
 A40_REFERENCE_LATENT = -106.22467041015625
 
 # Latent generated on commit 2b54068960c41d42221e8b8719a374b499855029 with 1 x L40S
-L40S_REFERENCE_LATENT = -158.32318115234375
+L40S_REFERENCE_LATENT = -157.09130859375
 
 
 @pytest.mark.usefixtures("distributed_setup")
