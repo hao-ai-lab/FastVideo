@@ -13,7 +13,7 @@ from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.utils import FlexibleArgumentParser
 
 wandb_name = "test_training_loss_VSA"
-l40s_reference_wandb_summary_file = "fastvideo/tests/training/VSA/reference_wandb_summary_VSA.json"
+h100_reference_wandb_summary_file = "fastvideo/tests/training/VSA/h100_reference_wandb_summary_VSA.json"
 h200_reference_wandb_summary_file = "fastvideo/tests/training/VSA/h200_reference_wandb_summary_VSA.json"
 
 NUM_NODES = "1"
@@ -107,8 +107,8 @@ def test_distributed_training():
     summary_file = 'data/wan_finetune_test_VSA/tracker/wandb/latest-run/files/wandb-summary.json'
 
     device_name = torch.cuda.get_device_name()
-    if "L40S" in device_name:
-        reference_wandb_summary_file = l40s_reference_wandb_summary_file
+    if "H100" in device_name:
+        reference_wandb_summary_file = h100_reference_wandb_summary_file
     elif "H200" in device_name:
         reference_wandb_summary_file = h200_reference_wandb_summary_file
     else:
