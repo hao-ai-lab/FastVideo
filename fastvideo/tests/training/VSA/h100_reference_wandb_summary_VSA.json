@@ -5,6 +5,6 @@
     "_timestamp": 1751181952.70901,
     "vsa_sparsity": 0.05,
     "learning_rate": 1e-05,
-    "train_loss": 0.2530866410434246,
+    "train_loss": 0.3085433095693588,
     "_runtime": 107.325113071
 }
