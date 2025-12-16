@@ -180,6 +180,10 @@ class FastVideoArgs:
     # MoE parameters used by Wan2.2
     boundary_ratio: float | None = 0.875
 
+    # MatrixGame model variant selection
+    # Options: "base_distilled_model", "gta_distilled_model", "templerun_distilled_model"
+    model_variant: str = "base_distilled_model"
+
     @property
     def training_mode(self) -> bool:
         return not self.inference_mode

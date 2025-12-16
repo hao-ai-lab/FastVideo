@@ -17,10 +17,24 @@ CAMERA_MAP = {
     "i": [CAM_VALUE, 0], "k": [-CAM_VALUE, 0],
     "j": [0, -CAM_VALUE], "l": [0, CAM_VALUE], "u": [0, 0]
 }
-KEYBOARD_MAP = {
+
+KEYBOARD_MAP_4 = {  # base_distilled_model (universal): W/S/A/D
     "w": [1, 0, 0, 0], "s": [0, 1, 0, 0],
     "a": [0, 0, 1, 0], "d": [0, 0, 0, 1], "q": [0, 0, 0, 0]
 }
+KEYBOARD_MAP_2 = {  # gta_distilled_model: W/S only (steering via mouse)
+    "w": [1, 0], "s": [0, 1], "q": [0, 0]
+}
+KEYBOARD_MAP_7 = {  # templerun_distilled_model: still/w/s/left/right/a/d
+    "q": [1, 0, 0, 0, 0, 0, 0],  # still
+    "w": [0, 1, 0, 0, 0, 0, 0],  # forward
+    "s": [0, 0, 1, 0, 0, 0, 0],  # back
+    "j": [0, 0, 0, 1, 0, 0, 0],  # left (swipe)
+    "l": [0, 0, 0, 0, 1, 0, 0],  # right (swipe)
+    "a": [0, 0, 0, 0, 0, 1, 0],  # a
+    "d": [0, 0, 0, 0, 0, 0, 1],  # d
+}
+KEYBOARD_MAP = KEYBOARD_MAP_4  # Default for backward compatibility
 
 
 def load_initial_image(image_path: str = None) -> Image.Image:
@@ -31,15 +45,33 @@ def load_initial_image(image_path: str = None) -> Image.Image:
 
 
 def create_action_presets(num_frames: int, keyboard_dim: int = 4):
-    if keyboard_dim != 4:
-        raise ValueError("This demo only supports the universal (4-keyboard) Matrix-Game model.")
+    if keyboard_dim not in (2, 4, 7):
+        raise ValueError(f"keyboard_dim must be 2, 4, or 7, got {keyboard_dim}")
     if num_frames % 4 != 1:
         raise ValueError("Matrix-Game conditioning expects num_frames to be 4k+1.")
 
     num_samples_per_action = 4
-    actions_single_action = ["forward", "left", "right"]
-    actions_double_action = ["forward_left", "forward_right"]
-    actions_single_camera = ["camera_l", "camera_r"]
+    
+    # Define actions based on keyboard_dim
+    if keyboard_dim == 4:
+        # Universal model: W, S, A, D
+        actions_single_action = ["forward", "left", "right"]
+        actions_double_action = ["forward_left", "forward_right"]
+        actions_single_camera = ["camera_l", "camera_r"]
+        keyboard_idx = {"forward": 0, "back": 1, "left": 2, "right": 3}
+    elif keyboard_dim == 2:
+        # GTA model: W, S only (steering via mouse)
+        actions_single_action = ["forward", "back"]
+        actions_double_action = []
+        actions_single_camera = ["camera_l", "camera_r"]
+        keyboard_idx = {"forward": 0, "back": 1}
+    else:  # keyboard_dim == 7
+        # Temple Run model: still, w, s, left, right, a, d (no mouse)
+        actions_single_action = ["forward", "back", "left", "right"]
+        actions_double_action = []
+        actions_single_camera = []  # No mouse for Temple Run
+        keyboard_idx = {"still": 0, "forward": 1, "back": 2, "left": 3, "right": 4, "a": 5, "d": 6}
+
     actions_to_test = (
         actions_double_action * 5 + actions_single_camera * 5 + actions_single_action * 5
     )
@@ -47,8 +79,11 @@ def create_action_presets(num_frames: int, keyboard_dim: int = 4):
         for camera in actions_single_camera:
             actions_to_test.append(f"{action}_{camera}")
 
+    # Ensure we have at least some actions
+    if not actions_to_test:
+        actions_to_test = actions_single_action * 5
+
     base_action = actions_single_action + actions_single_camera
-    keyboard_idx = {"forward": 0, "back": 1, "left": 2, "right": 3}
     cam_value = 0.1
     camera_value_map = {
         "camera_up": [cam_value, 0],
@@ -63,7 +98,7 @@ def create_action_presets(num_frames: int, keyboard_dim: int = 4):
 
     data = []
     for action_name in actions_to_test:
-        keyboard_condition = torch.zeros((num_samples_per_action, 4))
+        keyboard_condition = torch.zeros((num_samples_per_action, keyboard_dim))
         mouse_condition = torch.zeros((num_samples_per_action, 2))
 
         for sub_act in base_action:
@@ -107,39 +142,67 @@ def create_action_presets(num_frames: int, keyboard_dim: int = 4):
     return {"keyboard": keyboard_condition, "mouse": mouse_condition}
 
 
-def get_action_from_input():
-    print("\nCamera: [I=up, K=down, J=left, L=right, U=none]")
-    print("Move: [W=forward, S=back, A=left, D=right, Q=none]")
+def get_action_from_input(keyboard_dim: int = 4):
+    if keyboard_dim == 2:
+        kb_map = KEYBOARD_MAP_2
+        print("\nCamera: [I=up, K=down, J=left, L=right, U=none]")
+        print("Move: [W=forward, S=back, Q=none]")
+    elif keyboard_dim == 7:
+        kb_map = KEYBOARD_MAP_7
+        print("\nTemple Run controls (no camera):")
+        print("Move: [W=forward, S=back, J=left-swipe, L=right-swipe, A=left, D=right, Q=still]")
+    else:  # keyboard_dim == 4
+        kb_map = KEYBOARD_MAP_4
+        print("\nCamera: [I=up, K=down, J=left, L=right, U=none]")
+        print("Move: [W=forward, S=back, A=left, D=right, Q=none]")
     print("(Press Enter to finish)")
     
     while True:
         try:
-            mouse_key = input("Camera: ").strip().lower()
-            if mouse_key in ('', 'done', 'stop'):
-                return None
-            keyboard_key = input("Move: ").strip().lower()
-            if keyboard_key in ('', 'done', 'stop'):
-                return None
-            if mouse_key in CAMERA_MAP and keyboard_key in KEYBOARD_MAP:
-                return {
-                    "mouse": torch.tensor(CAMERA_MAP[mouse_key]),
-                    "keyboard": torch.tensor(KEYBOARD_MAP[keyboard_key]),
-                }
+            if keyboard_dim == 7:  # Temple Run has no mouse
+                keyboard_key = input("Move: ").strip().lower()
+                if keyboard_key in ('', 'done', 'stop'):
+                    return None
+                if keyboard_key in kb_map:
+                    return {
+                        "mouse": torch.tensor([0.0, 0.0]),
+                        "keyboard": torch.tensor(kb_map[keyboard_key]),
+                    }
+            else:
+                mouse_key = input("Camera: ").strip().lower()
+                if mouse_key in ('', 'done', 'stop'):
+                    return None
+                keyboard_key = input("Move: ").strip().lower()
+                if keyboard_key in ('', 'done', 'stop'):
+                    return None
+                if mouse_key in CAMERA_MAP and keyboard_key in kb_map:
+                    return {
+                        "mouse": torch.tensor(CAMERA_MAP[mouse_key]),
+                        "keyboard": torch.tensor(kb_map[keyboard_key]),
+                    }
         except (EOFError, KeyboardInterrupt):
             return None
 
 
-def collect_actions_interactively():
+def collect_actions_interactively(keyboard_dim: int = 4):
     actions = []
     block_idx = 1
+    
+    if keyboard_dim == 2:
+        default_keyboard = [1, 0]  # forward for GTA
+    elif keyboard_dim == 7:
+        default_keyboard = [0, 1, 0, 0, 0, 0, 0]  # forward for Temple Run
+    else:
+        default_keyboard = [1, 0, 0, 0]  # forward for universal
+    
     while True:
         print(f"\n[Block {block_idx}]")
-        action = get_action_from_input()
+        action = get_action_from_input(keyboard_dim)
         if action is None:
             if len(actions) == 0:
                 actions.append({
                     "mouse": torch.tensor([0.0, 0.0]),
-                    "keyboard": torch.tensor([1, 0, 0, 0])
+                    "keyboard": torch.tensor(default_keyboard)
                 })
             break
         actions.append(action)
@@ -147,14 +210,31 @@ def collect_actions_interactively():
     return actions
 
 
-def get_default_actions(num_blocks: int):
-    predefined = [
-        {"mouse": [0, 0], "keyboard": [1, 0, 0, 0]},
-        {"mouse": [0, 0], "keyboard": [1, 0, 0, 0]},
-        {"mouse": [0, -0.1], "keyboard": [1, 0, 0, 0]},
-        {"mouse": [0, 0], "keyboard": [1, 0, 0, 0]},
-        {"mouse": [0, 0.1], "keyboard": [1, 0, 0, 0]},
-    ]
+def get_default_actions(num_blocks: int, keyboard_dim: int = 4):
+    if keyboard_dim == 2:  # GTA
+        predefined = [
+            {"mouse": [0, 0], "keyboard": [1, 0]},  # forward
+            {"mouse": [0, 0], "keyboard": [1, 0]},
+            {"mouse": [0, -0.1], "keyboard": [1, 0]},  # turn left
+            {"mouse": [0, 0], "keyboard": [1, 0]},
+            {"mouse": [0, 0.1], "keyboard": [1, 0]},  # turn right
+        ]
+    elif keyboard_dim == 7:  # Temple Run
+        predefined = [
+            {"mouse": [0, 0], "keyboard": [0, 1, 0, 0, 0, 0, 0]},  # forward
+            {"mouse": [0, 0], "keyboard": [0, 1, 0, 0, 0, 0, 0]},
+            {"mouse": [0, 0], "keyboard": [0, 0, 0, 1, 0, 0, 0]},  # left swipe
+            {"mouse": [0, 0], "keyboard": [0, 1, 0, 0, 0, 0, 0]},
+            {"mouse": [0, 0], "keyboard": [0, 0, 0, 0, 1, 0, 0]},  # right swipe
+        ]
+    else:  # Universal (4-key)
+        predefined = [
+            {"mouse": [0, 0], "keyboard": [1, 0, 0, 0]},
+            {"mouse": [0, 0], "keyboard": [1, 0, 0, 0]},
+            {"mouse": [0, -0.1], "keyboard": [1, 0, 0, 0]},
+            {"mouse": [0, 0], "keyboard": [1, 0, 0, 0]},
+            {"mouse": [0, 0.1], "keyboard": [1, 0, 0, 0]},
+        ]
     return [
         {"mouse": torch.tensor(predefined[i % len(predefined)]["mouse"]),
          "keyboard": torch.tensor(predefined[i % len(predefined)]["keyboard"])}
@@ -163,11 +243,73 @@ def get_default_actions(num_blocks: int):
 
 
 class StreamingCallback:
-    def __init__(self, actions):
-        self.actions = actions
+    def __init__(self, action_file: str, keyboard_dim: int = 4):
+        self.action_file = action_file
+        self.request_file = action_file + '.request'
+        self.keyboard_dim = keyboard_dim
         
     def __call__(self, block_idx, start_frame, num_frames):
-        return self.actions[min(block_idx, len(self.actions) - 1)]
+        import time
+        import json
+        
+        with open(self.request_file, 'w') as f:
+            json.dump({'block_idx': block_idx, 'status': 'waiting'}, f)
+        
+        while True:
+            try:
+                if os.path.exists(self.action_file):
+                    with open(self.action_file) as f:
+                        data = json.load(f)
+                    if data.get('block_idx', -1) == block_idx:
+                        os.remove(self.action_file)
+                        action = data.get('action')
+                        if action is None:
+                            return None
+                        return {
+                            "mouse": torch.tensor(action['mouse']),
+                            "keyboard": torch.tensor(action['keyboard'])
+                        }
+            except (json.JSONDecodeError, FileNotFoundError, PermissionError):
+                pass
+            time.sleep(0.05)
+
+
+def input_collector(action_file, request_file, keyboard_dim, max_blocks, stop_event):
+    import json
+    last_block = -1
+    user_stopped = False
+    while not stop_event.is_set():
+        try:
+            if os.path.exists(request_file):
+                with open(request_file) as f:
+                    req = json.load(f)
+                block_idx = req.get('block_idx', -1)
+                if block_idx > last_block:
+                    last_block = block_idx
+                    os.remove(request_file)
+                    
+                    if user_stopped:
+                        with open(action_file, 'w') as f:
+                            json.dump({'block_idx': block_idx, 'action': None}, f)
+                    else:
+                        print(f"\n[Block {block_idx + 1}/{max_blocks}]")
+                        action = get_action_from_input(keyboard_dim)
+                        
+                        if action is None:
+                            user_stopped = True
+                            with open(action_file, 'w') as f:
+                                json.dump({'block_idx': block_idx, 'action': None}, f)
+                        else:
+                            action_data = {
+                                'mouse': action['mouse'].tolist(),
+                                'keyboard': action['keyboard'].tolist()
+                            }
+                            with open(action_file, 'w') as f:
+                                json.dump({'block_idx': block_idx, 'action': action_data}, f)
+        except (json.JSONDecodeError, FileNotFoundError, PermissionError):
+            pass
+        import time
+        time.sleep(0.05)
 
 
 def parse_config(config, mode="universal"):

@@ -648,6 +648,11 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     if user_action is not None:
                         batch = self._update_action_conditions_from_callback(
                             batch, user_action, start_index, current_num_frames)
+                    elif getattr(batch, 'allow_early_stop', False):
+                        latents = latents[:, :, :start_index, :, :]
+                        batch.latents = latents
+                        batch.early_stopped = True
+                        return batch
 
                 action_kwargs = self._prepare_action_kwargs(batch, start_index, current_num_frames)
 

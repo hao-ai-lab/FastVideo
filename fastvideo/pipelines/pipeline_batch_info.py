@@ -124,6 +124,7 @@ class ForwardBatch:
     keyboard_cond: torch.Tensor | None = None   # Shape: (B, T, K)
     grid_sizes: torch.Tensor | None = None      # Shape: (3,) [F,H,W]
     streaming_action_callback: Any = None
+    allow_early_stop: bool = False
 
     # Latent dimensions
     height_latents: list[int] | int | None = None
