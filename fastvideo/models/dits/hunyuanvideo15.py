@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from fastvideo.attention import DistributedAttention, LocalAttention
 from fastvideo.distributed.parallel_state import get_sp_world_size
@@ -32,6 +33,8 @@ from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed,
 from fastvideo.models.dits.base import CachableDiT
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.logger import init_logger
+from fastvideo.forward_context import set_forward_context
+from fastvideo.attention.backends.abstract import AttentionMetadata
 
 logger = init_logger(__name__)
 
@@ -283,9 +286,9 @@ class MMDoubleStreamBlock(nn.Module):
         self,
         img: torch.Tensor,
         txt: torch.Tensor,
+        encoder_attention_mask: torch.Tensor,
         vec: torch.Tensor,
         freqs_cis: tuple,
-        encoder_attention_mask: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         # Process modulation vectors
         img_mod_outputs = self.img_mod(vec)
@@ -344,9 +347,22 @@ class MMDoubleStreamBlock(nn.Module):
         txt_q = self.txt_attn_q_norm(txt_q).to(txt_q.dtype)
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_k.dtype)
 
-        # Run distributed attention
-        img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v)
+        # seq_len = txt_q.shape[1] + img_q.shape[1]
+        # attention_mask = F.pad(encoder_attention_mask, (seq_len - encoder_attention_mask.shape[1], 0), value=True)
+        # attention_mask = attention_mask.bool()
+        # self_attn_mask_1 = attention_mask.view(batch_size, 1, 1, seq_len).repeat(1, 1, seq_len, 1)
+        # self_attn_mask_2 = self_attn_mask_1.transpose(2, 3)
+        # attention_mask = (self_attn_mask_1 & self_attn_mask_2).bool()
 
+        from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
+        attn_metadata = FlashAttnMetadataBuilder().build(
+            current_timestep=0,
+            attn_mask=encoder_attention_mask,
+        )
+        # Run distributed attention
+        with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
+            img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v)
+        
         img_attn_out, _ = self.img_attn_proj(
             img_attn.view(batch_size, image_seq_len, -1))
         # Use fused operation for residual connection, normalization, and modulation
@@ -479,7 +495,7 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
         hidden_states = self.img_in(hidden_states)
 
         # qwen text embedding
-        encoder_hidden_states = self.txt_in(encoder_hidden_states, timestep)
+        encoder_hidden_states = self.txt_in(encoder_hidden_states, timestep, encoder_attention_mask)
 
         encoder_hidden_states_cond_emb = self.cond_type_embed(
             torch.zeros_like(encoder_hidden_states[:, :, 0], dtype=torch.long)
@@ -534,60 +550,60 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
             encoder_hidden_states_3,
             encoder_attention_mask_3,
         ):
-            if is_t2v:
-                # Concatenate: [valid_byt5, valid_mllm, invalid_byt5, invalid_mllm]
-                new_encoder_hidden_states.append(
-                    torch.cat(
-                        [
-                            text_2[text_mask_2],  # valid byt5
-                            text[text_mask],  # valid mllm
-                            torch.zeros_like(text_2[~text_mask_2]),  # invalid byt5 (zeroed)
-                            torch.zeros_like(text[~text_mask]),  # invalid mllm (zeroed)
-                        ],
-                        dim=0,
-                    )
+            # if is_t2v:
+            #     # Concatenate: [valid_byt5, valid_mllm, invalid_byt5, invalid_mllm]
+            #     new_encoder_hidden_states.append(
+            #         torch.cat(
+            #             [
+            #                 text_2[text_mask_2],  # valid byt5
+            #                 text[text_mask],  # valid mllm
+            #                 torch.zeros_like(text_2[~text_mask_2]),  # invalid byt5 (zeroed)
+            #                 torch.zeros_like(text[~text_mask]),  # invalid mllm (zeroed)
+            #             ],
+            #             dim=0,
+            #         )
+            #     )
+            #     # Apply same reordering to attention masks
+            #     new_encoder_attention_mask.append(
+            #         torch.cat(
+            #             [
+            #                 text_mask_2[text_mask_2],
+            #                 text_mask[text_mask],
+            #                 # text_mask_2[~text_mask_2],
+            #                 # text_mask[~text_mask],
+            #             ],
+            #             dim=0,
+            #         )
+            #     )
+            # else:
+            # Concatenate: [valid_image, valid_byt5, valid_mllm, invalid_image, invalid_byt5, invalid_mllm]
+            new_encoder_hidden_states.append(
+                torch.cat(
+                    [
+                        image[image_mask],  # valid image
+                        text_2[text_mask_2],  # valid byt5
+                        text[text_mask],  # valid mllm
+                        image[~image_mask],  # invalid image (zeroed)
+                        torch.zeros_like(text_2[~text_mask_2]),  # invalid byt5 (zeroed)
+                        torch.zeros_like(text[~text_mask]),  # invalid mllm (zeroed)
+                    ],
+                    dim=0,
                 )
-                # Apply same reordering to attention masks
-                new_encoder_attention_mask.append(
-                    torch.cat(
-                        [
-                            text_mask_2[text_mask_2],
-                            text_mask[text_mask],
-                            ~text_mask_2[~text_mask_2],
-                            text_mask[~text_mask],
-                        ],
-                        dim=0,
-                    )
+            )
+            # Apply same reordering to attention masks
+            new_encoder_attention_mask.append(
+                torch.cat(
+                    [
+                        image_mask[image_mask],
+                        text_mask_2[text_mask_2],
+                        text_mask[text_mask],
+                        image_mask[~image_mask],
+                        text_mask_2[~text_mask_2],
+                        text_mask[~text_mask],
+                    ],
+                    dim=0,
                 )
-            else:
-                # Concatenate: [valid_image, valid_byt5, valid_mllm, invalid_image, invalid_byt5, invalid_mllm]
-                new_encoder_hidden_states.append(
-                    torch.cat(
-                        [
-                            image[image_mask],  # valid image
-                            text_2[text_mask_2],  # valid byt5
-                            text[text_mask],  # valid mllm
-                            image[~image_mask],  # invalid image (zeroed)
-                            torch.zeros_like(text_2[~text_mask_2]),  # invalid byt5 (zeroed)
-                            torch.zeros_like(text[~text_mask]),  # invalid mllm (zeroed)
-                        ],
-                        dim=0,
-                    )
-                )
-                # Apply same reordering to attention masks
-                new_encoder_attention_mask.append(
-                    torch.cat(
-                        [
-                            image_mask[image_mask],
-                            text_mask_2[text_mask_2],
-                            text_mask[text_mask],
-                            image_mask[~image_mask],
-                            ~text_mask_2[~text_mask_2],
-                            text_mask[~text_mask],
-                        ],
-                        dim=0,
-                    )
-                )
+            )
 
         encoder_hidden_states = torch.stack(new_encoder_hidden_states)
         encoder_attention_mask = torch.stack(new_encoder_attention_mask)
@@ -599,15 +615,17 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
                     block,
                     hidden_states,
                     encoder_hidden_states,
+                    encoder_attention_mask,
                     temb,
                     freqs_cis
                 )
 
         else:
-            for block in self.double_blocks[:1]:
+            for block in self.double_blocks:
                 hidden_states, encoder_hidden_states = block(
                     hidden_states,
                     encoder_hidden_states,
+                    encoder_attention_mask,
                     temb,
                     freqs_cis
                 )
@@ -671,13 +689,17 @@ class SingleTokenRefiner(nn.Module):
             ) for i in range(depth)
         ])
 
-    def forward(self, x, t):
+    def forward(self, x, t, mask=None):
         # Get timestep embeddings
         timestep_aware_representations = self.t_embedder(t)
 
         # Get context-aware representations
         original_dtype = x.dtype
-        context_aware_representations = torch.mean(x.float(), dim=1).to(original_dtype)
+        if mask is None:
+            context_aware_representations = x.mean(dim=1)
+        else:
+            mask_float = mask.float().unsqueeze(-1)  # [B, L, 1]
+            context_aware_representations = (x * mask_float).sum(dim=1) / mask_float.sum(dim=1)
 
         context_aware_representations = self.c_embedder(
             context_aware_representations)
@@ -686,7 +708,7 @@ class SingleTokenRefiner(nn.Module):
         x = self.input_embedder(x)
         # Process through refiner blocks
         for block in self.refiner_blocks:
-            x = block(x, c)
+            x = block(x, c, mask)
         return x
 
 class IndividualTokenRefinerBlock(nn.Module):
@@ -755,7 +777,11 @@ class IndividualTokenRefinerBlock(nn.Module):
                                           AttentionBackendEnum.TORCH_SDPA),
         )
 
-    def forward(self, x, c):
+    def forward(self, x, c, mask=None):
+        if mask is not None:
+            mask = mask.clone().bool()
+            mask[:, 0] = True  # Prevent attention weights from becoming NaN
+
         # Get modulation parameters
         gate_msa, gate_mlp = self.adaLN_modulation(c).chunk(2, dim=-1)
         # Self-attention
@@ -767,7 +793,14 @@ class IndividualTokenRefinerBlock(nn.Module):
         q, k, v = qkv[:, :, 0], qkv[:, :, 1], qkv[:, :, 2]
 
         # Run scaled dot product attention
-        attn_output = self.attn(q, k, v)  # [B, L, H, D]
+        from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
+        attn_metadata = FlashAttnMetadataBuilder().build(
+            current_timestep=0,
+            attn_mask=mask,
+        )
+        # Run distributed attention
+        with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
+            attn_output = self.attn(q, k, v)  # [B, L, H, D]
         attn_output = attn_output.reshape(batch_size, seq_len,
                                           -1)  # [B, L, H*D]
 

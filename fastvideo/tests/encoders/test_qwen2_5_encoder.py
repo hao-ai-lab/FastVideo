@@ -35,7 +35,7 @@ def test_qwen2_5_encoder(qwen_model_path):
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     # Qwen2.5-VL default dtype is usually bf16
-    precision_str = "bf16" if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else "fp16"
+    precision_str = "fp32"
     precision = PRECISION_TO_TYPE[precision_str]
     
     logger.info(f"Using precision: {precision_str}")

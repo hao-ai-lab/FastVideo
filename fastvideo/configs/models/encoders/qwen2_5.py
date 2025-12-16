@@ -74,8 +74,19 @@ class Qwen2_5_VLArchConfig(TextEncoderArchConfig):
             if self.rope_scaling["type"] == "mrope":
                 self.rope_scaling["type"] = "default"
             self.rope_scaling["rope_type"] = self.rope_scaling["type"]
+        
+        self.tokenizer_kwargs = {
+            "add_generation_prompt": True,
+            "tokenize": True,
+            "return_dict": True,
+            "padding": "max_length",
+            "max_length": 1000 + 108,
+            "truncation": True,
+            "return_tensors": "pt",
+        }
 
 @dataclass
 class Qwen2_5_VLConfig(TextEncoderConfig):
     arch_config: TextEncoderArchConfig = field(default_factory=Qwen2_5_VLArchConfig)
     prefix: str = "qwen2_5_vl"
+    is_chat_model: bool = True

@@ -32,8 +32,8 @@ CONFIG_PATH = os.path.join(VAE_PATH, "config.json")
 @pytest.mark.usefixtures("distributed_setup")
 def test_hunyuan_vae():
     device = torch.device("cuda:0")
-    precision = torch.bfloat16
-    precision_str = "bf16"
+    precision = torch.float32
+    precision_str = "fp32"
     args = FastVideoArgs(model_path=VAE_PATH, pipeline_config=PipelineConfig(vae_config=Hunyuan15VAEConfig(), vae_precision=precision_str))
     args.device = device
     args.vae_cpu_offload = False

@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import torch
+import torch.nn.functional as F
 from flash_attn import flash_attn_func as flash_attn_2_func
-
+from dataclasses import dataclass
 try:
     from flash_attn_interface import flash_attn_func as flash_attn_3_func
 
@@ -45,6 +46,26 @@ class FlashAttentionBackend(AttentionBackend):
     def get_builder_cls() -> type["AttentionMetadataBuilder"]:
         raise NotImplementedError
 
+@dataclass
+class FlashAttnMetadata(AttentionMetadata):
+    current_timestep: int
+    attn_mask: torch.Tensor | None = None
+
+class FlashAttnMetadataBuilder(AttentionMetadataBuilder):
+
+    def __init__(self):
+        pass
+
+    def prepare(self):
+        pass
+
+    def build(  # type: ignore
+        self,
+        current_timestep: int,
+        attn_mask: torch.Tensor,
+    ) -> FlashAttnMetadata:
+        return FlashAttnMetadata(current_timestep=current_timestep, attn_mask=attn_mask)
+
 
 class FlashAttentionImpl(AttentionImpl):
 
@@ -66,12 +87,26 @@ class FlashAttentionImpl(AttentionImpl):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        attn_metadata: AttentionMetadata,
+        attn_metadata: FlashAttnMetadata,
     ):
-        output = flash_attn_func(
-            query,  # type: ignore[no-untyped-call]
-            key,
-            value,
-            softmax_scale=self.softmax_scale,
-            causal=self.causal)
+        if attn_metadata is not None and attn_metadata.attn_mask is not None:
+            from fastvideo.attention.utils.flash_attn_no_pad import flash_attn_no_pad
+            attn_mask = attn_metadata.attn_mask
+            qkv = torch.stack([query, key, value], dim=2)
+
+            attn_mask = F.pad(attn_mask, (qkv.shape[1] - attn_mask.shape[1], 0), value=True)
+            output = flash_attn_no_pad(
+                qkv,
+                attn_mask,
+                causal=False,
+                dropout_p=0,
+                softmax_scale=None
+            )
+        else:
+            output = flash_attn_func(
+                query,  # type: ignore[no-untyped-call]
+                key,
+                value,
+                softmax_scale=self.softmax_scale,
+                causal=self.causal)
         return output
