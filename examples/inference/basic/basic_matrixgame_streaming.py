@@ -12,7 +12,7 @@ OUTPUT_PATH = "outputs/matrixgame_streaming"
 
 def main():
     generator = VideoGenerator.from_pretrained(
-        "/workspace/Matrix-Game-2.0-Diffusers/base_distilled_model",
+        "Skywork/Matrix-Game-2.0",
         num_gpus=1,
         use_fsdp_inference=True,
         dit_cpu_offload=False,

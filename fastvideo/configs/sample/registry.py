@@ -23,6 +23,7 @@ from fastvideo.configs.sample.wan import (
     Wan2_1_Fun_1_3B_Control_SamplingParam,
     SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam,
     SelfForcingWan2_2_T2V_A14B_480P_SamplingParam,
+    MatrixGame2_SamplingParam,
 )
 # isort: on
 from fastvideo.logger import init_logger
@@ -85,6 +86,10 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "nvidia/Cosmos-Predict2-2B-Video2World":
     Cosmos_Predict2_2B_Video2World_SamplingParam,
 
+    # MatrixGame
+    "Skywork/Matrix-Game-2.0":
+    MatrixGame2_SamplingParam,
+
     # Add other specific weight variants
 }
 
@@ -96,6 +101,7 @@ SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
     "stepvideo": lambda id: "stepvideo" in id.lower(),
     "wandmdpipeline": lambda id: "wandmdpipeline" in id.lower(),
     "wancausaldmdpipeline": lambda id: "wancausaldmdpipeline" in id.lower(),
+    "matrixgame": lambda id: "matrixgame" in id.lower() or "matrix-game" in id.lower(),
     # Add other pipeline architecture detectors
 }
 
@@ -109,12 +115,27 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
     "wandmdpipeline": FastWanT2V480P_SamplingParam,
     "wancausaldmdpipeline": SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam,
     "stepvideo": StepVideoT2VSamplingParam,
+    "matrixgame": MatrixGame2_SamplingParam,
     # Other fallbacks by architecture
 }
 
 
 def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
     """Get the appropriate sampling param for specific pretrained weights."""
+
+    # First try exact match for specific weights
+    if pipeline_name_or_path in SAMPLING_PARAM_REGISTRY:
+        return SAMPLING_PARAM_REGISTRY[pipeline_name_or_path]
+
+    # Try partial matches (for local paths that might include the weight ID)
+    for registered_id, config_class in SAMPLING_PARAM_REGISTRY.items():
+        if registered_id in pipeline_name_or_path:
+            return config_class
+
+    matrixgame_patterns = ["Matrix-Game", "Skywork--Matrix-Game", "matrixgame"]
+    for pattern in matrixgame_patterns:
+        if pattern.lower() in pipeline_name_or_path.lower():
+            return MatrixGame2_SamplingParam
 
     if os.path.exists(pipeline_name_or_path):
         config = verify_model_config_and_directory(pipeline_name_or_path)
@@ -125,15 +146,6 @@ def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
         config = maybe_download_model_index(pipeline_name_or_path)
 
     pipeline_name = config["_class_name"]
-
-    # First try exact match for specific weights
-    if pipeline_name_or_path in SAMPLING_PARAM_REGISTRY:
-        return SAMPLING_PARAM_REGISTRY[pipeline_name_or_path]
-
-    # Try partial matches (for local paths that might include the weight ID)
-    for registered_id, config_class in SAMPLING_PARAM_REGISTRY.items():
-        if registered_id in pipeline_name_or_path:
-            return config_class
 
     # If no match, try to use the fallback config
     fallback_config = None

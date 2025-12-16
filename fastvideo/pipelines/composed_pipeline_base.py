@@ -19,6 +19,10 @@ from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.profiler import get_or_create_profiler
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
+from fastvideo.models.loader.matrixgame_conversion import (
+    is_matrixgame_original_checkpoint,
+    maybe_convert_matrixgame,
+)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages import PipelineStage
 import fastvideo.envs as envs
@@ -201,9 +205,18 @@ class ComposedPipelineBase(ABC):
         self.modules[module_name] = module
 
     def _load_config(self, model_path: str) -> dict[str, Any]:
-        model_path = maybe_download_model(self.model_path)
+        if is_matrixgame_original_checkpoint(model_path):
+            model_variant = getattr(self.fastvideo_args, 'model_variant',
+                                    'base_distilled_model')
+            model_path = maybe_convert_matrixgame(
+                model_path=model_path,
+                model_variant=model_variant,
+                delete_original=False,
+            )
+        else:
+            model_path = maybe_download_model(model_path)
+
         self.model_path = model_path
-        # fastvideo_args.downloaded_model_path = model_path
         logger.info("Model path: %s", model_path)
         config = verify_model_config_and_directory(model_path)
         return cast(dict[str, Any], config)

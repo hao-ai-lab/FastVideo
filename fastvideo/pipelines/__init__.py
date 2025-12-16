@@ -14,6 +14,10 @@ from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
 from fastvideo.pipelines.pipeline_registry import (PipelineType,
                                                    get_pipeline_registry)
+from fastvideo.models.loader.matrixgame_conversion import (
+    is_matrixgame_original_checkpoint,
+    maybe_convert_matrixgame,
+)
 from fastvideo.utils import (maybe_download_model,
                              verify_model_config_and_directory)
 
@@ -38,8 +42,19 @@ def build_pipeline(
     """
     # Get pipeline type
     model_path = fastvideo_args.model_path
-    model_path = maybe_download_model(model_path)
-    # fastvideo_args.downloaded_model_path = model_path
+
+    if is_matrixgame_original_checkpoint(model_path):
+        model_variant = getattr(fastvideo_args, 'model_variant',
+                                'base_distilled_model')
+        model_path = maybe_convert_matrixgame(
+            model_path=model_path,
+            model_variant=model_variant,
+            delete_original=False,
+        )
+        fastvideo_args.model_path = model_path
+    else:
+        model_path = maybe_download_model(model_path)
+
     logger.info("Model path: %s", model_path)
 
     config = verify_model_config_and_directory(model_path)
