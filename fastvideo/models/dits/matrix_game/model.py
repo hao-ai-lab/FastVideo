@@ -315,7 +315,7 @@ class MatrixGameWanModel(BaseDiT):
         self.num_attention_heads = config.num_attention_heads
         self.patch_size = config.patch_size
 
-        # 1. Patch & position embedding# 1. Patch & position embedding
+        # 1. Patch & position embedding
         self.patch_embedding = PatchEmbed(in_chans=config.in_channels,
                                           embed_dim=inner_dim,
                                           patch_size=config.patch_size,

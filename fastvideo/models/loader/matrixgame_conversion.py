@@ -17,8 +17,6 @@ logger = init_logger(__name__)
 def _get_cache_dir() -> str:
     """Get the cache directory for MatrixGame models."""
     from huggingface_hub.constants import HF_HUB_CACHE
-    # HF_HUB_CACHE is typically ~/.cache/huggingface/hub
-    # We want ~/.cache/huggingface (parent of hub)
     return str(Path(HF_HUB_CACHE).parent)
 
 MODEL_VARIANTS: dict[str, dict[str, str]] = {
@@ -139,7 +137,7 @@ def _download_matrixgame(
 def _create_model_index() -> dict[str, Any]:
     """Create model_index.json for diffusers format."""
     return {
-        "_class_name": "MatrixCausalGameDMDPipeline",
+        "_class_name": "MatrixGameCausalDMDPipeline",
         "_diffusers_version": "0.33.1",
         "scheduler": ["diffusers", "SelfForcingFlowMatchScheduler"],
         "transformer": ["diffusers", "MatrixGameWanModel"],

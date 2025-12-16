@@ -39,7 +39,6 @@ logger = init_logger(__name__)
 
 
 def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
-    """MatrixGame's RoPE implementation for comparison."""
     n, c = x.size(2), x.size(3) // 2
 
     # split freqs
@@ -72,10 +71,6 @@ def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
 
 
 def rope_params(max_seq_len, dim, theta=10000):
-    """MatrixGame's rope_params: create frequency table.
-    
-    Uses float64 precision to match Official implementation exactly.
-    """
     assert dim % 2 == 0
     freqs = torch.outer(
         torch.arange(max_seq_len),
@@ -140,8 +135,6 @@ class CausalMatrixGameSelfAttention(nn.Module):
         self.sink_size = sink_size
         self.qk_norm = qk_norm
         self.eps = eps
-        # Don't hardcode 880 here - compute dynamically in forward with actual frame_seqlen
-        # self.max_attention_size = 15 * 1 * 880 if local_attn_size == -1 else local_attn_size * 880
         self._freqs_cache = None
 
         self.attn = LocalAttention(
@@ -341,11 +334,7 @@ class CausalMatrixGameTransformerBlock(nn.Module):
             elementwise_affine=False,
             dtype=torch.float32)
 
-        # self.use_action_module = len(action_config) > 0 and block_idx in action_config.get('blocks', [])
-        # if self.use_action_module:
-        #     self.action_model = ActionModule(**action_config, local_attn_size=local_attn_size)
-        # else:
-        #     self.action_model = None
+
         if len(action_config) > 0 and block_idx in action_config.get("blocks", []):
             self.action_model = ActionModule(
                 heads_num=action_config["heads_num"],
@@ -404,8 +393,7 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         frame_seqlen = hidden_states.shape[1] // num_frames
         bs, seq_length, _ = hidden_states.shape
         orig_dtype = hidden_states.dtype
-        # Convert to float32 for computation to match Official precision
-        hidden_states = hidden_states.float()
+        # hidden_states = hidden_states.float()
 
         e = self.scale_shift_table + temb
         assert e.shape == (bs, num_frames, 6, self.hidden_dim)
@@ -463,7 +451,7 @@ class CausalMatrixGameTransformerBlock(nn.Module):
 
         ff_output = self.ffn(
             (self.norm1(hidden_states).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) *
-            #  (1 + scale_msa) + shift_msa).flatten(1, 2)
+
             (1 + c_scale_msa) + c_shift_msa).flatten(1, 2)
         )
         hidden_states = self.mlp_residual(hidden_states, ff_output, c_gate_msa)
@@ -504,20 +492,24 @@ class CausalMatrixGameWanModel(BaseDiT):
         self.local_attn_size = getattr(arch_cfg, 'local_attn_size', getattr(config, 'local_attn_size', -1)) if arch_cfg else getattr(config, 'local_attn_size', -1)
         self.sink_size = getattr(arch_cfg, 'sink_size', getattr(config, 'sink_size', 0)) if arch_cfg else getattr(config, 'sink_size', 0)
 
+        # 1. Patch & position embedding
         self.patch_embedding = PatchEmbed(in_chans=config.in_channels,
                                           embed_dim=inner_dim,
                                           patch_size=config.patch_size,
                                           flatten=False)
 
+        # 2. Condition embeddings
         self.condition_embedder = CausalMatrixGameTimeImageEmbedding(
             dim=inner_dim,
             time_freq_dim=config.freq_dim,
             image_embed_dim=config.image_dim,
         )
 
+        # 2.1. Get action config
         arch_cfg = getattr(config, "arch_config", None)
         self.action_config = getattr(arch_cfg, "action_config", {}) if arch_cfg is not None else {}
 
+        # 3. Transformer blocks
         self.blocks = nn.ModuleList([
             CausalMatrixGameTransformerBlock(
                 inner_dim,
@@ -536,6 +528,7 @@ class CausalMatrixGameWanModel(BaseDiT):
             for i in range(config.num_layers)
         ])
 
+        # 4. Output norm & projection
         self.norm_out = LayerNormScaleShift(inner_dim,
                                             norm_type="layer",
                                             eps=config.eps,
@@ -682,8 +675,7 @@ class CausalMatrixGameWanModel(BaseDiT):
         start_frame: int = 0,
         **kwargs
     ) -> torch.Tensor:
-        # Extract num_frame_per_block from kwargs if passed by causal_denoising.py
-        # This allows dynamic block sizes (e.g., 1 for first frame, 3 for subsequent)
+        # Extract num_frame_per_block from kwargs
         effective_num_frame_per_block = kwargs.pop('num_frame_per_block', self.num_frame_per_block)
         
         if mouse_cond is not None or keyboard_cond is not None:
@@ -824,22 +816,6 @@ class CausalMatrixGameWanModel(BaseDiT):
             kv_cache_keyboard = [None] * len(self.blocks)
         if crossattn_cache is None:
             crossattn_cache = [None] * len(self.blocks)
-
-        # hidden_states = self.causal_pos_embedder(
-        #     hidden_states,
-        #     timestep_proj,
-        #     post_patch_num_frames=post_patch_num_frames,
-        #     post_patch_height=post_patch_height,
-        #     post_patch_width=post_patch_width,
-        #     freqs_cis=freqs_cis,
-        #     mouse_cond=mouse_cond,
-        #     keyboard_cond=keyboard_cond,
-        #     block_mask=self.block_mask,
-        #     block_mask_mouse=self.block_mask_mouse,
-        #     block_mask_keyboard=self.block_mask_keyboard,
-        #     use_rope_keyboard=self.use_rope_keyboard,
-        #     num_frame_per_block=self.num_frame_per_block
-        # )
 
         for block_index, block in enumerate(self.blocks):
             if torch.is_grad_enabled() and self.gradient_checkpointing:
