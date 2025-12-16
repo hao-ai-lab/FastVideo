@@ -42,7 +42,7 @@ def extract_glyph_texts(prompt: str) -> List[str]:
 
     return formatted_result
 
-def format_text_input(prompt: List[str], system_message: str) -> List[Dict[str, Any]]:
+def format_text_input(prompt: str, system_message: str) -> List[Dict[str, Any]]:
     """
     Apply text to template.
 
@@ -54,9 +54,7 @@ def format_text_input(prompt: List[str], system_message: str) -> List[Dict[str, 
         List[Dict[str, Any]]: List of chat conversation.
     """
 
-    template = [
-        [{"role": "system", "content": system_message}, {"role": "user", "content": p if p else " "}] for p in prompt
-    ]
+    template = [{"role": "system", "content": system_message}, {"role": "user", "content": prompt if prompt else " "}]
 
     return template
 
@@ -67,22 +65,22 @@ def qwen_preprocess_text(prompt: str) -> str:
     return prompt
 
 
-def qwen_postprocess_text(outputs: BaseEncoderOutput) -> torch.tensor:
+def qwen_postprocess_text(outputs: BaseEncoderOutput, mask: torch.tensor) -> tuple[torch.tensor, torch.tensor]:
     assert outputs.hidden_states is not None
     output = outputs.hidden_states[-3]
     output = output[:, 108:]
-    return output
+    mask = mask[:, 108:]
+    return output, mask
 
 
-def t5_preprocess_text(prompt: str) -> str:
+def byt5_preprocess_text(prompt: str) -> str:
     prompt = [prompt] if isinstance(prompt, str) else prompt
     glyph_texts = [extract_glyph_texts(p) for p in prompt]
-    return prompt
+    return glyph_texts[0]
 
 
-def clip_postprocess_text(outputs: BaseEncoderOutput) -> torch.tensor:
-    pooler_output: torch.tensor = outputs.pooler_output
-    return pooler_output
+def byt5_postprocess_text(outputs: BaseEncoderOutput) -> torch.tensor:
+    return outputs.last_hidden_state
 
 
 @dataclass
@@ -101,11 +99,11 @@ class Hunyuan15T2V480PConfig(PipelineConfig):
     text_encoder_configs: tuple[EncoderConfig, ...] = field(
         default_factory=lambda: (T5Config(), Qwen2_5_VLConfig()))
     preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
-        default_factory=lambda: (qwen_preprocess_text, clip_preprocess_text))
+        default_factory=lambda: (qwen_preprocess_text, byt5_preprocess_text))
     postprocess_text_funcs: tuple[
         Callable[[BaseEncoderOutput], torch.tensor],
         ...] = field(default_factory=lambda:
-                     (qwen_postprocess_text, clip_postprocess_text))
+                     (qwen_postprocess_text, byt5_postprocess_text))
 
     # Precision for each component
     dit_precision: str = "bf16"
@@ -113,6 +111,8 @@ class Hunyuan15T2V480PConfig(PipelineConfig):
     text_encoder_precisions: tuple[str, ...] = field(
         default_factory=lambda: ("bf16", "fp32"))
     text_encoder_crop_start: int = 108
+    text_encoder_max_lengths: tuple[int, ...] = field(
+        default_factory=lambda: (1000 + 108, 256))
 
     def __post_init__(self):
         self.vae_config.load_encoder = False

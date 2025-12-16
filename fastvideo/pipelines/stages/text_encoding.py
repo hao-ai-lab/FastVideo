@@ -205,18 +205,28 @@ class TextEncodingStage(PipelineStage):
 
             processed_texts: list[str] = []
             for prompt_str in texts:
-                processed_texts.append(preprocess_func(prompt_str))
+                processed_text = preprocess_func(prompt_str)
+                if processed_text is not None:
+                    processed_texts.append(processed_text)
+                else:
+                    processed_texts.append(prompt_str)
 
             tok_kwargs = dict(encoder_config.tokenizer_kwargs)
             if max_length is not None:
                 tok_kwargs["max_length"] = max_length
+            elif hasattr(fastvideo_args.pipeline_config, "text_encoder_max_lengths"):
+                tok_kwargs["max_length"] = fastvideo_args.pipeline_config.text_encoder_max_lengths[i]
+
             if truncation is not None:
                 tok_kwargs["truncation"] = truncation
             if padding is not None:
                 tok_kwargs["padding"] = padding
 
-            text_inputs = tokenizer(processed_texts,
-                                    **tok_kwargs).to(target_device)
+            if encoder_config.is_chat_model:
+                text_inputs = tokenizer.apply_chat_template(processed_texts, **tok_kwargs).to(target_device)
+            else:
+                text_inputs = tokenizer(processed_texts,
+                                        **tok_kwargs).to(target_device)
 
             input_ids = text_inputs["input_ids"]
             attention_mask = text_inputs["attention_mask"]
@@ -228,7 +238,11 @@ class TextEncodingStage(PipelineStage):
                     output_hidden_states=True,
                 )
 
-            prompt_embeds = postprocess_func(outputs)
+            try:
+                prompt_embeds = postprocess_func(outputs)
+            except Exception as e:
+                prompt_embeds, attention_mask = postprocess_func(outputs, attention_mask)
+
             if dtype is not None:
                 prompt_embeds = prompt_embeds.to(dtype=dtype)
             embeds_list.append(prompt_embeds)
