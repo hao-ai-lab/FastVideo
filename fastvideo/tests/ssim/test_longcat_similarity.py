@@ -417,7 +417,7 @@ def test_longcat_refine_similarity(prompt: str, ATTENTION_BACKEND: str):
         "tp_size": LONGCAT_REFINE_PARAMS["tp_size"],
         "dit_cpu_offload": True,
         # VAE can be large at 720p decode/encode paths; keep it CPU-offloaded.
-        "vae_cpu_offload": True,
+        "vae_cpu_offload": False,
         "text_encoder_cpu_offload": True,
         "pin_cpu_memory": True,
         "enable_bsa": LONGCAT_REFINE_PARAMS["enable_bsa"],
