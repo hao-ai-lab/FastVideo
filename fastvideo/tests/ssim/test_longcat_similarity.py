@@ -183,20 +183,16 @@ LONGCAT_BASE_PARAMS = {
 
 LONGCAT_REFINE_PARAMS = {
     "num_gpus": 4,
-    # Refinement doubles frames (unless spatial_refine_only=True) and runs at higher
-    # resolution, so SP sharding is important to keep per-GPU activation memory
-    # under control on 4x 48GB-class GPUs.
-    "sp_size": 4,
+    "sp_size": 1,
     "tp_size": 1,
     "height": 720,
     "width": 1280,
-    # LongCat refine doubles frames when spatial_refine_only=False
     "num_inference_steps": 8,
     "guidance_scale": 1.0,
-    "fps": 30,
+    "fps": 15,
     "seed": 42,
     "t_thresh": 0.5,
-    "spatial_refine_only": False,
+    "spatial_refine_only": True,
     "num_cond_frames": 0,
     # BSA settings from the official script
     "enable_bsa": True,
