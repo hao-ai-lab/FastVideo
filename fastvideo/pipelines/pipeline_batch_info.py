@@ -123,7 +123,7 @@ class ForwardBatch:
 
     # Latent tensors
     latents: torch.Tensor | None = None
-    raw_latent_shape: torch.Tensor | None = None
+    raw_latent_shape: tuple[int, ...] | None = None
     noise_pred: torch.Tensor | None = None
     image_latent: torch.Tensor | None = None
 
@@ -214,7 +214,7 @@ class TrainingBatch:
 
     # Dataloader batch outputs
     latents: torch.Tensor | None = None
-    raw_latent_shape: torch.Tensor | None = None
+    raw_latent_shape: tuple[int, ...] | None = None
     noise_latents: torch.Tensor | None = None
     encoder_hidden_states: torch.Tensor | None = None
     encoder_attention_mask: torch.Tensor | None = None

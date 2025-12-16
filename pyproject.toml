@@ -27,7 +27,7 @@ dependencies = [
     "timm==1.0.11",
     "peft>=0.15.0",
     "diffusers>=0.33.1",
-    "torch==2.7.1",
+    "torch==2.9.0",
     "torchvision",
 
     # Acceleration & Optimization

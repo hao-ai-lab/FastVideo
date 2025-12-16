@@ -82,6 +82,7 @@ class LatentPreparationStage(PipelineStage):
             raise ValueError("Height and width must be provided")
 
         # Calculate latent shape
+        bcthw_shape: tuple[int, ...] | None = None
         if self.use_btchw_layout:
             shape = (
                 batch_size,
@@ -92,6 +93,7 @@ class LatentPreparationStage(PipelineStage):
                 width // fastvideo_args.pipeline_config.vae_config.arch_config.
                 spatial_compression_ratio,
             )
+            bcthw_shape = tuple(shape[i] for i in [0, 2, 1, 3, 4])
         else:
             shape = (
                 batch_size,
@@ -102,6 +104,7 @@ class LatentPreparationStage(PipelineStage):
                 width // fastvideo_args.pipeline_config.vae_config.arch_config.
                 spatial_compression_ratio,
             )
+            bcthw_shape = shape
 
         # Validate generator if it's a list
         if isinstance(generator, list) and len(generator) != batch_size:
@@ -133,7 +136,7 @@ class LatentPreparationStage(PipelineStage):
 
         # Update batch with prepared latents
         batch.latents = latents
-        batch.raw_latent_shape = latents.shape
+        batch.raw_latent_shape = bcthw_shape
 
         return batch
 
