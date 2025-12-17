@@ -4,7 +4,6 @@ Denoising stage for diffusion pipelines.
 """
 
 import inspect
-import math
 import weakref
 from collections.abc import Iterable
 from typing import Any
