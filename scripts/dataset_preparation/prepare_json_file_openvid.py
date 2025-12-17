@@ -82,7 +82,7 @@ def prepare_dataset_json(folder_path,
         raise ValueError("Mismatch between video and caption counts after cleaning.")
 
     # Build full video paths
-    video_paths = [folder_path / 'video_sample' / vid for vid in video_names]
+    video_paths = [folder_path / vid for vid in video_names]
 
     # Verify all videos exist (optional but recommended)
     missing = [vp for vp in video_paths if not Path(vp).exists()]
