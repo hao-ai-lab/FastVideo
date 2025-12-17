@@ -232,7 +232,6 @@ class DenoisingStage(PipelineStage):
                        1) * (batch.height // spatial_scale) * (
                            batch.width // spatial_scale) // (patch_size[1] *
                                                              patch_size[2])
-            seq_len = int(math.ceil(seq_len / sp_world_size)) * sp_world_size
 
         # Initialize lists for ODE trajectory
         trajectory_timesteps: list[torch.Tensor] = []
