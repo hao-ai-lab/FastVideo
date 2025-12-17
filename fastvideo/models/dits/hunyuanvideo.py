@@ -23,10 +23,7 @@ from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed,
 from fastvideo.models.dits.base import CachableDiT
 from fastvideo.models.utils import modulate
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.distributed.communication_op import (
-    sequence_model_parallel_all_gather,
-    sequence_model_parallel_all_gather_with_unpad,
-    sequence_model_parallel_shard)
+from fastvideo.distributed.communication_op import sequence_model_parallel_shard, sequence_model_parallel_all_gather
 
 
 class HunyuanRMSNorm(nn.Module):
@@ -598,29 +595,7 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
             vec = vec + self.guidance_in(guidance)
         # Embed image and text
         img = self.img_in(img)
-        # Shard with padding support - returns (sharded_tensor, original_seq_len)
-        img, original_img_seq_len = sequence_model_parallel_shard(img, dim=1)
-        
-        # Create attention mask for padded tokens if padding was applied
-        current_seq_len = img.shape[1]
-        sp_world_size = get_sp_world_size()
-        padded_seq_len = current_seq_len * sp_world_size
-        
-        if padded_seq_len > original_img_seq_len:
-            # Padding was applied - create mask for the full (gathered) sequence
-            from fastvideo.distributed.padding_utils import create_attention_mask_for_padding
-            batch_size = img.shape[0]
-            attention_mask = create_attention_mask_for_padding(
-                seq_len=original_img_seq_len,
-                padded_seq_len=padded_seq_len,
-                batch_size=batch_size,
-                device=img.device,
-            )
-            # Store mask in forward context for attention layers to use
-            forward_context.attn_metadata.attention_mask = attention_mask
-        else:
-            forward_context.attn_metadata.attention_mask = None
-        
+        img = sequence_model_parallel_shard(img, dim=1)
         txt = self.txt_in(txt, t)
         txt_seq_len = txt.shape[1]
         img_seq_len = img.shape[1]
@@ -661,9 +636,7 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
                 self.maybe_cache_states(img, original_img)
 
         # Final layer processing
-        # Gather and unpad in one operation
-        img = sequence_model_parallel_all_gather_with_unpad(
-            img, original_img_seq_len, dim=1)
+        img = sequence_model_parallel_all_gather(img, dim=1)
         img = self.final_layer(img, vec)
         # Unpatchify to get original shape
         img = unpatchify(img, tt, th, tw, self.patch_size, self.out_channels)
