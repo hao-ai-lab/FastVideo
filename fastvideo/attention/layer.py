@@ -173,7 +173,6 @@ class DistributedAttention_VSA(DistributedAttention):
         replicated_v: torch.Tensor | None = None,
         gate_compress: torch.Tensor | None = None,
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
-        attention_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
         
@@ -185,7 +184,6 @@ class DistributedAttention_VSA(DistributedAttention):
             replicated_q (Optional[torch.Tensor]): Replicated query tensor, typically for text tokens
             replicated_k (Optional[torch.Tensor]): Replicated key tensor
             replicated_v (Optional[torch.Tensor]): Replicated value tensor
-            attention_mask (Optional[torch.Tensor]): Attention mask [batch_size, seq_len]
             
         Returns:
             Tuple[torch.Tensor, Optional[torch.Tensor]]: A tuple containing:
@@ -201,9 +199,7 @@ class DistributedAttention_VSA(DistributedAttention):
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
         
-        # Get attention mask if present
-        original_attention_mask = attention_mask
-
+        
         batch_size, seq_len, num_heads, head_dim = q.shape
         # Stack QKV
         qkvg = torch.cat([q, k, v, gate_compress],
@@ -245,10 +241,6 @@ class DistributedAttention_VSA(DistributedAttention):
         # Apply backend-specific postprocess_output
         output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
         
-        # Restore original mask before second all-to-all
-        if original_attention_mask is not None:
-            attention_mask = original_attention_mask
-
         output = sequence_model_parallel_all_to_all_4D(output,
                                                        scatter_dim=1,
                                                        gather_dim=2)
