@@ -904,7 +904,6 @@ block_sparse_attention_backward(torch::Tensor q,
     TORCH_CHECK(k2q_block_sparse_index.size(0) == batch, "k2q_block_sparse_index batch dimension - idx 0 - must match for all inputs");
     TORCH_CHECK(k2q_block_sparse_num.size(0) == batch, "k2q_block_sparse_num batch dimension - idx 0 - must match for all inputs");
 
-
     TORCH_CHECK(v.size(2)     == kv_seq_len, "V  sequence length dimension - idx 2 - must match K sequence length");
     TORCH_CHECK(l_vec.size(2) == q_seq_len, "L  sequence length dimension - idx 2 - must match Q sequence length");
     TORCH_CHECK(o.size(2)     == q_seq_len, "O  sequence length dimension - idx 2 - must match Q sequence length");
