@@ -310,14 +310,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
                 if self.boundary_timestep is not None and current_timestep < self.boundary_timestep and self.transformer_2 is not None:
                     current_model = self.transformer_2
-                    self._enable_training(self.transformer_2, self.optimizer_2)
-                    self._disable_training(self.transformer, self.optimizer)
                 else:
                     current_model = self.transformer
-                    self._enable_training(self.transformer, self.optimizer)
-                    if self.boundary_timestep is not None and self.transformer_2 is not None:
-                        self._disable_training(self.transformer_2,
-                                               self.optimizer_2)
 
                 if not exit_flag:
                     with torch.no_grad():
@@ -677,8 +671,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         batches = []
         for _ in range(gradient_accumulation_steps):
-            batch = self._prepare_distillation(training_batch)
-            batch = self._get_next_batch(batch)
+            batch = self._get_next_batch(training_batch)
             batch = self._normalize_dit_input(batch)
             batch = self._prepare_dit_inputs(batch)
             batch = self._build_attention_metadata(batch)
