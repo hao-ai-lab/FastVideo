@@ -8,7 +8,9 @@ from fastvideo.distributed.parallel_state import (get_sp_group,
                                                   get_sp_parallel_rank,
                                                   get_sp_world_size,
                                                   get_tp_group)
-
+from fastvideo.distributed.utils import (unpad_sequence_tensor,
+                                                  compute_padding_for_sp,
+                                                  pad_sequence_tensor)
 
 def tensor_model_parallel_all_reduce(input_: torch.Tensor) -> torch.Tensor:
     """All-reduce the input tensor across model parallel group."""
@@ -49,7 +51,6 @@ def sequence_model_parallel_all_gather_with_unpad(
     Returns:
         Tensor: Gathered and unpadded tensor
     """
-    from fastvideo.distributed.padding_utils import unpad_sequence_tensor
     
     # First gather across all ranks
     gathered = get_sp_group().all_gather(input_, dim)
@@ -74,8 +75,7 @@ def sequence_model_parallel_shard(input_: torch.Tensor,
             - sharded_tensor: The sharded (and possibly padded) tensor
             - original_seq_len: Original sequence length before padding
     """
-    from fastvideo.distributed.padding_utils import (compute_padding_for_sp,
-                                                      pad_sequence_tensor)
+
     
     sp_rank = get_sp_parallel_rank()
     sp_world_size = get_sp_world_size()

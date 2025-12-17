@@ -32,6 +32,7 @@ from fastvideo.models.dits.base import CachableDiT
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 from fastvideo.distributed.parallel_state import get_sp_world_size
+from fastvideo.distributed.utils import create_attention_mask_for_padding
 
 logger = init_logger(__name__)
 
@@ -674,7 +675,6 @@ class WanTransformer3DModel(CachableDiT):
             if not self._logged_attention_mask:
                 logger.info(f"Padding applied, original seq len: {original_seq_len}, padded seq len: {padded_seq_len}")
                 self._logged_attention_mask = True
-            from fastvideo.distributed.padding_utils import create_attention_mask_for_padding
             attention_mask = create_attention_mask_for_padding(
                 seq_len=original_seq_len,
                 padded_seq_len=padded_seq_len,
