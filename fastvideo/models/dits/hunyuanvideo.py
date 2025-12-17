@@ -595,7 +595,7 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
             vec = vec + self.guidance_in(guidance)
         # Embed image and text
         img = self.img_in(img)
-        img = sequence_model_parallel_shard(img, dim=1)
+        img, _ = sequence_model_parallel_shard(img, dim=1)
         txt = self.txt_in(txt, t)
         txt_seq_len = txt.shape[1]
         img_seq_len = img.shape[1]
