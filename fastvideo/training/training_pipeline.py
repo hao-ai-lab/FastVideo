@@ -436,22 +436,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
             sharded_target = shard_latents_across_sp(target)
             loss = (torch.mean((sharded_pred.float() - sharded_target.float()) ** 2) /
                     self.training_args.gradient_accumulation_steps)
-            # loss = (torch.mean((model_pred.float() - target.float())**2) /
-            #         self.training_args.gradient_accumulation_steps)
-            
-            # grad_checksum = torch.zeros((), device=training_batch.noisy_model_input.device)
-            # for p in current_model.parameters():
-            #     if p.grad is not None:
-            #         grad_checksum += p.grad.float().abs().sum()
-            # print(f"Grad checksum before backward pass: {grad_checksum.item()}, RANK {self.global_rank}")
 
             loss.backward()
 
-            # grad_checksum = torch.zeros((), device=training_batch.noisy_model_input.device)
-            # for p in current_model.parameters():
-            #     if p.grad is not None:
-            #         grad_checksum += p.grad.float().abs().sum()
-            # print(f"Grad checksum after backward pass: {grad_checksum.item()}, RANK {self.global_rank}")
             avg_loss = loss.detach().clone()
 
         # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
@@ -460,7 +447,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
             world_group = get_world_group()
             avg_loss = world_group.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
         training_batch.total_loss += avg_loss.item()
-        # print(f"training_batch.total_loss in steps = {training_batch.total_loss:.4f}")
 
         return training_batch
 
@@ -503,8 +489,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
             # Create noisy model input
             training_batch = self._prepare_dit_inputs(training_batch)
 
-            # print(f"training_batch.noisy_model_input before sharding: shape={tuple(training_batch.noisy_model_input.shape)}, device={training_batch.noisy_model_input.device}, sum={training_batch.noisy_model_input.sum().item():.4f}")
-
             # old sharding code, need to shard latents and noise but not input
             # Shard latents across sp groups
             training_batch.latents = training_batch.latents[:, :, :self.
@@ -522,40 +506,13 @@ class TrainingPipeline(LoRAPipeline, ABC):
                                                         training_args.
                                                         num_latent_t]
 
-            # training_batch.latents = shard_latents_across_sp(
-            #     training_batch.latents,
-            #     num_latent_t=self.training_args.num_latent_t)
-            # # shard noisy_model_input to match
-            # training_batch.noisy_model_input = training_batch.noisy_model_input[:, :, :self.training_args.num_latent_t]
-            # # shard noise to match latents
-            # training_batch.noise = shard_latents_across_sp(
-            #     training_batch.noise,
-            #     num_latent_t=self.training_args.num_latent_t)
-
-
-
             training_batch = self._build_attention_metadata(training_batch)
             training_batch = self._build_input_kwargs(training_batch)
-
-
-            # if self.global_rank == 0:
-            #     for k, v in training_batch.input_kwargs.items():
-            #         if torch.is_tensor(v):
-            #             print(f"{k}: shape={tuple(v.shape)}, dtype={v.dtype}, device={v.device}, sum={v.sum().item():.4f}")
-            #         else:
-            #             print(f"{k}: {type(v)} = {v}")
-            #     print("Iter Done \n\n")
             
             training_batch = self._transformer_forward_and_compute_loss(
                 training_batch)
 
-        # print(f"training_batch.total_loss after accul steps = {training_batch.total_loss:.4f}")
         training_batch = self._clip_grad_norm(training_batch)
-
-        # weight_sum = 0.0
-        # for p in self.transformer.parameters():
-        #     weight_sum += p.data.float().sum().item()
-        # print(f"Weight sum before optimizer: {weight_sum}, RANK {self.global_rank}")
 
         # Only step the optimizer and scheduler for the model that is currently training
         with self.tracker.timed("timing/optimizer_step"):
@@ -566,15 +523,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 self.optimizer.step()
                 self.lr_scheduler.step()
 
-        # weight_sum = 0.0
-        # for p in self.transformer.parameters():
-        #     weight_sum += p.data.float().sum().item()
-        # print(f"Weight sum after optimizer: {weight_sum}, RANK {self.global_rank}")
-
         training_batch.total_loss = training_batch.total_loss
         training_batch.grad_norm = training_batch.grad_norm
-        # print(f"training_batch.total_loss at end = {training_batch.total_loss:.4f}")
-        # sys.exit()
         return training_batch
 
     def _resume_from_checkpoint(self) -> None:
