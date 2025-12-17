@@ -43,7 +43,8 @@ from fastvideo.training.trackers import (DummyTracker, TrackerType,
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, count_trainable, get_scheduler,
-    get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint, shard_latents_across_sp)
+    get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint,
+    shard_latents_across_sp)
 from fastvideo.utils import (is_vmoba_available, is_vsa_available,
                              set_random_seed, shallow_asdict)
 
@@ -432,9 +433,10 @@ class TrainingPipeline(LoRAPipeline, ABC):
             # make sure no implicit broadcasting happens
             assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
 
-            sharded_pred   = shard_latents_across_sp(model_pred)
+            sharded_pred = shard_latents_across_sp(model_pred)
             sharded_target = shard_latents_across_sp(target)
-            loss = (torch.mean((sharded_pred.float() - sharded_target.float()) ** 2) /
+            loss = (torch.mean(
+                (sharded_pred.float() - sharded_target.float())**2) /
                     self.training_args.gradient_accumulation_steps)
 
             loss.backward()
@@ -508,7 +510,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
             training_batch = self._build_attention_metadata(training_batch)
             training_batch = self._build_input_kwargs(training_batch)
-            
+
             training_batch = self._transformer_forward_and_compute_loss(
                 training_batch)
 

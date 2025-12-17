@@ -9,8 +9,9 @@ from fastvideo.distributed.parallel_state import (get_sp_group,
                                                   get_sp_world_size,
                                                   get_tp_group)
 from fastvideo.distributed.utils import (unpad_sequence_tensor,
-                                                  compute_padding_for_sp,
-                                                  pad_sequence_tensor)
+                                         compute_padding_for_sp,
+                                         pad_sequence_tensor)
+
 
 def tensor_model_parallel_all_reduce(input_: torch.Tensor) -> torch.Tensor:
     """All-reduce the input tensor across model parallel group."""
@@ -51,14 +52,16 @@ def sequence_model_parallel_all_gather_with_unpad(
     Returns:
         Tensor: Gathered and unpadded tensor
     """
-    
+
     # First gather across all ranks
     gathered = get_sp_group().all_gather(input_, dim)
-    
+
     current_seq_len = gathered.shape[dim]
     if current_seq_len > original_seq_len:
-        gathered = unpad_sequence_tensor(gathered, original_seq_len, seq_dim=dim)
-    
+        gathered = unpad_sequence_tensor(gathered,
+                                         original_seq_len,
+                                         seq_dim=dim)
+
     return gathered
 
 
@@ -76,26 +79,25 @@ def sequence_model_parallel_shard(input_: torch.Tensor,
             - original_seq_len: Original sequence length before padding
     """
 
-    
     sp_rank = get_sp_parallel_rank()
     sp_world_size = get_sp_world_size()
-    
+
     original_seq_len = input_.shape[dim]
-    
+
     # Compute padding if needed
     padded_seq_len, padding_amount = compute_padding_for_sp(
         original_seq_len, sp_world_size)
-    
+
     # Pad if necessary
     if padding_amount > 0:
         input_ = pad_sequence_tensor(input_, padded_seq_len, seq_dim=dim)
-    
+
     elements_per_rank = padded_seq_len // sp_world_size
-    
+
     # Sharding along dim
     input_ = input_.movedim(dim, 0)
     input_ = input_[sp_rank * elements_per_rank:(sp_rank + 1) *
                     elements_per_rank]
     input_ = input_.movedim(0, dim)
-    
+
     return input_, original_seq_len

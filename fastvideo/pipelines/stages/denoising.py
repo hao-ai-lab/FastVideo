@@ -374,7 +374,7 @@ class DenoisingStage(PipelineStage):
                             # fastvideo_args=fastvideo_args
                     ):
                         # Run transformer
-                        noise_pred = current_model( 
+                        noise_pred = current_model(
                             latent_model_input,
                             prompt_embeds,
                             t_expand,

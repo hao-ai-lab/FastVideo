@@ -93,15 +93,16 @@ class DistributedAttention(nn.Module):
 
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
-        
+
         # Stack QKV
-        qkv = torch.cat([q, k, v], dim=0)  # [3*batch, seq_len, num_heads, head_dim]
+        qkv = torch.cat([q, k, v],
+                        dim=0)  # [3*batch, seq_len, num_heads, head_dim]
 
         # Redistribute heads across sequence dimension
         qkv = sequence_model_parallel_all_to_all_4D(qkv,
                                                     scatter_dim=2,
                                                     gather_dim=1)
-        
+
         # After all-to-all, each rank has the full sequence but only a subset of heads
         # The attention mask should now apply to the full sequence length
         # Since mask is [batch, full_seq_len], it's already in the correct format
@@ -198,8 +199,7 @@ class DistributedAttention_VSA(DistributedAttention):
 
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
-        
-        
+
         batch_size, seq_len, num_heads, head_dim = q.shape
         # Stack QKV
         qkvg = torch.cat([q, k, v, gate_compress],
@@ -211,7 +211,7 @@ class DistributedAttention_VSA(DistributedAttention):
         qkvg = sequence_model_parallel_all_to_all_4D(qkvg,
                                                      scatter_dim=2,
                                                      gather_dim=1)
-        
+
         # After all-to-all, each rank has the full sequence but only a subset of heads
         # The attention mask should now apply to the full sequence length
 
@@ -240,7 +240,7 @@ class DistributedAttention_VSA(DistributedAttention):
 
         # Apply backend-specific postprocess_output
         output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
-        
+
         output = sequence_model_parallel_all_to_all_4D(output,
                                                        scatter_dim=1,
                                                        gather_dim=2)

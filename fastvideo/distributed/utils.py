@@ -60,6 +60,7 @@ def split_tensor_along_last_dim(
 
     return tuple(tensor_list)
 
+
 def compute_padding_for_sp(seq_len: int, sp_world_size: int) -> tuple[int, int]:
     """
     Compute padding needed for sequence parallel.
@@ -73,10 +74,10 @@ def compute_padding_for_sp(seq_len: int, sp_world_size: int) -> tuple[int, int]:
     """
     if seq_len % sp_world_size == 0:
         return seq_len, 0
-    
+
     padding_amount = sp_world_size - (seq_len % sp_world_size)
     padded_seq_len = seq_len + padding_amount
-    
+
     return padded_seq_len, padding_amount
 
 
@@ -103,14 +104,14 @@ def create_attention_mask_for_padding(
     """
     if seq_len == padded_seq_len:
         return None
-    
+
     # Create mask: True for valid tokens, False for padding
     attention_mask = torch.ones(
         (batch_size, padded_seq_len),
         dtype=dtype,
         device=device,
     )
-    
+
     # Mask out padding tokens
     attention_mask[:, seq_len:] = 0
 
@@ -136,16 +137,16 @@ def pad_sequence_tensor(
         Tensor: Padded tensor
     """
     current_seq_len = tensor.shape[seq_dim]
-    
+
     if current_seq_len >= target_seq_len:
         return tensor
-    
+
     padding_amount = target_seq_len - current_seq_len
-    
+
     # Create padding shape
     pad_shape = list(tensor.shape)
     pad_shape[seq_dim] = padding_amount
-    
+
     # Create padding tensor
     padding = torch.full(
         pad_shape,
@@ -153,10 +154,10 @@ def pad_sequence_tensor(
         dtype=tensor.dtype,
         device=tensor.device,
     )
-    
+
     # Concatenate along sequence dimension
     padded_tensor = torch.cat([tensor, padding], dim=seq_dim)
-    
+
     return padded_tensor
 
 
@@ -179,8 +180,9 @@ def unpad_sequence_tensor(
     # Use slice to remove padding
     indices = [slice(None)] * tensor.dim()
     indices[seq_dim] = slice(0, original_seq_len)
-    
+
     return tensor[tuple(indices)]
+
 
 @dataclasses.dataclass
 class StatelessProcessGroup:
