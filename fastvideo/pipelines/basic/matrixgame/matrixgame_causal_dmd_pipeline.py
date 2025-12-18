@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Matrix-Game causal DMD pipeline for streaming inference."""
+"""Matrix-Game causal DMD pipeline implementation."""
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger

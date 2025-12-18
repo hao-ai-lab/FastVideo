@@ -26,8 +26,6 @@ class SamplingParam:
     mouse_cond: Any | None = None      # Shape: (B, T, 2)
     keyboard_cond: Any | None = None   # Shape: (B, T, K)
     grid_sizes: Any | None = None      # Shape: (3,) [F,H,W]
-    streaming_action_callback: Any | None = None
-    allow_early_stop: bool = False
 
     # Text inputs
     prompt: str | list[str] | None = None
