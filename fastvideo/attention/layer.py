@@ -222,13 +222,6 @@ class DistributedAttention_VSA(DistributedAttention):
                                                       sin,
                                                       is_neox_style=False)
 
-        if freqs_cis is not None:
-            cos, sin = freqs_cis
-            qkvg[:batch_size * 2] = _apply_rotary_emb(qkvg[:batch_size * 2],
-                                                      cos,
-                                                      sin,
-                                                      is_neox_style=False)
-
         qkvg = self.attn_impl.preprocess_qkv(qkvg, ctx_attn_metadata)
 
         q, k, v, gate_compress = qkvg.chunk(4, dim=0)
