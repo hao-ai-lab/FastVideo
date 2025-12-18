@@ -123,12 +123,12 @@ def prepare_dataset_json(folder_path,
     print(f"Average time per video: {avg_time_per_video:.2f} seconds")
 
     # Save to JSON file
-    output_file = folder_path / "video_sample" / output_name
+    output_file = folder_path / output_name
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(dataset_info, f, indent=2)
 
     # Create merge.txt
-    merge_file = folder_path /"video_sample"/ "merge.txt"
+    merge_file = folder_path / "merge.txt"
     with open(merge_file, 'w') as f:
         f.write(f"{folder_path}/video_sample,{output_file}\n")
 
