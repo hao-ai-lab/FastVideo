@@ -13,12 +13,14 @@ from fastvideo.configs.models.encoders import (BaseEncoderOutput,
 from fastvideo.configs.models.vaes import Hunyuan15VAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 
+PROMPT_TEMPLATE_TOKEN_LENGTH = 108
+
 PROMPT_TEMPLATE_ENCODE_VIDEO = "You are a helpful assistant. Describe the video by detailing the following aspects: \
-1. The main content and theme of the video. \
-2. The color, shape, size, texture, quantity, text, and spatial relationships of the objects. \
-3. Actions, events, behaviors temporal relationships, physical movement changes of the objects. \
-4. background environment, light, style and atmosphere. \
-5. camera angles, movements, and transitions used in the video."
+        1. The main content and theme of the video. \
+        2. The color, shape, size, texture, quantity, text, and spatial relationships of the objects. \
+        3. Actions, events, behaviors temporal relationships, physical movement changes of the objects. \
+        4. background environment, light, style and atmosphere. \
+        5. camera angles, movements, and transitions used in the video."
 
 def extract_glyph_texts(prompt: str) -> List[str]:
     """
@@ -60,7 +62,6 @@ def format_text_input(prompt: str, system_message: str) -> List[Dict[str, Any]]:
 
 
 def qwen_preprocess_text(prompt: str) -> str:
-    prompt = [prompt] if isinstance(prompt, str) else prompt
     prompt = format_text_input(prompt, PROMPT_TEMPLATE_ENCODE_VIDEO)
     return prompt
 
@@ -68,8 +69,8 @@ def qwen_preprocess_text(prompt: str) -> str:
 def qwen_postprocess_text(outputs: BaseEncoderOutput, mask: torch.tensor) -> tuple[torch.tensor, torch.tensor]:
     assert outputs.hidden_states is not None
     output = outputs.hidden_states[-3]
-    output = output[:, 108:]
-    mask = mask[:, 108:]
+    output = output[:, PROMPT_TEMPLATE_TOKEN_LENGTH:]
+    mask = mask[:, PROMPT_TEMPLATE_TOKEN_LENGTH:]
     return output, mask
 
 
@@ -97,7 +98,7 @@ class Hunyuan15T2V480PConfig(PipelineConfig):
 
     # Text encoding stage
     text_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (T5Config(), Qwen2_5_VLConfig()))
+        default_factory=lambda: (Qwen2_5_VLConfig(), T5Config()))
     preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
         default_factory=lambda: (qwen_preprocess_text, byt5_preprocess_text))
     postprocess_text_funcs: tuple[
@@ -110,9 +111,11 @@ class Hunyuan15T2V480PConfig(PipelineConfig):
     vae_precision: str = "fp16"
     text_encoder_precisions: tuple[str, ...] = field(
         default_factory=lambda: ("bf16", "fp32"))
-    text_encoder_crop_start: int = 108
+    text_encoder_crop_start: int = PROMPT_TEMPLATE_TOKEN_LENGTH
     text_encoder_max_lengths: tuple[int, ...] = field(
-        default_factory=lambda: (1000 + 108, 256))
+        default_factory=lambda: (1000 + PROMPT_TEMPLATE_TOKEN_LENGTH, 256))
+
+    vae_tiling: bool = True
 
     def __post_init__(self):
         self.vae_config.load_encoder = False

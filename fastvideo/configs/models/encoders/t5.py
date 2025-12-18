@@ -70,6 +70,7 @@ class T5ArchConfig(TextEncoderArchConfig):
             "return_attention_mask": True,
             "return_tensors": "pt",
         }
+        self.hidden_size = self.d_model
 
 
 @dataclass

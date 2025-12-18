@@ -249,6 +249,7 @@ class TextEncoderLoader(ComponentLoader):
                    dtype: str = "fp16"):
         use_cpu_offload = fastvideo_args.text_encoder_cpu_offload and len(
             getattr(model_config, "_fsdp_shard_conditions", [])) > 0
+        logger.info("Text encoder use_cpu_offload: %s", use_cpu_offload)
 
         from fastvideo.platforms import current_platform
 
@@ -480,8 +481,8 @@ class TransformerLoader(ComponentLoader):
             fastvideo_args.pipeline_config.dit_precision]
 
         # Load the model using FSDP loader
-        logger.info("Loading model from %s, default_dtype: %s", cls_name,
-                    default_dtype)
+        logger.info("Loading model from %s, default_dtype: %s, cpu_offload: %s", cls_name,
+                    default_dtype, fastvideo_args.dit_cpu_offload)
         assert fastvideo_args.hsdp_shard_dim is not None
         model = maybe_load_fsdp_model(
             model_cls=model_cls,

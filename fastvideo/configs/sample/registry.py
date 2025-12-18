@@ -5,6 +5,7 @@ from typing import Any
 
 from fastvideo.configs.sample.hunyuan import (FastHunyuanSamplingParam,
                                               HunyuanSamplingParam)
+from fastvideo.configs.sample.hunyuan15 import Hunyuan15_480P_SamplingParam
 from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
 
 from fastvideo.configs.sample.cosmos import Cosmos_Predict2_2B_Video2World_SamplingParam
@@ -33,9 +34,14 @@ from fastvideo.utils import (maybe_download_model_index,
 logger = init_logger(__name__)
 # Registry maps specific model weights to their config classes
 SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
-    "FastVideo/FastHunyuan-diffusers": FastHunyuanSamplingParam,
-    "hunyuanvideo-community/HunyuanVideo": HunyuanSamplingParam,
-    "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VSamplingParam,
+    "FastVideo/FastHunyuan-diffusers":
+    FastHunyuanSamplingParam,
+    "hunyuanvideo-community/HunyuanVideo":
+    HunyuanSamplingParam,
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v":
+    Hunyuan15_480P_SamplingParam,
+    "FastVideo/stepvideo-t2v-diffusers":
+    StepVideoT2VSamplingParam,
 
     # Wan2.1
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V_1_3B_SamplingParam,
@@ -86,6 +92,8 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
 SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
     "hunyuan":
     lambda id: "hunyuan" in id.lower(),
+    "hunyuan15": 
+    lambda id: "hunyuan15" in id.lower(),
     "wanpipeline":
     lambda id: "wanpipeline" in id.lower(),
     "wanimagetovideo":
@@ -105,6 +113,8 @@ SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
 SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
     "hunyuan":
     HunyuanSamplingParam,  # Base Hunyuan config as fallback for any Hunyuan variant
+    "hunyuan15":
+    Hunyuan15_480P_SamplingParam,  # Base Hunyuan15 config as fallback for any Hunyuan15 variant
     "wanpipeline":
     WanT2V_1_3B_SamplingParam,  # Base Wan config as fallback for any Wan variant
     "wanimagetovideo": WanI2V_14B_480P_SamplingParam,

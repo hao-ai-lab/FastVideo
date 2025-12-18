@@ -150,7 +150,7 @@ class HunyuanVideo15ArchConfig(DiTArchConfig):
     def __post_init__(self):
         super().__post_init__()
         self.hidden_size: int = self.attention_head_dim * self.num_attention_heads
-        self.num_channels_latents: int = self.in_channels
+        self.num_channels_latents: int = self.out_channels
 
 
 @dataclass

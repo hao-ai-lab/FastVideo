@@ -43,7 +43,7 @@ def test_hunyuanvideo15_transformer():
     model2 = loader.load(TRANSFORMER_PATH, args).to(dtype=precision)
 
     model1 = HunyuanVideo_1_5_DiffusionTransformer.from_pretrained(
-        "/mnt/weka/home/hao.zhang/wei/hy1.5_models/transformer/480p_t2v", device=device,
+        "/mnt/fast-disks/hao_lab/wei/hy1.5_models/transformer/480p_t2v", device=device,
         torch_dtype=precision).to(device, dtype=precision).requires_grad_(False)
     # model1 = HunyuanVideo15Transformer3DModel.from_pretrained(
     #     TRANSFORMER_PATH, device=device,
@@ -148,11 +148,9 @@ def test_hunyuanvideo15_transformer():
                     forward_batch=forward_batch,
             ):
                 output2 = model2(hidden_states=hidden_states,
-                                encoder_hidden_states=encoder_hidden_states,
-                                encoder_attention_mask=encoder_attention_mask,
-                                encoder_hidden_states_2=encoder_hidden_states_2,
-                                encoder_attention_mask_2=encoder_attention_mask_2,
-                                image_embeds=image_embeds,
+                                encoder_hidden_states=[encoder_hidden_states, encoder_hidden_states_2],
+                                encoder_attention_mask=[encoder_attention_mask, encoder_attention_mask_2],
+                                encoder_hidden_states_image=[image_embeds],
                                 timestep=timestep)
 
     # Check if outputs have the same shape

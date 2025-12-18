@@ -75,6 +75,7 @@ def test_hunyuanvideo15_transformer():
     # Create identical inputs for both models
     batch_size = 1
     seq_len = 30
+    seq_len_2 = 70
 
     # Video latents [B, C, T, H, W]
     hidden_states = torch.randn(batch_size,
@@ -96,18 +97,20 @@ def test_hunyuanvideo15_transformer():
                                         seq_len + 1,
                                         device=device,
                                         dtype=torch.bool)
-    # encoder_attention_mask[:, seq_len//2:] = False
+    encoder_hidden_states[:, 15:] = 0
+    encoder_attention_mask[:, 15:] = False
 
     encoder_hidden_states_2 = torch.randn(batch_size,
-                                        seq_len + 1,
+                                        seq_len_2 + 1,
                                         1472,
                                         device=device,
                                         dtype=precision)
     encoder_attention_mask_2 = torch.ones(batch_size,
-                                        seq_len + 1,
+                                        seq_len_2 + 1,
                                         device=device,
                                         dtype=torch.bool)
-    # encoder_attention_mask_2[:, seq_len//2:] = False
+    encoder_hidden_states_2[:, 39:] = 0
+    encoder_attention_mask_2[:, 39:] = False
 
     image_embeds = torch.zeros(batch_size, 729, 1152, dtype=precision, device=device)
 
@@ -136,11 +139,9 @@ def test_hunyuanvideo15_transformer():
                     forward_batch=forward_batch,
             ):
                 output2 = model2(hidden_states=hidden_states,
-                                encoder_hidden_states=encoder_hidden_states,
-                                encoder_attention_mask=encoder_attention_mask,
-                                encoder_hidden_states_2=encoder_hidden_states_2,
-                                encoder_attention_mask_2=encoder_attention_mask_2,
-                                image_embeds=image_embeds,
+                                encoder_hidden_states=[encoder_hidden_states, encoder_hidden_states_2],
+                                encoder_attention_mask=[encoder_attention_mask, encoder_attention_mask_2],
+                                encoder_hidden_states_image=[image_embeds],
                                 timestep=timestep)
 
     # Check if outputs have the same shape

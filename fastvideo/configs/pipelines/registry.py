@@ -7,6 +7,7 @@ from collections.abc import Callable
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
+from fastvideo.configs.pipelines.hunyuan15 import Hunyuan15T2V480PConfig
 from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
 
 # isort: off
@@ -27,6 +28,7 @@ logger = init_logger(__name__)
 PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "FastVideo/FastHunyuan-diffusers": FastHunyuanConfig,
     "hunyuanvideo-community/HunyuanVideo": HunyuanConfig,
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v": Hunyuan15T2V480PConfig,
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V480PConfig,
     "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers": WanI2V480PConfig,
     "IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers": WANV2VConfig,
@@ -56,6 +58,8 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
 PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     "hunyuan":
     lambda id: "hunyuan" in id.lower(),
+    "hunyuan15":
+    lambda id: "hunyuan15" in id.lower(),
     "matrixgame":
     lambda id: "matrix-game" in id.lower() or "matrixgame" in id.lower(),
     "wanpipeline":
@@ -77,7 +81,10 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
 PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "hunyuan":
     HunyuanConfig,  # Base Hunyuan config as fallback for any Hunyuan variant
-    "matrixgame": MatrixGameI2V480PConfig,
+    "matrixgame": 
+    MatrixGameI2V480PConfig,
+    "hunyuan15":
+    Hunyuan15T2V480PConfig,  # Base Hunyuan15 config as fallback for any Hunyuan15 variant
     "wanpipeline":
     WanT2V480PConfig,  # Base Wan config as fallback for any Wan variant
     "wanimagetovideo": WanI2V480PConfig,
@@ -123,6 +130,7 @@ def get_pipeline_config_cls_from_name(
     # First try exact match for specific weights
     if pipeline_name_or_path in PIPE_NAME_TO_CONFIG:
         pipeline_config_cls = PIPE_NAME_TO_CONFIG[pipeline_name_or_path]
+        return pipeline_config_cls
 
     # Try partial matches (for local paths that might include the weight ID)
     for registered_id, config_class in PIPE_NAME_TO_CONFIG.items():

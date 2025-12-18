@@ -69,12 +69,17 @@ class TextEncodingStage(PipelineStage):
             encoder_index=all_indices,
             return_attention_mask=True,
         )
+        logger.info(f"prompt: {prompt_text}")
+        logger.info(f"pos text 1 sum: {prompt_embeds_list[0].sum()}, pos text 2 sum: {prompt_embeds_list[1].sum()}")
+        logger.info(f"pos text 1 mask sum: {prompt_masks_list[0].sum()}, pos text 2 mask sum: {prompt_masks_list[1].sum()}")
 
         for pe in prompt_embeds_list:
             batch.prompt_embeds.append(pe)
         if batch.prompt_attention_mask is not None:
             for am in prompt_masks_list:
                 batch.prompt_attention_mask.append(am)
+        else:
+            raise ValueError("prompt_attention_mask is required")
 
         # Encode negative prompt if CFG is enabled
         if batch.do_classifier_free_guidance:
@@ -85,7 +90,9 @@ class TextEncodingStage(PipelineStage):
                 encoder_index=all_indices,
                 return_attention_mask=True,
             )
-
+            logger.info(f"neg text: {batch.negative_prompt}")
+            logger.info(f"neg text 1 sum: {neg_embeds_list[0].sum()}, neg text 2 sum: {neg_embeds_list[1].sum()}")
+            logger.info(f"neg text 1 mask sum: {neg_masks_list[0].sum()}, neg text 2 mask sum: {neg_masks_list[1].sum()}")
             assert batch.negative_prompt_embeds is not None
             for ne in neg_embeds_list:
                 batch.negative_prompt_embeds.append(ne)
@@ -100,9 +107,9 @@ class TextEncodingStage(PipelineStage):
         """Verify text encoding stage inputs."""
         result = VerificationResult()
         result.add_check("prompt", batch.prompt, V.string_or_list_strings)
-        result.add_check(
-            "negative_prompt", batch.negative_prompt, lambda x: not batch.
-            do_classifier_free_guidance or V.string_not_empty(x))
+        # result.add_check(
+        #     "negative_prompt", batch.negative_prompt, lambda x: not batch.
+        #     do_classifier_free_guidance or V.string_not_empty(x))
         result.add_check("do_classifier_free_guidance",
                          batch.do_classifier_free_guidance, V.bool_value)
         result.add_check("prompt_embeds", batch.prompt_embeds, V.is_list)
@@ -203,14 +210,6 @@ class TextEncodingStage(PipelineStage):
             preprocess_func = preprocess_funcs[i]
             postprocess_func = postprocess_funcs[i]
 
-            processed_texts: list[str] = []
-            for prompt_str in texts:
-                processed_text = preprocess_func(prompt_str)
-                if processed_text is not None:
-                    processed_texts.append(processed_text)
-                else:
-                    processed_texts.append(prompt_str)
-
             tok_kwargs = dict(encoder_config.tokenizer_kwargs)
             if max_length is not None:
                 tok_kwargs["max_length"] = max_length
@@ -222,7 +221,24 @@ class TextEncodingStage(PipelineStage):
             if padding is not None:
                 tok_kwargs["padding"] = padding
 
+            processed_texts: list[str] = []
+            for prompt_str in texts:
+                processed_text = preprocess_func(prompt_str)
+                if processed_text is not None:
+                    processed_texts.append(processed_text)
+                else:
+                    # Assuming batch_size = 1
+                    prompt_embeds = torch.zeros(
+                        (1, tok_kwargs["max_length"], encoder_config.hidden_size), device=target_device
+                    )
+                    attention_mask = torch.zeros((1, tok_kwargs["max_length"]), device=target_device, dtype=torch.int64)
+                    embeds_list.append(prompt_embeds)
+                    attn_masks_list.append(attention_mask)
+                    return self.return_embeds(embeds_list, attn_masks_list, return_type, return_attention_mask, indices)
+
             if encoder_config.is_chat_model:
+                logger.info(f"processed_texts: {processed_texts}")
+                logger.info(f"tok_kwargs: {tok_kwargs}")
                 text_inputs = tokenizer.apply_chat_template(processed_texts, **tok_kwargs).to(target_device)
             else:
                 text_inputs = tokenizer(processed_texts,
@@ -249,6 +265,15 @@ class TextEncodingStage(PipelineStage):
             if return_attention_mask:
                 attn_masks_list.append(attention_mask)
 
+        return self.return_embeds(embeds_list, attn_masks_list, return_type, return_attention_mask, indices)
+    
+    def return_embeds(self, 
+        embeds_list: list[torch.Tensor], 
+        attn_masks_list: list[torch.Tensor], 
+        return_type: str = "list",
+        return_attention_mask: bool = False,
+        indices: list[int] = None,
+    ) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
         # Shape results according to return_type
         if return_type == "list":
             if return_attention_mask:

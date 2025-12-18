@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, List
 
 import torch
 import torch.nn as nn
@@ -465,15 +465,18 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
     def forward(
         self,
         hidden_states: torch.Tensor,
+        encoder_hidden_states: List[torch.Tensor],
         timestep: torch.LongTensor,
-        encoder_hidden_states: torch.Tensor,
-        encoder_attention_mask: torch.Tensor,
+        encoder_hidden_states_image: List[torch.Tensor],
+        encoder_attention_mask: List[torch.Tensor],
+        guidance: Optional[torch.Tensor] = None,
         timestep_r: Optional[torch.LongTensor] = None,
-        encoder_hidden_states_2: Optional[torch.Tensor] = None,
-        encoder_attention_mask_2: Optional[torch.Tensor] = None,
-        image_embeds: Optional[torch.Tensor] = None,
         attention_kwargs: Optional[Dict[str, Any]] = None,
     ):
+        encoder_hidden_states_image = encoder_hidden_states_image[0]
+        encoder_hidden_states, encoder_hidden_states_2 = encoder_hidden_states
+        encoder_attention_mask, encoder_attention_mask_2 = encoder_attention_mask
+
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.config.patch_size_t, self.config.patch_size, self.config.patch_size
         post_patch_num_frames = num_frames // p_t
@@ -511,8 +514,8 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
         encoder_hidden_states_2 = encoder_hidden_states_2 + encoder_hidden_states_2_cond_emb
 
         # image embed
-        encoder_hidden_states_3 = self.image_embedder(image_embeds)
-        is_t2v = torch.all(image_embeds == 0)
+        encoder_hidden_states_3 = self.image_embedder(encoder_hidden_states_image)
+        is_t2v = torch.all(encoder_hidden_states_image == 0)
         if is_t2v:
             encoder_hidden_states_3 = encoder_hidden_states_3 * 0.0
             encoder_attention_mask_3 = torch.zeros(

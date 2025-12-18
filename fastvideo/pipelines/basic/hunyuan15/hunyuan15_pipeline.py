@@ -13,7 +13,8 @@ from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
                                         DenoisingStage, InputValidationStage,
                                         LatentPreparationStage,
                                         TextEncodingStage,
-                                        TimestepPreparationStage)
+                                        TimestepPreparationStage,
+                                        Hy15ImageEncodingStage)
 
 # TODO(will): move PRECISION_TO_TYPE to better place
 
@@ -56,6 +57,11 @@ class HunyuanVideo15Pipeline(ComposedPipelineBase):
                        stage=LatentPreparationStage(
                            scheduler=self.get_module("scheduler"),
                            transformer=self.get_module("transformer")))
+        
+        self.add_stage(stage_name="image_encoding_stage",
+                        stage=Hy15ImageEncodingStage(
+                            image_encoder=None,
+                            image_processor=None))
 
         self.add_stage(stage_name="denoising_stage",
                        stage=DenoisingStage(
