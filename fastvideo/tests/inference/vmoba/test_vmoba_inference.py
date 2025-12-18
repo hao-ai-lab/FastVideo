@@ -27,7 +27,7 @@ def test_inference_vmoba():
         "--height", "480",
         "--width", "832",
         "--num-frames", "77",
-        "--num-inference-steps", "50",
+        "--num-inference-steps", "10",
         "--moba-config-path", moba_config,
         "--fps", "16",
         "--guidance-scale", "6.0",
