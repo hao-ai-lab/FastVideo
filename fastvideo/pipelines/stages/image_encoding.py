@@ -103,7 +103,7 @@ class ImageEncodingStage(PipelineStage):
 class MatrixGameImageEncodingStage(ImageEncodingStage):
     CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073]
     CLIP_STD = [0.26862954, 0.26130258, 0.27577711]
-    
+
     @torch.no_grad()
     def forward(
         self,
@@ -117,40 +117,41 @@ class MatrixGameImageEncodingStage(ImageEncodingStage):
 
         if isinstance(image, torch.Tensor):
             if image.dim() == 5:
-                image = image[:, :, 0] # Extract first frame: [B, C, T, H, W] -> [B, C, H, W]
+                image = image[:, :,
+                              0]  # Extract first frame: [B, C, T, H, W] -> [B, C, H, W]
         else:
             from torchvision import transforms as T
             transform = T.Compose([
                 T.ToTensor(),  # [0, 1]
-                T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),  # -> [-1, 1]
+                T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5,
+                                                       0.5]),  # -> [-1, 1]
             ])
             image = transform(image).unsqueeze(0)  # [1, C, H, W]
-        
+
         device = get_local_torch_device()
         image = image.to(device)
-        
+
         # F.interpolate with bicubic
-        image = torch.nn.functional.interpolate(
-            image, 
-            size=(224, 224), 
-            mode='bicubic', 
-            align_corners=False
-        )
-        
+        image = torch.nn.functional.interpolate(image,
+                                                size=(224, 224),
+                                                mode='bicubic',
+                                                align_corners=False)
+
         #  [-1, 1] to [0, 1]
         image = image * 0.5 + 0.5
-        
+
         # CLIP normalization
-        mean = torch.tensor(self.CLIP_MEAN, device=device, dtype=image.dtype).view(1, 3, 1, 1)
-        std = torch.tensor(self.CLIP_STD, device=device, dtype=image.dtype).view(1, 3, 1, 1)
+        mean = torch.tensor(self.CLIP_MEAN, device=device,
+                            dtype=image.dtype).view(1, 3, 1, 1)
+        std = torch.tensor(self.CLIP_STD, device=device,
+                           dtype=image.dtype).view(1, 3, 1, 1)
         image = (image - mean) / std
 
         with set_forward_context(current_timestep=0, attn_metadata=None):
-            outputs = self.image_encoder(
-                pixel_values=image,
-                output_hidden_states=True
-            )
-            if outputs.hidden_states is not None and len(outputs.hidden_states) >= 2:
+            outputs = self.image_encoder(pixel_values=image,
+                                         output_hidden_states=True)
+            if outputs.hidden_states is not None and len(
+                    outputs.hidden_states) >= 2:
                 image_embeds = outputs.hidden_states[-2]
             else:
                 image_embeds = outputs.last_hidden_state
@@ -590,6 +591,7 @@ class VideoVAEEncodingStage(ImageVAEEncodingStage):
 
 
 class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
+
     def forward(
         self,
         batch: ForwardBatch,
@@ -601,7 +603,7 @@ class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
             # Accept both PIL.Image and torch.Tensor
             # Causal pipeline (is_causal=True) converts PIL to tensor in InputValidationStage
             assert batch.pil_image is not None and isinstance(
-                batch.pil_image, (PIL.Image.Image, torch.Tensor))
+                batch.pil_image, PIL.Image.Image | torch.Tensor)
             assert batch.height is not None and isinstance(batch.height, int)
             assert batch.width is not None and isinstance(batch.width, int)
             assert batch.num_frames is not None and isinstance(
@@ -621,19 +623,19 @@ class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
             width = batch.width[0]
         else:
             # Fallback for other modes
-            height = batch.height if isinstance(batch.height, int) else batch.height[0]
-            width = batch.width if isinstance(batch.width, int) else batch.width[0]
-            num_frames = batch.num_frames if isinstance(batch.num_frames, int) else batch.num_frames[0]
+            height = batch.height if isinstance(batch.height,
+                                                int) else batch.height[0]
+            width = batch.width if isinstance(batch.width,
+                                              int) else batch.width[0]
+            num_frames = batch.num_frames if isinstance(
+                batch.num_frames, int) else batch.num_frames[0]
 
         self.vae = self.vae.to(get_local_torch_device())
 
-        # Process single image for I2V
-        latent_height = height // self.vae.spatial_compression_ratio
-        latent_width = width // self.vae.spatial_compression_ratio
-        latent_frames = (num_frames - 1) // self.vae.temporal_compression_ratio + 1
+        # Process single image for I2V (latent dimensions computed but not used directly)
 
         image = batch.pil_image
-        
+
         # Handle tensor input from causal pipeline
         if isinstance(image, torch.Tensor):
             # Causal pipeline provides tensor in [B, C, F, H, W] format
@@ -644,20 +646,24 @@ class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
                 # Create video condition with first frame + zeros
                 video_condition = torch.cat([
                     first_frame,
-                    first_frame.new_zeros(first_frame.shape[0], first_frame.shape[1], 
-                                          num_frames - 1, first_frame.shape[3], first_frame.shape[4])
-                ], dim=2)
+                    first_frame.new_zeros(
+                        first_frame.shape[0], first_frame.shape[1], num_frames -
+                        1, first_frame.shape[3], first_frame.shape[4])
+                ],
+                                            dim=2)
             elif image.dim() == 4:
                 # [B, C, H, W] -> need to add frame dim
                 image = image.unsqueeze(2)  # [B, C, 1, H, W]
                 video_condition = torch.cat([
                     image,
-                    image.new_zeros(image.shape[0], image.shape[1], num_frames - 1,
-                                    image.shape[3], image.shape[4])
-                ], dim=2)
+                    image.new_zeros(image.shape[0], image.shape[1], num_frames -
+                                    1, image.shape[3], image.shape[4])
+                ],
+                                            dim=2)
             else:
                 raise ValueError(f"Unexpected tensor dimensions: {image.dim()}")
-            video_condition = video_condition.to(get_local_torch_device(), dtype=torch.float32)
+            video_condition = video_condition.to(get_local_torch_device(),
+                                                 dtype=torch.float32)
         else:
             # PIL Image input - use preprocess
             image = self.preprocess(
@@ -674,9 +680,10 @@ class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
                 image,
                 image.new_zeros(image.shape[0], image.shape[1], num_frames - 1,
                                 image.shape[3], image.shape[4])
-            ], dim=2)
-            video_condition = video_condition.to(device=get_local_torch_device(),
-                                                 dtype=torch.float32)
+            ],
+                                        dim=2)
+            video_condition = video_condition.to(
+                device=get_local_torch_device(), dtype=torch.float32)
 
         # Setup VAE precision
         vae_dtype = PRECISION_TO_TYPE[
@@ -699,29 +706,27 @@ class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
         img_cond = encoder_output.mode()
 
         # manually using latents_mean and latents_std from config...
-        if (hasattr(self.vae.config, 'latents_mean') and
-            hasattr(self.vae.config, 'latents_std')):
+        if (hasattr(self.vae.config, 'latents_mean')
+                and hasattr(self.vae.config, 'latents_std')):
             # Convert config values to tensors
-            latents_mean = torch.tensor(
-                self.vae.config.latents_mean,
-                device=img_cond.device,
-                dtype=img_cond.dtype
-            ).view(1, -1, 1, 1, 1)
+            latents_mean = torch.tensor(self.vae.config.latents_mean,
+                                        device=img_cond.device,
+                                        dtype=img_cond.dtype).view(
+                                            1, -1, 1, 1, 1)
 
-            latents_std = torch.tensor(
-                self.vae.config.latents_std,
-                device=img_cond.device,
-                dtype=img_cond.dtype
-            ).view(1, -1, 1, 1, 1)
+            latents_std = torch.tensor(self.vae.config.latents_std,
+                                       device=img_cond.device,
+                                       dtype=img_cond.dtype).view(
+                                           1, -1, 1, 1, 1)
 
             # Apply normalization: (latent - mean) * (1/std)
             img_cond = (img_cond - latents_mean) / latents_std
-        elif (hasattr(self.vae, "shift_factor") and
-              self.vae.shift_factor is not None):
+        elif (hasattr(self.vae, "shift_factor")
+              and self.vae.shift_factor is not None):
             # Fallback to shift_factor/scaling_factor if available
             if isinstance(self.vae.shift_factor, torch.Tensor):
-                img_cond -= self.vae.shift_factor.to(
-                    img_cond.device, img_cond.dtype)
+                img_cond -= self.vae.shift_factor.to(img_cond.device,
+                                                     img_cond.dtype)
             else:
                 img_cond -= self.vae.shift_factor
 

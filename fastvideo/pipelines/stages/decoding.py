@@ -78,20 +78,18 @@ class DecodingStage(PipelineStage):
 
         # denormalization for MatrixGame VAE
         # z = z * std + mean during decode
-        if (hasattr(self.vae.config, 'latents_mean') and
-            hasattr(self.vae.config, 'latents_std')):
+        if (hasattr(self.vae.config, 'latents_mean')
+                and hasattr(self.vae.config, 'latents_std')):
             # Convert config values to tensors
-            latents_mean = torch.tensor(
-                self.vae.config.latents_mean,
-                device=latents.device,
-                dtype=latents.dtype
-            ).view(1, -1, 1, 1, 1)
+            latents_mean = torch.tensor(self.vae.config.latents_mean,
+                                        device=latents.device,
+                                        dtype=latents.dtype).view(
+                                            1, -1, 1, 1, 1)
 
-            latents_std = torch.tensor(
-                self.vae.config.latents_std,
-                device=latents.device,
-                dtype=latents.dtype
-            ).view(1, -1, 1, 1, 1)
+            latents_std = torch.tensor(self.vae.config.latents_std,
+                                       device=latents.device,
+                                       dtype=latents.dtype).view(
+                                           1, -1, 1, 1, 1)
 
             # Apply denormalization: z = z * std + mean
             latents = latents * latents_std + latents_mean

@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from fastvideo.configs.models.dits.wanvideo import WanVideoArchConfig, WanVideoConfig
 
+
 @dataclass
 class MatrixGameWanVideoArchConfig(WanVideoArchConfig):
     # Override param_names_mapping to remove patch_embedding transformation
@@ -9,7 +10,6 @@ class MatrixGameWanVideoArchConfig(WanVideoArchConfig):
         default_factory=lambda: {
             # Removed: r"^patch_embedding\.(.*)$": r"patch_embedding.proj.\1"
             # because checkpoint already has correct format
-            
             r"^condition_embedder\.text_embedder\.linear_1\.(.*)$":
             r"condition_embedder.text_embedder.fc_in.\1",
             r"^condition_embedder\.text_embedder\.linear_2\.(.*)$":
@@ -45,7 +45,7 @@ class MatrixGameWanVideoArchConfig(WanVideoArchConfig):
             r"^blocks\.(\d+)\.norm2\.(.*)$":
             r"blocks.\1.self_attn_residual_norm.norm.\2",
         })
-    
+
     action_config: dict = field(
         default_factory=lambda: {
             "blocks": list(range(15)),

@@ -83,9 +83,11 @@ class LatentPreparationStage(PipelineStage):
             # Matrix-Game models have text_dim=0 and ignore encoder_hidden_states.
             transformer_dtype = next(self.transformer.parameters()).dtype
             device = get_local_torch_device()
-            dummy_prompt = torch.zeros(
-                batch_size, 0, self.transformer.hidden_size, device=device, dtype=transformer_dtype
-            )
+            dummy_prompt = torch.zeros(batch_size,
+                                       0,
+                                       self.transformer.hidden_size,
+                                       device=device,
+                                       dtype=transformer_dtype)
             batch.prompt_embeds = [dummy_prompt]
             batch.negative_prompt_embeds = []
             batch.do_classifier_free_guidance = False
@@ -177,9 +179,9 @@ class LatentPreparationStage(PipelineStage):
         """Verify latent preparation stage inputs."""
         result = VerificationResult()
         result.add_check(
-            "prompt_or_embeds", None, lambda _: V.string_or_list_strings(
-                batch.prompt) or not batch.prompt_embeds
-                or V.list_not_empty(batch.prompt_embeds))
+            "prompt_or_embeds", None,
+            lambda _: V.string_or_list_strings(batch.prompt) or not batch.
+            prompt_embeds or V.list_not_empty(batch.prompt_embeds))
         if batch.prompt_embeds:
             result.add_check("prompt_embeds", batch.prompt_embeds,
                              V.list_of_tensors)

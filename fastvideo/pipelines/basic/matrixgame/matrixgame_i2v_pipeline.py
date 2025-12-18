@@ -62,9 +62,9 @@ class MatrixGamePipeline(LoRAPipeline, ComposedPipelineBase):
                            scheduler=self.get_module("scheduler"),
                            transformer=self.get_module("transformer")))
 
-        self.add_stage(stage_name="image_latent_preparation_stage",
-                       stage=MatrixGameImageVAEEncodingStage(
-                           vae=self.get_module("vae")))
+        self.add_stage(
+            stage_name="image_latent_preparation_stage",
+            stage=MatrixGameImageVAEEncodingStage(vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",
                        stage=DenoisingStage(

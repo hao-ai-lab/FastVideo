@@ -23,9 +23,9 @@ class SamplingParam:
     video_path: str | None = None
 
     # Action control inputs (Matrix-Game)
-    mouse_cond: Any | None = None      # Shape: (B, T, 2)
-    keyboard_cond: Any | None = None   # Shape: (B, T, K)
-    grid_sizes: Any | None = None      # Shape: (3,) [F,H,W]
+    mouse_cond: Any | None = None  # Shape: (B, T, 2)
+    keyboard_cond: Any | None = None  # Shape: (B, T, K)
+    grid_sizes: Any | None = None  # Shape: (3,) [F,H,W]
 
     # Text inputs
     prompt: str | list[str] | None = None

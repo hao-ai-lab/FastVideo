@@ -91,9 +91,8 @@ class ConditioningStage(PipelineStage):
             result.add_check("prompt_embeds", batch.prompt_embeds,
                              V.list_not_empty)
             result.add_check(
-                "negative_prompt_embeds", batch.negative_prompt_embeds,
-                lambda x: not batch.do_classifier_free_guidance
-                or V.list_not_empty(x))
+                "negative_prompt_embeds", batch.negative_prompt_embeds, lambda
+                x: not batch.do_classifier_free_guidance or V.list_not_empty(x))
         return result
 
     def verify_output(self, batch: ForwardBatch,
