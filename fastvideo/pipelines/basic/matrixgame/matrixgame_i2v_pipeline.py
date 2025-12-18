@@ -6,11 +6,12 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 
-from fastvideo.pipelines.stages import (
-    MatrixGameImageEncodingStage, ConditioningStage,
-    DecodingStage, DenoisingStage,
-    InputValidationStage, LatentPreparationStage, TextEncodingStage,
-    TimestepPreparationStage)
+from fastvideo.pipelines.stages import (MatrixGameImageEncodingStage,
+                                        ConditioningStage, DecodingStage,
+                                        DenoisingStage, InputValidationStage,
+                                        LatentPreparationStage,
+                                        TextEncodingStage,
+                                        TimestepPreparationStage)
 from fastvideo.pipelines.stages.image_encoding import (
     MatrixGameImageVAEEncodingStage)
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
@@ -21,8 +22,7 @@ logger = init_logger(__name__)
 
 class MatrixGamePipeline(LoRAPipeline, ComposedPipelineBase):
     _required_config_modules = [
-        "vae", "transformer", "scheduler",
-        "image_encoder", "image_processor"
+        "vae", "transformer", "scheduler", "image_encoder", "image_processor"
     ]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):

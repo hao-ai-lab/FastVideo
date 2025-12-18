@@ -5,20 +5,21 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 
-from fastvideo.pipelines.stages import (
-    ConditioningStage, DecodingStage,
-    InputValidationStage, LatentPreparationStage, TextEncodingStage,
-    MatrixGameImageEncodingStage, MatrixGameCausalDenoisingStage)
+from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
+                                        InputValidationStage,
+                                        LatentPreparationStage,
+                                        TextEncodingStage,
+                                        MatrixGameImageEncodingStage,
+                                        MatrixGameCausalDenoisingStage)
 from fastvideo.pipelines.stages.image_encoding import (
     MatrixGameImageVAEEncodingStage)
 
 logger = init_logger(__name__)
 
 
-class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):    
+class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
     _required_config_modules = [
-        "vae", "transformer", "scheduler",
-        "image_encoder", "image_processor"
+        "vae", "transformer", "scheduler", "image_encoder", "image_processor"
     ]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
@@ -65,7 +66,8 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))
 
-        logger.info("MatrixGameCausalDMDPipeline initialized with action support")
+        logger.info(
+            "MatrixGameCausalDMDPipeline initialized with action support")
 
 
 EntryClass = [MatrixGameCausalDMDPipeline]
