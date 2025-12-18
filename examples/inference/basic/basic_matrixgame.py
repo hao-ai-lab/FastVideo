@@ -14,14 +14,17 @@ MODEL_VARIANT = "base_distilled_model"
 # Variant-specific settings
 VARIANT_CONFIG = {
     "base_distilled_model": {
+        "model_path": "H1yori233/Matrix-Game-2.0-Diffusers-Base",
         "keyboard_dim": 4,
         "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/universal/0000.png",
     },
     "gta_distilled_model": {
+        "model_path": "H1yori233/Matrix-Game-2.0-Diffusers-GTA",
         "keyboard_dim": 2,
         "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/gta_drive/0000.png",
     },
     "templerun_distilled_model": {
+        "model_path": "H1yori233/Matrix-Game-2.0-Diffusers-TempleRun",
         "keyboard_dim": 7,
         "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/temple_run/0002.png",
     },
@@ -33,14 +36,13 @@ def main():
     config = VARIANT_CONFIG[MODEL_VARIANT]
 
     generator = VideoGenerator.from_pretrained(
-        "Skywork/Matrix-Game-2.0",
+        config["model_path"],
         num_gpus=1,
         use_fsdp_inference=True,
         dit_cpu_offload=False,
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True,
-        model_variant=MODEL_VARIANT,  # Specify the model variant
         pipeline_config=MatrixGameI2V480PConfig())
 
     num_frames = 597

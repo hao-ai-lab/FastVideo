@@ -86,8 +86,12 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "nvidia/Cosmos-Predict2-2B-Video2World":
     Cosmos_Predict2_2B_Video2World_SamplingParam,
 
-    # MatrixGame
-    "Skywork/Matrix-Game-2.0":
+    # MatrixGame2.0 models
+    "H1yori233/Matrix-Game-2.0-Diffusers-Base":
+    MatrixGame2_SamplingParam,
+    "H1yori233/Matrix-Game-2.0-Diffusers-GTA":
+    MatrixGame2_SamplingParam,
+    "H1yori233/Matrix-Game-2.0-Diffusers-TempleRun":
     MatrixGame2_SamplingParam,
 
     # Add other specific weight variants

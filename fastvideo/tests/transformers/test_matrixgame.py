@@ -15,8 +15,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
-
-from fastvideo.models.loader.matrixgame_conversion import maybe_convert_matrixgame
+from fastvideo.utils import maybe_download_model
 
 logger = init_logger(__name__)
 
@@ -24,8 +23,8 @@ os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29505"
 os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
-BASE_MODEL_PATH = "Skywork/Matrix-Game-2.0"
-MODEL_PATH = maybe_convert_matrixgame(BASE_MODEL_PATH)
+# Use pre-converted HuggingFace model directly
+MODEL_PATH = maybe_download_model("H1yori233/Matrix-Game-2.0-Diffusers-Base")
 TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
 REFERENCE_LATENT = -112914.0136833489
 
