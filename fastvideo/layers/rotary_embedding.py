@@ -429,6 +429,7 @@ def get_rotary_pos_embed(
     theta_rescale_factor=1.0,
     interpolation_factor=1.0,
     shard_dim: int = 0,
+    do_sp_sharding: bool = False,
     dtype: torch.dtype = torch.float32,
     start_frame: int = 0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -444,6 +445,7 @@ def get_rotary_pos_embed(
         theta_rescale_factor: Rescale factor for theta. Defaults to 1.0
         interpolation_factor: Factor to scale positions. Defaults to 1.0
         shard_dim: Which dimension to shard for sequence parallelism. Defaults to 0.
+        do_sp_sharding: Whether to shard the positional embeddings for sequence parallelism. Defaults to False.
         
     Returns:
         Tuple of (cos, sin) tensors for rotary embeddings
@@ -460,9 +462,13 @@ def get_rotary_pos_embed(
     ) == head_dim, "sum(rope_dim_list) should equal to head_dim of attention layer"
 
     # Get SP info
-    sp_group = get_sp_group()
-    sp_rank = sp_group.rank_in_group
-    sp_world_size = sp_group.world_size
+    if do_sp_sharding:
+        sp_group = get_sp_group()
+        sp_rank = sp_group.rank_in_group
+        sp_world_size = sp_group.world_size
+    else:
+        sp_rank = 0
+        sp_world_size = 1
 
     freqs_cos, freqs_sin = get_nd_rotary_pos_embed(
         rope_dim_list,

@@ -593,11 +593,6 @@ class DistillationPipeline(TrainingPipeline):
         noise = torch.randn(self.video_latent_shape,
                             device=self.device,
                             dtype=dtype)
-        if self.sp_world_size > 1:
-            noise = rearrange(noise,
-                              "b (n t) c h w -> b n t c h w",
-                              n=self.sp_world_size).contiguous()
-            noise = noise[:, self.rank_in_sp_group, :, :, :, :]
         noisy_latent = self.noise_scheduler.add_noise(latents.flatten(0, 1),
                                                       noise.flatten(0, 1),
                                                       timestep).unflatten(
@@ -637,13 +632,6 @@ class DistillationPipeline(TrainingPipeline):
         current_noise_latents = torch.randn(self.video_latent_shape,
                                             device=self.device,
                                             dtype=dtype)
-        if self.sp_world_size > 1:
-            current_noise_latents = rearrange(
-                current_noise_latents,
-                "b (n t) c h w -> b n t c h w",
-                n=self.sp_world_size).contiguous()
-            current_noise_latents = current_noise_latents[:, self.
-                                                          rank_in_sp_group, :, :, :, :]
         current_noise_latents_copy = current_noise_latents.clone()
 
         # Only run intermediate steps if target_timestep_idx > 0
@@ -678,11 +666,6 @@ class DistillationPipeline(TrainingPipeline):
                     noise = torch.randn(self.video_latent_shape,
                                         device=self.device,
                                         dtype=pred_clean.dtype)
-                    if self.sp_world_size > 1:
-                        noise = rearrange(noise,
-                                          "b (n t) c h w -> b n t c h w",
-                                          n=self.sp_world_size).contiguous()
-                        noise = noise[:, self.rank_in_sp_group, :, :, :, :]
                     current_noise_latents = self.noise_scheduler.add_noise(
                         pred_clean.flatten(0, 1), noise.flatten(0, 1),
                         next_timestep_tensor).unflatten(0, pred_clean.shape[:2])
@@ -735,11 +718,6 @@ class DistillationPipeline(TrainingPipeline):
             noise = torch.randn(self.video_latent_shape,
                                 device=self.device,
                                 dtype=generator_pred_video.dtype)
-            if self.sp_world_size > 1:
-                noise = rearrange(noise,
-                                  "b (n t) c h w -> b n t c h w",
-                                  n=self.sp_world_size).contiguous()
-                noise = noise[:, self.rank_in_sp_group, :, :, :, :]
 
             noisy_latent = self.noise_scheduler.add_noise(
                 generator_pred_video.flatten(0, 1), noise.flatten(0, 1),
@@ -848,12 +826,6 @@ class DistillationPipeline(TrainingPipeline):
         fake_score_noise = torch.randn(self.video_latent_shape,
                                        device=self.device,
                                        dtype=generator_pred_video.dtype)
-        if self.sp_world_size > 1:
-            fake_score_noise = rearrange(fake_score_noise,
-                                         "b (n t) c h w -> b n t c h w",
-                                         n=self.sp_world_size).contiguous()
-            fake_score_noise = fake_score_noise[:, self.
-                                                rank_in_sp_group, :, :, :, :]
 
         noisy_generator_pred_video = self.noise_scheduler.add_noise(
             generator_pred_video.flatten(0, 1), fake_score_noise.flatten(0, 1),
@@ -924,14 +896,6 @@ class DistillationPipeline(TrainingPipeline):
         training_batch.raw_latent_shape = training_batch.latents.shape
         training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
         self.video_latent_shape = training_batch.latents.shape
-
-        if self.sp_world_size > 1:
-            training_batch.latents = rearrange(
-                training_batch.latents,
-                "b (n t) c h w -> b n t c h w",
-                n=self.sp_world_size).contiguous()
-            training_batch.latents = training_batch.latents[:, self.
-                                                            rank_in_sp_group, :, :, :, :]
 
         self.video_latent_shape_sp = training_batch.latents.shape
 
