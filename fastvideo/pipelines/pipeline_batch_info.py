@@ -269,12 +269,18 @@ class TrainingBatch:
 
     # RL/GRPO-specific attributes
     reward_scores: torch.Tensor | None = None  # Computed rewards from reward models
-    log_probs: torch.Tensor | None = None  # Current policy log probabilities
-    old_log_probs: torch.Tensor | None = None  # Old policy log probs (for importance ratio)
-    advantages: torch.Tensor | None = None  # GAE advantages
-    returns: torch.Tensor | None = None  # TD returns (advantages + values)
-    values: torch.Tensor | None = None  # Value function predictions
-    old_values: torch.Tensor | None = None  # Old value predictions (for clipping)
+    log_probs: torch.Tensor | None = None  # Current policy log probabilities [B, num_steps] or [B]
+    old_log_probs: torch.Tensor | None = None  # Old policy log probs (for importance ratio) [B, num_steps] or [B]
+    advantages: torch.Tensor | None = None  # GAE advantages [B, num_steps] or [B]
+    returns: torch.Tensor | None = None  # TD returns (advantages + values) [B, num_steps] or [B]
+    values: torch.Tensor | None = None  # Value function predictions [B]
+    old_values: torch.Tensor | None = None  # Old value predictions (for clipping) [B]
+    
+    # GRPO sampling-specific attributes
+    kl: torch.Tensor | None = None  # KL divergences from sampling [B, num_steps] (if kl_reward > 0)
+    prompt_ids: torch.Tensor | None = None  # Prompt token IDs for stat tracking [B, seq_len]
+    prompt_embeds: torch.Tensor | None = None  # Prompt embeddings used in sampling [B, seq_len, hidden_dim]
+    negative_prompt_embeds: torch.Tensor | None = None  # Negative prompt embeddings for CFG [B, seq_len, hidden_dim]
 
     # RL loss components
     policy_loss: float = 0.0  # GRPO/PPO policy loss

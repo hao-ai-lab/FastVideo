@@ -33,10 +33,15 @@ from .rl_utils import (
     sample_random_timesteps,
     compute_reward_statistics,
 )
+from fastvideo.training.rl.wan_grpo_utils import wan_pipeline_with_logprob
+from fastvideo.training.rl.stat_tracking import PerPromptStatTracker
 from fastvideo.training.training_utils import (
     get_scheduler,
     count_trainable
 )
+from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
+from fastvideo.distributed import get_local_torch_device
+from copy import deepcopy
 
 logger = init_logger(__name__)
 
@@ -82,6 +87,14 @@ class RLPipeline(TrainingPipeline):
         self.value_model: ValueModel | None = None
         self.value_optimizer: torch.optim.Optimizer | None = None
         self.value_scheduler: Any | None = None
+        
+        # Sampling pipeline for generating videos with log probabilities
+        # Will be initialized in initialize_training_pipeline
+        self.sampling_pipeline: WanPipeline | None = None
+        
+        # Per-prompt stat tracker for advantage normalization
+        # Will be initialized in initialize_training_pipeline
+        self.stat_tracker: PerPromptStatTracker | None = None
 
         logger.info(
             "Initialized RLPipeline with algorithm: %s",
@@ -112,6 +125,14 @@ class RLPipeline(TrainingPipeline):
         # Initialize value model if algorithm requires it
         if self.algorithm.requires_value_model:
             self._initialize_value_model(training_args)
+
+        # Initialize sampling pipeline for trajectory collection
+        self._initialize_sampling_pipeline(training_args)
+        
+        # Initialize per-prompt stat tracker for advantage normalization
+        global_std = getattr(training_args.rl_args, 'rl_global_std', False)
+        self.stat_tracker = PerPromptStatTracker(global_std=global_std)
+        logger.info("Initialized PerPromptStatTracker with global_std=%s", global_std)
 
         logger.info("RL pipeline initialization complete")
 
@@ -160,6 +181,39 @@ class RLPipeline(TrainingPipeline):
             logger.info("Value model trainable parameters: %s B",
                        round(count_trainable(self.value_model) / 1e9, 3))
 
+    def _initialize_sampling_pipeline(self, training_args: TrainingArgs) -> None:
+        """
+        Initialize a WanPipeline for sampling videos with log probabilities.
+        
+        This pipeline is used for on-policy trajectory collection during RL training.
+        It shares the transformer with the training pipeline but runs in eval mode.
+        """
+        logger.info("Initializing sampling pipeline for trajectory collection...")
+        
+        # Create a copy of training args for inference mode
+        args_copy = deepcopy(training_args)
+        args_copy.inference_mode = True
+        
+        # Create WanPipeline for sampling, sharing the transformer
+        self.sampling_pipeline = WanPipeline.from_pretrained(
+            training_args.model_path,
+            args=args_copy,  # type: ignore
+            inference_mode=True,
+            loaded_modules={
+                "transformer": self.get_module("transformer"),
+            },
+            tp_size=training_args.tp_size,
+            sp_size=training_args.sp_size,
+            num_gpus=training_args.num_gpus,
+            pin_cpu_memory=training_args.pin_cpu_memory,
+            dit_cpu_offload=True
+        )
+        
+        # Ensure transformer is in eval mode for sampling
+        self.sampling_pipeline.get_module("transformer").eval()
+        
+        logger.info("Sampling pipeline initialized")
+
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         """Initialize validation pipeline for RL (similar to base implementation)."""
         # For now, reuse the base implementation
@@ -170,74 +224,303 @@ class RLPipeline(TrainingPipeline):
 
     def collect_trajectories(self, training_batch: TrainingBatch) -> TrainingBatch:
         """
-        Collect on-policy trajectories using Flow-GRPO-Fast approach.
-
-        This implements fast trajectory collection by:
-        1. Sampling random intermediate timesteps for noise injection
-        2. Running 1-2 denoising steps (not full trajectory)
-        3. Computing log probabilities at sampled steps
-
+        Collect on-policy trajectories by generating videos with log probabilities.
+        
+        This method implements the GRPO sampling phase:
+        1. Gets prompts from the training batch
+        2. Uses wan_pipeline_with_logprob to generate videos with log probabilities
+        3. Stores latents, log_probs, timesteps, and KL divergences in TrainingBatch
+        
+        Ported from FlowGRPO's sampling loop to work with FastVideo's TrainingBatch structure.
+        
         Args:
-            training_batch: Current training batch
-
+            training_batch: Current training batch (should contain prompts in input_kwargs or infos)
+        
         Returns:
-            Updated training_batch with trajectory information
+            Updated training_batch with sampling results:
+            - latents: [B, num_steps+1, C, T, H, W] - latents at each denoising step
+            - log_probs: [B, num_steps] - log probabilities at each step
+            - timesteps: [B, num_steps] - timesteps used
+            - old_log_probs: [B, num_steps] - copy of log_probs for importance ratio
+            - kl: [B, num_steps] - KL divergences (if kl_reward > 0)
+            - prompt_ids: [B, seq_len] - prompt token IDs for stat tracking
+            - prompt_embeds: [B, seq_len, hidden_dim] - prompt embeddings used
+            - negative_prompt_embeds: [B, seq_len, hidden_dim] - negative embeddings for CFG
         """
-        logger.debug("Collecting trajectories with Flow-GRPO-Fast")
-
-        # Parse rollout steps from config
-        rollout_steps_str = self.training_args.rl_args.rl_rollout_steps
-        rollout_steps = [int(s.strip()) for s in rollout_steps_str.split(",")]
-
-        # Sample random timesteps for noise injection
-        batch_size = training_batch.latents.shape[0]
-        timesteps = sample_random_timesteps(
-            batch_size=batch_size,
-            min_timestep=self.training_args.rl_args.rl_noise_injection_min,
-            max_timestep=self.training_args.rl_args.rl_noise_injection_max,
-            device=training_batch.latents.device,
-            generator=self.noise_random_generator
+        if self.sampling_pipeline is None:
+            raise RuntimeError("Sampling pipeline not initialized. Call initialize_training_pipeline first.")
+        
+        logger.debug("Collecting trajectories with GRPO sampling")
+        
+        # Get prompts from batch
+        # Prompts can be in input_kwargs["prompts"] or in infos
+        prompts = None
+        if training_batch.input_kwargs is not None and "prompts" in training_batch.input_kwargs:
+            prompts = training_batch.input_kwargs["prompts"]
+        elif training_batch.infos is not None:
+            # Extract prompts from infos (each info dict should have 'prompt' or 'caption')
+            prompts = []
+            for info in training_batch.infos:
+                prompt = info.get("prompt") or info.get("caption", "")
+                prompts.append(prompt)
+        else:
+            raise ValueError(
+                "Cannot find prompts in training_batch. "
+                "Prompts should be in input_kwargs['prompts'] or infos[]['prompt'/'caption']"
+            )
+        
+        # Normalize to list
+        if isinstance(prompts, str):
+            prompts = [prompts]
+        batch_size = len(prompts)
+        
+        # Get sampling configuration (hardcoded for now, as per plan)
+        # These should come from config later
+        num_inference_steps = 20  # config.sample.num_steps - hardcoded
+        guidance_scale = 4.5  # config.sample.guidance_scale - hardcoded
+        num_frames = self.training_args.num_frames if self.training_args.num_frames > 0 else 33
+        height = self.training_args.num_height if self.training_args.num_height > 0 else 240
+        width = self.training_args.num_width if self.training_args.num_width > 0 else 416
+        num_videos_per_prompt = 1  # Each prompt in batch generates one video (batch already has repeated prompts if needed)
+        sample_time_per_prompt = 1  # config.sample.sample_time_per_prompt - hardcoded
+        kl_reward = getattr(self.training_args.rl_args, 'rl_kl_reward', 0.0)
+        
+        # Get tokenizer for prompt_ids
+        tokenizer = self.get_module("tokenizer")
+        
+        # Tokenize prompts to get prompt_ids for stat tracking
+        prompt_ids = tokenizer(
+            prompts,
+            padding="max_length",
+            max_length=512,
+            truncation=True,
+            return_tensors="pt"
+        ).input_ids.to(get_local_torch_device())
+        
+        # Prepare negative prompt embeddings for CFG
+        negative_prompt = [""] * batch_size
+        negative_prompt_embeds = None
+        
+        # Collect samples (multiple samples per prompt if sample_time_per_prompt > 1)
+        all_latents_list = []
+        all_log_probs_list = []
+        all_kl_list = []
+        all_timesteps_list = []
+        all_prompt_embeds_list = []
+        all_negative_prompt_embeds_list = []
+        all_prompt_ids_list = []
+        
+        # Set transformer to eval mode for sampling
+        self.transformer.eval()
+        
+        with torch.no_grad():
+            # Sample multiple times per prompt if needed
+            for sample_idx in range(sample_time_per_prompt):
+                # Generate videos with log probabilities
+                # Note: wan_pipeline_with_logprob returns:
+                # - videos: Generated video tensor or latents [B, C, T, H, W]
+                # - all_latents: List of latents at each step [num_steps+1] of [B, C, T, H, W]
+                # - all_log_probs: List of log probs at each step [num_steps] of [B]
+                # - all_kl: List of KL divergences [num_steps] of [B]
+                videos, latents_list, log_probs_list, kl_list = wan_pipeline_with_logprob(
+                    self.sampling_pipeline,
+                    prompt=prompts,
+                    negative_prompt=negative_prompt if guidance_scale > 1.0 else None,
+                    height=height,
+                    width=width,
+                    num_frames=num_frames,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    num_videos_per_prompt=num_videos_per_prompt,
+                    generator=self.noise_random_generator,
+                    output_type="latent",  # Return latents, not decoded videos (videos decoded in compute_rewards)
+                    determistic=False,  # Use stochastic sampling
+                    kl_reward=kl_reward,
+                )
+                
+                # Stack latents: latents_list is [num_steps+1] where each element is [B, C, T, H, W]
+                # Stack along a new dimension: [B, num_steps+1, C, T, H, W]
+                latents = torch.stack(latents_list, dim=1)
+                
+                # Stack log_probs: log_probs_list is [num_steps] where each element is [B]
+                # Stack along a new dimension: [B, num_steps]
+                log_probs = torch.stack(log_probs_list, dim=1)
+                
+                # Stack KL: kl_list is [num_steps] where each element is [B]
+                # Stack along a new dimension: [B, num_steps]
+                # Note: kl_list is always returned (zeros if kl_reward == 0)
+                kl = torch.stack(kl_list, dim=1) if len(kl_list) > 0 else None
+                
+                # Get timesteps from scheduler
+                scheduler = self.get_module("scheduler")
+                timesteps = scheduler.timesteps.repeat(batch_size, 1)  # [B, num_steps]
+                
+                # Get prompt embeddings (they were computed inside wan_pipeline_with_logprob)
+                # For now, we'll recompute them if needed, or store None and recompute later
+                # Actually, we can get them from the pipeline's last encoding
+                # For simplicity, we'll store None and recompute when needed
+                prompt_embeds = None  # Will be recomputed if needed
+                
+                # Store in lists
+                all_latents_list.append(latents)
+                all_log_probs_list.append(log_probs)
+                all_kl_list.append(kl)  # kl is always computed (may be zeros if kl_reward == 0)
+                all_timesteps_list.append(timesteps)
+                all_prompt_embeds_list.append(prompt_embeds)
+                all_negative_prompt_embeds_list.append(None)  # Will be set if needed
+                all_prompt_ids_list.append(prompt_ids)
+        
+        # Concatenate across sample_time_per_prompt dimension (if sample_time_per_prompt > 1)
+        if sample_time_per_prompt > 1:
+            # Shape: [B * sample_time_per_prompt, num_steps+1, C, T, H, W]
+            training_batch.latents = torch.cat(all_latents_list, dim=0)
+            # Shape: [B * sample_time_per_prompt, num_steps]
+            training_batch.log_probs = torch.cat(all_log_probs_list, dim=0)
+            # Shape: [B * sample_time_per_prompt, num_steps]
+            training_batch.timesteps = torch.cat(all_timesteps_list, dim=0)
+            # Store KL if computed
+            training_batch.kl = torch.cat(all_kl_list, dim=0) if all_kl_list[0] is not None else None
+            # Store prompt_ids (repeat for each sample)
+            training_batch.prompt_ids = torch.cat(all_prompt_ids_list, dim=0)
+        else:
+            # Single sample per prompt
+            training_batch.latents = all_latents_list[0]  # [B, num_steps+1, C, T, H, W]
+            training_batch.log_probs = all_log_probs_list[0]  # [B, num_steps]
+            training_batch.timesteps = all_timesteps_list[0]  # [B, num_steps]
+            training_batch.kl = all_kl_list[0] if len(all_kl_list) > 0 and all_kl_list[0] is not None else None
+            training_batch.prompt_ids = all_prompt_ids_list[0]  # [B, seq_len]
+        
+        # Store old log probs for importance ratio computation
+        training_batch.old_log_probs = training_batch.log_probs.clone()
+        
+        # Store prompt_embeds and negative_prompt_embeds (None for now, will be recomputed if needed)
+        training_batch.prompt_embeds = None
+        training_batch.negative_prompt_embeds = None
+        
+        # Store prompts in input_kwargs for reward computation
+        if training_batch.input_kwargs is None:
+            training_batch.input_kwargs = {}
+        # Repeat prompts for each sample if sample_time_per_prompt > 1
+        if sample_time_per_prompt > 1:
+            repeated_prompts = []
+            for prompt in prompts:
+                for _ in range(sample_time_per_prompt):
+                    repeated_prompts.append(prompt)
+            training_batch.input_kwargs["prompts"] = repeated_prompts
+        else:
+            training_batch.input_kwargs["prompts"] = prompts
+        
+        logger.debug(
+            "Trajectory collection complete: batch_size=%d, latents_shape=%s, log_probs_shape=%s",
+            training_batch.latents.shape[0],
+            training_batch.latents.shape,
+            training_batch.log_probs.shape
         )
-
-        # TODO: Implement actual trajectory collection
-        # use existing noisy inputs and compute log probs for now
-        training_batch.timesteps = timesteps
-
-        # Store old log probs for importance ratio
-        training_batch.old_log_probs = training_batch.log_probs
-
-        logger.debug("Trajectory collection complete")
+        
         return training_batch
 
     def compute_rewards(self, training_batch: TrainingBatch) -> TrainingBatch:
         """
-        Compute rewards using multi-reward aggregation.
-
+        Compute rewards by decoding latents to videos and calling reward models.
+        
+        This method implements Step 5 of GRPO training:
+        1. Extracts final latents from the denoising trajectory
+        2. Decodes latents to videos using VAE
+        3. Calls reward models with decoded videos
+        4. Applies KL reward penalty if configured
+        5. Stores reward scores and statistics in TrainingBatch
+        
+        Ported from FlowGRPO's reward computation to work with FastVideo's TrainingBatch.
+        
         Args:
-            training_batch: Training batch with generated videos
-
+            training_batch: Training batch with latents [B, num_steps+1, C, T, H, W]
+        
         Returns:
-            Updated training_batch with reward scores
+            Updated training_batch with:
+            - reward_scores: Computed rewards [B]
+            - reward_mean: Mean reward
+            - reward_std: Std of rewards
         """
+        if self.reward_models is None:
+            raise RuntimeError("Reward models not initialized. Call initialize_training_pipeline first.")
+        
         logger.debug("Computing rewards from reward models")
-
-        # TODO: Implement actual asynchronous reward computation
-        # This requires decoding latents to videos and running reward models
-        # For now, use dummy rewards
-        rewards = self.reward_models.compute_reward(training_batch.latents, training_batch.input_kwargs["prompts"])
-        batch_size = training_batch.latents.shape[0]
-        dummy_rewards = torch.randn(batch_size, device=training_batch.latents.device) * 0.1 + 0.5
-        training_batch.reward_scores = dummy_rewards.clamp(0.0, 1.0)
-
+        
+        # Get final latents (after all denoising steps)
+        # training_batch.latents is [B, num_steps+1, C, T, H, W]
+        # We want the final latents at index -1: [B, C, T, H, W]
+        final_latents = training_batch.latents[:, -1]  # [B, C, T, H, W]
+        
+        # Get VAE for decoding
+        vae = self.get_module("vae")
+        device = final_latents.device
+        
+        # Decode latents to videos
+        # Apply VAE normalization (Wan VAE specific)
+        latents_to_decode = final_latents.to(vae.dtype)
+        
+        # Wan VAE requires denormalization before decoding
+        if hasattr(vae, 'config') and hasattr(vae.config, 'latents_mean') and hasattr(vae.config, 'latents_std'):
+            z_dim = getattr(vae.config, 'z_dim', latents_to_decode.shape[1])
+            latents_mean = (
+                torch.tensor(vae.config.latents_mean, device=device, dtype=latents_to_decode.dtype)
+                .view(1, z_dim, 1, 1, 1)
+            )
+            latents_std = (
+                1.0 / torch.tensor(vae.config.latents_std, device=device, dtype=latents_to_decode.dtype)
+                .view(1, z_dim, 1, 1, 1)
+            )
+            latents_to_decode = latents_to_decode / latents_std + latents_mean
+        elif hasattr(vae, 'latents_mean') and hasattr(vae, 'latents_std'):
+            z_dim = latents_to_decode.shape[1]
+            latents_mean = (
+                torch.tensor(vae.latents_mean, device=device, dtype=latents_to_decode.dtype)
+                .view(1, z_dim, 1, 1, 1)
+            )
+            latents_std = (
+                1.0 / torch.tensor(vae.latents_std, device=device, dtype=latents_to_decode.dtype)
+                .view(1, z_dim, 1, 1, 1)
+            )
+            latents_to_decode = latents_to_decode / latents_std + latents_mean
+        
+        # Decode using VAE
+        with torch.no_grad():
+            videos = vae.decode(latents_to_decode)
+            # VAE.decode returns tensor directly (not tuple)
+            # Postprocess video: convert from [-1, 1] to [0, 1]
+            videos = (videos / 2 + 0.5).clamp(0, 1)
+        
+        # Get prompts for reward computation
+        prompts = training_batch.input_kwargs.get("prompts") if training_batch.input_kwargs else None
+        if prompts is None:
+            raise ValueError("Prompts not found in training_batch.input_kwargs. Required for reward computation.")
+        
+        # Compute rewards using reward models
+        # Note: reward_models.compute_reward expects videos [B, C, T, H, W] and prompts [B]
+        reward_scores = self.reward_models.compute_reward(videos, prompts)
+        
+        # Apply KL reward penalty if configured
+        # In FlowGRPO: rewards["avg"] = rewards["avg"] - kl_reward * kl
+        kl_reward = getattr(self.training_args.rl_args, 'rl_kl_reward', 0.0)
+        if kl_reward > 0 and training_batch.kl is not None:
+            # training_batch.kl is [B, num_steps], we need to aggregate across timesteps
+            # FlowGRPO uses the mean KL across timesteps
+            kl_penalty = training_batch.kl.mean(dim=1)  # [B]
+            reward_scores = reward_scores - kl_reward * kl_penalty
+        
+        # Store reward scores
+        training_batch.reward_scores = reward_scores
+        
         # Compute reward statistics
         reward_stats = compute_reward_statistics(training_batch.reward_scores)
         training_batch.reward_mean = reward_stats["reward_mean"]
         training_batch.reward_std = reward_stats["reward_std"]
-
-        logger.debug("Rewards computed: mean=%.3f, std=%.3f",
+        
+        logger.debug("Rewards computed: mean=%.3f, std=%.3f, kl_reward=%.3f",
                     reward_stats["reward_mean"],
-                    reward_stats["reward_std"])
-
+                    reward_stats["reward_std"],
+                    kl_reward)
+        
         return training_batch
 
     def compute_values(self, training_batch: TrainingBatch) -> TrainingBatch:
@@ -269,43 +552,92 @@ class RLPipeline(TrainingPipeline):
 
     def compute_advantages(self, training_batch: TrainingBatch) -> TrainingBatch:
         """
-        Compute advantages using the algorithm's implementation.
-
+        Compute advantages using per-prompt stat tracking and normalization.
+        
+        This method implements Step 6 of GRPO training:
+        1. Uses PerPromptStatTracker for per-prompt normalization (if enabled)
+        2. Supports global std option
+        3. Computes normalized advantages from rewards
+        4. Computes returns (advantages + values if value model is used)
+        5. Stores advantages, returns, and statistics in TrainingBatch
+        
+        Ported from FlowGRPO's advantage computation to work with FastVideo's TrainingBatch.
+        
         Args:
-            training_batch: Training batch with rewards and values
-
+            training_batch: Training batch with reward_scores [B] and prompt_ids [B, seq_len]
+        
         Returns:
-            Updated training_batch with advantages and returns
+            Updated training_batch with:
+            - advantages: Computed advantages [B]
+            - returns: TD returns [B] (advantages if no value model)
+            - advantage_mean: Mean advantage
+            - advantage_std: Std of advantages
         """
         if training_batch.reward_scores is None:
             raise ValueError("Rewards must be computed before advantages")
-
+        
+        if self.stat_tracker is None:
+            raise RuntimeError("Stat tracker not initialized. Call initialize_training_pipeline first.")
+        
+        logger.debug("Computing advantages with per-prompt stat tracking")
+        
+        # Get prompts from prompt_ids (decode token IDs to strings)
+        if training_batch.prompt_ids is not None:
+            tokenizer = self.get_module("tokenizer")
+            prompt_ids_np = training_batch.prompt_ids.cpu().numpy()
+            prompts = tokenizer.batch_decode(prompt_ids_np, skip_special_tokens=True)
+        elif training_batch.input_kwargs is not None and "prompts" in training_batch.input_kwargs:
+            prompts = training_batch.input_kwargs["prompts"]
+        else:
+            raise ValueError(
+                "Cannot find prompts for stat tracking. "
+                "Need either prompt_ids or input_kwargs['prompts']"
+            )
+        
+        # Get rewards
+        rewards = training_batch.reward_scores
+        
+        # Check if per-prompt stat tracking is enabled
+        per_prompt_stat_tracking = getattr(
+            self.training_args.rl_args, 
+            'rl_per_prompt_stat_tracking', 
+            True  # Default to True for GRPO
+        )
+        
+        if per_prompt_stat_tracking:
+            # Use PerPromptStatTracker for per-prompt normalization
+            # This computes (reward - mean_per_prompt) / std_per_prompt
+            advantages_np = self.stat_tracker.update(
+                prompts=prompts,
+                rewards=rewards,
+                type='grpo'  # GRPO-style normalization
+            )
+            advantages = torch.as_tensor(advantages_np, device=rewards.device, dtype=rewards.dtype)
+        else:
+            # Global normalization: (reward - global_mean) / global_std
+            advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-4)
+        
         # Get values (use zeros if algorithm doesn't use value model)
         if training_batch.values is not None:
             values = training_batch.values
         else:
-            values = torch.zeros_like(training_batch.reward_scores)
-
-        # For single-step, next_value = current_value
-        next_values = values
-
-        # Delegate to algorithm for advantage computation
-        advantages, returns = self.algorithm.compute_advantages(
-            rewards=training_batch.reward_scores,
-            values=values,
-            next_values=next_values,
-            dones=None
-        )
-
+            values = torch.zeros_like(rewards)
+        
+        # Compute returns: returns = advantages + values
+        # For GRPO, we typically don't use value models, so returns = advantages
+        returns = advantages + values
+        
+        # Store in training batch
         training_batch.advantages = advantages
         training_batch.returns = returns
         training_batch.advantage_mean = advantages.mean().item()
         training_batch.advantage_std = advantages.std().item()
-
-        logger.debug("Advantages computed: mean=%.3f, std=%.3f",
+        
+        logger.debug("Advantages computed: mean=%.3f, std=%.3f, per_prompt=%s",
                     training_batch.advantage_mean,
-                    training_batch.advantage_std)
-
+                    training_batch.advantage_std,
+                    per_prompt_stat_tracking)
+        
         return training_batch
 
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
