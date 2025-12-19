@@ -7,8 +7,7 @@ complete diffusion pipelines.
 """
 
 from fastvideo.pipelines.stages.base import PipelineStage
-from fastvideo.pipelines.stages.causal_denoising import (
-    CausalDMDDenosingStage, MatrixGameCausalDenoisingStage)
+from fastvideo.pipelines.stages.causal_denoising import CausalDMDDenosingStage
 from fastvideo.pipelines.stages.conditioning import ConditioningStage
 from fastvideo.pipelines.stages.decoding import DecodingStage
 from fastvideo.pipelines.stages.denoising import (CosmosDenoisingStage,
@@ -21,6 +20,8 @@ from fastvideo.pipelines.stages.image_encoding import (
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.latent_preparation import (
     CosmosLatentPreparationStage, LatentPreparationStage)
+from fastvideo.pipelines.stages.matrixgame_denoising import (
+    MatrixGameCausalDenoisingStage)
 from fastvideo.pipelines.stages.stepvideo_encoding import (
     StepvideoPromptEncodingStage)
 from fastvideo.pipelines.stages.text_encoding import TextEncodingStage

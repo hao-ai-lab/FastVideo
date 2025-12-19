@@ -200,6 +200,9 @@ class SelfForcingWan2_2_T2V480PConfig(Wan2_2_T2V_A14B_Config):
 class MatrixGameI2V480PConfig(WanI2V480PConfig):
     dit_config: DiTConfig = field(default_factory=MatrixGameWanVideoConfig)
 
+    image_encoder_config: EncoderConfig = field(
+        default_factory=WAN2_1ControlCLIPVisionConfig)
+
     is_causal: bool = True
     flow_shift: float | None = 5.0
     dmd_denoising_steps: list[int] | None = field(

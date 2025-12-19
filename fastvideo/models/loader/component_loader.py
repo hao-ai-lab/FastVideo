@@ -15,7 +15,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from safetensors.torch import load_file as safetensors_load_file
 from torch.distributed import init_device_mesh
-from transformers import AutoImageProcessor, AutoTokenizer, CLIPImageProcessor
+from transformers import AutoImageProcessor, AutoTokenizer
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
 from fastvideo.configs.models import EncoderConfig
@@ -323,27 +323,13 @@ class TextEncoderLoader(ComponentLoader):
 class ImageEncoderLoader(TextEncoderLoader):
 
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
-        """Load the image encoder based on the model path, and inference args."""
-        from fastvideo.platforms import current_platform
-
-        if fastvideo_args.image_encoder_cpu_offload:
-            target_device = torch.device("mps") if current_platform.is_mps() else torch.device("cpu")
-        else:
-            target_device = get_local_torch_device()
-
-        # MatrixGame's CLIP config has fields incompatible with FastVideo's CLIPVisionArchConfig
-        # Use HFCLIPVisionModel directly for MatrixGame to avoid config parsing issues
-        pipeline_class_name = type(fastvideo_args.pipeline_config).__name__
-        if "MatrixGame" in pipeline_class_name:
-            from transformers import CLIPVisionModel as HFCLIPVisionModel
-            precision = fastvideo_args.pipeline_config.image_encoder_precision
-            dtype = PRECISION_TO_TYPE.get(precision, torch.bfloat16)
-            model = HFCLIPVisionModel.from_pretrained(
-                model_path, torch_dtype=dtype
-            ).to(target_device)
-            return model.eval()
-
-        # Standard path for other models (Wan I2V, TI2V, etc.)
+        """Load the text encoders based on the model path, and inference args."""
+        # model_config: PretrainedConfig = get_hf_config(
+        #     model=model_path,
+        #     trust_remote_code=fastvideo_args.trust_remote_code,
+        #     revision=fastvideo_args.revision,
+        #     model_override_args=None,
+        # )
         with open(os.path.join(model_path, "config.json")) as f:
             model_config = json.load(f)
         model_config.pop("_name_or_path", None)
@@ -355,6 +341,13 @@ class ImageEncoderLoader(TextEncoderLoader):
         encoder_config = fastvideo_args.pipeline_config.image_encoder_config
         encoder_config.update_model_arch(model_config)
 
+        from fastvideo.platforms import current_platform
+
+        if fastvideo_args.image_encoder_cpu_offload:
+            target_device = torch.device("mps") if current_platform.is_mps() else torch.device("cpu")
+        else:
+            target_device = get_local_torch_device()
+        # TODO(will): add support for other dtypes
         return self.load_model(
             model_path, encoder_config, target_device, fastvideo_args,
             fastvideo_args.pipeline_config.image_encoder_precision)
@@ -367,27 +360,7 @@ class ImageProcessorLoader(ComponentLoader):
         """Load the image processor based on the model path, and inference args."""
         logger.info("Loading image processor from %s", model_path)
 
-        try:
-            image_processor = AutoImageProcessor.from_pretrained(model_path)
-        except ValueError as exc:
-            # Matrix-Game only include preprocessor_config.json
-            # with an image_processor_type but no model_type,
-            config_path = os.path.join(model_path, "preprocessor_config.json")
-            if (os.path.isfile(config_path)):
-                with open(config_path, encoding="utf-8") as fp:
-                    config = json.load(fp)
-                processor_type = config.get("image_processor_type")
-                if processor_type == "CLIPImageProcessor":
-                    logger.warning(
-                        "AutoImageProcessor failed to load config without model_type, "
-                        "falling back to CLIPImageProcessor: %s", exc)
-                    image_processor = CLIPImageProcessor.from_pretrained(
-                        model_path)
-                else:
-                    raise
-            else:
-                raise
-
+        image_processor = AutoImageProcessor.from_pretrained(model_path, )
         logger.info("Loaded image processor: %s",
                     image_processor.__class__.__name__)
         return image_processor

@@ -33,17 +33,24 @@ VARIANT_CONFIG = {
 
 OUTPUT_PATH = "video_samples_matrixgame2"
 def main():
+    # FastVideo will automatically use the optimal default arguments for the
+    # model.
+    # If a local path is provided, FastVideo will make a best effort
+    # attempt to identify the optimal arguments.
     config = VARIANT_CONFIG[MODEL_VARIANT]
 
     generator = VideoGenerator.from_pretrained(
         config["model_path"],
+        # FastVideo will automatically handle distributed setup
         num_gpus=1,
         use_fsdp_inference=True,
-        dit_cpu_offload=False,
+        dit_cpu_offload=True, # DiT need to be offloaded for MoE
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,
+        # Set pin_cpu_memory to false if CPU RAM is limited and there're no frequent CPU-GPU transfer
         pin_cpu_memory=True,
-        pipeline_config=MatrixGameI2V480PConfig())
+        # image_encoder_cpu_offload=False,
+    )
 
     num_frames = 597
     actions = create_action_presets(num_frames, keyboard_dim=config["keyboard_dim"])

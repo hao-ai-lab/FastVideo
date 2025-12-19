@@ -148,13 +148,10 @@ class MatrixGameImageEncodingStage(ImageEncodingStage):
         image = (image - mean) / std
 
         with set_forward_context(current_timestep=0, attn_metadata=None):
-            outputs = self.image_encoder(pixel_values=image,
-                                         output_hidden_states=True)
-            if outputs.hidden_states is not None and len(
-                    outputs.hidden_states) >= 2:
-                image_embeds = outputs.hidden_states[-2]
-            else:
-                image_embeds = outputs.last_hidden_state
+            # WAN2_1ControlCLIPVisionConfig sets num_hidden_layers_override=31
+            # so last_hidden_state is the second-to-last layer output
+            outputs = self.image_encoder(pixel_values=image)
+            image_embeds = outputs.last_hidden_state
 
         batch.image_embeds.append(image_embeds)
         if fastvideo_args.image_encoder_cpu_offload:
