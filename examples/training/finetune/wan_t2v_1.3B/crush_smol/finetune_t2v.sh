@@ -6,7 +6,7 @@ export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-DATA_DIR="data/crush-smol_processed_t2v/training_dataset/"
+DATA_DIR="data/crush-smol_processed_t2v/combined_parquet_dataset/"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 NUM_GPUS=4
 # export CUDA_VISIBLE_DEVICES=4,5
@@ -55,15 +55,14 @@ dataset_args=(
 validation_args=(
   --log_validation 
   --validation_dataset_file $VALIDATION_DATASET_FILE
-  --validation_steps 50
+  --validation_steps 200
   --validation_sampling_steps "50" 
   --validation_guidance_scale "3.0"
 )
 
 # Optimizer arguments
 optimizer_args=(
-  # --learning_rate 5e-5
-  --learning_rate 1e-5
+  --learning_rate 5e-5
   --mixed_precision "bf16"
   --weight_only_checkpointing_steps 1000
   --training_state_checkpointing_steps 1000
@@ -82,7 +81,7 @@ miscellaneous_args=(
   --num_euler_timesteps 50
   --ema_start_step 0
   --enable_gradient_checkpointing_type "full"
-  # --resume_from_checkpoint "checkpoints/wan_t2v_finetune/checkpoint-1000"
+  # --resume_from_checkpoint "checkpoints/wan_t2v_finetune/checkpoint-2500"
 )
 
 torchrun \
