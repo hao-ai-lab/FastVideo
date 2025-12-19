@@ -23,7 +23,7 @@ os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29505"
 os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
-MODEL_PATH = maybe_download_model("FastVideo/Matrix-Game-2.0-Diffusers-Base")
+MODEL_PATH = maybe_download_model("FastVideo/Matrix-Game-2.0-Base-Diffusers")
 TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
 REFERENCE_LATENT = -111835.58895772696
 

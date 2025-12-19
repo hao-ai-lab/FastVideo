@@ -75,9 +75,9 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     Cosmos_Predict2_2B_Video2World_SamplingParam,
 
     # MatrixGame2.0 models
-    "FastVideo/Matrix-Game-2.0-Diffusers-Base": MatrixGame2_SamplingParam,
-    "FastVideo/Matrix-Game-2.0-Diffusers-GTA": MatrixGame2_SamplingParam,
-    "FastVideo/Matrix-Game-2.0-Diffusers-TempleRun": MatrixGame2_SamplingParam,
+    "FastVideo/Matrix-Game-2.0-Base-Diffusers": MatrixGame2_SamplingParam,
+    "FastVideo/Matrix-Game-2.0-GTA-Diffusers": MatrixGame2_SamplingParam,
+    "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers": MatrixGame2_SamplingParam,
 
     # Add other specific weight variants
 }
