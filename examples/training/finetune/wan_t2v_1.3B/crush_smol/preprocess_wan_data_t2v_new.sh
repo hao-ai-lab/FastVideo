@@ -4,6 +4,7 @@ GPU_NUM=2 # 2,4,8
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATASET_PATH="data/crush-smol/"
 OUTPUT_DIR="data/crush-smol_processed_t2v/"
+
 torchrun --nproc_per_node=$GPU_NUM \
     -m fastvideo.pipelines.preprocess.v1_preprocessing_new \
     --model_path $MODEL_PATH \
@@ -16,7 +17,7 @@ torchrun --nproc_per_node=$GPU_NUM \
     --preprocess.preprocess_video_batch_size 2 \
     --preprocess.dataloader_num_workers 0 \
     --preprocess.max_height 480 \
-    --preprocess.max_width 832 \ 
+    --preprocess.max_width 832 \
     --preprocess.num_frames 77 \
     --preprocess.train_fps 16 \
     --preprocess.samples_per_file 8 \

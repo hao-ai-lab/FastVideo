@@ -11,9 +11,6 @@ VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 NUM_GPUS=4
 # export CUDA_VISIBLE_DEVICES=4,5
 
-# echo "W&B is set to OFFLINE mode. Continue? (press Enter)"
-# read  # waits for user to press Enter
-# export WANDB_MODE=offline
 
 # Training arguments
 training_args=(
