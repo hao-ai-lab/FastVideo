@@ -33,7 +33,7 @@ from .rl_utils import (
     sample_random_timesteps,
     compute_reward_statistics,
 )
-from fastvideo.training.rl.wan_grpo_utils import wan_pipeline_with_logprob
+from fastvideo.training.rl.wan_grpo_utils import wan_pipeline_with_logprob, sde_step_with_logprob
 from fastvideo.training.rl.stat_tracking import PerPromptStatTracker
 from fastvideo.training.training_utils import (
     get_scheduler,
@@ -41,7 +41,9 @@ from fastvideo.training.training_utils import (
 )
 from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
 from fastvideo.distributed import get_local_torch_device
+from fastvideo.dataset.rl_prompt_dataset import build_rl_prompt_dataloader
 from copy import deepcopy
+from collections.abc import Iterator
 
 logger = init_logger(__name__)
 
@@ -103,7 +105,44 @@ class RLPipeline(TrainingPipeline):
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         """Initialize the RL training pipeline with algorithm, reward and value models."""
+        # Call parent initialization for basic setup (optimizer, scheduler, etc.)
+        # But we'll override the dataloader initialization
         super().initialize_training_pipeline(training_args)
+        
+        # Override dataloader with RL prompt dataloader
+        # Get RL dataset configuration (hardcoded for now, should come from config later)
+        rl_dataset_path = getattr(training_args, 'rl_dataset_path', training_args.data_path)
+        rl_dataset_type = getattr(training_args, 'rl_dataset_type', 'text')  # "text" or "geneval"
+        rl_num_image_per_prompt = getattr(training_args, 'rl_num_image_per_prompt', 4)  # k parameter
+        num_replicas = 1  # Single GPU training
+        rank = 0  # Single GPU training
+        
+        logger.info("Initializing RL prompt dataloader...")
+        logger.info("  dataset_path: %s", rl_dataset_path)
+        logger.info("  dataset_type: %s", rl_dataset_type)
+        logger.info("  num_image_per_prompt (k): %s", rl_num_image_per_prompt)
+        
+        # Build RL prompt dataloader
+        train_dataloader, test_dataloader = build_rl_prompt_dataloader(
+            dataset_path=rl_dataset_path,
+            dataset_type=rl_dataset_type,
+            split='train',
+            train_batch_size=training_args.train_batch_size,
+            test_batch_size=8,  # Hardcoded for now
+            k=rl_num_image_per_prompt,
+            seed=training_args.seed if training_args.seed is not None else 42,
+            train_num_workers=training_args.dataloader_num_workers,
+            test_num_workers=0,
+            num_replicas=num_replicas,
+            rank=rank
+        )
+        
+        # Replace the dataloader from parent initialization
+        self.train_dataloader = train_dataloader
+        self.train_loader_iter = iter(self.train_dataloader)
+        self.current_epoch = 0
+        
+        logger.info("RL prompt dataloader initialized")
 
         logger.info("Initializing RL-specific components...")
 
@@ -213,6 +252,52 @@ class RLPipeline(TrainingPipeline):
         self.sampling_pipeline.get_module("transformer").eval()
         
         logger.info("Sampling pipeline initialized")
+
+    def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
+        """
+        Get next batch of prompts from RL prompt dataloader.
+        
+        The RL prompt dataloader returns (prompts, metadatas) tuples from the collate function.
+        This method extracts prompts and stores them in training_batch for use in collect_trajectories.
+        
+        Args:
+            training_batch: Current training batch
+        
+        Returns:
+            Updated training_batch with prompts in input_kwargs
+        """
+        with self.tracker.timed("timing/get_next_batch"):
+            try:
+                batch = next(self.train_loader_iter)
+            except StopIteration:
+                # Reset iterator for next epoch
+                self.current_epoch += 1
+                logger.info("Starting epoch %s", self.current_epoch)
+                self.train_loader_iter = iter(self.train_dataloader)
+                batch = next(self.train_loader_iter)
+            
+            # RL prompt dataloader returns (prompts, metadatas) tuple
+            prompts, metadatas = batch
+            
+            # Store prompts and metadatas in training_batch for use in collect_trajectories
+            if training_batch.input_kwargs is None:
+                training_batch.input_kwargs = {}
+            training_batch.input_kwargs["prompts"] = prompts
+            training_batch.input_kwargs["metadata"] = metadatas
+            
+            # Also store in infos for compatibility (convert metadatas to info_list format)
+            if metadatas:
+                training_batch.infos = [
+                    {"prompt": prompt, "metadata": metadata}
+                    for prompt, metadata in zip(prompts, metadatas)
+                ]
+            else:
+                training_batch.infos = [
+                    {"prompt": prompt, "caption": prompt}
+                    for prompt in prompts
+                ]
+        
+        return training_batch
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         """Initialize validation pipeline for RL (similar to base implementation)."""
@@ -640,6 +725,306 @@ class RLPipeline(TrainingPipeline):
         
         return training_batch
 
+    def _compute_log_prob_for_timestep(
+        self,
+        latents: torch.Tensor,
+        next_latents: torch.Tensor,
+        timesteps: torch.Tensor,
+        prompt_embeds: torch.Tensor,
+        negative_prompt_embeds: torch.Tensor | None = None,
+        guidance_scale: float = 4.5,
+        return_dt_and_std_dev_t: bool = False
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, ...]:
+        """
+        Compute log probability for a given timestep using current transformer.
+        
+        This is similar to FlowGRPO's compute_log_prob function, adapted for FastVideo.
+        It computes the log probability of next_latents given latents under the current model.
+        
+        Args:
+            latents: Current latents [B, C, T, H, W]
+            next_latents: Next latents (target) [B, C, T, H, W]
+            timesteps: Timesteps [B]
+            prompt_embeds: Prompt embeddings [B, seq_len, hidden_dim]
+            negative_prompt_embeds: Negative prompt embeddings for CFG [B, seq_len, hidden_dim]
+            guidance_scale: Classifier-free guidance scale
+            return_dt_and_std_dev_t: If True, return dt and std_dev_t separately
+        
+        Returns:
+            If return_dt_and_std_dev_t=True:
+                (prev_sample, log_prob, prev_sample_mean, std_dev_t, dt)
+            Otherwise:
+                (prev_sample, log_prob, prev_sample_mean, std_dev_t * sqrt_dt)
+        """
+        scheduler = self.get_module("scheduler")
+        transformer = self.get_module("transformer")
+        
+        # Prepare latent input
+        latent_model_input = latents.to(transformer.dtype)
+        timestep = timesteps.to(transformer.dtype)
+        
+        # Predict noise with transformer
+        if guidance_scale > 1.0 and negative_prompt_embeds is not None:
+            # Classifier-free guidance: concatenate negative and positive prompts
+            # For CFG, we need to run transformer twice or concatenate inputs
+            # FlowGRPO concatenates: [negative_embeds, positive_embeds]
+            latent_model_input_cfg = torch.cat([latent_model_input] * 2)
+            prompt_embeds_cfg = torch.cat([negative_prompt_embeds, prompt_embeds])
+            timestep_cfg = timestep.repeat(2)
+            
+            noise_pred = transformer(
+                hidden_states=latent_model_input_cfg,
+                timestep=timestep_cfg,
+                encoder_hidden_states=prompt_embeds_cfg,
+                return_dict=False,
+            )[0]
+            noise_pred = noise_pred.to(prompt_embeds.dtype)
+            
+            # Split and apply guidance
+            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+        else:
+            # No CFG
+            noise_pred = transformer(
+                hidden_states=latent_model_input,
+                timestep=timestep,
+                encoder_hidden_states=prompt_embeds,
+                return_dict=False,
+            )[0]
+            noise_pred = noise_pred.to(prompt_embeds.dtype)
+        
+        # Compute log probability using SDE step
+        # Use next_latents as prev_sample to compute log prob of the actual transition
+        return sde_step_with_logprob(
+            scheduler,
+            noise_pred.float(),
+            timesteps,
+            latents.float(),
+            prev_sample=next_latents.float(),
+            return_dt_and_std_dev_t=return_dt_and_std_dev_t
+        )
+
+    def _compute_grpo_loss(
+        self,
+        training_batch: TrainingBatch
+    ) -> tuple[torch.Tensor, dict[str, Any]]:
+        """
+        Compute GRPO loss (policy loss + KL loss).
+        
+        This function implements the GRPO training objective:
+        1. Recomputes log probabilities for current policy at each timestep
+        2. Computes reference log probabilities with adapter disabled (if using LoRA)
+        3. Computes policy loss with clipping
+        4. Computes KL loss using reference model
+        5. Returns total loss and metrics
+        
+        Ported from FlowGRPO's training loop to work with FastVideo's TrainingBatch.
+        
+        Args:
+            training_batch: Training batch with:
+                - latents: [B, num_steps+1, C, T, H, W] - latents at each step
+                - timesteps: [B, num_steps] - timesteps used
+                - log_probs: [B, num_steps] - old log probs from sampling
+                - advantages: [B, num_steps] or [B] - advantages
+                - prompt_embeds: [B, seq_len, hidden_dim] - prompt embeddings
+                - negative_prompt_embeds: [B, seq_len, hidden_dim] - negative embeddings (optional)
+        
+        Returns:
+            total_loss: Total loss for backward pass
+            metrics: Dictionary with loss components and diagnostics
+        """
+        # Get configuration (hardcoded for now)
+        clip_range = getattr(self.training_args.rl_args, 'grpo_policy_clip_range', 0.2)
+        kl_beta = getattr(self.training_args.rl_args, 'rl_kl_beta', 0.004)
+        guidance_scale = 4.5  # Hardcoded
+        adv_clip_max = 10.0  # Hardcoded (advantage clipping)
+        
+        # Get data from training batch
+        latents = training_batch.latents  # [B, num_steps+1, C, T, H, W]
+        timesteps = training_batch.timesteps  # [B, num_steps]
+        old_log_probs = training_batch.old_log_probs  # [B, num_steps]
+        advantages = training_batch.advantages  # [B, num_steps] or [B]
+        
+        # Get prompt embeddings
+        # If not stored, recompute from prompts
+        if training_batch.prompt_embeds is not None:
+            prompt_embeds = training_batch.prompt_embeds
+        elif training_batch.encoder_hidden_states is not None:
+            prompt_embeds = training_batch.encoder_hidden_states
+        else:
+            # Recompute prompt embeddings from prompts
+            prompts = training_batch.input_kwargs.get("prompts") if training_batch.input_kwargs else None
+            if prompts is None:
+                raise ValueError("Cannot find prompts or prompt embeddings in training_batch")
+            
+            # Encode prompts
+            text_encoder = self.get_module("text_encoder")
+            tokenizer = self.get_module("tokenizer")
+            device = next(self.transformer.parameters()).device
+            
+            # Normalize to list
+            if isinstance(prompts, str):
+                prompts = [prompts]
+            
+            # Tokenize and encode
+            text_inputs = tokenizer(
+                prompts,
+                padding="max_length",
+                max_length=512,
+                truncation=True,
+                return_tensors="pt"
+            ).to(device)
+            
+            with torch.no_grad():
+                outputs = text_encoder(
+                    text_inputs["input_ids"],
+                    attention_mask=text_inputs["attention_mask"],
+                    output_hidden_states=True,
+                )
+                prompt_embeds = outputs.last_hidden_state.to(self.transformer.dtype)
+        
+        # Get negative prompt embeddings
+        negative_prompt_embeds = training_batch.negative_prompt_embeds
+        if negative_prompt_embeds is None and guidance_scale > 1.0:
+            # Generate negative prompt embeddings if needed
+            text_encoder = self.get_module("text_encoder")
+            tokenizer = self.get_module("tokenizer")
+            device = next(self.transformer.parameters()).device
+            
+            batch_size = prompt_embeds.shape[0]
+            negative_prompts = [""] * batch_size
+            
+            neg_text_inputs = tokenizer(
+                negative_prompts,
+                padding="max_length",
+                max_length=512,
+                truncation=True,
+                return_tensors="pt"
+            ).to(device)
+            
+            with torch.no_grad():
+                neg_outputs = text_encoder(
+                    neg_text_inputs["input_ids"],
+                    attention_mask=neg_text_inputs["attention_mask"],
+                    output_hidden_states=True,
+                )
+                negative_prompt_embeds = neg_outputs.last_hidden_state.to(self.transformer.dtype)
+        
+        # Handle advantages shape: if [B], expand to [B, num_steps]
+        if advantages.dim() == 1:
+            advantages = advantages.unsqueeze(1).expand(-1, timesteps.shape[1])
+        
+        batch_size, num_steps = timesteps.shape
+        
+        # Accumulate losses across timesteps
+        policy_losses = []
+        kl_losses = []
+        clip_fractions = []
+        importance_ratios = []
+        approx_kls = []
+        
+        # Get transformer for reference model computation
+        transformer = self.get_module("transformer")
+        
+        # Loop over timesteps
+        for j in range(num_steps):
+            # Get latents and next_latents for this timestep
+            latents_j = latents[:, j]  # [B, C, T, H, W]
+            next_latents_j = latents[:, j + 1]  # [B, C, T, H, W]
+            timesteps_j = timesteps[:, j]  # [B]
+            old_log_probs_j = old_log_probs[:, j]  # [B]
+            advantages_j = advantages[:, j]  # [B]
+            
+            # Compute log probability with current policy
+            prev_sample, log_prob, prev_sample_mean, std_dev_t, dt = self._compute_log_prob_for_timestep(
+                latents_j,
+                next_latents_j,
+                timesteps_j,
+                prompt_embeds,
+                negative_prompt_embeds,
+                guidance_scale,
+                return_dt_and_std_dev_t=True
+            )
+            
+            # Compute reference log probability with adapter disabled (if using LoRA)
+            if kl_beta > 0:
+                with torch.no_grad():
+                    if hasattr(transformer, 'disable_adapter'):
+                        with transformer.disable_adapter():
+                            _, _, prev_sample_mean_ref, std_dev_t_ref, dt_ref = self._compute_log_prob_for_timestep(
+                                latents_j,
+                                next_latents_j,
+                                timesteps_j,
+                                prompt_embeds,
+                                negative_prompt_embeds,
+                                guidance_scale,
+                                return_dt_and_std_dev_t=True
+                            )
+                    else:
+                        # No adapter to disable, use current model (shouldn't happen in practice)
+                        prev_sample_mean_ref = prev_sample_mean.detach()
+                        std_dev_t_ref = std_dev_t.detach()
+                        dt_ref = dt.detach()
+                
+                # Compute KL loss: KL = (mean_diff)^2 / (2 * (std_dev_t * dt)^2)
+                # FlowGRPO uses: kl_loss = ((prev_sample_mean - prev_sample_mean_ref) ** 2).mean(dim=(1,2,3), keepdim=True) / (2 * (std_dev_t * dt_ref) ** 2)
+                # For videos [B, C, T, H, W], we average over all spatial/channel dims except batch
+                # Note: std_dev_t and dt_ref are already broadcast to [B, 1, 1, 1, 1]
+                kl_loss_j = ((prev_sample_mean - prev_sample_mean_ref) ** 2).mean(dim=(1, 2, 3, 4), keepdim=True) / (2 * (std_dev_t * dt_ref) ** 2 + 1e-8)
+                kl_loss_j = kl_loss_j.mean()  # Average over batch dimension
+                kl_losses.append(kl_loss_j)
+            else:
+                kl_losses.append(torch.tensor(0.0, device=log_prob.device))
+            
+            # GRPO policy loss computation
+            # Clip advantages
+            advantages_j_clipped = torch.clamp(advantages_j, -adv_clip_max, adv_clip_max)
+            
+            # Compute importance ratio
+            ratio = torch.exp(log_prob - old_log_probs_j)
+            
+            # Clipped surrogate objective
+            unclipped_loss = -advantages_j_clipped * ratio
+            clipped_loss = -advantages_j_clipped * torch.clamp(
+                ratio,
+                1.0 - clip_range,
+                1.0 + clip_range,
+            )
+            policy_loss_j = torch.maximum(unclipped_loss, clipped_loss).mean()
+            policy_losses.append(policy_loss_j)
+            
+            # Compute diagnostics
+            with torch.no_grad():
+                # Clip fraction
+                clip_fraction_j = ((ratio < 1.0 - clip_range) | (ratio > 1.0 + clip_range)).float().mean()
+                clip_fractions.append(clip_fraction_j)
+                
+                # Importance ratio
+                importance_ratios.append(ratio.mean())
+                
+                # Approximate KL (using log prob difference)
+                approx_kl_j = 0.5 * torch.mean((log_prob - old_log_probs_j) ** 2)
+                approx_kls.append(approx_kl_j)
+        
+        # Average losses across timesteps
+        policy_loss = torch.stack(policy_losses).mean()
+        kl_loss = torch.stack(kl_losses).mean() if kl_beta > 0 else torch.tensor(0.0, device=policy_loss.device)
+        
+        # Total loss
+        total_loss = policy_loss + kl_beta * kl_loss
+        
+        # Compute metrics
+        metrics = {
+            "policy_loss": policy_loss.item(),
+            "kl_loss": kl_loss.item() if kl_beta > 0 else 0.0,
+            "total_loss": total_loss.item(),
+            "clip_fraction": torch.stack(clip_fractions).mean().item(),
+            "importance_ratio_mean": torch.stack(importance_ratios).mean().item(),
+            "approx_kl": torch.stack(approx_kls).mean().item(),
+        }
+        
+        return total_loss, metrics
+
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
         """
         Train one step using the configured RL algorithm.
@@ -670,13 +1055,14 @@ class RLPipeline(TrainingPipeline):
 
         # Gradient accumulation loop
         for _ in range(self.training_args.gradient_accumulation_steps):
+            # Get next batch of prompts (skip normalization steps for RL)
             training_batch = self._get_next_batch(training_batch)
-            training_batch = self._normalize_dit_input(training_batch)
-            training_batch = self._prepare_dit_inputs(training_batch)
+            # Note: _normalize_dit_input and _prepare_dit_inputs are skipped for RL
+            # since we generate latents from prompts, not from pre-computed latents
 
             # === RL-specific steps ===
 
-            # 1. Collect trajectories
+            # 1. Collect trajectories (generates latents and log_probs)
             training_batch = self.collect_trajectories(training_batch)
 
             # 2. Compute rewards
@@ -685,31 +1071,30 @@ class RLPipeline(TrainingPipeline):
             # 3. Compute value predictions (if algorithm requires)
             training_batch = self.compute_values(training_batch)
 
-            # 4. Compute advantages using algorithm
+            # 4. Compute advantages
             training_batch = self.compute_advantages(training_batch)
 
-            # 5. Compute losses using algorithm
+            # 5. Compute GRPO loss
             if training_batch.log_probs is not None and training_batch.old_log_probs is not None:
-                # Use the algorithm to compute all losses
-                algorithm_output = self.algorithm.compute_loss(training_batch)
-
-                # Extract metrics from algorithm output
-                if algorithm_output.metrics:
-                    training_batch.policy_loss = algorithm_output.metrics.get("policy_loss", 0.0)
-                    training_batch.kl_divergence = algorithm_output.metrics.get("kl_divergence", 0.0)
-                    training_batch.importance_ratio = algorithm_output.metrics.get("importance_ratio_mean", 1.0)
-                    training_batch.clip_fraction = algorithm_output.metrics.get("clip_fraction", 0.0)
-                    training_batch.value_loss = algorithm_output.metrics.get("value_loss", 0.0)
-                    training_batch.entropy = algorithm_output.metrics.get("entropy", 0.0)
-
+                # Compute GRPO loss (policy loss + KL loss)
+                total_loss, metrics = self._compute_grpo_loss(training_batch)
+                
+                # Store metrics in training batch
+                training_batch.policy_loss = metrics.get("policy_loss", 0.0)
+                training_batch.kl_divergence = metrics.get("kl_loss", 0.0)  # KL loss is the KL divergence
+                training_batch.importance_ratio = metrics.get("importance_ratio_mean", 1.0)
+                training_batch.clip_fraction = metrics.get("clip_fraction", 0.0)
+                training_batch.value_loss = 0.0  # GRPO doesn't use value loss
+                training_batch.entropy = 0.0  # Not computed for now
+                
                 # Backward pass with scaled loss
-                if algorithm_output.total_loss is not None:
-                    scaled_loss = algorithm_output.total_loss / self.training_args.gradient_accumulation_steps
-                    scaled_loss.backward()
-
+                scaled_loss = total_loss / self.training_args.gradient_accumulation_steps
+                scaled_loss.backward()
+                
                 # Accumulate total loss
-                if algorithm_output.total_loss is not None:
-                    training_batch.total_loss += algorithm_output.total_loss.item()
+                if training_batch.total_loss is None:
+                    training_batch.total_loss = 0.0
+                training_batch.total_loss += total_loss.item()
 
         # Clip gradients
         training_batch = self._clip_grad_norm(training_batch)
@@ -724,10 +1109,14 @@ class RLPipeline(TrainingPipeline):
                 self.value_scheduler.step()
 
         # Check for early stopping based on KL divergence
-        if self.algorithm.check_early_stopping(training_batch.kl_divergence):
+        # Use a simple threshold check (hardcoded for now)
+        kl_threshold = 0.1  # Hardcoded
+        if training_batch.kl_divergence > kl_threshold:
             logger.warning(
-                "Early stopping at step %d due to high KL divergence",
-                training_batch.current_timestep
+                "High KL divergence at step %d: %.4f > %.4f",
+                training_batch.current_timestep,
+                training_batch.kl_divergence,
+                kl_threshold
             )
 
         return training_batch
