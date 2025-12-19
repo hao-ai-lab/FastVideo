@@ -873,6 +873,7 @@ class RLArgs:
         parser.add_argument("--rl-policy-clip-range",
                             type=float,
                             default=RLArgs.grpo_policy_clip_range,
+                            dest="grpo_policy_clip_range",  # Map to RLArgs field name
                             help="PPO-style clipping range for policy ratio")
         parser.add_argument("--rl-value-clip-range",
                             type=float,
@@ -948,6 +949,7 @@ class RLArgs:
         parser.add_argument("--rl-kl-beta",
                             type=float,
                             default=RLArgs.kl_beta,
+                            dest="kl_beta",  # Map CLI arg to RLArgs field name
                             help="KL loss coefficient (GRPO uses KL loss, DPO uses larger beta)")
         parser.add_argument("--rl-kl-reward",
                             type=float,
@@ -1006,6 +1008,11 @@ class TrainingArgs(FastVideoArgs):
     num_height: int = 0
     num_width: int = 0
     num_frames: int = 0
+    
+    # RL dataset configuration (for RL prompt datasets)
+    rl_dataset_path: str = ""  # Path to RL prompt dataset directory (defaults to data_path if not set)
+    rl_dataset_type: str = "text"  # "text" or "geneval"
+    rl_num_image_per_prompt: int = 4  # k parameter for KRepeatSampler (num_image_per_prompt)
 
     train_batch_size: int = 0
     num_latent_t: int = 0
@@ -1191,11 +1198,26 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--data-path",
                             type=str,
                             required=True,
-                            help="Path to parquet files")
+                            help="Path to parquet files (or RL prompt dataset directory for RL training)")
         parser.add_argument("--dataloader-num-workers",
                             type=int,
                             required=True,
                             help="Number of workers for dataloader")
+        
+        # RL dataset arguments (optional, defaults to data_path)
+        parser.add_argument("--rl-dataset-path",
+                            type=str,
+                            default="",
+                            help="Path to RL prompt dataset directory (defaults to --data-path if not set)")
+        parser.add_argument("--rl-dataset-type",
+                            type=str,
+                            default="text",
+                            choices=["text", "geneval"],
+                            help="RL dataset type: 'text' for TextPromptDataset or 'geneval' for GenevalPromptDataset")
+        parser.add_argument("--rl-num-image-per-prompt",
+                            type=int,
+                            default=4,
+                            help="Number of times to repeat each prompt (k parameter for KRepeatSampler)")
         parser.add_argument("--num-height",
                             type=int,
                             required=True,

@@ -110,10 +110,10 @@ class RLPipeline(TrainingPipeline):
         super().initialize_training_pipeline(training_args)
         
         # Override dataloader with RL prompt dataloader
-        # Get RL dataset configuration (hardcoded for now, should come from config later)
-        rl_dataset_path = getattr(training_args, 'rl_dataset_path', training_args.data_path)
-        rl_dataset_type = getattr(training_args, 'rl_dataset_type', 'text')  # "text" or "geneval"
-        rl_num_image_per_prompt = getattr(training_args, 'rl_num_image_per_prompt', 4)  # k parameter
+        # Get RL dataset configuration from training_args
+        rl_dataset_path = training_args.rl_dataset_path if training_args.rl_dataset_path else training_args.data_path
+        rl_dataset_type = training_args.rl_dataset_type  # "text" or "geneval"
+        rl_num_image_per_prompt = training_args.rl_num_image_per_prompt  # k parameter
         num_replicas = 1  # Single GPU training
         rank = 0  # Single GPU training
         
@@ -833,9 +833,12 @@ class RLPipeline(TrainingPipeline):
             total_loss: Total loss for backward pass
             metrics: Dictionary with loss components and diagnostics
         """
-        # Get configuration (hardcoded for now)
-        clip_range = getattr(self.training_args.rl_args, 'grpo_policy_clip_range', 0.2)
-        kl_beta = getattr(self.training_args.rl_args, 'rl_kl_beta', 0.004)
+        # Get configuration from RLArgs
+        # Note: CLI arguments map to RLArgs fields:
+        # --rl-policy-clip-range -> grpo_policy_clip_range (via dest)
+        # --rl-kl-beta -> kl_beta (via dest)
+        clip_range = self.training_args.rl_args.grpo_policy_clip_range
+        kl_beta = self.training_args.rl_args.kl_beta
         guidance_scale = 4.5  # Hardcoded
         adv_clip_max = 10.0  # Hardcoded (advantage clipping)
         
