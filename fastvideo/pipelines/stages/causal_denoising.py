@@ -73,7 +73,7 @@ class CausalDMDDenosingStage(DenoisingStage):
             -1] * self.transformer.config.arch_config.patch_size[-2]
         self.frame_seq_length = latent_seq_length // patch_ratio
         # TODO(will): make this a parameter once we add i2v support
-        independent_first_frame = self.transformer.independent_first_frame if hasattr(
+        independent_first_frame = self.transformer.independent_first_frame if hasattr(  # noqa: F841
             self.transformer, 'independent_first_frame') else False
         # Timesteps for DMD
         timesteps = torch.tensor(
@@ -244,13 +244,13 @@ class CausalDMDDenosingStage(DenoisingStage):
                     t_expand = t_cur.repeat(latent_model_input.shape[0])
 
                     # Attention metadata if needed
-                    if (
-                        vsa_available
-                        and self.attn_backend == VideoSparseAttentionBackend
-                    ):
-                        self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls()
+                    if (vsa_available and self.attn_backend
+                            == VideoSparseAttentionBackend):
+                        self.attn_metadata_builder_cls = self.attn_backend.get_builder_cls(
+                        )
                         if self.attn_metadata_builder_cls is not None:
-                            self.attn_metadata_builder = self.attn_metadata_builder_cls()
+                            self.attn_metadata_builder = self.attn_metadata_builder_cls(
+                            )
                             attn_metadata = self.attn_metadata_builder.build(  # type: ignore
                                 current_num_frames=current_num_frames,
                                 video_raw_latent_shape=video_raw_latent_shape,
@@ -315,7 +315,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                                 batch.generator, list) else
                                        batch.generator)).to(self.device)
                         noise_btchw = noise
-                        if boundary_timestep is not None and i < len(
+                        if boundary_timestep is not None and high_noise_timesteps is not None and i < len(
                                 high_noise_timesteps) - 1:
                             noise_latents_btchw = self.scheduler.add_noise_high(
                                 pred_video_btchw.flatten(0, 1),
@@ -752,8 +752,14 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                             [1],
                             dtype=torch.long,
                             device=pred_video_btchw.device)
-                        # Use global RNG like MatrixGame (torch.randn_like without generator)
-                        noise_btchw = torch.randn_like(pred_video_btchw)
+                        noise = torch.randn(
+                            pred_video_btchw.shape,
+                            dtype=pred_video_btchw.dtype,
+                            generator=(batch.generator[0] if isinstance(
+                                batch.generator, list) else
+                                       batch.generator)).to(
+                                           pred_video_btchw.device)
+                        noise_btchw = noise
                         if boundary_timestep is not None and high_noise_timesteps is not None and i < len(
                                 high_noise_timesteps) - 1:
                             noise_latents_btchw = self.scheduler.add_noise_high(

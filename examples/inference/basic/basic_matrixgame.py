@@ -26,7 +26,7 @@ VARIANT_CONFIG = {
     "templerun_distilled_model": {
         "model_path": "H1yori233/Matrix-Game-2.0-Diffusers-TempleRun",
         "keyboard_dim": 7,
-        "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/temple_run/0002.png",
+        "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/temple_run/0000.png",
     },
 }
 

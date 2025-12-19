@@ -54,14 +54,22 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
 
 # For determining pipeline type from model ID
 PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
-    "hunyuan": lambda id: "hunyuan" in id.lower(),
-    "matrixgame": lambda id: "matrix-game" in id.lower() or "matrixgame" in id.lower(),
-    "wanpipeline": lambda id: "wanpipeline" in id.lower(),
-    "wanimagetovideo": lambda id: "wanimagetovideo" in id.lower(),
-    "wandmdpipeline": lambda id: "wandmdpipeline" in id.lower(),
-    "wancausaldmdpipeline": lambda id: "wancausaldmdpipeline" in id.lower(),
-    "stepvideo": lambda id: "stepvideo" in id.lower(),
-    "cosmos": lambda id: "cosmos" in id.lower(),
+    "hunyuan":
+    lambda id: "hunyuan" in id.lower(),
+    "matrixgame":
+    lambda id: "matrix-game" in id.lower() or "matrixgame" in id.lower(),
+    "wanpipeline":
+    lambda id: "wanpipeline" in id.lower(),
+    "wanimagetovideo":
+    lambda id: "wanimagetovideo" in id.lower(),
+    "wandmdpipeline":
+    lambda id: "wandmdpipeline" in id.lower(),
+    "wancausaldmdpipeline":
+    lambda id: "wancausaldmdpipeline" in id.lower(),
+    "stepvideo":
+    lambda id: "stepvideo" in id.lower(),
+    "cosmos":
+    lambda id: "cosmos" in id.lower(),
     # Add other pipeline architecture detectors
 }
 

@@ -33,44 +33,32 @@ from fastvideo.utils import (maybe_download_model_index,
 logger = init_logger(__name__)
 # Registry maps specific model weights to their config classes
 SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
-    "FastVideo/FastHunyuan-diffusers":
-    FastHunyuanSamplingParam,
-    "hunyuanvideo-community/HunyuanVideo":
-    HunyuanSamplingParam,
-    "FastVideo/stepvideo-t2v-diffusers":
-    StepVideoT2VSamplingParam,
+    "FastVideo/FastHunyuan-diffusers": FastHunyuanSamplingParam,
+    "hunyuanvideo-community/HunyuanVideo": HunyuanSamplingParam,
+    "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VSamplingParam,
 
     # Wan2.1
-    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers":
-    WanT2V_1_3B_SamplingParam,
-    "Wan-AI/Wan2.1-T2V-14B-Diffusers":
-    WanT2V_14B_SamplingParam,
-    "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers":
-    WanI2V_14B_480P_SamplingParam,
-    "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers":
-    WanI2V_14B_720P_SamplingParam,
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V_1_3B_SamplingParam,
+    "Wan-AI/Wan2.1-T2V-14B-Diffusers": WanT2V_14B_SamplingParam,
+    "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V_14B_480P_SamplingParam,
+    "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V_14B_720P_SamplingParam,
     "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers":
     Wan2_1_Fun_1_3B_InP_SamplingParam,
     "IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers":
     Wan2_1_Fun_1_3B_Control_SamplingParam,
 
     # Wan2.2
-    "Wan-AI/Wan2.2-TI2V-5B-Diffusers":
-    Wan2_2_TI2V_5B_SamplingParam,
+    "Wan-AI/Wan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_SamplingParam,
     "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers":
     Wan2_2_TI2V_5B_SamplingParam,
-    "Wan-AI/Wan2.2-T2V-A14B-Diffusers":
-    Wan2_2_T2V_A14B_SamplingParam,
-    "Wan-AI/Wan2.2-I2V-A14B-Diffusers":
-    Wan2_2_I2V_A14B_SamplingParam,
+    "Wan-AI/Wan2.2-T2V-A14B-Diffusers": Wan2_2_T2V_A14B_SamplingParam,
+    "Wan-AI/Wan2.2-I2V-A14B-Diffusers": Wan2_2_I2V_A14B_SamplingParam,
 
     # FastWan2.1
-    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers":
-    FastWanT2V480P_SamplingParam,
+    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": FastWanT2V480P_SamplingParam,
 
     # FastWan2.2
-    "FastVideo/FastWan2.2-TI2V-5B-Diffusers":
-    Wan2_2_TI2V_5B_SamplingParam,
+    "FastVideo/FastWan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_SamplingParam,
 
     # Causal Self-Forcing Wan2.1
     "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers":
@@ -87,25 +75,29 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     Cosmos_Predict2_2B_Video2World_SamplingParam,
 
     # MatrixGame2.0 models
-    "H1yori233/Matrix-Game-2.0-Diffusers-Base":
-    MatrixGame2_SamplingParam,
-    "H1yori233/Matrix-Game-2.0-Diffusers-GTA":
-    MatrixGame2_SamplingParam,
-    "H1yori233/Matrix-Game-2.0-Diffusers-TempleRun":
-    MatrixGame2_SamplingParam,
+    "H1yori233/Matrix-Game-2.0-Diffusers-Base": MatrixGame2_SamplingParam,
+    "H1yori233/Matrix-Game-2.0-Diffusers-GTA": MatrixGame2_SamplingParam,
+    "H1yori233/Matrix-Game-2.0-Diffusers-TempleRun": MatrixGame2_SamplingParam,
 
     # Add other specific weight variants
 }
 
 # For determining pipeline type from model ID
 SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
-    "hunyuan": lambda id: "hunyuan" in id.lower(),
-    "wanpipeline": lambda id: "wanpipeline" in id.lower(),
-    "wanimagetovideo": lambda id: "wanimagetovideo" in id.lower(),
-    "stepvideo": lambda id: "stepvideo" in id.lower(),
-    "wandmdpipeline": lambda id: "wandmdpipeline" in id.lower(),
-    "wancausaldmdpipeline": lambda id: "wancausaldmdpipeline" in id.lower(),
-    "matrixgame": lambda id: "matrixgame" in id.lower() or "matrix-game" in id.lower(),
+    "hunyuan":
+    lambda id: "hunyuan" in id.lower(),
+    "wanpipeline":
+    lambda id: "wanpipeline" in id.lower(),
+    "wanimagetovideo":
+    lambda id: "wanimagetovideo" in id.lower(),
+    "stepvideo":
+    lambda id: "stepvideo" in id.lower(),
+    "wandmdpipeline":
+    lambda id: "wandmdpipeline" in id.lower(),
+    "wancausaldmdpipeline":
+    lambda id: "wancausaldmdpipeline" in id.lower(),
+    "matrixgame":
+    lambda id: "matrixgame" in id.lower() or "matrix-game" in id.lower(),
     # Add other pipeline architecture detectors
 }
 
