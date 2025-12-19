@@ -14,17 +14,17 @@ MODEL_VARIANT = "base_distilled_model"
 # Variant-specific settings
 VARIANT_CONFIG = {
     "base_distilled_model": {
-        "model_path": "H1yori233/Matrix-Game-2.0-Diffusers-Base",
+        "model_path": "FastVideo/Matrix-Game-2.0-Diffusers-Base",
         "keyboard_dim": 4,
         "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/universal/0000.png",
     },
     "gta_distilled_model": {
-        "model_path": "H1yori233/Matrix-Game-2.0-Diffusers-GTA",
+        "model_path": "FastVideo/Matrix-Game-2.0-Diffusers-GTA",
         "keyboard_dim": 2,
         "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/gta_drive/0000.png",
     },
     "templerun_distilled_model": {
-        "model_path": "H1yori233/Matrix-Game-2.0-Diffusers-TempleRun",
+        "model_path": "FastVideo/Matrix-Game-2.0-Diffusers-TempleRun",
         "keyboard_dim": 7,
         "image_url": "https://raw.githubusercontent.com/SkyworkAI/Matrix-Game/main/Matrix-Game-2/demo_images/temple_run/0000.png",
     },

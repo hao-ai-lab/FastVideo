@@ -31,7 +31,7 @@ else:
 
 MATRIXGAME_PARAMS = {
     "num_gpus": 1,
-    "model_path": "H1yori233/Matrix-Game-2.0-Diffusers-Base",
+    "model_path": "FastVideo/Matrix-Game-2.0-Diffusers-Base",
     "height": 352,
     "width": 640,
     "num_frames": 117,

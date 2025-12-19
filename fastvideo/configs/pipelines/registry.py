@@ -46,9 +46,9 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": Wan2_2_T2V_A14B_Config,
     "Wan-AI/Wan2.2-I2V-A14B-Diffusers": Wan2_2_I2V_A14B_Config,
     "nvidia/Cosmos-Predict2-2B-Video2World": CosmosConfig,
-    "H1yori233/Matrix-Game-2.0-Diffusers-Base": MatrixGameI2V480PConfig,
-    "H1yori233/Matrix-Game-2.0-Diffusers-GTA": MatrixGameI2V480PConfig,
-    "H1yori233/Matrix-Game-2.0-Diffusers-TempleRun": MatrixGameI2V480PConfig,
+    "FastVideo/Matrix-Game-2.0-Diffusers-Base": MatrixGameI2V480PConfig,
+    "FastVideo/Matrix-Game-2.0-Diffusers-GTA": MatrixGameI2V480PConfig,
+    "FastVideo/Matrix-Game-2.0-Diffusers-TempleRun": MatrixGameI2V480PConfig,
     # Add other specific weight variants
 }
 
