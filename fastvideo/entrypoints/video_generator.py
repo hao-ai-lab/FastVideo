@@ -102,6 +102,11 @@ class VideoGenerator:
         self,
         prompt: str | None = None,
         sampling_param: SamplingParam | None = None,
+        # Action control inputs (Matrix-Game)
+        mouse_cond: torch.Tensor | None = None,
+        keyboard_cond: torch.Tensor | None = None,
+        grid_sizes: tuple[int, int, int] | list[int] | torch.Tensor
+        | None = None,
         **kwargs,
     ) -> dict[str, Any] | list[np.ndarray] | list[dict[str, Any]]:
         """
@@ -131,6 +136,15 @@ class VideoGenerator:
         if sampling_param is None:
             sampling_param = SamplingParam.from_pretrained(
                 self.fastvideo_args.model_path)
+
+        # Add action control inputs to kwargs if provided
+        if mouse_cond is not None:
+            kwargs['mouse_cond'] = mouse_cond
+        if keyboard_cond is not None:
+            kwargs['keyboard_cond'] = keyboard_cond
+        if grid_sizes is not None:
+            kwargs['grid_sizes'] = grid_sizes
+
         sampling_param.update(kwargs)
 
         if self.fastvideo_args.prompt_txt is not None or sampling_param.prompt_path is not None:

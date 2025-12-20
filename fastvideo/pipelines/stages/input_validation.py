@@ -39,6 +39,7 @@ class InputValidationStage(PipelineStage):
         assert seed is not None
         seeds = [seed + i for i in range(num_videos_per_prompt)]
         batch.seeds = seeds
+
         # Peiyuan: using GPU seed will cause A100 and H100 to generate different results...
         batch.generator = [
             torch.Generator("cpu").manual_seed(seed) for seed in seeds
@@ -111,20 +112,28 @@ class InputValidationStage(PipelineStage):
             ) and batch.pil_image is not None:
             img = batch.pil_image
             ih, iw = img.height, img.width
-            patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
-            vae_stride = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
-            dh, dw = patch_size[1] * vae_stride, patch_size[2] * vae_stride
-            max_area = 480 * 832
-            ow, oh = best_output_size(iw, ih, dw, dh, max_area)
 
-            scale = max(ow / iw, oh / ih)
-            img = img.resize((round(iw * scale), round(ih * scale)),
-                             Image.LANCZOS)
+            pipeline_class_name = type(fastvideo_args.pipeline_config).__name__
+            if 'MatrixGame' in pipeline_class_name or 'MatrixCausal' in pipeline_class_name:
+                oh, ow = batch.height, batch.width
+                img = img.resize((ow, oh), Image.LANCZOS)
+            else:
+                # Standard Wan logic
+                patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
+                vae_stride = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
+                dh, dw = patch_size[1] * vae_stride, patch_size[2] * vae_stride
+                max_area = 480 * 832
+                ow, oh = best_output_size(iw, ih, dw, dh, max_area)
 
-            # center-crop
-            x1 = (img.width - ow) // 2
-            y1 = (img.height - oh) // 2
-            img = img.crop((x1, y1, x1 + ow, y1 + oh))
+                scale = max(ow / iw, oh / ih)
+                img = img.resize((round(iw * scale), round(ih * scale)),
+                                 Image.LANCZOS)
+
+                # center-crop
+                x1 = (img.width - ow) // 2
+                y1 = (img.height - oh) // 2
+                img = img.crop((x1, y1, x1 + ow, y1 + oh))
+
             assert img.width == ow and img.height == oh
             logger.info("final processed img height: %s, img width: %s",
                         img.height, img.width)
@@ -185,6 +194,43 @@ class InputValidationStage(PipelineStage):
             input_video = video_tensor.permute(1, 0, 2, 3).unsqueeze(0)
 
             batch.video_latent = input_video
+
+        # Validate action control inputs (Matrix-Game)
+        if batch.mouse_cond is not None:
+            if batch.mouse_cond.dim() != 3 or batch.mouse_cond.shape[-1] != 2:
+                raise ValueError(
+                    f"mouse_cond must have shape (B, T, 2), but got {batch.mouse_cond.shape}"
+                )
+            logger.info("Action control: mouse_cond validated - shape %s",
+                        batch.mouse_cond.shape)
+
+        if batch.keyboard_cond is not None:
+            if batch.keyboard_cond.dim() != 3:
+                raise ValueError(
+                    f"keyboard_cond must have 3 dimensions (B, T, K), but got {batch.keyboard_cond.dim()}"
+                )
+            keyboard_dim = batch.keyboard_cond.shape[-1]
+            if keyboard_dim not in {2, 4, 6, 7}:
+                raise ValueError(
+                    f"keyboard_cond last dimension must be 2, 4, 6, or 7, but got {keyboard_dim}"
+                )
+            logger.info(
+                "Action control: keyboard_cond validated - shape %s (dim=%d)",
+                batch.keyboard_cond.shape, keyboard_dim)
+
+        if batch.grid_sizes is not None:
+            if not isinstance(batch.grid_sizes, list | tuple | torch.Tensor):
+                raise ValueError("grid_sizes must be a list, tuple, or tensor")
+            if isinstance(batch.grid_sizes, torch.Tensor):
+                if batch.grid_sizes.numel() != 3:
+                    raise ValueError(
+                        "grid_sizes must have 3 elements [F, H, W]")
+            else:
+                if len(batch.grid_sizes) != 3:
+                    raise ValueError(
+                        "grid_sizes must have 3 elements [F, H, W]")
+            logger.info("Action control: grid_sizes validated - %s",
+                        batch.grid_sizes)
 
         return batch
 
