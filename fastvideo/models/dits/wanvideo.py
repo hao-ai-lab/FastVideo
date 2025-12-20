@@ -509,7 +509,8 @@ class WanTransformerBlock_VSA(nn.Module):
                                     key,
                                     value,
                                     freqs_cis = freqs_cis,
-                                    gate_compress=gate_compress)
+                                    gate_compress=gate_compress,
+                                    attention_mask=attention_mask)
         attn_output = attn_output.flatten(2)
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)
