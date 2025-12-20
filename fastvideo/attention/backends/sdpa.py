@@ -3,7 +3,8 @@
 import torch
 from dataclasses import dataclass
 from fastvideo.attention.backends.abstract import (  # FlashAttentionMetadata,
-    AttentionBackend, AttentionImpl, AttentionMetadata, AttentionMetadataBuilder)
+    AttentionBackend, AttentionImpl, AttentionMetadata,
+    AttentionMetadataBuilder)
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
@@ -29,10 +30,12 @@ class SDPABackend(AttentionBackend):
     # def get_metadata_cls() -> Type["AttentionMetadata"]:
     #     return FlashAttentionMetadata
 
+
 @dataclass
 class SDPAMetadata(AttentionMetadata):
     current_timestep: int
     attn_mask: torch.Tensor | None = None
+
 
 class SDPAMetadataBuilder(AttentionMetadataBuilder):
 
@@ -47,7 +50,9 @@ class SDPAMetadataBuilder(AttentionMetadataBuilder):
         current_timestep: int,
         attn_mask: torch.Tensor,
     ) -> SDPAMetadata:
-        return SDPAMetadata(current_timestep=current_timestep, attn_mask=attn_mask)
+        return SDPAMetadata(current_timestep=current_timestep,
+                            attn_mask=attn_mask)
+
 
 class SDPAImpl(AttentionImpl):
 

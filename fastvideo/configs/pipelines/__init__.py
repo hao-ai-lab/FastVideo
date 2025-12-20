@@ -11,9 +11,9 @@ from fastvideo.configs.pipelines.wan import (SelfForcingWanT2V480PConfig,
                                              WanT2V480PConfig, WanT2V720PConfig)
 
 __all__ = [
-    "HunyuanConfig", "FastHunyuanConfig", "PipelineConfig", "Hunyuan15T2V480PConfig",
-    "SlidingTileAttnConfig", "WanT2V480PConfig", "WanI2V480PConfig",
-    "WanT2V720PConfig", "WanI2V720PConfig", "StepVideoT2VConfig",
-    "SelfForcingWanT2V480PConfig", "CosmosConfig",
+    "HunyuanConfig", "FastHunyuanConfig", "PipelineConfig",
+    "Hunyuan15T2V480PConfig", "SlidingTileAttnConfig", "WanT2V480PConfig",
+    "WanI2V480PConfig", "WanT2V720PConfig", "WanI2V720PConfig",
+    "StepVideoT2VConfig", "SelfForcingWanT2V480PConfig", "CosmosConfig",
     "get_pipeline_config_cls_from_name"
 ]

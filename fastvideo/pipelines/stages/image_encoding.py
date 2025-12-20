@@ -99,16 +99,19 @@ class ImageEncodingStage(PipelineStage):
                          V.list_of_tensors_dims(3))
         return result
 
+
 class Hy15ImageEncodingStage(ImageEncodingStage):
     """
     Stage for encoding image prompts into embeddings for HunyuanVideo1.5 models.
     """
+
     def verify_input(self, batch: ForwardBatch,
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify image encoding stage inputs."""
         return VerificationResult()
 
-    def forward(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> ForwardBatch:
+    def forward(self, batch: ForwardBatch,
+                fastvideo_args: FastVideoArgs) -> ForwardBatch:
         """
         Encode the prompt into image encoder hidden states.
         """
@@ -119,7 +122,8 @@ class Hy15ImageEncodingStage(ImageEncodingStage):
 
         raw_latent_shape = list(batch.raw_latent_shape)
         raw_latent_shape[1] = 1
-        batch.video_latent = torch.zeros(tuple(raw_latent_shape), device=get_local_torch_device())
+        batch.video_latent = torch.zeros(tuple(raw_latent_shape),
+                                         device=get_local_torch_device())
         return batch
 
 

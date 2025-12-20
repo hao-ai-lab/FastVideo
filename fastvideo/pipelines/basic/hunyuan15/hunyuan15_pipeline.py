@@ -57,11 +57,10 @@ class HunyuanVideo15Pipeline(ComposedPipelineBase):
                        stage=LatentPreparationStage(
                            scheduler=self.get_module("scheduler"),
                            transformer=self.get_module("transformer")))
-        
+
         self.add_stage(stage_name="image_encoding_stage",
-                        stage=Hy15ImageEncodingStage(
-                            image_encoder=None,
-                            image_processor=None))
+                       stage=Hy15ImageEncodingStage(image_encoder=None,
+                                                    image_processor=None))
 
         self.add_stage(stage_name="denoising_stage",
                        stage=DenoisingStage(

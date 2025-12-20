@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TypedDict, List, Dict, Any
+from typing import Any
 import re
 
 import torch
@@ -22,7 +22,8 @@ PROMPT_TEMPLATE_ENCODE_VIDEO = "You are a helpful assistant. Describe the video 
         4. background environment, light, style and atmosphere. \
         5. camera angles, movements, and transitions used in the video."
 
-def extract_glyph_texts(prompt: str) -> List[str]:
+
+def extract_glyph_texts(prompt: str) -> str | None:
     """
     Extract glyph texts from prompt using regex pattern.
 
@@ -38,13 +39,15 @@ def extract_glyph_texts(prompt: str) -> List[str]:
     result = list(dict.fromkeys(result)) if len(result) > 1 else result
 
     if result:
-        formatted_result = ". ".join([f'Text "{text}"' for text in result]) + ". "
+        formatted_result = ". ".join([f'Text "{text}"'
+                                      for text in result]) + ". "
     else:
         formatted_result = None
 
     return formatted_result
 
-def format_text_input(prompt: str, system_message: str) -> List[Dict[str, Any]]:
+
+def format_text_input(prompt: str, system_message: str) -> list[dict[str, Any]]:
     """
     Apply text to template.
 
@@ -56,17 +59,25 @@ def format_text_input(prompt: str, system_message: str) -> List[Dict[str, Any]]:
         List[Dict[str, Any]]: List of chat conversation.
     """
 
-    template = [{"role": "system", "content": system_message}, {"role": "user", "content": prompt if prompt else " "}]
+    template = [{
+        "role": "system",
+        "content": system_message
+    }, {
+        "role": "user",
+        "content": prompt if prompt else " "
+    }]
 
     return template
 
 
-def qwen_preprocess_text(prompt: str) -> str:
-    prompt = format_text_input(prompt, PROMPT_TEMPLATE_ENCODE_VIDEO)
-    return prompt
+def qwen_preprocess_text(prompt: str) -> list[dict[str, Any]]:
+    output = format_text_input(prompt, PROMPT_TEMPLATE_ENCODE_VIDEO)
+    return output
 
 
-def qwen_postprocess_text(outputs: BaseEncoderOutput, mask: torch.tensor) -> tuple[torch.tensor, torch.tensor]:
+def qwen_postprocess_text(
+        outputs: BaseEncoderOutput,
+        mask: torch.tensor) -> tuple[torch.tensor, torch.tensor]:
     assert outputs.hidden_states is not None
     output = outputs.hidden_states[-3]
     output = output[:, PROMPT_TEMPLATE_TOKEN_LENGTH:]
@@ -74,9 +85,9 @@ def qwen_postprocess_text(outputs: BaseEncoderOutput, mask: torch.tensor) -> tup
     return output, mask
 
 
-def byt5_preprocess_text(prompt: str) -> str:
-    prompt = [prompt] if isinstance(prompt, str) else prompt
-    glyph_texts = [extract_glyph_texts(p) for p in prompt]
+def byt5_preprocess_text(prompt: str) -> str | None:
+    prompts = [prompt] if isinstance(prompt, str) else prompt
+    glyph_texts = [extract_glyph_texts(p) for p in prompts]
     return glyph_texts[0]
 
 
@@ -99,12 +110,10 @@ class Hunyuan15T2V480PConfig(PipelineConfig):
     # Text encoding stage
     text_encoder_configs: tuple[EncoderConfig, ...] = field(
         default_factory=lambda: (Qwen2_5_VLConfig(), T5Config()))
-    preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
+    preprocess_text_funcs: tuple[Callable[[Any], Any], ...] = field(
         default_factory=lambda: (qwen_preprocess_text, byt5_preprocess_text))
-    postprocess_text_funcs: tuple[
-        Callable[[BaseEncoderOutput], torch.tensor],
-        ...] = field(default_factory=lambda:
-                     (qwen_postprocess_text, byt5_postprocess_text))
+    postprocess_text_funcs: tuple[Callable[..., Any], ...] = field(
+        default_factory=lambda: (qwen_postprocess_text, byt5_postprocess_text))
 
     # Precision for each component
     dit_precision: str = "bf16"

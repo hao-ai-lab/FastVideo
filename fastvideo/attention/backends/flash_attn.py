@@ -46,10 +46,12 @@ class FlashAttentionBackend(AttentionBackend):
     def get_builder_cls() -> type["AttentionMetadataBuilder"]:
         raise NotImplementedError
 
+
 @dataclass
 class FlashAttnMetadata(AttentionMetadata):
     current_timestep: int
     attn_mask: torch.Tensor | None = None
+
 
 class FlashAttnMetadataBuilder(AttentionMetadataBuilder):
 
@@ -64,7 +66,8 @@ class FlashAttnMetadataBuilder(AttentionMetadataBuilder):
         current_timestep: int,
         attn_mask: torch.Tensor,
     ) -> FlashAttnMetadata:
-        return FlashAttnMetadata(current_timestep=current_timestep, attn_mask=attn_mask)
+        return FlashAttnMetadata(current_timestep=current_timestep,
+                                 attn_mask=attn_mask)
 
 
 class FlashAttentionImpl(AttentionImpl):
@@ -94,14 +97,13 @@ class FlashAttentionImpl(AttentionImpl):
             attn_mask = attn_metadata.attn_mask
             qkv = torch.stack([query, key, value], dim=2)
 
-            attn_mask = F.pad(attn_mask, (qkv.shape[1] - attn_mask.shape[1], 0), value=True)
-            output = flash_attn_no_pad(
-                qkv,
-                attn_mask,
-                causal=False,
-                dropout_p=0,
-                softmax_scale=None
-            )
+            attn_mask = F.pad(attn_mask, (qkv.shape[1] - attn_mask.shape[1], 0),
+                              value=True)
+            output = flash_attn_no_pad(qkv,
+                                       attn_mask,
+                                       causal=False,
+                                       dropout_p=0,
+                                       softmax_scale=None)
         else:
             output = flash_attn_func(
                 query,  # type: ignore[no-untyped-call]

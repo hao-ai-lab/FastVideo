@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
 
-import torch
-
 from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
 
 
@@ -10,7 +8,7 @@ def is_double_block(n: str, m) -> bool:
     return "double_blocks" in n and str.isdigit(n.split(".")[-1])
 
 
-def is_refiner_block(n: str, m) -> bool: 
+def is_refiner_block(n: str, m) -> bool:
     return "refiner" in n and str.isdigit(n.split(".")[-1])
 
 
@@ -21,8 +19,7 @@ def is_txt_in(n: str, m) -> bool:
 @dataclass
 class HunyuanVideo15ArchConfig(DiTArchConfig):
     _fsdp_shard_conditions: list = field(
-        default_factory=lambda:
-        [is_double_block, is_refiner_block])
+        default_factory=lambda: [is_double_block, is_refiner_block])
 
     _compile_conditions: list = field(
         default_factory=lambda: [is_double_block, is_refiner_block, is_txt_in])

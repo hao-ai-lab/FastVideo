@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
-from typing import Optional
 
 from fastvideo.configs.models.encoders.base import (TextEncoderArchConfig,
                                                     TextEncoderConfig)
+
 
 def _is_transformer_layer(n: str, m) -> bool:
     return "layers" in n and str.isdigit(n.split(".")[-1])
@@ -33,26 +33,26 @@ class Qwen2_5_VLArchConfig(TextEncoderArchConfig):
     tie_word_embeddings: bool = False
     rope_theta: float = 1000000.0
     use_sliding_window: bool = False
-    sliding_window: int = 4096
+    sliding_window: int | None = 4096
     max_window_layers: int = 80
     layer_types: list = field(default_factory=list)
     attention_dropout: float = 0.0
-    rope_scaling: Optional[dict] = None
-    bos_token_id: Optional[int] = None
-    eos_token_id: Optional[int] = None
-    pad_token_id: Optional[int] = None
+    rope_scaling: dict | None = None
+    bos_token_id: int | None = None
+    eos_token_id: int | None = None
+    pad_token_id: int | None = None
     vision_token_id: int = 151654
     model_type: str = "qwen2_5_vl_text"
     dtype: str = "bfloat16"
-    
-    stacked_params_mapping: list[tuple[str, str, str]] = field(
-        default_factory=lambda: [
-            (".qkv_proj", ".q_proj", "q"),
-            (".qkv_proj", ".k_proj", "k"),
-            (".qkv_proj", ".v_proj", "v"),
-            (".gate_up_proj", ".gate_proj", 0),
-            (".gate_up_proj", ".up_proj", 1),
-        ])
+
+    stacked_params_mapping: list[tuple[str, str, str
+                                       | int]] = field(default_factory=lambda: [
+                                           (".qkv_proj", ".q_proj", "q"),
+                                           (".qkv_proj", ".k_proj", "k"),
+                                           (".qkv_proj", ".v_proj", "v"),
+                                           (".gate_up_proj", ".gate_proj", 0),
+                                           (".gate_up_proj", ".up_proj", 1),
+                                       ])
     _fsdp_shard_conditions: list = field(
         default_factory=lambda:
         [_is_transformer_layer, _is_embeddings, _is_final_norm])
@@ -65,16 +65,15 @@ class Qwen2_5_VLArchConfig(TextEncoderArchConfig):
             self.num_key_value_heads = self.num_attention_heads
         if self.layer_types is None:
             self.layer_types = [
-                "sliding_attention"
-                if self.sliding_window is not None and i >= self.max_window_layers
-                else "full_attention"
+                "sliding_attention" if self.sliding_window is not None
+                and i >= self.max_window_layers else "full_attention"
                 for i in range(self.num_hidden_layers)
             ]
         if self.rope_scaling is not None and "type" in self.rope_scaling:
             if self.rope_scaling["type"] == "mrope":
                 self.rope_scaling["type"] = "default"
             self.rope_scaling["rope_type"] = self.rope_scaling["type"]
-        
+
         self.tokenizer_kwargs = {
             "add_generation_prompt": True,
             "tokenize": True,
@@ -85,8 +84,10 @@ class Qwen2_5_VLArchConfig(TextEncoderArchConfig):
             "return_tensors": "pt",
         }
 
+
 @dataclass
 class Qwen2_5_VLConfig(TextEncoderConfig):
-    arch_config: TextEncoderArchConfig = field(default_factory=Qwen2_5_VLArchConfig)
+    arch_config: TextEncoderArchConfig = field(
+        default_factory=Qwen2_5_VLArchConfig)
     prefix: str = "qwen2_5_vl"
     is_chat_model: bool = True

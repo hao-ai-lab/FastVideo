@@ -28,7 +28,8 @@ logger = init_logger(__name__)
 PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "FastVideo/FastHunyuan-diffusers": FastHunyuanConfig,
     "hunyuanvideo-community/HunyuanVideo": HunyuanConfig,
-    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v": Hunyuan15T2V480PConfig,
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v":
+    Hunyuan15T2V480PConfig,
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V480PConfig,
     "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers": WanI2V480PConfig,
     "IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers": WANV2VConfig,
