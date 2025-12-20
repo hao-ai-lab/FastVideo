@@ -174,6 +174,7 @@ class DistributedAttention_VSA(DistributedAttention):
         replicated_v: torch.Tensor | None = None,
         gate_compress: torch.Tensor | None = None,
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
+        attention_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
         
@@ -185,6 +186,7 @@ class DistributedAttention_VSA(DistributedAttention):
             replicated_q (Optional[torch.Tensor]): Replicated query tensor, typically for text tokens
             replicated_k (Optional[torch.Tensor]): Replicated key tensor
             replicated_v (Optional[torch.Tensor]): Replicated value tensor
+            attention_mask (Optional[torch.Tensor]): Attention mask [batch_size, seq_len]
             
         Returns:
             Tuple[torch.Tensor, Optional[torch.Tensor]]: A tuple containing:
@@ -215,6 +217,10 @@ class DistributedAttention_VSA(DistributedAttention):
         # After all-to-all, each rank has the full sequence but only a subset of heads
         # The attention mask should now apply to the full sequence length
 
+        if attention_mask is not None:
+            valid_seq_len = (attention_mask[0] == 1).sum().item()
+            qkvg = qkvg[:, :valid_seq_len, :, :]
+
         if freqs_cis is not None:
             cos, sin = freqs_cis
             qkvg[:batch_size * 2] = _apply_rotary_emb(qkvg[:batch_size * 2],
@@ -233,6 +239,10 @@ class DistributedAttention_VSA(DistributedAttention):
 
         # Apply backend-specific postprocess_output
         output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
+
+        if attention_mask is not None:
+            pad_len = (attention_mask[0] == 0).sum().item()
+            output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad_len))
 
         output = sequence_model_parallel_all_to_all_4D(output,
                                                        scatter_dim=1,
