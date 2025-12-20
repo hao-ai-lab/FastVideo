@@ -223,7 +223,7 @@ class SamplingParam:
             help="Path to input image for image-to-video generation",
         )
         parser.add_argument(
-            "--video_path",
+            "--video-path",
             type=str,
             default=SamplingParam.video_path,
             help="Path to input video for video-to-video generation",

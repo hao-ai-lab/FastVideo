@@ -124,24 +124,20 @@ class TimestepEmbedder(nn.Module):
             t: [B] or [B, T] timesteps
             latent_shape: (T, H, W) for temporal expansion
         Returns:
-            [B, T, C]
+            [B, T, C] in FP32
         """
-        # Sinusoidal embedding in FP32
-        t_freq = self.timestep_embedding(t.flatten(), self.frequency_embedding_size)
+        # CRITICAL: Original LongCat computes timestep embedding entirely in FP32
+        # The output is kept in FP32 and used directly by AdaLN modulation
+        with torch.amp.autocast(device_type='cuda', dtype=torch.float32):
+            # Sinusoidal embedding in FP32
+            t_freq = self.timestep_embedding(t.float().flatten(), self.frequency_embedding_size)
+            
+            # MLP projection in FP32 (matching original LongCat)
+            t_emb, _ = self.linear_1(t_freq)
+            t_emb = self.act(t_emb)
+            t_emb, _ = self.linear_2(t_emb)
         
-        # Cast to model dtype before MLP
-        # Handle LoRA wrapper if present
-        linear_layer = self.linear_1.base_layer if hasattr(self.linear_1, 'base_layer') else self.linear_1
-        target_dtype = linear_layer.weight.dtype
-        if t_freq.dtype != target_dtype:
-            t_freq = t_freq.to(target_dtype)
-        
-        # MLP projection
-        t_emb, _ = self.linear_1(t_freq)
-        t_emb = self.act(t_emb)
-        t_emb, _ = self.linear_2(t_emb)
-        
-        # Reshape if needed
+        # Reshape if needed - keep in FP32!
         if latent_shape is not None and len(t.shape) > 1:
             B = t.shape[0]
             T = latent_shape[0]
@@ -166,13 +162,14 @@ class CaptionEmbedder(nn.Module):
         self.text_tokens_zero_pad = text_tokens_zero_pad
 
         # Two-layer MLP using ReplicatedLinear
+        # CRITICAL: Original LongCat uses GELU(approximate="tanh"), NOT SiLU!
         self.linear_1 = ReplicatedLinear(
             caption_channels,
             hidden_size,
             bias=True,
             params_dtype=dtype,
         )
-        self.act = nn.SiLU()
+        self.act = nn.GELU(approximate="tanh")  # Match original LongCat
         self.linear_2 = ReplicatedLinear(
             hidden_size,
             hidden_size,
@@ -909,11 +906,15 @@ class FinalLayer(nn.Module):
         """
         Returns: [B, N, out_channels * patch_size^3]
         """
+        # CRITICAL: Original LongCat runs the ENTIRE forward in FP32 autocast context
+        # including both modulation AND the linear projection
+        assert t.dtype == torch.float32, "Timestep embeddings must be FP32"
         B, N, C = x.shape
         T, _, _ = latent_shape
 
-        # AdaLN modulation (FP32 for stability like original)
+        # Run everything in FP32 to match original LongCat
         with torch.amp.autocast(device_type='cuda', dtype=torch.float32):
+            # AdaLN modulation
             t_mod = self.adaln_act(t)
             mod_params, _ = self.adaln_linear(t_mod)
             # Ensure FP32 output (needed when LoRA is applied)
@@ -921,12 +922,12 @@ class FinalLayer(nn.Module):
                 mod_params = mod_params.float()
             shift, scale = mod_params.unsqueeze(2).chunk(2, dim=-1)
 
-        # Modulate
-        x = modulate_fp32(self.norm, x.view(B, T, -1, C), shift, scale)
-        x = x.reshape(B, N, C)
+            # Modulate (uses FP32 norm internally)
+            x = modulate_fp32(self.norm, x.view(B, T, -1, C), shift, scale)
+            x = x.reshape(B, N, C)
 
-        # Project
-        x, _ = self.proj(x)
+            # Project (MUST be inside FP32 context like original!)
+            x, _ = self.proj(x)
 
         return x
 

@@ -6,6 +6,8 @@ This stage handles encoding multiple video frames to latent space with
 LongCat-specific normalization for VC conditioning.
 """
 
+from typing import Any
+
 import PIL.Image
 import torch
 
@@ -63,7 +65,8 @@ class LongCatVideoVAEEncodingStage(PipelineStage):
         # Take last num_cond_frames
         if len(video) > num_cond_frames:
             video = video[-num_cond_frames:]
-            logger.info("Using last %d frames for conditioning", num_cond_frames)
+            logger.info("Using last %d frames for conditioning",
+                        num_cond_frames)
         elif len(video) < num_cond_frames:
             logger.warning(
                 "Video has only %d frames, less than num_cond_frames=%d",
@@ -96,8 +99,8 @@ class LongCatVideoVAEEncodingStage(PipelineStage):
         video_tensor = video_tensor.to(get_local_torch_device(),
                                        dtype=torch.float32)
 
-        logger.info(
-            "VC: Preprocessed video tensor shape: %s", video_tensor.shape)
+        logger.info("VC: Preprocessed video tensor shape: %s",
+                    video_tensor.shape)
 
         # Encode via VAE
         self.vae = self.vae.to(get_local_torch_device())
@@ -144,7 +147,8 @@ class LongCatVideoVAEEncodingStage(PipelineStage):
 
         return batch
 
-    def retrieve_latents(self, encoder_output, generator):
+    def retrieve_latents(self, encoder_output: Any,
+                         generator: torch.Generator | None) -> torch.Tensor:
         """Sample from VAE posterior."""
         if hasattr(encoder_output, 'sample'):
             return encoder_output.sample(generator)
@@ -155,7 +159,7 @@ class LongCatVideoVAEEncodingStage(PipelineStage):
         else:
             raise AttributeError("Could not access latents from encoder output")
 
-    def normalize_latents(self, latents):
+    def normalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
         """
         Apply LongCat-specific latent normalization.
         

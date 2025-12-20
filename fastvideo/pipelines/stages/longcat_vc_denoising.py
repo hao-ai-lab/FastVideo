@@ -209,9 +209,8 @@ class LongCatVCDenoisingStage(LongCatDenoisingStage):
 
         # Log average timing
         avg_time = sum(step_times) / len(step_times)
-        logger.info(
-            "Average step time: %.2fs (total: %.1fs)",
-            avg_time, sum(step_times))
+        logger.info("Average step time: %.2fs (total: %.1fs)", avg_time,
+                    sum(step_times))
 
         # Update batch with denoised latents
         batch.latents = latents

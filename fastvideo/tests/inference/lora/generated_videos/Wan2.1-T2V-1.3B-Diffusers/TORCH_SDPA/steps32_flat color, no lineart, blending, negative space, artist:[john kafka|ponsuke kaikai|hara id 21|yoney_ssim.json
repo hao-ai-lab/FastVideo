@@ -1,0 +1,11 @@
+{
+  "mean_ssim": 0.8076071275605096,
+  "min_ssim": 0.7927247285842896,
+  "max_ssim": 0.8125591278076172,
+  "reference_video": "/mnt/fast-disks/hao_lab/shao/FastVideo/fastvideo/tests/inference/lora/L40S_reference_videos/Wan2.1-T2V-1.3B-Diffusers/TORCH_SDPA/wan-flat-color-1.3b-v2_flat color, no lineart, blending, negative space, .mp4",
+  "generated_video": "/mnt/fast-disks/hao_lab/shao/FastVideo/fastvideo/tests/inference/lora/generated_videos/Wan2.1-T2V-1.3B-Diffusers/TORCH_SDPA/wan-flat-color-1.3b-v2_flat color, no lineart, blending, negative space,.mp4",
+  "parameters": {
+    "num_inference_steps": 32,
+    "prompt": "flat color, no lineart, blending, negative space, artist:[john kafka|ponsuke kaikai|hara id 21|yoneyama mai|fuzichoco], 1girl, sakura miko, pink hair, cowboy shot, white shirt, floral print, off shoulder, outdoors, cherry blossom, tree shade, wariza, looking up, falling petals, half-closed eyes, white sky, clouds, live2d animation, upper body, high quality cinematic video of a woman sitting under a sakura tree. Dreamy and lonely, the camera close-ups on the face of the woman as she turns towards the viewer. The Camera is steady, This is a cowboy shot. The animation is smooth and fluid."
+  }
+}

@@ -2,8 +2,8 @@
 """
 LongCat KV Cache Initialization Stage for Video Continuation (VC).
 
-This stage pre-computes K/V cache for conditioning frames, providing
-2-3x speedup during denoising.
+This stage pre-computes K/V cache for conditioning frames.
+
 """
 
 import torch
@@ -20,13 +20,7 @@ logger = init_logger(__name__)
 class LongCatKVCacheInitStage(PipelineStage):
     """
     Pre-compute KV cache for conditioning frames.
-    
-    This is the KEY optimization for VC:
-    - Runs transformer once on conditioning frames
-    - Caches K/V tensors for all blocks
-    - Reuses cache at every denoising step
-    - Achieves 2-3x speedup
-    
+
     After this stage:
     - batch.kv_cache_dict contains {block_idx: (k, v)}
     - batch.cond_latents contains the conditioning latents
@@ -97,13 +91,13 @@ class LongCatKVCacheInitStage(PipelineStage):
 
         # Run transformer with return_kv=True, skip_crs_attn=True
         with (
-            torch.no_grad(),
-            set_forward_context(
-                current_timestep=0,
-                attn_metadata=None,
-                forward_batch=batch,
-            ),
-            torch.autocast(device_type='cuda', dtype=transformer_dtype),
+                torch.no_grad(),
+                set_forward_context(
+                    current_timestep=0,
+                    attn_metadata=None,
+                    forward_batch=batch,
+                ),
+                torch.autocast(device_type='cuda', dtype=transformer_dtype),
         ):
             _, kv_cache_dict = self.transformer(
                 hidden_states=cond_latents.to(transformer_dtype),
