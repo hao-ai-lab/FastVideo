@@ -6,6 +6,6 @@ from fastvideo.configs.models.dits.stepvideo import StepVideoConfig
 from fastvideo.configs.models.dits.wanvideo import WanVideoConfig
 
 __all__ = [
-    "HunyuanVideoConfig", "HunyuanVideo15Config", "WanVideoConfig", "StepVideoConfig",
-    "CosmosVideoConfig", "Cosmos25VideoConfig"
+    "HunyuanVideoConfig", "HunyuanVideo15Config", "WanVideoConfig",
+    "StepVideoConfig", "CosmosVideoConfig", "Cosmos25VideoConfig"
 ]

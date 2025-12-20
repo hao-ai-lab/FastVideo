@@ -20,11 +20,22 @@ def main():
         # image_encoder_cpu_offload=False,
     )
 
-    with open("data/validation_64.json", "r") as f:
-        data = json.load(f)["data"]
-        for item in data[1:]:
-            prompt = item["caption"]
-            video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, negative_prompt="", num_frames=81, fps=16)
+    prompt = (
+        "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
+        "wide with interest. The playful yet serene atmosphere is complemented by soft "
+        "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
+    )
+
+    video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, negative_prompt="", num_frames=81, fps=16)
+
+    prompt2 = (
+        "A majestic lion strides across the golden savanna, its powerful frame "
+        "glistening under the warm afternoon sun. The tall grass ripples gently in "
+        "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
+        "embodying the raw energy of the wild. Low angle, steady tracking shot, "
+        "cinematic.")
+
+    video2 = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=True, negative_prompt="", num_frames=81, fps=16)
 
 
 if __name__ == "__main__":

@@ -553,32 +553,6 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
             encoder_hidden_states_3,
             encoder_attention_mask_3,
         ):
-            # if is_t2v:
-            #     # Concatenate: [valid_byt5, valid_mllm, invalid_byt5, invalid_mllm]
-            #     new_encoder_hidden_states.append(
-            #         torch.cat(
-            #             [
-            #                 text_2[text_mask_2],  # valid byt5
-            #                 text[text_mask],  # valid mllm
-            #                 torch.zeros_like(text_2[~text_mask_2]),  # invalid byt5 (zeroed)
-            #                 torch.zeros_like(text[~text_mask]),  # invalid mllm (zeroed)
-            #             ],
-            #             dim=0,
-            #         )
-            #     )
-            #     # Apply same reordering to attention masks
-            #     new_encoder_attention_mask.append(
-            #         torch.cat(
-            #             [
-            #                 text_mask_2[text_mask_2],
-            #                 text_mask[text_mask],
-            #                 # text_mask_2[~text_mask_2],
-            #                 # text_mask[~text_mask],
-            #             ],
-            #             dim=0,
-            #         )
-            #     )
-            # else:
             # Concatenate: [valid_image, valid_byt5, valid_mllm, invalid_image, invalid_byt5, invalid_mllm]
             new_encoder_hidden_states.append(
                 torch.cat(

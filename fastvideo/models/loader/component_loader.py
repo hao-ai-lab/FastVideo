@@ -412,10 +412,6 @@ class VAELoader(ComponentLoader):
         # Find all safetensors files
         safetensors_list = glob.glob(
             os.path.join(str(model_path), "*.safetensors"))
-        # TODO(PY)
-        # assert len(
-        #     safetensors_list
-        # ) == 1, f"Found {len(safetensors_list)} safetensors files in {model_path}"
         loaded = {}
         for sf_file in safetensors_list:
             loaded.update(safetensors_load_file(sf_file))
