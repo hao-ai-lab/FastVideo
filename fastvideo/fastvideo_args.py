@@ -174,6 +174,8 @@ class FastVideoArgs:
     init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
     init_weights_from_safetensors_2: str = ""  # path to safetensors file for initial weight loading for transformer_2
 
+    override_pipeline_cls_name: str | None = None
+
     # # DMD parameters
     # dmd_denoising_steps: List[int] | None = field(default=None)
 
@@ -423,6 +425,12 @@ class FastVideoArgs:
             type=str,
             default=FastVideoArgs.override_transformer_cls_name,
             help="Override transformer cls name",
+        )
+        parser.add_argument(
+            "--override-pipeline-cls-name",
+            type=str,
+            default=FastVideoArgs.override_pipeline_cls_name,
+            help="Override pipeline cls name",
         )
         parser.add_argument(
             "--init-weights-from-safetensors",
