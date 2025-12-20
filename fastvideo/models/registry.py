@@ -34,6 +34,8 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
     # "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoDiT"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
+    "MatrixGameWanModel": ("dits", "matrix_game", "MatrixGameWanModel"),
+    "CausalMatrixGameWanModel": ("dits", "matrix_game", "CausalMatrixGameWanModel"),
 }
 
 _TEXT_ENCODER_MODELS = {
@@ -48,6 +50,7 @@ _TEXT_ENCODER_MODELS = {
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
     # "HunyuanVideoTransformer3DModel": ("image_encoder", "hunyuanvideo", "HunyuanVideoImageEncoder"),
     "CLIPVisionModelWithProjection": ("encoders", "clip", "CLIPVisionModel"),
+    "CLIPVisionModel": ("encoders", "clip", "CLIPVisionModel"),
 }
 
 _VAE_MODELS = {

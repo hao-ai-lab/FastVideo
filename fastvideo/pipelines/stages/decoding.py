@@ -76,21 +76,39 @@ class DecodingStage(PipelineStage):
         vae_autocast_enabled = (
             vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
-        if hasattr(self.vae, 'scaling_factor'):
+        # denormalization for MatrixGame VAE
+        # z = z * std + mean during decode
+        if (hasattr(self.vae.config, 'latents_mean')
+                and hasattr(self.vae.config, 'latents_std')):
+            # Convert config values to tensors
+            latents_mean = torch.tensor(self.vae.config.latents_mean,
+                                        device=latents.device,
+                                        dtype=latents.dtype).view(
+                                            1, -1, 1, 1, 1)
+
+            latents_std = torch.tensor(self.vae.config.latents_std,
+                                       device=latents.device,
+                                       dtype=latents.dtype).view(
+                                           1, -1, 1, 1, 1)
+
+            # Apply denormalization: z = z * std + mean
+            latents = latents * latents_std + latents_mean
+        elif hasattr(self.vae, 'scaling_factor'):
+            # Standard VAE scaling
             if isinstance(self.vae.scaling_factor, torch.Tensor):
                 latents = latents / self.vae.scaling_factor.to(
                     latents.device, latents.dtype)
             else:
                 latents = latents / self.vae.scaling_factor
 
-        # Apply shifting if needed
-        if (hasattr(self.vae, "shift_factor")
-                and self.vae.shift_factor is not None):
-            if isinstance(self.vae.shift_factor, torch.Tensor):
-                latents += self.vae.shift_factor.to(latents.device,
-                                                    latents.dtype)
-            else:
-                latents += self.vae.shift_factor
+            # Apply shifting if needed
+            if (hasattr(self.vae, "shift_factor")
+                    and self.vae.shift_factor is not None):
+                if isinstance(self.vae.shift_factor, torch.Tensor):
+                    latents += self.vae.shift_factor.to(latents.device,
+                                                        latents.dtype)
+                else:
+                    latents += self.vae.shift_factor
 
         # Decode latents
         with torch.autocast(device_type="cuda",

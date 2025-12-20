@@ -168,6 +168,14 @@ class DenoisingStage(PipelineStage):
             },
         )
 
+        action_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "mouse_cond": batch.mouse_cond,
+                "keyboard_cond": batch.keyboard_cond,
+            },
+        )
+
         # Prepare STA parameters
         if st_attn_available and self.attn_backend == SlidingTileAttentionBackend:
             self.prepare_sta_param(batch, fastvideo_args)
@@ -379,6 +387,7 @@ class DenoisingStage(PipelineStage):
                             guidance=guidance_expand,
                             **image_kwargs,
                             **pos_cond_kwargs,
+                            **action_kwargs,
                         )
 
                     if batch.do_classifier_free_guidance:
@@ -395,6 +404,7 @@ class DenoisingStage(PipelineStage):
                                 guidance=guidance_expand,
                                 **image_kwargs,
                                 **neg_cond_kwargs,
+                                **action_kwargs,
                             )
 
                         noise_pred_text = noise_pred

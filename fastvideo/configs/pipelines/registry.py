@@ -14,7 +14,8 @@ from fastvideo.configs.pipelines.wan import (
     FastWan2_1_T2V_480P_Config, FastWan2_2_TI2V_5B_Config,
     Wan2_2_I2V_A14B_Config, Wan2_2_T2V_A14B_Config, Wan2_2_TI2V_5B_Config,
     WanI2V480PConfig, WanI2V720PConfig, WanT2V480PConfig, WanT2V720PConfig,
-    SelfForcingWanT2V480PConfig, WANV2VConfig, SelfForcingWan2_2_T2V480PConfig)
+    SelfForcingWanT2V480PConfig, WANV2VConfig, SelfForcingWan2_2_T2V480PConfig,
+    MatrixGameI2V480PConfig)
 # isort: on
 from fastvideo.logger import init_logger
 from fastvideo.utils import (maybe_download_model_index,
@@ -45,18 +46,30 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": Wan2_2_T2V_A14B_Config,
     "Wan-AI/Wan2.2-I2V-A14B-Diffusers": Wan2_2_I2V_A14B_Config,
     "nvidia/Cosmos-Predict2-2B-Video2World": CosmosConfig,
+    "FastVideo/Matrix-Game-2.0-Base-Diffusers": MatrixGameI2V480PConfig,
+    "FastVideo/Matrix-Game-2.0-GTA-Diffusers": MatrixGameI2V480PConfig,
+    "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers": MatrixGameI2V480PConfig,
     # Add other specific weight variants
 }
 
 # For determining pipeline type from model ID
 PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
-    "hunyuan": lambda id: "hunyuan" in id.lower(),
-    "wanpipeline": lambda id: "wanpipeline" in id.lower(),
-    "wanimagetovideo": lambda id: "wanimagetovideo" in id.lower(),
-    "wandmdpipeline": lambda id: "wandmdpipeline" in id.lower(),
-    "wancausaldmdpipeline": lambda id: "wancausaldmdpipeline" in id.lower(),
-    "stepvideo": lambda id: "stepvideo" in id.lower(),
-    "cosmos": lambda id: "cosmos" in id.lower(),
+    "hunyuan":
+    lambda id: "hunyuan" in id.lower(),
+    "matrixgame":
+    lambda id: "matrix-game" in id.lower() or "matrixgame" in id.lower(),
+    "wanpipeline":
+    lambda id: "wanpipeline" in id.lower(),
+    "wanimagetovideo":
+    lambda id: "wanimagetovideo" in id.lower(),
+    "wandmdpipeline":
+    lambda id: "wandmdpipeline" in id.lower(),
+    "wancausaldmdpipeline":
+    lambda id: "wancausaldmdpipeline" in id.lower(),
+    "stepvideo":
+    lambda id: "stepvideo" in id.lower(),
+    "cosmos":
+    lambda id: "cosmos" in id.lower(),
     # Add other pipeline architecture detectors
 }
 
@@ -64,6 +77,7 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
 PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "hunyuan":
     HunyuanConfig,  # Base Hunyuan config as fallback for any Hunyuan variant
+    "matrixgame": MatrixGameI2V480PConfig,
     "wanpipeline":
     WanT2V480PConfig,  # Base Wan config as fallback for any Wan variant
     "wanimagetovideo": WanI2V480PConfig,

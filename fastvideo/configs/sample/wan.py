@@ -196,3 +196,14 @@ class SelfForcingWan2_2_T2V_A14B_480P_SamplingParam(
     height: int = 448
     width: int = 832
     fps: int = 16
+
+
+@dataclass
+class MatrixGame2_SamplingParam(SamplingParam):
+    height: int = 352
+    width: int = 640
+    num_frames: int = 57
+    fps: int = 25
+    guidance_scale: float = 1.0
+    num_inference_steps: int = 3
+    negative_prompt: str | None = None

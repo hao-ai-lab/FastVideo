@@ -25,7 +25,9 @@ _PIPELINE_NAME_TO_ARCHITECTURE_NAME: dict[str, str] = {
     "WanCausalDMDPipeline": "wan",
     "StepVideoPipeline": "stepvideo",
     "HunyuanVideoPipeline": "hunyuan",
-    "Cosmos2VideoToWorldPipeline": "cosmos"
+    "Cosmos2VideoToWorldPipeline": "cosmos",
+    "MatrixGamePipeline": "matrixgame",
+    "MatrixGameCausalDMDPipeline": "matrixgame",
 }
 
 _PREPROCESS_WORKLOAD_TYPE_TO_PIPELINE_NAME: dict[WorkloadType, str] = {
