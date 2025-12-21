@@ -18,6 +18,7 @@ from fastvideo.training.wan_training_pipeline import WanTrainingPipeline
 wandb_name = "test_training_loss"
 a40_reference_wandb_summary_file = "fastvideo/tests/training/Vanilla/a40_reference_wandb_summary.json"
 l40s_reference_wandb_summary_file = "fastvideo/tests/training/Vanilla/l40s_reference_wandb_summary.json"
+h200_reference_wandb_summary_file = "fastvideo/tests/training/Vanilla/h200_reference_wandb_summary.json"
 
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "2"
@@ -65,7 +66,7 @@ def run_worker():
         "--num_width", "832",
         "--num_frames", "81",
         "--flow_shift", "3",
-        "--validation_guidance_scale", "1.0",
+        "--validation_guidance_scale", "3.0",
         "--num_euler_timesteps", "50",
         "--multi_phased_distill_schedule", "4000-1",
         "--weight_decay", "0.01",
@@ -126,6 +127,8 @@ def test_distributed_training():
         reference_wandb_summary_file = a40_reference_wandb_summary_file
     elif "L40S" in device_name:
         reference_wandb_summary_file = l40s_reference_wandb_summary_file
+    elif "H200" in device_name:
+        reference_wandb_summary_file = h200_reference_wandb_summary_file
     else:
         raise ValueError(f"Unknown device: {device_name}")
 

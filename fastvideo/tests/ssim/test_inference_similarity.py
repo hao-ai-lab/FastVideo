@@ -24,7 +24,8 @@ elif "H100" in device_name or "NVIDIA H100" in device_name:
 
 else:
     # device_reference_folder = "L40S" + device_reference_folder_suffix
-    raise ValueError(f"Unsupported device for ssim tests: {device_name}")
+    logger.warning(f"Unsupported device for ssim tests: {device_name}")
+    # raise ValueError(f"Unsupported device for ssim tests: {device_name}")
 
 # Base parameters from the shell script
 

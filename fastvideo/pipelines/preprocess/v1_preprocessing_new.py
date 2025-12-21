@@ -5,6 +5,10 @@ from fastvideo.logger import init_logger
 from fastvideo.utils import FlexibleArgumentParser
 from fastvideo.workflow.workflow_base import WorkflowBase
 
+import os
+
+os.environ["MASTER_PORT"] = "29513"
+
 logger = init_logger(__name__)
 
 

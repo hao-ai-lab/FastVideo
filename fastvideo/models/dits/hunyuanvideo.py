@@ -23,6 +23,7 @@ from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed,
 from fastvideo.models.dits.base import CachableDiT
 from fastvideo.models.utils import modulate
 from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.distributed.communication_op import sequence_model_parallel_shard, sequence_model_parallel_all_gather
 
 
 class HunyuanRMSNorm(nn.Module):
@@ -239,14 +240,7 @@ class MMDoubleStreamBlock(nn.Module):
 
         img_q = self.img_attn_q_norm(img_q).to(img_v)
         img_k = self.img_attn_k_norm(img_k).to(img_v)
-        # Apply rotary embeddings
-        cos, sin = freqs_cis
-        img_q, img_k = _apply_rotary_emb(
-            img_q, cos, sin,
-            is_neox_style=False), _apply_rotary_emb(img_k,
-                                                    cos,
-                                                    sin,
-                                                    is_neox_style=False)
+
         # Prepare text for attention using fused operation
         txt_attn_input = self.txt_attn_norm(txt, txt_attn_shift, txt_attn_scale)
 
@@ -265,7 +259,7 @@ class MMDoubleStreamBlock(nn.Module):
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_k.dtype)
 
         # Run distributed attention
-        img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v)
+        img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v, freqs_cis=freqs_cis)
         img_attn_out, _ = self.img_attn_proj(
             img_attn.view(batch_size, image_seq_len, -1))
         # Use fused operation for residual connection, normalization, and modulation
@@ -395,18 +389,11 @@ class MMSingleStreamBlock(nn.Module):
         img_q, txt_q = q[:, :-txt_len], q[:, -txt_len:]
         img_k, txt_k = k[:, :-txt_len], k[:, -txt_len:]
         img_v, txt_v = v[:, :-txt_len], v[:, -txt_len:]
-        # Apply rotary embeddings to image parts
-        cos, sin = freqs_cis
-        img_q, img_k = _apply_rotary_emb(
-            img_q, cos, sin,
-            is_neox_style=False), _apply_rotary_emb(img_k,
-                                                    cos,
-                                                    sin,
-                                                    is_neox_style=False)
+
 
         # Run distributed attention
         img_attn_output, txt_attn_output = self.attn(img_q, img_k, img_v, txt_q,
-                                                     txt_k, txt_v)
+                                                     txt_k, txt_v, freqs_cis = freqs_cis)
         attn_output = torch.cat((img_attn_output, txt_attn_output),
                                 dim=1).view(batch_size, seq_len, -1)
         # Process MLP activation
@@ -593,7 +580,7 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
 
         # Get rotary embeddings
         freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (tt * get_sp_world_size(), th, tw), self.hidden_size,
+            (tt, th, tw), self.hidden_size,
             self.num_attention_heads, self.rope_dim_list, self.rope_theta)
         freqs_cos = freqs_cos.to(x.device)
         freqs_sin = freqs_sin.to(x.device)
@@ -608,6 +595,7 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
             vec = vec + self.guidance_in(guidance)
         # Embed image and text
         img = self.img_in(img)
+        img, _ = sequence_model_parallel_shard(img, dim=1)
         txt = self.txt_in(txt, t)
         txt_seq_len = txt.shape[1]
         img_seq_len = img.shape[1]
@@ -648,6 +636,7 @@ class HunyuanVideoTransformer3DModel(CachableDiT):
                 self.maybe_cache_states(img, original_img)
 
         # Final layer processing
+        img = sequence_model_parallel_all_gather(img, dim=1)
         img = self.final_layer(img, vec)
         # Unpatchify to get original shape
         img = unpatchify(img, tt, th, tw, self.patch_size, self.out_channels)

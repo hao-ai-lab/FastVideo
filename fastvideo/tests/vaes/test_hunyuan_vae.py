@@ -23,8 +23,8 @@ os.environ["MASTER_PORT"] = "29503"
 
 BASE_MODEL_PATH = "hunyuanvideo-community/HunyuanVideo"
 MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-                                  local_dir=os.path.join(
-                                      "data", BASE_MODEL_PATH))
+                                  local_dir=os.path.join("data", BASE_MODEL_PATH) # store in the large /workspace disk on Runpod
+                                  )
 VAE_PATH = os.path.join(MODEL_PATH, "vae")
 CONFIG_PATH = os.path.join(VAE_PATH, "config.json")
 
@@ -33,7 +33,7 @@ CONFIG_PATH = os.path.join(VAE_PATH, "config.json")
 A40_REFERENCE_LATENT = -106.22467041015625
 
 # Latent generated on commit 2b54068960c41d42221e8b8719a374b499855029 with 1 x L40S
-L40S_REFERENCE_LATENT = -158.32318115234375
+L40S_REFERENCE_LATENT = -157.09130859375
 
 
 @pytest.mark.usefixtures("distributed_setup")

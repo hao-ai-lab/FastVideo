@@ -124,7 +124,7 @@ def run_training():
         "--num_height", "480",
         "--num_width", "832",
         "--num_frames", "81",
-        "--validation_guidance_scale", "1.0",
+        "--validation_guidance_scale", "6.0",
         "--num_euler_timesteps", "50",
         "--multi_phased_distill_schedule", "4000-1",
         "--weight_decay", "0.01",
@@ -140,8 +140,8 @@ def run_training():
 def test_e2e_overfit_single_sample():
     os.environ["WANDB_MODE"] = "online"
 
-    # download_data()
-    # run_preprocessing()
+    download_data()
+    run_preprocessing()
     run_training()
 
     reference_video_file = os.path.join(os.path.dirname(__file__), "reference_video_1_sample_v0.mp4")

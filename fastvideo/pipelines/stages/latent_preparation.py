@@ -28,10 +28,14 @@ class LatentPreparationStage(PipelineStage):
     denoised during the diffusion process.
     """
 
-    def __init__(self, scheduler, transformer) -> None:
+    def __init__(self,
+                 scheduler,
+                 transformer,
+                 use_btchw_layout: bool = False) -> None:
         super().__init__()
         self.scheduler = scheduler
         self.transformer = transformer
+        self.use_btchw_layout = use_btchw_layout
 
     def forward(
         self,
@@ -53,8 +57,17 @@ class LatentPreparationStage(PipelineStage):
         # Adjust video length based on VAE version if needed
         if hasattr(self, 'adjust_video_length'):
             latent_num_frames = self.adjust_video_length(batch, fastvideo_args)
-        # Determine batch size
-        if isinstance(batch.prompt, list):
+        # Determine batch size; fall back to action/image inputs when no text encoder is present
+        if not batch.prompt_embeds:
+            if batch.keyboard_cond is not None:
+                batch_size = batch.keyboard_cond.shape[0]
+            elif batch.mouse_cond is not None:
+                batch_size = batch.mouse_cond.shape[0]
+            elif batch.image_embeds:
+                batch_size = batch.image_embeds[0].shape[0]
+            else:
+                batch_size = 1
+        elif isinstance(batch.prompt, list):
             batch_size = len(batch.prompt)
         elif batch.prompt is not None:
             batch_size = 1
@@ -65,6 +78,19 @@ class LatentPreparationStage(PipelineStage):
         batch_size *= batch.num_videos_per_prompt
 
         # Get required parameters
+        if not batch.prompt_embeds:
+            # Create a dummy zero-length text embedding to satisfy downstream checks.
+            # Matrix-Game models have text_dim=0 and ignore encoder_hidden_states.
+            transformer_dtype = next(self.transformer.parameters()).dtype
+            device = get_local_torch_device()
+            dummy_prompt = torch.zeros(batch_size,
+                                       0,
+                                       self.transformer.hidden_size,
+                                       device=device,
+                                       dtype=transformer_dtype)
+            batch.prompt_embeds = [dummy_prompt]
+            batch.negative_prompt_embeds = []
+            batch.do_classifier_free_guidance = False
         dtype = batch.prompt_embeds[0].dtype
         device = get_local_torch_device()
         generator = batch.generator
@@ -78,15 +104,29 @@ class LatentPreparationStage(PipelineStage):
             raise ValueError("Height and width must be provided")
 
         # Calculate latent shape
-        shape = (
-            batch_size,
-            self.transformer.num_channels_latents,
-            num_frames,
-            height // fastvideo_args.pipeline_config.vae_config.arch_config.
-            spatial_compression_ratio,
-            width // fastvideo_args.pipeline_config.vae_config.arch_config.
-            spatial_compression_ratio,
-        )
+        bcthw_shape: tuple[int, ...] | None = None
+        if self.use_btchw_layout:
+            shape = (
+                batch_size,
+                num_frames,
+                self.transformer.num_channels_latents,
+                height // fastvideo_args.pipeline_config.vae_config.arch_config.
+                spatial_compression_ratio,
+                width // fastvideo_args.pipeline_config.vae_config.arch_config.
+                spatial_compression_ratio,
+            )
+            bcthw_shape = tuple(shape[i] for i in [0, 2, 1, 3, 4])
+        else:
+            shape = (
+                batch_size,
+                self.transformer.num_channels_latents,
+                num_frames,
+                height // fastvideo_args.pipeline_config.vae_config.arch_config.
+                spatial_compression_ratio,
+                width // fastvideo_args.pipeline_config.vae_config.arch_config.
+                spatial_compression_ratio,
+            )
+            bcthw_shape = shape
 
         # Validate generator if it's a list
         if isinstance(generator, list) and len(generator) != batch_size:
@@ -108,7 +148,7 @@ class LatentPreparationStage(PipelineStage):
             latents = latents * self.scheduler.init_noise_sigma
         # Update batch with prepared latents
         batch.latents = latents
-        batch.raw_latent_shape = latents.shape
+        batch.raw_latent_shape = bcthw_shape
 
         return batch
 
@@ -139,10 +179,12 @@ class LatentPreparationStage(PipelineStage):
         """Verify latent preparation stage inputs."""
         result = VerificationResult()
         result.add_check(
-            "prompt_or_embeds", None, lambda _: V.string_or_list_strings(
-                batch.prompt) or V.list_not_empty(batch.prompt_embeds))
-        result.add_check("prompt_embeds", batch.prompt_embeds,
-                         V.list_of_tensors)
+            "prompt_or_embeds", None,
+            lambda _: V.string_or_list_strings(batch.prompt) or not batch.
+            prompt_embeds or V.list_not_empty(batch.prompt_embeds))
+        if batch.prompt_embeds:
+            result.add_check("prompt_embeds", batch.prompt_embeds,
+                             V.list_of_tensors)
         result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt,
                          V.positive_int)
         result.add_check("generator", batch.generator,

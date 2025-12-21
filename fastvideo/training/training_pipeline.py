@@ -153,8 +153,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         )
         if self.transformer_2 is not None:
             # Ensure transformer_2 has trainable parameters before creating optimizer
-            self.transformer_2.train()
-            self.transformer_2.requires_grad_(True)
             params_to_optimize_2 = self.transformer_2.parameters()
             params_to_optimize_2 = list(
                 filter(lambda p: p.requires_grad, params_to_optimize_2))
@@ -238,28 +236,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
             "Training pipelines must implement this method")
 
     def _prepare_training(self, training_batch: TrainingBatch) -> TrainingBatch:
-        self.transformer.train()
         self.optimizer.zero_grad()
         if self.transformer_2 is not None:
-            self.transformer_2.train()
             self.optimizer_2.zero_grad()
         training_batch.total_loss = 0.0
         return training_batch
-
-    def _enable_training(self, model: torch.nn.Module,
-                         optimizer: torch.optim.Optimizer) -> None:
-        """Enable training mode and gradients for the specified model."""
-        for param in model.parameters():
-            param.requires_grad = True
-        model.train()
-        optimizer.zero_grad()
-
-    def _disable_training(self, model: torch.nn.Module,
-                          optimizer: torch.optim.Optimizer) -> None:
-        """Disable training mode and gradients for the specified model."""
-        for param in model.parameters():
-            param.requires_grad = False
-        optimizer.zero_grad(set_to_none=True)
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         with self.tracker.timed("timing/get_next_batch"):
@@ -326,15 +307,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
                                 device=latents.device,
                                 dtype=latents.dtype)
             timesteps = self._sample_timesteps(batch_size, latents.device)
-
-            # Enable training for the model that will be trained next and disable the other
-            if self.train_transformer_2:
-                self._enable_training(self.transformer_2, self.optimizer_2)
-                self._disable_training(self.transformer, self.optimizer)
-            else:
-                self._enable_training(self.transformer, self.optimizer)
-                if self.transformer_2 is not None:
-                    self._disable_training(self.transformer_2, self.optimizer_2)
 
             if self.training_args.sp_size > 1:
                 # Make sure that the timesteps are the same across all sp processes.
@@ -476,10 +448,15 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
             # make sure no implicit broadcasting happens
             assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
-            loss = (torch.mean((model_pred.float() - target.float())**2) /
+
+            sharded_pred = shard_latents_across_sp(model_pred)
+            sharded_target = shard_latents_across_sp(target)
+            loss = (torch.mean(
+                (sharded_pred.float() - sharded_target.float())**2) /
                     self.training_args.gradient_accumulation_steps)
 
             loss.backward()
+
             avg_loss = loss.detach().clone()
 
         # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
@@ -530,21 +507,26 @@ class TrainingPipeline(LoRAPipeline, ABC):
             # Create noisy model input
             training_batch = self._prepare_dit_inputs(training_batch)
 
+            # old sharding code, need to shard latents and noise but not input
             # Shard latents across sp groups
-            training_batch.latents = shard_latents_across_sp(
-                training_batch.latents,
-                num_latent_t=self.training_args.num_latent_t)
+            training_batch.latents = training_batch.latents[:, :, :self.
+                                                            training_args.
+                                                            num_latent_t]
             # shard noisy_model_input to match
-            training_batch.noisy_model_input = shard_latents_across_sp(
-                training_batch.noisy_model_input,
-                num_latent_t=self.training_args.num_latent_t)
+            training_batch.noisy_model_input = training_batch.noisy_model_input[:, :, :
+                                                                                self
+                                                                                .
+                                                                                training_args
+                                                                                .
+                                                                                num_latent_t]
             # shard noise to match latents
-            training_batch.noise = shard_latents_across_sp(
-                training_batch.noise,
-                num_latent_t=self.training_args.num_latent_t)
+            training_batch.noise = training_batch.noise[:, :, :self.
+                                                        training_args.
+                                                        num_latent_t]
 
             training_batch = self._build_attention_metadata(training_batch)
             training_batch = self._build_input_kwargs(training_batch)
+
             training_batch = self._transformer_forward_and_compute_loss(
                 training_batch)
 
@@ -825,7 +807,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         validation_dataloader = DataLoader(validation_dataset,
                                            batch_size=None,
                                            num_workers=0)
-
+        # return
         self.transformer.eval()
         if getattr(self, "transformer_2", None) is not None:
             self.transformer_2.eval()

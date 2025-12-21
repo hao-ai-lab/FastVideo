@@ -115,9 +115,14 @@ class ForwardBatch:
 
     # Latent tensors
     latents: torch.Tensor | None = None
-    raw_latent_shape: torch.Tensor | None = None
+    raw_latent_shape: tuple[int, ...] | None = None
     noise_pred: torch.Tensor | None = None
     image_latent: torch.Tensor | None = None
+
+    # Action control inputs (Matrix-Game)
+    mouse_cond: torch.Tensor | None = None  # Shape: (B, T, 2)
+    keyboard_cond: torch.Tensor | None = None  # Shape: (B, T, K)
+    grid_sizes: torch.Tensor | None = None  # Shape: (3,) [F,H,W]
 
     # Latent dimensions
     height_latents: list[int] | int | None = None
@@ -206,7 +211,7 @@ class TrainingBatch:
 
     # Dataloader batch outputs
     latents: torch.Tensor | None = None
-    raw_latent_shape: torch.Tensor | None = None
+    raw_latent_shape: tuple[int, ...] | None = None
     noise_latents: torch.Tensor | None = None
     encoder_hidden_states: torch.Tensor | None = None
     encoder_attention_mask: torch.Tensor | None = None
