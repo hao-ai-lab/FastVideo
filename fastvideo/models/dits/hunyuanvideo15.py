@@ -19,15 +19,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from fastvideo.attention import DistributedAttention, LocalAttention
-from fastvideo.distributed.parallel_state import get_sp_world_size
+from fastvideo.distributed.communication_op import (
+    sequence_model_parallel_all_gather_with_unpad,
+    sequence_model_parallel_shard)
 from fastvideo.configs.models.dits import HunyuanVideo15Config
 from fastvideo.layers.layernorm import (LayerNormScaleShift, ScaleResidual,
                                         ScaleResidualLayerNormScaleShift)
 from fastvideo.layers.linear import ReplicatedLinear
 # TODO(will-PY-refactor): RMSNorm ....
 from fastvideo.layers.mlp import MLP
-from fastvideo.layers.rotary_embedding import (_apply_rotary_emb,
-                                               get_rotary_pos_embed)
+from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
 from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed,
                                                TimestepEmbedder, unpatchify)
 from fastvideo.models.dits.base import CachableDiT
@@ -35,6 +36,9 @@ from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.logger import init_logger
 from fastvideo.forward_context import set_forward_context
 from fastvideo.attention.backends.abstract import AttentionMetadata
+
+from fastvideo.distributed.parallel_state import get_sp_world_size
+from fastvideo.distributed.utils import create_attention_mask_for_padding
 
 logger = init_logger(__name__)
 
@@ -289,6 +293,7 @@ class MMDoubleStreamBlock(nn.Module):
         encoder_attention_mask: torch.Tensor,
         vec: torch.Tensor,
         freqs_cis: tuple,
+        seq_attention_mask: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         # Process modulation vectors
         img_mod_outputs = self.img_mod(vec)
@@ -327,10 +332,6 @@ class MMDoubleStreamBlock(nn.Module):
         img_q = self.img_attn_q_norm(img_q).to(img_v)
         img_k = self.img_attn_k_norm(img_k).to(img_v)
 
-        # Apply rotary embeddings
-        cos, sin = freqs_cis
-        img_q = _apply_rotary_emb(img_q, cos, sin, is_neox_style=False)
-        img_k = _apply_rotary_emb(img_k, cos, sin, is_neox_style=False)
         # Prepare text for attention using fused operation
         txt_attn_input = self.txt_attn_norm(txt, txt_attn_shift, txt_attn_scale)
 
@@ -361,7 +362,7 @@ class MMDoubleStreamBlock(nn.Module):
         )
         # Run distributed attention
         with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
-            img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v)
+            img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v, freqs_cis=freqs_cis, attention_mask=seq_attention_mask)
         
         img_attn_out, _ = self.img_attn_proj(
             img_attn.view(batch_size, image_seq_len, -1))
@@ -486,7 +487,7 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
         # 1. RoPE
         # Get rotary embeddings
         freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (post_patch_num_frames * get_sp_world_size(), post_patch_height, post_patch_width), self.hidden_size,
+            (post_patch_num_frames, post_patch_height, post_patch_width), self.hidden_size,
             self.num_attention_heads, self.config.rope_axes_dim, self.config.rope_theta)
         freqs_cos = freqs_cos.to(hidden_states.device)
         freqs_sin = freqs_sin.to(hidden_states.device)
@@ -496,6 +497,21 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
         temb = self.time_in(timestep, timestep_r=timestep_r)
 
         hidden_states = self.img_in(hidden_states)
+        hidden_states, original_seq_len = sequence_model_parallel_shard(hidden_states, dim=1)
+
+        current_seq_len = hidden_states.shape[1]
+        sp_world_size = get_sp_world_size()
+        padded_seq_len = current_seq_len * sp_world_size
+        
+        if padded_seq_len > original_seq_len:
+            seq_attention_mask = create_attention_mask_for_padding(
+                seq_len=original_seq_len,
+                padded_seq_len=padded_seq_len,
+                batch_size=batch_size,
+                device=hidden_states.device,
+            )
+        else:
+            seq_attention_mask = None
 
         # qwen text embedding
         encoder_hidden_states = self.txt_in(encoder_hidden_states, timestep, encoder_attention_mask)
@@ -594,7 +610,8 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
                     encoder_hidden_states,
                     encoder_attention_mask,
                     temb,
-                    freqs_cis
+                    freqs_cis,
+                    seq_attention_mask
                 )
 
         else:
@@ -604,10 +621,12 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
                     encoder_hidden_states,
                     encoder_attention_mask,
                     temb,
-                    freqs_cis
+                    freqs_cis,
+                    seq_attention_mask
                 )
 
         # Final layer processing
+        hidden_states = sequence_model_parallel_all_gather_with_unpad(hidden_states, original_seq_len, dim=1)
         hidden_states = self.final_layer(hidden_states, temb)
         # Unpatchify to get original shape
         hidden_states = unpatchify(hidden_states, post_patch_num_frames, post_patch_height, post_patch_width, self.patch_size, self.out_channels)

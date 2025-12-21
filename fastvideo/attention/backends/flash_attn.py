@@ -92,7 +92,9 @@ class FlashAttentionImpl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: FlashAttnMetadata,
     ):
-        if attn_metadata is not None and attn_metadata.attn_mask is not None:
+        if attn_metadata is not None and hasattr(
+                attn_metadata,
+                "attn_mask") and attn_metadata.attn_mask is not None:
             from fastvideo.attention.utils.flash_attn_no_pad import flash_attn_no_pad
             attn_mask = attn_metadata.attn_mask
             qkv = torch.stack([query, key, value], dim=2)

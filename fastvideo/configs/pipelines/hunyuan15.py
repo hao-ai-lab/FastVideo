@@ -129,3 +129,11 @@ class Hunyuan15T2V480PConfig(PipelineConfig):
     def __post_init__(self):
         self.vae_config.load_encoder = False
         self.vae_config.load_decoder = True
+
+
+@dataclass
+class Hunyuan15T2V720PConfig(Hunyuan15T2V480PConfig):
+    """Base configuration for HunYuan pipeline architecture."""
+
+    # HunyuanConfig-specific parameters with defaults
+    flow_shift: int = 9

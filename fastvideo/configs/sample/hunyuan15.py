@@ -19,3 +19,11 @@ class Hunyuan15_480P_SamplingParam(SamplingParam):
     negative_attention_mask: list = field(default_factory=list)
     sigmas: list[float] | None = field(
         default_factory=lambda: list(np.linspace(1.0, 0.0, 50 + 1)[:-1]))
+
+    negative_prompt: str = ""
+
+
+@dataclass
+class Hunyuan15_720P_SamplingParam(Hunyuan15_480P_SamplingParam):
+    height: int = 720
+    width: int = 1280
