@@ -15,10 +15,10 @@ classifiers = [
     "Environment :: GPU :: NVIDIA CUDA :: 12",
     "License :: OSI Approved :: Apache Software License",
 ]
-dependencies = ["torch>=2.5.0"]
-
-[project.optional-dependencies]
-triton = ["triton>=2.0.0"]
+dependencies = [
+    "torch>=2.5.0",
+    "triton>=2.0.0"
+]
 
 [project.urls]
 Repository = "https://github.com/hao-ai-lab/FastVideo"

@@ -8,10 +8,27 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 ROOT = Path(__file__).parent.absolute()
 CSRC_DIR = ROOT / "csrc"
 
-# Path to ThunderKittens (TK) - needs to be provided via env var or submodule
-# Since TK is a heavy dependency, we assume it's in a known location 
-# or the user has initialized submodules in the parent repo.
-TK_DIR = os.getenv("THUNDERKITTENS_ROOT", str(ROOT.parent / "attn" / "sliding_tile_attn" / "tk"))
+# Path to ThunderKittens (TK)
+def get_tk_dir():
+    tk_env = os.getenv("THUNDERKITTENS_ROOT")
+    if tk_env:
+        return tk_env
+    
+    # Check common locations
+    possible_paths = [
+        ROOT / "tk",
+        ROOT / "csrc" / "tk",
+        ROOT.parent / "attn" / "sliding_tile_attn" / "tk",
+        ROOT.parent / "attn" / "video_sparse_attn" / "tk",
+    ]
+    for p in possible_paths:
+        if (p / "include" / "kittens.cuh").exists():
+            return str(p)
+    
+    # Default fallback
+    return str(ROOT.parent / "attn" / "sliding_tile_attn" / "tk")
+
+TK_DIR = get_tk_dir()
 
 def get_cuda_flags(tk_root: str) -> list:
     python_include = subprocess.check_output(

@@ -42,14 +42,13 @@ def sliding_tile_attention(
     flag = shape_map[seq_shape]
     
     for head_idx, (t, h, w) in enumerate(window_size):
-        for batch in range(q.shape[0]):
-            sta_fwd(
-                q[batch:batch+1, head_idx:head_idx+1],
-                k[batch:batch+1, head_idx:head_idx+1],
-                v[batch:batch+1, head_idx:head_idx+1],
-                output[batch:batch+1, head_idx:head_idx+1],
-                t, h, w, text_length, False, has_text, flag
-            )
+        sta_fwd(
+            q[:, head_idx:head_idx+1],
+            k[:, head_idx:head_idx+1],
+            v[:, head_idx:head_idx+1],
+            output[:, head_idx:head_idx+1],
+            t, h, w, text_length, False, has_text, flag
+        )
     
     if has_text:
         sta_fwd(q, k, v, output, 3, 3, 3, text_length, True, True, flag)

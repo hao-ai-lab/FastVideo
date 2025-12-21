@@ -3,15 +3,8 @@ import sys
 import os
 from tqdm import tqdm
 
-# Add the parent directory of csrc/attn/tests to find flex_sta_ref
-# We are running from FastVideo-fork/csrc/fastvideo_kernel
-sys.path.append(os.path.abspath("../attn/tests"))
-
-try:
-    from flex_sta_ref import get_sliding_tile_attention_mask
-except ImportError:
-    print("Error: Could not find flex_sta_ref.py. Make sure you are running from FastVideo-fork/csrc/fastvideo_kernel")
-    sys.exit(1)
+# Local support import
+from .support_flex_sta import get_sliding_tile_attention_mask
 
 # USE OUR NEW PACKAGE!
 from fastvideo_kernel import sliding_tile_attention
