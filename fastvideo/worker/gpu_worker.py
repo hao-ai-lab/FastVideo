@@ -114,6 +114,18 @@ class Worker:
             return {"status": "lora_adapter_unmerged"}
         return {"status": "failed: pipeline is not a LoRAPipeline"}
 
+    def execute_streaming_reset(self, forward_batch: ForwardBatch,
+                                fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        return self.pipeline.streaming_reset(forward_batch, self.fastvideo_args)
+
+    def execute_streaming_step(self, keyboard_action: torch.Tensor,
+                               mouse_action: torch.Tensor) -> ForwardBatch:
+        return self.pipeline.streaming_step(keyboard_action, mouse_action)
+
+    def execute_streaming_clear(self) -> dict[str, Any]:
+        self.pipeline.streaming_clear()
+        return {"status": "cleared"}
+
     def merge_lora_weights(self) -> dict[str, Any]:
         if isinstance(self.pipeline, LoRAPipeline):
             self.pipeline.merge_lora_weights()

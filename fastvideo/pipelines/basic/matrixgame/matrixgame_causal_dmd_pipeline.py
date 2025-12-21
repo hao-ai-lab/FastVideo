@@ -2,8 +2,9 @@
 """Matrix-Game causal DMD pipeline implementation."""
 
 from fastvideo.fastvideo_args import FastVideoArgs
+import torch
 from fastvideo.logger import init_logger
-from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
+from fastvideo.pipelines import ComposedPipelineBase, ForwardBatch, LoRAPipeline
 
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
                                         InputValidationStage,
@@ -69,5 +70,60 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         logger.info(
             "MatrixGameCausalDMDPipeline initialized with action support")
 
+    @torch.no_grad()
+    def streaming_reset(self, batch: ForwardBatch, 
+                        fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        if not self.post_init_called:
+            self.post_init()
+            
+        # 1. Run Pre-processing stages
+        stages_to_run = [
+            "input_validation_stage", 
+            "prompt_encoding_stage", 
+            "image_encoding_stage", 
+            "conditioning_stage",
+            "latent_preparation_stage",
+            "image_latent_preparation_stage"
+        ]
+        
+        for stage_name in stages_to_run:
+            if stage_name in self._stage_name_mapping:
+                batch = self._stage_name_mapping[stage_name].forward(batch, fastvideo_args)
+                
+        # 2. Reset Denoising Stage
+        denoiser = self._stage_name_mapping["denoising_stage"]
+        batch = denoiser.reset_streaming(batch, fastvideo_args)
+        
+        # 3. Decode the generated block
+        end_idx = denoiser._streaming_start_index
+        if end_idx > 0:
+            current_latents = batch.latents[:, :, :end_idx, :, :]
+            decoded_frames = self._stage_name_mapping["decoding_stage"].decode(current_latents, fastvideo_args)
+            batch.output = decoded_frames
+            
+        return batch
+
+    def streaming_step(self, keyboard_action, mouse_action) -> ForwardBatch:
+        denoiser = self._stage_name_mapping["denoising_stage"]
+        
+        start_idx = denoiser._streaming_start_index
+        batch = denoiser.step_streaming(keyboard_action, mouse_action)
+        end_idx = denoiser._streaming_start_index
+        
+        # Decode only the new generated block
+        if end_idx > start_idx:
+            current_latents = batch.latents[:, :, start_idx:end_idx, :, :]
+            args = denoiser._streaming_fastvideo_args
+            decoded_frames = self._stage_name_mapping["decoding_stage"].decode(current_latents, args)
+            batch.output = decoded_frames
+        else:
+            batch.output = None
+
+        return batch
+        
+    def streaming_clear(self) -> None:
+        denoiser = self._stage_name_mapping.get("denoising_stage")
+        if denoiser is not None and hasattr(denoiser, "clear_streaming"):
+            denoiser.clear_streaming()
 
 EntryClass = [MatrixGameCausalDMDPipeline]
