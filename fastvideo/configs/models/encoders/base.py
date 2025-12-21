@@ -72,6 +72,7 @@ class EncoderConfig(ModelConfig):
 @dataclass
 class TextEncoderConfig(EncoderConfig):
     arch_config: ArchConfig = field(default_factory=TextEncoderArchConfig)
+    is_chat_model: bool = False
 
 
 @dataclass

@@ -108,6 +108,7 @@ class DistributedAttention(nn.Module):
         # Since mask is [batch, full_seq_len], it's already in the correct format
 
         # LOAY TODO, instead of slicing repeatedly maintain an original qkv and rewrite into that
+        valid_seq_len = None
         if attention_mask is not None:
             valid_seq_len = (attention_mask[0] == 1).sum().item()
             qkv = qkv[:, :valid_seq_len, :, :]
@@ -140,8 +141,9 @@ class DistributedAttention(nn.Module):
         # Redistribute back if using sequence parallelism
         replicated_output = None
         if replicated_q is not None:
-            replicated_output = output[:, seq_len * world_size:]
-            output = output[:, :seq_len * world_size]
+            split_idx = seq_len * world_size if valid_seq_len is None else valid_seq_len
+            replicated_output = output[:, split_idx:]
+            output = output[:, :split_idx]
             # TODO: make this asynchronous
             replicated_output = sequence_model_parallel_all_gather(
                 replicated_output.contiguous(), dim=2)

@@ -16,7 +16,7 @@ from fastvideo.pipelines.stages.denoising import (CosmosDenoisingStage,
 from fastvideo.pipelines.stages.encoding import EncodingStage
 from fastvideo.pipelines.stages.image_encoding import (
     ImageEncodingStage, MatrixGameImageEncodingStage, RefImageEncodingStage,
-    ImageVAEEncodingStage, VideoVAEEncodingStage)
+    ImageVAEEncodingStage, VideoVAEEncodingStage, Hy15ImageEncodingStage)
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.latent_preparation import (
     CosmosLatentPreparationStage, LatentPreparationStage)
@@ -44,6 +44,7 @@ __all__ = [
     "DecodingStage",
     "ImageEncodingStage",
     "MatrixGameImageEncodingStage",
+    "Hy15ImageEncodingStage",
     "RefImageEncodingStage",
     "ImageVAEEncodingStage",
     "VideoVAEEncodingStage",
