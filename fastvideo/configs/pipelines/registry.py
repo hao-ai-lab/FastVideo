@@ -84,8 +84,7 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
 PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "hunyuan":
     HunyuanConfig,  # Base Hunyuan config as fallback for any Hunyuan variant
-    "matrixgame": 
-    MatrixGameI2V480PConfig,
+    "matrixgame": MatrixGameI2V480PConfig,
     "hunyuan15":
     Hunyuan15T2V480PConfig,  # Base Hunyuan15 config as fallback for any Hunyuan15 variant
     "wanpipeline":
