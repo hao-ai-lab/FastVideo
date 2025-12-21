@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0", "torch>=2.5.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fastvideo-kernel"
+version = "0.1.0"
+description = "CUDA kernels for FastVideo"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+authors = [{name = "Hao AI Lab"}]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Environment :: GPU :: NVIDIA CUDA :: 12",
+    "License :: OSI Approved :: Apache Software License",
+]
+dependencies = ["torch>=2.5.0"]
+
+[project.optional-dependencies]
+triton = ["triton>=2.0.0"]
+
+[project.urls]
+Repository = "https://github.com/hao-ai-lab/FastVideo"
+
+[tool.setuptools.packages.find]
+where = ["src"]
