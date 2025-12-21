@@ -412,11 +412,9 @@ class VAELoader(ComponentLoader):
         # Find all safetensors files
         safetensors_list = glob.glob(
             os.path.join(str(model_path), "*.safetensors"))
-        # TODO(PY)
-        assert len(
-            safetensors_list
-        ) == 1, f"Found {len(safetensors_list)} safetensors files in {model_path}"
-        loaded = safetensors_load_file(safetensors_list[0])
+        loaded = {}
+        for sf_file in safetensors_list:
+            loaded.update(safetensors_load_file(sf_file))
         vae.load_state_dict(
             loaded, strict=False)  # We might only load encoder or decoder
 
@@ -478,8 +476,6 @@ class TransformerLoader(ComponentLoader):
             fastvideo_args.pipeline_config.dit_precision]
 
         # Load the model using FSDP loader
-        logger.info("Loading model from %s, default_dtype: %s", cls_name,
-                    default_dtype)
         assert fastvideo_args.hsdp_shard_dim is not None
         model = maybe_load_fsdp_model(
             model_cls=model_cls,

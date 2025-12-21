@@ -24,6 +24,8 @@ logger = init_logger(__name__)
 _TEXT_TO_VIDEO_DIT_MODELS = {
     "HunyuanVideoTransformer3DModel":
     ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
+    "HunyuanVideo15Transformer3DModel":
+    ("dits", "hunyuanvideo15", "HunyuanVideo15Transformer3DModel"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
     "StepVideoModel": ("dits", "stepvideo", "StepVideoModel"),
@@ -45,6 +47,7 @@ _TEXT_ENCODER_MODELS = {
     "T5EncoderModel": ("encoders", "t5", "T5EncoderModel"),
     "STEP1TextEncoder": ("encoders", "stepllm", "STEP1TextEncoder"),
     "BertModel": ("encoders", "clip", "CLIPTextModel"),
+    "Qwen2_5_VLTextModel": ("encoders", "qwen2_5", "Qwen2_5_VLTextModel"),
 }
 
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
@@ -56,6 +59,7 @@ _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
 _VAE_MODELS = {
     "AutoencoderKLHunyuanVideo":
     ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
+    "AutoencoderKLHunyuanVideo15": ("vaes", "hunyuan15vae", "AutoencoderKLHunyuanVideo15"),
     "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
     "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo")
 }

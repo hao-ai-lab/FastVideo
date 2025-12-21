@@ -50,6 +50,7 @@ class SamplingParam:
     guidance_scale: float = 1.0
     guidance_rescale: float = 0.0
     boundary_ratio: float | None = None
+    sigmas: list[float] | None = None
 
     # TeaCache parameters
     enable_teacache: bool = False

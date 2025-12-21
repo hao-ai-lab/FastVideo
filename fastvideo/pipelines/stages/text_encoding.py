@@ -6,6 +6,7 @@ This module contains implementations of prompt encoding stages for diffusion pip
 """
 
 import torch
+from typing import Any
 
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -100,9 +101,9 @@ class TextEncodingStage(PipelineStage):
         """Verify text encoding stage inputs."""
         result = VerificationResult()
         result.add_check("prompt", batch.prompt, V.string_or_list_strings)
-        result.add_check(
-            "negative_prompt", batch.negative_prompt, lambda x: not batch.
-            do_classifier_free_guidance or V.string_not_empty(x))
+        # result.add_check(
+        #     "negative_prompt", batch.negative_prompt, lambda x: not batch.
+        #     do_classifier_free_guidance or V.string_not_empty(x))
         result.add_check("do_classifier_free_guidance",
                          batch.do_classifier_free_guidance, V.bool_value)
         result.add_check("prompt_embeds", batch.prompt_embeds, V.is_list)
@@ -203,20 +204,45 @@ class TextEncodingStage(PipelineStage):
             preprocess_func = preprocess_funcs[i]
             postprocess_func = postprocess_funcs[i]
 
-            processed_texts: list[str] = []
-            for prompt_str in texts:
-                processed_texts.append(preprocess_func(prompt_str))
-
             tok_kwargs = dict(encoder_config.tokenizer_kwargs)
             if max_length is not None:
                 tok_kwargs["max_length"] = max_length
+            elif hasattr(fastvideo_args.pipeline_config,
+                         "text_encoder_max_lengths"):
+                tok_kwargs[
+                    "max_length"] = fastvideo_args.pipeline_config.text_encoder_max_lengths[
+                        i]
+
             if truncation is not None:
                 tok_kwargs["truncation"] = truncation
             if padding is not None:
                 tok_kwargs["padding"] = padding
 
-            text_inputs = tokenizer(processed_texts,
-                                    **tok_kwargs).to(target_device)
+            processed_texts: list[str] = []
+            for prompt_str in texts:
+                processed_text = preprocess_func(prompt_str)
+                if processed_text is not None:
+                    processed_texts.append(processed_text)
+                else:
+                    # Assuming batch_size = 1
+                    prompt_embeds = torch.zeros((1, tok_kwargs["max_length"],
+                                                 encoder_config.hidden_size),
+                                                device=target_device)
+                    attention_mask = torch.zeros((1, tok_kwargs["max_length"]),
+                                                 device=target_device,
+                                                 dtype=torch.int64)
+                    embeds_list.append(prompt_embeds)
+                    attn_masks_list.append(attention_mask)
+                    return self.return_embeds(embeds_list, attn_masks_list,
+                                              return_type,
+                                              return_attention_mask, indices)
+
+            if encoder_config.is_chat_model:
+                text_inputs = tokenizer.apply_chat_template(
+                    processed_texts, **tok_kwargs).to(target_device)
+            else:
+                text_inputs = tokenizer(processed_texts,
+                                        **tok_kwargs).to(target_device)
 
             input_ids = text_inputs["input_ids"]
             attention_mask = text_inputs["attention_mask"]
@@ -228,13 +254,29 @@ class TextEncodingStage(PipelineStage):
                     output_hidden_states=True,
                 )
 
-            prompt_embeds = postprocess_func(outputs)
+            try:
+                prompt_embeds = postprocess_func(outputs)
+            except Exception:
+                prompt_embeds, attention_mask = postprocess_func(
+                    outputs, attention_mask)
+
             if dtype is not None:
                 prompt_embeds = prompt_embeds.to(dtype=dtype)
             embeds_list.append(prompt_embeds)
             if return_attention_mask:
                 attn_masks_list.append(attention_mask)
 
+        return self.return_embeds(embeds_list, attn_masks_list, return_type,
+                                  return_attention_mask, indices)
+
+    def return_embeds(
+        self,
+        embeds_list: list[torch.Tensor],
+        attn_masks_list: list[torch.Tensor],
+        return_type: str = "list",
+        return_attention_mask: bool = False,
+        indices: list[int] | None = None,
+    ) -> Any:
         # Shape results according to return_type
         if return_type == "list":
             if return_attention_mask:

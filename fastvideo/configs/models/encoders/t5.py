@@ -40,6 +40,8 @@ class T5ArchConfig(TextEncoderArchConfig):
     eos_token_id: int = 1
     classifier_dropout: float = 0.0
     text_len: int = 512
+    dtype: str | None = None
+    gradient_checkpointing: bool = False
     stacked_params_mapping: list[tuple[str, str,
                                        str]] = field(default_factory=lambda: [
                                            # (param_name, shard_name, shard_id)
@@ -68,6 +70,7 @@ class T5ArchConfig(TextEncoderArchConfig):
             "return_attention_mask": True,
             "return_tensors": "pt",
         }
+        self.hidden_size = self.d_model
 
 
 @dataclass

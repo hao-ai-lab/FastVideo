@@ -23,6 +23,8 @@ class DiTArchConfig(ArchConfig):
     hidden_size: int = 0
     num_attention_heads: int = 0
     num_channels_latents: int = 0
+    in_channels: int = 0
+    out_channels: int = 0
     exclude_lora_layers: list[str] = field(default_factory=list)
     boundary_ratio: float | None = None
 

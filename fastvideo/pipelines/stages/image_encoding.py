@@ -100,6 +100,33 @@ class ImageEncodingStage(PipelineStage):
         return result
 
 
+class Hy15ImageEncodingStage(ImageEncodingStage):
+    """
+    Stage for encoding image prompts into embeddings for HunyuanVideo1.5 models.
+    """
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+        """Verify image encoding stage inputs."""
+        return VerificationResult()
+
+    def forward(self, batch: ForwardBatch,
+                fastvideo_args: FastVideoArgs) -> ForwardBatch:
+        """
+        Encode the prompt into image encoder hidden states.
+        """
+        if batch.pil_image is None:
+            batch.image_embeds = [
+                torch.zeros(1, 729, 1152, device=get_local_torch_device())
+            ]
+
+        raw_latent_shape = list(batch.raw_latent_shape)
+        raw_latent_shape[1] = 1
+        batch.video_latent = torch.zeros(tuple(raw_latent_shape),
+                                         device=get_local_torch_device())
+        return batch
+
+
 class MatrixGameImageEncodingStage(ImageEncodingStage):
     CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073]
     CLIP_STD = [0.26862954, 0.26130258, 0.27577711]

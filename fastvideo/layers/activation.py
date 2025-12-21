@@ -87,6 +87,7 @@ _ACTIVATION_REGISTRY = {
     "gelu_pytorch_tanh": lambda: nn.GELU(approximate="tanh"),
     "relu": nn.ReLU,
     "silu": nn.SiLU,
+    "swish": nn.SiLU,
     "quick_gelu": QuickGELU,
 }
 
