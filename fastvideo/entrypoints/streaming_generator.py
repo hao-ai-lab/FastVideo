@@ -1,3 +1,4 @@
+import asyncio
 import math
 import os
 import re
@@ -127,6 +128,35 @@ class StreamingVideoGenerator:
         
         self.executor.execute_streaming_clear()
         self.accumulated_frames = []
+        return output_path
+
+    async def step_async(self, keyboard_cond: torch.Tensor, mouse_cond: torch.Tensor) -> list[np.ndarray]:
+        if self.batch is None:
+            raise RuntimeError("Call reset() before step_async()")
+            
+        start_time = time.perf_counter()
+        
+        output_batch = await self.executor.execute_streaming_step_async(
+            keyboard_action=keyboard_cond, 
+            mouse_action=mouse_cond
+        )
+        
+        frames = self._process_output_batch(output_batch)
+        if len(frames) > 0:
+            self.accumulated_frames.extend(frames)
+        else:
+            logger.info("Step finished (no frames returned).")
+
+        return frames
+
+    async def save_video_async(self, frames: list[np.ndarray], output_path: str, fps: int = 24) -> str:
+        if not frames:
+            logger.warning("No frames to save.")
+            return ""
+            
+        logger.info(f"Saving {len(frames)} frames to {output_path} (async)...")
+        await asyncio.to_thread(imageio.mimsave, output_path, frames, fps=fps, format="mp4")
+        logger.info(f"Saved video to {output_path}")
         return output_path
 
     def _process_output_batch(self, output_batch: ForwardBatch) -> list[np.ndarray]:

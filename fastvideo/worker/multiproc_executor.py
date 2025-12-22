@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import asyncio
 import atexit
 import contextlib
 from dataclasses import dataclass
@@ -106,6 +107,15 @@ class MultiprocExecutor(Executor):
                                         })
         return responses[0]
 
+    async def execute_streaming_step_async(self, keyboard_action: Any,
+                                           mouse_action: Any) -> ForwardBatch:
+        responses = await self.collective_rpc_async("execute_streaming_step",
+                                                    kwargs={
+                                                        "keyboard_action": keyboard_action,
+                                                        "mouse_action": mouse_action,
+                                                    })
+        return responses[0]
+
     def execute_streaming_clear(self) -> dict[str, Any]:
         responses = self.collective_rpc("execute_streaming_clear")
         return responses[0]
@@ -168,6 +178,29 @@ class MultiprocExecutor(Executor):
             raise e
         except Exception as e:
             raise e
+
+    async def collective_rpc_async(self,
+                                   method: str | Callable,
+                                   timeout: float | None = None,
+                                   args: tuple = (),
+                                   kwargs: dict | None = None) -> list[Any]:
+        kwargs = kwargs or {}
+        loop = asyncio.get_running_loop()
+
+        for worker in self.workers:
+            worker.pipe.send({
+                "method": method,
+                "args": args,
+                "kwargs": kwargs
+            })
+
+        async def recv_from_worker(worker):
+            return await loop.run_in_executor(None, worker.pipe.recv)
+
+        responses = await asyncio.gather(
+            *[recv_from_worker(worker) for worker in self.workers]
+        )
+        return list(responses)
 
     def shutdown(self) -> None:
         """Properly shut down the executor and its workers"""
