@@ -76,7 +76,7 @@ def run_transformer_tests():
     run_test("hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/transformers -vs")
 
 @app.function(
-    gpu="L40S:2", 
+    gpu="L40S:4", 
     image=image, 
     timeout=5400, 
     secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})],
