@@ -911,6 +911,9 @@ class DistillationPipeline(TrainingPipeline):
                 # Get first batch of new epoch
                 batch = next(self.train_loader_iter)
 
+            device = get_local_torch_device()
+            dtype = torch.bfloat16
+
             encoder_hidden_states = batch['text_embedding']
             encoder_attention_mask = batch['text_attention_mask']
             infos = batch['info_list']
@@ -924,11 +927,15 @@ class DistillationPipeline(TrainingPipeline):
                 latent_height = self.training_args.num_height // spatial_compression_ratio
                 latent_width = self.training_args.num_width // spatial_compression_ratio
 
-                latents = torch.zeros(batch_size, num_channels,
-                                      self.training_args.num_latent_t,
-                                      latent_height,
-                                      latent_width).to(get_local_torch_device(),
-                                                       dtype=torch.bfloat16)
+                latents = torch.zeros(
+                    batch_size,
+                    num_channels,
+                    self.training_args.num_latent_t,
+                    latent_height,
+                    latent_width,
+                    device=device,
+                    dtype=dtype,
+                )
             else:
                 if 'vae_latent' not in batch:
                     raise ValueError(
@@ -936,14 +943,13 @@ class DistillationPipeline(TrainingPipeline):
                     )
                 latents = batch['vae_latent']
                 latents = latents[:, :, :self.training_args.num_latent_t]
-                latents = latents.to(get_local_torch_device(),
-                                     dtype=torch.bfloat16)
+                latents = latents.to(device, dtype=dtype)
 
             training_batch.latents = latents
             training_batch.encoder_hidden_states = encoder_hidden_states.to(
-                get_local_torch_device(), dtype=torch.bfloat16)
+                device, dtype=dtype)
             training_batch.encoder_attention_mask = encoder_attention_mask.to(
-                get_local_torch_device(), dtype=torch.bfloat16)
+                device, dtype=dtype)
             training_batch.infos = infos
         return training_batch
 
