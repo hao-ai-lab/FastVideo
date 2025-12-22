@@ -70,3 +70,6 @@ docs/distillation/examples/
 
 dmd_t2v_output/
 preprocess_output_text/
+
+# Official model repos (for local testing only - not for PR)
+fastvideo/models/Hunyuan-GameCraft-1.0-main/

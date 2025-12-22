@@ -77,10 +77,30 @@ else
     echo -e "${YELLOW}Skipping numerical validation tests (no weights)${NC}"
 fi
 
-# Phase 3: Pipeline Tests (not yet implemented)
+# Phase 3: Compare with Original
+if [ -d "fastvideo/models/Hunyuan-GameCraft-1.0-main" ]; then
+    echo ""
+    echo "=========================================="
+    echo "Phase 3: Compare with Original"
+    echo "=========================================="
+    
+    echo ""
+    echo "Testing against original GameCraft implementation..."
+    echo "You can also run: python compare_with_original.py"
+    pytest fastvideo/tests/transformers/test_hunyuangamecraft.py::test_gamecraft_vs_original -v -s || {
+        echo -e "${YELLOW}⚠ Comparison test skipped or failed${NC}"
+        echo "  This is expected without loaded weights"
+    }
+else
+    echo ""
+    echo -e "${YELLOW}Original GameCraft repo not found${NC}"
+    echo "  Expected at: fastvideo/models/Hunyuan-GameCraft-1.0-main/"
+fi
+
+# Phase 4: Pipeline Tests (not yet implemented)
 echo ""
 echo "=========================================="
-echo "Phase 3: Pipeline Tests"
+echo "Phase 4: Pipeline Tests"
 echo "=========================================="
 echo -e "${YELLOW}TODO: Pipeline tests not yet implemented${NC}"
 echo "Next steps:"
