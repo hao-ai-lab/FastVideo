@@ -94,11 +94,14 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         denoiser = self._stage_name_mapping["denoising_stage"]
         batch = denoiser.reset_streaming(batch, fastvideo_args)
         
-        # 3. Decode the generated block
+        # 3. Initialize VAE cache and decode the first block
+        self._vae_cache = None
         end_idx = denoiser._streaming_start_index
         if end_idx > 0:
             current_latents = batch.latents[:, :, :end_idx, :, :]
-            decoded_frames = self._stage_name_mapping["decoding_stage"].decode(current_latents, fastvideo_args)
+            decoder = self._stage_name_mapping["decoding_stage"]
+            decoded_frames, self._vae_cache = decoder.streaming_decode(
+                current_latents, fastvideo_args, cache=None, is_first_chunk=True)
             batch.output = decoded_frames
             
         return batch
@@ -112,24 +115,11 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         
         # Decode only the new generated block
         if end_idx > start_idx:
-            # Overlap with previous latents to avoid VAE boundary artifacts
-            # Use 2 latent frames of context (8 video frames) and drop 5 frames
-            decode_start_idx = start_idx
-            frames_to_drop = 0
-            if start_idx >= 2:
-                decode_start_idx = start_idx - 2
-                frames_to_drop = 5  # 4 frames per latent + 1 overlap frame
-            elif start_idx == 1:
-                decode_start_idx = start_idx - 1
-                frames_to_drop = 1
-            
-            current_latents = batch.latents[:, :, decode_start_idx:end_idx, :, :]
+            current_latents = batch.latents[:, :, start_idx:end_idx, :, :]
             args = denoiser._streaming_fastvideo_args
-            decoded_frames = self._stage_name_mapping["decoding_stage"].decode(current_latents, args)
-            
-            if frames_to_drop > 0:
-                decoded_frames = decoded_frames[:, :, frames_to_drop:, :, :]
-            
+            decoder = self._stage_name_mapping["decoding_stage"]
+            decoded_frames, self._vae_cache = decoder.streaming_decode(
+                current_latents, args, cache=self._vae_cache, is_first_chunk=False)
             batch.output = decoded_frames
         else:
             batch.output = None
@@ -140,5 +130,6 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         denoiser = self._stage_name_mapping.get("denoising_stage")
         if denoiser is not None and hasattr(denoiser, "clear_streaming"):
             denoiser.clear_streaming()
+        self._vae_cache = None
 
 EntryClass = [MatrixGameCausalDMDPipeline]
