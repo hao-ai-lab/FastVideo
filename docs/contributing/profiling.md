@@ -1,7 +1,7 @@
 # Profiling FastVideo
 
 !!! warning
-    Profiling is only intended for FastVideo developers and maintainers to understand the proportion of time spent in different parts of the codebase. **FastVideo end-users should never turn on profiling** as it will significantly slow down the inference.
+    Profiling is only intended for FastVideo developers and maintainers to understand the proportion of time spent in different parts of the codebase. **FastVideo end-users should never turn on profiling** as it will significantly slow down inference.
 
 ## Profiling with PyTorch
 
@@ -49,5 +49,5 @@ Traces can be visualized using <https://ui.perfetto.dev/>.
 ### Best Practices
 
 - Keep the profiled step count small; traces can be large and slow down job shutdown while the profiler flushes data.
-- After profiling, clean up trace directories to avoid filling disks.
+- After profiling, clean up trace directories to avoid filling disk storage.
 - When adding new regions, register them in `fastvideo.profiler` and wrap the corresponding code block with `with self.profiler_controller.region("your_region"):` or the `@profile_region` decorator.

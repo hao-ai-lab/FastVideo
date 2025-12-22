@@ -30,7 +30,7 @@ path_to_your_dataset_folder/
 └── prompt.txt
 ```
 
-To geranate the `videos2caption.json` and `merge.txt`, run
+To generate the `videos2caption.json` and `merge.txt`, run
 
 ``` python
 python scripts/dataset_preparation/prepare_json_file.py --data_folder mini_i2v_dataset/crush-smol_raw/ --output your_output_folder

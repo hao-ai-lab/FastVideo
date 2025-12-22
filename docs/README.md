@@ -6,7 +6,7 @@ This directory contains the FastVideo documentation built with MkDocs.
 
 ```bash
 # Install dependencies
-pip install -r docs/requirements-mkdocs.txt
+pip install -r requirements-mkdocs.txt
 
 # Serve docs with live reload (recommended for development)
 mkdocs serve

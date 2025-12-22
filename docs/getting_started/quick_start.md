@@ -7,6 +7,11 @@ Get up and running with FastVideo in minutes!
 First, install FastVideo:
 
 ```bash
+# Create and activate a new conda environment
+conda create -n fastvideo python=3.12
+conda activate fastvideo
+
+# Install FastVideo
 pip install fastvideo
 ```
 
@@ -15,36 +20,53 @@ pip install fastvideo
 ### Text-to-Video Generation
 
 ```python
-from fastvideo import FastVideoPipeline
+from fastvideo import VideoGenerator
 
-# Initialize the pipeline
-pipe = FastVideoPipeline.from_pretrained("wan2.1-t2v-1.3B")
+def main():
+    # Create a video generator with a pre-trained model
+    generator = VideoGenerator.from_pretrained(
+        "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        num_gpus=1,  # Adjust based on your hardware
+    )
 
-# Generate a video
-prompt = "A cat playing with a ball of yarn"
-video = pipe(prompt, num_frames=16, height=512, width=512)
+    # Define a prompt for your video
+    prompt = "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes wide with interest."
 
-# Save the video
-video.save("output.mp4")
+    # Generate the video
+    video = generator.generate_video(
+        prompt,
+        return_frames=True,  # Also return frames from this call (defaults to False)
+        output_path="my_videos/",  # Controls where videos are saved
+        save_video=True
+    )
+
+if __name__ == '__main__':
+    main()
 ```
 
 ### Image-to-Video Generation
 
 ```python
-from fastvideo import FastVideoPipeline
-from PIL import Image
+from fastvideo import VideoGenerator, SamplingParam
 
-# Load an image
-image = Image.open("input.jpg")
+def main():
+    # Create the generator
+    model_name = "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
+    generator = VideoGenerator.from_pretrained(model_name, num_gpus=1)
 
-# Initialize the pipeline
-pipe = FastVideoPipeline.from_pretrained("wan2.1-i2v-14B-480p")
+    # Set up parameters with an initial image
+    sampling_param = SamplingParam.from_pretrained(model_name)
+    sampling_param.image_path = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/astronaut.jpg"
+    sampling_param.num_frames = 107
 
-# Generate a video from the image
-video = pipe(image, num_frames=16, height=480, width=480)
+    # Generate video based on the image
+    prompt = "A photograph coming to life with gentle movement"
+    generator.generate_video(prompt, sampling_param=sampling_param,
+                             output_path="my_videos/",
+                             save_video=True)
 
-# Save the video
-video.save("output.mp4")
+if __name__ == '__main__':
+    main()
 ```
 
 ## Next Steps
