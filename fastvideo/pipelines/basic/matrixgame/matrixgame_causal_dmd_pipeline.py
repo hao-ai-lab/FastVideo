@@ -112,9 +112,18 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         
         # Decode only the new generated block
         if end_idx > start_idx:
-            current_latents = batch.latents[:, :, start_idx:end_idx, :, :]
+            # Overlap with previous latent to generate connecting frames
+            decode_start_idx = start_idx
+            if start_idx > 0:
+                decode_start_idx = start_idx - 1
+            
+            current_latents = batch.latents[:, :, decode_start_idx:end_idx, :, :]
             args = denoiser._streaming_fastvideo_args
             decoded_frames = self._stage_name_mapping["decoding_stage"].decode(current_latents, args)
+            
+            if start_idx > 0:
+                decoded_frames = decoded_frames[:, :, 1:, :, :]
+            
             batch.output = decoded_frames
         else:
             batch.output = None
