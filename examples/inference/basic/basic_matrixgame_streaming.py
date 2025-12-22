@@ -1,5 +1,5 @@
 from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
-from fastvideo.models.dits.matrix_game.utils import create_action_presets, get_current_action
+from fastvideo.models.dits.matrix_game.utils import get_current_action
 
 import os
 import imageio
@@ -71,11 +71,28 @@ def main():
     total_latent_frames = num_latent_frames_per_block * max_blocks
     num_frames = (total_latent_frames - 1) * 4 + 1
     
-    actions = create_action_presets(num_frames, keyboard_dim=config["keyboard_dim"])
+    
+    actions = {
+        "keyboard": torch.zeros((num_frames, config["keyboard_dim"])),
+        "mouse": torch.zeros((num_frames, 2))
+    }
     grid_sizes = torch.tensor([150, 44, 80])
 
     os.makedirs(OUTPUT_PATH, exist_ok=True)
     temp_output_path = os.path.join(OUTPUT_PATH, "temp.mp4")
+
+    # Interactive generation loop
+    mode = config["mode"]
+    frames_per_block = num_latent_frames_per_block * 4
+
+    print(f"\n=== Block 1/{max_blocks} ===")
+    action = get_current_action(mode)
+    expanded_action = expand_action_to_frames(action, frames_per_block)
+    
+    # Update the first block of actions with user input
+    actions["keyboard"][:frames_per_block] = expanded_action["keyboard"].cpu()
+    if "mouse" in expanded_action:
+        actions["mouse"][:frames_per_block] = expanded_action["mouse"].cpu()
 
     # Initialize streaming with first block
     generator.reset(
@@ -90,11 +107,12 @@ def main():
         num_inference_steps=50,
     )
     imageio.mimsave(temp_output_path, generator.accumulated_frames, fps=24, format="mp4")
-
-    # Interactive generation loop
-    mode = config["mode"]
-    frames_per_block = num_latent_frames_per_block * 4
     
+    cont = input("\nContinue? (y/n, default=y): ").strip().lower()
+    if cont == 'n':
+        generator.shutdown() # Ensure clean exit if immediate stop
+        return
+
     for block_idx in range(1, max_blocks):
         print(f"\n=== Block {block_idx + 1}/{max_blocks} ===")
         
