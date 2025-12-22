@@ -901,6 +901,52 @@ class DistillationPipeline(TrainingPipeline):
 
         return training_batch
 
+    def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
+        with self.tracker.timed("timing/get_next_batch"):
+            batch = next(self.train_loader_iter, None)  # type: ignore
+            if batch is None:
+                self.current_epoch += 1
+                # Reset iterator for next epoch
+                self.train_loader_iter = iter(self.train_dataloader)
+                # Get first batch of new epoch
+                batch = next(self.train_loader_iter)
+
+            encoder_hidden_states = batch['text_embedding']
+            encoder_attention_mask = batch['text_attention_mask']
+            infos = batch['info_list']
+
+            if self.training_args.simulate_generator_forward:
+                batch_size = encoder_hidden_states.shape[0]
+                vae_config = self.training_args.pipeline_config.vae_config.arch_config
+                num_channels = vae_config.z_dim
+                spatial_compression_ratio = vae_config.spatial_compression_ratio
+
+                latent_height = self.training_args.num_height // spatial_compression_ratio
+                latent_width = self.training_args.num_width // spatial_compression_ratio
+
+                latents = torch.zeros(batch_size, num_channels,
+                                      self.training_args.num_latent_t,
+                                      latent_height,
+                                      latent_width).to(get_local_torch_device(),
+                                                       dtype=torch.bfloat16)
+            else:
+                if 'vae_latent' not in batch:
+                    raise ValueError(
+                        "vae_latent not found in batch and simulate_generator_forward is False"
+                    )
+                latents = batch['vae_latent']
+                latents = latents[:, :, :self.training_args.num_latent_t]
+                latents = latents.to(get_local_torch_device(),
+                                     dtype=torch.bfloat16)
+
+            training_batch.latents = latents
+            training_batch.encoder_hidden_states = encoder_hidden_states.to(
+                get_local_torch_device(), dtype=torch.bfloat16)
+            training_batch.encoder_attention_mask = encoder_attention_mask.to(
+                get_local_torch_device(), dtype=torch.bfloat16)
+            training_batch.infos = infos
+        return training_batch
+
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
         gradient_accumulation_steps = getattr(self.training_args,
                                               'gradient_accumulation_steps', 1)
