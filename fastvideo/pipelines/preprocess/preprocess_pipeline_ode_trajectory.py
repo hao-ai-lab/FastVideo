@@ -62,12 +62,6 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
         assert fastvideo_args.pipeline_config.flow_shift == 5
-        self.modules["scheduler"] = SelfForcingFlowMatchScheduler(
-            shift=fastvideo_args.pipeline_config.flow_shift,
-            sigma_min=0.0,
-            extra_one_step=True)
-        self.modules["scheduler"].set_timesteps(num_inference_steps=48,
-                                                denoising_strength=1.0)
 
         self.add_stage(stage_name="input_validation_stage",
                        stage=InputValidationStage())
@@ -164,11 +158,11 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                 batch.prompt_attention_mask = prompt_masks_list
                 batch.negative_prompt_embeds = negative_prompt_embeds_list
                 batch.negative_attention_mask = negative_prompt_masks_list
-                batch.num_inference_steps = 48
+                batch.num_inference_steps = 50
                 batch.return_trajectory_latents = True
                 # Enabling this will save the decoded trajectory videos.
                 # Used for debugging.
-                batch.return_trajectory_decoded = False
+                batch.return_trajectory_decoded = True
                 batch.height = args.max_height
                 batch.width = args.max_width
                 batch.num_frames = args.num_frames
@@ -203,7 +197,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                 if batch.return_trajectory_decoded:
                     for i, decoded_frames in enumerate(trajectory_decoded):
                         for j, decoded_frame in enumerate(decoded_frames):
-                            if j in [40, 44, 47]:
+                            if j in [40, 44, 49]:
                                 save_decoded_latents_as_video(
                                     decoded_frame,
                                     f"decoded_videos/trajectory_decoded_{i}_{j}.mp4",

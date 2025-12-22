@@ -17,8 +17,8 @@ class Hunyuan15_480P_SamplingParam(SamplingParam):
     guidance_scale: float = 6.0
     prompt_attention_mask: list = field(default_factory=list)
     negative_attention_mask: list = field(default_factory=list)
-    # sigmas: list[float] | None = field(
-    #     default_factory=lambda: list(np.linspace(1.0, 0.0, 50 + 1)[:-1]))
+    sigmas: list[float] | None = field(
+        default_factory=lambda: list(np.linspace(1.0, 0.0, 50 + 1)[:-1]))
 
     negative_prompt: str = ""
 
