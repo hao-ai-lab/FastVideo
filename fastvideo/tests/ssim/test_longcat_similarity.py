@@ -151,14 +151,14 @@ else:
 
 
 LONGCAT_DISTILL_PARAMS = {
-    "num_gpus": 4,
+    "num_gpus": 2,
     "sp_size": 1,
     "tp_size": 1,
     # NOTE: Speed-optimized settings for SSIM tests.
     # We intentionally reduce denoising steps and resolution (must be multiples of 4)
     # to keep runtime manageable in CI.
-    "height": 360,
-    "width": 624,
+    "height": 480,
+    "width": 832,
     "num_frames": 93,
     "num_inference_steps": 2,
     "guidance_scale": 1.0,
@@ -171,12 +171,12 @@ LONGCAT_BASE_PARAMS = {
     # Base (non-LoRA) LongCat generation at 480p.
     # Mirrors `scripts/inference/v1_inference_longcat.sh` but uses fewer steps
     # to keep SSIM runtime reasonable.
-    "num_gpus": 4,
+    "num_gpus": 2,
     "sp_size": 1,
     "tp_size": 1,
     # Keep the same aspect ratio as (480, 832) but at lower res (multiples of 4).
-    "height": 360,
-    "width": 624,
+    "height": 480,
+    "width": 832,
     "num_frames": 93,
     "num_inference_steps": 4,
     "guidance_scale": 4.0,
@@ -186,12 +186,12 @@ LONGCAT_BASE_PARAMS = {
 }
 
 LONGCAT_REFINE_PARAMS = {
-    "num_gpus": 4,
+    "num_gpus": 2,
     "sp_size": 1,
     "tp_size": 1,
     # Lower 720p -> 540p-equivalent (multiples of 4) to speed up refine.
-    "height": 540,
-    "width": 960,
+    "height": 720,
+    "width": 1280,
     "num_inference_steps": 2,
     "guidance_scale": 1.0,
     "fps": 15,
