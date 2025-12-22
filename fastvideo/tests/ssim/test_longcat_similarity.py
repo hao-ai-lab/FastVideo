@@ -27,17 +27,18 @@ def _looks_like_local_path(path: str) -> bool:
 def _resolve_longcat_model_path() -> str:
     """Resolve LongCat model path.
 
-    NOTE: This function is intentionally strict: if the path looks local but
-    does not exist, it raises immediately (no silent skip).
+    Logic: Get base path from MODEL_PATH and append 'longcat-native'.
     """
-    model_path = os.getenv("FASTVIDEO_LONGCAT_MODEL_PATH", "weights/longcat-native")
+    base_path = os.getenv("MODEL_PATH", "weights")
+    
+    model_path = os.path.join(base_path, "longcat-native")
+
     if _looks_like_local_path(model_path) and not os.path.exists(model_path):
         raise FileNotFoundError(
             f"LongCat model path not found: {model_path}. "
-            "Set FASTVIDEO_LONGCAT_MODEL_PATH to your converted weights folder."
+            f"Please ensure MODEL_PATH is set correctly (Current base: {base_path})."
         )
     return model_path
-
 
 def _resolve_longcat_distill_lora_path(model_path: str) -> str:
     """Resolve distilled LoRA path for LongCat distill/refine stage1.
