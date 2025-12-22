@@ -127,6 +127,77 @@ class DecodingStage(PipelineStage):
         return image
 
     @torch.no_grad()
+    def streaming_decode(
+        self,
+        latents: torch.Tensor,
+        fastvideo_args: FastVideoArgs,
+        cache: list[torch.Tensor | None] | None = None,
+        is_first_chunk: bool = False,
+    ) -> tuple[torch.Tensor, list[torch.Tensor | None]]:
+        """
+        Decode latent representations into pixel space using VAE with streaming cache.
+        
+        Args:
+            latents: Input latent tensor with shape (batch, channels, frames, height_latents, width_latents)
+            fastvideo_args: Configuration object.
+            cache: VAE cache from previous call, or None to initialize a new cache.
+            is_first_chunk: Whether this is the first chunk.
+            
+        Returns:
+            A tuple of (decoded_frames, updated_cache).
+        """
+        self.vae = self.vae.to(get_local_torch_device())
+        latents = latents.to(get_local_torch_device())
+
+        # Setup VAE precision
+        vae_dtype = PRECISION_TO_TYPE[
+            fastvideo_args.pipeline_config.vae_precision]
+        vae_autocast_enabled = (
+            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+
+        # denormalization for MatrixGame VAE
+        if (hasattr(self.vae.config, 'latents_mean')
+                and hasattr(self.vae.config, 'latents_std')):
+            latents_mean = torch.tensor(self.vae.config.latents_mean,
+                                        device=latents.device,
+                                        dtype=latents.dtype).view(1, -1, 1, 1, 1)
+            latents_std = torch.tensor(self.vae.config.latents_std,
+                                       device=latents.device,
+                                       dtype=latents.dtype).view(1, -1, 1, 1, 1)
+            latents = latents * latents_std + latents_mean
+        elif hasattr(self.vae, 'scaling_factor'):
+            if isinstance(self.vae.scaling_factor, torch.Tensor):
+                latents = latents / self.vae.scaling_factor.to(
+                    latents.device, latents.dtype)
+            else:
+                latents = latents / self.vae.scaling_factor
+            if (hasattr(self.vae, "shift_factor")
+                    and self.vae.shift_factor is not None):
+                if isinstance(self.vae.shift_factor, torch.Tensor):
+                    latents += self.vae.shift_factor.to(latents.device,
+                                                        latents.dtype)
+                else:
+                    latents += self.vae.shift_factor
+
+        # Initialize cache if needed
+        if cache is None:
+            cache = self.vae.get_streaming_cache()
+
+        # Decode latents with streaming
+        with torch.autocast(device_type="cuda",
+                            dtype=vae_dtype,
+                            enabled=vae_autocast_enabled):
+            if fastvideo_args.pipeline_config.vae_tiling:
+                self.vae.enable_tiling()
+            if not vae_autocast_enabled:
+                latents = latents.to(vae_dtype)
+            image, cache = self.vae.streaming_decode(latents, cache, is_first_chunk)
+
+        # Normalize image to [0, 1] range
+        image = (image / 2 + 0.5).clamp(0, 1)
+        return image, cache
+
+    @torch.no_grad()
     def forward(
         self,
         batch: ForwardBatch,

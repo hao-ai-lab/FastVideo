@@ -1252,6 +1252,57 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
         dec = dec[:, :, start_frame_idx:]
         return dec
 
+    def get_streaming_cache(self) -> list[torch.Tensor | None]:
+        def _count_conv3d(model) -> int:
+            count = 0
+            for m in model.modules():
+                if isinstance(m, WanCausalConv3d):
+                    count += 1
+            return count
+
+        conv_num = _count_conv3d(self.decoder)
+        return [None] * conv_num
+
+    def streaming_decode(
+        self,
+        z: torch.Tensor,
+        cache: list[torch.Tensor | None],
+        is_first_chunk: bool = False,
+    ) -> tuple[torch.Tensor, list[torch.Tensor | None]]:
+        """
+        Args:
+            z (`torch.Tensor`): Latent tensor of shape [B, C, T, H, W].
+            cache (`list[torch.Tensor | None]`): The VAE cache.
+            is_first_chunk (`bool`): Whether this is the first chunk in the sequence.
+            
+        Returns:
+            A tuple of (decoded_frames, updated_cache).
+        """
+        iter_ = z.shape[2]
+        x = self.post_quant_conv(z)
+        
+        with forward_context(feat_cache_arg=cache, feat_idx_arg=0):
+            for i in range(iter_):
+                feat_idx.set(0)
+                if is_first_chunk and i == 0:
+                    first_chunk.set(True)
+                    out = self.decoder(x[:, :, i:i + 1, :, :])
+                else:
+                    first_chunk.set(False)
+                    out_ = self.decoder(x[:, :, i:i + 1, :, :])
+                    if i == 0:
+                        out = out_
+                    else:
+                        out = torch.cat([out, out_], 2)
+
+        if self.config.patch_size is not None:
+            out = unpatchify(out, patch_size=self.config.patch_size)
+
+        out = out.float()
+        out = torch.clamp(out, min=-1.0, max=1.0)
+
+        return out, cache
+
     def forward(
         self,
         sample: torch.Tensor,
@@ -1272,3 +1323,4 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
             z = posterior.mode()
         dec = self.decode(z)
         return dec
+
