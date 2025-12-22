@@ -7,9 +7,9 @@ pip install vsa
 ```
 
 # Building from Source
-We support H100 (via ThunderKittens) and any other GPU (via Triton) for VSA.
+We support H100s (via ThunderKittens) and any other GPU (via Triton) for VSA.
 
-First, install C++20 for ThunderKittens (if using H100):
+First, install C++20 for ThunderKittens (if using an H100):
 
 ```bash
 sudo apt update
