@@ -162,7 +162,7 @@ class PreprocessPipeline_ODE_Trajectory(BasePreprocessPipeline):
                 batch.return_trajectory_latents = True
                 # Enabling this will save the decoded trajectory videos.
                 # Used for debugging.
-                batch.return_trajectory_decoded = True
+                batch.return_trajectory_decoded = False
                 batch.height = args.max_height
                 batch.width = args.max_width
                 batch.num_frames = args.num_frames
