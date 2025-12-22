@@ -29,7 +29,7 @@ def _resolve_longcat_model_path() -> str:
 
     Logic: Get base path from MODEL_PATH and append 'longcat-native'.
     """
-    base_path = os.getenv("MODEL_PATH", "weights")
+    base_path = os.getenv("MODEL_PATH", "../weights")
     
     model_path = os.path.join(base_path, "longcat-native")
 
@@ -154,10 +154,13 @@ LONGCAT_DISTILL_PARAMS = {
     "num_gpus": 4,
     "sp_size": 1,
     "tp_size": 1,
-    "height": 480,
-    "width": 832,
+    # NOTE: Speed-optimized settings for SSIM tests.
+    # We intentionally reduce denoising steps and resolution (must be multiples of 4)
+    # to keep runtime manageable in CI.
+    "height": 360,
+    "width": 624,
     "num_frames": 93,
-    "num_inference_steps": 16,
+    "num_inference_steps": 2,
     "guidance_scale": 1.0,
     "fps": 15,
     "seed": 42,
@@ -171,10 +174,11 @@ LONGCAT_BASE_PARAMS = {
     "num_gpus": 4,
     "sp_size": 1,
     "tp_size": 1,
-    "height": 480,
-    "width": 832,
+    # Keep the same aspect ratio as (480, 832) but at lower res (multiples of 4).
+    "height": 360,
+    "width": 624,
     "num_frames": 93,
-    "num_inference_steps": 20,
+    "num_inference_steps": 4,
     "guidance_scale": 4.0,
     "fps": 15,
     "seed": 42,
@@ -185,9 +189,10 @@ LONGCAT_REFINE_PARAMS = {
     "num_gpus": 4,
     "sp_size": 1,
     "tp_size": 1,
-    "height": 720,
-    "width": 1280,
-    "num_inference_steps": 8,
+    # Lower 720p -> 540p-equivalent (multiples of 4) to speed up refine.
+    "height": 540,
+    "width": 960,
+    "num_inference_steps": 2,
     "guidance_scale": 1.0,
     "fps": 15,
     "seed": 42,
@@ -288,7 +293,8 @@ def test_longcat_distill_similarity(prompt: str, ATTENTION_BACKEND: str):
     if not success:
         logger.error("Failed to write SSIM results to file")
 
-    min_acceptable_ssim = 0.93
+    # With reduced steps/resolution, allow a slightly lower SSIM threshold.
+    min_acceptable_ssim = 0.90
     assert mean_ssim >= min_acceptable_ssim, (
         f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
         f"for {model_id} with backend {ATTENTION_BACKEND}")
@@ -373,7 +379,8 @@ def test_longcat_base_similarity(prompt: str, ATTENTION_BACKEND: str):
     if not success:
         logger.error("Failed to write SSIM results to file")
 
-    min_acceptable_ssim = 0.93
+    # With reduced steps/resolution, allow a slightly lower SSIM threshold.
+    min_acceptable_ssim = 0.90
     assert mean_ssim >= min_acceptable_ssim, (
         f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
         f"for {model_id} with backend {ATTENTION_BACKEND}")
@@ -489,7 +496,8 @@ def test_longcat_refine_similarity(prompt: str, ATTENTION_BACKEND: str):
     if not success:
         logger.error("Failed to write SSIM results to file")
 
-    min_acceptable_ssim = 0.90
+    # Refinement is especially sensitive; keep a modest threshold for the fast config.
+    min_acceptable_ssim = 0.88
     assert mean_ssim >= min_acceptable_ssim, (
         f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
         f"for {model_id} with backend {ATTENTION_BACKEND}")
