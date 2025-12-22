@@ -17,6 +17,7 @@ from PIL import Image
 from transformers import AutoTokenizer
 
 from fastvideo.logger import init_logger
+from fastvideo.utils import maybe_download_model
 
 logger = init_logger(__name__)
 
@@ -655,7 +656,7 @@ class TextDataset(torch.utils.data.IterableDataset,
         self.seed = seed
 
         # Initialize tokenizer
-        tokenizer_path = os.path.join(args.model_path, "tokenizer")
+        tokenizer_path = os.path.join(maybe_download_model(args.model_path), "tokenizer")
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_path,
                                                   cache_dir=args.cache_dir)
 

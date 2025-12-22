@@ -303,7 +303,7 @@ class BasePreprocessPipeline(ComposedPipelineBase):
             if data is None:
                 continue
 
-            with torch.inference_mode():
+            with torch.no_grad():
                 # Filter out invalid samples (those with all zeros)
                 valid_indices = []
                 for i, pixel_values in enumerate(data["pixel_values"]):
