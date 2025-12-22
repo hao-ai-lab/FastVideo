@@ -37,6 +37,105 @@ KEYBOARD_MAP_7 = {  # templerun_distilled_model: still/w/s/left/right/a/d
 KEYBOARD_MAP = KEYBOARD_MAP_4  # Default for backward compatibility
 
 
+def get_current_action(mode="universal"):
+
+    CAM_VALUE = 0.1
+    if mode == 'universal':
+        print()
+        print('-'*30)
+        print("PRESS [I, K, J, L, U] FOR CAMERA TRANSFORM\n (I: up, K: down, J: left, L: right, U: no move)")
+        print("PRESS [W, S, A, D, Q] FOR MOVEMENT\n (W: forward, S: back, A: left, D: right, Q: no move)")
+        print('-'*30)
+        CAMERA_VALUE_MAP = {
+            "i":  [CAM_VALUE, 0],
+            "k":  [-CAM_VALUE, 0],
+            "j":  [0, -CAM_VALUE],
+            "l":  [0, CAM_VALUE],
+            "u":  [0, 0]
+        }
+        KEYBOARD_IDX = { 
+            "w": [1, 0, 0, 0], "s": [0, 1, 0, 0], "a": [0, 0, 1, 0], "d": [0, 0, 0, 1],
+            "q": [0, 0, 0, 0]
+        }
+        flag = 0
+        while flag != 1:
+            try:
+                idx_mouse = input('Please input the mouse action (e.g. `U`):\n').strip().lower()
+                idx_keyboard = input('Please input the keyboard action (e.g. `W`):\n').strip().lower()
+                if idx_mouse in CAMERA_VALUE_MAP.keys() and idx_keyboard in KEYBOARD_IDX.keys():
+                    flag = 1
+            except:
+                pass
+        mouse_cond = torch.tensor(CAMERA_VALUE_MAP[idx_mouse]).cuda()
+        keyboard_cond = torch.tensor(KEYBOARD_IDX[idx_keyboard]).cuda()
+    elif mode == 'gta_drive':
+        print()
+        print('-'*30)
+        print("PRESS [W, S, A, D, Q] FOR MOVEMENT\n (W: forward, S: back, A: left, D: right, Q: no move)")
+        print('-'*30)
+        CAMERA_VALUE_MAP = {
+            "a":  [0, -CAM_VALUE],
+            "d":  [0, CAM_VALUE],
+            "q":  [0, 0]
+        }
+        KEYBOARD_IDX = { 
+            "w": [1, 0], "s": [0, 1],
+            "q": [0, 0]
+        }
+        flag = 0
+        while flag != 1:
+            try:
+                indexes = input('Please input the actions (split with ` `):\n(e.g. `W` for forward, `W A` for forward and left)\n').strip().lower().split(' ')
+                idx_mouse = []
+                idx_keyboard = []
+                for i in indexes:
+                    if i in CAMERA_VALUE_MAP.keys():
+                        idx_mouse += [i]
+                    elif i in KEYBOARD_IDX.keys():
+                        idx_keyboard += [i]
+                if len(idx_mouse) == 0:
+                    idx_mouse += ['q']
+                if len(idx_keyboard) == 0:
+                    idx_keyboard += ['q']
+                assert idx_mouse in [['a'], ['d'], ['q']] and idx_keyboard in [['q'], ['w'], ['s']]
+                flag = 1
+            except:
+                pass
+        mouse_cond = torch.tensor(CAMERA_VALUE_MAP[idx_mouse[0]]).cuda()
+        keyboard_cond = torch.tensor(KEYBOARD_IDX[idx_keyboard[0]]).cuda()
+    elif mode == 'templerun':
+        print()
+        print('-'*30)
+        print("PRESS [W, S, A, D, Z, C, Q] FOR ACTIONS\n (W: jump, S: slide, A: left side, D: right side, Z: turn left, C: turn right, Q: no move)")
+        print('-'*30)
+        KEYBOARD_IDX = { 
+            "w": [0, 1, 0, 0, 0, 0, 0], "s": [0, 0, 1, 0, 0, 0, 0],
+            "a": [0, 0, 0, 0, 0, 1, 0], "d": [0, 0, 0, 0, 0, 0, 1],
+            "z": [0, 0, 0, 1, 0, 0, 0], "c": [0, 0, 0, 0, 1, 0, 0],
+            "q": [1, 0, 0, 0, 0, 0, 0]
+        }
+        flag = 0
+        while flag != 1:
+            try:
+                idx_keyboard = input('Please input the action: \n(e.g. `W` for forward, `Z` for turning left)\n').strip().lower()
+                if idx_keyboard in KEYBOARD_IDX.keys():
+                    flag = 1
+            except:
+                pass
+        keyboard_cond = torch.tensor(KEYBOARD_IDX[idx_keyboard]).cuda()
+    
+    if mode != 'templerun':
+        return {
+            "mouse": mouse_cond,
+            "keyboard": keyboard_cond
+        }
+    return {
+        "keyboard": keyboard_cond
+    }
+
+
+
+
 def load_initial_image(image_path: str = None) -> Image.Image:
     if image_path and os.path.exists(image_path):
         return Image.open(image_path).convert("RGB")
