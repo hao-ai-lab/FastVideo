@@ -7,7 +7,7 @@ pip install st_attn
 ``` 
 
 # Building from Source
-We test our code on Pytorch 2.5.0 and CUDA>=12.4. Currently we only have implementation on H100.
+We test our code on Pytorch 2.5.0 and CUDA>=12.4. Currently, we only have an implementation for H100s.
 First, install C++20 for ThunderKittens:
 
 ```bash

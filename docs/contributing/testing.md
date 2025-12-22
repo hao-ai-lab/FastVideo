@@ -74,9 +74,11 @@ To add a new SSIM test, follow these steps:
        generator.generate_video(prompt, ...)
 
        # Compare with Reference
-       ssim_values = compute_video_ssim_torchvision(reference_path, generated_path, use_ms_ssim=True)
-        assert ssim_values[0] >= 0.98  # Threshold
-    ```
+       ssim_values = compute_video_ssim_torchvision(
+           reference_path, generated_path, use_ms_ssim=True
+       )
+       assert ssim_values[0] >= 0.98  # Threshold
+   ```
 
 4. **Reference Videos**:
    * When running the test for the first time (or when updating the reference), the test will fail because the reference video is missing. The generated video will be saved in `fastvideo/tests/ssim/generated_videos`.
