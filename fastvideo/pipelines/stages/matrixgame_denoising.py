@@ -711,6 +711,18 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
 
         # NOTE: crossattn_cache should NOT be reset between blocks!
 
+        # Update batch with new actions for this block
+        if keyboard_action is not None or mouse_action is not None:
+            vae_ratio = 4
+            start_frame = 0 if start_index == 0 else 1 + vae_ratio * (start_index - 1)
+            
+            if keyboard_action is not None:
+                n = keyboard_action.shape[1]
+                batch.keyboard_cond[:, start_frame:start_frame + n] = keyboard_action.to(batch.keyboard_cond.device)
+            if mouse_action is not None:
+                n = mouse_action.shape[1]
+                batch.mouse_cond[:, start_frame:start_frame + n] = mouse_action.to(batch.mouse_cond.device)
+
         action_kwargs = self._prepare_action_kwargs(
             batch, start_index, current_num_frames)
 
