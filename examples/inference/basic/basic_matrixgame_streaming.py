@@ -2,8 +2,8 @@ from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
 from fastvideo.models.dits.matrix_game.utils import get_current_action
 
 import os
-import imageio
 import torch
+import asyncio
 
 # Available variants: "base_distilled_model", "gta_distilled_model", "templerun_distilled_model"
 # Each variant has different keyboard_dim:
@@ -45,7 +45,7 @@ def expand_action_to_frames(action: dict, num_frames: int) -> dict:
     return result
 
 
-def main():
+async def main():
     # FastVideo will automatically use the optimal default arguments for the
     # model.
     # If a local path is provided, FastVideo will make a best effort
@@ -70,7 +70,7 @@ def main():
     max_blocks = 10
     total_latent_frames = num_latent_frames_per_block * max_blocks
     num_frames = (total_latent_frames - 1) * 4 + 1
-    
+    frames_per_block = num_latent_frames_per_block * 4
     
     actions = {
         "keyboard": torch.zeros((num_frames, config["keyboard_dim"])),
@@ -79,22 +79,16 @@ def main():
     grid_sizes = torch.tensor([150, 44, 80])
 
     os.makedirs(OUTPUT_PATH, exist_ok=True)
-    temp_output_path = os.path.join(OUTPUT_PATH, "temp.mp4")
-
-    # Interactive generation loop
+    temp_path = os.path.join(OUTPUT_PATH, "temp.mp4")
     mode = config["mode"]
-    frames_per_block = num_latent_frames_per_block * 4
 
     print(f"\n=== Block 1/{max_blocks} ===")
     action = get_current_action(mode)
-    expanded_action = expand_action_to_frames(action, frames_per_block)
-    
-    # Update the first block of actions with user input
-    actions["keyboard"][:frames_per_block] = expanded_action["keyboard"].cpu()
-    if "mouse" in expanded_action:
-        actions["mouse"][:frames_per_block] = expanded_action["mouse"].cpu()
+    expanded = expand_action_to_frames(action, frames_per_block)
+    actions["keyboard"][:frames_per_block] = expanded["keyboard"].cpu()
+    if "mouse" in expanded:
+        actions["mouse"][:frames_per_block] = expanded["mouse"].cpu()
 
-    # Initialize streaming with first block
     generator.reset(
         prompt="",
         image_path=config["image_url"],
@@ -106,33 +100,29 @@ def main():
         width=640,
         num_inference_steps=50,
     )
-    imageio.mimsave(temp_output_path, generator.accumulated_frames, fps=24, format="mp4")
-    
-    cont = input("\nContinue? (y/n, default=y): ").strip().lower()
-    if cont == 'n':
-        generator.shutdown() # Ensure clean exit if immediate stop
+
+    if input("\nContinue? (y/n): ").lower() == 'n':
+        generator.shutdown()
         return
 
     for block_idx in range(1, max_blocks):
         print(f"\n=== Block {block_idx + 1}/{max_blocks} ===")
         
         action = get_current_action(mode)
-        expanded_action = expand_action_to_frames(action, frames_per_block)
+        expanded = expand_action_to_frames(action, frames_per_block)
+        keyboard_cond = expanded["keyboard"].unsqueeze(0)
+        mouse_cond = expanded.get("mouse", torch.zeros(frames_per_block, 2).cuda()).unsqueeze(0)
         
-        keyboard_cond = expanded_action["keyboard"].unsqueeze(0)
-        mouse_cond = expanded_action.get("mouse", torch.zeros(frames_per_block, 2).cuda()).unsqueeze(0)
+        # step() with save_path triggers background save
+        await generator.step_async(keyboard_cond, mouse_cond, save_path=temp_path)
         
-        generator.step(keyboard_cond=keyboard_cond, mouse_cond=mouse_cond)
-        imageio.mimsave(temp_output_path, generator.accumulated_frames, fps=24, format="mp4")
-        
-        cont = input("\nContinue? (y/n, default=y): ").strip().lower()
-        if cont == 'n':
+        if input("\nContinue? (y/n): ").lower() == 'n':
             break
 
     # Save final video
-    generator.finalize(output_path=os.path.join(OUTPUT_PATH, "streaming_output.mp4"), fps=24)
+    generator.finalize(os.path.join(OUTPUT_PATH, "streaming_output.mp4"))
     generator.shutdown()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
