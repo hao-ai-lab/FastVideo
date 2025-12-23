@@ -82,13 +82,6 @@ async def main():
     temp_path = os.path.join(OUTPUT_PATH, "temp.mp4")
     mode = config["mode"]
 
-    print(f"\n=== Block 1/{max_blocks} ===")
-    action = get_current_action(mode)
-    expanded = expand_action_to_frames(action, frames_per_block)
-    actions["keyboard"][:frames_per_block] = expanded["keyboard"].cpu()
-    if "mouse" in expanded:
-        actions["mouse"][:frames_per_block] = expanded["mouse"].cpu()
-
     generator.reset(
         prompt="",
         image_path=config["image_url"],
@@ -101,6 +94,14 @@ async def main():
         num_inference_steps=50,
         output_path=temp_path,
     )
+    print("Initialization complete.")
+
+    print(f"\n=== Block 1/{max_blocks} ===")
+    action = get_current_action(mode)
+    expanded = expand_action_to_frames(action, frames_per_block)
+    keyboard_cond = expanded["keyboard"].unsqueeze(0)
+    mouse_cond = expanded.get("mouse", torch.zeros(frames_per_block, 2).cuda()).unsqueeze(0)
+    await generator.step_async(keyboard_cond, mouse_cond)
 
     if input("\nContinue? (y/n): ").lower() == 'n':
         generator.shutdown()

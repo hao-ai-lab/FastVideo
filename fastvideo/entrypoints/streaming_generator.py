@@ -90,7 +90,7 @@ class StreamingVideoGenerator:
             prompt: str = "A gameplay video of a cyberpunk city",
             image_path: str | None = None,
             num_frames: int = 120,  # Default max frames
-            **kwargs) -> list[np.ndarray]:
+            **kwargs):
         self.accumulated_frames = []
         if self.writer:
             self.writer.close()
@@ -137,16 +137,9 @@ class StreamingVideoGenerator:
             result = self.executor.wait_result()
             if result.error:
                 raise result.error
-            output_batch = result.output_batch
         else:
-            output_batch = self.executor.execute_streaming_reset(
+            self.executor.execute_streaming_reset(
                 self.batch, fastvideo_args)
-
-        frames = self._process_output_batch(output_batch)
-        self.accumulated_frames.extend(frames)
-        if self.writer:
-            self.writer.add_frames(frames)
-        return frames
 
     def step(self,
              keyboard_cond: torch.Tensor,
