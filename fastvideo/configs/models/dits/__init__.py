@@ -8,5 +8,6 @@ from fastvideo.configs.models.dits.wanvideo import WanVideoConfig
 
 __all__ = [
     "HunyuanVideoConfig", "HunyuanVideo15Config", "WanVideoConfig",
-    "StepVideoConfig", "CosmosVideoConfig", "Cosmos25VideoConfig", "LongCatVideoConfig"
+    "StepVideoConfig", "CosmosVideoConfig", "Cosmos25VideoConfig",
+    "LongCatVideoConfig"
 ]
