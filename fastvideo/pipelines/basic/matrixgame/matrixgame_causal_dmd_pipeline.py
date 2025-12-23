@@ -72,7 +72,7 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
 
     @torch.no_grad()
     def streaming_reset(self, batch: ForwardBatch, 
-                        fastvideo_args: FastVideoArgs) -> ForwardBatch:
+                        fastvideo_args: FastVideoArgs):
         if not self.post_init_called:
             self.post_init()
             
@@ -92,13 +92,10 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
                 
         # 2. Reset Denoising Stage
         denoiser = self._stage_name_mapping["denoising_stage"]
-        batch = denoiser.reset_streaming(batch, fastvideo_args)
+        denoiser.reset_streaming(batch, fastvideo_args)
         
         # 3. Initialize VAE cache
         self._vae_cache = None
-        batch.output = None
-            
-        return batch
 
     def streaming_step(self, keyboard_action, mouse_action) -> ForwardBatch:
         denoiser = self._stage_name_mapping["denoising_stage"]

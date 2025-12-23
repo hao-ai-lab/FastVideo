@@ -139,7 +139,7 @@ class MultiprocExecutor(Executor):
         return result_batch
 
     def execute_streaming_reset(self, forward_batch: ForwardBatch,
-                                fastvideo_args: FastVideoArgs) -> ForwardBatch:
+                                fastvideo_args: FastVideoArgs) -> dict[str, Any]:
         responses = self.collective_rpc("execute_streaming_reset",
                                         kwargs={
                                             "forward_batch": forward_batch,
@@ -684,11 +684,10 @@ class WorkerMultiprocProc:
                     break
                 elif task.task_type == StreamingTaskType.RESET:
                     try:
-                        batch = self.worker.execute_streaming_reset(
+                        self.worker.execute_streaming_reset(
                             task.batch, task.fastvideo_args)
                         self.streaming_output_queue.put(
-                            StreamingResult(task_type=StreamingTaskType.RESET,
-                                            output_batch=batch))
+                            StreamingResult(task_type=StreamingTaskType.RESET))
                     except Exception as e:
                         logger.error("Worker %d reset error: %s", self.rank, e)
                         self.streaming_output_queue.put(
