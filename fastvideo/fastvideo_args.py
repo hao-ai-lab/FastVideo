@@ -319,6 +319,62 @@ class FastVideoArgs:
             "Path to a text file containing prompts (one per line) for batch processing",
         )
 
+        # LoRA parameters (inference-time adapter loading)
+        parser.add_argument(
+            "--lora-path",
+            type=str,
+            default=FastVideoArgs.lora_path,
+            help=
+            "Path to a LoRA adapter (directory or HF repo id). If set, LoRA will be applied at inference.",
+        )
+        parser.add_argument(
+            "--lora-nickname",
+            type=str,
+            default=FastVideoArgs.lora_nickname,
+            help=
+            "Nickname to refer to the loaded LoRA adapter (useful for swapping).",
+        )
+        parser.add_argument(
+            "--lora-target-modules",
+            nargs="+",
+            type=str,
+            default=FastVideoArgs.lora_target_modules,
+            help=
+            "Optional list of module name substrings to restrict LoRA injection (e.g. q_proj k_proj v_proj).",
+        )
+
+        # BSA runtime control (LongCat)
+        parser.add_argument(
+            "--enable-bsa",
+            action=StoreBoolean,
+            help=
+            "Enable Block Sparse Attention (BSA) at runtime (overrides config).",
+        )
+        parser.add_argument(
+            "--bsa-sparsity",
+            type=float,
+            help="BSA sparsity (e.g., 0.9375).",
+        )
+        parser.add_argument(
+            "--bsa-cdf-threshold",
+            type=float,
+            help="BSA CDF threshold (optional).",
+        )
+        parser.add_argument(
+            "--bsa-chunk-q",
+            nargs=3,
+            type=int,
+            metavar=("T", "H", "W"),
+            help="BSA chunk_3d_shape_q as three ints, e.g., 4 4 4.",
+        )
+        parser.add_argument(
+            "--bsa-chunk-k",
+            nargs=3,
+            type=int,
+            metavar=("T", "H", "W"),
+            help="BSA chunk_3d_shape_k as three ints, e.g., 4 4 4.",
+        )
+
         # STA (Sliding Tile Attention) parameters
         parser.add_argument(
             "--STA-mode",

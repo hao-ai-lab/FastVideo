@@ -30,6 +30,8 @@ env
 **/build/
 **.pyc
 **.txt
+*.log
+weights/
 
 # Distribution / packaging
 build/

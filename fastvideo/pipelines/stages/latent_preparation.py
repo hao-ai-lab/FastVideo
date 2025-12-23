@@ -136,16 +136,26 @@ class LatentPreparationStage(PipelineStage):
             )
         # Generate or use provided latents
         if latents is None:
-            latents = randn_tensor(shape,
-                                   generator=generator,
-                                   device=device,
-                                   dtype=dtype)
+            latents = randn_tensor(
+                shape,
+                generator=generator,
+                device=device,
+                dtype=dtype,
+            )
+            if hasattr(self.scheduler, "init_noise_sigma"):
+                latents = latents * self.scheduler.init_noise_sigma
         else:
+            # Pre-initialized latents:
+            # - For LongCat refine (refine_from or stage1_video present), we should not re-scale by init_noise_sigma.
+            # - For other models, keep the original behavior.
             latents = latents.to(device)
+            is_longcat_refine = (batch.refine_from
+                                 is not None) or (batch.stage1_video
+                                                  is not None)
+            if (not is_longcat_refine) and hasattr(self.scheduler,
+                                                   "init_noise_sigma"):
+                latents = latents * self.scheduler.init_noise_sigma
 
-        # Scale the initial noise if needed
-        if hasattr(self.scheduler, "init_noise_sigma"):
-            latents = latents * self.scheduler.init_noise_sigma
         # Update batch with prepared latents
         batch.latents = latents
         batch.raw_latent_shape = bcthw_shape

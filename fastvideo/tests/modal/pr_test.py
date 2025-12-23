@@ -4,6 +4,7 @@ app = modal.App()
 
 import os
 
+model_vol = modal.Volume.from_name("hf-model-weights")
 image_version = os.getenv("IMAGE_VERSION")
 image_tag = f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{image_version}"
 print(f"Using image: {image_tag}")
@@ -74,9 +75,15 @@ def run_vae_tests():
 def run_transformer_tests():
     run_test("hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/transformers -vs")
 
-@app.function(gpu="L40S:2", image=image, timeout=2700, secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})])
+@app.function(
+    gpu="L40S:4", 
+    image=image, 
+    timeout=2700, 
+    secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})],
+    volumes={"/root/data": model_vol} 
+)
 def run_ssim_tests():
-    run_test("hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/ssim -vs")
+    run_test("export MODEL_PATH='/root/data/weights' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/ssim -vs")
 
 @app.function(gpu="L40S:4", image=image, timeout=900, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
 def run_training_tests():
