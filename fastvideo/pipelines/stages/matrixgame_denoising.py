@@ -90,6 +90,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         self._streaming_batch = None
         self._streaming_latents = None
         self._streaming_fastvideo_args = None
+        self._streaming_noise_pool = None
 
     def forward(
         self,
@@ -653,6 +654,19 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         self._streaming_target_dtype = target_dtype
         self._streaming_pos_start_base = 0
         self._streaming_context_noise = getattr(fastvideo_args.pipeline_config, "context_noise", 0)
+
+        num_denoising_steps = len(timesteps)
+        noise_shape = (b, self.num_frame_per_block, c, h, w)
+        self._streaming_noise_pool = [
+            torch.randn(
+                noise_shape,
+                dtype=target_dtype,
+                device=latents.device,
+                # Not use the generator here since it may be on a different device
+            )
+            for _ in range(num_denoising_steps - 1)  # Last step doesn't need noise
+        ]
+        
         self._streaming_initialized = True
         
         # Execute the first block
@@ -827,13 +841,18 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     [1],
                     dtype=torch.long,
                     device=pred_video_btchw.device)
-                noise = torch.randn(
-                    pred_video_btchw.shape,
-                    dtype=pred_video_btchw.dtype,
-                    generator=(batch.generator[0] if isinstance(
-                        batch.generator, list) else
-                               batch.generator)).to(
-                                   pred_video_btchw.device)
+
+                if self._streaming_noise_pool is not None and i < len(self._streaming_noise_pool):
+                    noise = self._streaming_noise_pool[i][:, :current_num_frames, :, :, :].to(pred_video_btchw.device)
+                else:
+                    # Fallback to dynamic allocation if pool not available
+                    noise = torch.randn(
+                        pred_video_btchw.shape,
+                        dtype=pred_video_btchw.dtype,
+                        generator=(batch.generator[0] if isinstance(
+                            batch.generator, list) else
+                                   batch.generator)).to(
+                                       pred_video_btchw.device)
                 noise_btchw = noise
                 if boundary_timestep is not None and high_noise_timesteps is not None and i < len(
                         high_noise_timesteps) - 1:
@@ -933,6 +952,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         self._streaming_batch = None
         self._streaming_latents = None
         self._streaming_fastvideo_args = None
+        self._streaming_noise_pool = None
 
     def verify_input(self, batch: ForwardBatch,
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
