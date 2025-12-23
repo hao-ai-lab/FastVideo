@@ -8,7 +8,7 @@ This is a Triton implementation of the Flash Attention v2 algorithm from Tri Dao
 Credits: OpenAI kernel team
 """
 
-import pytest
+
 import torch
 import triton
 import triton.language as tl

@@ -63,7 +63,7 @@ def video_sparse_attn(
     variable_block_sizes: torch.Tensor,
     topk: int,
     block_size: int | tuple = 64,
-    compress_weight: torch.Tensor = None,
+    compress_attn_weight: torch.Tensor = None,
 ) -> torch.Tensor:
     if isinstance(block_size, int):
         block_size = (block_size, block_size, block_size)
@@ -98,6 +98,6 @@ def video_sparse_attn(
         idx, num = map_to_index(mask)
         out_s, _ = triton_block_sparse_attn_forward(q, k, v, idx, num, variable_block_sizes)
     
-    if compress_weight is not None:
-        return out_c * compress_weight + out_s
+    if compress_attn_weight is not None:
+        return out_c * compress_attn_weight + out_s
     return out_c + out_s
