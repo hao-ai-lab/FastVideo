@@ -6,7 +6,7 @@ Thank you for your interest in contributing to FastVideo. We want to make the pr
 Our community is open to everyone and welcomes any contributions no matter how large or small.
 
 # Developer Environment:
-Do make sure you have CUDA 12.4 installed and supported. FastVideo currently only support Linux and CUDA GPUs, but we hope to support other platforms in the future.
+Do make sure you have CUDA 12.4 installed and supported. FastVideo currently only supports Linux and CUDA GPUs, but we hope to support other platforms in the future.
 
 We recommend using a fresh Python 3.10 Conda environment to develop FastVideo:
 

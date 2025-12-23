@@ -27,7 +27,7 @@ dependencies = [
     "timm==1.0.11",
     "peft>=0.15.0",
     "diffusers>=0.33.1",
-    "torch==2.9.0",
+    "torch>=2.9.0",
     "torchvision",
 
     # Acceleration & Optimization
@@ -102,20 +102,24 @@ explicit = true
 
 [project.optional-dependencies]
 
-# flash-attn: pip install flash-attn==2.8.1 --no-cache-dir --no-build-isolation 
+# flash-attn: pip install flash-attn==2.8.1 --no-cache-dir --no-build-isolation
 
 
 lint = [
     "pre-commit==4.0.1",
 ]
 
-test = [ 
+test = [
     "av==14.3.0",
     "pytorch-msssim==1.0.0",
     "pytest",
 ]
 
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
+
+rocm = [
+    "amdsmi",
+]
 
 [project.scripts]
 fastvideo = "fastvideo.entrypoints.cli.main:main"

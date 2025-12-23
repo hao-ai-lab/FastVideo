@@ -44,6 +44,12 @@ def build_pipeline(
 
     config = verify_model_config_and_directory(model_path)
     pipeline_name = config.get("_class_name")
+
+    if fastvideo_args.override_pipeline_cls_name:
+        logger.info("Overriding pipeline class name from %s to %s",
+                    pipeline_name, fastvideo_args.override_pipeline_cls_name)
+        pipeline_name = fastvideo_args.override_pipeline_cls_name
+
     if pipeline_name is None:
         raise ValueError(
             "Model config does not contain a _class_name attribute. "

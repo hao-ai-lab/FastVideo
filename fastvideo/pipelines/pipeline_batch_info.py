@@ -127,6 +127,11 @@ class ForwardBatch:
     noise_pred: torch.Tensor | None = None
     image_latent: torch.Tensor | None = None
 
+    # Action control inputs (Matrix-Game)
+    mouse_cond: torch.Tensor | None = None  # Shape: (B, T, 2)
+    keyboard_cond: torch.Tensor | None = None  # Shape: (B, T, K)
+    grid_sizes: torch.Tensor | None = None  # Shape: (3,) [F,H,W]
+
     # Latent dimensions
     height_latents: list[int] | int | None = None
     width_latents: list[int] | int | None = None

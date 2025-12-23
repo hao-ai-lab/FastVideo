@@ -18,9 +18,15 @@ class SamplingParam:
 
     # Image inputs
     image_path: str | None = None
+    pil_image: Any | None = None
 
     # Video inputs
     video_path: str | None = None
+
+    # Action control inputs (Matrix-Game)
+    mouse_cond: Any | None = None  # Shape: (B, T, 2)
+    keyboard_cond: Any | None = None  # Shape: (B, T, K)
+    grid_sizes: Any | None = None  # Shape: (3,) [F,H,W]
 
     # Refine inputs (LongCat 480p->720p upscaling)
     # Path-based refine (load stage1 video from disk, e.g. MP4)
@@ -56,6 +62,7 @@ class SamplingParam:
     guidance_scale: float = 1.0
     guidance_rescale: float = 0.0
     boundary_ratio: float | None = None
+    sigmas: list[float] | None = None
 
     # TeaCache parameters
     enable_teacache: bool = False

@@ -10,18 +10,19 @@ from typing import Any
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
-from einops import rearrange
 from safetensors.torch import save_file
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 
-from fastvideo.distributed.parallel_state import (get_sp_parallel_rank,
-                                                  get_sp_world_size)
 from fastvideo.logger import init_logger
 from fastvideo.training.checkpointing_utils import (ModelWrapper,
                                                     OptimizerWrapper,
                                                     RandomStateWrapper,
                                                     SchedulerWrapper)
+
+from einops import rearrange
+from fastvideo.distributed.parallel_state import (get_sp_parallel_rank,
+                                                  get_sp_world_size)
 
 logger = init_logger(__name__)
 
@@ -862,11 +863,9 @@ def normalize_dit_input(model_type, latents, vae) -> torch.Tensor:
         raise NotImplementedError(f"model_type {model_type} not supported")
 
 
-def shard_latents_across_sp(latents: torch.Tensor,
-                            num_latent_t: int) -> torch.Tensor:
+def shard_latents_across_sp(latents: torch.Tensor) -> torch.Tensor:
     sp_world_size = get_sp_world_size()
     rank_in_sp_group = get_sp_parallel_rank()
-    latents = latents[:, :, :num_latent_t]
     if sp_world_size > 1:
         latents = rearrange(latents,
                             "b c (n s) h w -> b c n s h w",

@@ -6,7 +6,7 @@ The `VideoGenerator` class provides the primary Python interface for doing offli
 - Python 3.10-3.12
 
 ## Installation
-If you have not installed FastVideo, please following these [instructions](https://hao-ai-lab.github.io/FastVideo/getting_started/installation.html) first.
+If you have not installed FastVideo, please following these [instructions](https://hao-ai-lab.github.io/FastVideo/getting_started/installation) first.
 
 ## Usage
 The first script in this example shows the most basic usage of FastVideo. If you are new to Python and FastVideo, you should start here.
