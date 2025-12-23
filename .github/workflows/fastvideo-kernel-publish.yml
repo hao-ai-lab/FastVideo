@@ -160,7 +160,7 @@ jobs:
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.wheel_name }}
+          name: ${{ env.wheel_name }}-py${{ matrix.python-version }}
           path: csrc/fastvideo_kernel/dist/*.whl
           retention-days: 90
 
