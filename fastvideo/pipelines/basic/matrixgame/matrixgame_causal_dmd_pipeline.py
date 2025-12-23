@@ -94,15 +94,9 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         denoiser = self._stage_name_mapping["denoising_stage"]
         batch = denoiser.reset_streaming(batch, fastvideo_args)
         
-        # 3. Initialize VAE cache and decode the first block
+        # 3. Initialize VAE cache
         self._vae_cache = None
-        end_idx = denoiser._streaming_start_index
-        if end_idx > 0:
-            current_latents = batch.latents[:, :, :end_idx, :, :]
-            decoder = self._stage_name_mapping["decoding_stage"]
-            decoded_frames, self._vae_cache = decoder.streaming_decode(
-                current_latents, fastvideo_args, cache=None, is_first_chunk=True)
-            batch.output = decoded_frames
+        batch.output = None
             
         return batch
 

@@ -668,9 +668,8 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         ]
         
         self._streaming_initialized = True
-        
-        # Execute the first block
-        return self.step_streaming()
+
+        return self._streaming_batch
 
     def step_streaming(self, keyboard_action: torch.Tensor | None = None,
                        mouse_action: torch.Tensor | None = None) -> ForwardBatch:
