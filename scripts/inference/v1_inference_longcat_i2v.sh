@@ -24,8 +24,8 @@ export MODEL_BASE=FastVideo/LongCat-Video-I2V-Diffusers
 # Option 2: Local weights (uncomment if you have local weights)
 # export MODEL_BASE=weights/longcat-for-i2v
 
-# Input image path
-IMAGE_PATH="assets/girl_480p.png"
+# Input image path (must be square for LongCat I2V)
+IMAGE_PATH="assets/girl.png"
 
 # Check if image exists
 if [ ! -f "$IMAGE_PATH" ]; then
@@ -46,7 +46,7 @@ fastvideo generate \
     --enable-bsa False \
     --image-path "$IMAGE_PATH" \
     --height 480 \
-    --width 832 \
+    --width 480 \
     --num-frames 93 \
     --num-inference-steps 50 \
     --fps 15 \
