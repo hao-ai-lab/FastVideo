@@ -1,9 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 Native LongCat Video DiT implementation using FastVideo conventions.
-
-This is a Phase 2 reimplementation that replaces the third_party wrapper
-with native FastVideo layers for better performance and integration.
 """
 
 from typing import Any
@@ -935,8 +932,6 @@ class FinalLayer(nn.Module):
 class LongCatTransformer3DModel(CachableDiT):
     """
     Native LongCat Video Transformer using FastVideo layers.
-    
-    This is a Phase 2 implementation that replaces third_party dependencies.
     """
 
     # FSDP sharding: shard at each transformer block

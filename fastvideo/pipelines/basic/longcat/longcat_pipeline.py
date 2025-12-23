@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-LongCat video diffusion pipeline implementation (Phase 1: Wrapper).
+LongCat video diffusion pipeline implementation.
 
-This module contains a wrapper implementation of the LongCat video diffusion pipeline
-using FastVideo's modular pipeline architecture with the original LongCat modules.
+This module implements the LongCat video diffusion pipeline using FastVideo's
+modular pipeline architecture.
 """
 
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -26,9 +26,6 @@ logger = init_logger(__name__)
 class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
     """
     LongCat video diffusion pipeline with LoRA support.
-    
-    Phase 1 implementation using wrapper modules from third_party/longcat_video.
-    This validates the pipeline infrastructure before full FastVideo integration.
     """
 
     _required_config_modules = [
