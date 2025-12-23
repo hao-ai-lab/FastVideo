@@ -27,7 +27,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     echo 'source $HOME/.local/bin/env' >> /root/.bashrc
 
 # Copy just the pyproject.toml first to leverage Docker cache
-COPY pyproject.toml ./
+COPY pyproject_other.toml ./pyproject.toml
 
 # Create a dummy README to satisfy the installation
 RUN echo "# Placeholder" > README.md
