@@ -115,8 +115,9 @@ class Worker:
         return {"status": "failed: pipeline is not a LoRAPipeline"}
 
     def execute_streaming_reset(self, forward_batch: ForwardBatch,
-                                fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        return self.pipeline.streaming_reset(forward_batch, self.fastvideo_args)
+                                fastvideo_args: FastVideoArgs) -> dict[str, Any]:
+        self.pipeline.streaming_reset(forward_batch, self.fastvideo_args)
+        return {"status": "reset_complete"}
 
     def execute_streaming_step(self, keyboard_action: torch.Tensor,
                                mouse_action: torch.Tensor) -> ForwardBatch:

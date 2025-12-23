@@ -270,8 +270,8 @@ class RayDistributedExecutor(Executor):
                 self.non_driver_workers.append(worker)
 
     def execute_streaming_reset(self, forward_batch: ForwardBatch,
-                                fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        responses: list[ForwardBatch] = self.collective_rpc(
+                                fastvideo_args: FastVideoArgs) -> dict[str, Any]:
+        responses: list[dict[str, Any]] = self.collective_rpc(
             "execute_streaming_reset",
             kwargs={
                 "forward_batch": forward_batch,
