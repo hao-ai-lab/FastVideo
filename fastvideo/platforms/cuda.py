@@ -126,7 +126,7 @@ class CudaPlatformBase(Platform):
         logger.info("Selected backend: %s", selected_backend)
         if selected_backend == AttentionBackendEnum.SLIDING_TILE_ATTN:
             try:
-                from st_attn import sliding_tile_attention  # noqa: F401
+                from fastvideo_kernel import sliding_tile_attention  # noqa: F401
 
                 from fastvideo.attention.backends.sliding_tile_attn import (  # noqa: F401
                     SlidingTileAttentionBackend)
@@ -169,7 +169,7 @@ class CudaPlatformBase(Platform):
                 )
         elif selected_backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
             try:
-                from vsa import block_sparse_attn  # noqa: F401
+                from fastvideo_kernel import video_sparse_attn  # noqa: F401
 
                 from fastvideo.attention.backends.video_sparse_attn import (  # noqa: F401
                     VideoSparseAttentionBackend)
@@ -188,8 +188,7 @@ class CudaPlatformBase(Platform):
 
         elif selected_backend == AttentionBackendEnum.VMOBA_ATTN:
             try:
-                from csrc.attn.vmoba_attn.vmoba import (  # noqa: F401
-                    moba_attn_varlen)
+                from fastvideo_kernel import moba_attn_varlen  # noqa: F401
                 from fastvideo.attention.backends.vmoba import (  # noqa: F401
                     VMOBAAttentionBackend)
                 logger.info("Using Video MOBA Attention backend.")

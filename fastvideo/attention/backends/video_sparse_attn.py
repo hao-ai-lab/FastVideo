@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import torch
 
 try:
-    from vsa import video_sparse_attn
+    from fastvideo_kernel import video_sparse_attn
 except ImportError:
     video_sparse_attn = None
 

@@ -6,8 +6,8 @@ from dataclasses import dataclass
 import torch
 from einops import rearrange
 
-from csrc.attn.vmoba_attn.vmoba import (moba_attn_varlen, process_moba_input,
-                                        process_moba_output)
+from fastvideo_kernel import (moba_attn_varlen, process_moba_input,
+                               process_moba_output)
 from fastvideo.attention.backends.abstract import (AttentionBackend,
                                                    AttentionImpl,
                                                    AttentionMetadata,
