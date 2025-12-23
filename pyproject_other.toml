@@ -1,0 +1,182 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fastvideo"
+version = "0.1.6"
+description = "FastVideo"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+]
+
+dependencies = [
+    # Core Libraries
+    "scipy==1.14.1",
+    "six==1.16.0",
+    "h5py==3.12.1",
+    "requests>=2.32.2",
+
+    # Machine Learning & Transformers
+    "transformers==4.57.3",
+    "tokenizers>=0.20.1",
+    "sentencepiece==0.2.0",
+    "timm==1.0.11",
+    "peft>=0.15.0",
+    "diffusers>=0.33.1",
+    "torch>=2.9.1",
+    "torchvision",
+
+    # Acceleration & Optimization
+    "accelerate==1.0.1",
+
+    # Computer Vision & Image Processing
+    "opencv-python==4.10.0.84",
+    "pillow>=10.3.0",
+    "imageio==2.36.0",
+    "imageio-ffmpeg==0.5.1",
+    "einops",
+
+    # Experiment Tracking & Logging
+    "wandb>=0.21.0",
+    "loguru",
+    "test-tube==0.7.5",
+    # Miscellaneous Utilities
+    "tqdm",
+    "pytest",
+    "PyYAML==6.0.1",
+    "protobuf>=5.28.3",
+    "gradio==5.32.0",
+    "moviepy>=2.0.0",
+    "flask",
+    "flask_restful",
+    "aiohttp",
+    "huggingface_hub",
+    "cloudpickle",
+
+    # System & Monitoring Tools
+    "gpustat",
+    "watch",
+    "remote-pdb",
+
+    # Kernel & Packaging
+    "wheel",
+
+    # Training Dependencies
+    "torchdata",
+    "pyarrow",
+    "datasets==4.0.0",
+    "av",
+
+    # Preprocessing Dependencies
+    "torchcodec==0.5.0",
+    "ray>=2.49.1",
+]
+
+[tool.uv]
+prerelease = "allow"
+
+[project.optional-dependencies]
+
+# flash-attn: pip install flash-attn==2.8.1 --no-cache-dir --no-build-isolation
+
+
+lint = [
+    "pre-commit==4.0.1",
+]
+
+test = [
+    "av==14.3.0",
+    "pytorch-msssim==1.0.0",
+    "pytest",
+]
+
+dev = [ "fastvideo[lint]", "fastvideo[test]", ]
+
+rocm = [
+    "amdsmi",
+]
+
+[project.scripts]
+fastvideo = "fastvideo.entrypoints.cli.main:main"
+
+[tool.setuptools.packages.find]
+exclude = ["assets*", "docker*", "docs", "scripts*"]
+
+[tool.wheel]
+exclude = ["assets*", "docker*", "docs", "scripts*"]
+
+
+[tool.mypy]
+warn_unused_configs = true
+ignore_missing_imports = true
+disallow_untyped_calls = true
+check_untyped_defs = true
+follow_imports = "silent"
+
+[tool.codespell]
+skip ="./data,./wandb,./csrc/sliding_tile_attention/tk"
+
+[tool.ruff]
+# Allow lines to be as long as 80.
+line-length = 80
+
+[tool.ruff.lint]
+select = [
+    # pycodestyle
+    "E",
+    # Pyflakes
+    "F",
+    # pyupgrade
+    "UP",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # isort
+    # "I",
+    "G",
+]
+ignore = [
+    # star imports
+    "F405", "F403",
+    # lambda expression assignment
+    "E731",
+    # Loop control variable not used within loop body
+    "B007",
+    # f-string format
+    "UP032",
+    # line too long
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"fastvideo/models/stepvideo/diffusion/video_pipeline.py" = ["F821"]
+"fastvideo/sample/call_remote_server_stepvideo.py" = ["E722"]
+"csrc/sliding_tile_attention/test/bench.py" = ["F841"]
+"fastvideo/models/stepvideo/__init__.py" = ["F403"]
+"fastvideo/models/stepvideo/utils/__init__.py" = ["F403"]
+# Ignore all files that end in `_test.py`.
+"fastvideo/models/hunyuan/diffusion/pipelines/pipeline_hunyuan_video.py" = ["E741"]
+
+
+[tool.yapf]
+column_limit = 80
+
+[tool.isort]
+line_length = 80
+use_parentheses = true
+skip_gitignore = true
+
+
+[project.urls]
+Repository = "https://github.com/hao-ai-lab/FastVideo"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = "fastvideo"
+DisplayName = "FastVideo"
+Icon = "https://raw.githubusercontent.com/hao-ai-lab/FastVideo/main/comfyui/assets/icon_simple.svg"
