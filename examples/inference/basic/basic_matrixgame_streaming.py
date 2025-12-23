@@ -99,6 +99,7 @@ async def main():
         height=352,
         width=640,
         num_inference_steps=50,
+        output_path=temp_path,
     )
 
     if input("\nContinue? (y/n): ").lower() == 'n':
@@ -112,9 +113,7 @@ async def main():
         expanded = expand_action_to_frames(action, frames_per_block)
         keyboard_cond = expanded["keyboard"].unsqueeze(0)
         mouse_cond = expanded.get("mouse", torch.zeros(frames_per_block, 2).cuda()).unsqueeze(0)
-        
-        # step() with save_path triggers background save
-        await generator.step_async(keyboard_cond, mouse_cond, save_path=temp_path)
+        await generator.step_async(keyboard_cond, mouse_cond)
         
         if input("\nContinue? (y/n): ").lower() == 'n':
             break

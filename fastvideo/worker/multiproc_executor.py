@@ -52,8 +52,10 @@ class StreamingTaskType(str, Enum):
 class StreamingTask:
     """Task submitted to worker via input queue."""
     task_type: StreamingTaskType
+    # For STEP tasks:
     keyboard_action: torch.Tensor | None = None
     mouse_action: torch.Tensor | None = None
+    # For RESET tasks:
     batch: ForwardBatch | None = None
     fastvideo_args: FastVideoArgs | None = None
 

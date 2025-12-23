@@ -18,6 +18,37 @@ from fastvideo.worker.multiproc_executor import MultiprocExecutor
 logger = init_logger(__name__)
 
 
+class IncrementalVideoWriter:
+
+    def __init__(self, path: str, fps: int = 24):
+        self._executor = ThreadPoolExecutor(max_workers=1,
+                                            thread_name_prefix="video_write_")
+        self._writer = imageio.get_writer(path, fps=fps, format="mp4")
+        self._pending: Future | None = None
+
+    def add_frames(self, frames: list[np.ndarray]) -> None:
+        # Wait for previous write to complete before starting a new one
+        if self._pending is not None:
+            self._pending.result()
+
+        # Copy frames to avoid race conditions
+        frames_copy = [f.copy() for f in frames]
+        self._pending = self._executor.submit(self._write_frames, frames_copy)
+
+    def _write_frames(self, frames: list[np.ndarray]) -> None:
+        for frame in frames:
+            self._writer.append_data(frame)
+
+    def close(self) -> None:
+        if self._pending is not None:
+            self._pending.result()
+            self._pending = None
+        if self._writer:
+            self._writer.close()
+            self._writer = None
+        self._executor.shutdown(wait=True)
+
+
 class StreamingVideoGenerator:
 
     def __init__(self,
@@ -30,11 +61,9 @@ class StreamingVideoGenerator:
         self.accumulated_frames: list[np.ndarray] = []
         self.sampling_param: SamplingParam | None = None
         self.batch: ForwardBatch | None = None
-        self._save_executor = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="video_save_")
-        self._save_future: Future | None = None
         self._use_queue_mode = use_queue_mode and isinstance(
             self.executor, MultiprocExecutor)
+        self.writer: IncrementalVideoWriter | None = None
 
     @classmethod
     def from_pretrained(cls,
@@ -63,6 +92,9 @@ class StreamingVideoGenerator:
             num_frames: int = 120,  # Default max frames
             **kwargs) -> list[np.ndarray]:
         self.accumulated_frames = []
+        if self.writer:
+            self.writer.close()
+            self.writer = None
         self.executor.execute_streaming_clear()
 
         # Handle batch processing from text file
@@ -75,6 +107,10 @@ class StreamingVideoGenerator:
         if image_path:
             self.sampling_param.image_path = image_path
         self.sampling_param.num_frames = num_frames
+
+        if "output_path" in kwargs:
+            self.writer = IncrementalVideoWriter(kwargs["output_path"],
+                                                 fps=24)  # Default fps
 
         fastvideo_args = self.fastvideo_args
 
@@ -108,12 +144,13 @@ class StreamingVideoGenerator:
 
         frames = self._process_output_batch(output_batch)
         self.accumulated_frames.extend(frames)
+        if self.writer:
+            self.writer.add_frames(frames)
         return frames
 
     def step(self,
              keyboard_cond: torch.Tensor,
-             mouse_cond: torch.Tensor,
-             save_path: str | None = None) -> list[np.ndarray]:
+             mouse_cond: torch.Tensor) -> list[np.ndarray]:
         if self.batch is None:
             raise RuntimeError("Call reset() before step()")
 
@@ -125,23 +162,20 @@ class StreamingVideoGenerator:
             output_batch = result.output_batch
         else:
             # Fallback to RPC-based
-            self._wait_for_save()
             output_batch = self.executor.execute_streaming_step(
                 keyboard_action=keyboard_cond, mouse_action=mouse_cond)
 
         frames = self._process_output_batch(output_batch)
         if len(frames) > 0:
             self.accumulated_frames.extend(frames)
-
-        if save_path:
-            self._start_background_save(save_path)
+            if self.writer:
+                self.writer.add_frames(frames)
 
         return frames
 
     async def step_async(self,
                          keyboard_cond: torch.Tensor,
-                         mouse_cond: torch.Tensor,
-                         save_path: str | None = None) -> list[np.ndarray]:
+                         mouse_cond: torch.Tensor) -> list[np.ndarray]:
         if self.batch is None:
             raise RuntimeError("Call reset() before step_async()")
 
@@ -159,7 +193,6 @@ class StreamingVideoGenerator:
             output_batch = result.output_batch
         else:
             # Fallback to RPC-based
-            self._wait_for_save()
             output_batch = await self.executor.execute_streaming_step_async(
                 keyboard_action=keyboard_cond,
                 mouse_action=mouse_cond,
@@ -168,38 +201,27 @@ class StreamingVideoGenerator:
         frames = self._process_output_batch(output_batch)
         if len(frames) > 0:
             self.accumulated_frames.extend(frames)
-
-        if save_path:
-            self._start_background_save(save_path)
+            if self.writer:
+                self.writer.add_frames(frames)
 
         return frames
 
-    def _wait_for_save(self) -> None:
-        if self._save_future is not None and not self._save_future.done():
-            self._save_future.result()  # Block until done
-
-    def _start_background_save(self, output_path: str, fps: int = 24) -> None:
-        # Make a copy of frames list to avoid race conditions
-        frames_copy = list(self.accumulated_frames)
-
-        def save_task():
-            imageio.mimsave(output_path, frames_copy, fps=fps, format="mp4")
-
-        self._save_future = self._save_executor.submit(save_task)
 
     def finalize(self,
                  output_path: str = "streaming_output.mp4",
                  fps: int = 24) -> str:
-        self._wait_for_save()
-
         if not self.accumulated_frames:
             logger.warning("No frames to save.")
             return ""
 
-        imageio.mimsave(output_path,
-                        self.accumulated_frames,
-                        fps=fps,
-                        format="mp4")
+        if self.writer:
+            self.writer.close()
+            self.writer = None
+        else:
+            imageio.mimsave(output_path,
+                            self.accumulated_frames,
+                            fps=fps,
+                            format="mp4")
 
         if self._use_queue_mode and self.executor._streaming_enabled:
             self.executor.submit_clear()
@@ -231,8 +253,9 @@ class StreamingVideoGenerator:
         return frames
 
     def shutdown(self):
-        self._wait_for_save()
-        self._save_executor.shutdown(wait=True)
+        if self.writer:
+            self.writer.close()
+            self.writer = None
 
         if self._use_queue_mode and self.executor._streaming_enabled:
             self.executor.disable_streaming()
