@@ -290,6 +290,9 @@ class RayDistributedExecutor(Executor):
         )
         return responses[0]
 
+    async def execute_streaming_step_async(self, keyboard_action=None, mouse_action=None) -> ForwardBatch:
+        return self.execute_streaming_step(keyboard_action, mouse_action)
+
     def execute_streaming_clear(self) -> None:
         self.collective_rpc("execute_streaming_clear")
 
