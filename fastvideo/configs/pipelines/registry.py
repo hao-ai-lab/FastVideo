@@ -9,6 +9,7 @@ from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuan15 import Hunyuan15T2V480PConfig, Hunyuan15T2V720PConfig
 from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
+from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 
 # isort: off
 from fastvideo.configs.pipelines.wan import (
@@ -77,11 +78,14 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "stepvideo" in id.lower(),
     "cosmos":
     lambda id: "cosmos" in id.lower(),
+    "longcat":
+    lambda id: "longcat" in id.lower(),
     # Add other pipeline architecture detectors
 }
 
 # Fallback configs when exact match isn't found but architecture is detected
 PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
+    "longcat": LongCatT2V480PConfig,
     "hunyuan":
     HunyuanConfig,  # Base Hunyuan config as fallback for any Hunyuan variant
     "matrixgame": MatrixGameI2V480PConfig,

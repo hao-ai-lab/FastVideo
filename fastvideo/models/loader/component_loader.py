@@ -16,6 +16,7 @@ import torch.nn as nn
 from safetensors.torch import load_file as safetensors_load_file
 from torch.distributed import init_device_mesh
 from transformers import AutoImageProcessor, AutoTokenizer
+from transformers import UMT5EncoderModel
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
 from fastvideo.configs.models import EncoderConfig
@@ -405,7 +406,7 @@ class VAELoader(ComponentLoader):
             target_device = get_local_torch_device()
 
         with set_default_torch_dtype(PRECISION_TO_TYPE[
-                fastvideo_args.pipeline_config.vae_precision]):
+                fastvideo_args.pipeline_config.vae_precision] if fastvideo_args.pipeline_config.vae_precision else torch.bfloat16):
             vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
             vae = vae_cls(vae_config).to(target_device)
 

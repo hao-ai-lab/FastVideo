@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastvideo.logger import init_logger
+from fastvideo.utils import StoreBoolean
 
 logger = init_logger(__name__)
 
@@ -26,6 +27,17 @@ class SamplingParam:
     mouse_cond: Any | None = None  # Shape: (B, T, 2)
     keyboard_cond: Any | None = None  # Shape: (B, T, K)
     grid_sizes: Any | None = None  # Shape: (3,) [F,H,W]
+
+    # Refine inputs (LongCat 480p->720p upscaling)
+    # Path-based refine (load stage1 video from disk, e.g. MP4)
+    refine_from: str | None = None  # Path to stage1 video (480p output from distill)
+    t_thresh: float = 0.5  # Threshold for timestep scheduling in refinement
+    spatial_refine_only: bool = False  # If True, only spatial (no temporal doubling)
+    num_cond_frames: int = 0  # Number of conditioning frames
+    # In-memory refine input (for two-stage pipeline where stage1 frames are already in memory)
+    # This mirrors LongCat's demo where a list of frames (e.g. np.ndarray or PIL.Image)
+    # is passed directly to the refinement pipeline instead of reloading from disk.
+    stage1_video: Any | None = None
 
     # Text inputs
     prompt: str | list[str] | None = None
@@ -215,6 +227,31 @@ class SamplingParam:
             type=str,
             default=SamplingParam.video_path,
             help="Path to input video for video-to-video generation",
+        )
+        parser.add_argument(
+            "--refine-from",
+            type=str,
+            default=SamplingParam.refine_from,
+            help="Path to stage1 video for refinement (LongCat 480p->720p)",
+        )
+        parser.add_argument(
+            "--t-thresh",
+            type=float,
+            default=SamplingParam.t_thresh,
+            help=
+            "Threshold for timestep scheduling in refinement (default: 0.5)",
+        )
+        parser.add_argument(
+            "--spatial-refine-only",
+            action=StoreBoolean,
+            default=SamplingParam.spatial_refine_only,
+            help="Only perform spatial super-resolution (no temporal doubling)",
+        )
+        parser.add_argument(
+            "--num-cond-frames",
+            type=int,
+            default=SamplingParam.num_cond_frames,
+            help="Number of conditioning frames for refinement",
         )
         parser.add_argument(
             "--moba-config-path",
