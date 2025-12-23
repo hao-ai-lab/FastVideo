@@ -124,20 +124,24 @@ class TimestepEmbedder(nn.Module):
             t: [B] or [B, T] timesteps
             latent_shape: (T, H, W) for temporal expansion
         Returns:
-            [B, T, C] in FP32
+            [B, T, C]
         """
-        # CRITICAL: Original LongCat computes timestep embedding entirely in FP32
-        # The output is kept in FP32 and used directly by AdaLN modulation
-        with torch.amp.autocast(device_type='cuda', dtype=torch.float32):
-            # Sinusoidal embedding in FP32
-            t_freq = self.timestep_embedding(t.float().flatten(), self.frequency_embedding_size)
-            
-            # MLP projection in FP32 (matching original LongCat)
-            t_emb, _ = self.linear_1(t_freq)
-            t_emb = self.act(t_emb)
-            t_emb, _ = self.linear_2(t_emb)
+        # Sinusoidal embedding in FP32
+        t_freq = self.timestep_embedding(t.flatten(), self.frequency_embedding_size)
         
-        # Reshape if needed - keep in FP32!
+        # Cast to model dtype before MLP (matching original LongCat)
+        # Handle LoRA wrapper if present
+        linear_layer = self.linear_1.base_layer if hasattr(self.linear_1, 'base_layer') else self.linear_1
+        target_dtype = linear_layer.weight.dtype
+        if t_freq.dtype != target_dtype:
+            t_freq = t_freq.to(target_dtype)
+        
+        # MLP projection
+        t_emb, _ = self.linear_1(t_freq)
+        t_emb = self.act(t_emb)
+        t_emb, _ = self.linear_2(t_emb)
+        
+        # Reshape if needed
         if latent_shape is not None and len(t.shape) > 1:
             B = t.shape[0]
             T = latent_shape[0]
@@ -671,19 +675,19 @@ class LongCatSwiGLUFFN(nn.Module):
 
 def modulate_fp32(norm: nn.Module, x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
     """
-    Apply modulation in FP32 for numerical stability (matching original LongCat).
+    Apply modulation in FP32 for numerical stability.
     
-    shift and scale should already be FP32 from torch.amp.autocast context.
+    Converts inputs to FP32 for the modulation operation, then casts back.
     """
-    # Ensure modulation params are FP32 (should be from autocast)
-    assert shift.dtype == torch.float32 and scale.dtype == torch.float32, \
-        f"shift and scale must be FP32, got {shift.dtype} and {scale.dtype}"
-    
     orig_dtype = x.dtype
+    
+    # Convert to FP32 for numerical stability
+    shift_fp32 = shift.float()
+    scale_fp32 = scale.float()
     
     # Normalize and modulate in FP32
     x_norm = norm(x.to(torch.float32))
-    x_mod = x_norm * (scale + 1) + shift
+    x_mod = x_norm * (scale_fp32 + 1) + shift_fp32
     
     return x_mod.to(orig_dtype)
 
@@ -906,28 +910,20 @@ class FinalLayer(nn.Module):
         """
         Returns: [B, N, out_channels * patch_size^3]
         """
-        # CRITICAL: Original LongCat runs the ENTIRE forward in FP32 autocast context
-        # including both modulation AND the linear projection
-        assert t.dtype == torch.float32, "Timestep embeddings must be FP32"
         B, N, C = x.shape
         T, _, _ = latent_shape
 
-        # Run everything in FP32 to match original LongCat
-        with torch.amp.autocast(device_type='cuda', dtype=torch.float32):
-            # AdaLN modulation
-            t_mod = self.adaln_act(t)
-            mod_params, _ = self.adaln_linear(t_mod)
-            # Ensure FP32 output (needed when LoRA is applied)
-            if mod_params.dtype != torch.float32:
-                mod_params = mod_params.float()
-            shift, scale = mod_params.unsqueeze(2).chunk(2, dim=-1)
+        # AdaLN modulation
+        t_mod = self.adaln_act(t)
+        mod_params, _ = self.adaln_linear(t_mod)
+        shift, scale = mod_params.unsqueeze(2).chunk(2, dim=-1)
 
-            # Modulate (uses FP32 norm internally)
-            x = modulate_fp32(self.norm, x.view(B, T, -1, C), shift, scale)
-            x = x.reshape(B, N, C)
+        # Modulate (converts to FP32 internally for stability)
+        x = modulate_fp32(self.norm, x.view(B, T, -1, C), shift, scale)
+        x = x.reshape(B, N, C)
 
-            # Project (MUST be inside FP32 context like original!)
-            x, _ = self.proj(x)
+        # Project
+        x, _ = self.proj(x)
 
         return x
 
