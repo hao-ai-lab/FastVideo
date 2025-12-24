@@ -27,6 +27,7 @@
 #include "tile_scheduler.h"
 #include "kernel_ws.h"
 #include "kernel_traits.h"
+#include "block_config.h"
 
 
 template<typename Kernel_traits, bool Is_causal>
@@ -102,7 +103,7 @@ void run_mha_fwd_(Flash_fwd_params &params, cudaStream_t stream) {
         BOOL_SWITCH(params.per_block_mean, per_block, [&] {
             if constexpr (Headdim == 64 || Headdim == 128) {
                 run_flash_fwd<
-                    Flash_fwd_kernel_traits<Headdim, 128, 128, 3, 1, per_block, T, O>,
+                    Flash_fwd_kernel_traits<Headdim, flash::BLOCK_M, flash::BLOCK_N, 3, 1, per_block, T, O>,
                     Is_causal
                 >(params, stream);
             } else {

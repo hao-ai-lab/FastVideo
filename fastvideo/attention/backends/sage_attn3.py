@@ -322,23 +322,8 @@ def sageattn_blackwell_with_16bit_bwd(q_BLHD, k_BLHD, v_BLHD, is_causal=False, p
 
 class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, q_BHLD, k_BHLD, v_BHLD, is_causal=False, per_block_mean=True):
-        softmax_scale = 1.0 / sqrt(q_BHLD.shape[-1])
-        # FA forward only to get softmax_lse (which is shape BHL)
-        _, softmax_lse, _S_dmask, rng_state = _wrapped_flash_attn_forward(
-            q_BHLD, k_BHLD, v_BHLD,
-            0.0,               # dropout_p
-            softmax_scale,     # softmax_scale
-            is_causal,         # causal
-            -1, -1,            # window_size_left/right
-            0.0,               # softcap
-            None,              # alibi_slopes
-            False              # return_softmax
-        )
-        
+    def forward(ctx, q_BHLD, k_BHLD, v_BHLD, softmax_scale, softmax_lse, is_causal=False, per_block_mean=True):
         k_mean = k_BHLD.mean(dim=(0, 1, 2), keepdim=True).view(-1)
-
-        logger.info(f"sageattn_blackwell.__file__: {sageattn_blackwell.__file__}")
 
         out_BHLD = sageattn_blackwell(
             q_BHLD, k_BHLD, v_BHLD,
@@ -353,6 +338,7 @@ class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
         ctx.IS_QAT = True
         ctx.k_mean = k_mean
         ctx.save_for_backward(q_BHLD, k_BHLD, v_BHLD, out_BHLD, softmax_lse)
+        return out_BHLD
 
     @staticmethod
     def backward(ctx, do):
@@ -368,7 +354,7 @@ class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
         PRE_BLOCK = 128
         NUM_STAGES = 3
         NUM_WARPS = 4
-        BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 128, 128, 128, 128
+        BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 64, 64, 64, 64
         BLK_SLICE_FACTOR = 1
         # NOTE: K is NOT pre-scaled here - scaling is applied AFTER qk dot product in kernels
         # This improves precision by avoiding rounding errors in K before the dot product
@@ -431,13 +417,26 @@ class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
                 num_stages=NUM_STAGES
             )
     
-        return dq_BHLD, dk_BHLD, dv_BHLD, None, None 
+        return dq_BHLD, dk_BHLD, dv_BHLD, None, None, None, None 
 
 def sageattn_blackwell_with_triton_bwd(q_BLHD, k_BLHD, v_BLHD, is_causal=False, per_block_mean=True):
+    softmax_scale = 1.0 / sqrt(q_BLHD.shape[-1])
+    # FA forward only to get softmax_lse (which is shape BHL)
+    _, softmax_lse, _S_dmask, rng_state = _wrapped_flash_attn_forward(
+        q_BLHD, k_BLHD, v_BLHD,
+        0.0,               # dropout_p
+        softmax_scale,     # softmax_scale
+        is_causal,         # causal
+        -1, -1,            # window_size_left/right
+        0.0,               # softcap
+        None,              # alibi_slopes
+        False              # return_softmax
+    )
+    
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
     v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
-    out_BHLD = _SageAttnBlackwellWithTritonBwd.apply(q_BHLD, k_BHLD, v_BHLD, is_causal, per_block_mean)
+    out_BHLD = _SageAttnBlackwellWithTritonBwd.apply(q_BHLD, k_BHLD, v_BHLD, softmax_scale, softmax_lse, is_causal, per_block_mean)
     return out_BHLD.permute(0, 2, 1, 3).contiguous()
 
 def qat_attn(q_BLHD, k_BLHD, v_BLHD, is_causal=False):

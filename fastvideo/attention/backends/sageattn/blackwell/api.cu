@@ -25,6 +25,7 @@
 #include "params.h"
 #include "launch.h"
 #include "static_switch.h"
+#include "block_config.h"
 
 #define CHECK_DEVICE(x) TORCH_CHECK(x.is_cuda(), #x " must be on CUDA")
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == torch::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
@@ -165,7 +166,7 @@ void set_params_fprop(Flash_fwd_params &params,
     if (per_block_mean) {
         params.seqlen_s = seqlen_q;
     } else {
-        params.seqlen_s = 128; // size of BLOCK_M
+        params.seqlen_s = flash::BLOCK_M; // size of BLOCK_M
     }
     if (window_size_left < 0 && window_size_right >= 0) { window_size_left = seqlen_k; }
     if (window_size_left >= 0 && window_size_right < 0) { window_size_right = seqlen_k; }
@@ -273,8 +274,8 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x (head_size
     auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
     // const int head_size = round_multiple(head_size_og, 8);
     // const int head_size_rounded = round_multiple(head_size, 32);
-    const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
-    const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
+    const int seqlen_q_rounded = round_multiple(seqlen_q, flash::BLOCK_M);
+    const int seqlen_k_rounded = round_multiple(seqlen_k, flash::BLOCK_N);
 
     // Otherwise the kernel will be launched from cuda:0 device
     // Cast to char to avoid compiler warning about narrowing

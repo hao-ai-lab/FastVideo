@@ -22,6 +22,11 @@ from torch.nn.functional import scaled_dot_product_attention as sdpa
 import fp4attn_cuda
 import fp4quant_cuda
 
+# Centralized block size configuration for sageattn_blackwell kernels
+# These should match the values in fastvideo/attention/backends/sageattn/blackwell/block_config.h
+BLOCK_M = 64  # Block size for M dimension (query sequence length)
+BLOCK_N = 64  # Block size for N dimension (key/value sequence length)
+
 
 @triton.jit
 def group_mean_kernel(
@@ -54,7 +59,7 @@ def group_mean_kernel(
 
 def triton_group_mean(q: torch.Tensor):
     B, H, L, D = q.shape
-    GROUP_SIZE = 128
+    GROUP_SIZE = BLOCK_M
     num_groups = L // GROUP_SIZE
     
     q_out = torch.empty_like(q)  # [B, H, L, D]
@@ -74,15 +79,15 @@ def triton_group_mean(q: torch.Tensor):
 
 def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_mean: bool = True, disable_delta_s: bool = True):
 
-    def pad_128(x):
+    def pad_to_block_size(x):
         L = x.size(2)
-        pad_len = (128 - L % 128) % 128
+        pad_len = (BLOCK_M - L % BLOCK_M) % BLOCK_M
         if pad_len == 0:
             return x.contiguous()
         return F.pad(x, (0, 0, 0, pad_len), value=0).contiguous()
     
     k -= k.mean(dim=-2, keepdim=True)  
-    q, k, v = map(lambda x: pad_128(x), [q, k, v])
+    q, k, v = map(lambda x: pad_to_block_size(x), [q, k, v])
     if per_block_mean:
         q, qm = triton_group_mean(q)
     else:
