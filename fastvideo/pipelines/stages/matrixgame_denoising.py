@@ -554,7 +554,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             })
         return crossattn_cache
 
-    def reset_streaming(self, batch: ForwardBatch,
+    def streaming_reset(self, batch: ForwardBatch,
                         fastvideo_args: FastVideoArgs) -> ForwardBatch:
         target_dtype = torch.bfloat16
         autocast_enabled = (target_dtype != torch.float32
@@ -674,13 +674,13 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
 
         return self._streaming_batch
 
-    def step_streaming(
+    def streaming_step(
             self,
             keyboard_action: torch.Tensor | None = None,
             mouse_action: torch.Tensor | None = None) -> ForwardBatch:
         if not self._streaming_initialized:
             raise RuntimeError(
-                "Streaming not initialized! Call reset_streaming first.")
+                "Streaming not initialized! Call streaming_reset first.")
 
         if self._streaming_block_idx >= len(self._streaming_block_sizes):
             # Already finished
@@ -949,7 +949,7 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
 
         return batch
 
-    def clear_streaming(self) -> None:
+    def streaming_clear(self) -> None:
         self._streaming_initialized = False
         self._streaming_kv_cache1 = None
         self._streaming_kv_cache2 = None
