@@ -174,17 +174,18 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 last_epoch=self.init_steps - 1,
             )
 
-        self.train_dataset, self.train_dataloader = build_parquet_map_style_dataloader(
-            training_args.data_path,
-            training_args.train_batch_size,
-            parquet_schema=self.train_dataset_schema,
-            num_data_workers=training_args.dataloader_num_workers,
-            cfg_rate=training_args.training_cfg_rate,
-            drop_last=True,
-            text_padding_length=training_args.pipeline_config.
-            text_encoder_configs[0].arch_config.
-            text_len,  # type: ignore[attr-defined]
-            seed=self.seed)
+        if not self.training_args.rl_args.rl_mode:
+            self.train_dataset, self.train_dataloader = build_parquet_map_style_dataloader(
+                training_args.data_path,
+                training_args.train_batch_size,
+                parquet_schema=self.train_dataset_schema,
+                num_data_workers=training_args.dataloader_num_workers,
+                cfg_rate=training_args.training_cfg_rate,
+                drop_last=True,
+                text_padding_length=training_args.pipeline_config.
+                text_encoder_configs[0].arch_config.
+                text_len,  # type: ignore[attr-defined]
+                seed=self.seed)
 
         self.noise_scheduler = noise_scheduler
         if self.training_args.boundary_ratio is not None:
@@ -192,19 +193,21 @@ class TrainingPipeline(LoRAPipeline, ABC):
         else:
             self.boundary_timestep = None
 
-        logger.info("train_dataloader length: %s", len(self.train_dataloader))
+        if not self.training_args.rl_args.rl_mode:
+            logger.info("train_dataloader length: %s", len(self.train_dataloader))
         logger.info("train_sp_batch_size: %s",
                     training_args.train_sp_batch_size)
         logger.info("gradient_accumulation_steps: %s",
                     training_args.gradient_accumulation_steps)
         logger.info("sp_size: %s", training_args.sp_size)
 
-        self.num_update_steps_per_epoch = math.ceil(
-            len(self.train_dataloader) /
-            training_args.gradient_accumulation_steps * training_args.sp_size /
-            training_args.train_sp_batch_size)
-        self.num_train_epochs = math.ceil(training_args.max_train_steps /
-                                          self.num_update_steps_per_epoch)
+        if not self.training_args.rl_args.rl_mode:
+            self.num_update_steps_per_epoch = math.ceil(
+                len(self.train_dataloader) /
+                training_args.gradient_accumulation_steps * training_args.sp_size /
+                training_args.train_sp_batch_size)
+            self.num_train_epochs = math.ceil(training_args.max_train_steps /
+                                            self.num_update_steps_per_epoch)
 
         # TODO(will): is there a cleaner way to track epochs?
         self.current_epoch = 0

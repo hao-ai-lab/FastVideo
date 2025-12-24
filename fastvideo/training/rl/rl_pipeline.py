@@ -2,11 +2,9 @@
 """
 RL training pipeline for FastVideo.
 
-This module implements reinforcement learning training using pluggable algorithms
-(GRPO, PPO, DPO). It extends the base TrainingPipeline with RL-specific functionality.
-
-The pipeline separates algorithm logic from pipeline infrastructure, allowing
-easy switching between different RL algorithms.
+This module implements GRPO (Group Relative Policy Optimization) training for video generation models.
+It extends the base TrainingPipeline with RL-specific functionality including trajectory collection,
+reward computation, advantage estimation, and GRPO loss computation.
 
 Reference:
     Flow-GRPO: https://github.com/yifan123/flow_grpo
@@ -16,6 +14,8 @@ import torch
 import torch.nn as nn
 from typing import Any
 
+import math
+
 from fastvideo.fastvideo_args import TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import TrainingBatch
@@ -24,10 +24,6 @@ from fastvideo.training.rl.rewards import (
     create_reward_models,
     MultiRewardAggregator,
     ValueModel
-)
-from fastvideo.training.rl.algorithms import (
-    BaseRLAlgorithm,
-    create_algorithm,
 )
 from .rl_utils import (
     sample_random_timesteps,
@@ -52,20 +48,13 @@ class RLPipeline(TrainingPipeline):
     """
     RL training pipeline for flow matching models.
 
-    This pipeline implements online reinforcement learning for video generation models.
-    It supports multiple RL algorithms through a pluggable architecture:
-    - GRPO (Group Relative Policy Optimization) with GRPO-Guard safety
-    - PPO (Proximal Policy Optimization) #TODO
-    - DPO (Direct Preference Optimization) #TODO
-
-    The algorithm is selected via the `rl_algorithm` configuration and handles:
-    - Advantage computation
-    - Policy loss computation
-    - Value loss computation (if applicable)
+    This pipeline implements GRPO (Group Relative Policy Optimization) for video generation models.
+    It handles:
+    - Trajectory collection with log probability computation
+    - Reward computation using reward models
+    - Advantage computation with per-prompt stat tracking
+    - GRPO policy loss with clipping and KL regularization
     """
-
-    # Algorithm instance that implements train_one_step logic
-    algorithm: BaseRLAlgorithm
 
     def __init__(
         self,
@@ -103,6 +92,10 @@ class RLPipeline(TrainingPipeline):
             fastvideo_args.rl_args.rl_algorithm
         )
 
+    @torch.no_grad()
+    def _log_validation(self, transformer, training_args, global_step) -> None:
+        pass
+
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         """Initialize the RL training pipeline with algorithm, reward and value models."""
         # Call parent initialization for basic setup (optimizer, scheduler, etc.)
@@ -123,7 +116,7 @@ class RLPipeline(TrainingPipeline):
         logger.info("  num_image_per_prompt (k): %s", rl_num_image_per_prompt)
         
         # Build RL prompt dataloader
-        train_dataloader, test_dataloader = build_rl_prompt_dataloader(
+        train_dataloader, test_dataloader, train_dataset, test_dataset = build_rl_prompt_dataloader(
             dataset_path=rl_dataset_path,
             dataset_type=rl_dataset_type,
             split='train',
@@ -136,34 +129,29 @@ class RLPipeline(TrainingPipeline):
             num_replicas=num_replicas,
             rank=rank
         )
-        
-        # Replace the dataloader from parent initialization
+               
         self.train_dataloader = train_dataloader
+        self.train_dataset = train_dataset
         self.train_loader_iter = iter(self.train_dataloader)
         self.current_epoch = 0
         
-        logger.info("RL prompt dataloader initialized")
+        logger.info("train_dataloader length: %s", len(self.train_dataloader))
+
+        self.num_update_steps_per_epoch = math.ceil(
+                len(self.train_dataloader) /
+                training_args.gradient_accumulation_steps * training_args.sp_size /
+                training_args.train_sp_batch_size)
+        self.num_train_epochs = math.ceil(training_args.max_train_steps /
+                                            self.num_update_steps_per_epoch)
 
         logger.info("Initializing RL-specific components...")
 
-        # Initialize the RL algorithm
-        self.algorithm = create_algorithm(
-            algorithm_name=training_args.rl_args.rl_algorithm,
-            config=training_args.rl_args
+        # Initialize reward models (GRPO always uses reward models)
+        self.reward_models = create_reward_models(
+            reward_models=training_args.rl_args.reward_models,
+            device=str(self.device)
         )
-        logger.info("Using RL algorithm: %s", self.algorithm.name)
-
-        # Initialize reward models (excludes DPO)
-        if not self.algorithm.name == "dpo":
-            self.reward_models = create_reward_models(
-                reward_models=training_args.rl_args.reward_models,
-                device=str(self.device)
-            )
-            logger.info("Loaded reward models: %s", self.reward_models)
-
-        # Initialize value model if algorithm requires it
-        if self.algorithm.requires_value_model:
-            self._initialize_value_model(training_args)
+        logger.info("Loaded reward models: %s", self.reward_models)
 
         # Initialize sampling pipeline for trajectory collection
         self._initialize_sampling_pipeline(training_args)
@@ -618,21 +606,8 @@ class RLPipeline(TrainingPipeline):
         Returns:
             Updated training_batch with value predictions
         """
-        if not self.algorithm.requires_value_model:
-            return training_batch
-
-        logger.debug("Computing value predictions")
-
-        # TODO: Implement actual value computation
-        # For now, use dummy values
-        batch_size = training_batch.latents.shape[0]
-        dummy_values = torch.randn(batch_size, device=training_batch.latents.device) * 0.1 + 0.5
-        training_batch.values = dummy_values
-        training_batch.old_values = training_batch.values.clone()
-
-        training_batch.value_mean = training_batch.values.mean().item()
-
-        logger.debug("Values computed: mean=%.3f", training_batch.value_mean)
+        # GRPO doesn't use value models, so this method is a no-op
+        # Keeping for API compatibility but returning early
         return training_batch
 
     def compute_advantages(self, training_batch: TrainingBatch) -> TrainingBatch:
@@ -1030,18 +1005,14 @@ class RLPipeline(TrainingPipeline):
 
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
         """
-        Train one step using the configured RL algorithm.
+        Train one step using GRPO algorithm.
 
-        This method orchestrates the training step while delegating
-        algorithm-specific loss computation to the algorithm instance.
-
-        Steps:
+        This method orchestrates the GRPO training step:
         1. Collect trajectories with current policy
         2. Compute rewards
-        3. Compute values (if algorithm requires)
-        4. Compute advantages
-        5. Compute losses using algorithm
-        6. Update policy and value function
+        3. Compute advantages
+        4. Compute GRPO loss (policy loss with clipping + KL regularization)
+        5. Update policy
 
         Args:
             training_batch: Current training batch
@@ -1049,10 +1020,10 @@ class RLPipeline(TrainingPipeline):
         Returns:
             Updated training_batch with loss and metrics
         """
-        # Check if we're in warmup phase (do SFT instead of RL)
-        if training_batch.current_timestep < self.training_args.rl_args.rl_warmup_steps:
-            logger.debug("In warmup phase, using standard SFT training")
-            return super().train_one_step(training_batch)
+        # # Check if we're in warmup phase (do SFT instead of RL)
+        # if training_batch.current_timestep < self.training_args.rl_args.rl_warmup_steps:
+        #     logger.debug("In warmup phase, using standard SFT training")
+        #     return super().train_one_step(training_batch)
 
         training_batch = self._prepare_training(training_batch)
 
@@ -1072,7 +1043,7 @@ class RLPipeline(TrainingPipeline):
             training_batch = self.compute_rewards(training_batch)
 
             # 3. Compute value predictions (if algorithm requires)
-            training_batch = self.compute_values(training_batch)
+            # training_batch = self.compute_values(training_batch)
 
             # 4. Compute advantages
             training_batch = self.compute_advantages(training_batch)
@@ -1130,12 +1101,7 @@ class RLPipeline(TrainingPipeline):
         for param in self.transformer.parameters():
             param.requires_grad = True
 
-        # Value model is trainable if not sharing backbone and algorithm requires it
-        if (self.value_model is not None and
-            self.algorithm.requires_value_model and
-            not self.training_args.rl_args.value_model_share_backbone):
-            for param in self.value_model.parameters():
-                param.requires_grad = True
+        # GRPO doesn't use value models, so no value model training needed
 
         # Freeze reward models (they should not be trained)
         if self.reward_models is not None:

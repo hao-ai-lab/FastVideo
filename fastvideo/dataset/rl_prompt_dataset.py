@@ -90,6 +90,9 @@ class KRepeatSampler(Sampler):
             
             # Return the sample indices for the current card
             yield per_card_samples[self.rank]
+        
+    def __len__(self):
+        return len(self.dataset) // self.batch_size
     
     def set_step(self, step):
         """Used to synchronize the random state for different epochs."""
@@ -167,5 +170,5 @@ def build_rl_prompt_dataloader(
         num_workers=test_num_workers,
     )
     
-    return train_dataloader, test_dataloader
+    return train_dataloader, test_dataloader, train_dataset, test_dataset
 

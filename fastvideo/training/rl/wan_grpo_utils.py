@@ -274,10 +274,11 @@ def wan_pipeline_with_logprob(
         else:
             negative_prompt_embeds = None
 
-    transformer_dtype = transformer.dtype
-    prompt_embeds = prompt_embeds.to(transformer_dtype)
-    if negative_prompt_embeds is not None:
-        negative_prompt_embeds = negative_prompt_embeds.to(transformer_dtype)
+    # logger.info("wan_pipeline_with_logprob's transformer class type: %s", type(transformer))
+    # transformer_dtype = transformer.dtype
+    # prompt_embeds = prompt_embeds.to(transformer_dtype)
+    # if negative_prompt_embeds is not None:
+    #     negative_prompt_embeds = negative_prompt_embeds.to(transformer_dtype)
 
     # Prepare timesteps
     scheduler.set_timesteps(num_inference_steps, device=device)

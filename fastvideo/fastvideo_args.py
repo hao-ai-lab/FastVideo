@@ -747,8 +747,8 @@ class RLArgs:
     """
     # ============================================================================
     # SHARED RL CONFIGURATION
-    mode: bool = False  # Enable RL training mode
-    algorithm: str = "grpo"  # RL algorithm to use: "grpo", "ppo", "dpo"
+    rl_mode: bool = False # Enable RL training mode
+    rl_algorithm: str = "grpo"  # RL algorithm to use: "grpo", "ppo", "dpo"
 
     # Trajectory collection
     num_rollouts: int = 4  # Number of rollouts to collect per training step
@@ -824,7 +824,7 @@ class RLArgs:
                             help="Enable RL training mode")
         parser.add_argument("--rl-algorithm",
                             type=str,
-                            default=RLArgs.algorithm,
+                            default=RLArgs.rl_algorithm,
                             choices=["grpo", "ppo", "dpo"],
                             help="RL algorithm to use (grpo, ppo, dpo)")
 

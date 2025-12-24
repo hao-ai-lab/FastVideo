@@ -1,12 +1,20 @@
 #!/bin/bash
 
+# Change to FastVideo root directory (3 levels up from this script)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FASTVIDEO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+cd "$FASTVIDEO_ROOT"
+
+# Add FastVideo root to PYTHONPATH so Python can find the fastvideo package
+export PYTHONPATH="$FASTVIDEO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-RL_DATASET_DIR="data/rl_prompts/"  # Path to RL prompt dataset directory (should contain train.txt and test.txt)
-VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
+RL_DATASET_DIR="data/ocr/"  # Path to RL prompt dataset directory (should contain train.txt and test.txt)
+VALIDATION_DATASET_FILE="$SCRIPT_DIR/validation.json"
 NUM_GPUS=1
 # export CUDA_VISIBLE_DEVICES=4,5
 
@@ -32,8 +40,9 @@ parallel_args=(
   --num_gpus $NUM_GPUS 
   --sp_size $NUM_GPUS 
   --tp_size $NUM_GPUS
-  --hsdp_replicate_dim 1
-  --hsdp_shard_dim $NUM_GPUS
+  # --hsdp_replicate_dim 1
+  # --hsdp_shard_dim $NUM_GPUS
+  --use-fsdp-inference False
 )
 
 # Model arguments
@@ -97,7 +106,7 @@ torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
   --master_port 29501 \
-    fastvideo/training/wan_rl_training_pipeline.py \
+    "$FASTVIDEO_ROOT/fastvideo/training/wan_rl_training_pipeline.py" \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \
