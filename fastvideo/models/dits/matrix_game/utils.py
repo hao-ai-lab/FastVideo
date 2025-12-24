@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import random
 
 # import cv2
-import numpy as np
+# from diffusers.utils import export_to_video
+# import numpy as np
 import torch
-from diffusers.utils import export_to_video
 from PIL import Image
 
 from fastvideo.utils import logger
@@ -77,9 +78,9 @@ def get_current_action(mode="universal"):
             try:
                 idx_mouse = input('Please input the mouse action (e.g. `U`):\n').strip().lower()
                 idx_keyboard = input('Please input the keyboard action (e.g. `W`):\n').strip().lower()
-                if idx_mouse in CAMERA_VALUE_MAP.keys() and idx_keyboard in KEYBOARD_IDX.keys():
+                if idx_mouse in CAMERA_VALUE_MAP and idx_keyboard in KEYBOARD_IDX:
                     flag = 1
-            except:
+            except Exception:
                 pass
         mouse_cond = torch.tensor(CAMERA_VALUE_MAP[idx_mouse]).cuda()
         keyboard_cond = torch.tensor(KEYBOARD_IDX[idx_keyboard]).cuda()
@@ -114,7 +115,7 @@ def get_current_action(mode="universal"):
                     idx_keyboard += ['q']
                 assert idx_mouse in [['a'], ['d'], ['q']] and idx_keyboard in [['q'], ['w'], ['s']]
                 flag = 1
-            except:
+            except Exception:
                 pass
         mouse_cond = torch.tensor(CAMERA_VALUE_MAP[idx_mouse[0]]).cuda()
         keyboard_cond = torch.tensor(KEYBOARD_IDX[idx_keyboard[0]]).cuda()
@@ -135,7 +136,7 @@ def get_current_action(mode="universal"):
                 idx_keyboard = input('Please input the action: \n(e.g. `W` for forward, `Z` for turning left)\n').strip().lower()
                 if idx_keyboard in KEYBOARD_IDX.keys():
                     flag = 1
-            except:
+            except Exception:
                 pass
         keyboard_cond = torch.tensor(KEYBOARD_IDX[idx_keyboard]).cuda()
     
@@ -147,6 +148,9 @@ def get_current_action(mode="universal"):
     return {
         "keyboard": keyboard_cond
     }
+
+async def get_current_action_async(mode="universal"):
+    return await asyncio.to_thread(get_current_action, mode)
 
 def load_initial_image(image_path: str = None) -> Image.Image:
     if image_path and os.path.exists(image_path):
