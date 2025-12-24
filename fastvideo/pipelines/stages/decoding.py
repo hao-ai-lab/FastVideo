@@ -50,32 +50,7 @@ class DecodingStage(PipelineStage):
         result.add_check("output", batch.output, [V.is_tensor, V.with_dims(5)])
         return result
 
-    @torch.no_grad()
-    def decode(self, latents: torch.Tensor,
-               fastvideo_args: FastVideoArgs) -> torch.Tensor:
-        """
-        Decode latent representations into pixel space using VAE.
-        
-        Args:
-            latents: Input latent tensor with shape (batch, channels, frames, height_latents, width_latents)
-            fastvideo_args: Configuration containing:
-                - disable_autocast: Whether to disable automatic mixed precision (default: False)
-                - pipeline_config.vae_precision: VAE computation precision ("fp32", "fp16", "bf16")
-                - pipeline_config.vae_tiling: Whether to enable VAE tiling for memory efficiency
-            
-        Returns:
-            Decoded video tensor with shape (batch, channels, frames, height, width), 
-            normalized to [0, 1] range and moved to CPU as float32
-        """
-        self.vae = self.vae.to(get_local_torch_device())
-        latents = latents.to(get_local_torch_device())
-
-        # Setup VAE precision
-        vae_dtype = PRECISION_TO_TYPE[
-            fastvideo_args.pipeline_config.vae_precision]
-        vae_autocast_enabled = (
-            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
-
+    def _denormalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
         # denormalization for MatrixGame VAE
         # z = z * std + mean during decode
         if (hasattr(self.vae.config, 'latents_mean')
@@ -109,6 +84,35 @@ class DecodingStage(PipelineStage):
                                                         latents.dtype)
                 else:
                     latents += self.vae.shift_factor
+        return latents
+
+    @torch.no_grad()
+    def decode(self, latents: torch.Tensor,
+               fastvideo_args: FastVideoArgs) -> torch.Tensor:
+        """
+        Decode latent representations into pixel space using VAE.
+        
+        Args:
+            latents: Input latent tensor with shape (batch, channels, frames, height_latents, width_latents)
+            fastvideo_args: Configuration containing:
+                - disable_autocast: Whether to disable automatic mixed precision (default: False)
+                - pipeline_config.vae_precision: VAE computation precision ("fp32", "fp16", "bf16")
+                - pipeline_config.vae_tiling: Whether to enable VAE tiling for memory efficiency
+            
+        Returns:
+            Decoded video tensor with shape (batch, channels, frames, height, width), 
+            normalized to [0, 1] range and moved to CPU as float32
+        """
+        self.vae = self.vae.to(get_local_torch_device())
+        latents = latents.to(get_local_torch_device())
+
+        # Setup VAE precision
+        vae_dtype = PRECISION_TO_TYPE[
+            fastvideo_args.pipeline_config.vae_precision]
+        vae_autocast_enabled = (
+            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+
+        latents = self._denormalize_latents(latents)
 
         # Decode latents
         with torch.autocast(device_type="cuda",
@@ -155,31 +159,7 @@ class DecodingStage(PipelineStage):
         vae_autocast_enabled = (
             vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
-        # denormalization for MatrixGame VAE
-        if (hasattr(self.vae.config, 'latents_mean')
-                and hasattr(self.vae.config, 'latents_std')):
-            latents_mean = torch.tensor(self.vae.config.latents_mean,
-                                        device=latents.device,
-                                        dtype=latents.dtype).view(
-                                            1, -1, 1, 1, 1)
-            latents_std = torch.tensor(self.vae.config.latents_std,
-                                       device=latents.device,
-                                       dtype=latents.dtype).view(
-                                           1, -1, 1, 1, 1)
-            latents = latents * latents_std + latents_mean
-        elif hasattr(self.vae, 'scaling_factor'):
-            if isinstance(self.vae.scaling_factor, torch.Tensor):
-                latents = latents / self.vae.scaling_factor.to(
-                    latents.device, latents.dtype)
-            else:
-                latents = latents / self.vae.scaling_factor
-            if (hasattr(self.vae, "shift_factor")
-                    and self.vae.shift_factor is not None):
-                if isinstance(self.vae.shift_factor, torch.Tensor):
-                    latents += self.vae.shift_factor.to(latents.device,
-                                                        latents.dtype)
-                else:
-                    latents += self.vae.shift_factor
+        latents = self._denormalize_latents(latents)
 
         # Initialize cache if needed
         if cache is None:

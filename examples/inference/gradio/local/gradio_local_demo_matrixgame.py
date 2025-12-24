@@ -169,7 +169,7 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
         checkbox_background_color_selected="#2563eb",
     )
     
-    with gr.Blocks(title="FastWan", theme=theme) as demo:
+    with gr.Blocks(title="FastVideo - Matrix Game 2.0", theme=theme) as demo:
         game_state = gr.State({
             "initialized": False,
             "current_model": None,
