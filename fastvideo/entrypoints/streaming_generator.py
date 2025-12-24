@@ -1,4 +1,5 @@
 import asyncio
+import os
 from concurrent.futures import Future, ThreadPoolExecutor
 
 import imageio
@@ -19,30 +20,45 @@ logger = init_logger(__name__)
 
 
 class IncrementalVideoWriter:
-
-    def __init__(self, path: str, fps: int = 24):
-        self._executor = ThreadPoolExecutor(max_workers=1,
+    def __init__(self, path: str, fps: int = 24, block_dir: str | None = None):
+        self._executor = ThreadPoolExecutor(max_workers=2,
                                             thread_name_prefix="video_write_")
         self._writer = imageio.get_writer(path, fps=fps, format="mp4")
-        self._pending: Future | None = None
+        self._pending_main: Future | None = None
+        self._block_dir = block_dir
+        self._block_idx = 0
+        self._fps = fps
 
-    def add_frames(self, frames: list[np.ndarray]) -> None:
-        # Wait for previous write to complete before starting a new one
-        if self._pending is not None:
-            self._pending.result()
+    def add_frames(self, frames: list[np.ndarray]) -> Future | None:
+        # Wait for previous main video write to complete
+        if self._pending_main is not None:
+            self._pending_main.result()
 
         # Copy frames to avoid race conditions
         frames_copy = [f.copy() for f in frames]
-        self._pending = self._executor.submit(self._write_frames, frames_copy)
+        self._pending_main = self._executor.submit(self._write_frames, frames_copy)
+
+        # Write block file if block_dir is set
+        block_future = None
+        if self._block_dir:
+            self._block_idx += 1
+            block_path = os.path.join(self._block_dir, f"b{self._block_idx}.mp4")
+            block_future = self._executor.submit(self._write_block, frames_copy, block_path)
+
+        return block_future
 
     def _write_frames(self, frames: list[np.ndarray]) -> None:
         for frame in frames:
             self._writer.append_data(frame)
 
+    def _write_block(self, frames: list[np.ndarray], path: str) -> str:
+        imageio.mimsave(path, frames, fps=self._fps)
+        return path
+
     def close(self) -> None:
-        if self._pending is not None:
-            self._pending.result()
-            self._pending = None
+        if self._pending_main is not None:
+            self._pending_main.result()
+            self._pending_main = None
         if self._writer:
             self._writer.close()
             self._writer = None
@@ -64,6 +80,8 @@ class StreamingVideoGenerator:
         self._use_queue_mode = use_queue_mode and isinstance(
             self.executor, MultiprocExecutor)
         self.writer: IncrementalVideoWriter | None = None
+        self.block_dir: str | None = None
+        self.block_idx: int = 0
 
     @classmethod
     def from_pretrained(cls,
@@ -92,6 +110,8 @@ class StreamingVideoGenerator:
             num_frames: int = 120,  # Default max frames
             **kwargs):
         self.accumulated_frames = []
+        self.block_idx = 0
+        self.block_dir = None
         if self.writer:
             self.writer.close()
             self.writer = None
@@ -109,8 +129,12 @@ class StreamingVideoGenerator:
         self.sampling_param.num_frames = num_frames
 
         if "output_path" in kwargs:
-            self.writer = IncrementalVideoWriter(kwargs["output_path"],
-                                                 fps=24)  # Default fps
+            output_path = kwargs["output_path"]
+            # Create block directory for individual block files
+            block_dir = output_path.replace(".mp4", "")
+            os.makedirs(block_dir, exist_ok=True)
+            self.block_dir = block_dir
+            self.writer = IncrementalVideoWriter(output_path, fps=24, block_dir=block_dir)
 
         fastvideo_args = self.fastvideo_args
 
@@ -143,7 +167,7 @@ class StreamingVideoGenerator:
 
     def step(self,
              keyboard_cond: torch.Tensor,
-             mouse_cond: torch.Tensor) -> list[np.ndarray]:
+             mouse_cond: torch.Tensor) -> tuple[list[np.ndarray], Future | None]:
         if self.batch is None:
             raise RuntimeError("Call reset() before step()")
 
@@ -159,16 +183,19 @@ class StreamingVideoGenerator:
                 keyboard_action=keyboard_cond, mouse_action=mouse_cond)
 
         frames = self._process_output_batch(output_batch)
+        block_future = None
         if len(frames) > 0:
             self.accumulated_frames.extend(frames)
+            self.block_idx += 1
             if self.writer:
-                self.writer.add_frames(frames)
+                # Returns Future for block file, or None if no block_dir
+                block_future = self.writer.add_frames(frames)
 
-        return frames
+        return frames, block_future
 
     async def step_async(self,
                          keyboard_cond: torch.Tensor,
-                         mouse_cond: torch.Tensor) -> list[np.ndarray]:
+                         mouse_cond: torch.Tensor) -> tuple[list[np.ndarray], Future | None]:
         if self.batch is None:
             raise RuntimeError("Call reset() before step_async()")
 
@@ -192,12 +219,14 @@ class StreamingVideoGenerator:
             )
 
         frames = self._process_output_batch(output_batch)
+        block_future = None
         if len(frames) > 0:
             self.accumulated_frames.extend(frames)
+            self.block_idx += 1
             if self.writer:
-                self.writer.add_frames(frames)
+                block_future = self.writer.add_frames(frames)
 
-        return frames
+        return frames, block_future
 
 
     def finalize(self,
