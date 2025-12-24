@@ -23,6 +23,7 @@ from fastvideo.attention.backends.abstract import (AttentionBackend,
 from fastvideo.logger import init_logger
 from test_quantization_precision import get_fake_quant
 from qat_attn import attention
+from qat_attn import _attn_bwd_preprocess, _attn_bwd_dq_cross, _attn_bwd_dkdv_cross, _attn_bwd
 
 logger = init_logger(__name__)
 
@@ -314,6 +315,123 @@ def sageattn_blackwell_with_16bit_bwd(q_BLHD, k_BLHD, v_BLHD, is_causal=False, p
     """
     return _SageAttnBlackwellWith16bitBwd.apply(q_BLHD, k_BLHD, v_BLHD, is_causal, per_block_mean)
 
+class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, q_BHLD, k_BHLD, v_BHLD, is_causal=False, per_block_mean=True):
+        softmax_scale = 1.0 / sqrt(q_BHLD.shape[-1])
+        # FA forward only to get softmax_lse (which is shape BHL)
+        _, softmax_lse, _S_dmask, rng_state = _wrapped_flash_attn_forward(
+            q_BHLD, k_BHLD, v_BHLD,
+            0.0,               # dropout_p
+            softmax_scale,     # softmax_scale
+            is_causal,         # causal
+            -1, -1,            # window_size_left/right
+            0.0,               # softcap
+            None,              # alibi_slopes
+            False              # return_softmax
+        )
+        
+        k_mean = k_BHLD.mean(dim=(0, 1, 2), keepdim=True).view(-1)
+
+        out_BHLD = sageattn_blackwell(
+            q_BHLD, k_BHLD, v_BHLD,
+            attn_mask=None,
+            is_causal=is_causal,
+            per_block_mean=per_block_mean,
+        )
+        
+        ctx.HEAD_DIM = q_BHLD.shape[-1]
+        ctx.sm_scale = softmax_scale  # Use sm_scale to match backward access
+        ctx.causal = is_causal
+        ctx.IS_QAT = True
+        ctx.k_mean = k_mean
+        ctx.save_for_backward(q_BHLD, k_BHLD, v_BHLD, out_BHLD, softmax_lse)
+
+    @staticmethod
+    def backward(ctx, do):
+        # note this assumes that we do everything in algorithm 1 from SageAttention3 except smoothing q
+        q_BHLD, k_BHLD, v_BHLD, o_for_bwd_BHLD, M_BHLD = ctx.saved_tensors
+        do = do.contiguous()
+        dq_BHLD = torch.empty_like(q_BHLD)
+        dk_BHLD = torch.empty_like(k_BHLD)
+        dv_BHLD = torch.empty_like(v_BHLD)
+        BATCH, N_HEAD, N_CTX_Q = q_BHLD.shape[:3]
+        N_CTX_KV = k_BHLD.shape[2]
+        assert k_BHLD.shape[2] == v_BHLD.shape[2], "k and v must have the same sequence length"
+        PRE_BLOCK = 128
+        NUM_STAGES = 3
+        NUM_WARPS = 4
+        BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 128, 128, 128, 128
+        BLK_SLICE_FACTOR = 1
+        # NOTE: K is NOT pre-scaled here - scaling is applied AFTER qk dot product in kernels
+        # This improves precision by avoiding rounding errors in K before the dot product
+        arg_k = k_BHLD
+        pre_grid = ((N_CTX_Q + PRE_BLOCK - 1) // PRE_BLOCK, BATCH * N_HEAD)
+        delta = torch.empty_like(M_BHLD)
+        _attn_bwd_preprocess[pre_grid](
+            o_for_bwd_BHLD, do,
+            delta,
+            BATCH, N_HEAD, N_CTX_Q,
+            BLOCK_M=PRE_BLOCK, HEAD_DIM=ctx.HEAD_DIM
+        )
+
+        if N_CTX_Q == N_CTX_KV:
+            # Use existing kernel for self-attention (same sequence lengths)
+            grid = ((N_CTX_KV + BLOCK_N1 - 1) // BLOCK_N1, 1, BATCH * N_HEAD)
+            _attn_bwd[grid](
+                q_BHLD, arg_k, v_BHLD, ctx.sm_scale, do, dq_BHLD, dk_BHLD, dv_BHLD,
+                M_BHLD, delta,
+                q_BHLD.stride(0), q_BHLD.stride(1), q_BHLD.stride(2), q_BHLD.stride(3),
+                N_HEAD, N_CTX_KV,
+                ctx.k_mean,
+                BLOCK_M1=BLOCK_M1, BLOCK_N1=BLOCK_N1,
+                BLOCK_M2=BLOCK_M2, BLOCK_N2=BLOCK_N2,
+                BLK_SLICE_FACTOR=BLK_SLICE_FACTOR,
+                HEAD_DIM=ctx.HEAD_DIM,
+                CAUSAL=ctx.causal,
+                IS_QAT=ctx.IS_QAT,
+                SMOOTH_K=True,
+                two_level_quant_P=True,
+                fake_quant_P=True,
+                num_warps=NUM_WARPS,
+                num_stages=NUM_STAGES
+            )
+        else:
+            # Use separate kernels for cross-attention (different sequence lengths)
+            grid_dq = ((N_CTX_Q + BLOCK_M2 - 1) // BLOCK_M2, 1, BATCH * N_HEAD)
+            _attn_bwd_dq_cross[grid_dq](
+                q_BHLD, arg_k, v_BHLD, ctx.sm_scale, do, dq_BHLD, M_BHLD, delta,
+                q_BHLD.stride(0), k_BHLD.stride(0), q_BHLD.stride(1), k_BHLD.stride(1), q_BHLD.stride(2), k_BHLD.stride(2), q_BHLD.stride(3), k_BHLD.stride(3),
+                N_HEAD, N_CTX_Q, N_CTX_KV,
+                ctx.k_mean,
+                BLOCK_M2=BLOCK_M2, BLOCK_N2=BLOCK_N2,
+                HEAD_DIM=ctx.HEAD_DIM,
+                num_warps=NUM_WARPS,
+                num_stages=NUM_STAGES,
+                SMOOTH_K=True,
+            )
+            grid_dkdv = ((N_CTX_KV + BLOCK_N1 - 1) // BLOCK_N1, 1, BATCH * N_HEAD)
+            _attn_bwd_dkdv_cross[grid_dkdv](
+                q_BHLD, arg_k, v_BHLD, ctx.sm_scale, do, dk_BHLD, dv_BHLD, M_BHLD, delta,
+                q_BHLD.stride(0), k_BHLD.stride(0), q_BHLD.stride(1), k_BHLD.stride(1), q_BHLD.stride(2), k_BHLD.stride(2), q_BHLD.stride(3), k_BHLD.stride(3),
+                N_HEAD, N_CTX_Q, N_CTX_KV,
+                BLOCK_M1=BLOCK_M1, BLOCK_N1=BLOCK_N1,
+                HEAD_DIM=ctx.HEAD_DIM,
+                IS_QAT=ctx.IS_QAT,
+                two_level_quant_P=True,
+                fake_quant_P=True,
+                num_warps=NUM_WARPS,
+                num_stages=NUM_STAGES
+            )
+    
+        return dq_BHLD, dk_BHLD, dv_BHLD, None, None 
+
+def sageattn_blackwell_with_triton_bwd(q_BLHD, k_BLHD, v_BLHD, is_causal=False, per_block_mean=True):
+    q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
+    k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
+    v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
+    out_BHLD = _SageAttnBlackwellWithTritonBwd.apply(q_BHLD, k_BHLD, v_BHLD, is_causal, per_block_mean)
+    return out_BHLD.permute(0, 2, 1, 3).contiguous()
 
 def qat_attn(q_BLHD, k_BLHD, v_BLHD, is_causal=False):
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -376,6 +494,7 @@ class SageAttention3Impl(AttentionImpl):
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         # output = sageattn_blackwell_with_16bit_bwd(query, key, value, is_causal=self.causal)
+        output = sageattn_blackwell_with_triton_bwd(query, key, value, is_causal=self.causal)
         # output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
-        output = qat_attn(query, key, value, is_causal=self.causal)
+        # output = qat_attn(query, key, value, is_causal=self.causal)
         return output

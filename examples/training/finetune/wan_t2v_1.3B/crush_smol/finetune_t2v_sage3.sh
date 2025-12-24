@@ -17,7 +17,7 @@ NUM_GPUS=4
 # Training arguments
 training_args=(
   --tracker_project_name "wan_t2v_finetune_qat"
-  --output_dir "checkpoints/wan_t2v_finetune_handwritten_sage3"
+  --output_dir "checkpoints/wan_t2v_finetune_sage3"
   --max_train_steps 5000
   --train_batch_size 16
   --train_sp_batch_size 1
@@ -33,7 +33,7 @@ training_args=(
 # Parallel arguments
 parallel_args=(
   --num_gpus $NUM_GPUS 
-  --sp_size 4
+  --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
   --hsdp_shard_dim $NUM_GPUS

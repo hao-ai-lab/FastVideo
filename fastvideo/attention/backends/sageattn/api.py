@@ -72,7 +72,7 @@ def triton_group_mean(q: torch.Tensor):
     return q_out, qm
 
 
-def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_mean: bool = True):
+def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_mean: bool = True, disable_delta_s: bool = True):
 
     def pad_128(x):
         L = x.size(2)
@@ -89,6 +89,10 @@ def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_
         qm = q.mean(dim=-2, keepdim=True)
         q = q - qm
     delta_s = torch.matmul(qm, k.transpose(-2, -1)).to(torch.float32).contiguous()
+sa
+    if disable_delta_s:  # used to disable q smoothing
+        delta_s = torch.zeros_like(delta_s)
+        
     return q, k, v, delta_s
 
 def scale_and_quant_fp4(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
