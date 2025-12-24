@@ -32,7 +32,7 @@ export MASTER_ADDR MASTER_PORT
 # Training arguments
 training_args=(
   --tracker_project_name "wan_t2v_finetune_qat"
-  --output_dir "checkpoints/wan_t2v_finetune_qat"
+  --output_dir "checkpoints/wan_t2v_finetune_sage3_14B"
   --max_train_steps 4000
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -79,7 +79,8 @@ validation_args=(
 optimizer_args=(
   --learning_rate 1e-5
   --mixed_precision "bf16"
-  --checkpointing_steps 1000
+  --weight_only_checkpointing_steps 1000
+  --training_state_checkpointing_steps 1000
   --weight_decay 0.01
   --max_grad_norm 1.0
 )

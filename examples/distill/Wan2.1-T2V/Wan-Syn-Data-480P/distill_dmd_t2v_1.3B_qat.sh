@@ -4,7 +4,7 @@ set -euo pipefail
 ############################################
 # Single node, 6 GPUs
 ############################################
-NUM_GPUS=4
+NUM_GPUS=1
 export WANDB_API_KEY=2f25ad37933894dbf0966c838c0b8494987f9f2f
 # export CUDA_VISIBLE_DEVICES=0,1,2,3
 
@@ -26,7 +26,7 @@ echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATA_DIR=data/Wan-Syn_77x448x832_600k
 VALIDATION_DATASET_FILE="examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json"
-OUTPUT_DIR="checkpoints/sage3_distill"
+OUTPUT_DIR="checkpoints/qat_distill"
 REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 
@@ -35,7 +35,7 @@ training_args=(
   --tracker_project_name wan_t2v_distill_dmd_qat
   --output_dir "$OUTPUT_DIR"
   --max_train_steps 4000
-  --train_batch_size 16
+  --train_batch_size 64
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
   --num_latent_t 12
@@ -49,7 +49,7 @@ training_args=(
 # Parallel arguments (adjusted to 6 GPUs)
 parallel_args=(
   --num_gpus $NUM_GPUS
-  --sp_size 4
+  --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
   --hsdp_shard_dim $NUM_GPUS

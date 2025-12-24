@@ -5,25 +5,27 @@ export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
+export TRITON_PRINT_AUTOTUNING=1  # to print the best config
+export WANDB_API_KEY=2f25ad37933894dbf0966c838c0b8494987f9f2f
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-DATA_DIR="data/Wan-Syn_77x448x832_600k/train/"
-VALIDATION_DATASET_FILE="data/Wan-Syn_77x448x832_600k/validation_6.json"
-NUM_GPUS=6
+DATA_DIR=data/Wan-Syn_77x448x832_600k
+VALIDATION_DATASET_FILE="examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json"
+NUM_GPUS=1
 # export CUDA_VISIBLE_DEVICES=4,5
 
 
 # Training arguments
 training_args=(
-  --tracker_project_name "wan_t2v_finetune"
+  --tracker_project_name "wan_t2v_finetune_qat"
   --output_dir "checkpoints/wan_t2v_finetune_full_precision"
   --max_train_steps 5000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 6
+  --num_latent_t 12
   --num_height 480
   --num_width 832
-  --num_frames 21
+  --num_frames 45
   --enable_gradient_checkpointing_type "full"
 )
 
@@ -52,16 +54,17 @@ dataset_args=(
 validation_args=(
   --log_validation 
   --validation_dataset_file $VALIDATION_DATASET_FILE
-  --validation_steps 200
+  --validation_steps 50
   --validation_sampling_steps "50" 
-  --validation_guidance_scale "3.0"
+  --validation_guidance_scale "6.0"
 )
 
 # Optimizer arguments
 optimizer_args=(
   --learning_rate 1e-6
   --mixed_precision "bf16"
-  --checkpointing_steps 200
+  --weight_only_checkpointing_steps 200
+  --training_state_checkpointing_steps 200
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )

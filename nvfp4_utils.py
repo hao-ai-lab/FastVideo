@@ -9,8 +9,7 @@ from triton.language.target_info import cuda_capability_geq
 MXFP_BLOCK_SIZE = tl.constexpr(16)
 
 @triton.jit
-def _compute_quant_and_scale(src_tensor, valid_src_mask, mx_tensor_dtype: tl.constexpr):
-    is_fp8: tl.constexpr = mx_tensor_dtype == tl.float8e4nv or mx_tensor_dtype == tl.float8e5
+def _compute_quant_and_scale(src_tensor, valid_src_mask, use_global_sf=True, two_level_quant_P=False):
     BLOCK_SIZE_OUT_DIM: tl.constexpr = src_tensor.shape[0]
     BLOCK_SIZE_QUANT_DIM: tl.constexpr = src_tensor.shape[1]
     BLOCK_SIZE_QUANT_MX_SCALE: tl.constexpr = src_tensor.shape[1] // MXFP_BLOCK_SIZE
@@ -19,17 +18,32 @@ def _compute_quant_and_scale(src_tensor, valid_src_mask, mx_tensor_dtype: tl.con
     f32_tensor = src_tensor.to(tl.float32)
     abs_tensor = tl.abs(f32_tensor)
     abs_tensor = tl.where(valid_src_mask, abs_tensor, -1.0)  # Don't consider padding tensors in scale computation
-    abs_tensor = tl.reshape(abs_tensor, [BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, MXFP_BLOCK_SIZE])
     
-    global_max_val = tl.max(abs_tensor)
-    # Avoid division by zero: if all values are padding (max is 0), use a default scale
-    global_max_val = tl.maximum(global_max_val, 1e-8)
-    s_enc = (6 * 448) / global_max_val
-    s_dec = (1 / s_enc)
+    if two_level_quant_P:
+        global_max_val = tl.max(f32_tensor, axis=1, keep_dims=True)  # (BLOCK_SIZE_OUT_DIM, 1)
+        global_max_val = tl.maximum(global_max_val, 1e-8)
+        s_enc = ((6 * 448) / global_max_val).reshape([BLOCK_SIZE_OUT_DIM, 1, 1])
+        s_dec = (1 / s_enc)
+
+    abs_tensor = tl.reshape(abs_tensor, [BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, MXFP_BLOCK_SIZE])
+
+    if use_global_sf and not two_level_quant_P:
+        global_max_val = tl.max(abs_tensor)
+        # Avoid division by zero: if all values are padding (max is 0), use a default scale
+        global_max_val = tl.maximum(global_max_val, 1e-8)
+        s_enc = (6 * 448) / global_max_val
+        s_dec = (1 / s_enc)
+    elif not two_level_quant_P and not use_global_sf:
+        s_dec = 1.0
+        s_enc = 1.0
+    
     max_val = tl.max(abs_tensor, axis=2, keep_dims=True)  # (BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, 1)  # per block maxima
     s_dec_b = max_val / 6  # (BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, 1)
     s_dec_b_e4m3 = (s_dec_b * s_enc).to(tl.float8e4nv)  # (BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, 1)
     s_enc_b = 1 / (s_dec_b_e4m3.to(tl.float32) * s_dec)  # (BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, 1)
+    # # Handle 0 case to avoid Inf/NaN.
+    # s_dec_b_f32 = s_dec_b_e4m3.to(tl.float32)
+    # s_enc_b = tl.where(s_dec_b_f32 != 0, s_enc / s_dec_b_f32, 0.0)
 
     f32_tensor = tl.reshape(f32_tensor, [BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, MXFP_BLOCK_SIZE])
     quant_tensor = f32_tensor * s_enc_b
