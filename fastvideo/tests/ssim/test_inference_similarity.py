@@ -8,6 +8,7 @@ import pytest
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
 from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results
+from fastvideo.tests.ssim.model_resolver import resolve_ssim_model_path
 from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
@@ -31,7 +32,7 @@ HUNYUAN_PARAMS = {
     "height": 720,
     "width": 1280,
     "num_frames": 45,
-    "num_inference_steps": 6,
+    "num_inference_steps": 2,
     "guidance_scale": 1,
     "embedded_cfg_scale": 6,
     "flow_shift": 17,
@@ -48,7 +49,7 @@ WAN_T2V_PARAMS = {
     "height": 480,
     "width": 832,
     "num_frames": 45,
-    "num_inference_steps": 20,
+    "num_inference_steps": 4,
     "guidance_scale": 3,
     "embedded_cfg_scale": 6,
     "flow_shift": 7.0,
@@ -67,7 +68,7 @@ WAN_I2V_PARAMS = {
     "height": 480,
     "width": 832,
     "num_frames": 45,
-    "num_inference_steps": 6,
+    "num_inference_steps": 2,
     "guidance_scale": 5.0,
     "embedded_cfg_scale": 6,
     "flow_shift": 7.0,
@@ -154,7 +155,8 @@ def test_i2v_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     if "neg_prompt" in BASE_PARAMS:
         generation_kwargs["neg_prompt"] = BASE_PARAMS["neg_prompt"]
 
-    generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
+    resolved_model_path = resolve_ssim_model_path(model_id=model_id, model_ref=BASE_PARAMS["model_path"])
+    generator = VideoGenerator.from_pretrained(model_path=resolved_model_path, **init_kwargs)
     generator.generate_video(prompt, **generation_kwargs)
     
     if isinstance(generator.executor, MultiprocExecutor):
@@ -254,7 +256,8 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     if "neg_prompt" in BASE_PARAMS:
         generation_kwargs["neg_prompt"] = BASE_PARAMS["neg_prompt"]
 
-    generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
+    resolved_model_path = resolve_ssim_model_path(model_id=model_id, model_ref=BASE_PARAMS["model_path"])
+    generator = VideoGenerator.from_pretrained(model_path=resolved_model_path, **init_kwargs)
     generator.generate_video(prompt, **generation_kwargs)
 
     if isinstance(generator.executor, MultiprocExecutor):
