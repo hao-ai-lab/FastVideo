@@ -12,9 +12,14 @@ if str(_project_root) not in sys.path:
 
 import torch
 try:
-    from sageattn import sageattn_blackwell
+    # Use local version first (avoids issues with installed package)
+    from fastvideo.attention.backends.sageattn import sageattn_blackwell
 except ImportError:
-    sageattn_blackwell = None
+    # Fall back to installed package if local version not available
+    try:
+        from sageattn import sageattn_blackwell
+    except ImportError:
+        sageattn_blackwell = None
 
 from fastvideo.attention.backends.abstract import (AttentionBackend,
                                                    AttentionImpl,
@@ -332,6 +337,8 @@ class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
         )
         
         k_mean = k_BHLD.mean(dim=(0, 1, 2), keepdim=True).view(-1)
+
+        logger.info(f"sageattn_blackwell.__file__: {sageattn_blackwell.__file__}")
 
         out_BHLD = sageattn_blackwell(
             q_BHLD, k_BHLD, v_BHLD,
