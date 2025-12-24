@@ -36,6 +36,21 @@ KEYBOARD_MAP_7 = {  # templerun_distilled_model: still/w/s/left/right/a/d
 }
 KEYBOARD_MAP = KEYBOARD_MAP_4  # Default for backward compatibility
 
+def expand_action_to_frames(action: dict, num_frames: int) -> tuple[torch.Tensor, torch.Tensor]:
+    result = {}
+    for key, tensor in action.items():
+        if tensor is not None:
+             # Expand to [num_frames, D] then unsqueeze to [1, num_frames, D]
+            result[key] = tensor.unsqueeze(0).repeat(num_frames, 1).unsqueeze(0)
+        else:
+            result[key] = None
+
+    if "mouse" not in result or result["mouse"] is None:
+         # keyboard device if available, otherwise default
+         device = result.get("keyboard", torch.tensor([])).device if result.get("keyboard") is not None else torch.device("cuda")
+         result["mouse"] = torch.zeros(1, num_frames, 2, device=device)
+    
+    return result["keyboard"], result["mouse"]
 
 def get_current_action(mode="universal"):
 
@@ -133,15 +148,11 @@ def get_current_action(mode="universal"):
         "keyboard": keyboard_cond
     }
 
-
-
-
 def load_initial_image(image_path: str = None) -> Image.Image:
     if image_path and os.path.exists(image_path):
         return Image.open(image_path).convert("RGB")
     logger.warning("No image provided, creating placeholder...")
     return Image.new("RGB", (640, 352), (128, 128, 128))
-
 
 def create_action_presets(num_frames: int, keyboard_dim: int = 4, seed: int = None):
     if keyboard_dim not in (2, 4, 7):
@@ -244,7 +255,6 @@ def create_action_presets(num_frames: int, keyboard_dim: int = 4, seed: int = No
 
     return {"keyboard": keyboard_condition, "mouse": mouse_condition}
 
-
 def parse_config(config, mode="universal"):
     assert mode in ['universal', 'gta_drive', 'templerun']
     key_data = {}
@@ -282,7 +292,6 @@ def parse_config(config, mode="universal"):
                 )
     return key_data, mouse_data
 
-
 # NOTE: drawing functions are commented out to avoid cv2/libGL dependency.
 #
 # def draw_rounded_rectangle(image, top_left, bottom_right, color, radius=10, alpha=0.5):
@@ -297,7 +306,6 @@ def parse_config(config, mode="universal"):
 #     cv2.ellipse(overlay, (x1 + radius, y2 - radius), (radius, radius), 90, 0, 90, color, -1)
 #     cv2.ellipse(overlay, (x2 - radius, y2 - radius), (radius, radius), 0, 0, 90, color, -1)
 #     cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0, image)
-#
 #
 # def draw_keys_on_frame(frame, keys, key_size=(80, 50), spacing=20, bottom_margin=30, mode='universal'):
 #     h, w, _ = frame.shape
@@ -343,7 +351,6 @@ def parse_config(config, mode="universal"):
 #         text_y = y + (key_size[1] + text_size[1]) // 2
 #         cv2.putText(frame, key_icon[key], (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
 #
-#
 # def overlay_icon(frame, icon, position, scale=1.0, rotation=0):
 #     x, y = position
 #     h, w, _ = icon.shape
@@ -380,7 +387,6 @@ def parse_config(config, mode="universal"):
 #     for c in range(3):
 #         frame_region[:, :, c] = (1 - alpha) * frame_region[:, :, c] + alpha * icon_rgb[:, :, c]
 #     frame[top_left_y:bottom_right_y, top_left_x:bottom_right_x] = frame_region
-#
 #
 # def process_video(input_video, output_video, config, mouse_icon_path, 
 #                   mouse_scale=1.0, mouse_rotation=0, process_icon=True, mode='universal'):

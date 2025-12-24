@@ -1,5 +1,5 @@
 from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
-from fastvideo.models.dits.matrix_game.utils import get_current_action
+from fastvideo.models.dits.matrix_game.utils import get_current_action, expand_action_to_frames
 
 import os
 import torch
@@ -36,15 +36,6 @@ VARIANT_CONFIG = {
 
 
 OUTPUT_PATH = "video_samples_matrixgame2"
-
-def expand_action_to_frames(action: dict, num_frames: int) -> dict:
-    """Expand a single action to cover multiple frames."""
-    result = {}
-    for key, tensor in action.items():
-        result[key] = tensor.unsqueeze(0).repeat(num_frames, 1)
-    return result
-
-
 async def main():
     # FastVideo will automatically use the optimal default arguments for the
     # model.
@@ -65,21 +56,13 @@ async def main():
         # image_encoder_cpu_offload=False,
     )
 
-    # Streaming parameters
-    num_latent_frames_per_block = 3
-    max_blocks = 10
-    total_latent_frames = num_latent_frames_per_block * max_blocks
-    num_frames = (total_latent_frames - 1) * 4 + 1
-    frames_per_block = num_latent_frames_per_block * 4
-    
+    max_blocks = 50
+    num_frames = 597    
     actions = {
         "keyboard": torch.zeros((num_frames, config["keyboard_dim"])),
         "mouse": torch.zeros((num_frames, 2))
     }
     grid_sizes = torch.tensor([150, 44, 80])
-
-    os.makedirs(OUTPUT_PATH, exist_ok=True)
-    video_path = os.path.join(OUTPUT_PATH, "video.mp4")
     mode = config["mode"]
 
     generator.reset(
@@ -92,28 +75,16 @@ async def main():
         height=352,
         width=640,
         num_inference_steps=50,
-        output_path=video_path,
+        output_path=OUTPUT_PATH,
+        save_video=True,
     )
     print("Initialization complete.")
 
-    print(f"\n=== Block 1/{max_blocks} ===")
-    action = get_current_action(mode)
-    expanded = expand_action_to_frames(action, frames_per_block)
-    keyboard_cond = expanded["keyboard"].unsqueeze(0)
-    mouse_cond = expanded.get("mouse", torch.zeros(frames_per_block, 2).cuda()).unsqueeze(0)
-    await generator.step_async(keyboard_cond, mouse_cond)
-
-    if input("\nContinue? (y/n): ").lower() == 'n':
-        generator.shutdown()
-        return
-
-    for block_idx in range(1, max_blocks):
-        print(f"\n=== Block {block_idx + 1}/{max_blocks} ===")
+    for block_id in range(max_blocks):
+        print(f"\n=== Block {block_id + 1}/{max_blocks} ===")
         
         action = get_current_action(mode)
-        expanded = expand_action_to_frames(action, frames_per_block)
-        keyboard_cond = expanded["keyboard"].unsqueeze(0)
-        mouse_cond = expanded.get("mouse", torch.zeros(frames_per_block, 2).cuda()).unsqueeze(0)
+        keyboard_cond, mouse_cond = expand_action_to_frames(action, 12)
         await generator.step_async(keyboard_cond, mouse_cond)
         
         if input("\nContinue? (y/n): ").lower() == 'n':
