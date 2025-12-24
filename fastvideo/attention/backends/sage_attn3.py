@@ -352,7 +352,7 @@ class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
         N_CTX_KV = k_BHLD.shape[2]
         assert k_BHLD.shape[2] == v_BHLD.shape[2], "k and v must have the same sequence length"
         PRE_BLOCK = 128
-        NUM_STAGES = 3
+        NUM_STAGES = 1
         NUM_WARPS = 4
         BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 64, 64, 64, 64
         BLK_SLICE_FACTOR = 1
