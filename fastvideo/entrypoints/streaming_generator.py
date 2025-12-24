@@ -206,11 +206,8 @@ class StreamingVideoGenerator(VideoGenerator):
         if self._use_queue_mode and self.executor._streaming_enabled:
             self.executor.submit_step(keyboard_cond, mouse_cond)
 
-            while True:
-                result = self.executor.get_result(timeout=0.01)
-                if result is not None:
-                    break
-                await asyncio.sleep(0.01)
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(None, self.executor.wait_result)
 
             if result.error:
                 raise result.error

@@ -1,7 +1,6 @@
 from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
-from fastvideo.models.dits.matrix_game.utils import get_current_action, expand_action_to_frames
+from fastvideo.models.dits.matrix_game.utils import get_current_action_async, expand_action_to_frames
 
-import os
 import torch
 import asyncio
 
@@ -83,11 +82,11 @@ async def main():
     for block_id in range(max_blocks):
         print(f"\n=== Block {block_id + 1}/{max_blocks} ===")
         
-        action = get_current_action(mode)
+        action = await get_current_action_async(mode)
         keyboard_cond, mouse_cond = expand_action_to_frames(action, 12)
         await generator.step_async(keyboard_cond, mouse_cond)
         
-        if input("\nContinue? (y/n): ").lower() == 'n':
+        if (await asyncio.to_thread(input, "\nContinue? (y/n): ")).lower() == 'n':
             break
 
     # Save final video
