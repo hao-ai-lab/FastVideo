@@ -20,9 +20,9 @@
 // Block sizes for M and N dimensions
 namespace flash {
     // Block size for M dimension (query sequence length)
-    static constexpr int BLOCK_M = 128;
+    static constexpr int BLOCK_M = 64;
     
     // Block size for N dimension (key/value sequence length)
-    static constexpr int BLOCK_N = 128;
+    static constexpr int BLOCK_N = 64;
 }
 

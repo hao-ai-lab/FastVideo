@@ -24,8 +24,8 @@ import fp4quant_cuda
 
 # Centralized block size configuration for sageattn_blackwell kernels
 # These should match the values in fastvideo/attention/backends/sageattn/blackwell/block_config.h
-BLOCK_M = 128  # Block size for M dimension (query sequence length)
-BLOCK_N = 128  # Block size for N dimension (key/value sequence length)
+BLOCK_M = 64  # Block size for M dimension (query sequence length)
+BLOCK_N = 64  # Block size for N dimension (key/value sequence length)
 
 
 @triton.jit
