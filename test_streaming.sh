@@ -13,5 +13,21 @@ echo "y"
 
 echo "l"
 echo "s"
+echo "y"
+
+echo "l"
+echo "s"
+echo "y"
+
+echo "l"
+echo "s"
+echo "y"
+
+echo "l"
+echo "s"
+echo "y"
+
+echo "l"
+echo "s"
 echo "n" 
-) | python examples/inference/basic/basic_matrixgame_streaming.py
+) | HF_HOME=/workspace/.cache/huggingface python examples/inference/basic/basic_matrixgame_streaming.py

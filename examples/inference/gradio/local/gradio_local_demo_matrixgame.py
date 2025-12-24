@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import os
 import time
 
@@ -64,11 +65,11 @@ KEYBOARD_MAP_TEMPLERUN = {
 
 
 CAMERA_MAP_UNIVERSAL = {
+    "U (Center)": [0, 0],
     "I (Up)": [CAM_VALUE, 0],
     "K (Down)": [-CAM_VALUE, 0],
     "J (Left)": [0, -CAM_VALUE],
     "L (Right)": [0, CAM_VALUE],
-    "U (Center)": [0, 0],
 }
 CAMERA_MAP_GTA = {
     "A (Steer Left)": [0, -CAM_VALUE],
@@ -517,26 +518,22 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
             else:
                 mouse_cond = torch.zeros(frames_per_block, 2).cuda().unsqueeze(0)
             
-            # run step
+            # run step async
             inference_start_time = time.time()
-            frames = generator.step(keyboard_cond, mouse_cond)
+            frames, block_future = asyncio.run(generator.step_async(keyboard_cond, mouse_cond))
             inference_time = time.time() - inference_start_time
             
-            state["block_idx"] += 1
+            # wait for block file to be written
+            block_path = block_future.result() if block_future else None
+            state["block_idx"] = generator.block_idx
             block_str = f"Block: {state['block_idx']} / {state['max_blocks']}"
             
             total_time = time.time() - total_start_time
             
             # Timing breakdown
             timing_html = create_timing_display(inference_time, total_time, [], frames_per_block)
-            
-            # Save current block's frames
-            if frames is not None and len(frames) > 0:
-                temp_video = state["temp_path"].replace(".mp4", f"_b{state['block_idx']}.mp4")
-                imageio.mimsave(temp_video, frames, fps=24)
-                return state, state.get("seed", 0), block_str, temp_video, gr.update(), gr.update()
-            
-            return state, state.get("seed", 0), block_str, None, gr.update(), gr.update()
+
+            return state, state.get("seed", 0), block_str, block_path, gr.update(), gr.update()
 
         def stop_game(model_name, state):
             if not state.get("initialized"):
@@ -545,8 +542,7 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
             config = VARIANT_CONFIG.get(model_name)
             generator = generators.get(config["model_path"])
             
-            output_dir = "outputs/matrixgame"
-            final_path = os.path.join(output_dir, f"temp_{int(time.time())}.mp4")
+            final_path = state.get("temp_path")
             generator.finalize(final_path)
             
             return {"initialized": False}, state.get("seed", 0), "Block: 0 / 50", final_path, gr.update(value="Start"), gr.update(interactive=False)
