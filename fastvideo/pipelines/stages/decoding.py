@@ -160,10 +160,12 @@ class DecodingStage(PipelineStage):
                 and hasattr(self.vae.config, 'latents_std')):
             latents_mean = torch.tensor(self.vae.config.latents_mean,
                                         device=latents.device,
-                                        dtype=latents.dtype).view(1, -1, 1, 1, 1)
+                                        dtype=latents.dtype).view(
+                                            1, -1, 1, 1, 1)
             latents_std = torch.tensor(self.vae.config.latents_std,
                                        device=latents.device,
-                                       dtype=latents.dtype).view(1, -1, 1, 1, 1)
+                                       dtype=latents.dtype).view(
+                                           1, -1, 1, 1, 1)
             latents = latents * latents_std + latents_mean
         elif hasattr(self.vae, 'scaling_factor'):
             if isinstance(self.vae.scaling_factor, torch.Tensor):
@@ -191,10 +193,12 @@ class DecodingStage(PipelineStage):
                 self.vae.enable_tiling()
             if not vae_autocast_enabled:
                 latents = latents.to(vae_dtype)
-            image, cache = self.vae.streaming_decode(latents, cache, is_first_chunk)
+            image, cache = self.vae.streaming_decode(latents, cache,
+                                                     is_first_chunk)
 
         # Normalize image to [0, 1] range
         image = (image / 2 + 0.5).clamp(0, 1)
+        assert cache is not None, "cache should not be None after streaming_decode"
         return image, cache
 
     @torch.no_grad()

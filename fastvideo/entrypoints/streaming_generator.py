@@ -20,6 +20,7 @@ logger = init_logger(__name__)
 
 
 class IncrementalVideoWriter:
+
     def __init__(self, path: str, fps: int = 24, block_dir: str | None = None):
         self._executor = ThreadPoolExecutor(max_workers=2,
                                             thread_name_prefix="video_write_")
@@ -36,14 +37,17 @@ class IncrementalVideoWriter:
 
         # Copy frames to avoid race conditions
         frames_copy = [f.copy() for f in frames]
-        self._pending_main = self._executor.submit(self._write_frames, frames_copy)
+        self._pending_main = self._executor.submit(self._write_frames,
+                                                   frames_copy)
 
         # Write block file if block_dir is set
         block_future = None
         if self._block_dir:
             self._block_idx += 1
-            block_path = os.path.join(self._block_dir, f"b{self._block_idx}.mp4")
-            block_future = self._executor.submit(self._write_block, frames_copy, block_path)
+            block_path = os.path.join(self._block_dir,
+                                      f"b{self._block_idx}.mp4")
+            block_future = self._executor.submit(self._write_block, frames_copy,
+                                                 block_path)
 
         return block_future
 
@@ -134,7 +138,9 @@ class StreamingVideoGenerator:
             block_dir = output_path.replace(".mp4", "")
             os.makedirs(block_dir, exist_ok=True)
             self.block_dir = block_dir
-            self.writer = IncrementalVideoWriter(output_path, fps=24, block_dir=block_dir)
+            self.writer = IncrementalVideoWriter(output_path,
+                                                 fps=24,
+                                                 block_dir=block_dir)
 
         fastvideo_args = self.fastvideo_args
 
@@ -162,12 +168,11 @@ class StreamingVideoGenerator:
             if result.error:
                 raise result.error
         else:
-            self.executor.execute_streaming_reset(
-                self.batch, fastvideo_args)
+            self.executor.execute_streaming_reset(self.batch, fastvideo_args)
 
-    def step(self,
-             keyboard_cond: torch.Tensor,
-             mouse_cond: torch.Tensor) -> tuple[list[np.ndarray], Future | None]:
+    def step(
+            self, keyboard_cond: torch.Tensor,
+            mouse_cond: torch.Tensor) -> tuple[list[np.ndarray], Future | None]:
         if self.batch is None:
             raise RuntimeError("Call reset() before step()")
 
@@ -193,9 +198,9 @@ class StreamingVideoGenerator:
 
         return frames, block_future
 
-    async def step_async(self,
-                         keyboard_cond: torch.Tensor,
-                         mouse_cond: torch.Tensor) -> tuple[list[np.ndarray], Future | None]:
+    async def step_async(
+            self, keyboard_cond: torch.Tensor,
+            mouse_cond: torch.Tensor) -> tuple[list[np.ndarray], Future | None]:
         if self.batch is None:
             raise RuntimeError("Call reset() before step_async()")
 
@@ -227,7 +232,6 @@ class StreamingVideoGenerator:
                 block_future = self.writer.add_frames(frames)
 
         return frames, block_future
-
 
     def finalize(self,
                  output_path: str = "streaming_output.mp4",

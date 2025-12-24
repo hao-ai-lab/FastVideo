@@ -138,8 +138,9 @@ class MultiprocExecutor(Executor):
 
         return result_batch
 
-    def execute_streaming_reset(self, forward_batch: ForwardBatch,
-                                fastvideo_args: FastVideoArgs) -> dict[str, Any]:
+    def execute_streaming_reset(
+            self, forward_batch: ForwardBatch,
+            fastvideo_args: FastVideoArgs) -> dict[str, Any]:
         responses = self.collective_rpc("execute_streaming_reset",
                                         kwargs={
                                             "forward_batch": forward_batch,

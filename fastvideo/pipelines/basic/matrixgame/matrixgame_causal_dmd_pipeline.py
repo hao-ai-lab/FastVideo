@@ -71,56 +71,58 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
             "MatrixGameCausalDMDPipeline initialized with action support")
 
     @torch.no_grad()
-    def streaming_reset(self, batch: ForwardBatch, 
+    def streaming_reset(self, batch: ForwardBatch,
                         fastvideo_args: FastVideoArgs):
         if not self.post_init_called:
             self.post_init()
-            
+
         # 1. Run Pre-processing stages
         stages_to_run = [
-            "input_validation_stage", 
-            "prompt_encoding_stage", 
-            "image_encoding_stage", 
-            "conditioning_stage",
-            "latent_preparation_stage",
-            "image_latent_preparation_stage"
+            "input_validation_stage", "prompt_encoding_stage",
+            "image_encoding_stage", "conditioning_stage",
+            "latent_preparation_stage", "image_latent_preparation_stage"
         ]
-        
+
         for stage_name in stages_to_run:
             if stage_name in self._stage_name_mapping:
-                batch = self._stage_name_mapping[stage_name].forward(batch, fastvideo_args)
-                
+                batch = self._stage_name_mapping[stage_name].forward(
+                    batch, fastvideo_args)
+
         # 2. Reset Denoising Stage
         denoiser = self._stage_name_mapping["denoising_stage"]
         denoiser.reset_streaming(batch, fastvideo_args)
-        
+
         # 3. Initialize VAE cache
         self._vae_cache = None
 
     def streaming_step(self, keyboard_action, mouse_action) -> ForwardBatch:
         denoiser = self._stage_name_mapping["denoising_stage"]
-        
+
         start_idx = denoiser._streaming_start_index
         batch = denoiser.step_streaming(keyboard_action, mouse_action)
         end_idx = denoiser._streaming_start_index
-        
+
         # Decode only the new generated block
         if end_idx > start_idx:
             current_latents = batch.latents[:, :, start_idx:end_idx, :, :]
             args = denoiser._streaming_fastvideo_args
             decoder = self._stage_name_mapping["decoding_stage"]
             decoded_frames, self._vae_cache = decoder.streaming_decode(
-                current_latents, args, cache=self._vae_cache, is_first_chunk=False)
+                current_latents,
+                args,
+                cache=self._vae_cache,
+                is_first_chunk=False)
             batch.output = decoded_frames
         else:
             batch.output = None
 
         return batch
-        
+
     def streaming_clear(self) -> None:
         denoiser = self._stage_name_mapping.get("denoising_stage")
         if denoiser is not None and hasattr(denoiser, "clear_streaming"):
             denoiser.clear_streaming()
         self._vae_cache = None
+
 
 EntryClass = [MatrixGameCausalDMDPipeline]
