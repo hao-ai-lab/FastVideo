@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapt from https://github.com/vllm-project/vllm/blob/releases/v0.11.0/vllm/executor/ray_distributed_executor.py
 
+import asyncio
 from collections import defaultdict
 import os
 import cloudpickle
@@ -296,7 +297,16 @@ class RayDistributedExecutor(Executor):
     async def execute_streaming_step_async(self,
                                            keyboard_action=None,
                                            mouse_action=None) -> ForwardBatch:
-        return self.execute_streaming_step(keyboard_action, mouse_action)
+        kwargs = {
+            "keyboard_action": keyboard_action,
+            "mouse_action": mouse_action,
+        }
+        futures = [
+            w.execute_method.remote("execute_streaming_step", **kwargs)
+            for w in self.workers
+        ]
+        responses = await asyncio.gather(*futures)
+        return responses[0]
 
     def execute_streaming_clear(self) -> None:
         self.collective_rpc("execute_streaming_clear")
