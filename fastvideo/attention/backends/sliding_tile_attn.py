@@ -5,7 +5,7 @@ from typing import Any
 
 import torch
 from einops import rearrange
-from st_attn import sliding_tile_attention
+from fastvideo_kernel import sliding_tile_attention
 
 import fastvideo.envs as envs
 from fastvideo.attention.backends.abstract import (AttentionBackend,
