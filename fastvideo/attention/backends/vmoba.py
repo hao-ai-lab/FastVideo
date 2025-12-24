@@ -7,7 +7,7 @@ import torch
 from einops import rearrange
 
 from fastvideo_kernel import (moba_attn_varlen, process_moba_input,
-                               process_moba_output)
+                              process_moba_output)
 from fastvideo.attention.backends.abstract import (AttentionBackend,
                                                    AttentionImpl,
                                                    AttentionMetadata,
