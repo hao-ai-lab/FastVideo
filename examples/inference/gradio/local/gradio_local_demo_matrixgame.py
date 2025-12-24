@@ -488,7 +488,7 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
             
             return new_state, seed_val, "Block: 0 / 50", None, gr.update(value="Step"), gr.update(interactive=True)
         
-        def step_game(keyboard_key, mouse_key, model_name, state):
+        async def step_game(keyboard_key, mouse_key, model_name, state):
             if not state.get("initialized"):
                 return state, state.get("seed", 0), "Block: 0 / 50", None, gr.update(), gr.update()
             
@@ -504,7 +504,7 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
             
             # run step async
             inference_start_time = time.time()
-            frames, block_future = asyncio.run(generator.step_async(keyboard_cond, mouse_cond))
+            frames, block_future = await generator.step_async(keyboard_cond, mouse_cond)
             inference_time = time.time() - inference_start_time
             
             # wait for block file to be written
@@ -531,11 +531,11 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
             
             return {"initialized": False}, state.get("seed", 0), "Block: 0 / 50", final_path, gr.update(value="Start"), gr.update(interactive=False)
         
-        def handle_action(keyboard_key, mouse_key, model_name, seed_val, randomize, state):
+        async def handle_action(keyboard_key, mouse_key, model_name, seed_val, randomize, state):
             if not state.get("initialized"):
                 return start_game(model_name, seed_val, randomize, state)
             else:
-                return step_game(keyboard_key, mouse_key, model_name, state)
+                return await step_game(keyboard_key, mouse_key, model_name, state)
         
         action_btn.click(
             fn=handle_action,
@@ -636,7 +636,7 @@ def main():
             
             <meta property="og:type" content="website">
             <meta property="og:url" content="{base_url}/">
-            <meta property="og:title" content="FastWan">
+            <meta property="og:title" content="FastVideo - Matrix Game 2.0">
             <meta property="og:description" content="Make video generation go blurrrrrrr">
             <meta property="og:image" content="{base_url}/logo.png">
             <meta property="og:image:width" content="1200">

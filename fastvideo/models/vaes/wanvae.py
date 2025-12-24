@@ -1282,18 +1282,13 @@ class AutoencoderKLWan(nn.Module, ParallelTiledVAE):
         x = self.post_quant_conv(z)
         
         with forward_context(feat_cache_arg=cache, feat_idx_arg=0):
+            outputs = []
             for i in range(iter_):
                 feat_idx.set(0)
-                if is_first_chunk and i == 0:
-                    first_chunk.set(True)
-                    out = self.decoder(x[:, :, i:i + 1, :, :])
-                else:
-                    first_chunk.set(False)
-                    out_ = self.decoder(x[:, :, i:i + 1, :, :])
-                    if i == 0:
-                        out = out_
-                    else:
-                        out = torch.cat([out, out_], 2)
+                first_chunk.set(is_first_chunk and i == 0)
+                decoded_chunk = self.decoder(x[:, :, i:i + 1, :, :])
+                outputs.append(decoded_chunk)
+            out = torch.cat(outputs, dim=2)
 
         if self.config.patch_size is not None:
             out = unpatchify(out, patch_size=self.config.patch_size)

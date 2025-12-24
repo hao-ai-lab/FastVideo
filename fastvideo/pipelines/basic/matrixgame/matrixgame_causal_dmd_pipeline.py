@@ -111,7 +111,7 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
                 current_latents,
                 args,
                 cache=self._vae_cache,
-                is_first_chunk=False)
+                is_first_chunk=(start_idx == 0))
             batch.output = decoded_frames
         else:
             batch.output = None
