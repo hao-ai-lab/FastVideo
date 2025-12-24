@@ -12,6 +12,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 
 from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
+from fastvideo.models.dits.matrix_game.utils import expand_action_to_frames
 
 
 VARIANT_CONFIG = {
@@ -128,17 +129,6 @@ def create_timing_display(inference_time, total_time, stage_execution_times, num
     
     return timing_html + "</div>"
 
-
-def expand_action_to_frames(action: dict, num_frames: int) -> dict:
-    result = {}
-    for key, tensor in action.items():
-        if tensor is not None:
-            result[key] = tensor.unsqueeze(0).repeat(num_frames, 1)
-        else:
-            result[key] = None
-    return result
-
-
 def get_action_tensors(mode: str, keyboard_key: str, mouse_key: str | None):
     if mode == "universal":
         keyboard = torch.tensor(KEYBOARD_MAP_UNIVERSAL.get(keyboard_key, [0, 0, 0, 0])).cuda()
@@ -153,7 +143,6 @@ def get_action_tensors(mode: str, keyboard_key: str, mouse_key: str | None):
         raise ValueError(f"Unknown mode: {mode}")
     
     return {"keyboard": keyboard, "mouse": mouse}
-
 
 def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], loaded_model_name: str):
     initial_config = VARIANT_CONFIG.get(loaded_model_name, VARIANT_CONFIG["Matrix-Game-2.0-Base"])
@@ -509,14 +498,9 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
             mode = state["mode"]
             frames_per_block = state["frames_per_block"]
 
+            # Parse inputs to tensors
             action = get_action_tensors(mode, keyboard_key, mouse_key)
-            expanded = expand_action_to_frames(action, frames_per_block)
-            
-            keyboard_cond = expanded["keyboard"].unsqueeze(0)
-            if expanded.get("mouse") is not None:
-                mouse_cond = expanded["mouse"].unsqueeze(0)
-            else:
-                mouse_cond = torch.zeros(frames_per_block, 2).cuda().unsqueeze(0)
+            keyboard_cond, mouse_cond = expand_action_to_frames(action, frames_per_block)
             
             # run step async
             inference_start_time = time.time()
