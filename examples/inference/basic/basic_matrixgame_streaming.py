@@ -79,7 +79,7 @@ async def main():
     grid_sizes = torch.tensor([150, 44, 80])
 
     os.makedirs(OUTPUT_PATH, exist_ok=True)
-    temp_path = os.path.join(OUTPUT_PATH, "temp.mp4")
+    video_path = os.path.join(OUTPUT_PATH, "video.mp4")
     mode = config["mode"]
 
     generator.reset(
@@ -92,7 +92,7 @@ async def main():
         height=352,
         width=640,
         num_inference_steps=50,
-        output_path=temp_path,
+        output_path=video_path,
     )
     print("Initialization complete.")
 
@@ -120,7 +120,7 @@ async def main():
             break
 
     # Save final video
-    generator.finalize(os.path.join(OUTPUT_PATH, "streaming_output.mp4"))
+    generator.finalize()
     generator.shutdown()
 
 

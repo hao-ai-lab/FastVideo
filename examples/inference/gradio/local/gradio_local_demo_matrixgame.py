@@ -471,7 +471,7 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
             
             output_dir = os.path.abspath("outputs/matrixgame")
             os.makedirs(output_dir, exist_ok=True)
-            temp_path = os.path.join(output_dir, f"temp_{int(time.time())}.mp4")
+            video_path = os.path.join(output_dir, f"video_{int(time.time())}.mp4")
             
             generator.reset(
                 prompt="",
@@ -483,7 +483,7 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
                 height=352,
                 width=640,
                 num_inference_steps=50,
-                output_path=temp_path,
+                output_path=video_path,
             )
             
             new_state = {
@@ -491,7 +491,7 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
                 "current_model": model_name,
                 "block_idx": 0,
                 "max_blocks": max_blocks,
-                "temp_path": temp_path,
+                "video_path": video_path,
                 "frames_per_block": num_latent_frames_per_block * 4,
                 "mode": config["mode"],
                 "seed": seed_val,
@@ -542,7 +542,7 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
             config = VARIANT_CONFIG.get(model_name)
             generator = generators.get(config["model_path"])
             
-            final_path = state.get("temp_path")
+            final_path = state.get("video_path")
             generator.finalize(final_path)
             
             return {"initialized": False}, state.get("seed", 0), "Block: 0 / 50", final_path, gr.update(value="Start"), gr.update(interactive=False)

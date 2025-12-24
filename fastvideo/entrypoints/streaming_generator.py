@@ -9,6 +9,7 @@ import torchvision
 from einops import rearrange
 
 from fastvideo.configs.sample import SamplingParam
+from fastvideo.entrypoints.video_generator import VideoGenerator
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
@@ -24,11 +25,16 @@ class IncrementalVideoWriter:
     def __init__(self, path: str, fps: int = 24, block_dir: str | None = None):
         self._executor = ThreadPoolExecutor(max_workers=2,
                                             thread_name_prefix="video_write_")
+        self._path = path
         self._writer = imageio.get_writer(path, fps=fps, format="mp4")
         self._pending_main: Future | None = None
         self._block_dir = block_dir
         self._block_idx = 0
         self._fps = fps
+
+    @property
+    def path(self) -> str:
+        return self._path
 
     def add_frames(self, frames: list[np.ndarray]) -> Future | None:
         # Wait for previous main video write to complete
@@ -48,7 +54,6 @@ class IncrementalVideoWriter:
                                       f"b{self._block_idx}.mp4")
             block_future = self._executor.submit(self._write_block, frames_copy,
                                                  block_path)
-
         return block_future
 
     def _write_frames(self, frames: list[np.ndarray]) -> None:
@@ -69,15 +74,18 @@ class IncrementalVideoWriter:
         self._executor.shutdown(wait=True)
 
 
-class StreamingVideoGenerator:
+class StreamingVideoGenerator(VideoGenerator):
+    """
+    This class extends VideoGenerator with streaming capabilities,
+    allowing incremental video generation with step-by-step control.
+    """
 
     def __init__(self,
                  fastvideo_args: FastVideoArgs,
                  executor_class: type[Executor],
                  log_stats: bool,
                  use_queue_mode: bool = True):
-        self.fastvideo_args = fastvideo_args
-        self.executor = executor_class(fastvideo_args)
+        super().__init__(fastvideo_args, executor_class, log_stats)
         self.accumulated_frames: list[np.ndarray] = []
         self.sampling_param: SamplingParam | None = None
         self.batch: ForwardBatch | None = None
@@ -86,16 +94,6 @@ class StreamingVideoGenerator:
         self.writer: IncrementalVideoWriter | None = None
         self.block_dir: str | None = None
         self.block_idx: int = 0
-
-    @classmethod
-    def from_pretrained(cls,
-                        model_path: str,
-                        device: str | None = None,
-                        torch_dtype: torch.dtype | None = None,
-                        **kwargs) -> "StreamingVideoGenerator":
-        kwargs['model_path'] = model_path
-        fastvideo_args = FastVideoArgs.from_kwargs(**kwargs)
-        return cls.from_fastvideo_args(fastvideo_args)
 
     @classmethod
     def from_fastvideo_args(
@@ -133,7 +131,8 @@ class StreamingVideoGenerator:
         self.sampling_param.num_frames = num_frames
 
         if "output_path" in kwargs:
-            output_path = kwargs["output_path"]
+            output_path = self._prepare_output_path(kwargs["output_path"],
+                                                    prompt)
             # Create block directory for individual block files
             block_dir = output_path.replace(".mp4", "")
             os.makedirs(block_dir, exist_ok=True)
@@ -241,13 +240,16 @@ class StreamingVideoGenerator:
             return ""
 
         if self.writer:
+            output_path = self.writer.path
             self.writer.close()
             self.writer = None
+            logger.info("Saved video to %s", output_path)
         else:
             imageio.mimsave(output_path,
                             self.accumulated_frames,
                             fps=fps,
                             format="mp4")
+            logger.info("Saved video to %s", output_path)
 
         if self._use_queue_mode and self.executor._streaming_enabled:
             self.executor.submit_clear()
@@ -286,4 +288,4 @@ class StreamingVideoGenerator:
         if self._use_queue_mode and self.executor._streaming_enabled:
             self.executor.disable_streaming()
 
-        self.executor.shutdown()
+        super().shutdown()
