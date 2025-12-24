@@ -114,8 +114,9 @@ class Worker:
             return {"status": "lora_adapter_unmerged"}
         return {"status": "failed: pipeline is not a LoRAPipeline"}
 
-    def execute_streaming_reset(self, forward_batch: ForwardBatch,
-                                fastvideo_args: FastVideoArgs) -> dict[str, Any]:
+    def execute_streaming_reset(
+            self, forward_batch: ForwardBatch,
+            fastvideo_args: FastVideoArgs) -> dict[str, Any]:
         self.pipeline.streaming_reset(forward_batch, self.fastvideo_args)
         return {"status": "reset_complete"}
 

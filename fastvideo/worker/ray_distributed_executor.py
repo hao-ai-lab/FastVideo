@@ -269,8 +269,9 @@ class RayDistributedExecutor(Executor):
             else:
                 self.non_driver_workers.append(worker)
 
-    def execute_streaming_reset(self, forward_batch: ForwardBatch,
-                                fastvideo_args: FastVideoArgs) -> dict[str, Any]:
+    def execute_streaming_reset(
+            self, forward_batch: ForwardBatch,
+            fastvideo_args: FastVideoArgs) -> dict[str, Any]:
         responses: list[dict[str, Any]] = self.collective_rpc(
             "execute_streaming_reset",
             kwargs={
@@ -280,7 +281,9 @@ class RayDistributedExecutor(Executor):
         )
         return responses[0]
 
-    def execute_streaming_step(self, keyboard_action=None, mouse_action=None) -> ForwardBatch:
+    def execute_streaming_step(self,
+                               keyboard_action=None,
+                               mouse_action=None) -> ForwardBatch:
         responses: list[ForwardBatch] = self.collective_rpc(
             "execute_streaming_step",
             kwargs={
@@ -290,7 +293,9 @@ class RayDistributedExecutor(Executor):
         )
         return responses[0]
 
-    async def execute_streaming_step_async(self, keyboard_action=None, mouse_action=None) -> ForwardBatch:
+    async def execute_streaming_step_async(self,
+                                           keyboard_action=None,
+                                           mouse_action=None) -> ForwardBatch:
         return self.execute_streaming_step(keyboard_action, mouse_action)
 
     def execute_streaming_clear(self) -> None:
