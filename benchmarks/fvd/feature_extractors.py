@@ -11,7 +11,7 @@ from huggingface_hub import hf_hub_download
 from tqdm import tqdm
 
 try:
-    from transformers import CLIPModel, CLIPProcessor, VideoMAEModel, VideoMAEImageProcessor
+    from transformers import CLIPModel, CLIPProcessor, VideoMAEModel
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
@@ -150,7 +150,7 @@ class CLIPFeatureExtractor(BaseFeatureExtractor):
         self.processor = CLIPProcessor.from_pretrained(model_name)
         self.model = CLIPModel.from_pretrained(model_name).to(self.device)
         self.model.eval()
-        self._feature_dim = 512 if 'base' in model_name else 768
+        self._feature_dim = self.model.config.projection_dim
 
     @property
     def feature_dim(self) -> int:
@@ -169,10 +169,7 @@ class CLIPFeatureExtractor(BaseFeatureExtractor):
         videos = self.preprocess(videos)
 
         # Flatten B*T to treat frames as images
-        images = [
-            img.permute(1, 2, 0).cpu().numpy()
-            for img in videos.view(B * T, C, H, W)
-        ]
+        images = videos.view(B * T, C, H, W)
 
         # HF Processor
         inputs = self.processor(images=images,
@@ -198,37 +195,56 @@ class VideoMAEFeatureExtractor(BaseFeatureExtractor):
             raise ImportError(
                 "Please install transformers: pip install transformers")
         super().__init__(device)
-        self.processor = VideoMAEImageProcessor.from_pretrained(model_name)
         self.model = VideoMAEModel.from_pretrained(model_name).to(self.device)
         self.model.eval()
 
+        self.register_buffer(
+            'mean',
+            torch.tensor([0.485, 0.456, 0.406],
+                         device=self.device).view(1, 1, 3, 1, 1))
+        self.register_buffer(
+            'std',
+            torch.tensor([0.229, 0.224, 0.225],
+                         device=self.device).view(1, 1, 3, 1, 1))
+
     @property
     def feature_dim(self) -> int:
-        return 768
+        return self.model.config.hidden_size
 
     def preprocess(self, videos: torch.Tensor) -> torch.Tensor:
-        # Ensure values are [0, 255]
-        if videos.max() <= 1.0:
-            videos = videos * 255.0
+        """
+        Efficient GPU-based preprocessing.
+        Input: [B, T, C, H, W] in range [0, 255]
+        """
+        B, T, C, H, W = videos.shape
 
-        return videos.to(torch.uint8)
+        # 1. Resize to 224x224
+        if H != 224 or W != 224:
+            videos = videos.view(B * T, C, H, W)
+            videos = F.interpolate(videos,
+                                   size=(224, 224),
+                                   mode='bilinear',
+                                   align_corners=False)
+            videos = videos.view(B, T, C, 224, 224)
+
+        # 2. Normalize to [0, 1]
+        if videos.dtype != torch.float32:
+            videos = videos.float()
+
+        if videos.max() > 1.0:
+            videos = videos / 255.0
+
+        # 3. Apply ImageNet Mean/Std
+        return (videos - self.mean) / self.std
 
     def extract_features_batch(self, videos: torch.Tensor) -> torch.Tensor:
         # Input: [B, T, C, H, W]
-        videos = self.preprocess(videos)
 
-        video_list = []
-        for i in range(len(videos)):
-            # Get frames for one video [T, C, H, W]
-            vid = videos[i]
-            # Convert to list of numpy [H, W, C]
-            frames = [f.permute(1, 2, 0).cpu().numpy() for f in vid]
-            video_list.append(frames)
+        # Fast GPU Preprocessing
+        pixel_values = self.preprocess(videos)
 
-        inputs = self.processor(video_list, return_tensors="pt")
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
-
-        outputs = self.model(**inputs)
+        # Forward pass
+        outputs = self.model(pixel_values)
 
         # Global Average Pooling of last hidden state [B, T_patches, 768] -> [B, 768]
         return outputs.last_hidden_state.mean(dim=1)

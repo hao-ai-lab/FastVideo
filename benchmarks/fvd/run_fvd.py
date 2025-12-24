@@ -40,7 +40,7 @@ def main() -> None:
                                               gen_dir,
                                               cfg,
                                               verbose=False)
-            print(f"{model_name.upper()} Score: {results['fvd']:.4f}")
+            print(f"FVD: {results['fvd']}\nModel: {results['model']}")
 
         except Exception as e:
             print(f"{model_name.upper()} Failed: {e}")

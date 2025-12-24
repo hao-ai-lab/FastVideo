@@ -268,8 +268,29 @@ def compute_fvd_with_config(real_videos: str | Path | torch.Tensor,
                             config: FVDConfig,
                             verbose: bool = True) -> dict:
     """
-    Compute FVD using a standardized configuration.
+        Compute FVD using a standardized configuration.
+
+        This is the recommended way to compute FVD for reproducibility.
+
+        Args:
+            real_videos: Path or tensors
+            gen_videos: Path or tensors
+            config: FVDConfig specifying protocol
+            verbose: Print progress
+
+        Returns:
+            results: Dictionary with:
+                - 'fvd': FVD score (float)
+                - 'protocol': Protocol name (str)
+                - 'model': Feature extractor model name (str)
+                - 'config': Configuration dict
+
+        Example:
+            >>> config = FVDConfig.fvd2048_16f()
+            >>> results = compute_fvd_with_config('data/real/', 'outputs/gen/', config)
+            >>> print(f"FVD: {results['fvd']:.2f}")
     """
+
     # Seed for reproducibility
     if config.seed is not None:
         import random as _rnd

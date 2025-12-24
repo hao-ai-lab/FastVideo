@@ -1,6 +1,6 @@
 import argparse
 import sys
-
+import traceback
 from .fvd import compute_fvd_with_config, FVDConfig
 
 
@@ -26,18 +26,42 @@ def main() -> int:
                         help='Feature extractor model to use (default: i3d)')
 
     # Standard args
-    parser.add_argument('--seed', type=int, default=None)
+    parser.add_argument('--seed',
+                        type=int,
+                        default=None,
+                        help='Random seed for reproducibility')
     parser.add_argument('--protocol',
                         type=str,
                         default=None,
-                        choices=['fvd2048_16f', 'fvd2048_128f', 'quick_test'])
-    parser.add_argument('--num-videos', type=int, default=2048)
-    parser.add_argument('--num-frames', type=int, default=16)
-    parser.add_argument('--clip-strategy', type=str, default='beginning')
-    parser.add_argument('--batch-size', type=int, default=32)
-    parser.add_argument('--device', type=str, default='cuda')
-    parser.add_argument('--cache-real-features', type=str, default=None)
-    parser.add_argument('--quiet', action='store_true')
+                        choices=['fvd2048_16f', 'fvd2048_128f', 'quick_test'],
+                        help='Use standard protocol (overrides other settings)')
+    parser.add_argument('--num-videos',
+                        type=int,
+                        default=2048,
+                        help='Number of videos to use')
+    parser.add_argument('--num-frames',
+                        type=int,
+                        default=16,
+                        help='Number of frames per clip')
+    parser.add_argument('--clip-strategy',
+                        type=str,
+                        default='beginning',
+                        help='Clip sampling strategy')
+    parser.add_argument('--batch-size',
+                        type=int,
+                        default=32,
+                        help='Batch size for feature extraction')
+    parser.add_argument('--device',
+                        type=str,
+                        default='cuda',
+                        help='Device to use (cuda or cpu)')
+    parser.add_argument('--cache-real-features',
+                        type=str,
+                        default=None,
+                        help='Path to cache real video features')
+    parser.add_argument('--quiet',
+                        action='store_true',
+                        help='Suppress progress output')
 
     args = parser.parse_args()
 
@@ -65,15 +89,17 @@ def main() -> int:
             seed=args.seed)
 
     try:
-        compute_fvd_with_config(args.real_path,
-                                args.gen_path,
-                                config,
-                                verbose=not args.quiet)
+        _ = compute_fvd_with_config(
+            args.real_path,  # noqa: F841
+            args.gen_path,
+            config,
+            verbose=not args.quiet)
 
         return 0
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         return 1
 
 
