@@ -27,6 +27,7 @@
 #include <cuda_fp8.h>
 
 #include "cuda_utils.h"
+#include "../blackwell/block_config.h"
 
 #define DISPATCH_PYTORCH_DTYPE_TO_CTYPE_FP16(pytorch_dtype, c_type, ...)                \
   if (pytorch_dtype == at::ScalarType::Half) {                                          \
@@ -389,7 +390,7 @@ void scaled_fp4_quant(torch::Tensor const& input,
                             torch::Tensor const& output,
                             torch::Tensor const& output_sf,
                             int tensor_layout) {
-  constexpr int BLOCK_SIZE = 128;
+  constexpr int BLOCK_SIZE = flash::BLOCK_M;
   
   CHECK_CUDA(input);
   CHECK_CUDA(output);
@@ -467,7 +468,7 @@ void scaled_fp4_quant_permute(torch::Tensor const& input,
                             torch::Tensor const& output,
                             torch::Tensor const& output_sf,
                             int tensor_layout) {
-  constexpr int BLOCK_SIZE = 128;
+  constexpr int BLOCK_SIZE = flash::BLOCK_M;
 
   CHECK_CUDA(input);
   CHECK_CUDA(output);
@@ -525,7 +526,7 @@ void scaled_fp4_quant_permute(torch::Tensor const& input,
 
   DISPATCH_PYTORCH_DTYPE_TO_CTYPE_FP16(input_dtype, c_type, {
     DISPATCH_HEAD_DIM(head_dim, HEAD_DIM, {
-      constexpr int BLOCK_SIZE = 128;
+      constexpr int BLOCK_SIZE = flash::BLOCK_M;
       dim3 block(BLOCK_SIZE * HEAD_DIM / CVT_FP4_ELTS_PER_THREAD, 1, 1);
       dim3 grid((num_tokens + BLOCK_SIZE - 1) / BLOCK_SIZE, batch_size, num_heads);
 
@@ -546,7 +547,7 @@ void scaled_fp4_quant_trans(torch::Tensor const& input,
                             torch::Tensor const& output,
                             torch::Tensor const& output_sf,
                             int tensor_layout) {
-  constexpr int BLOCK_SIZE = 128;
+  constexpr int BLOCK_SIZE = flash::BLOCK_M;
   
   CHECK_CUDA(input);
   CHECK_CUDA(output);
