@@ -1,4 +1,4 @@
-[submodule "csrc/fastvideo_kernel/tk"]
-	path = csrc/fastvideo_kernel/tk
+[submodule "fastvideo_kernel/tk"]
+	path = fastvideo_kernel/tk
 	url = https://github.com/HazyResearch/ThunderKittens.git
 
