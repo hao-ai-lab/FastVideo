@@ -5,7 +5,6 @@ app = modal.App()
 import os
 
 model_vol = modal.Volume.from_name("hf-model-weights")
-model_vol = modal.Volume.from_name("hf-model-weights")
 image_version = os.getenv("IMAGE_VERSION")
 image_tag = f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{image_version}"
 print(f"Using image: {image_tag}")
@@ -13,7 +12,6 @@ print(f"Using image: {image_tag}")
 image = (
     modal.Image.from_registry(image_tag, add_python="3.12")
     .run_commands("rm -rf /FastVideo")
-    .apt_install("cmake", "pkg-config", "build-essential", "curl", "libssl-dev", "ffmpeg")
     .apt_install("cmake", "pkg-config", "build-essential", "curl", "libssl-dev", "ffmpeg")
     .run_commands("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable")
     .run_commands("echo 'source ~/.cargo/env' >> ~/.bashrc")
@@ -89,7 +87,6 @@ def run_transformer_tests():
     volumes={"/root/data": model_vol} 
 )
 def run_ssim_tests():
-    run_test("export MODEL_PATH='/root/data/weights' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/ssim -vs")
     run_test("export MODEL_PATH='/root/data/weights' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/ssim -vs")
 
 @app.function(gpu="L40S:4", image=image, timeout=900, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
