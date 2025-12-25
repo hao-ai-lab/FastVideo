@@ -29,10 +29,10 @@ export PATH=${CUDA_HOME}/bin:${PATH}
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 ```
 
-Install VSA:
+Install FastVideo Kernel:
 
 ```bash
-cd csrc/attn/video_sparse_attn/
+cd csrc/fastvideo_kernel/
 git submodule update --init --recursive
 python setup.py install
 ```
@@ -40,13 +40,13 @@ python setup.py install
 # 🧪 Test
 
 ```bash
-python csrc/attn/tests/test_vsa.py
+pytest csrc/fastvideo_kernel/tests/test_correctness.py
 ```
 
 # 📋 Usage
 
 ```python
-from vsa import video_sparse_attn
+from fastvideo_kernel import video_sparse_attn
 
 # q, k, v: [batch_size, num_heads, seq_len, head_dim]
 # variable_block_sizes: [num_blocks] - number of valid tokens in each block

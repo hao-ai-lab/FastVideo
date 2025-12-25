@@ -863,6 +863,6 @@ def test_attn_varlen_moba_speed(batch, head, seqlen, head_dim, moba_chunk_size, 
 if __name__ == "__main__":
     """
     CUDA_VISIBLE_DEVICES=1 \
-    python -u csrc/attn/vmoba_attn/vmoba/vmoba.py
+    python -u csrc/fastvideo_kernel/src/fastvideo_kernel/vmoba.py
     """
     test_attn_varlen_moba_speed(batch=1, head=12, seqlen=32760, head_dim=128, moba_chunk_size=32760 // 3 // 6 // 4, moba_topk=3, select_mode='threshold', simsum_threshold=0.3, threshold_type='query_head')

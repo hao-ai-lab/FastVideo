@@ -28,10 +28,10 @@ export PATH=${CUDA_HOME}/bin:${PATH}
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 ```
 
-Install STA:
+Install FastVideo Kernel:
 
 ```bash
-cd csrc/attn/sliding_tile_attn/
+cd csrc/fastvideo_kernel/
 git submodule update --init --recursive
 python setup.py install
 ```
@@ -39,13 +39,13 @@ python setup.py install
 # 🧪 Test
 
 ```bash
-python csrc/attn/tests/test_sta.py
+pytest csrc/fastvideo_kernel/tests/test_correctness.py
 ```
 
 # 📋 Usage
 
 ```python
-from st_attn import sliding_tile_attention
+from fastvideo_kernel import sliding_tile_attention
 # assuming video size (T, H, W) = (30, 48, 80), text tokens = 256 with padding. 
 # q, k, v: [batch_size, num_heads, seq_length, head_dim], seq_length = T*H*W + 256
 # a tile is a cube of size (6, 8, 8)
