@@ -10,7 +10,7 @@ export WANDB_API_KEY=2f25ad37933894dbf0966c838c0b8494987f9f2f
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 DATA_DIR=data/Wan-Syn_77x448x832_600k
 VALIDATION_DATASET_FILE="examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json"
-NUM_GPUS=8
+NUM_GPUS=6
 # export CUDA_VISIBLE_DEVICES=4,5
 
 
