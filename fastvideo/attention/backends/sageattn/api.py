@@ -77,7 +77,7 @@ def triton_group_mean(q: torch.Tensor):
     return q_out, qm
 
 
-def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_mean: bool = True, disable_delta_s: bool = True):
+def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_mean: bool = True, disable_delta_s: bool = False):
 
     def pad_to_block_size(x):
         L = x.size(2)
