@@ -71,9 +71,9 @@ CAMERA_MAP_UNIVERSAL = {
     "L (Right)": [0, CAM_VALUE],
 }
 CAMERA_MAP_GTA = {
+    "Q (Straight)": [0, 0],
     "A (Steer Left)": [0, -CAM_VALUE],
     "D (Steer Right)": [0, CAM_VALUE],
-    "Q (Straight)": [0, 0],
 }
 
 def setup_model_environment(model_path: str) -> None:
