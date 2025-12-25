@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import os
 import time
 
@@ -506,7 +507,7 @@ def create_gradio_interface(generators: dict[str, StreamingVideoGenerator], load
             # inference_time = time.time() - inference_start_time
             
             # wait for block file to be written
-            block_path = block_future.result() if block_future else None
+            block_path = await asyncio.to_thread(block_future.result) if block_future else None
             state["block_idx"] = generator.block_idx
             block_str = f"Block: {state['block_idx']} / {state['max_blocks']}"
             
