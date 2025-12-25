@@ -422,16 +422,18 @@ class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
 def sageattn_blackwell_with_triton_bwd(q_BLHD, k_BLHD, v_BLHD, is_causal=False, per_block_mean=True):
     softmax_scale = 1.0 / sqrt(q_BLHD.shape[-1])
     # FA forward only to get softmax_lse (which is shape BHL)
-    _, softmax_lse, _S_dmask, rng_state = _wrapped_flash_attn_forward(
-        q_BLHD, k_BLHD, v_BLHD,
-        0.0,               # dropout_p
-        softmax_scale,     # softmax_scale
-        is_causal,         # causal
-        -1, -1,            # window_size_left/right
-        0.0,               # softcap
-        None,              # alibi_slopes
-        False              # return_softmax
-    )
+    # Use no_grad to prevent autograd from tracking this call
+    with torch.no_grad():
+        _, softmax_lse, _S_dmask, rng_state = _wrapped_flash_attn_forward(
+            q_BLHD, k_BLHD, v_BLHD,
+            0.0,               # dropout_p
+            softmax_scale,     # softmax_scale
+            is_causal,         # causal
+            -1, -1,            # window_size_left/right
+            0.0,               # softcap
+            None,              # alibi_slopes
+            False              # return_softmax
+        )
     
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
