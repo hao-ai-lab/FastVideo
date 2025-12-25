@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from curses import KEY_B2
 import os
 import sys
 from pathlib import Path
@@ -502,7 +501,7 @@ class SageAttention3Impl(AttentionImpl):
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         # output = sageattn_blackwell_with_16bit_bwd(query, key, value, is_causal=self.causal)
-        output = sageattn_blackwell_with_triton_bwd(query, key, value, is_causal=self.causal)
+        # output = sageattn_blackwell_with_triton_bwd(query, key, value, is_causal=self.causal)
         # output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
-        # output = qat_attn(query, key, value, is_causal=self.causal)
+        output = qat_attn(query, key, value, is_causal=self.causal)
         return output
