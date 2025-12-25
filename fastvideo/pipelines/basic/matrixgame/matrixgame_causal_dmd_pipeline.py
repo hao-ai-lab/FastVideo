@@ -97,15 +97,17 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
 
     def streaming_step(self, keyboard_action, mouse_action) -> ForwardBatch:
         denoiser = self._stage_name_mapping["denoising_stage"]
+        ctx = denoiser._streaming_ctx
+        assert ctx is not None, "streaming_ctx must be set"
 
-        start_idx = denoiser._streaming_start_index
+        start_idx = ctx.start_index
         batch = denoiser.streaming_step(keyboard_action, mouse_action)
-        end_idx = denoiser._streaming_start_index
+        end_idx = ctx.start_index
 
         # Decode only the new generated block
         if end_idx > start_idx:
             current_latents = batch.latents[:, :, start_idx:end_idx, :, :]
-            args = denoiser._streaming_fastvideo_args
+            args = ctx.fastvideo_args
             decoder = self._stage_name_mapping["decoding_stage"]
             decoded_frames, self._vae_cache = decoder.streaming_decode(
                 current_latents,
