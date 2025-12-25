@@ -79,10 +79,11 @@ CAMERA_MAP_GTA = {
 }
 
 def setup_model_environment(model_path: str) -> None:
-    if "fullattn" in model_path.lower():
-        os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
-    else:
-        os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
+    # if "fullattn" in model_path.lower():
+    #     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
+    # else:
+    #     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
+    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
     os.environ["FASTVIDEO_STAGE_LOGGING"] = "1"
 
 def create_timing_display(inference_time, total_time, stage_execution_times, num_frames):
