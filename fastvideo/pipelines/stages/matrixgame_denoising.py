@@ -138,7 +138,6 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         patch_ratio = patch_size[-1] * patch_size[-2]
         self.frame_seq_length = latent_seq_length // patch_ratio
 
-
         timesteps = torch.tensor(
             fastvideo_args.pipeline_config.dmd_denoising_steps,
             dtype=torch.long).cpu()
@@ -201,8 +200,6 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             dtype=target_dtype,
             device=latents.device)
 
-
-
         if t % self.num_frame_per_block != 0:
             raise ValueError(
                 "num_frames must be divisible by num_frame_per_block for causal denoising"
@@ -235,12 +232,14 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             autocast_enabled=autocast_enabled,
             boundary_timestep=boundary_timestep,
             high_noise_timesteps=high_noise_timesteps,
-            context_noise=getattr(fastvideo_args.pipeline_config, "context_noise", 0),
+            context_noise=getattr(fastvideo_args.pipeline_config,
+                                  "context_noise", 0),
             image_kwargs=image_kwargs,
             pos_cond_kwargs=pos_cond_kwargs,
         )
 
-        context_noise = getattr(fastvideo_args.pipeline_config, "context_noise", 0)
+        context_noise = getattr(fastvideo_args.pipeline_config, "context_noise",
+                                0)
 
         with self.progress_bar(total=len(block_sizes) *
                                len(timesteps)) as progress_bar:
@@ -455,7 +454,8 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             noise_latents = noise_latents_btchw.clone()
             latent_model_input = current_latents.to(ctx.target_dtype)
 
-            independent_first_frame = getattr(self.transformer, 'independent_first_frame', False)
+            independent_first_frame = getattr(self.transformer,
+                                              'independent_first_frame', False)
             if batch.image_latent is not None and independent_first_frame and start_index == 0:
                 latent_model_input = torch.cat([
                     latent_model_input,
@@ -511,8 +511,10 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
 
                 if self.use_action_module and current_model == self.transformer:
                     model_kwargs.update({
-                        "kv_cache_mouse": ctx.kv_cache_mouse,
-                        "kv_cache_keyboard": ctx.kv_cache_keyboard,
+                        "kv_cache_mouse":
+                        ctx.kv_cache_mouse,
+                        "kv_cache_keyboard":
+                        ctx.kv_cache_keyboard,
                     })
                     model_kwargs.update(action_kwargs)
 
@@ -572,9 +574,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     noise_latents_btchw = pred_video_btchw
                 else:
                     noise_latents_btchw = self.scheduler.add_noise(
-                        pred_video_btchw.flatten(0, 1),
-                        noise_btchw.flatten(0, 1), next_timestep).unflatten(
-                            0, pred_video_btchw.shape[:2])
+                        pred_video_btchw.flatten(0,
+                                                 1), noise_btchw.flatten(0, 1),
+                        next_timestep).unflatten(0, pred_video_btchw.shape[:2])
                 current_latents = noise_latents_btchw.permute(0, 2, 1, 3, 4)
             else:
                 current_latents = pred_video_btchw.permute(0, 2, 1, 3, 4)
@@ -619,8 +621,10 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
 
             if self.use_action_module:
                 context_model_kwargs.update({
-                    "kv_cache_mouse": ctx.kv_cache_mouse,
-                    "kv_cache_keyboard": ctx.kv_cache_keyboard,
+                    "kv_cache_mouse":
+                    ctx.kv_cache_mouse,
+                    "kv_cache_keyboard":
+                    ctx.kv_cache_keyboard,
                 })
                 context_model_kwargs.update(action_kwargs)
 
@@ -697,16 +701,14 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         assert torch.isnan(prompt_embeds[0]).sum() == 0
 
         # Initialize caches
-        kv_cache1 = self._initialize_kv_cache(
-            batch_size=latents.shape[0],
-            dtype=target_dtype,
-            device=latents.device)
+        kv_cache1 = self._initialize_kv_cache(batch_size=latents.shape[0],
+                                              dtype=target_dtype,
+                                              device=latents.device)
         kv_cache2 = None
         if boundary_timestep is not None:
-            kv_cache2 = self._initialize_kv_cache(
-                batch_size=latents.shape[0],
-                dtype=target_dtype,
-                device=latents.device)
+            kv_cache2 = self._initialize_kv_cache(batch_size=latents.shape[0],
+                                                  dtype=target_dtype,
+                                                  device=latents.device)
 
         kv_cache_mouse = None
         kv_cache_keyboard = None
@@ -761,7 +763,8 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             autocast_enabled=autocast_enabled,
             boundary_timestep=boundary_timestep,
             high_noise_timesteps=high_noise_timesteps,
-            context_noise=getattr(fastvideo_args.pipeline_config, "context_noise", 0),
+            context_noise=getattr(fastvideo_args.pipeline_config,
+                                  "context_noise", 0),
             image_kwargs=image_kwargs,
             pos_cond_kwargs=pos_cond_kwargs,
         )
@@ -811,9 +814,8 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                                                     current_num_frames)
 
         # Create noise generator that uses pre-allocated noise pool
-        def streaming_noise_generator(
-                shape: tuple, dtype: torch.dtype,
-                step_idx: int) -> torch.Tensor:
+        def streaming_noise_generator(shape: tuple, dtype: torch.dtype,
+                                      step_idx: int) -> torch.Tensor:
             if ctx.noise_pool is not None and step_idx < len(ctx.noise_pool):
                 return ctx.noise_pool[step_idx][:, :shape[1], :, :, :].to(
                     latents.device)
