@@ -92,7 +92,7 @@ def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_
         q, qm = triton_group_mean(q)
     else:
         qm = q.mean(dim=-2, keepdim=True)
-        q = q - qm
+    q = q - qm
     delta_s = torch.matmul(qm, k.transpose(-2, -1)).to(torch.float32).contiguous()
     if disable_delta_s:  # used to disable q smoothing
         delta_s = torch.zeros_like(delta_s)
