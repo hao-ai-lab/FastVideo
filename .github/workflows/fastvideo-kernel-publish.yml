@@ -23,7 +23,7 @@ jobs:
       - name: Check if version changed
         id: check-version
         run: |
-          cd csrc/fastvideo_kernel
+          cd fastvideo-kernel
           # Get current commit's version from pyproject.toml
           NEW_VERSION=$(grep -oP 'version\s*=\s*"\K[^"]+' pyproject.toml)
           echo "New version: $NEW_VERSION"
