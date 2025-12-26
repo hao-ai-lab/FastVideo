@@ -183,56 +183,19 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install CUDA 12.4.1
-        uses: Jimver/cuda-toolkit@v0.2.21
-        id: cuda-toolkit
+      - name: Download all wheels
+        uses: actions/download-artifact@v4
         with:
-          cuda: 12.4.1
-          linux-local-args: '["--toolkit"]'
-          method: 'network'
-          sub-packages: '["nvcc"]'
-
-      - name: Install dependencies (GCC, Clang, CUDA Paths, Git)
-        run: |
-          sudo apt update
-          sudo apt install -y git patchelf gcc-11 g++-11 clang-11
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
-
-          # Allow Git to Access Safe Directory
-          git config --global --add safe.directory /__w/FastVideo/FastVideo
-
-          # Set CUDA environment variables
-          export CUDA_HOME=/usr/local/cuda-12.4.1
-          export PATH=${CUDA_HOME}/bin:${PATH}
-          export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
-          
-          # Verify installation
-          gcc --version
-          g++ --version
-          clang-11 --version
-          nvcc --version
-
-      - name: Install PyTorch 2.5.1+cu12.4.1
-        run: |
-          pip install --upgrade pip
-          pip install typing-extensions==4.12.2
-          export TORCH_CUDA_VERSION=124
-          pip install --no-cache-dir torch==2.5.1 --index-url https://download.pytorch.org/whl/cu${TORCH_CUDA_VERSION}
-          nvcc --version
-          python --version
-          python -c "import torch; print('PyTorch:', torch.__version__)"
-          python -c "import torch; print('CUDA:', torch.version.cuda)"
-          python -c "from torch.utils import cpp_extension; print (cpp_extension.CUDA_HOME)"
+          path: fastvideo-kernel/dist/
+          pattern: '*-py*'
+          merge-multiple: true
 
       - name: Build source distribution
         run: |
-          export PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH
-          
-          pip install setuptools ninja packaging wheel triton scikit-build-core cmake build
+          pip install build scikit-build-core cmake ninja
           
           cd fastvideo-kernel
-          git submodule update --init --recursive
-          export TORCH_CUDA_ARCH_LIST="9.0a"
+          # We don't need full CUDA/Torch to just package the source (sdist)
           python -m build --sdist --outdir dist
 
       - name: Publish release distributions to PyPI
