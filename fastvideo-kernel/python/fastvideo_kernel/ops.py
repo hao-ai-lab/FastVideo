@@ -1,19 +1,19 @@
 import math
 import torch
 from .triton_kernels.block_sparse_attn_triton import triton_block_sparse_attn_forward
+from .triton_kernels.st_attn_triton import sliding_tile_attention_triton
 from .triton_kernels.index import map_to_index
 
+# Try to load the C++ extension
 try:
-    from fastvideo_kernel._C.st_attn import sta_fwd
+    from fastvideo_kernel._C import fastvideo_kernel_ops
+    sta_fwd = getattr(fastvideo_kernel_ops, "sta_fwd", None)
+    block_sparse_fwd = getattr(fastvideo_kernel_ops, "block_sparse_fwd", None)
+    block_sparse_bwd = getattr(fastvideo_kernel_ops, "block_sparse_bwd", None)
 except ImportError:
     sta_fwd = None
-
-try:
-    from fastvideo_kernel._C.vsa import block_sparse_fwd, block_sparse_bwd
-except ImportError:
     block_sparse_fwd = None
     block_sparse_bwd = None
-
 
 def sliding_tile_attention(
     q: torch.Tensor,
@@ -24,9 +24,10 @@ def sliding_tile_attention(
     has_text: bool = True,
     seq_shape: str = "30x48x80",
 ) -> torch.Tensor:
+    # Check if the specific op is available
     if sta_fwd is None:
-        raise RuntimeError(
-            "STA kernel not compiled. Requires H100 and ThunderKittens at build time."
+        return sliding_tile_attention_triton(
+            q, k, v, window_size, text_length, has_text, seq_shape
         )
 
     seq_length = q.shape[2]
@@ -44,9 +45,11 @@ def sliding_tile_attention(
     flag = shape_map[seq_shape]
 
     for head_idx, (t, h, w) in enumerate(window_size):
-        sta_fwd(q[:, head_idx:head_idx + 1], k[:, head_idx:head_idx + 1],
-                v[:, head_idx:head_idx + 1], output[:, head_idx:head_idx + 1],
-                t, h, w, text_length, False, has_text, flag)
+        sta_fwd(
+            q[:, head_idx:head_idx + 1], k[:, head_idx:head_idx + 1],
+            v[:, head_idx:head_idx + 1], output[:, head_idx:head_idx + 1],
+            t, h, w, text_length, False, has_text, flag
+        )
 
     if has_text:
         sta_fwd(q, k, v, output, 3, 3, 3, text_length, True, True, flag)
@@ -94,12 +97,13 @@ def video_sparse_attn(
     mask = torch.zeros_like(scores,
                             dtype=torch.bool).scatter_(-1, topk_idx, True)
 
+    idx, num = map_to_index(mask)
+    
     if block_sparse_fwd is not None:
-        idx, num = map_to_index(mask)
-        out_s, _ = block_sparse_fwd(q, k, v, idx, num,
-                                    variable_block_sizes.int())
+        out_s = block_sparse_fwd(
+            q, k, v, idx, num, variable_block_sizes.int()
+        )[0] # block_sparse_fwd returns vector<Tensor>
     else:
-        idx, num = map_to_index(mask)
         out_s, _ = triton_block_sparse_attn_forward(q, k, v, idx, num,
                                                     variable_block_sizes)
 

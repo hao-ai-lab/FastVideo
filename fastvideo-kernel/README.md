@@ -6,14 +6,14 @@ CUDA kernels for FastVideo video generation.
 
 ```bash
 git submodule update --init --recursive
-cd csrc/fastvideo_kernel
+cd fastvideo-kernel
 pip install .
 ```
 
 ## Usage
 
 ```python
-from fastvideo_kernel import sliding_tile_attention, video_sparse_attn, moba_attn_varlen
+from fastvideo-kernel import sliding_tile_attention, video_sparse_attn, moba_attn_varlen
 
 # Example: Sliding Tile Attention
 out = sliding_tile_attention(q, k, v, window_sizes, text_len)

@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - "csrc/fastvideo_kernel/pyproject.toml"
+      - "fastvideo-kernel/pyproject.toml"
   workflow_dispatch:
 
 jobs:
@@ -138,15 +138,16 @@ jobs:
         run: |
           export PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH
           
-          pip install setuptools ninja packaging wheel triton
+          pip install setuptools ninja packaging wheel triton scikit-build-core cmake build
           
-          cd csrc/fastvideo_kernel
+          cd fastvideo-kernel
           git submodule update --init --recursive  # Ensure ThunderKittens submodule is initialized
-          python setup.py bdist_wheel --dist-dir=dist
+          export TORCH_CUDA_ARCH_LIST="9.0a"
+          python -m build --wheel --outdir dist
 
       - name: Rename wheel file
         run: |
-          cd csrc/fastvideo_kernel
+          cd fastvideo-kernel
 
           CUDA_SHORT_VERSION=$(echo ${{ matrix.torch-cuda.cuda-version }} | cut -d. -f1,2 | sed 's/\.//g')
           TORCH_SHORT_VERSION=$(echo ${{ matrix.torch-cuda.torch-version }} | cut -d. -f1,2)
@@ -161,7 +162,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.wheel_name }}-py${{ matrix.python-version }}
-          path: csrc/fastvideo_kernel/dist/*.whl
+          path: fastvideo-kernel/dist/*.whl
           retention-days: 90
 
   publish_package:
@@ -226,11 +227,12 @@ jobs:
           
           pip install setuptools ninja packaging wheel triton
           
-          cd csrc/fastvideo_kernel
+          cd fastvideo-kernel
           git submodule update --init --recursive
-          python setup.py sdist --dist-dir=dist
+          export TORCH_CUDA_ARCH_LIST="9.0a"
+          python -m build --sdist --outdir dist
 
       - name: Publish release distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: csrc/fastvideo_kernel/dist/
+          packages-dir: fastvideo-kernel/dist/

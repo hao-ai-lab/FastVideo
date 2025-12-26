@@ -3,7 +3,7 @@
 import torch
 import pytest
 import random
-from fastvideo_kernel.vmoba import moba_attn_varlen
+from fastvideo_kernel import moba_attn_varlen
 
 def generate_test_data(batch_size, total_seqlen, num_heads, head_dim, dtype, device="cuda"):
     """

@@ -129,7 +129,7 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/**"
-                - "csrc/fastvideo_kernel/**"
+                - "fastvideo-kernel/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -141,7 +141,7 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/**"
-                - "csrc/fastvideo_kernel/**"
+                - "fastvideo-kernel/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -163,7 +163,7 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "csrc/fastvideo_kernel/**"
+                - "fastvideo-kernel/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -174,7 +174,7 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "csrc/fastvideo_kernel/**"
+                - "fastvideo-kernel/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -185,7 +185,7 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "csrc/fastvideo_kernel/**"
+                - "fastvideo-kernel/**"
                 - "fastvideo/attention/backends/vmoba.py"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
