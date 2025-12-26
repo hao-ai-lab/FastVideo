@@ -28,6 +28,11 @@ from fastvideo.pipelines.stages.text_encoding import TextEncodingStage
 from fastvideo.pipelines.stages.timestep_preparation import (
     TimestepPreparationStage)
 
+# LongCat stages
+from fastvideo.pipelines.stages.longcat_video_vae_encoding import LongCatVideoVAEEncodingStage
+from fastvideo.pipelines.stages.longcat_kv_cache_init import LongCatKVCacheInitStage
+from fastvideo.pipelines.stages.longcat_vc_denoising import LongCatVCDenoisingStage
+
 __all__ = [
     "PipelineStage",
     "InputValidationStage",
@@ -50,4 +55,8 @@ __all__ = [
     "VideoVAEEncodingStage",
     "TextEncodingStage",
     "StepvideoPromptEncodingStage",
+    # LongCat stages
+    "LongCatVideoVAEEncodingStage",
+    "LongCatKVCacheInitStage",
+    "LongCatVCDenoisingStage",
 ]
