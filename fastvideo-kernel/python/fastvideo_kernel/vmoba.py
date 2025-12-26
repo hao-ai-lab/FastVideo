@@ -1022,7 +1022,7 @@ def test_attn_varlen_moba_speed(batch,
 if __name__ == "__main__":
     """
     CUDA_VISIBLE_DEVICES=1 \
-    python -u csrc/fastvideo_kernel/src/fastvideo_kernel/vmoba.py
+    python -u fastvideo-kernel/python/fastvideo_kernel/vmoba.py
     """
     test_attn_varlen_moba_speed(batch=1,
                                 head=12,

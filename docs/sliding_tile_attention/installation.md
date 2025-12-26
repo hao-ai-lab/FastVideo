@@ -31,15 +31,15 @@ export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
 Install FastVideo Kernel:
 
 ```bash
-cd csrc/fastvideo_kernel/
+cd fastvideo-kernel/
 git submodule update --init --recursive
-python setup.py install
+./build.sh
 ```
 
 # 🧪 Test
 
 ```bash
-pytest csrc/fastvideo_kernel/tests/test_correctness.py
+pytest fastvideo-kernel/tests/test_correctness.py
 ```
 
 # 📋 Usage
