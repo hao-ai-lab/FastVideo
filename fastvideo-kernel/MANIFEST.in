@@ -1,0 +1,6 @@
+include LICENSE
+include README.md
+include pyproject.toml
+recursive-include python/fastvideo_kernel *.py
+recursive-include csrc *.cu *.cuh *.cpp *.h
+recursive-include include/tk *.cu *.cuh *.cpp *.h *.src

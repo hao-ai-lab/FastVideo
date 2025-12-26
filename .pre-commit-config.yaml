@@ -4,7 +4,7 @@ default_stages:
 exclude: |
   (?x)(
     fastvideo/third_party/.*|
-    csrc/.*|
+    fastvideo-kernel/.*|
     assets/.*|
     tests/.*|
     demo/.*|

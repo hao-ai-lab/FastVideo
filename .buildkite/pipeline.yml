@@ -129,11 +129,7 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/**"
-                - "csrc/attn/video_sparse_attn/**"
-                - "csrc/attn/video_sparse_attn/tk/**"
-                - "csrc/attn/video_sparse_attn/setup.py"
-                - "csrc/attn/video_sparse_attn/config_vsa.py"
-                - "csrc/attn/video_sparse_attn/vsa.cpp"
+                - "fastvideo-kernel/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -145,10 +141,7 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/**"
-                - "csrc/attn/sliding_tile_attn/**"
-                - "csrc/attn/sliding_tile_attn/setup.py"
-                - "csrc/attn/sliding_tile_attn/config_sta.py"
-                - "csrc/attn/sliding_tile_attn/st_attn.cpp"
+                - "fastvideo-kernel/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -159,10 +152,7 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "csrc/attn/sliding_tile_attn/**"
-                - "csrc/attn/sliding_tile_attn/setup.py"
-                - "csrc/attn/sliding_tile_attn/config_sta.py"
-                - "csrc/attn/sliding_tile_attn/st_attn.cpp"
+                - "fastvideo-kernel/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -173,12 +163,7 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "csrc/attn/video_sparse_attn/**"
-                - "csrc/attn/video_sparse_attn/tk/**"
-                - "csrc/attn/tests/test_vsa.py"
-                - "csrc/attn/video_sparse_attn/setup.py"
-                - "csrc/attn/video_sparse_attn/config_vsa.py"
-                - "csrc/attn/video_sparse_attn/vsa.cpp"
+                - "fastvideo-kernel/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -189,7 +174,7 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "csrc/attn/vmoba_attn/**"
+                - "fastvideo-kernel/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -200,7 +185,7 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "csrc/attn/vmoba_attn/vmoba/**"
+                - "fastvideo-kernel/**"
                 - "fastvideo/attention/backends/vmoba.py"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
