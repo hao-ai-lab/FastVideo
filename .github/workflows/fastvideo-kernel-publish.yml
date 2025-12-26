@@ -60,9 +60,9 @@ jobs:
             # - torch-version: '2.6.0'
             #   cuda-version: '12.6.3'
             #   torch-cuda-short: 'cu126'
-            - torch-version: '2.7.1'
-              cuda-version: '12.8.0'
-              torch-cuda-short: 'cu128'
+            # - torch-version: '2.7.1'
+            #   cuda-version: '12.8.0'
+            #   torch-cuda-short: 'cu128'
             - torch-version: '2.9.1'
               cuda-version: '12.8.0'
               torch-cuda-short: 'cu128'
@@ -148,29 +148,12 @@ jobs:
           git submodule update --init --recursive  # Ensure ThunderKittens submodule is initialized
           export TORCH_CUDA_ARCH_LIST="9.0a"
           
-          # Construct version with local suffix
-          CUDA_SHORT_VERSION=$(echo ${{ matrix.torch-cuda.cuda-version }} | cut -d. -f1,2 | sed 's/\.//g')
-          TORCH_SHORT_VERSION=$(echo ${{ matrix.torch-cuda.torch-version }} | cut -d. -f1,2)
-          
-          # Check if this is the "default" build (Py3.12, Torch 2.9.1, CUDA 12.8.0)
-          if [ "${{ matrix.python-version }}" == "3.12" ] && [ "${{ matrix.torch-cuda.torch-version }}" == "2.9.1" ] && [ "${{ matrix.torch-cuda.cuda-version }}" == "12.8.0" ]; then
-            LOCAL_VERSION=""
-            echo "Building DEFAULT version (no suffix)"
-          else
-            LOCAL_VERSION="+cu${CUDA_SHORT_VERSION}torch${TORCH_SHORT_VERSION}"
-            echo "Building variant with suffix: $LOCAL_VERSION"
-          fi
-          
-          # Temporarily patch pyproject.toml to include the local version
-          # Note: scikit-build-core might support dynamic versioning better, but patching is reliable.
-          # Using stricter regex to match only the project version, not minimum-version etc.
-          if [ -n "$LOCAL_VERSION" ]; then
-             sed -i "s/^version = \"\([^\"]*\)\"/version = \"\1${LOCAL_VERSION}\"/" pyproject.toml
-          fi
-          
+          # Build standard wheel (no local version suffix) for PyPI
           python -m build --wheel --outdir dist
 
       - name: Upload wheel artifact
+        # Only upload if it's the "main" CUDA version we want on PyPI
+        # We upload all to artifacts for inspection/GH releases, but give them distinct artifact names
         uses: actions/upload-artifact@v4
         with:
           name: fastvideo_kernel-py${{ matrix.python-version }}-${{ matrix.torch-cuda.torch-cuda-short }}-torch${{ matrix.torch-cuda.torch-version }}
@@ -192,7 +175,7 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Download all wheels
+      - name: Download PyPI wheels
         uses: actions/download-artifact@v4
         with:
           path: fastvideo-kernel/dist/
