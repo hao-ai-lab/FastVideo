@@ -32,4 +32,4 @@ dependencies = [
 [tool.scikit-build]
 cmake.build-type = "Release"
 minimum-version = "build-system.requires"
-wheel.packages = ["python/fastvideo_kernel"]
+wheel.packages = ["python"]

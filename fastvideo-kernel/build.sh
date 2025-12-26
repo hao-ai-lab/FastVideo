@@ -11,8 +11,10 @@ echo "Building fastvideo-kernel..."
 # Install build dependencies
 pip install scikit-build-core cmake ninja
 
-# Force TORCH_CUDA_ARCH_LIST to 9.0a to avoid compiling for unsupported architectures (like sm_80)
-export TORCH_CUDA_ARCH_LIST="9.0a"
+# Set TORCH_CUDA_ARCH_LIST only if not already set
+if [ -z "$TORCH_CUDA_ARCH_LIST" ]; then
+    export TORCH_CUDA_ARCH_LIST="9.0a"
+fi
 
 # Build and install
 # Use -v for verbose output

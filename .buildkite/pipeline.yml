@@ -152,7 +152,7 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "csrc/fastvideo_kernel/**"
+                - "fastvideo-kernel/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
