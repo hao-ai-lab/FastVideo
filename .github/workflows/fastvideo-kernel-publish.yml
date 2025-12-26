@@ -51,7 +51,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-          os: [ubuntu-22.04]
+          # Use Ubuntu 20.04 to produce more compatible wheels (glibc 2.31)
+          os: [ubuntu-20.04]
           python-version: ['3.10', '3.11', '3.12']
           torch-cuda:
             # - torch-version: '2.5.1'
@@ -153,7 +154,8 @@ jobs:
           
           # Fix the wheel to be manylinux compliant
           pip install auditwheel
-          auditwheel repair dist/*.whl --plat manylinux_2_28_x86_64 -w fixed_dist
+          # Target manylinux_2_31 (Ubuntu 20.04 native)
+          auditwheel repair dist/*.whl --plat manylinux_2_31_x86_64 -w fixed_dist
           # Move fixed wheels back to dist for upload consistency
           rm dist/*.whl
           mv fixed_dist/*.whl dist/
