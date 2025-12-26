@@ -9,7 +9,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "fastvideo-kernel"
-version = "0.2.0"
+version = "0.2.1"
 description = "Unified CUDA kernels for FastVideo"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,4 +32,4 @@ dependencies = [
 [tool.scikit-build]
 cmake.build-type = "Release"
 minimum-version = "build-system.requires"
-wheel.packages = ["python"]
+wheel.packages = ["python/fastvideo_kernel"]
