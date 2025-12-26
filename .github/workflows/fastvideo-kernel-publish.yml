@@ -150,6 +150,13 @@ jobs:
           
           # Build standard wheel (no local version suffix) for PyPI
           python -m build --wheel --outdir dist
+          
+          # Fix the wheel to be manylinux compliant
+          pip install auditwheel
+          auditwheel repair dist/*.whl --plat manylinux_2_28_x86_64 -w fixed_dist
+          # Move fixed wheels back to dist for upload consistency
+          rm dist/*.whl
+          mv fixed_dist/*.whl dist/
 
       - name: Upload wheel artifact
         # Only upload if it's the "main" CUDA version we want on PyPI
