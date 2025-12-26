@@ -89,9 +89,10 @@ markdown_extensions:
   - admonition
   - pymdownx.highlight:
       anchor_linenums: true
-      line_spans: __span
+      # line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
+  - pymdownx.snippets
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
@@ -99,13 +100,10 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.emoji
-  - pymdownx.superfences
   - pymdownx.arithmatex:
       generic: true
   - pymdownx.critic
   - pymdownx.details
-  - pymdownx.highlight
-  - pymdownx.inlinehilite
   - pymdownx.keys
   - pymdownx.mark
   - pymdownx.smartsymbols
@@ -149,11 +147,11 @@ nav:
   - Distillation:
     - Data Preprocessing: distillation/data_preprocess.md
     - DMD: distillation/dmd.md
-  - Sliding Tile Attention:
-    - Installation: sliding_tile_attention/installation.md
-    - Demo: sliding_tile_attention/demo.md
-  - Video Sparse Attention:
-    - Installation: video_sparse_attention/installation.md
+  - Attention:
+    - Overview: attention/index.md
+    - Video Sparse Attention: attention/vsa/index.md
+    - Sliding Tile Attention: attention/sta/index.md
+    - Adding a New Attention Backend: attention/developer/index.md
   - Design:
     - Overview: design/overview.md
   - Developer Guide:
@@ -164,6 +162,7 @@ nav:
       - RunPod: contributing/developer_env/runpod.md
     - Testing: contributing/testing.md
     - Profiling: contributing/profiling.md
+    - Adding a New Attention Backend: attention/developer/index.md
   - API Reference:
     - FastVideo: api/fastvideo.md
 
