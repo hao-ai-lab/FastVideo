@@ -25,12 +25,13 @@ jobs:
         run: |
           cd fastvideo-kernel
           # Get current commit's version from pyproject.toml
-          NEW_VERSION=$(grep -oP 'version\s*=\s*"\K[^"]+' pyproject.toml)
+          # Use ^ to match start of line to avoid matching minimum-version
+          NEW_VERSION=$(grep -oP '^version\s*=\s*"\K[^"]+' pyproject.toml)
           echo "New version: $NEW_VERSION"
           
           # Get previous version from git history
           # Note: git show expects path relative to repo root
-          OLD_VERSION=$(git show HEAD~1:fastvideo-kernel/pyproject.toml | grep -oP 'version\s*=\s*"\K[^"]+' || echo "0.0.0")
+          OLD_VERSION=$(git show HEAD~1:fastvideo-kernel/pyproject.toml | grep -oP '^version\s*=\s*"\K[^"]+' || echo "0.0.0")
           echo "Old version: $OLD_VERSION"
           
           if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
