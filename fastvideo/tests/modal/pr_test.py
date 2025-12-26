@@ -53,6 +53,7 @@ def run_test(pytest_command: str):
     git clone {git_repo} /FastVideo &&
     cd /FastVideo &&
     {checkout_command} &&
+    uv pip install -e fastvideo-kernel &&
     uv pip install -e .[test] &&
     {pytest_command}
     """
@@ -103,15 +104,16 @@ def run_inference_tests_STA():
 
 @app.function(gpu="H100:1", image=image, timeout=900)
 def run_precision_tests_STA():
-    run_test("python csrc/attn/tests/test_sta.py")
+    run_test("pytest fastvideo-kernel/tests/test_correctness.py")
 
 @app.function(gpu="H100:1", image=image, timeout=900)
 def run_precision_tests_VSA():
-    run_test("python csrc/attn/tests/test_vsa.py")
+    # VSA correctness is covered by the same file now
+    run_test("pytest fastvideo-kernel/tests/test_correctness.py")
 
 @app.function(gpu="L40S:1", image=image, timeout=900)
 def run_precision_tests_vmoba():
-    run_test("pytest csrc/attn/vmoba_attn/tests/test_vmoba_attn.py")
+    run_test("pytest fastvideo-kernel/tests/test_vmoba_correctness.py")
 
 @app.function(gpu="L40S:1", image=image, timeout=900)
 def run_inference_tests_vmoba():

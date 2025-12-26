@@ -1,7 +1,3 @@
-[submodule "csrc/attn/video_sparse_attn/tk"]
-	path = csrc/attn/video_sparse_attn/tk
-	url = https://github.com/HazyResearch/ThunderKittens.git
-
-[submodule "csrc/attn/sliding_tile_attn/tk"]
-	path = csrc/attn/sliding_tile_attn/tk
+[submodule "fastvideo-kernel/include/tk"]
+	path = fastvideo-kernel/include/tk
 	url = https://github.com/HazyResearch/ThunderKittens.git

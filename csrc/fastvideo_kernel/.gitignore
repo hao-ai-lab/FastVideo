@@ -1,7 +1,0 @@
-build/
-dist/
-*.egg-info/
-__pycache__/
-*.so
-*.pyc
-.ipynb_checkpoints/
