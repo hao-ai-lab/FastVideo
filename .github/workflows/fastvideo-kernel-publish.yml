@@ -51,15 +51,18 @@ jobs:
       fail-fast: false
       matrix:
           os: [ubuntu-22.04]
-          python-version: ['3.10', '3.11', '3.12', '3.13']
+          python-version: ['3.10', '3.11', '3.12']
           torch-cuda:
-            - torch-version: '2.5.1'
-              cuda-version: '12.4.1'
-              torch-cuda-short: 'cu124'
-            - torch-version: '2.6.0'
-              cuda-version: '12.6.3'
-              torch-cuda-short: 'cu126'
+            # - torch-version: '2.5.1'
+            #   cuda-version: '12.4.1'
+            #   torch-cuda-short: 'cu124'
+            # - torch-version: '2.6.0'
+            #   cuda-version: '12.6.3'
+            #   torch-cuda-short: 'cu126'
             - torch-version: '2.7.1'
+              cuda-version: '12.8.0'
+              torch-cuda-short: 'cu128'
+            - torch-version: '2.9.1'
               cuda-version: '12.8.0'
               torch-cuda-short: 'cu128'
 
