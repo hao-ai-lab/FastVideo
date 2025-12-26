@@ -418,7 +418,7 @@ class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
     
         return dq_BHLD, dk_BHLD, dv_BHLD, None, None, None, None 
 
-def sageattn_blackwell_with_triton_bwd(q_BLHD, k_BLHD, v_BLHD, is_causal=False, per_block_mean=True):
+def sageattn_blackwell_with_triton_bwd(q_BLHD, k_BLHD, v_BLHD, is_causal=False, per_block_mean=False):
     softmax_scale = 1.0 / sqrt(q_BLHD.shape[-1])
     # FA forward only to get softmax_lse (which is shape BHL)
     # Use no_grad to prevent autograd from tracking this call
