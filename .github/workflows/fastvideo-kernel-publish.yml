@@ -228,7 +228,7 @@ jobs:
         run: |
           export PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH
           
-          pip install setuptools ninja packaging wheel triton
+          pip install setuptools ninja packaging wheel triton scikit-build-core cmake build
           
           cd fastvideo-kernel
           git submodule update --init --recursive
