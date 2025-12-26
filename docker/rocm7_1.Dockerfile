@@ -51,8 +51,8 @@ RUN source $HOME/.local/bin/env && \
 # Install FastVideo Unified Kernel
 RUN source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
-    cd csrc/fastvideo_kernel && \
+    cd fastvideo-kernel && \
     git submodule update --init --recursive && \
-    SKIP_SM90_EXT=1 pip install --no-build-isolation -e .
+    ./build.sh
 
 EXPOSE 22
