@@ -4,8 +4,8 @@ FastVideo provides highly optimized custom attention kernels to accelerate video
 
 ## Supported Kernels
 
-* **[Sliding Tile Attention (STA)](sta/index.md)**: Optimized attention for window-based video generation.
 * **[Video Sparse Attention (VSA)](vsa/index.md)**: Sparse attention mechanism selecting top-k blocks.
+* **[Sliding Tile Attention (STA)](sta/index.md)**: Optimized attention for window-based video generation.
 
 ## General Build Instructions
 
