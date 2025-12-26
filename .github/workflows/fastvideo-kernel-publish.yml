@@ -146,25 +146,23 @@ jobs:
           cd fastvideo-kernel
           git submodule update --init --recursive  # Ensure ThunderKittens submodule is initialized
           export TORCH_CUDA_ARCH_LIST="9.0a"
-          python -m build --wheel --outdir dist
-
-      - name: Rename wheel file
-        run: |
-          cd fastvideo-kernel
-
+          
+          # Construct version with local suffix
           CUDA_SHORT_VERSION=$(echo ${{ matrix.torch-cuda.cuda-version }} | cut -d. -f1,2 | sed 's/\.//g')
           TORCH_SHORT_VERSION=$(echo ${{ matrix.torch-cuda.torch-version }} | cut -d. -f1,2)
-          # Get the correct version format
-          tmpname=cu${CUDA_SHORT_VERSION}torch${TORCH_SHORT_VERSION}
-          wheel_name=$(ls dist/*whl | xargs -n 1 basename | sed "s/-/+$tmpname-/2")
-          # Rename with version information
-          ls dist/*whl |xargs -I {} mv {} dist/${wheel_name}
-          echo "wheel_name=${wheel_name}" >> $GITHUB_ENV
+          LOCAL_VERSION="+cu${CUDA_SHORT_VERSION}torch${TORCH_SHORT_VERSION}"
+          
+          # Temporarily patch pyproject.toml to include the local version
+          # Note: scikit-build-core might support dynamic versioning better, but patching is reliable.
+          # Using stricter regex to match version = "..."
+          sed -i "s/version = \"\([^\"]*\)\"/version = \"\1${LOCAL_VERSION}\"/" pyproject.toml
+          
+          python -m build --wheel --outdir dist
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.wheel_name }}-py${{ matrix.python-version }}
+          name: fastvideo_kernel-py${{ matrix.python-version }}-${{ matrix.torch-cuda.torch-cuda-short }}
           path: fastvideo-kernel/dist/*.whl
           retention-days: 90
 
@@ -187,7 +185,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: fastvideo-kernel/dist/
-          pattern: '*-py*'
+          pattern: 'fastvideo_kernel-py*'
           merge-multiple: true
 
       - name: Build source distribution
