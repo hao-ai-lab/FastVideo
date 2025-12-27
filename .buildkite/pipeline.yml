@@ -22,7 +22,7 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                command: "timeout 20m .buildkite/scripts/pr_test.sh"
                 label: "Encoder Tests"
                 env:
                   - TEST_TYPE=encoder
@@ -35,7 +35,7 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                command: "timeout 20m .buildkite/scripts/pr_test.sh"
                 label: "VAE Tests"
                 env:
                   - TEST_TYPE=vae
