@@ -507,6 +507,28 @@ class TransformerLoader(ComponentLoader):
         assert next(model.parameters()).dtype == default_dtype, "Model dtype does not match default dtype"
 
         model = model.eval()
+
+        if fastvideo_args.dit_layerwise_offload and hasattr(model, "blocks"):
+            try:
+                num_layers = len(getattr(model, "blocks"))
+            except Exception:
+                num_layers = None
+            if isinstance(num_layers, int) and num_layers > 0:
+                # Ensure model is on the correct device (CUDA) before initializing manager
+                # This ensures non-managed parameters (embeddings, final norms) are on GPU
+                model = model.to(get_local_torch_device())
+                
+                from fastvideo.models.layerwise_offload import LayerwiseOffloadManager
+                mgr = LayerwiseOffloadManager(
+                    model,
+                    module_list_attr="blocks",
+                    num_layers=num_layers,
+                    enabled=True,
+                    pin_cpu_memory=fastvideo_args.pin_cpu_memory,
+                    auto_initialize=True,
+                )
+                setattr(model, "_layerwise_offload_manager", mgr)
+
         return model
 
 
