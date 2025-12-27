@@ -26,31 +26,54 @@ include_directories(
     ${TORCH_INCLUDE_DIRS}
 )
 
-# CUDA architecture flags
-# If not defined, try to detect from PyTorch
-if(NOT DEFINED TORCH_CUDA_ARCH_LIST)
-    execute_process(
-        COMMAND "${Python_EXECUTABLE}" -c "import torch; print(';'.join([x.replace('sm_', '') for x in torch.cuda.get_arch_list()]))"
-        OUTPUT_VARIABLE TORCH_CUDA_ARCH_LIST
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
+# ---------------------------
+# ThunderKittens (TK) toggles
+# ---------------------------
+# AUTO: enable TK only when we can confidently target Hopper (sm_90a).
+# ON:   force-enable TK kernels (intended for release wheels/images; does NOT require a GPU).
+# OFF:  never build TK kernels.
+set(FASTVIDEO_KERNEL_BUILD_TK "AUTO" CACHE STRING "Build ThunderKittens kernels: AUTO/ON/OFF")
+set_property(CACHE FASTVIDEO_KERNEL_BUILD_TK PROPERTY STRINGS AUTO ON OFF)
+
+# Prefer environment variable (used by CI) if CMake var is not explicitly set.
+if(NOT DEFINED TORCH_CUDA_ARCH_LIST AND DEFINED ENV{TORCH_CUDA_ARCH_LIST})
+    set(TORCH_CUDA_ARCH_LIST "$ENV{TORCH_CUDA_ARCH_LIST}")
 endif()
 
-if(NOT TORCH_CUDA_ARCH_LIST)
-    # Fallback default if detection failed or no GPU
-    set(TORCH_CUDA_ARCH_LIST "9.0a")
-endif()
+message(STATUS "TORCH_CUDA_ARCH_LIST (cmake/env): ${TORCH_CUDA_ARCH_LIST}")
+message(STATUS "FASTVIDEO_KERNEL_BUILD_TK: ${FASTVIDEO_KERNEL_BUILD_TK}")
 
-message(STATUS "TORCH_CUDA_ARCH_LIST: ${TORCH_CUDA_ARCH_LIST}")
-
-# Check if we are targeting Hopper (9.0a) for ThunderKittens
-string(FIND "${TORCH_CUDA_ARCH_LIST}" "9.0a" HAS_HOPPER)
-if(HAS_HOPPER EQUAL -1)
-    message(STATUS "TORCH_CUDA_ARCH_LIST (${TORCH_CUDA_ARCH_LIST}) does not contain 9.0a. ThunderKittens kernels will be disabled.")
+set(ENABLE_TK_KERNELS OFF)
+if(FASTVIDEO_KERNEL_BUILD_TK STREQUAL "ON")
+    set(ENABLE_TK_KERNELS ON)
+elseif(FASTVIDEO_KERNEL_BUILD_TK STREQUAL "OFF")
     set(ENABLE_TK_KERNELS OFF)
 else()
-    message(STATUS "Enabling ThunderKittens kernels (Hopper supported).")
-    set(ENABLE_TK_KERNELS ON)
+    # AUTO: detect Hopper if possible.
+    if(TORCH_CUDA_ARCH_LIST)
+        # Accept common spellings: 9.0a, 90a, sm_90a.
+        string(REGEX MATCH "(^|[; ,])((9\\.0a)|(90a)|(sm_90a))([; ,]|$)" _HAS_90A "${TORCH_CUDA_ARCH_LIST}")
+        if(_HAS_90A)
+            set(ENABLE_TK_KERNELS ON)
+        endif()
+    else()
+        # Best-effort local detection (works when a CUDA device is visible).
+        execute_process(
+            COMMAND "${Python_EXECUTABLE}" -c "import torch; import sys; \nprint('1' if (torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 9) else '0')"
+            OUTPUT_VARIABLE _LOCAL_HAS_HOPPER
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+        if(_LOCAL_HAS_HOPPER STREQUAL "1")
+            set(ENABLE_TK_KERNELS ON)
+        endif()
+    endif()
+endif()
+
+if(ENABLE_TK_KERNELS)
+    message(STATUS "ThunderKittens kernels: ENABLED")
+else()
+    message(STATUS "ThunderKittens kernels: DISABLED (will use Triton fallbacks at runtime)")
 endif()
 
 # Always try to build the extension if CUDA is available, but conditionally add sources/flags
@@ -72,10 +95,13 @@ set(CUDA_FLAGS
     "-Xptxas=--warn-on-spills"
 )
 
-# Only add -arch=sm_90a and TK flags if we are enabling TK kernels
+# If TK is enabled, ensure we target Hopper. This is required even on GPU-less builders (CI).
 if(ENABLE_TK_KERNELS)
-    list(APPEND CUDA_FLAGS "-arch=sm_90a")
+    if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES OR CMAKE_CUDA_ARCHITECTURES STREQUAL "")
+        set(CMAKE_CUDA_ARCHITECTURES "90a" CACHE STRING "CUDA architectures" FORCE)
+    endif()
     list(APPEND CUDA_FLAGS "-DKITTENS_HOPPER")
+    message(STATUS "CMAKE_CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
 endif()
 
 if(BUILD_CXX_KERNELS)

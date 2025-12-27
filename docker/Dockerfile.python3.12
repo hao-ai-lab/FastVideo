@@ -60,6 +60,6 @@ RUN source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
     cd fastvideo-kernel && \
     git submodule update --init --recursive && \
-    ./build.sh
+    ./build.sh --release
 
 EXPOSE 22
