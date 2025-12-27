@@ -82,8 +82,7 @@ class SDPAImpl(AttentionImpl):
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
 
-        if attn_metadata is not None:
-            attn_mask = getattr(attn_metadata, "attn_mask", None)
+        attn_mask = attn_metadata.attn_mask if attn_metadata is not None else None
         attn_kwargs = {
             "attn_mask": attn_mask,
             "dropout_p": self.dropout,
