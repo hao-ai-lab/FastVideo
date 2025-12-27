@@ -93,9 +93,13 @@ case "$TEST_TYPE" in
         log "Running inference STA tests..."
         MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_inference_tests_STA"
         ;;
-    "kernel_tests")
-        log "Running kernel tests..."
-        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_kernel_tests"
+    "precision_sta")
+        log "Running precision STA tests..."
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_precision_tests_STA"
+        ;;
+    "precision_vsa")
+        log "Running precision VSA tests..."
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_precision_tests_VSA"
         ;;
     "inference_lora")
         log "Running LoRA tests..."
@@ -113,6 +117,10 @@ case "$TEST_TYPE" in
     "inference_vmoba")
         log "Running V-MoBA inference tests..."
         MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_inference_tests_vmoba"
+        ;;
+    "precision_vmoba")
+        log "Running V-MoBA precision tests..."
+        MODAL_COMMAND="$MODAL_ENV python3 -m modal run $MODAL_TEST_FILE::run_precision_tests_vmoba"
         ;;
     "unit_test")
         log "Running unit tests..."

@@ -53,6 +53,7 @@ def run_test(pytest_command: str):
     git clone {git_repo} /FastVideo &&
     cd /FastVideo &&
     {checkout_command} &&
+    uv pip install -e fastvideo-kernel &&
     uv pip install -e .[test] &&
     {pytest_command}
     """
@@ -63,11 +64,11 @@ def run_test(pytest_command: str):
     
     sys.exit(result.returncode)
 
-@app.function(gpu="H100:1", image=image, timeout=1200, secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})])
+@app.function(gpu="H100:1", image=image, timeout=900, secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})])
 def run_encoder_tests():
     run_test("hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/encoders -vs")
 
-@app.function(gpu="L40S:1", image=image, timeout=1200, secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})])
+@app.function(gpu="L40S:1", image=image, timeout=900, secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})])
 def run_vae_tests():
     run_test("hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/vaes -vs")
 
@@ -102,17 +103,17 @@ def run_inference_tests_STA():
     run_test("pytest ./fastvideo/tests/inference/STA -srP")
 
 @app.function(gpu="H100:1", image=image, timeout=900)
-def run_kernel_tests():
-    run_test("pytest fastvideo-kernel/tests/ -vs")
+def run_precision_tests_STA():
+    run_test("pytest fastvideo-kernel/tests/test_correctness.py")
 
-# @app.function(gpu="H100:1", image=image, timeout=900)
-# def run_precision_tests_VSA():
-#     # VSA correctness is covered by the same file now
-#     run_test("pytest fastvideo-kernel/tests/test_correctness.py")
+@app.function(gpu="H100:1", image=image, timeout=900)
+def run_precision_tests_VSA():
+    # VSA correctness is covered by the same file now
+    run_test("pytest fastvideo-kernel/tests/test_correctness.py")
 
-# @app.function(gpu="L40S:1", image=image, timeout=900)
-# def run_precision_tests_vmoba():
-#     run_test("pytest fastvideo-kernel/tests/test_vmoba_correctness.py")
+@app.function(gpu="L40S:1", image=image, timeout=900)
+def run_precision_tests_vmoba():
+    run_test("pytest fastvideo-kernel/tests/test_vmoba_correctness.py")
 
 @app.function(gpu="L40S:1", image=image, timeout=900)
 def run_inference_tests_vmoba():
