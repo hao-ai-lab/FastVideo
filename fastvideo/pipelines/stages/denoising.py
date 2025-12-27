@@ -200,10 +200,6 @@ class DenoisingStage(PipelineStage):
 
         if boundary_ratio is not None:
             boundary_timestep = boundary_ratio * self.scheduler.num_train_timesteps
-            logger.info(
-                "MoE boundary_timestep: %s (boundary_ratio: %s, num_train_timesteps: %s)",
-                boundary_timestep, boundary_ratio,
-                self.scheduler.num_train_timesteps)
         else:
             boundary_timestep = None
         latent_model_input = latents.to(target_dtype)
