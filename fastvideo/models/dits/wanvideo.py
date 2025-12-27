@@ -733,9 +733,20 @@ class WanTransformer3DModel(CachableDiT):
                         block, hidden_states, encoder_hidden_states,
                         timestep_proj, freqs_cis, attention_mask)
             else:
-                for block in self.blocks:
-                    hidden_states = block(hidden_states, encoder_hidden_states,
-                                          timestep_proj, freqs_cis, attention_mask)
+                offload_mgr = getattr(self, "_layerwise_offload_manager", None)
+                if offload_mgr is not None and getattr(offload_mgr, "enabled", False):
+                    for i, block in enumerate(self.blocks):
+                        with offload_mgr.layer_scope(
+                            prefetch_layer_idx=i+1 if i+1 < len(self.blocks) else None,
+                            release_layer_idx=i,
+                            non_blocking=True,
+                        ):
+                            hidden_states = block(hidden_states, encoder_hidden_states,
+                                                  timestep_proj, freqs_cis, attention_mask)
+                else:
+                    for block in self.blocks:
+                        hidden_states = block(hidden_states, encoder_hidden_states,
+                                              timestep_proj, freqs_cis, attention_mask)
             # if teacache is enabled, we need to cache the original hidden states
 
             if enable_teacache:
