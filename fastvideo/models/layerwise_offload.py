@@ -1,20 +1,3 @@
-# fastvideo/utils/layerwise_offload.py
-# (or wherever you keep this utility)
-#
-# Drop-in replacement for your current LayerwiseOffloadManager:
-# - Same public API / call pattern as the file you pasted
-# - Fixes the "mat2 must be a matrix, got 1-D tensor" bug by using rank-preserving placeholders
-# - Improves overlap by doing copies inside a single stream context (less overhead)
-# - Keeps the SGLang-style usage working:
-#     with mgr.layer_scope(prefetch_layer_idx=i+1, release_layer_idx=i):
-#         hidden_states = block(...)
-#
-# NOTE:
-# This is still "layerwise blocks" offload (module_list_attr="blocks").
-# If you want expert-level swap only at the boundary, do that in your pipeline logic
-# by enabling/disabling mgr calls, or by attaching mgr only to the currently-used transformer.
-# (You said you'll handle the rest.)
-
 import re
 from contextlib import contextmanager
 from typing import Dict, Set, Optional, Tuple
@@ -27,22 +10,6 @@ class LayerwiseOffloadManager:
 
     Offloads per-layer parameters/buffers from GPU to CPU, and supports async H2D
     prefetch using a dedicated CUDA stream.
-
-    Typical usage (SGLang-style):
-        mgr = LayerwiseOffloadManager(model, module_list_attr="blocks", num_layers=len(model.blocks), enabled=True)
-        mgr.initialize()
-
-        for i, block in enumerate(model.blocks):
-            with mgr.layer_scope(prefetch_layer_idx=i+1, release_layer_idx=i):
-                x = block(x, ...)
-
-        mgr.release_all()
-
-    Key correctness fix vs the original file you pasted:
-      - When weights are "released", we replace them with a *rank-preserving* empty tensor
-        instead of torch.empty((1,)). This avoids:
-            RuntimeError: mat2 must be a matrix, got 1-D tensor
-        if some code accidentally touches an offloaded Linear weight.
     """
 
     def __init__(
@@ -88,9 +55,6 @@ class LayerwiseOffloadManager:
         if auto_initialize:
             self.initialize()
 
-    # -------------------------
-    # internal helpers
-    # -------------------------
     def _match_layer_idx(self, name: str) -> Optional[int]:
         m = self._layer_name_re.search(name)
         if not m:
@@ -135,9 +99,6 @@ class LayerwiseOffloadManager:
         if self.device is not None:
             tensor.data = self._make_placeholder(name)
 
-    # -------------------------
-    # public API
-    # -------------------------
     @torch.compiler.disable
     def initialize(self) -> None:
         """Offload all matched layer tensors to CPU and prefetch layer 0 (sync)."""
@@ -240,8 +201,6 @@ class LayerwiseOffloadManager:
         if not self.enabled or self.device is None:
             return
 
-        # Keep original behavior (never release layer 0), matching your pasted file.
-        # If you want to allow releasing 0, change to: `if layer_idx < 0: return`
         if layer_idx < 0:
             return
 
