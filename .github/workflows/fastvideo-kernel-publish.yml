@@ -147,7 +147,9 @@ jobs:
           
           cd fastvideo-kernel
           git submodule update --init --recursive  # Ensure ThunderKittens submodule is initialized
+          # Release builds are produced on GPU-less runners, so force-enable TK and target Hopper.
           export TORCH_CUDA_ARCH_LIST="9.0a"
+          export CMAKE_ARGS="${CMAKE_ARGS:-} -DFASTVIDEO_KERNEL_BUILD_TK=ON -DCMAKE_CUDA_ARCHITECTURES=90a"
           
           # Build standard wheel (no local version suffix) for PyPI
           python -m build --wheel --outdir dist
