@@ -33,23 +33,18 @@ class LayerwiseOffloadManager:
         )
         self.copy_stream = torch.cuda.Stream() if self.enabled else None
 
-        # Matches names like "...<module_list_attr>.<idx>..."
         self._layer_name_re = re.compile(
             rf"(^|\.){re.escape(module_list_attr)}\.(\d+)(\.|$)"
         )
 
-        # CPU store for offloaded tensors: layer_idx -> {name -> cpu_tensor}
         self._cpu_weights: Dict[int, Dict[str, torch.Tensor]] = {}
         self._cpu_dtypes: Dict[int, Dict[str, torch.dtype]] = {}
 
-        # Track which layer indices currently have GPU-resident tensors
         self._gpu_layers: Dict[int, Set[str]] = {}
 
-        # Name -> Parameter/Buffer object
         self._named_parameters: Dict[str, torch.nn.Parameter] = {}
         self._named_buffers: Dict[str, torch.Tensor] = {}
 
-        # Meta used to create rank-preserving placeholders: name -> (ndim, dtype)
         self._meta: Dict[str, Tuple[int, torch.dtype]] = {}
 
         if auto_initialize:
@@ -65,7 +60,6 @@ class LayerwiseOffloadManager:
             return None
 
     def _record_meta(self, name: str, t: torch.Tensor) -> None:
-        # Record once; dtype is used for placeholder dtype consistency
         if name not in self._meta:
             self._meta[name] = (int(t.ndim), t.dtype)
 
@@ -95,7 +89,6 @@ class LayerwiseOffloadManager:
         self._cpu_weights[layer_idx][name] = cpu_weight
         self._cpu_dtypes[layer_idx][name] = tensor.dtype
 
-        # Replace with placeholder on GPU to free VRAM
         if self.device is not None:
             tensor.data = self._make_placeholder(name)
 
@@ -108,21 +101,18 @@ class LayerwiseOffloadManager:
         self._named_parameters = dict(self.model.named_parameters())
         self._named_buffers = dict(self.model.named_buffers())
 
-        # Offload parameters
         for name, param in self._named_parameters.items():
             layer_idx = self._match_layer_idx(name)
             if layer_idx is None or layer_idx >= self.num_layers:
                 continue
             self._offload_tensor(name, param, layer_idx)
 
-        # Offload buffers
         for name, buf in self._named_buffers.items():
             layer_idx = self._match_layer_idx(name)
             if layer_idx is None or layer_idx >= self.num_layers:
                 continue
             self._offload_tensor(name, buf, layer_idx)
 
-        # Make layer 0 available immediately
         self.prefetch_layer(0, non_blocking=False)
         if self.copy_stream is not None:
             torch.cuda.current_stream().wait_stream(self.copy_stream)
@@ -139,7 +129,6 @@ class LayerwiseOffloadManager:
         if layer_idx not in self._cpu_weights:
             return
 
-        # Ensure copy stream starts after any current-stream work
         self.copy_stream.wait_stream(torch.cuda.current_stream())
 
         param_names: Set[str] = set()
@@ -147,7 +136,6 @@ class LayerwiseOffloadManager:
             for name, cpu_weight in self._cpu_weights[layer_idx].items():
                 target = self._get_target(name)
 
-                # Allocate a real GPU tensor and async copy from pinned CPU memory
                 gpu_weight = torch.empty(
                     cpu_weight.shape,
                     dtype=self._cpu_dtypes[layer_idx][name],
@@ -155,7 +143,6 @@ class LayerwiseOffloadManager:
                 )
                 gpu_weight.copy_(cpu_weight, non_blocking=non_blocking)
 
-                # Swap storage
                 target.data = gpu_weight
                 param_names.add(name)
 
@@ -169,7 +156,6 @@ class LayerwiseOffloadManager:
         release_layer_idx: Optional[int],
         non_blocking: bool = True,
     ):
-        # 1) Ensure CURRENT layer is resident before compute
         if self.enabled and release_layer_idx is not None:
             cur = release_layer_idx
             if (
@@ -178,11 +164,9 @@ class LayerwiseOffloadManager:
                 and self.device is not None
                 and self.copy_stream is not None
             ):
-                # Load current layer synchronously (only happens when something went wrong / first use)
                 self.prefetch_layer(cur, non_blocking=False)
                 torch.cuda.current_stream().wait_stream(self.copy_stream)
 
-        # 2) Prefetch NEXT layer for overlap
         if self.enabled and prefetch_layer_idx is not None:
             self.prefetch_layer(prefetch_layer_idx, non_blocking=non_blocking)
 
