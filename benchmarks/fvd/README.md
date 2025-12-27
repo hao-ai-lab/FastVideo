@@ -38,7 +38,8 @@ python -m benchmarks.fvd.cli \
     --num-frames 32 \
     --clip-strategy random \
     --batch-size 32 \
-    --seed 42
+    --seed 42 \
+    --extractor clip
 ```
 
 **Standard protocols:**
@@ -51,6 +52,8 @@ python -m benchmarks.fvd.cli \
     --protocol fvd2048_16f  # or fvd2048_128f, quick_test, etc.
 ```
 
+This would use i3d model by default as the feature extractor
+
 **Feature caching** (speed up repeated evaluations):
 
 ```bash
@@ -58,7 +61,7 @@ python -m benchmarks.fvd.cli \
     --real-path data/real/ \
     --gen-path outputs/gen/ \
     --protocol fvd2048_16f \
-    --cache-real-features cache/real  # Directory path (will save/load cache/real/real_features.pkl)
+    --cache-real-features fvd-cache/extractor_name  # Directory path (will save/load fvd-cache/extractor_name/extractor-name_real_features.pkl)
 ```
 
 Run `python -m benchmarks.fvd.cli --help` for all options.
@@ -83,6 +86,7 @@ batch_size=32,                # GPU batch size
 device='cuda',                # cuda|cpu
 cache_real_features=None,     # Cache path for speed
 seed=42,                      # Reproducibility
+extractor='i3d',              # i3d|clip|videomae
 ```
 
 ## Programmatic Usage
@@ -97,7 +101,6 @@ print(f"FVD: {results['fvd']:.2f}")
 
 ## Notes
 
-- I3D model auto-downloads from Hugging Face on first run
 - Requires minimum 10 frames per clip
 - Supports both video files (.mp4, .avi, etc.) and frame directories
 - `--cache-real-features` expects a **directory path** (e.g., `cache/real`), it will automatically create/load `real_features.pkl` inside that directory
