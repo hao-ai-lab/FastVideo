@@ -1,3 +1,6 @@
 [submodule "fastvideo-kernel/include/tk"]
 	path = fastvideo-kernel/include/tk
 	url = https://github.com/HazyResearch/ThunderKittens.git
+[submodule "fastvideo-kernel/include/cutlass"]
+	path = fastvideo-kernel/include/cutlass
+	url = https://github.com/NVIDIA/cutlass.git
