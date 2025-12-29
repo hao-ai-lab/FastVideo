@@ -15,9 +15,17 @@ git submodule update --init --recursive
 pip install scikit-build-core cmake ninja
 
 RELEASE=0
-if [ "${1:-}" = "--release" ] || [ "${1:-}" = "-r" ]; then
-    RELEASE=1
-fi
+GPU_BACKEND=CUDA
+for arg in "$@"; do
+    case "$arg" in
+        --release|-r)
+            RELEASE=1
+            ;;
+        --rocm)
+            GPU_BACKEND=ROCM
+            ;;
+    esac
+done
 
 if [ "$RELEASE" -eq 1 ]; then
     # Force-enable ThunderKittens kernels and compile for Hopper.
@@ -26,8 +34,11 @@ if [ "$RELEASE" -eq 1 ]; then
     export CMAKE_ARGS="${CMAKE_ARGS:-} -DFASTVIDEO_KERNEL_BUILD_TK=ON -DCMAKE_CUDA_ARCHITECTURES=90a"
 fi
 
+export CMAKE_ARGS="${CMAKE_ARGS:-} -DGPU_BACKEND=${GPU_BACKEND}"
+
 echo "TORCH_CUDA_ARCH_LIST: ${TORCH_CUDA_ARCH_LIST:-<unset>}"
 echo "CMAKE_ARGS: ${CMAKE_ARGS:-<unset>}"
+echo "GPU_BACKEND: ${GPU_BACKEND:-<unset>}"
 # Build and install
 # Use -v for verbose output
 pip install . -v --no-build-isolation
