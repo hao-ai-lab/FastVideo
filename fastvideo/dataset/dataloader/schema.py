@@ -145,10 +145,6 @@ pyarrow_schema_matrixgame = pa.schema([
     pa.field("pil_image_bytes", pa.binary()),
     pa.field("pil_image_shape", pa.list_(pa.int64())),
     pa.field("pil_image_dtype", pa.string()),
-    # I2V Validation
-    pa.field("pil_image_bytes", pa.binary()),
-    pa.field("pil_image_shape", pa.list_(pa.int64())),
-    pa.field("pil_image_dtype", pa.string()),
     # --- Metadata ---
     pa.field("file_name", pa.string()),
     pa.field("caption", pa.string()),
