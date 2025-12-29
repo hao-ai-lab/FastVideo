@@ -119,10 +119,6 @@ endif()
 
 if(BUILD_CXX_KERNELS)
     # Source files
-<<<<<<< HEAD
-    set(EXTENSION_SOURCES csrc/common_extension.cpp)
-
-=======
     set(EXTENSION_SOURCES 
         csrc/common_extension.cpp
         csrc/turbodiffusion/gemm/gemm.cu
@@ -131,7 +127,6 @@ if(BUILD_CXX_KERNELS)
         csrc/turbodiffusion/quant/quant.cu
     )
     
->>>>>>> 9ec2d8a2 (update)
     # Conditionally add TK kernels
     if(ENABLE_TK_KERNELS)
         list(APPEND EXTENSION_SOURCES
