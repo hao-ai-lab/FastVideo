@@ -21,8 +21,6 @@ for arg in "$@"; do
         --release|-r)
             RELEASE=1
             ;;
-    esac
-    case "$arg" in
         --rocm)
             GPU_BACKEND=ROCM
             ;;
