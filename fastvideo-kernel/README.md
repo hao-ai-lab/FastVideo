@@ -22,6 +22,14 @@ cd fastvideo-kernel
 ```
 *Note: The resulting wheel will contain kernels that require an H100 GPU to run, but can be built on any machine with CUDA 12.3+ toolchain.*
 
+### Rocm Build
+If you are in a rocm environment without the compilation toolchaine of CUDA.
+
+```bash
+cd fastvideo-kernel
+./build.sh --rocm
+```
+
 ## Usage
 
 ```python

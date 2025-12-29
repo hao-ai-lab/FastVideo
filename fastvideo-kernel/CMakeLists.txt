@@ -1,5 +1,16 @@
 cmake_minimum_required(VERSION 3.26 FATAL_ERROR)
-project(fastvideo-kernel LANGUAGES CXX CUDA)
+project(fastvideo-kernel LANGUAGES CXX)
+
+# Prefer environment variable (used by CI or pip install git+repo_addr) if CMake var is not explicitly set.
+if(NOT DEFINED GPU_BACKEND AND DEFINED ENV{GPU_BACKEND})
+    set(GPU_BACKEND "$ENV{GPU_BACKEND}")
+endif()
+
+if(GPU_BACKEND STREQUAL "ROCM")
+    enable_language(HIP)
+else()
+    enable_language(CUDA)
+endif()
 
 # Import common utils if needed, but we keep it simple for now
 
@@ -59,7 +70,7 @@ else()
     else()
         # Best-effort local detection (works when a CUDA device is visible).
         execute_process(
-            COMMAND "${Python_EXECUTABLE}" -c "import torch; import sys; \nprint('1' if (torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 9) else '0')"
+            COMMAND "${Python_EXECUTABLE}" -c "import torch; import sys; \nprint('1' if (torch.cuda.is_available() and torch.version.cuda and torch.cuda.get_device_capability()[0] >= 9) else '0')"
             OUTPUT_VARIABLE _LOCAL_HAS_HOPPER
             OUTPUT_STRIP_TRAILING_WHITESPACE
             ERROR_QUIET
@@ -107,10 +118,10 @@ endif()
 if(BUILD_CXX_KERNELS)
     # Source files
     set(EXTENSION_SOURCES csrc/common_extension.cpp)
-    
+
     # Conditionally add TK kernels
     if(ENABLE_TK_KERNELS)
-        list(APPEND EXTENSION_SOURCES 
+        list(APPEND EXTENSION_SOURCES
             csrc/attention/st_attn_h100.cu
             csrc/attention/block_sparse_h100.cu
         )
@@ -121,7 +132,7 @@ if(BUILD_CXX_KERNELS)
     Python_add_library(fastvideo_kernel_ops MODULE USE_SABI ${SKBUILD_SABI_VERSION} WITH_SOABI
         ${EXTENSION_SOURCES}
     )
-    
+
     # Build compile definitions list
     set(COMPILE_DEFS TORCH_EXTENSION_NAME=fastvideo_kernel_ops)
     if(ENABLE_TK_KERNELS)
@@ -130,10 +141,10 @@ if(BUILD_CXX_KERNELS)
 
     target_compile_definitions(fastvideo_kernel_ops PRIVATE ${COMPILE_DEFS})
 
-    target_compile_options(fastvideo_kernel_ops PRIVATE 
+    target_compile_options(fastvideo_kernel_ops PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_FLAGS}>
     )
-    
+
     # We install it to fastvideo_kernel/_C so we can load it to register the ops
     install(TARGETS fastvideo_kernel_ops LIBRARY DESTINATION fastvideo_kernel/_C)
 endif()
