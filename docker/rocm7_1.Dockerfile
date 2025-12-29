@@ -36,7 +36,7 @@ RUN echo "# Placeholder" > README.md
 RUN source $HOME/.local/bin/env && \
     uv venv --python 3.10 --seed /opt/venv && \
     source /opt/venv/bin/activate && \
-    uv pip install --no-cache-dir --upgrade pip 
+    uv pip install --no-cache-dir --upgrade pip
 
 COPY . .
 
@@ -53,6 +53,6 @@ RUN source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
     cd fastvideo-kernel && \
     git submodule update --init --recursive && \
-    ./build.sh --release
+    ./build.sh --rocm
 
 EXPOSE 22
