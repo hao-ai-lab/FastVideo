@@ -11,12 +11,20 @@ def is_hip():
     target = triton.runtime.driver.active.get_current_target()
     return target.backend == 'hip'
 
+
+def is_cdna3_cdna4():
+    target = triton.runtime.driver.active.get_current_target()
+    return (target.arch == 'gfx1201' or target.arch == 'gfx1101' or target.arch == 'gfx1100' or target.arch == 'gfx1030')
+
+
 def get_common_autotune_config():
+    # cdna arch does not support a 4-stage software pipeline, see https://github.com/ROCm/triton/issues/916
+    supported_num_staged = [1, 2] if is_cdna3_cdna4() else [1, 2, 3, 4]
     configs = [
         triton.Config({'BLOCK_Q': BLOCK_Q, 'BLOCK_KV': BLOCK_KV}, num_stages=s, num_warps=w) \
         for BLOCK_Q in [32, 64, 128]\
         for BLOCK_KV in [32, 64, 128]\
-        for s in [1, 2, 3, 4]\
+        for s in supported_num_staged\
         for w in [4, 8]\
     ]
     return configs
