@@ -13,10 +13,17 @@
 # limitations under the License.
 
 from typing import Any, Dict, Optional, List
+import math
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.nn.attention.flex_attention import BlockMask
+flex_attention = torch.compile(
+    flex_attention, dynamic=False, mode="default")
+import torch.distributed as dist
 
 from fastvideo.attention import DistributedAttention, LocalAttention
 from fastvideo.distributed.communication_op import (
@@ -28,151 +35,24 @@ from fastvideo.layers.layernorm import (LayerNormScaleShift, ScaleResidual,
 from fastvideo.layers.linear import ReplicatedLinear
 # TODO(will-PY-refactor): RMSNorm ....
 from fastvideo.layers.mlp import MLP
-from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
+from fastvideo.layers.rotary_embedding import get_rotary_pos_embed, _apply_rotary_emb
 from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed,
                                                TimestepEmbedder, unpatchify)
 from fastvideo.models.dits.base import CachableDiT
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.logger import init_logger
 from fastvideo.forward_context import set_forward_context
-from fastvideo.attention.backends.abstract import AttentionMetadata
 
 from fastvideo.distributed.parallel_state import get_sp_world_size
 from fastvideo.distributed.utils import create_attention_mask_for_padding
 
+from hunyuanvideo15 import (
+    HunyuanRMSNorm, 
+    HunyuanVideo15TimeEmbedding, 
+    HunyuanVideo15ByT5TextProjection,
+    HunyuanVideo15ImageProjection)
+
 logger = init_logger(__name__)
-
-class HunyuanRMSNorm(nn.Module):
-
-    def __init__(
-        self,
-        dim: int,
-        elementwise_affine=True,
-        eps: float = 1e-6,
-        device=None,
-        dtype=None,
-    ):
-        """
-        Initialize the RMSNorm normalization layer.
-
-        Args:
-            dim (int): The dimension of the input tensor.
-            eps (float, optional): A small value added to the denominator for numerical stability. Default is 1e-6.
-
-        Attributes:
-            eps (float): A small value added to the denominator for numerical stability.
-            weight (nn.Parameter): Learnable scaling parameter.
-
-        """
-        factory_kwargs = {"device": device, "dtype": dtype}
-        super().__init__()
-        self.eps = eps
-        if elementwise_affine:
-            self.weight = nn.Parameter(torch.ones(dim, **factory_kwargs))
-
-    def _norm(self, x) -> torch.Tensor:
-        """
-        Apply the RMSNorm normalization to the input tensor.
-
-        Args:
-            x (torch.Tensor): The input tensor.
-
-        Returns:
-            torch.Tensor: The normalized tensor.
-
-        """
-        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
-
-    def forward(self, x):
-        """
-        Forward pass through the RMSNorm layer.
-
-        Args:
-            x (torch.Tensor): The input tensor.
-
-        Returns:
-            torch.Tensor: The output tensor after applying RMSNorm.
-
-        """
-        output = self._norm(x.float()).type_as(x)
-        if hasattr(self, "weight"):
-            output = output * self.weight
-        return output
-
-
-class HunyuanVideo15TimeEmbedding(nn.Module):
-    r"""
-    Time embedding for HunyuanVideo 1.5.
-
-    Supports standard timestep embedding and optional reference timestep embedding for MeanFlow-based super-resolution
-    models.
-
-    Args:
-        embedding_dim (`int`):
-            The dimension of the output embedding.
-    """
-
-    def __init__(self, embedding_dim: int, use_meanflow: bool = False):
-        super().__init__()
-
-        self.timestep_embedder = TimestepEmbedder(hidden_size=embedding_dim)
-
-        self.use_meanflow = use_meanflow
-        self.time_proj_r = None
-        self.timestep_embedder_r = None
-        if use_meanflow:
-            self.timestep_embedder_r = TimestepEmbedder(hidden_size=embedding_dim)
-
-    def forward(
-        self,
-        timestep: torch.Tensor,
-        timestep_r: Optional[torch.Tensor] = None,
-        timestep_seq_len: int | None = None,
-    ) -> torch.Tensor:
-        timesteps_emb = self.timestep_embedder(timestep, timestep_seq_len)
-
-        if timestep_r is not None:
-            timesteps_emb_r = self.timestep_embedder_r(timestep_r)
-            timesteps_emb = timesteps_emb + timesteps_emb_r
-
-        return timesteps_emb
-
-
-class HunyuanVideo15ByT5TextProjection(nn.Module):
-    def __init__(self, in_features: int, hidden_size: int, out_features: int):
-        super().__init__()
-        self.norm = nn.LayerNorm(in_features)
-        self.linear_1 = nn.Linear(in_features, hidden_size)
-        self.linear_2 = nn.Linear(hidden_size, hidden_size)
-        self.linear_3 = nn.Linear(hidden_size, out_features)
-        self.act_fn = nn.GELU()
-
-    def forward(self, encoder_hidden_states: torch.Tensor) -> torch.Tensor:
-        hidden_states = self.norm(encoder_hidden_states)
-        hidden_states = self.linear_1(hidden_states)
-        hidden_states = self.act_fn(hidden_states)
-        hidden_states = self.linear_2(hidden_states)
-        hidden_states = self.act_fn(hidden_states)
-        hidden_states = self.linear_3(hidden_states)
-        return hidden_states
-
-
-class HunyuanVideo15ImageProjection(nn.Module):
-    def __init__(self, in_channels: int, hidden_size: int):
-        super().__init__()
-        self.norm_in = nn.LayerNorm(in_channels)
-        self.linear_1 = nn.Linear(in_channels, in_channels)
-        self.act_fn = nn.GELU()
-        self.linear_2 = nn.Linear(in_channels, hidden_size)
-        self.norm_out = nn.LayerNorm(hidden_size)
-
-    def forward(self, image_embeds: torch.Tensor) -> torch.Tensor:
-        hidden_states = self.norm_in(image_embeds)
-        hidden_states = self.linear_1(hidden_states)
-        hidden_states = self.act_fn(hidden_states)
-        hidden_states = self.linear_2(hidden_states)
-        hidden_states = self.norm_out(hidden_states)
-        return hidden_states
 
 
 class MMDoubleStreamBlock(nn.Module):
@@ -291,10 +171,10 @@ class MMDoubleStreamBlock(nn.Module):
         self,
         img: torch.Tensor,
         txt: torch.Tensor,
-        encoder_attention_mask: torch.Tensor,
         vec: torch.Tensor,
         freqs_cis: tuple,
-        seq_attention_mask: torch.Tensor,
+        block_mask: BlockMask,
+        kv_cache: dict | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         # Process modulation vectors
         img_mod_outputs = self.img_mod(vec)
@@ -333,6 +213,10 @@ class MMDoubleStreamBlock(nn.Module):
         img_q = self.img_attn_q_norm(img_q).to(img_v)
         img_k = self.img_attn_k_norm(img_k).to(img_v)
 
+        # Apply rotary embeddings
+        cos, sin = freqs_cis
+        img_q = _apply_rotary_emb(img_q, cos, sin, is_neox_style=False)
+        img_k = _apply_rotary_emb(img_k, cos, sin, is_neox_style=False)
         # Prepare text for attention using fused operation
         txt_attn_input = self.txt_attn_norm(txt, txt_attn_shift, txt_attn_scale)
 
@@ -349,21 +233,44 @@ class MMDoubleStreamBlock(nn.Module):
         txt_q = self.txt_attn_q_norm(txt_q).to(txt_q.dtype)
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_k.dtype)
 
-        # seq_len = txt_q.shape[1] + img_q.shape[1]
-        # attention_mask = F.pad(encoder_attention_mask, (seq_len - encoder_attention_mask.shape[1], 0), value=True)
-        # attention_mask = attention_mask.bool()
-        # self_attn_mask_1 = attention_mask.view(batch_size, 1, 1, seq_len).repeat(1, 1, seq_len, 1)
-        # self_attn_mask_2 = self_attn_mask_1.transpose(2, 3)
-        # attention_mask = (self_attn_mask_1 & self_attn_mask_2).bool()
+        # Apply flex_attention
+        # Does not support SP padding for now
+        if kv_cache is None:
+            txt_seq_len = txt_q.shape[1]
+            q = torch.cat([img_q, txt_q], dim=1)
+            k = torch.cat([img_k, txt_k], dim=1)
+            v = torch.cat([img_v, txt_v], dim=1)
+            # Padding for flex attention
+            padded_length = math.ceil(q.shape[1] / 128) * 128 - q.shape[1]
+            padded_roped_query = torch.cat(
+                [q,
+                    torch.zeros([q.shape[0], padded_length, q.shape[2], q.shape[3]],
+                                device=q.device, dtype=v.dtype)],
+                dim=1
+            )
 
-        from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
-        attn_metadata = FlashAttnMetadataBuilder().build(
-            current_timestep=0,
-            attn_mask=encoder_attention_mask,
-        )
-        # Run distributed attention
-        with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
-            img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v, freqs_cis=freqs_cis, attention_mask=seq_attention_mask)
+            padded_roped_key = torch.cat(
+                [k, torch.zeros([k.shape[0], padded_length, k.shape[2], k.shape[3]],
+                                        device=k.device, dtype=v.dtype)],
+                dim=1
+            )
+
+            padded_v = torch.cat(
+                [v, torch.zeros([v.shape[0], padded_length, v.shape[2], v.shape[3]],
+                                device=v.device, dtype=v.dtype)],
+                dim=1
+            )
+
+            attn_out = flex_attention(
+                query=padded_roped_query.transpose(2, 1),
+                key=padded_roped_key.transpose(2, 1),
+                value=padded_v.transpose(2, 1),
+                block_mask=block_mask
+            )[:, :, :-padded_length].transpose(2, 1)
+
+            assert attn_out.shape[1] == txt_seq_len + image_seq_len
+            img_attn = attn_out[:, :image_seq_len, :]
+            txt_attn = attn_out[:, image_seq_len:, :]
         
         img_attn_out, _ = self.img_attn_proj(
             img_attn.view(batch_size, image_seq_len, -1))
@@ -390,7 +297,7 @@ class MMDoubleStreamBlock(nn.Module):
         return img, txt
 
 
-class HunyuanVideo15Transformer3DModel(CachableDiT):
+class CausalHunyuanVideo15Transformer3DModel(CachableDiT):
     r"""
     A Transformer model for video-like data used in [HunyuanVideo1.5](https://huggingface.co/tencent/HunyuanVideo1.5).
     """
@@ -462,7 +369,115 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
 
         self.gradient_checkpointing = False
 
+        self.num_frame_per_block = config.num_frames_per_block
+        self.local_attn_size = config.local_attn_size
+        self.block_mask = None
+
         self.__post_init__()
+
+    @staticmethod
+    def _prepare_blockwise_causal_attn_mask(
+        device: torch.device | str, num_frames: int = 21,
+        frame_seqlen: int = 1560, num_frame_per_block=1, local_attn_size=-1,
+        txt_attn_mask: torch.Tensor = None
+    ) -> BlockMask:
+        """
+        we will divide the token sequence into the following format
+        [1 latent frame] [1 latent frame] ... [1 latent frame]
+        We use flexattention to construct the attention mask
+        """
+        assert num_frames == 19
+        img_seq_len = num_frames * frame_seqlen
+        batch_size, txt_seq_len = txt_attn_mask.shape
+        total_len = img_seq_len + txt_seq_len
+
+        # we do right padding to get to a multiple of 128
+        padded_total_len = math.ceil(total_len / 128) * 128
+
+        ends = torch.zeros(img_seq_len,
+                           device=device, dtype=torch.long)
+
+        # Block-wise causal mask will attend to all elements that are before the end of the current chunk
+        frame_indices = torch.arange(
+            start=frame_seqlen,
+            end=img_seq_len,
+            step=frame_seqlen * num_frame_per_block,
+            device=device
+        )
+        frame_indices = torch.cat([torch.tensor([0], device=device), frame_indices])
+
+        for i, tmp in enumerate(frame_indices):
+            if i == 0:
+                ends[tmp:tmp + frame_seqlen] = tmp + frame_seqlen
+            else:
+                ends[tmp:tmp + frame_seqlen * num_frame_per_block] = tmp + \
+                    frame_seqlen * num_frame_per_block
+
+        # Generate the 2D text attention mask
+        attention_mask_bool = txt_attn_mask.bool()
+        self_attn_mask_1 = attention_mask_bool.view(batch_size, 1, 1, txt_seq_len)
+        self_attn_mask_2 = self_attn_mask_1.transpose(2, 3)
+        txt_attn_2d_mask = (self_attn_mask_1 & self_attn_mask_2).bool()
+
+        # Flatten tensors for safer indexing under vmap to avoid .item() calls
+        txt_attn_mask_flat = attention_mask_bool.reshape(-1)
+        txt_attn_2d_mask_flat = txt_attn_2d_mask.reshape(-1)
+        ends_flat = ends.long()
+        
+        def attention_mask(b, h, q_idx, kv_idx):
+            # Use flattened indexing to avoid vmap issues with multi-dimensional indexing
+            q_idx_long = q_idx.long()
+            kv_idx_long = kv_idx.long()
+            b_long = b.long()
+
+            q_is_img = q_idx_long < img_seq_len
+            kv_is_img = kv_idx_long < img_seq_len
+            
+            q_idx_img_safe = q_idx_long.clamp(0, img_seq_len - 1)
+            kv_idx_img_safe = kv_idx_long.clamp(0, img_seq_len - 1)
+            
+            q_idx_txt_safe = (q_idx_long - img_seq_len).clamp(0, txt_seq_len - 1)
+            kv_idx_txt_safe = (kv_idx_long - img_seq_len).clamp(0, txt_seq_len - 1)
+
+            # Case 1: Image attending to image
+            q_end = ends_flat[q_idx_img_safe]
+            if local_attn_size == -1:
+                res_img_img = (kv_idx_img_safe < q_end) | (q_idx_img_safe == kv_idx_img_safe)
+            else:
+                res_img_img = ((kv_idx_img_safe < q_end) & (kv_idx_img_safe >= (q_end - local_attn_size * frame_seqlen))) | (q_idx_img_safe == kv_idx_img_safe)
+
+            # Case 2: Text attending to text
+            # txt_attn_2d_mask_flat index: b * 1 * txt_seq_len * txt_seq_len + 0 * txt_seq_len * txt_seq_len + q * txt_seq_len + kv
+            idx_txt_txt = b_long * (txt_seq_len * txt_seq_len) + q_idx_txt_safe * txt_seq_len + kv_idx_txt_safe
+            res_txt_txt = txt_attn_2d_mask_flat[idx_txt_txt]
+            
+            # Case 3: Image attending to text
+            # txt_attn_mask_flat index: b * txt_seq_len + kv
+            idx_img_txt = b_long * txt_seq_len + kv_idx_txt_safe
+            res_img_txt = txt_attn_mask_flat[idx_img_txt]
+            
+            # Case 4: Text attending to image
+            # index: b * txt_seq_len + q
+            idx_txt_img = b_long * txt_seq_len + q_idx_txt_safe
+            res_txt_img = txt_attn_mask_flat[idx_txt_img]
+
+            mask = torch.where(
+                q_is_img,
+                torch.where(kv_is_img, res_img_img, res_img_txt),
+                torch.where(kv_is_img, res_txt_img, res_txt_txt)
+            )
+            
+            return mask & (q_idx_long < total_len) & (kv_idx_long < total_len)
+
+        block_mask = create_block_mask(attention_mask, B=batch_size, H=None, Q_LEN=padded_total_len,
+                                       KV_LEN=padded_total_len, _compile=False, device=device)
+
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            print(
+                f" cache a block wise causal mask with block size of {num_frame_per_block} frames")
+            print(block_mask)
+
+        return block_mask
 
     def forward(
         self,
@@ -495,12 +510,7 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
 
         # 2. Conditional embeddings
-        if timestep.dim() == 2:
-            ts_seq_len = timestep.shape[1]
-            temb = self.time_in(timestep.flatten(), timestep_r=timestep_r, timestep_seq_len=ts_seq_len)
-        else:
-            temb = self.time_in(timestep, timestep_r=timestep_r)
-        # temb is [bs, seq_len, inner_dim] if ts_seq_len is not None, otherwise [bs, inner_dim]
+        temb = self.time_in(timestep, timestep_r=timestep_r)
 
         hidden_states = self.img_in(hidden_states)
         hidden_states, original_seq_len = sequence_model_parallel_shard(hidden_states, dim=1)
@@ -607,6 +617,17 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
         encoder_hidden_states = torch.stack(new_encoder_hidden_states)
         encoder_attention_mask = torch.stack(new_encoder_attention_mask)
 
+        # Prepare block-wise causal attention mask
+        if self.block_mask is None:
+            self.block_mask = self._prepare_blockwise_causal_attn_mask(
+                device=hidden_states.device,
+                num_frames=num_frames,
+                frame_seqlen=post_patch_height * post_patch_width,
+                num_frame_per_block=self.num_frame_per_block,
+                local_attn_size=self.local_attn_size,
+                txt_attn_mask=encoder_attention_mask
+            )
+
         # 4. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for block in self.double_blocks:
@@ -614,10 +635,9 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
                     block,
                     hidden_states,
                     encoder_hidden_states,
-                    encoder_attention_mask,
                     temb,
                     freqs_cis,
-                    seq_attention_mask
+                    self.block_mask
                 )
 
         else:
@@ -625,15 +645,12 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
                 hidden_states, encoder_hidden_states = block(
                     hidden_states,
                     encoder_hidden_states,
-                    encoder_attention_mask,
                     temb,
                     freqs_cis,
-                    seq_attention_mask
+                    self.block_mask
                 )
 
         # Final layer processing
-        if get_sp_world_size() > 1:
-            hidden_states = hidden_states.contiguous()
         hidden_states = sequence_model_parallel_all_gather_with_unpad(hidden_states, original_seq_len, dim=1)
         hidden_states = self.final_layer(hidden_states, temb)
         # Unpatchify to get original shape
@@ -695,10 +712,7 @@ class SingleTokenRefiner(nn.Module):
 
     def forward(self, x, t, mask=None):
         # Get timestep embeddings
-        if t.dim() == 2:
-            timestep_aware_representations = self.t_embedder(t.flatten(), timestep_seq_len=t.shape[1])
-        else:
-            timestep_aware_representations = self.t_embedder(t)
+        timestep_aware_representations = self.t_embedder(t)
 
         # Get context-aware representations
         original_dtype = x.dtype
@@ -791,7 +805,6 @@ class IndividualTokenRefinerBlock(nn.Module):
 
         # Get modulation parameters
         gate_msa, gate_mlp = self.adaLN_modulation(c).chunk(2, dim=-1)
-        print(f"gate_msa: {gate_msa.shape}, gate_mlp: {gate_mlp.shape}")
         # Self-attention
         norm_x = self.norm1(x)
         qkv, _ = self.self_attn_qkv(norm_x)
@@ -814,18 +827,11 @@ class IndividualTokenRefinerBlock(nn.Module):
 
         # Project and apply residual connection with gating
         attn_out, _ = self.self_attn_proj(attn_output)
-        print(f"attn_out: {attn_out.shape}")
-        if c.dim() == 3:
-            x = x + attn_out * gate_msa
-        else:
-            x = x + attn_out * gate_msa.unsqueeze(1)
+        x = x + attn_out * gate_msa.unsqueeze(1)
 
         # MLP
         mlp_out = self.mlp(self.norm2(x))
-        if c.dim() == 3:
-            x = x + mlp_out * gate_mlp
-        else:
-            x = x + mlp_out * gate_mlp.unsqueeze(1)
+        x = x + mlp_out * gate_mlp.unsqueeze(1)
 
         return x
 
@@ -867,11 +873,6 @@ class FinalLayer(nn.Module):
     def forward(self, x, c):
         # What the heck HF? Why you change the scale and shift order here???
         scale, shift = self.adaLN_modulation(c).chunk(2, dim=-1)
-        if c.dim() == 3:
-            # [bs, seq_len, inner_dim]
-            x = self.norm_final(x) * (1.0 + scale) + shift
-        else:
-            # [bs, inner_dim]
-            x = self.norm_final(x) * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+        x = self.norm_final(x) * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
         x, _ = self.linear(x)
         return x
