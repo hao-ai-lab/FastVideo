@@ -1,3 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+# Inspired by SGLang's layerwise offload implementation:
+# https://github.com/sgl-project/sglang/pull/15511
+#
+# This implementation provides a lightweight layerwise CPU offload manager
+# with async H2D prefetch using a dedicated CUDA stream, following SGLang's design.
+
 import re
 from contextlib import contextmanager
 from typing import Dict, Set, Optional, Tuple

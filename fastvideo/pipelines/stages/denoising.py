@@ -267,9 +267,6 @@ class DenoisingStage(PipelineStage):
                             current_model.parameters()).device.type
                         if transformer_device == 'cpu':
                             current_model.to(get_local_torch_device())
-                            # Sync to ensure onloading completes
-                            if torch.cuda.is_available():
-                                torch.cuda.synchronize()
                     current_guidance_scale = batch.guidance_scale
                 else:
                     # low-noise stage in wan2.2
@@ -287,9 +284,6 @@ class DenoisingStage(PipelineStage):
                             current_model.parameters()).device.type
                         if transformer_2_device == 'cpu':
                             current_model.to(get_local_torch_device())
-                            # Sync to ensure onloading completes
-                            if torch.cuda.is_available():
-                                torch.cuda.synchronize()
                     current_guidance_scale = batch.guidance_scale_2
                 assert current_model is not None, "current_model is None"
 
