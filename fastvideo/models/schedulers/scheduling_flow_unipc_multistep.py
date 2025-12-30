@@ -109,6 +109,9 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         sigmas = 1.0 - alphas
         sigmas = torch.from_numpy(sigmas).to(dtype=torch.float32)
 
+        # Needed when final_sigmas_type == "sigma_min" (kept for compatibility).
+        self.alphas_cumprod = torch.from_numpy(alphas).to(dtype=torch.float32)
+
         if not use_dynamic_shifting:
             # when use_dynamic_shifting is True, we apply the timestep shifting on the fly based on the image resolution
             assert shift is not None
@@ -171,6 +174,8 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         sigmas: list[float] | None = None,
         mu: float | None | None = None,
         shift: float | None | None = None,
+        use_karras_sigmas: bool | None = None,
+        use_kerras_sigma: bool | None = None,
     ):
         """
         Sets the discrete timesteps used for the diffusion chain (to be run before inference).
@@ -186,21 +191,44 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
                 " you have to pass a value for `mu` when `use_dynamic_shifting` is set to be `True`"
             )
 
-        if sigmas is None:
-            assert num_inference_steps is not None
-            sigmas = np.linspace(self.sigma_max, self.sigma_min,
-                                 num_inference_steps +
-                                 1).copy()[:-1]  # pyright: ignore
+
+        # Cosmos official uses `use_kerras_sigma=True` and a specific EDM sigma schedule.
+        # Some external code uses the misspelling `use_kerras_sigma`; support both.
+        if use_karras_sigmas is None and use_kerras_sigma is not None:
+            use_karras_sigmas = use_kerras_sigma
+
+        if use_karras_sigmas:
+            # Force to use the exact sigma used in official EDM sampler:
+            # sigma_max=200, sigma_min=0.01, rho=7
+            sigma_max = 200.0
+            sigma_min = 0.01
+            rho = 7.0
+            # Match the official Cosmos implementation: Karras/EDM schedule with
+            # `num_inference_steps + 1` points, then `final_sigmas_type="zero"`
+            # appends the terminal sigma (0.0).
+            ramp = np.arange(num_inference_steps + 1,
+                             dtype=np.float32) / float(num_inference_steps)
+            min_inv_rho = sigma_min**(1 / rho)
+            max_inv_rho = sigma_max**(1 / rho)
+            sigmas = (max_inv_rho + ramp * (min_inv_rho - max_inv_rho))**rho
+            # Convert EDM sigma to flow-matching sigma in [0, 1).
+            sigmas = sigmas / (1.0 + sigmas)
+        else:
+            if sigmas is None:
+                assert num_inference_steps is not None
+                sigmas = np.linspace(self.sigma_max, self.sigma_min,
+                                     num_inference_steps +
+                                     1).copy()[:-1]  # pyright: ignore
 
         if self.config.use_dynamic_shifting:
             assert mu is not None
             sigmas = self.time_shift(mu, 1.0, sigmas)  # pyright: ignore
         else:
-            if shift is None:
-                shift = self.config.shift
-            assert isinstance(sigmas, np.ndarray)
-            sigmas = shift * sigmas / (1 +
-                                       (shift - 1) * sigmas)  # pyright: ignore
+            if not use_karras_sigmas:
+                if shift is None:
+                    shift = self.config.shift
+                assert isinstance(sigmas, np.ndarray)
+                sigmas = shift * sigmas / (1 + (shift - 1) * sigmas)  # pyright: ignore
 
         if self.config.final_sigmas_type == "sigma_min":
             sigma_last = ((1 - self.alphas_cumprod[0]) /
@@ -418,8 +446,12 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         alpha_t, sigma_t = self._sigma_to_alpha_sigma_t(sigma_t)
         alpha_s0, sigma_s0 = self._sigma_to_alpha_sigma_t(sigma_s0)
 
-        lambda_t = torch.log(alpha_t) - torch.log(sigma_t)
-        lambda_s0 = torch.log(alpha_s0) - torch.log(sigma_s0)
+        # Numerical safety
+        eps = 1e-12
+        lambda_t = torch.log(torch.clamp(alpha_t, min=eps)) - torch.log(
+            torch.clamp(sigma_t, min=eps))
+        lambda_s0 = torch.log(torch.clamp(alpha_s0, min=eps)) - torch.log(
+            torch.clamp(sigma_s0, min=eps))
 
         h = lambda_t - lambda_s0
         device = sample.device
@@ -430,7 +462,8 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
             si = self.step_index - i  # pyright: ignore
             mi = model_output_list[-(i + 1)]
             alpha_si, sigma_si = self._sigma_to_alpha_sigma_t(self.sigmas[si])
-            lambda_si = torch.log(alpha_si) - torch.log(sigma_si)
+            lambda_si = torch.log(torch.clamp(alpha_si, min=eps)) - torch.log(
+                torch.clamp(sigma_si, min=eps))
             rk = (lambda_si - lambda_s0) / h
             rks.append(rk)
             assert mi is not None
@@ -563,8 +596,11 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         alpha_t, sigma_t = self._sigma_to_alpha_sigma_t(sigma_t)
         alpha_s0, sigma_s0 = self._sigma_to_alpha_sigma_t(sigma_s0)
 
-        lambda_t = torch.log(alpha_t) - torch.log(sigma_t)
-        lambda_s0 = torch.log(alpha_s0) - torch.log(sigma_s0)
+        eps = 1e-12
+        lambda_t = torch.log(torch.clamp(alpha_t, min=eps)) - torch.log(
+            torch.clamp(sigma_t, min=eps))
+        lambda_s0 = torch.log(torch.clamp(alpha_s0, min=eps)) - torch.log(
+            torch.clamp(sigma_s0, min=eps))
 
         h = lambda_t - lambda_s0
         device = this_sample.device
@@ -575,7 +611,8 @@ class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
             si = self.step_index - (i + 1)  # pyright: ignore
             mi = model_output_list[-(i + 1)]
             alpha_si, sigma_si = self._sigma_to_alpha_sigma_t(self.sigmas[si])
-            lambda_si = torch.log(alpha_si) - torch.log(sigma_si)
+            lambda_si = torch.log(torch.clamp(alpha_si, min=eps)) - torch.log(
+                torch.clamp(sigma_si, min=eps))
             rk = (lambda_si - lambda_s0) / h
             rks.append(rk)
             assert mi is not None
