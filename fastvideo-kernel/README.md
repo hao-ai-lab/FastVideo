@@ -13,15 +13,6 @@ cd fastvideo-kernel
 ./build.sh
 ```
 
-### Release Build (Force Enable Kernels)
-If you are building a release wheel or docker image on a machine without a GPU (e.g., CI/CD), you can force-enable the compilation of Hopper-specific ThunderKittens kernels.
-
-```bash
-cd fastvideo-kernel
-./build.sh --release
-```
-*Note: The resulting wheel will contain kernels that require an H100 GPU to run, but can be built on any machine with CUDA 12.3+ toolchain.*
-
 ### Rocm Build
 If you are in a rocm environment without the compilation toolchaine of CUDA.
 
