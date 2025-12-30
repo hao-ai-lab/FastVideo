@@ -4,12 +4,10 @@ import asyncio
 import os
 import random
 
-# import cv2
-# from diffusers.utils import export_to_video
-# import numpy as np
 import torch
 from PIL import Image
 
+from fastvideo.distributed.parallel_state import get_local_torch_device
 from fastvideo.utils import logger
 
 
@@ -48,7 +46,7 @@ def expand_action_to_frames(action: dict, num_frames: int) -> tuple[torch.Tensor
 
     if "mouse" not in result or result["mouse"] is None:
          # keyboard device if available, otherwise default
-         device = result.get("keyboard", torch.tensor([])).device if result.get("keyboard") is not None else torch.device("cuda")
+         device = result.get("keyboard", torch.tensor([])).device if result.get("keyboard") is not None else get_local_torch_device()
          result["mouse"] = torch.zeros(1, num_frames, 2, device=device)
     
     return result["keyboard"], result["mouse"]
@@ -57,11 +55,11 @@ def get_current_action(mode="universal"):
 
     CAM_VALUE = 0.1
     if mode == 'universal':
-        print()
-        print('-'*30)
-        print("PRESS [I, K, J, L, U] FOR CAMERA TRANSFORM\n (I: up, K: down, J: left, L: right, U: no move)")
-        print("PRESS [W, S, A, D, Q] FOR MOVEMENT\n (W: forward, S: back, A: left, D: right, Q: no move)")
-        print('-'*30)
+        logger.info("")
+        logger.info('-'*30)
+        logger.info("PRESS [I, K, J, L, U] FOR CAMERA TRANSFORM\n (I: up, K: down, J: left, L: right, U: no move)")
+        logger.info("PRESS [W, S, A, D, Q] FOR MOVEMENT\n (W: forward, S: back, A: left, D: right, Q: no move)")
+        logger.info('-'*30)
         CAMERA_VALUE_MAP = {
             "i":  [CAM_VALUE, 0],
             "k":  [-CAM_VALUE, 0],
@@ -85,10 +83,10 @@ def get_current_action(mode="universal"):
         mouse_cond = torch.tensor(CAMERA_VALUE_MAP[idx_mouse]).cuda()
         keyboard_cond = torch.tensor(KEYBOARD_IDX[idx_keyboard]).cuda()
     elif mode == 'gta_drive':
-        print()
-        print('-'*30)
-        print("PRESS [W, S, A, D, Q] FOR MOVEMENT\n (W: forward, S: back, A: left, D: right, Q: no move)")
-        print('-'*30)
+        logger.info("")
+        logger.info('-'*30)
+        logger.info("PRESS [W, S, A, D, Q] FOR MOVEMENT\n (W: forward, S: back, A: left, D: right, Q: no move)")
+        logger.info('-'*30)
         CAMERA_VALUE_MAP = {
             "a":  [0, -CAM_VALUE],
             "d":  [0, CAM_VALUE],
@@ -120,10 +118,10 @@ def get_current_action(mode="universal"):
         mouse_cond = torch.tensor(CAMERA_VALUE_MAP[idx_mouse[0]]).cuda()
         keyboard_cond = torch.tensor(KEYBOARD_IDX[idx_keyboard[0]]).cuda()
     elif mode == 'templerun':
-        print()
-        print('-'*30)
-        print("PRESS [W, S, A, D, Z, C, Q] FOR ACTIONS\n (W: jump, S: slide, A: left side, D: right side, Z: turn left, C: turn right, Q: no move)")
-        print('-'*30)
+        logger.info("")
+        logger.info('-'*30)
+        logger.info("PRESS [W, S, A, D, Z, C, Q] FOR ACTIONS\n (W: jump, S: slide, A: left side, D: right side, Z: turn left, C: turn right, Q: no move)")
+        logger.info('-'*30)
         KEYBOARD_IDX = { 
             "w": [0, 1, 0, 0, 0, 0, 0], "s": [0, 0, 1, 0, 0, 0, 0],
             "a": [0, 0, 0, 0, 0, 1, 0], "d": [0, 0, 0, 0, 0, 0, 1],
