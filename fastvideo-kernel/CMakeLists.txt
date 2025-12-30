@@ -31,9 +31,11 @@ find_package(Torch REQUIRED)
 # Include directories
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/include/cutlass/include
     ${CMAKE_SOURCE_DIR}/include/tk/include
     ${CMAKE_SOURCE_DIR}/include/tk/prototype
     ${CMAKE_SOURCE_DIR}/csrc
+    ${CMAKE_SOURCE_DIR}/csrc/turbodiffusion
     ${TORCH_INCLUDE_DIRS}
 )
 
@@ -117,8 +119,14 @@ endif()
 
 if(BUILD_CXX_KERNELS)
     # Source files
-    set(EXTENSION_SOURCES csrc/common_extension.cpp)
-
+    set(EXTENSION_SOURCES 
+        csrc/common_extension.cpp
+        csrc/turbodiffusion/gemm/gemm.cu
+        csrc/turbodiffusion/norm/rmsnorm.cu
+        csrc/turbodiffusion/norm/layernorm.cu
+        csrc/turbodiffusion/quant/quant.cu
+    )
+    
     # Conditionally add TK kernels
     if(ENABLE_TK_KERNELS)
         list(APPEND EXTENSION_SOURCES

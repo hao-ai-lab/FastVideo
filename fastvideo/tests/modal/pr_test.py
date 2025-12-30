@@ -53,6 +53,10 @@ def run_test(pytest_command: str):
     git clone {git_repo} /FastVideo &&
     cd /FastVideo &&
     {checkout_command} &&
+    git submodule update --init --recursive &&
+    cd fastvideo-kernel &&
+    ./build.sh &&
+    cd .. &&
     uv pip install -e .[test] &&
     {pytest_command}
     """
