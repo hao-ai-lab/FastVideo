@@ -32,6 +32,10 @@ cd fastvideo-kernel
 
 ## Usage
 
+### Sliding Tile Attention (STA) & Video Sparse Attention (VSA)
+
+For detailed usage, please check the [Attention Documentation](../docs/attention/index.md).
+
 ```python
 from fastvideo_kernel import sliding_tile_attention, video_sparse_attn, moba_attn_varlen
 
@@ -45,6 +49,10 @@ out = video_sparse_attn(q, k, v, block_sizes, topk=5)
 out = moba_attn_varlen(q, k, v, cu_seqlens_q, cu_seqlens_k, ...)
 ```
 
+### TurboDiffusion Kernels
+
+This package also includes kernels from [TurboDiffusion](https://github.com/thu-ml/TurboDiffusion), including INT8 GEMM, Quantization, RMSNorm and LayerNorm.
+
 ## Requirements
 
 - **Runtime**:
@@ -57,3 +65,14 @@ out = moba_attn_varlen(q, k, v, cu_seqlens_q, cu_seqlens_k, ...)
 ## Acknowledgement
 
 This package structure and build system are based on [sgl-kernel](https://github.com/sgl-project/sglang/tree/main/sgl-kernel) from the SGLang project.
+
+The implementation of `turbodiffusion` kernels is adapted from [TurboDiffusion](https://github.com/thu-ml/TurboDiffusion). If you use these kernels, please cite:
+
+```bibtex
+@article{zhang2025turbodiffusion,
+  title={TurboDiffusion: Accelerating Video Diffusion Models by 100-200 Times},
+  author={Zhang, Jintao and Zheng, Kaiwen and Jiang, Kai and Wang, Haoxu and Stoica, Ion and Gonzalez, Joseph E and Chen, Jianfei and Zhu, Jun},
+  journal={arXiv preprint arXiv:2512.16093},
+  year={2025}
+}
+```
