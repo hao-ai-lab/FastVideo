@@ -200,8 +200,14 @@ class ParquetDatasetSaver:
             value = getattr(batch, key.name)
             if isinstance(value, list):
                 for idx in range(len(value)):
-                    if isinstance(value[idx], torch.Tensor):
-                        value[idx] = value[idx].cpu().numpy()
+                    # if isinstance(value[idx], torch.Tensor):
+                    #     value[idx] = value[idx].cpu().numpy()
+                    t = value[idx]
+                    if isinstance(t, torch.Tensor):
+                        if t.dtype == torch.bfloat16:
+                            t = t.float()   # or t.to(torch.float16) if you want smaller
+                        value[idx] = t.cpu().numpy()
+
             elif isinstance(value, torch.Tensor):
                 value = value.cpu().numpy()
                 setattr(batch, key.name, value)

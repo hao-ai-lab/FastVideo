@@ -114,11 +114,14 @@ class HunyuanVideo15AttnBlock(nn.Module):
         """
         seq_len = n_frame * n_hw
         mask = torch.full((seq_len, seq_len), float("-inf"), dtype=dtype, device=device)
+        
         for i in range(seq_len):
             i_frame = i // n_hw
             mask[i, : (i_frame + 1) * n_hw] = 0
         if batch_size is not None:
-            mask = mask.unsqueeze(0).expand(batch_size, -1, -1)
+            # mask = mask.unsqueeze(0).expand(batch_size, -1, -1)
+            mask = mask.unsqueeze(0).unsqueeze(1).expand(batch_size, 1, -1, -1)
+
         return mask
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -131,6 +134,7 @@ class HunyuanVideo15AttnBlock(nn.Module):
         value = self.to_v(x)
 
         batch_size, channels, frames, height, width = query.shape
+        
 
         query = query.reshape(batch_size, channels, frames * height * width).permute(0, 2, 1).unsqueeze(1).contiguous()
         key = key.reshape(batch_size, channels, frames * height * width).permute(0, 2, 1).unsqueeze(1).contiguous()
