@@ -18,21 +18,15 @@ RELEASE=0
 GPU_BACKEND=CUDA
 for arg in "$@"; do
     case "$arg" in
-        --release|-r)
-            RELEASE=1
-            ;;
         --rocm)
             GPU_BACKEND=ROCM
             ;;
     esac
 done
 
-if [ "$RELEASE" -eq 1 ]; then
-    # Force-enable ThunderKittens kernels and compile for Hopper.
-    # Intended for producing release wheels/images on machines without a GPU.
-    export TORCH_CUDA_ARCH_LIST="9.0a"
-    export CMAKE_ARGS="${CMAKE_ARGS:-} -DFASTVIDEO_KERNEL_BUILD_TK=ON -DCMAKE_CUDA_ARCHITECTURES=90a"
-fi
+# Force-enable ThunderKittens kernels and compile for Hopper.
+export TORCH_CUDA_ARCH_LIST="9.0a"
+export CMAKE_ARGS="${CMAKE_ARGS:-} -DFASTVIDEO_KERNEL_BUILD_TK=ON -DCMAKE_CUDA_ARCHITECTURES=90a"
 
 export CMAKE_ARGS="${CMAKE_ARGS:-} -DGPU_BACKEND=${GPU_BACKEND}"
 
