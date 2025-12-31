@@ -695,10 +695,7 @@ class SingleTokenRefiner(nn.Module):
 
     def forward(self, x, t, mask=None):
         # Get timestep embeddings
-        if t.dim() == 2:
-            timestep_aware_representations = self.t_embedder(t.flatten(), timestep_seq_len=t.shape[1])
-        else:
-            timestep_aware_representations = self.t_embedder(t)
+        timestep_aware_representations = self.t_embedder(t)
 
         # Get context-aware representations
         original_dtype = x.dtype
@@ -707,6 +704,7 @@ class SingleTokenRefiner(nn.Module):
         else:
             mask_float = mask.float().unsqueeze(-1)  # [B, L, 1]
             context_aware_representations = (x * mask_float).sum(dim=1) / mask_float.sum(dim=1)
+        context_aware_representations = context_aware_representations.to(original_dtype)
 
         context_aware_representations = self.c_embedder(
             context_aware_representations)
@@ -791,7 +789,6 @@ class IndividualTokenRefinerBlock(nn.Module):
 
         # Get modulation parameters
         gate_msa, gate_mlp = self.adaLN_modulation(c).chunk(2, dim=-1)
-        print(f"gate_msa: {gate_msa.shape}, gate_mlp: {gate_mlp.shape}")
         # Self-attention
         norm_x = self.norm1(x)
         qkv, _ = self.self_attn_qkv(norm_x)
@@ -814,18 +811,11 @@ class IndividualTokenRefinerBlock(nn.Module):
 
         # Project and apply residual connection with gating
         attn_out, _ = self.self_attn_proj(attn_output)
-        print(f"attn_out: {attn_out.shape}")
-        if c.dim() == 3:
-            x = x + attn_out * gate_msa
-        else:
-            x = x + attn_out * gate_msa.unsqueeze(1)
+        x = x + attn_out * gate_msa.unsqueeze(1)
 
         # MLP
         mlp_out = self.mlp(self.norm2(x))
-        if c.dim() == 3:
-            x = x + mlp_out * gate_mlp
-        else:
-            x = x + mlp_out * gate_mlp.unsqueeze(1)
+        x = x + mlp_out * gate_mlp.unsqueeze(1)
 
         return x
 
@@ -869,7 +859,9 @@ class FinalLayer(nn.Module):
         scale, shift = self.adaLN_modulation(c).chunk(2, dim=-1)
         if c.dim() == 3:
             # [bs, seq_len, inner_dim]
-            x = self.norm_final(x) * (1.0 + scale) + shift
+            num_frames = scale.shape[1]
+            frame_seqlen = x.shape[1] // num_frames
+            x = (self.norm_final(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1.0 + scale.unsqueeze(2)) + shift.unsqueeze(2)).flatten(1, 2)
         else:
             # [bs, inner_dim]
             x = self.norm_final(x) * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)

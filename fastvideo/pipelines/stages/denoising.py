@@ -26,7 +26,7 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.utils import dict_to_3d_list, masks_like
+from fastvideo.utils import dict_to_3d_list, masks_like, PRECISION_TO_TYPE
 
 try:
     from fastvideo.attention.backends.sliding_tile_attn import (
@@ -210,7 +210,9 @@ class DenoisingStage(PipelineStage):
             # the image latent instead of appending along the channel dim
             assert batch.image_latent is None, "TI2V task should not have image latents"
             assert self.vae is not None, "VAE is not provided for TI2V task"
-            z = self.vae.encode(batch.pil_image).mean.float()
+            vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+            self.vae = self.vae.to(get_local_torch_device())
+            z = self.vae.encode(batch.pil_image.to(vae_dtype)).mean.float()
             if (hasattr(self.vae, "shift_factor")
                     and self.vae.shift_factor is not None):
                 if isinstance(self.vae.shift_factor, torch.Tensor):
@@ -223,6 +225,9 @@ class DenoisingStage(PipelineStage):
             else:
                 z = z * self.vae.scaling_factor
 
+            if fastvideo_args.vae_cpu_offload:
+                self.vae = self.vae.to('cpu')
+
             latent_model_input = latent_model_input.squeeze(0)
             _, mask2 = masks_like([latent_model_input], zero=True)
 
@@ -232,13 +237,13 @@ class DenoisingStage(PipelineStage):
             latent_model_input = latent_model_input.to(get_local_torch_device())
             latents = latent_model_input
             F = batch.num_frames
-            temporal_scale = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_temporal
-            spatial_scale = fastvideo_args.pipeline_config.vae_config.arch_config.scale_factor_spatial
-            patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
+            temporal_scale = fastvideo_args.pipeline_config.vae_config.temporal_compression_ratio
+            spatial_scale = fastvideo_args.pipeline_config.vae_config.spatial_compression_ratio
+            patch_size = fastvideo_args.pipeline_config.dit_config.patch_size
             seq_len = ((F - 1) // temporal_scale +
                        1) * (batch.height // spatial_scale) * (
-                           batch.width // spatial_scale) // (patch_size[1] *
-                                                             patch_size[2])
+                           batch.width // spatial_scale) // (patch_size *
+                                                             patch_size)
 
         # Initialize lists for ODE trajectory
         trajectory_timesteps: list[torch.Tensor] = []
