@@ -154,8 +154,14 @@ def collate_rows_from_parquet_schema(rows,
                     ) if rng else random.random()) < cfg_rate:
                         data = np.zeros((512, 4096), dtype=np.float32)
                     else:
-                        data = np.frombuffer(
-                            bytes_data, dtype=np.float32).reshape(shape).copy()
+                        if row[f"{tensor_name}_dtype"] == "float32":
+                            data = np.frombuffer(
+                                bytes_data, dtype=np.float32).reshape(shape).copy()
+                        elif row[f"{tensor_name}_dtype"] == "int64":
+                            data = np.frombuffer(
+                                bytes_data, dtype=np.int64).reshape(shape).copy()
+                        else:
+                            raise ValueError(f"Unsupported dtype: {row[f"{tensor_name}_dtype"]}")
                     tensor = torch.from_numpy(data)
                     # if len(data.shape) == 3:
                     #     B, L, D = tensor.shape
@@ -168,7 +174,7 @@ def collate_rows_from_parquet_schema(rows,
                 tensor_list.append(torch.zeros(0, dtype=torch.bfloat16))
 
         # Stack tensors with special handling for text embeddings
-        if tensor_name == 'text_embedding':
+        if tensor_name == 'null':
             # Handle text embeddings with padding
             padded_tensors = []
             attention_masks = []

@@ -90,6 +90,15 @@ pyarrow_schema_ode_trajectory_text_only = pa.schema([
     pa.field("text_embedding_shape", pa.list_(pa.int64())),
     # e.g., 'bfloat16' or 'float32'
     pa.field("text_embedding_dtype", pa.string()),
+    pa.field("text_embedding_2_bytes", pa.binary()),
+    pa.field("text_embedding_2_shape", pa.list_(pa.int64())),
+    pa.field("text_embedding_2_dtype", pa.string()),
+    pa.field("text_mask_bytes", pa.binary()),
+    pa.field("text_mask_shape", pa.list_(pa.int64())),
+    pa.field("text_mask_dtype", pa.string()),
+    pa.field("text_mask_2_bytes", pa.binary()),
+    pa.field("text_mask_2_shape", pa.list_(pa.int64())),
+    pa.field("text_mask_2_dtype", pa.string()),
     # --- ODE Trajectory ---
     pa.field("trajectory_latents_bytes", pa.binary()),
     pa.field("trajectory_latents_shape", pa.list_(pa.int64())),
