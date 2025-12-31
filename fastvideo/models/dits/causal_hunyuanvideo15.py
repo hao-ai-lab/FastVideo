@@ -25,10 +25,6 @@ flex_attention = torch.compile(
     flex_attention, dynamic=False, mode="default")
 import torch.distributed as dist
 
-from fastvideo.attention import DistributedAttention, LocalAttention
-from fastvideo.distributed.communication_op import (
-    sequence_model_parallel_all_gather_with_unpad,
-    sequence_model_parallel_shard)
 from fastvideo.configs.models.dits import HunyuanVideo15Config
 from fastvideo.layers.layernorm import (LayerNormScaleShift, ScaleResidual,
                                         ScaleResidualLayerNormScaleShift)
@@ -37,20 +33,18 @@ from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import get_rotary_pos_embed, _apply_rotary_emb
 from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed,
-                                               TimestepEmbedder, unpatchify)
+                                               unpatchify)
 from fastvideo.models.dits.base import CachableDiT
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.logger import init_logger
-from fastvideo.forward_context import set_forward_context
 
-from fastvideo.distributed.parallel_state import get_sp_world_size
-from fastvideo.distributed.utils import create_attention_mask_for_padding
-
-from hunyuanvideo15 import (
+from fastvideo.models.dits.hunyuanvideo15 import (
     HunyuanRMSNorm, 
     HunyuanVideo15TimeEmbedding, 
     HunyuanVideo15ByT5TextProjection,
-    HunyuanVideo15ImageProjection)
+    HunyuanVideo15ImageProjection,
+    SingleTokenRefiner,
+    FinalLayer)
 
 logger = init_logger(__name__)
 
@@ -159,35 +153,39 @@ class MMDoubleStreamBlock(nn.Module):
 
         self.txt_mlp = MLP(hidden_size, mlp_hidden_dim, bias=True, dtype=dtype)
 
-        # Distributed attention
-        self.attn = DistributedAttention(
-            num_heads=num_attention_heads,
-            head_size=head_dim,
-            causal=False,
-            supported_attention_backends=supported_attention_backends,
-            prefix=f"{prefix}.attn")
-
     def forward(
         self,
         img: torch.Tensor,
         txt: torch.Tensor,
         vec: torch.Tensor,
+        vec_txt: torch.Tensor,
         freqs_cis: tuple,
         block_mask: BlockMask,
         kv_cache: dict | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         # Process modulation vectors
-        img_mod_outputs = self.img_mod(vec)
-        (
-            img_attn_shift,
-            img_attn_scale,
-            img_attn_gate,
-            img_mlp_shift,
-            img_mlp_scale,
-            img_mlp_gate,
-        ) = torch.chunk(img_mod_outputs, 6, dim=-1)
+        if vec.dim() == 3:
+            img_mod_outputs = self.img_mod(vec).unflatten(dim=-1, sizes=(6, -1))
+            (
+                img_attn_shift,
+                img_attn_scale,
+                img_attn_gate,
+                img_mlp_shift,
+                img_mlp_scale,
+                img_mlp_gate,
+            ) = torch.chunk(img_mod_outputs, 6, dim=2)
+        else:
+            img_mod_outputs = self.img_mod(vec)
+            (
+                img_attn_shift,
+                img_attn_scale,
+                img_attn_gate,
+                img_mlp_shift,
+                img_mlp_scale,
+                img_mlp_gate,
+            ) = torch.chunk(img_mod_outputs, 6, dim=-1)
 
-        txt_mod_outputs = self.txt_mod(vec)
+        txt_mod_outputs = self.txt_mod(vec_txt)
         (
             txt_attn_shift,
             txt_attn_scale,
@@ -386,7 +384,6 @@ class CausalHunyuanVideo15Transformer3DModel(CachableDiT):
         [1 latent frame] [1 latent frame] ... [1 latent frame]
         We use flexattention to construct the attention mask
         """
-        assert num_frames == 19
         img_seq_len = num_frames * frame_seqlen
         batch_size, txt_seq_len = txt_attn_mask.shape
         total_len = img_seq_len + txt_seq_len
@@ -510,27 +507,21 @@ class CausalHunyuanVideo15Transformer3DModel(CachableDiT):
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
 
         # 2. Conditional embeddings
-        temb = self.time_in(timestep, timestep_r=timestep_r)
+        if timestep.dim() == 2:
+            ts_seq_len = timestep.shape[1]
+            temb = self.time_in(timestep.flatten(), timestep_r=timestep_r, timestep_seq_len=ts_seq_len)
+        else:
+            temb = self.time_in(timestep, timestep_r=timestep_r)
+        # temb is [bs, seq_len, inner_dim] if ts_seq_len is not None, otherwise [bs, inner_dim]
+
+        # 2.1 Timestep embedding just for text
+        temb_txt = self.time_in(torch.tensor([0], device=hidden_states.device, dtype=hidden_states.dtype), timestep_r=timestep_r)
 
         hidden_states = self.img_in(hidden_states)
-        hidden_states, original_seq_len = sequence_model_parallel_shard(hidden_states, dim=1)
-
-        current_seq_len = hidden_states.shape[1]
-        sp_world_size = get_sp_world_size()
-        padded_seq_len = current_seq_len * sp_world_size
-        
-        if padded_seq_len > original_seq_len:
-            seq_attention_mask = create_attention_mask_for_padding(
-                seq_len=original_seq_len,
-                padded_seq_len=padded_seq_len,
-                batch_size=batch_size,
-                device=hidden_states.device,
-            )
-        else:
-            seq_attention_mask = None
 
         # qwen text embedding
-        encoder_hidden_states = self.txt_in(encoder_hidden_states, timestep, encoder_attention_mask)
+        txt_timestep = torch.tensor([0], device=hidden_states.device, dtype=hidden_states.dtype)
+        encoder_hidden_states = self.txt_in(encoder_hidden_states, txt_timestep, encoder_attention_mask)
 
         encoder_hidden_states_cond_emb = self.cond_type_embed(
             torch.zeros_like(encoder_hidden_states[:, :, 0], dtype=torch.long)
@@ -636,6 +627,7 @@ class CausalHunyuanVideo15Transformer3DModel(CachableDiT):
                     hidden_states,
                     encoder_hidden_states,
                     temb,
+                    temb_txt,
                     freqs_cis,
                     self.block_mask
                 )
@@ -646,233 +638,14 @@ class CausalHunyuanVideo15Transformer3DModel(CachableDiT):
                     hidden_states,
                     encoder_hidden_states,
                     temb,
+                    temb_txt,
                     freqs_cis,
                     self.block_mask
                 )
 
         # Final layer processing
-        hidden_states = sequence_model_parallel_all_gather_with_unpad(hidden_states, original_seq_len, dim=1)
         hidden_states = self.final_layer(hidden_states, temb)
         # Unpatchify to get original shape
         hidden_states = unpatchify(hidden_states, post_patch_num_frames, post_patch_height, post_patch_width, self.patch_size, self.out_channels)
 
         return hidden_states
-
-class SingleTokenRefiner(nn.Module):
-    """
-    A token refiner that processes text embeddings with attention to improve
-    their representation for cross-attention with image features.
-    """
-
-    def __init__(
-        self,
-        in_channels,
-        hidden_size,
-        num_attention_heads,
-        depth=2,
-        qkv_bias=True,
-        dtype=None,
-        prefix: str = "",
-    ) -> None:
-        super().__init__()
-
-        # Input projection
-        # self.input_embedder = ReplicatedLinear(
-        #     in_channels,
-        #     hidden_size,
-        #     bias=True,
-        #     params_dtype=dtype,
-        #     prefix=f"{prefix}.input_embedder")
-        self.input_embedder = nn.Linear(in_channels, hidden_size, bias=True)
-
-        # Timestep embedding
-        self.t_embedder = TimestepEmbedder(hidden_size,
-                                           act_layer="silu",
-                                           dtype=dtype,
-                                           prefix=f"{prefix}.t_embedder")
-
-        # Context embedding
-        self.c_embedder = MLP(in_channels,
-                              hidden_size,
-                              hidden_size,
-                              act_type="silu",
-                              dtype=dtype,
-                              prefix=f"{prefix}.c_embedder")
-
-        # Refiner blocks
-        self.refiner_blocks = nn.ModuleList([
-            IndividualTokenRefinerBlock(
-                hidden_size,
-                num_attention_heads,
-                qkv_bias=qkv_bias,
-                dtype=dtype,
-                prefix=f"{prefix}.refiner_blocks.{i}",
-            ) for i in range(depth)
-        ])
-
-    def forward(self, x, t, mask=None):
-        # Get timestep embeddings
-        timestep_aware_representations = self.t_embedder(t)
-
-        # Get context-aware representations
-        original_dtype = x.dtype
-        if mask is None:
-            context_aware_representations = x.mean(dim=1)
-        else:
-            mask_float = mask.float().unsqueeze(-1)  # [B, L, 1]
-            context_aware_representations = (x * mask_float).sum(dim=1) / mask_float.sum(dim=1)
-
-        context_aware_representations = self.c_embedder(
-            context_aware_representations)
-        c = timestep_aware_representations + context_aware_representations
-        # Project input
-        x = self.input_embedder(x)
-        # Process through refiner blocks
-        for block in self.refiner_blocks:
-            x = block(x, c, mask)
-        return x
-
-class IndividualTokenRefinerBlock(nn.Module):
-    """
-    A transformer block for refining individual tokens with self-attention.
-    """
-
-    def __init__(
-        self,
-        hidden_size,
-        num_attention_heads,
-        mlp_ratio=4.0,
-        qkv_bias=True,
-        dtype=None,
-        prefix: str = "",
-    ) -> None:
-        super().__init__()
-        self.num_attention_heads = num_attention_heads
-        mlp_hidden_dim = int(hidden_size * mlp_ratio)
-
-        # Normalization and attention
-        self.norm1 = nn.LayerNorm(hidden_size,
-                                  eps=1e-6,
-                                  elementwise_affine=True,
-                                  dtype=dtype)
-
-        self.self_attn_qkv = ReplicatedLinear(hidden_size,
-                                              hidden_size * 3,
-                                              bias=qkv_bias,
-                                              params_dtype=dtype,
-                                              prefix=f"{prefix}.self_attn_qkv")
-
-        self.self_attn_proj = ReplicatedLinear(
-            hidden_size,
-            hidden_size,
-            bias=qkv_bias,
-            params_dtype=dtype,
-            prefix=f"{prefix}.self_attn_proj")
-
-        # MLP
-        self.norm2 = nn.LayerNorm(hidden_size,
-                                  eps=1e-6,
-                                  elementwise_affine=True,
-                                  dtype=dtype)
-        self.mlp = MLP(hidden_size,
-                       mlp_hidden_dim,
-                       bias=True,
-                       act_type="silu",
-                       dtype=dtype,
-                       prefix=f"{prefix}.mlp")
-
-        # Modulation
-        self.adaLN_modulation = ModulateProjection(
-            hidden_size,
-            factor=2,
-            act_layer="silu",
-            dtype=dtype,
-            prefix=f"{prefix}.adaLN_modulation")
-
-        # Scaled dot product attention
-        self.attn = LocalAttention(
-            num_heads=num_attention_heads,
-            head_size=hidden_size // num_attention_heads,
-            # TODO: remove hardcode; remove STA
-            supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
-                                          AttentionBackendEnum.TORCH_SDPA),
-        )
-
-    def forward(self, x, c, mask=None):
-        if mask is not None:
-            mask = mask.clone().bool()
-            mask[:, 0] = True  # Prevent attention weights from becoming NaN
-
-        # Get modulation parameters
-        gate_msa, gate_mlp = self.adaLN_modulation(c).chunk(2, dim=-1)
-        # Self-attention
-        norm_x = self.norm1(x)
-        qkv, _ = self.self_attn_qkv(norm_x)
-
-        batch_size, seq_len = qkv.shape[0], qkv.shape[1]
-        qkv = qkv.view(batch_size, seq_len, 3, self.num_attention_heads, -1)
-        q, k, v = qkv[:, :, 0], qkv[:, :, 1], qkv[:, :, 2]
-
-        # Run scaled dot product attention
-        from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
-        attn_metadata = FlashAttnMetadataBuilder().build(
-            current_timestep=0,
-            attn_mask=mask,
-        )
-        # Run distributed attention
-        with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
-            attn_output = self.attn(q, k, v)  # [B, L, H, D]
-        attn_output = attn_output.reshape(batch_size, seq_len,
-                                          -1)  # [B, L, H*D]
-
-        # Project and apply residual connection with gating
-        attn_out, _ = self.self_attn_proj(attn_output)
-        x = x + attn_out * gate_msa.unsqueeze(1)
-
-        # MLP
-        mlp_out = self.mlp(self.norm2(x))
-        x = x + mlp_out * gate_mlp.unsqueeze(1)
-
-        return x
-
-class FinalLayer(nn.Module):
-    """
-    The final layer of DiT that projects features to pixel space.
-    """
-
-    def __init__(self,
-                 hidden_size,
-                 patch_size,
-                 out_channels,
-                 dtype=None,
-                 prefix: str = "") -> None:
-        super().__init__()
-
-        # Normalization
-        self.norm_final = nn.LayerNorm(hidden_size,
-                                       eps=1e-6,
-                                       elementwise_affine=False,
-                                       dtype=dtype)
-
-        output_dim = patch_size[0] * patch_size[1] * patch_size[2] * out_channels
-
-        self.linear = ReplicatedLinear(hidden_size,
-                                       output_dim,
-                                       bias=True,
-                                       params_dtype=dtype,
-                                       prefix=f"{prefix}.linear")
-
-        # Modulation
-        self.adaLN_modulation = ModulateProjection(
-            hidden_size,
-            factor=2,
-            act_layer="silu",
-            dtype=dtype,
-            prefix=f"{prefix}.adaLN_modulation")
-
-    def forward(self, x, c):
-        # What the heck HF? Why you change the scale and shift order here???
-        scale, shift = self.adaLN_modulation(c).chunk(2, dim=-1)
-        x = self.norm_final(x) * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
-        x, _ = self.linear(x)
-        return x
