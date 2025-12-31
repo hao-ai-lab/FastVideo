@@ -75,3 +75,4 @@ if __name__ == '__main__':
 - [Configuration](../inference/configuration.md) - Learn about configuration options
 - [Examples](../inference/examples/) - Explore more examples
 - [Optimizations](../inference/optimizations.md) - Performance optimization tips
+- [Low VRAM Inference](../inference/low_vram_inference.md) - Memory-saving settings (CPU offload, sharded loading, etc.)

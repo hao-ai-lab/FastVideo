@@ -12,7 +12,8 @@ from fastvideo.configs.models import (DiTConfig, EncoderConfig, ModelConfig,
 from fastvideo.configs.models.encoders import BaseEncoderOutput
 from fastvideo.configs.utils import update_config_from_args
 from fastvideo.logger import init_logger
-from fastvideo.utils import FlexibleArgumentParser, StoreBoolean, shallow_asdict
+from fastvideo.utils import (FlexibleArgumentParser, StoreBoolean,
+                             PRECISION_TO_TYPE, shallow_asdict)
 
 logger = init_logger(__name__)
 
@@ -309,6 +310,21 @@ class PipelineConfig:
         if len(self.text_encoder_configs) != len(self.text_encoder_precisions):
             raise ValueError(
                 f"Length of text encoder configs ({len(self.text_encoder_configs)}) must be equal to length of text encoder precisions ({len(self.text_encoder_precisions)})"
+            )
+
+        unsupported_precisions = [
+            precision for precision in self.text_encoder_precisions
+            if precision not in PRECISION_TO_TYPE
+            and not precision.startswith("fp8")
+        ]
+        if unsupported_precisions:
+            supported = ", ".join(PRECISION_TO_TYPE.keys())
+            logger.warning(
+                "Unsupported text encoder precision(s) detected in config: %s. "
+                "FastVideo will attempt to load them with transformers AutoModel when possible. "
+                "Supported fast paths: %s.",
+                unsupported_precisions,
+                supported,
             )
 
         if len(self.text_encoder_configs) != len(self.preprocess_text_funcs):

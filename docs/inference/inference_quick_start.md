@@ -98,7 +98,7 @@ Common issues and their solutions:
 ### Out of Memory Errors
 If you encounter CUDA out of memory errors:
 - Reduce `num_frames` or video resolution
-- Enable memory optimization with `enable_model_cpu_offload`
+- Enable memory optimization with CPU-offload and sharded loading flags (see [Low VRAM Inference](low_vram_inference.md))
 - Try a smaller model or use distilled versions
 - Use `num_gpus` > 1 if multiple GPUs are available
 

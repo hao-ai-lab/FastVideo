@@ -15,7 +15,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from safetensors.torch import load_file as safetensors_load_file
 from torch.distributed import init_device_mesh
-from transformers import AutoImageProcessor, AutoTokenizer
+from transformers import AutoImageProcessor, AutoModel, AutoTokenizer
 from transformers import UMT5EncoderModel
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
@@ -237,10 +237,23 @@ class TextEncoderLoader(ComponentLoader):
             encoder_precision = fastvideo_args.pipeline_config.text_encoder_precisions[
                 1]
 
+        requested_dtype = fastvideo_args.text_encoder_dtype or encoder_precision
+
         target_device = get_local_torch_device()
-        # TODO(will): add support for other dtypes
+        if requested_dtype not in PRECISION_TO_TYPE:
+            logger.info(
+                "Loading text encoder via transformers AutoModel with dtype=%s",
+                requested_dtype,
+            )
+            return self._load_with_transformers(
+                model_path,
+                requested_dtype,
+                fastvideo_args,
+                target_device,
+            )
+
         return self.load_model(model_path, encoder_config, target_device,
-                               fastvideo_args, encoder_precision)
+                               fastvideo_args, requested_dtype)
 
     def load_model(self,
                    model_path: str,
@@ -256,6 +269,18 @@ class TextEncoderLoader(ComponentLoader):
         if fastvideo_args.text_encoder_cpu_offload:
             target_device = torch.device(
                 "mps") if current_platform.is_mps() else torch.device("cpu")
+
+        if dtype not in PRECISION_TO_TYPE:
+            supported = ", ".join(PRECISION_TO_TYPE.keys())
+            raise ValueError(
+                f"Unsupported text encoder precision '{dtype}'. "
+                f"Supported precisions: {supported}. "
+                "FP8 checkpoints will currently be materialized in a supported dtype, "
+                "so they will not reduce VRAM usage."
+            )
+
+        logger.info("Loading text encoder with precision=%s (%s)",
+                    dtype, PRECISION_TO_TYPE[dtype])
 
         with set_default_torch_dtype(PRECISION_TO_TYPE[dtype]):
             with target_device:
@@ -317,6 +342,51 @@ class TextEncoderLoader(ComponentLoader):
             if weights_not_loaded:
                 raise ValueError("Following weights were not initialized from "
                                  f"checkpoint: {weights_not_loaded}")
+
+        return model.eval()
+
+    def _resolve_torch_dtype(self, dtype: str) -> torch.dtype:
+        if dtype in PRECISION_TO_TYPE:
+            return PRECISION_TO_TYPE[dtype]
+
+        if dtype.startswith("fp8"):
+            torch_dtype = getattr(torch, "float8_e4m3fn", None)
+            if torch_dtype is None:
+                torch_dtype = getattr(torch, "float8_e4m3fnuz", None)
+
+            if torch_dtype is None:
+                raise ValueError(
+                    "FP8 requested for text encoder loading, but the current "
+                    "PyTorch build does not expose float8 dtypes. Upgrade PyTorch "
+                    "or choose a supported dtype (fp16/bf16/fp32)."
+                )
+            return torch_dtype
+
+        raise ValueError(
+            f"Unsupported text encoder dtype '{dtype}'. "
+            "Pass a torch dtype string such as fp16, bf16, fp32, or fp8."
+        )
+
+    def _load_with_transformers(
+        self,
+        model_path: str,
+        dtype: str,
+        fastvideo_args: FastVideoArgs,
+        target_device: torch.device,
+    ) -> nn.Module:
+        torch_dtype = self._resolve_torch_dtype(dtype)
+        device_map = "auto" if fastvideo_args.text_encoder_cpu_offload else None
+
+        model = AutoModel.from_pretrained(
+            model_path,
+            trust_remote_code=fastvideo_args.trust_remote_code,
+            revision=fastvideo_args.revision,
+            torch_dtype=torch_dtype,
+            device_map=device_map,
+        )
+
+        if device_map is None:
+            model = model.to(target_device)
 
         return model.eval()
 

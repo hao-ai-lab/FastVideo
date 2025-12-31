@@ -352,8 +352,8 @@ class ComposedPipelineBase(ABC):
             else:
                 load_module_name = module_name
 
-            component_model_path = os.path.join(self.model_path,
-                                                load_module_name)
+            component_model_path = self._resolve_component_model_path(
+                fastvideo_args, module_name, load_module_name)
             module = PipelineComponentLoader.load_module(
                 module_name=load_module_name,
                 component_model_path=component_model_path,
@@ -375,6 +375,31 @@ class ComposedPipelineBase(ABC):
                 )
 
         return modules
+
+    def _resolve_component_model_path(
+        self,
+        fastvideo_args: FastVideoArgs,
+        module_name: str,
+        load_module_name: str,
+    ) -> str:
+        """Resolve the on-disk path for a given module, respecting overrides."""
+
+        override_repo, override_subpath = fastvideo_args.get_component_override(
+            module_name)
+        if override_repo is not None:
+            override_root = maybe_download_model(override_repo)
+            module_subpath = override_subpath or load_module_name
+            override_path = os.path.join(override_root, module_subpath)
+            if not os.path.exists(override_path):
+                raise FileNotFoundError(
+                    f"Override path for {module_name} not found: {override_path}"
+                )
+
+            logger.info("Using override for %s from %s", module_name,
+                        override_path)
+            return override_path
+
+        return os.path.join(self.model_path, load_module_name)
 
     def add_stage(self, stage_name: str, stage: PipelineStage):
         assert self.modules is not None, "No modules are registered"

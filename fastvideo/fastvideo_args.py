@@ -170,6 +170,9 @@ class FastVideoArgs:
         "transformer": True,
         "vae": True,
     })
+    text_encoder_override: str | None = None
+    text_encoder_override_path: str | None = None
+    text_encoder_dtype: str | None = None
     override_transformer_cls_name: str | None = None
     init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
     init_weights_from_safetensors_2: str = ""  # path to safetensors file for initial weight loading for transformer_2
@@ -429,6 +432,31 @@ class FastVideoArgs:
             "Use CPU offload for text encoder. Enable if run out of memory.",
         )
         parser.add_argument(
+            "--text-encoder-override",
+            type=str,
+            default=FastVideoArgs.text_encoder_override,
+            help=
+            ("Load text encoder weights from a different local path or HF repo "
+             "instead of the main diffusers snapshot."),
+        )
+        parser.add_argument(
+            "--text-encoder-override-path",
+            type=str,
+            default=FastVideoArgs.text_encoder_override_path,
+            help=
+            ("Optional relative path to the text encoder inside the override repository "
+             "(defaults to the module name)."),
+        )
+        parser.add_argument(
+            "--text-encoder-dtype",
+            type=str,
+            default=FastVideoArgs.text_encoder_dtype,
+            help=
+            ("Torch dtype string for loading text encoders with transformers AutoModel "
+             "(e.g., fp16, bf16, fp32, fp8). If set, overrides pipeline-config precisions."
+             ),
+        )
+        parser.add_argument(
             "--image-encoder-cpu-offload",
             action=StoreBoolean,
             help=
@@ -578,6 +606,16 @@ class FastVideoArgs:
         kwargs['pipeline_config'] = PipelineConfig.from_kwargs(kwargs)
         kwargs['preprocess_config'] = PreprocessConfig.from_kwargs(kwargs)
         return cls(**kwargs)
+
+    def get_component_override(
+            self, module_name: str) -> tuple[str | None, str | None]:
+        """Return override repo/path for a given module if configured."""
+
+        if module_name.startswith(
+                "text_encoder") and self.text_encoder_override:
+            return self.text_encoder_override, self.text_encoder_override_path
+
+        return None, None
 
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
