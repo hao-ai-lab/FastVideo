@@ -74,4 +74,4 @@ if __name__ == '__main__':
 
 ## Performance Optimization
 
-For configuring optimizations, please see our [optimizations guide](#inference-optimizations)
+For configuring optimizations, please see our [optimizations guide](inference-optimizations)

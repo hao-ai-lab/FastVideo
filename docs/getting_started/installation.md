@@ -38,4 +38,4 @@ pip install -e .
 
 - [Quick Start Guide](quick_start.md) - Get started with your first video generation
 - [Configuration](../inference/configuration.md) - Learn about configuration options
-- [Examples](../inference/examples/) - Explore example scripts and notebooks
+- [Examples](../inference/examples/examples_inference_index.md) - Explore example scripts and notebooks
