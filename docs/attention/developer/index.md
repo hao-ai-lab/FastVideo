@@ -50,21 +50,25 @@ class MyNewAttnBackend(AttentionBackend):
 FastVideo uses a `ForwardContext` to pass global metadata (like current timestep, batch info, or custom attention configurations) to attention backends without changing the `forward` signature of every layer. **This is optional and only required if your backend needs dynamic per-step information.**
 
 To use this:
+
 1. **Set Context**: In your pipeline or generation loop, use the `set_forward_context` context manager.
 2. **Access Context**: Inside your attention backend, use `get_forward_context()`.
 
-See `docs/attention/sta/index.md` (Sliding Tile Attention) for an example of how complex configuration (window sizes) is passed this way.
+See [`docs/attention/sta/index.md`](../sta/index.md) (Sliding Tile Attention) for an example of how complex configuration (window sizes) is passed this way.
 
 ## 3. Adding Compiled Kernels (C++/CUDA)
 
 If your backend requires custom CUDA kernels, you need to add them to the `fastvideo-kernel` package.
 
 ### A. Add Source Files
+
 Place your kernel implementation files in `fastvideo-kernel/csrc/attention/`.
+
 * `mynew_attn.cu` (CUDA implementation)
 * `mynew_attn.h` (Optional headers)
 
 ### B. Register in Extension
+
 Update `fastvideo-kernel/csrc/common_extension.cpp` to expose your function to Python.
 
 ```cpp
@@ -84,6 +88,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 ```
 
 ### C. Update CMakeLists.txt
+
 Update `fastvideo-kernel/CMakeLists.txt` to compile your new files.
 
 **Case 1: General CUDA Kernel (Runs on all GPUs)**
@@ -111,6 +116,7 @@ endif()
 ```
 
 ### D. Expose in Python Ops
+
 Update `fastvideo-kernel/python/fastvideo_kernel/ops.py` to make the function importable and handle fallbacks gracefully.
 
 ```python
@@ -133,6 +139,7 @@ def my_compiled_attn_func(q, k, v):
 ```
 
 ### E. Expose in Package Init
+
 Update `fastvideo-kernel/python/fastvideo_kernel/__init__.py` to export the function.
 
 ```python

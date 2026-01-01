@@ -4,25 +4,26 @@ This document outlines FastVideo's architecture for developers interested in fra
 
 ## Table of Contents - Directory Structure and Files
 
-- [`fastvideo/pipelines/`](#design-pipeline-system) - Core diffusion pipeline components
-- [`fastvideo/models/`](#design-model-components) - Model implementations
-  - [`dits/`](#design-transformer-models) - Transformer-based diffusion models
-  - [`vaes/`](#design-vae-variational-auto-encoder) - Variational autoencoders
-  - [`encoders/`](#design-text-and-image-encoders) - Text and image encoders
-  - [`schedulers/`](#design-schedulers) - Diffusion schedulers
-- [`fastvideo/attention/`](#design-optimized-attention) - Optimized attention implementations
-- [`fastvideo/distributed/`](#design-distributed-processing) - Distributed computing utilities
-- [`fastvideo/layers/`](#design-tensor-parallelism) - Custom neural network layers
-- [`fastvideo/platforms/`](#design-platforms) - Hardware platform abstractions
-- [`fastvideo/worker/`](#design-executor-and-worker-abstractions) - Multi-GPU process management
-- [`fastvideo/fastvideo_args.py`](#design-fastvideo-args) - Argument handling
-- [`fastvideo/forward_context.py`](#design-forwardcontext) - Forward pass context management
+- [`fastvideo/pipelines/`](#pipeline-system) - Core diffusion pipeline components
+- [`fastvideo/models/`](#model-components) - Model implementations
+  - [`dits/`](#transformer-models) - Transformer-based diffusion models
+  - [`vaes/`](#vae-variational-auto-encoder) - Variational autoencoders
+  - [`encoders/`](#text-and-image-encoders) - Text and image encoders
+  - [`schedulers/`](#schedulers) - Diffusion schedulers
+- [`fastvideo/attention/`](#optimized-attention) - Optimized attention implementations
+- [`fastvideo/distributed/`](#distributed-processing) - Distributed computing utilities
+- [`fastvideo/layers/`](#tensor-parallelism) - Custom neural network layers
+- [`fastvideo/platforms/`](#platforms) - Hardware platform abstractions
+- [`fastvideo/worker/`](#executor-and-worker-system) - Multi-GPU process management
+- [`fastvideo/fastvideo_args.py`](#fastvideoargs) - Argument handling
+- [`fastvideo/forward_context.py`](#forward-context-management) - Forward pass context management
 - `fastvideo/utils.py` - Utility functions
-- [`fastvideo/logger.py`](#design-logger) - Logging infrastructure
+- [`fastvideo/logger.py`](#logger) - Logging infrastructure
 
 ## Core Architecture
 
 FastVideo separates model components from execution logic with these principles:
+
 - **Component Isolation**: Models (encoders, VAEs, transformers) are isolated from execution (pipelines, stages, distributed processing)
 - **Modular Design**: Components can be independently replaced
 - **Distributed Execution**: Supports various parallelism strategies (Tensor, Sequence)
@@ -34,12 +35,14 @@ FastVideo separates model components from execution logic with these principles:
 The `FastVideoArgs` class in `fastvideo/fastvideo_args.py` serves as the central configuration system for FastVideo. It contains all parameters needed to control model loading, inference configuration, performance optimization settings, and more.
 
 Key features include:
+
 - **Command-line Interface**: Automatic conversion between CLI arguments and dataclass fields
 - **Configuration Groups**: Organized by functional areas (model loading, video params, optimization settings)
 - **Context Management**: Global access to current settings via `get_current_fastvideo_args()`
 - **Parameter Validation**: Ensures valid combinations of settings
 
 Common configuration areas:
+
 - **Model paths and loading options**: `model_path`, `trust_remote_code`, `revision`
 - **Distributed execution settings**: `num_gpus`, `tp_size`, `sp_size`
 - **Video generation parameters**: `height`, `width`, `num_frames`, `num_inference_steps`
@@ -90,7 +93,9 @@ class MyCustomPipeline(ComposedPipelineBase):
 ```
 
 ### Pipeline Stages
+
 Each stage handles a specific diffusion process component:
+
 - **Input Validation**: Parameter verification
 - **Text Encoding**: CLIP, LLaMA, or T5-based encoding
 - **Image Encoding**: Image input processing
@@ -133,6 +138,7 @@ Transformer networks perform the actual denoising during diffusion:
   - `HunyuanVideoTransformer3DModel`
 
 Features include:
+
 - Text/image conditioning
 - Standardized interface for model-specific optimizations
 
@@ -161,6 +167,7 @@ VAEs handle conversion between pixel space and latent space:
 These models compress image/video data to a more efficient latent representation (typically 4x-8x smaller in each dimension).
 
 FastVideo's VAE implementations include:
+
 - Efficient video batch processing
 - Memory optimization
 - Optional tiling for large frames
@@ -179,6 +186,7 @@ Encoders process conditioning inputs into embeddings:
   - `CLIPVisionModel`
 
 FastVideo implements optimizations such as:
+
 - Vocab parallelism for distributed processing
 - Caching for common prompts
 - Precision-tuned computation
@@ -193,6 +201,7 @@ Schedulers manage the diffusion sampling process:
   - `FlowMatchEulerDiscreteScheduler`
 
 These components control:
+
 - Diffusion timestep sequences
 - Noise prediction to latent update conversions
 - Quality/speed trade-offs
@@ -219,7 +228,9 @@ This diagram shows how models are discovered, validated, and loaded across entry
 The `fastvideo/attention/` directory contains optimized attention implementations crucial for efficient video diffusion:
 
 ### Attention Backends
+
 Multiple implementations with automatic selection:
+
 - **FLASH_ATTN**: Optimized for supporting hardware
 - **TORCH_SDPA**: Built-in PyTorch scaled dot-product attention
 - **SLIDING_TILE_ATTN**: For very long sequences
@@ -240,7 +251,9 @@ self.attn = LocalAttention(
 ![Attention backend selector design](../assets/images/attention_backend.png)
 
 ### Attention Patterns
+
 Supports various patterns with memory optimization techniques:
+
 - **Cross/Self/Temporal/Global-Local Attention**
 - Chunking, progressive computation, optimized masking
 
@@ -296,6 +309,7 @@ self.attn = DistributedAttention(
 ```
 
 ### Communication Primitives
+
 Efficient distributed operations via AllGather, AllReduce, and synchronization mechanisms.
 
 Efficient communication primitives minimize distributed overhead:
@@ -314,6 +328,7 @@ Defined in `fastvideo/forward_context.py`, `ForwardContext` manages execution-sp
 - **Profiling Data**: Potential hooks for performance metrics collection
 
 This context-based approach enables:
+
 - Dynamic optimization based on execution state (e.g., attention backend selection)
 - Step-specific customizations within model components
 
@@ -339,12 +354,14 @@ FastVideo implements a flexible execution model for distributed processing:
 - **GPU Workers**: Handle actual model execution on individual GPUs
 
 The MultiProcExecutor implementation:
+
 1. Spawns worker processes for each GPU
 2. Establishes communication channels via pipes
 3. Coordinates distributed operations across workers
 4. Handles graceful startup and shutdown of the process group
 
 Each GPU worker:
+
 1. Initializes the distributed environment
 2. Builds the pipeline for the specified model
 3. Executes requested operations on its assigned GPU
@@ -359,11 +376,13 @@ The `fastvideo/platforms/` directory provides hardware platform abstractions tha
 ### Platform Abstraction
 
 FastVideo's platform abstraction layer enables:
+
 - **Hardware Detection**: Automatic detection of available hardware
 - **Backend Selection**: Appropriate selection of compute kernels
 - **Memory Management**: Efficient utilization of hardware-specific memory features
 
 The primary components include:
+
 - **Platform Interface**: Defines the common API for all platform implementations
 - **CUDA Platform**: Optimized implementation for NVIDIA GPUs
 - **Backend Enum**: Used throughout the codebase for feature selection
@@ -383,6 +402,7 @@ else:
 The platform system is designed to be extensible for future hardware targets.
 
 ## Logger
+
 See [PR](https://github.com/hao-ai-lab/FastVideo/pull/356)
 
 *TODO*: (help wanted) Add an environment variable that disables process-aware logging.
@@ -397,6 +417,7 @@ If you're a new contributor, here are some common areas to explore:
 4. **Hardware support**: Extend the `platforms` module for new hardware targets
 
 When adding code, follow these practices:
+
 - Use type hints for better code readability
 - Add appropriate docstrings
 - Maintain the separation between model components and execution logic
