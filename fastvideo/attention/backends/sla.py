@@ -199,8 +199,6 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
             Output tensor (B, L, H, D)
         """
         original_dtype = query.dtype
-
-        print("running sla in fv")
         
         # Convert from FastVideo format (B, L, H, D) to SLA format (B, H, L, D)
         q = query.transpose(1, 2).contiguous()

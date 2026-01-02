@@ -160,13 +160,17 @@ class RCMScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         # Convert TrigFlow → RectifiedFlow: t = sin(t) / (cos(t) + sin(t))
         t_steps = torch.sin(t_steps) / (torch.cos(t_steps) + torch.sin(t_steps))
 
-        self.timesteps = t_steps
+        # Store raw sigmas for use in step() formula
         self.sigmas = t_steps.clone()
+        
+        # Scale timesteps by 1000 for model input (as per TurboDiffusion)
+        self.timesteps = t_steps * 1000
         
         self._step_index = None
         self._begin_index = None
 
-        logger.debug("rCM timesteps set: %s", self.timesteps.tolist())
+        logger.debug("rCM timesteps (scaled): %s", self.timesteps.tolist())
+        logger.debug("rCM sigmas (raw): %s", self.sigmas.tolist())
 
     def _init_step_index(self, timestep: torch.FloatTensor | None = None) -> None:
         """Initialize step index at the beginning of sampling."""
@@ -194,7 +198,7 @@ class RCMScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         """
         Scale initial noise for rCM sampling.
         
-        In rCM, initial noise is scaled by the first timestep:
+        In rCM, initial noise is scaled by the first timestep (raw sigma):
             x_0 = noise * t_steps[0]
 
         Args:
@@ -208,7 +212,8 @@ class RCMScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         if noise is None:
             raise ValueError("noise must be provided for rCM scale_noise")
         
-        t_initial = self.timesteps[0]
+        # Use raw sigma (not scaled timestep) for initial noise scaling
+        t_initial = self.sigmas[0]
         return noise.to(torch.float64) * t_initial
 
     def step(
@@ -247,9 +252,15 @@ class RCMScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
         assert self._step_index is not None
         
-        # Get current and next timestep values
-        t_cur = self.timesteps[self._step_index]
-        t_next = self.timesteps[self._step_index + 1]
+        # Get current and next sigma values (raw, unscaled) for rCM formula
+        # Note: self.timesteps is scaled by 1000 for model input,
+        # but we need raw values for the step formula
+        t_cur = self.sigmas[self._step_index]
+        # On the final step, t_next should be 0 (fully denoised)
+        if self._step_index + 1 < len(self.sigmas):
+            t_next = self.sigmas[self._step_index + 1]
+        else:
+            t_next = torch.tensor(0.0, device=sample.device, dtype=torch.float64)
 
         # Ensure we're working in float64 for precision
         sample = sample.to(torch.float64)
@@ -259,11 +270,12 @@ class RCMScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         x_denoised = sample - t_cur * model_output
         
         # Generate noise for SDE sampling
+        # Note: We don't use the generator here because it may be on CPU
+        # while the sample is on CUDA, causing device mismatch
         noise = torch.randn(
             sample.shape,
             dtype=torch.float32,
             device=sample.device,
-            generator=generator,
         ).to(torch.float64)
 
         prev_sample = (1 - t_next) * x_denoised + t_next * noise
