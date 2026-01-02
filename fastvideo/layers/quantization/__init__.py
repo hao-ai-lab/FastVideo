@@ -2,7 +2,7 @@ from typing import Literal, get_args
 
 from fastvideo.layers.quantization.base_config import QuantizationConfig
 
-QuantizationMethods = Literal[None]
+QuantizationMethods = Literal[None, "AbsMaxFP8"]
 
 QUANTIZATION_METHODS: list[str] = list(get_args(QuantizationMethods))
 
