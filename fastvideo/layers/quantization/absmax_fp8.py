@@ -34,7 +34,7 @@ class AbsMaxFP8Config(QuantizationConfig):
         return "AbsMaxFP8"
 
     def get_supported_act_dtypes(self) -> list[torch.dtype]:
-        return [torch.bfloat16, torch.float16]
+        return [torch.bfloat16, torch.float16, torch.float32]
 
     @classmethod
     def get_min_capability(cls) -> int:
@@ -72,6 +72,7 @@ class AbsMaxFP8MergedParameter(nn.Parameter):
         loaded_weight: torch.Tensor,
         share_id: str | int | None = None,
     ) -> None:
+        # currently only support QKVParallelLinear and MergedColumnParallelLinear
         output_partition_sizes: list[int] = self.output_partition_sizes
         if share_id is None:
             share_id = 0
@@ -144,8 +145,8 @@ class AbsMaxFP8LinearMethod(LinearMethodBase):
         **extra_weight_attrs,
     ) -> None:
         assert params_dtype in [
-            torch.bfloat16, torch.float16
-        ], (f"AbsMaxFP8LinearMethod only supports bfloat16 or float16 original dtype, got {params_dtype}."
+            torch.bfloat16, torch.float16, torch.float32
+        ], (f"AbsMaxFP8LinearMethod only supports bfloat16, float16, or float32 original dtype, got {params_dtype}."
             )
         weight = nn.Parameter(
             torch.empty(
@@ -187,21 +188,6 @@ class AbsMaxFP8LinearMethod(LinearMethodBase):
         weight_output_type = weight_quant.to(dtype=output_dtype)
         weight_final = weight_output_type * scale_weight.unsqueeze(1)
         x_final = x.to(dtype=output_dtype) * scale_input
-        # if (
-        #     torch.isnan(x_final).any()
-        #     or torch.isinf(x_final).any()
-        #     or torch.isnan(weight_final).any()
-        #     or torch.isinf(weight_final).any()
-        # ):
-        #     raise ValueError(
-        #         "NaN or Inf detected in AbsMaxFP8LinearMethod inputs."
-        #     )
-        res = nn.functional.linear(x_final, weight_final,
-                                   bias=bias).to(dtype=output_dtype)
-        # res_nan = torch.isnan(res)
-        # res_inf = torch.isinf(res)
-        # if res_nan.any():
-        #     raise ValueError("NaN detected in AbsMaxFP8LinearMethod output.")
-        # if res_inf.any():
-        #     raise ValueError("Inf detected in AbsMaxFP8LinearMethod output.")
-        return res
+
+        return nn.functional.linear(x_final, weight_final,
+                                    bias=bias).to(dtype=output_dtype)
