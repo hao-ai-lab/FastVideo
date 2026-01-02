@@ -3,6 +3,7 @@ import os
 # os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "SLA_ATTN"
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "SAGE_SLA_ATTN"
 
+
 def main() -> None:
     # Create a video generator with a pre-trained model
     generator = VideoGenerator.from_pretrained(

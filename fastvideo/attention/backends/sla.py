@@ -33,14 +33,15 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
-
 # ============================================================================
 # SLA Utility functions (moved from sla_kernels/utils.py)
 # ============================================================================
 
+
 @triton.jit
 def compress_kernel(
-    X, XM,
+    X,
+    XM,
     L: tl.constexpr,
     D: tl.constexpr,
     BLOCK_L: tl.constexpr,
@@ -53,11 +54,13 @@ def compress_kernel(
 
     x_offset = idx_bh * L * D
     xm_offset = idx_bh * ((L + BLOCK_L - 1) // BLOCK_L) * D
-    x = tl.load(X + x_offset + offs_l[:, None] * D + offs_d[None, :], mask=offs_l[:, None] < L)
+    x = tl.load(X + x_offset + offs_l[:, None] * D + offs_d[None, :],
+                mask=offs_l[:, None] < L)
 
     nx = min(BLOCK_L, L - idx_l * BLOCK_L)
     x_mean = tl.sum(x, axis=0, dtype=tl.float32) / nx
-    tl.store(XM + xm_offset + idx_l * D + offs_d, x_mean.to(XM.dtype.element_ty))
+    tl.store(XM + xm_offset + idx_l * D + offs_d,
+             x_mean.to(XM.dtype.element_ty))
 
 
 def mean_pool(x: torch.Tensor, BLK: int) -> torch.Tensor:
@@ -94,7 +97,8 @@ def get_block_map(
         lut: Top-k indices of shape (B, H, num_q_blocks, topk)
         topk: Number of key blocks selected
     """
-    arg_k = k - torch.mean(k, dim=-2, keepdim=True)  # smooth-k technique from SageAttention
+    arg_k = k - torch.mean(
+        k, dim=-2, keepdim=True)  # smooth-k technique from SageAttention
     pooled_qblocks = mean_pool(q, BLKQ)
     pooled_kblocks = mean_pool(arg_k, BLKK)
     pooled_score = pooled_qblocks @ pooled_kblocks.transpose(-1, -2)
@@ -196,27 +200,27 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         topk_ratio: float = 0.1,  # TurboDiffusion uses topk=0.1
         feature_map: str = "softmax",
         BLKQ: int = 128,  # TurboDiffusion uses BLKQ=128
-        BLKK: int = 64,   # TurboDiffusion uses BLKK=64
+        BLKK: int = 64,  # TurboDiffusion uses BLKK=64
         use_bf16: bool = True,
         **extra_impl_args,
     ) -> None:
         nn.Module.__init__(self)
-        
+
         self.num_heads = num_heads
         self.head_size = head_size
         self.softmax_scale = softmax_scale if softmax_scale else head_size**-0.5
         self.causal = causal
         self.prefix = prefix
-        
+
         # SLA-specific config
         self.topk_ratio = topk_ratio
         self.BLKQ = BLKQ
         self.BLKK = BLKK
         self.dtype = torch.bfloat16 if use_bf16 else torch.float16
-        
+
         # Learnable linear projection for combining sparse + linear attention
         self.proj_l = nn.Linear(head_size, head_size, dtype=torch.float32)
-        
+
         # Feature map for linear attention
         if feature_map == "elu":
             self.feature_map_q = lambda x: F.elu(x) + 1
@@ -229,9 +233,9 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
             self.feature_map_k = lambda x: F.softmax(x, dim=-1)
         else:
             raise ValueError(f"Unknown feature map: {feature_map}")
-        
+
         self._init_weights()
-    
+
     def _init_weights(self) -> None:
         """Initialize projection weights to zero for residual-like behavior."""
         with torch.no_grad():
@@ -280,47 +284,48 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
             Output tensor (B, L, H, D)
         """
         original_dtype = query.dtype
-        
+
         # Convert from FastVideo format (B, L, H, D) to SLA format (B, H, L, D)
         q = query.transpose(1, 2).contiguous()
         k = key.transpose(1, 2).contiguous()
         v = value.transpose(1, 2).contiguous()
-        
+
         # Get topk ratio from metadata if available
         topk_ratio = self.topk_ratio
         if hasattr(attn_metadata, 'topk_ratio'):
             topk_ratio = attn_metadata.topk_ratio  # type: ignore[union-attr]
-        
+
         # Compute block-sparse attention pattern
-        sparse_map, lut, real_topk = get_block_map(
-            q, k, topk_ratio=topk_ratio, BLKQ=self.BLKQ, BLKK=self.BLKK
-        )
-        
+        sparse_map, lut, real_topk = get_block_map(q,
+                                                   k,
+                                                   topk_ratio=topk_ratio,
+                                                   BLKQ=self.BLKQ,
+                                                   BLKK=self.BLKK)
+
         # Convert to compute dtype
         q = q.to(self.dtype)
         k = k.to(self.dtype)
         v = v.to(self.dtype)
-        
+
         # Sparse attention
-        o_s = _attention.apply(
-            q, k, v, sparse_map, lut, real_topk, self.BLKQ, self.BLKK
-        )
-        
+        o_s = _attention.apply(q, k, v, sparse_map, lut, real_topk, self.BLKQ,
+                               self.BLKK)
+
         # Linear attention with feature maps
-        q_linear = self.feature_map_q(q).contiguous().to(self.dtype)
-        k_linear = self.feature_map_k(k).contiguous().to(self.dtype)
+        q_linear = self.feature_map_q(q).contiguous().to(self.dtype)  # type: ignore[no-untyped-call]
+        k_linear = self.feature_map_k(k).contiguous().to(self.dtype)  # type: ignore[no-untyped-call]
         o_l = self._calc_linear_attention(q_linear, k_linear, v)
-        
+
         # Project linear attention output and combine
         with torch.amp.autocast('cuda', dtype=self.dtype):
             o_l = self.proj_l(o_l)
-        
+
         # Combine sparse and linear outputs
         output = (o_s + o_l).to(original_dtype)
-        
+
         # Convert back to FastVideo format (B, L, H, D)
         output = output.transpose(1, 2)
-        
+
         return output
 
 
@@ -401,28 +406,30 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
         **extra_impl_args,
     ) -> None:
         nn.Module.__init__(self)
-        
+
         if not SAGESLA_ENABLED:
             raise ImportError(
                 "SageSLA requires spas_sage_attn. "
                 "Install with: pip install git+https://github.com/thu-ml/SpargeAttn.git"
             )
-        
-        assert head_size in [64, 128], f"SageSLA requires head_size in [64, 128], got {head_size}"
-        
+
+        assert head_size in [
+            64, 128
+        ], f"SageSLA requires head_size in [64, 128], got {head_size}"
+
         self.num_heads = num_heads
         self.head_size = head_size
         self.softmax_scale = softmax_scale if softmax_scale else head_size**-0.5
         self.causal = causal
         self.prefix = prefix
-        
+
         # SageSLA-specific config
         self.topk_ratio = topk_ratio
         self.dtype = torch.bfloat16 if use_bf16 else torch.float16
-        
+
         # Learnable linear projection for combining sparse + linear attention
         self.proj_l = nn.Linear(head_size, head_size, dtype=torch.float32)
-        
+
         # Feature map for linear attention
         if feature_map == "elu":
             self.feature_map_q = lambda x: F.elu(x) + 1
@@ -435,9 +442,9 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
             self.feature_map_k = lambda x: F.softmax(x, dim=-1)
         else:
             raise ValueError(f"Unknown feature map: {feature_map}")
-        
+
         self._init_weights()
-    
+
     def _init_weights(self) -> None:
         """Initialize projection weights to zero for residual-like behavior."""
         with torch.no_grad():
@@ -476,86 +483,98 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
             Output tensor (B, L, H, D)
         """
         original_dtype = query.dtype
-        
+
         # Convert from FastVideo format (B, L, H, D) to SLA format (B, H, L, D)
         q = query.transpose(1, 2).contiguous()
         k = key.transpose(1, 2).contiguous()
         v = value.transpose(1, 2).contiguous()
-        
+
         # Get topk ratio from metadata if available
         topk_ratio = self.topk_ratio
         if hasattr(attn_metadata, 'topk_ratio'):
             topk_ratio = attn_metadata.topk_ratio  # type: ignore[union-attr]
-        
+
         # Determine block sizes based on GPU architecture
         arch = _get_cuda_arch(q.device.index)
         if arch == "sm90":
             BLKQ, BLKK = 64, 128
         else:
             BLKQ, BLKK = 128, 64
-        
+
         # Compute block-sparse attention pattern
-        sparse_map, lut, real_topk = get_block_map(
-            q, k, topk_ratio=topk_ratio, BLKQ=BLKQ, BLKK=BLKK
-        )
-        
+        sparse_map, lut, real_topk = get_block_map(q,
+                                                   k,
+                                                   topk_ratio=topk_ratio,
+                                                   BLKQ=BLKQ,
+                                                   BLKK=BLKK)
+
         # Convert to compute dtype
         q = q.to(self.dtype)
         k = k.to(self.dtype)
         v = v.to(self.dtype)
-        
+
         # ========== SPARGE QUANTIZED ATTENTION ==========
         km = k.mean(dim=-2, keepdim=True)
         headdim = q.size(-1)
-        scale = 1.0 / (headdim ** 0.5)
-        
+        scale = 1.0 / (headdim**0.5)
+
         # Quantize Q, K to INT8
-        q_int8, q_scale, k_int8, k_scale = get_vanilla_qk_quant(q, k, km, BLKQ, BLKK)
+        q_int8, q_scale, k_int8, k_scale = get_vanilla_qk_quant(
+            q, k, km, BLKQ, BLKK)
         lut_triton, valid_block_num = block_map_lut_triton(sparse_map)
-        
+
         # Quantize V to FP8
         b, h_kv, kv_len, head_dim = v.shape
         padded_len = (kv_len + 127) // 128 * 128
-        v_transposed_permutted = torch.empty((b, h_kv, head_dim, padded_len), dtype=v.dtype, device=v.device)
+        v_transposed_permutted = torch.empty((b, h_kv, head_dim, padded_len),
+                                             dtype=v.dtype,
+                                             device=v.device)
         fused.transpose_pad_permute_cuda(v, v_transposed_permutted, 1)
-        v_fp8 = torch.empty(v_transposed_permutted.shape, dtype=torch.float8_e4m3fn, device=v.device)
-        v_scale = torch.empty((b, h_kv, head_dim), dtype=torch.float32, device=v.device)
-        fused.scale_fuse_quant_cuda(v_transposed_permutted, v_fp8, v_scale, kv_len, 2.25, 1)
-        
+        v_fp8 = torch.empty(v_transposed_permutted.shape,
+                            dtype=torch.float8_e4m3fn,
+                            device=v.device)
+        v_scale = torch.empty((b, h_kv, head_dim),
+                              dtype=torch.float32,
+                              device=v.device)
+        fused.scale_fuse_quant_cuda(v_transposed_permutted, v_fp8, v_scale,
+                                    kv_len, 2.25, 1)
+
         # Sparse attention with quantized kernels
         o_s = torch.empty_like(q)
         if arch == "sm90":
             qattn.qk_int8_sv_f8_accum_f32_block_sparse_attn_inst_buf_fuse_v_scale_sm90(
-                q_int8, k_int8, v_fp8, o_s, lut_triton, valid_block_num, 
-                q_scale, k_scale, v_scale, 1, False, 1, scale
-            )
+                q_int8, k_int8, v_fp8, o_s, lut_triton, valid_block_num,
+                q_scale, k_scale, v_scale, 1, False, 1, scale)
         else:
-            pvthreshold = torch.full((q.shape[-3],), 1e6, dtype=torch.float32, device=q.device)
+            pvthreshold = torch.full((q.shape[-3], ),
+                                     1e6,
+                                     dtype=torch.float32,
+                                     device=q.device)
             if SAGE2PP_ENABLED:
                 qk_int8_sv_f8_accum_f16_block_sparse_attn_inst_buf_fuse_v_scale_with_pv_threshold(
-                    q_int8, k_int8, v_fp8, o_s, lut_triton, valid_block_num, pvthreshold,
-                    q_scale, k_scale, v_scale, 1, False, 1, scale, 0
-                )
+                    q_int8, k_int8, v_fp8, o_s, lut_triton, valid_block_num,
+                    pvthreshold, q_scale, k_scale, v_scale, 1, False, 1, scale,
+                    0)
             else:
                 qattn.qk_int8_sv_f8_accum_f32_block_sparse_attn_inst_buf_fuse_v_scale_with_pv_threshold(
-                    q_int8, k_int8, v_fp8, o_s, lut_triton, valid_block_num, pvthreshold,
-                    q_scale, k_scale, v_scale, 1, False, 1, scale, 0
-                )
+                    q_int8, k_int8, v_fp8, o_s, lut_triton, valid_block_num,
+                    pvthreshold, q_scale, k_scale, v_scale, 1, False, 1, scale,
+                    0)
         # ========== END SPARGE ==========
-        
+
         # Linear attention with feature maps
-        q_linear = self.feature_map_q(q).contiguous().to(self.dtype)
-        k_linear = self.feature_map_k(k).contiguous().to(self.dtype)
+        q_linear = self.feature_map_q(q).contiguous().to(self.dtype)  # type: ignore[no-untyped-call]
+        k_linear = self.feature_map_k(k).contiguous().to(self.dtype)  # type: ignore[no-untyped-call]
         o_l = self._calc_linear_attention(q_linear, k_linear, v)
-        
+
         # Project linear attention output and combine
         with torch.amp.autocast('cuda', dtype=self.dtype):
             o_l = self.proj_l(o_l)
-        
+
         # Combine sparse and linear outputs
         output = (o_s + o_l).to(original_dtype)
-        
+
         # Convert back to FastVideo format (B, L, H, D)
         output = output.transpose(1, 2)
-        
+
         return output

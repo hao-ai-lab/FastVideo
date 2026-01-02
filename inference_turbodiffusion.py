@@ -24,36 +24,56 @@ from fastvideo.logger import init_logger
 logger = init_logger(__name__)
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="TurboDiffusion Video Generation")
-    parser.add_argument("--prompt", type=str, default="A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes wide with interest", help="Single text prompt")
-    parser.add_argument("--prompts_file", type=str, default="turbodiffusion_prompts.txt",
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="TurboDiffusion Video Generation")
+    parser.add_argument(
+        "--prompt",
+        type=str,
+        default=
+        "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes wide with interest",
+        help="Single text prompt")
+    parser.add_argument("--prompts_file",
+                        type=str,
+                        default="turbodiffusion_prompts.txt",
                         help="Path to file with prompts (one per line)")
-    parser.add_argument("--num_inference_steps", type=int, default=4, help="Steps (1-4)")
-    parser.add_argument("--num_frames", type=int, default=81, help="Number of frames")
+    parser.add_argument("--num_inference_steps",
+                        type=int,
+                        default=4,
+                        help="Steps (1-4)")
+    parser.add_argument("--num_frames",
+                        type=int,
+                        default=81,
+                        help="Number of frames")
     parser.add_argument("--height", type=int, default=480, help="Video height")
     parser.add_argument("--width", type=int, default=832, help="Video width")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--output_path", type=str, default="outputs/", help="Output dir")
-    parser.add_argument("--num_gpus", type=int, default=2, help="Number of GPUs")
+    parser.add_argument("--output_path",
+                        type=str,
+                        default="outputs/",
+                        help="Output dir")
+    parser.add_argument("--num_gpus",
+                        type=int,
+                        default=2,
+                        help="Number of GPUs")
     return parser.parse_args()
 
 
-def load_prompts(args):
+def load_prompts(args: argparse.Namespace) -> list[str]:
     """Load prompts from file or use single prompt."""
     if args.prompt:
         return [args.prompt]
-    
+
     if args.prompts_file and os.path.exists(args.prompts_file):
-        with open(args.prompts_file, 'r') as f:
+        with open(args.prompts_file) as f:
             prompts = [line.strip() for line in f if line.strip()]
         logger.info(f"Loaded {len(prompts)} prompts from {args.prompts_file}")
         return prompts
-    
+
     raise ValueError("No prompt provided. Use --prompt or --prompts_file")
 
 
-def main():
+def main() -> None:
     args = parse_args()
     prompts = load_prompts(args)
 
@@ -68,7 +88,7 @@ def main():
     # Generate video for each prompt
     for i, prompt in enumerate(prompts):
         logger.info(f"Generating video {i+1}/{len(prompts)}: {prompt[:80]}...")
-        
+
         # Note: guidance_scale=1.0 disables CFG - TurboDiffusion is distilled without CFG
         generator.generate_video(
             prompt,
@@ -85,4 +105,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

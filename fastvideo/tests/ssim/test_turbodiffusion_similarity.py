@@ -25,9 +25,9 @@ if "A40" in device_name:
 elif "L40S" in device_name:
     device_reference_folder = "L40S" + device_reference_folder_suffix
 else:
-    device_reference_folder = "L40S" + device_reference_folder_suffix
-    logger.warning(f"Unsupported device for ssim tests: {device_name}, using H100 references")
-    # raise ValueError(f"Unsupported device for ssim tests: {device_name}")
+    # device_reference_folder = "L40S" + device_reference_folder_suffix
+    logger.warning(f"Unsupported device for ssim tests: {device_name}, using L40S references")
+    raise ValueError(f"Unsupported device for ssim tests: {device_name}")
 
 
 # TurboDiffusion parameters (1-4 step generation with RCM scheduler + SLA attention)
@@ -157,7 +157,3 @@ def test_turbodiffusion_inference_similarity(prompt, model_id):
         f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
         f"for {model_id} with backend {ATTENTION_BACKEND}"
     )
-
-
-if __name__ == '__main__':
-    test_turbodiffusion_inference_similarity("Will Smith casually eats noodles, his relaxed demeanor contrasting with the energetic background of a bustling street food market. The scene captures a mix of humor and authenticity. Mid-shot framing, vibrant lighting.", "TurboWan2.1-T2V-1.3B-Diffusers")

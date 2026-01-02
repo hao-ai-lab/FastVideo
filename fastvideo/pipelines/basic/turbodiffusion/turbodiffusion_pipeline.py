@@ -7,12 +7,6 @@ for 1-4 step video generation using rCM (recurrent Consistency Model) sampling
 with SLA (Sparse-Linear Attention).
 """
 
-import os
-import re
-import torch
-
-from fastvideo.utils import maybe_download_model
-
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_rcm import RCMScheduler
@@ -41,12 +35,11 @@ class TurboDiffusionPipeline(LoRAPipeline, ComposedPipelineBase):
         # Use RCM scheduler for TurboDiffusion
         logger.info("Initializing RCM scheduler for TurboDiffusion")
         self.modules["scheduler"] = RCMScheduler(sigma_max=80.0)
-        
-        # Store checkpoint path for later loading
-        self._turbodiffusion_checkpoint = getattr(
-            fastvideo_args, 'turbodiffusion_checkpoint', None
-        )
 
+        # Store checkpoint path for later loading
+        self._turbodiffusion_checkpoint = getattr(fastvideo_args,
+                                                  'turbodiffusion_checkpoint',
+                                                  None)
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""
