@@ -20,6 +20,9 @@ import os
 import re
 import json
 import torch
+import shutil
+import glob
+from safetensors import safe_open
 from safetensors.torch import save_file
 from huggingface_hub import snapshot_download
 
@@ -99,10 +102,7 @@ def get_reference_shapes(reference_repo: str) -> dict:
         local_dir_use_symlinks=False
     )
     
-    # Load the first safetensors file to get shapes
-    import glob
-    from safetensors import safe_open
-    
+    # Load the first safetensors file to get shapes    
     weight_files = glob.glob(os.path.join(local_dir, "transformer", "*.safetensors"))
     shapes = {}
     
@@ -186,7 +186,6 @@ def main():
         allow_patterns=["transformer/config.json"],
         local_dir_use_symlinks=False
     )
-    import shutil
     src_config = os.path.join(ref_local, "transformer", "config.json")
     dst_config = os.path.join(args.output_dir, "config.json")
     shutil.copy(src_config, dst_config)

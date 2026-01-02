@@ -67,7 +67,6 @@ def load_prompts(args: argparse.Namespace) -> list[str]:
     if args.prompts_file and os.path.exists(args.prompts_file):
         with open(args.prompts_file) as f:
             prompts = [line.strip() for line in f if line.strip()]
-        logger.info(f"Loaded {len(prompts)} prompts from {args.prompts_file}")
         return prompts
 
     raise ValueError("No prompt provided. Use --prompt or --prompts_file")
@@ -87,9 +86,6 @@ def main() -> None:
 
     # Generate video for each prompt
     for i, prompt in enumerate(prompts):
-        logger.info(f"Generating video {i+1}/{len(prompts)}: {prompt[:80]}...")
-
-        # Note: guidance_scale=1.0 disables CFG - TurboDiffusion is distilled without CFG
         generator.generate_video(
             prompt,
             num_inference_steps=args.num_inference_steps,
@@ -99,7 +95,7 @@ def main() -> None:
             seed=args.seed,
             output_path=args.output_path,
             save_video=True,
-            guidance_scale=1.0,  # TurboDiffusion doesn't use CFG
+            guidance_scale=1.0,
         )
 
 

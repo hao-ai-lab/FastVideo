@@ -159,7 +159,6 @@ class RCMScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
             self.sigma_max = sigma_max
 
         # Build timestep schedule
-        # mid_t = [1.5, 1.4, 1.0][:num_steps - 1]
         mid_t = self._mid_timesteps[:num_inference_steps - 1]
 
         # TrigFlow timesteps: [atan(sigma_max), mid_t..., 0]
