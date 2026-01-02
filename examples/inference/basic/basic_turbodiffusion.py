@@ -1,102 +1,54 @@
-#!/usr/bin/env python3
-"""
-TurboDiffusion Inference Script for FastVideo
-
-Minimal script for 1-4 step video generation using:
-- TurboDiffusionPipeline with RCM scheduler
-- SLA attention backend
-- Auto-downloaded TurboDiffusion checkpoint weights
-
-Usage:
-    python inference_turbodiffusion.py --prompt "A curious raccoon..."
-    python inference_turbodiffusion.py --prompts_file turbodiffusion_prompts.txt
-"""
-
 import os
-import argparse
 
 # Set SLA attention backend BEFORE fastvideo imports
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "SLA_ATTN"
 
 from fastvideo import VideoGenerator
-from fastvideo.logger import init_logger
 
-logger = init_logger(__name__)
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="TurboDiffusion Video Generation")
-    parser.add_argument(
-        "--prompt",
-        type=str,
-        default=
-        "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes wide with interest",
-        help="Single text prompt")
-    parser.add_argument("--prompts_file",
-                        type=str,
-                        default="turbodiffusion_prompts.txt",
-                        help="Path to file with prompts (one per line)")
-    parser.add_argument("--num_inference_steps",
-                        type=int,
-                        default=4,
-                        help="Steps (1-4)")
-    parser.add_argument("--num_frames",
-                        type=int,
-                        default=81,
-                        help="Number of frames")
-    parser.add_argument("--height", type=int, default=480, help="Video height")
-    parser.add_argument("--width", type=int, default=832, help="Video width")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--output_path",
-                        type=str,
-                        default="outputs/",
-                        help="Output dir")
-    parser.add_argument("--num_gpus",
-                        type=int,
-                        default=2,
-                        help="Number of GPUs")
-    return parser.parse_args()
-
-
-def load_prompts(args: argparse.Namespace) -> list[str]:
-    """Load prompts from file or use single prompt."""
-    if args.prompt:
-        return [args.prompt]
-
-    if args.prompts_file and os.path.exists(args.prompts_file):
-        with open(args.prompts_file) as f:
-            prompts = [line.strip() for line in f if line.strip()]
-        return prompts
-
-    raise ValueError("No prompt provided. Use --prompt or --prompts_file")
+OUTPUT_PATH = "video_samples_turbodiffusion"
 
 
 def main() -> None:
-    args = parse_args()
-    prompts = load_prompts(args)
-
-    # Create video generator with TurboDiffusion pipeline
-    # Now loads directly from pre-converted HF repo (no .pth loading needed)
+    # TurboDiffusion: 1-4 step video generation using RCM scheduler + SLA attention
+    # FastVideo will automatically use TurboDiffusionPipeline when specified
     generator = VideoGenerator.from_pretrained(
-        "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers",  # Pre-converted weights
-        num_gpus=args.num_gpus,
+        "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers",
+        # FastVideo will automatically handle distributed setup
+        num_gpus=1,
+        # TurboDiffusion uses a custom pipeline with RCM scheduler
         override_pipeline_cls_name="TurboDiffusionPipeline",
     )
 
-    # Generate video for each prompt
-    for i, prompt in enumerate(prompts):
-        generator.generate_video(
-            prompt,
-            num_inference_steps=args.num_inference_steps,
-            num_frames=args.num_frames,
-            height=args.height,
-            width=args.width,
-            seed=args.seed,
-            output_path=args.output_path,
-            save_video=True,
-            guidance_scale=1.0,
-        )
+    # Generate videos with the same simple API, regardless of GPU count
+    # TurboDiffusion uses guidance_scale=1.0 (no CFG) and only 4 steps
+    prompt = (
+        "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
+        "wide with interest. The playful yet serene atmosphere is complemented by soft "
+        "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
+    )
+    video = generator.generate_video(
+        prompt,
+        output_path=OUTPUT_PATH,
+        save_video=True,
+        num_inference_steps=4,  # TurboDiffusion uses 1-4 steps
+        guidance_scale=1.0,  # No CFG for TurboDiffusion
+    )
+
+    # Generate another video with a different prompt, without reloading the model!
+    prompt2 = (
+        "A majestic lion strides across the golden savanna, its powerful frame "
+        "glistening under the warm afternoon sun. The tall grass ripples gently in "
+        "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
+        "embodying the raw energy of the wild. Low angle, steady tracking shot, "
+        "cinematic."
+    )
+    video2 = generator.generate_video(
+        prompt2,
+        output_path=OUTPUT_PATH,
+        save_video=True,
+        num_inference_steps=4,
+        guidance_scale=1.0,
+    )
 
 
 if __name__ == "__main__":
