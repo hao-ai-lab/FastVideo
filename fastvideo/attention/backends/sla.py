@@ -111,11 +111,11 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         softmax_scale: float | None = None,
         num_kv_heads: int | None = None,
         prefix: str = "",
-        # SLA-specific parameters
-        topk_ratio: float = 0.5,
+        # SLA-specific parameters - matched to TurboDiffusion defaults
+        topk_ratio: float = 0.1,  # TurboDiffusion uses topk=0.1
         feature_map: str = "softmax",
-        BLKQ: int = 64,
-        BLKK: int = 64,
+        BLKQ: int = 128,  # TurboDiffusion uses BLKQ=128
+        BLKK: int = 64,   # TurboDiffusion uses BLKK=64
         use_bf16: bool = True,
         **extra_impl_args,
     ) -> None:
@@ -200,7 +200,7 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         """
         original_dtype = query.dtype
 
-        # print("running sla")
+        print("running sla in fv")
         
         # Convert from FastVideo format (B, L, H, D) to SLA format (B, H, L, D)
         q = query.transpose(1, 2).contiguous()
