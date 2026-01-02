@@ -45,6 +45,7 @@ FastVideo uses the Hugging Face Diffusers format for model organization:
 ### Implementing Modules
 
 Place new modules in the appropriate directories:
+
 - Encoders: `fastvideo/models/encoders/`
 - VAEs: `fastvideo/models/vaes/`
 - Transformer models: `fastvideo/models/dits/`
@@ -53,12 +54,15 @@ Place new modules in the appropriate directories:
 ### Adapting Model Layers
 
 #### Layer Replacements
+
 Replace standard PyTorch layers with FastVideo optimized versions:
+
 - nn.LayerNorm → fastvideo.layers.layernorm.RMSNorm
 - Embedding layers → fastvideo.layers.vocab_parallel_embedding modules
 - Activation functions → versions from fastvideo.layers.activation
 
 #### Distributed Linear Layers
+
 Use appropriate parallel layers for distribution:
 
 ```python
@@ -91,6 +95,7 @@ self.out_proj = RowParallelLinear(
 ```
 
 ### Attention Layers
+
 Replace standard attention with FastVideo's optimized attention:
 
 ```python
@@ -304,6 +309,7 @@ EntryClass = [MyCustomPipeline, MyOtherPipeline]
 ```
 
 The registry will automatically:
+
 1. Scan all packages under `fastvideo/pipelines/`
 2. Look for `EntryClass` variables
 3. Register pipelines using their class names as identifiers

@@ -1,7 +1,7 @@
 
 # 🧠 Finetune
 ## ⚡ Full Finetune
-Ensure your data is prepared and preprocessed in the format specified in [data_preprocess.md](#v0-data-preprocess). For convenience, we also provide a mochi preprocessed Black Myth Wukong data that can be downloaded directly:
+Ensure your data is prepared and preprocessed in the format specified in [data_preprocess.md](data_preprocess.md). For convenience, we also provide a mochi preprocessed Black Myth Wukong data that can be downloaded directly:
 
 ```bash
 python scripts/huggingface/download_hf.py --repo_id=FastVideo/Mochi-Black-Myth --local_dir=data/Mochi-Black-Myth --repo_type=dataset
@@ -17,7 +17,7 @@ bash scripts/finetune/finetune_mochi.sh # for mochi
 
 **Note that for finetuning, we did not tune the hyperparameters in the provided script.**
 ## ⚡ Finetune with VSA
-Follow [data_preprocess.md](#v0-data-preprocess) to get parquet files for preproccessed latent, and then run:
+Follow [data_preprocess.md](data_preprocess.md) to get parquet files for preproccessed latent, and then run:
 
 ```bash
 bash scripts/finetune/finetune_v1_VSA.sh

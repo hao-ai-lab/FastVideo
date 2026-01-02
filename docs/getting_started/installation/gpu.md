@@ -84,12 +84,12 @@ pip install flash-attn --no-build-isolation
 
 ## Set up using Docker
 We also have prebuilt docker images with FastVideo dependencies pre-installed:
-[Docker Images](#docker)
+[Docker Images](../../contributing/developer_env/docker.md)
 
 ## Development Environment Setup
 
 If you're planning to contribute to FastVideo please see the following page:
-[Contributor Guide](#developer-overview)
+[Contributor Guide](../../contributing/overview.md)
 
 ## Hardware Requirements
 

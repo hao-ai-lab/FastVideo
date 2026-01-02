@@ -7,13 +7,13 @@ This page describes the various options for speeding up generation times in Fast
 
 - Optimized Attention Backends
 
-  - [Flash Attention](#optimizations-flash)
-  - [Sliding Tile Attention](#optimizations-sta)
-  - [Sage Attention](#optimizations-sage)
-  - [Sage Attention 3](#optimizations-sage3)
+  - [Flash Attention](#flash-attention)
+  - [Sliding Tile Attention](#sliding-tile-attention)
+  - [Sage Attention](#sage-attention)
+  - [Sage Attention 3](#sage-attention-3)
 
 - Caching Techniques
-  - [TeaCache](#optimizations-teacache)
+  - [TeaCache](#teacache)
 
 ## Attention Backends
 
@@ -74,7 +74,7 @@ python setup.py install
 pip install st_attn==0.0.4
 ```
 
-Please see [this page](#sta-installation) for more installation instructions.
+Please see [this page](../attention/sta/index.md) for more installation instructions.
 
 ### Video Sparse Attention
 
@@ -85,7 +85,7 @@ git submodule update --init --recursive
 python setup_vsa.py install
 ```
 
-Please see [this page](#vsa-installation) for more installation instructions.
+Please see [this page](../attention/vsa/index.md) for more installation instructions.
 
 ### Sage Attention
 
