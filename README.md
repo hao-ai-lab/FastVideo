@@ -1,6 +1,7 @@
 <div align="center">
 <img src=assets/logos/logo.svg width="30%"/>
 </div>
+
 **FastVideo is a unified post-training and inference framework for accelerated video generation.**
 
 FastVideo features an end-to-end unified pipeline for accelerating diffusion models, starting from data preprocessing to model training, finetuning, distillation, and inference. FastVideo is designed to be modular and extensible, allowing users to easily add new optimizations and techniques. Whether it is training-free optimizations or post-training optimizations, FastVideo has you covered.
@@ -25,11 +26,14 @@ FastVideo features an end-to-end unified pipeline for accelerating diffusion mod
 ## Key Features
 
 FastVideo has the following features:
-- End-to-end post-training support:
-  - [Sparse distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/) for Wan2.1 and Wan2.2 to achineve >50x denoising speedup
-  - Data preprocessing pipeline for video data
+- End-to-end post-training support for bidirectional and autoregressive models:
   - Support full finetuning and LoRA finetuning for state-of-the-art open video DiTs
-  - Scalable training with FSDP2, sequence parallelism, and selective activation checkpointing, with near linear scaling to 64 GPUs
+    - See this [page](https://hao-ai-lab.github.io/FastVideo/training/training_recipes/) for full list of supported models and recipes.
+  - Data preprocessing pipeline for video, image, and text data
+  - Distribution Matching Distillation (DMD2) stepwise distillation.
+  - [Sparse distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/) to achineve >50x denoising speedup
+  - Scalable training with FSDP2, sequence parallelism, and selective activation checkpointing.
+  - Causal distillation through Self-Forcing
 - State-of-the-art performance optimizations for inference
   - [Video Sparse Attention](https://arxiv.org/pdf/2505.13389)
   - [Sliding Tile Attention](https://arxiv.org/pdf/2502.04507)
