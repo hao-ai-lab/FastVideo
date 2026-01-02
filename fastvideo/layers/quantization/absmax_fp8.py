@@ -1,5 +1,6 @@
 from typing import Any
 import torch
+from fastvideo.distributed.parallel_state import get_tp_world_size
 from fastvideo.layers.linear import (
     LinearBase,
     LinearMethodBase,
@@ -71,24 +72,30 @@ class AbsMaxFP8MergedParameter(nn.Parameter):
         self,
         param: nn.Parameter,
         loaded_weight: torch.Tensor,
-        share_id: str | None = None,
+        share_id: str | int | None = None,
     ) -> None:
         output_partition_sizes: list[int] = self.output_partition_sizes
-        match share_id:
-            case "q":
-                start_idx = 0
-                end_idx = output_partition_sizes[0]
-            case "k":
-                start_idx = output_partition_sizes[0]
-                end_idx = start_idx + output_partition_sizes[1]
-            case "v":
-                start_idx = (output_partition_sizes[0] +
-                             output_partition_sizes[1])
-                end_idx = start_idx + output_partition_sizes[2]
-            case _:
-                raise ValueError(
-                    f"AbsMaxFP8Parameter only supports share_id in ['q', 'k', 'v'] for QKVParallelLinear now, got {share_id}."
+        if share_id is None:
+            share_id = 0
+        if isinstance(share_id, str) and share_id in ["q", "k", "v"]:
+            # QKVParallelLinear case
+            share_idx = ["q", "k", "v"].index(share_id)
+            start_idx = sum(output_partition_sizes[:share_idx])
+            end_idx = start_idx + output_partition_sizes[share_idx]
+        elif isinstance(share_id, int):
+            # MergedColumnParallelLinear case
+            tp_size = get_tp_world_size()
+            if tp_size > 1:
+                # TODO: support this case
+                raise NotImplementedError(
+                    "AbsMaxFP8MergedParameter with integer share_id is not supported in tensor parallelism greater than 1 yet."
                 )
+            start_idx = sum(output_partition_sizes[:share_id])
+            end_idx = start_idx + output_partition_sizes[share_id]
+        else:
+            raise ValueError(
+                f"AbsMaxFP8MergedParameter requires share_id to be ['q', 'k', 'v'] or int, got {share_id}."
+            )
         if len(loaded_weight.shape) == 0:
             loaded_weight = loaded_weight.reshape(1)
         assert loaded_weight.numel() == 1
@@ -150,13 +157,9 @@ class AbsMaxFP8LinearMethod(LinearMethodBase):
             ),
             requires_grad=False,
         )
-        if isinstance(layer, QKVParallelLinear):
+        if isinstance(layer, QKVParallelLinear | MergedColumnParallelLinear):
             scale_weight = self._merged_placeholder(output_partition_sizes, )
             scale_input = self._merged_placeholder(output_partition_sizes, )
-        elif isinstance(layer, MergedColumnParallelLinear):
-            raise NotImplementedError(
-                "AbsMaxFP8LinearMethod does not support MergedColumnParallelLinear yet."
-            )
         else:
             scale_weight = self._convert_scale(
                 extra_weight_attrs.get("scale_weight"))
