@@ -70,8 +70,6 @@ class DenoisingStage(PipelineStage):
         self.transformer = transformer
         self.transformer_2 = transformer_2
         self.scheduler = scheduler
-        # print(self.scheduler)
-        # sys.exit()
         self.vae = vae
         self.pipeline = weakref.ref(pipeline) if pipeline else None
         attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads
