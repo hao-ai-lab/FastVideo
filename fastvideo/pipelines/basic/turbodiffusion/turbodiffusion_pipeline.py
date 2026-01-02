@@ -11,6 +11,8 @@ import os
 import re
 import torch
 
+from fastvideo.utils import maybe_download_model
+
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_rcm import RCMScheduler
@@ -111,6 +113,7 @@ def load_turbodiffusion_weights(model: torch.nn.Module, checkpoint_path: str) ->
     
     # Load weights with DTensor compatibility
     loaded_count = 0
+    proj_l_loaded = 0
     with torch.no_grad():
         for name, param in model.named_parameters():
             if name in loaded_weights:
@@ -124,8 +127,13 @@ def load_turbodiffusion_weights(model: torch.nn.Module, checkpoint_path: str) ->
                 else:
                     param.copy_(new_weight)
                 loaded_count += 1
+                if 'proj_l' in name:
+                    proj_l_loaded += 1
+                    # Debug: Show that proj_l was loaded with non-zero values
+                    # if proj_l_loaded <= 2:
+                    #     logger.info(f"Loaded {name}: mean={new_weight.mean().item():.6f}, std={new_weight.std().item():.6f}")
     
-    logger.info(f"Successfully loaded {loaded_count} weights into FastVideo model")
+    logger.info(f"Successfully loaded {loaded_count} weights into FastVideo model (including {proj_l_loaded} proj_l)")
     return model
 
 
@@ -152,7 +160,6 @@ class TurboDiffusionPipeline(LoRAPipeline, ComposedPipelineBase):
 
     def load_modules(self, fastvideo_args: FastVideoArgs, loaded_modules=None):
         """Override to load TurboDiffusion weights after transformer is loaded."""
-        from fastvideo.utils import maybe_download_model
         
         # First, load all modules normally
         modules = super().load_modules(fastvideo_args, loaded_modules)

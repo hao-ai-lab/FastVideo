@@ -98,6 +98,18 @@ class RCMScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         """
         return self._begin_index
 
+    @property
+    def init_noise_sigma(self) -> float:
+        """
+        Initial noise sigma for scaling latents.
+        
+        In rCM, initial noise is scaled by the first sigma value:
+            x_0 = noise * sigmas[0]
+        
+        This property is used by LatentPreparationStage to scale initial latents.
+        """
+        return float(self.sigmas[0])
+
     def set_begin_index(self, begin_index: int = 0) -> None:
         """
         Sets the begin index for the scheduler.
