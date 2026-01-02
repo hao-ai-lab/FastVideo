@@ -15,6 +15,7 @@
 
 from dataclasses import dataclass
 from typing import Any
+from collections.abc import Callable
 
 import torch
 import torch.nn as nn
@@ -222,6 +223,9 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
         self.proj_l = nn.Linear(head_size, head_size, dtype=torch.float32)
 
         # Feature map for linear attention
+        # Type annotation for callables
+        self.feature_map_q: Callable[[torch.Tensor], torch.Tensor]
+        self.feature_map_k: Callable[[torch.Tensor], torch.Tensor]
         if feature_map == "elu":
             self.feature_map_q = lambda x: F.elu(x) + 1
             self.feature_map_k = lambda x: F.elu(x) + 1
@@ -312,8 +316,8 @@ class SLAAttentionImpl(AttentionImpl, nn.Module):
                                self.BLKK)
 
         # Linear attention with feature maps
-        q_linear = self.feature_map_q(q).contiguous().to(self.dtype)  # type: ignore[no-untyped-call]
-        k_linear = self.feature_map_k(k).contiguous().to(self.dtype)  # type: ignore[no-untyped-call]
+        q_linear = self.feature_map_q(q).contiguous().to(self.dtype)
+        k_linear = self.feature_map_k(k).contiguous().to(self.dtype)
         o_l = self._calc_linear_attention(q_linear, k_linear, v)
 
         # Project linear attention output and combine
@@ -431,6 +435,9 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
         self.proj_l = nn.Linear(head_size, head_size, dtype=torch.float32)
 
         # Feature map for linear attention
+        # Type annotation for callables
+        self.feature_map_q: Callable[[torch.Tensor], torch.Tensor]
+        self.feature_map_k: Callable[[torch.Tensor], torch.Tensor]
         if feature_map == "elu":
             self.feature_map_q = lambda x: F.elu(x) + 1
             self.feature_map_k = lambda x: F.elu(x) + 1
@@ -563,8 +570,8 @@ class SageSLAAttentionImpl(AttentionImpl, nn.Module):
         # ========== END SPARGE ==========
 
         # Linear attention with feature maps
-        q_linear = self.feature_map_q(q).contiguous().to(self.dtype)  # type: ignore[no-untyped-call]
-        k_linear = self.feature_map_k(k).contiguous().to(self.dtype)  # type: ignore[no-untyped-call]
+        q_linear = self.feature_map_q(q).contiguous().to(self.dtype)
+        k_linear = self.feature_map_k(k).contiguous().to(self.dtype)
         o_l = self._calc_linear_attention(q_linear, k_linear, v)
 
         # Project linear attention output and combine
