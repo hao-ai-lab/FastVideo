@@ -199,6 +199,34 @@ class CudaPlatformBase(Platform):
                     "Failed to import Video MoBA Attention backend: %s", str(e))
                 raise ImportError(
                     "Video MoBA Attention backend is not installed. ") from e
+        elif selected_backend == AttentionBackendEnum.SLA_ATTN:
+            try:
+                from fastvideo.attention.backends.sla import (  # noqa: F401
+                    SLAAttentionBackend)
+                logger.info("Using SLA (Sparse-Linear Attention) backend.")
+
+                return "fastvideo.attention.backends.sla.SLAAttentionBackend"
+            except ImportError as e:
+                logger.error("Failed to import SLA Attention backend: %s",
+                             str(e))
+                raise ImportError(
+                    "SLA Attention backend is not available. ") from e
+        elif selected_backend == AttentionBackendEnum.SAGE_SLA_ATTN:
+            try:
+                from fastvideo.attention.backends.sla import (  # noqa: F401
+                    SageSLAAttentionBackend)
+                logger.info(
+                    "Using SageSLA (Quantized Sparse-Linear Attention) backend."
+                )
+
+                return "fastvideo.attention.backends.sla.SageSLAAttentionBackend"
+            except ImportError as e:
+                logger.error("Failed to import SageSLA Attention backend: %s",
+                             str(e))
+                raise ImportError(
+                    "SageSLA Attention backend requires spas_sage_attn. "
+                    "Install with: pip install git+https://github.com/thu-ml/SpargeAttn.git"
+                ) from e
         elif selected_backend == AttentionBackendEnum.TORCH_SDPA:
             logger.info("Using Torch SDPA backend.")
             return "fastvideo.attention.backends.sdpa.SDPABackend"

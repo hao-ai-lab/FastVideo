@@ -1,0 +1,11 @@
+{
+  "mean_ssim": 0.9917645101194028,
+  "min_ssim": 0.9908460974693298,
+  "max_ssim": 0.9925968050956726,
+  "reference_video": "/FastVideo/fastvideo/tests/ssim/L40S_reference_videos/TurboWan2.1-T2V-1.3B-Diffusers/SLA_ATTN/Will Smith casually eats noodles, his relaxed demeanor contrasting with the energetic background of.mp4",
+  "generated_video": "/FastVideo/fastvideo/tests/ssim/generated_videos/TurboWan2.1-T2V-1.3B-Diffusers/SLA_ATTN/Will Smith casually eats noodles, his relaxed demeanor contrasting with the energetic background of.mp4",
+  "parameters": {
+    "num_inference_steps": 4,
+    "prompt": "Will Smith casually eats noodles, his relaxed demeanor contrasting with the energetic background of a bustling street food market. The scene captures a mix of humor and authenticity. Mid-shot framing, vibrant lighting."
+  }
+}
