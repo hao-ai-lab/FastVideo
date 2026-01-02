@@ -53,10 +53,8 @@ class AbsMaxFP8Parameter(nn.Parameter):
         self,
         param: nn.Parameter,
         loaded_weight: torch.Tensor,
-        share_id: str | None = None,
+        _share_id: str | None = None,
     ) -> None:
-        assert share_id is None, (
-            "AbsMaxFP8Parameter does not support share_id in weight_loader.")
         if len(loaded_weight.shape) == 0:
             loaded_weight = loaded_weight.reshape(1)
 
@@ -159,12 +157,10 @@ class AbsMaxFP8LinearMethod(LinearMethodBase):
         )
         if isinstance(layer, QKVParallelLinear | MergedColumnParallelLinear):
             scale_weight = self._merged_placeholder(output_partition_sizes, )
-            scale_input = self._merged_placeholder(output_partition_sizes, )
         else:
             scale_weight = self._convert_scale(
                 extra_weight_attrs.get("scale_weight"))
-            scale_input = self._convert_scale(
-                extra_weight_attrs.get("scale_input"))
+        scale_input = self._convert_scale(extra_weight_attrs.get("scale_input"))
 
         set_weight_attrs(weight, {"input_dim": 1, "output_dim": 0})
         layer.register_parameter("weight", weight)
@@ -190,5 +186,22 @@ class AbsMaxFP8LinearMethod(LinearMethodBase):
         scale_input: torch.Tensor = layer.scale_input.data.to(output_dtype)
         weight_output_type = weight_quant.to(dtype=output_dtype)
         weight_final = weight_output_type * scale_weight.unsqueeze(1)
-        return (nn.functional.linear(
-            x, weight_final, bias=bias).to(dtype=output_dtype) * scale_input)
+        x_final = x.to(dtype=output_dtype) * scale_input
+        # if (
+        #     torch.isnan(x_final).any()
+        #     or torch.isinf(x_final).any()
+        #     or torch.isnan(weight_final).any()
+        #     or torch.isinf(weight_final).any()
+        # ):
+        #     raise ValueError(
+        #         "NaN or Inf detected in AbsMaxFP8LinearMethod inputs."
+        #     )
+        res = nn.functional.linear(x_final, weight_final,
+                                   bias=bias).to(dtype=output_dtype)
+        # res_nan = torch.isnan(res)
+        # res_inf = torch.isinf(res)
+        # if res_nan.any():
+        #     raise ValueError("NaN detected in AbsMaxFP8LinearMethod output.")
+        # if res_inf.any():
+        #     raise ValueError("Inf detected in AbsMaxFP8LinearMethod output.")
+        return res
