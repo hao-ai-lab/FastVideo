@@ -578,8 +578,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 round(num_trainable_params / 1e9, 3))
 
         # Set random seeds for deterministic training
-        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
-            self.seed)
+        if not self.training_args.rl_args.rl_mode:
+            self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
+                self.seed)
+        else:
+            self.noise_random_generator = torch.Generator(device=self.device).manual_seed(
+                self.seed)
         self.noise_gen_cuda = torch.Generator(
             device=current_platform.device_name).manual_seed(self.seed)
         self.validation_random_generator = torch.Generator(

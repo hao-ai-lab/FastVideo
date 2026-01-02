@@ -16,7 +16,9 @@ MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 RL_DATASET_DIR="data/ocr/"  # Path to RL prompt dataset directory (should contain train.txt and test.txt)
 VALIDATION_DATASET_FILE="$SCRIPT_DIR/validation.json"
 NUM_GPUS=1
-# export CUDA_VISIBLE_DEVICES=4,5
+
+# use GPU 3
+export CUDA_VISIBLE_DEVICES=3
 
 
 # Training arguments
@@ -25,7 +27,8 @@ training_args=(
   --output_dir "checkpoints/wan_t2v_grpo"
   --max_train_steps 5000
   --train_batch_size 4
-  --train_sp_batch_size 4
+  # --train_sp_batch_size 4
+  --train_sp_batch_size 1
   --gradient_accumulation_steps 1
   --num_latent_t 20
   --num_height 480
@@ -89,6 +92,11 @@ rl_args=(
   --rl_global_std False  # Use per-prompt std (recommended for GRPO)
   --rl_per_prompt_stat_tracking True  # Enable per-prompt stat tracking
   --rl_warmup_steps 0  # Number of warmup steps (SFT before RL)
+)
+
+# CFG arguments
+cfg_args=(
+  --guidance_scale 1.0 # use guidance_scale > 1.0 to enable CFG
 )
 
 # Miscellaneous arguments

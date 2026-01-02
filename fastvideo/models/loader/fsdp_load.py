@@ -98,7 +98,8 @@ def maybe_load_fsdp_model(
         model = model_cls(**init_params)
 
     # Check if we should use FSDP
-    use_fsdp = training_mode or fsdp_inference
+    # use_fsdp = training_mode or fsdp_inference
+    use_fsdp = False
 
     # Disable FSDP for MPS as it's not compatible
     from fastvideo.platforms import current_platform

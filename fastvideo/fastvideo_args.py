@@ -783,6 +783,9 @@ class RLArgs:
     sft_weight: float = 0.0  # SFT loss weight for supervised learning in RL training
     sft_batch_size: int = 3  # Batch size for SFT data
 
+    # CFG
+    guidance_scale = 1.0 # use guidance_scale > 1.0 to enable CFG
+
     # Statistics tracking
     global_std: bool = False  # Use global std across all samples vs per-group std
     per_prompt_stat_tracking: bool = True  # Track statistics per prompt
@@ -965,6 +968,12 @@ class RLArgs:
                             type=int,
                             default=RLArgs.sft_batch_size,
                             help="Batch size for SFT data")
+
+        # CFG settings
+        parser.add_argument("--guidance-scale",
+                            type=float,
+                            default=1.0,
+                            help="Guidance scale for CFG")
 
         # Statistics tracking
         parser.add_argument("--rl-global-std",

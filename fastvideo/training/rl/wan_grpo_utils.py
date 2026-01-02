@@ -20,7 +20,9 @@ from typing import Any, Callable, Dict, List, Optional, Union, Tuple
 
 import torch
 from diffusers.utils.torch_utils import randn_tensor
+from torch.distributed.tensor import DTensor
 
+from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler
@@ -163,7 +165,7 @@ def wan_pipeline_with_logprob(
     determistic: bool = False,
     kl_reward: float = 0.0,
     return_pixel_log_prob: bool = False,
-) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor], List[torch.Tensor]]:
+    ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor], List[torch.Tensor], Optional[torch.Tensor]]:
     """
     Wan pipeline with log probability computation for GRPO training.
 
@@ -198,10 +200,11 @@ def wan_pipeline_with_logprob(
             - all_latents: List of latents at each step [num_steps+1] of shape [B, C, T, H, W]
             - all_log_probs: List of log probabilities at each step [num_steps] of shape [B]
             - all_kl: List of KL divergences at each step [num_steps] of shape [B] (if kl_reward > 0)
+            - prompt_ids: Tokenized prompt IDs [B, seq_len] (None if prompt_embeds were provided)
     """
     # Get device from transformer
     transformer = pipeline.get_module("transformer")
-    device = next(transformer.parameters()).device
+    # device = next(transformer.parameters()).device
     
     # Get scheduler and other modules
     scheduler = pipeline.get_module("scheduler")
@@ -218,6 +221,7 @@ def wan_pipeline_with_logprob(
         raise ValueError("Either prompt or prompt_embeds must be provided")
 
     # Encode prompts if not provided
+    prompt_ids = None
     if prompt_embeds is None:
         # Encode prompts directly using text encoder and tokenizer
         # This is a simplified encoding - for full pipeline encoding, use TextEncodingStage
@@ -237,7 +241,10 @@ def wan_pipeline_with_logprob(
             max_length=max_sequence_length,
             truncation=True,
             return_tensors="pt"
-        ).to(device)
+        ).to(pipeline.device)
+        
+        # Store prompt_ids for return
+        prompt_ids = text_inputs["input_ids"]
         
         # Encode with text encoder
         with torch.no_grad():
@@ -262,7 +269,7 @@ def wan_pipeline_with_logprob(
                 max_length=max_sequence_length,
                 truncation=True,
                 return_tensors="pt"
-            ).to(device)
+            ).to(pipeline.device)
             
             with torch.no_grad():
                 neg_outputs = text_encoder(
@@ -275,13 +282,14 @@ def wan_pipeline_with_logprob(
             negative_prompt_embeds = None
 
     # logger.info("wan_pipeline_with_logprob's transformer class type: %s", type(transformer))
-    # transformer_dtype = transformer.dtype
+    # logger.info("Variables in transformer: %s", str(dir(transformer)))
+    # transformer_dtype = transformer.torch_dtype
     # prompt_embeds = prompt_embeds.to(transformer_dtype)
     # if negative_prompt_embeds is not None:
     #     negative_prompt_embeds = negative_prompt_embeds.to(transformer_dtype)
 
     # Prepare timesteps
-    scheduler.set_timesteps(num_inference_steps, device=device)
+    scheduler.set_timesteps(num_inference_steps, device=pipeline.device)
     timesteps = scheduler.timesteps
 
     # Prepare latent variables
@@ -308,7 +316,7 @@ def wan_pipeline_with_logprob(
                     torch.randn(
                         latents_shape[1:],
                         generator=gen,
-                        device=device,
+                        device=pipeline.device,
                         dtype=torch.float32,
                     )
                     for gen in generator
@@ -318,13 +326,16 @@ def wan_pipeline_with_logprob(
                 latents = torch.randn(
                     latents_shape,
                     generator=generator,
-                    device=device,
+                    device=pipeline.device,
                     dtype=torch.float32,
                 )
         else:
-            latents = torch.randn(latents_shape, device=device, dtype=torch.float32)
+            latents = torch.randn(latents_shape, device=pipeline.device, dtype=torch.float32)
     else:
-        latents = latents.to(device=device, dtype=torch.float32)
+        latents = latents.to(device=pipeline.device, dtype=torch.float32)
+
+    # conver latents to DTensor for compatibility with fsdp model
+    # latents = DTensor.from_local(latents)
 
     all_latents = [latents]
     all_log_probs = []
@@ -333,30 +344,51 @@ def wan_pipeline_with_logprob(
     # Denoising loop
     do_classifier_free_guidance = guidance_scale > 1.0
 
+    # Debug
+    logger.info(f"Tensor type issue debugging:")
+    logger.info(f"latents: {type(latents)}")
+    logger.info(f"prompt_embeds: {type(prompt_embeds)}")
+
     for i, t in enumerate(timesteps):
         latents_ori = latents.clone()
-        latent_model_input = latents.to(transformer_dtype)
-        timestep = t.expand(latents.shape[0]) if isinstance(t, torch.Tensor) else torch.tensor([t] * latents.shape[0], device=device)
+        # latent_model_input = latents.to(transformer_dtype)
+        latent_model_input = latents
+        timestep = t.expand(latents.shape[0]) if isinstance(t, torch.Tensor) else torch.tensor([t] * latents.shape[0], device=pipeline.device)
+
+        # Print all arguments of fastvideo_args that contain 'fsdp' in their name and their values
+        fsdp_args = {k: v for k, v in vars(pipeline.fastvideo_args).items() if 'fsdp' in k.lower()}
+        for k, v in fsdp_args.items():
+            logger.info(f"FSDP param: {k} = {v}")
 
         # Predict noise with transformer
-        noise_pred = transformer(
-            hidden_states=latent_model_input,
-            timestep=timestep,
-            encoder_hidden_states=prompt_embeds,
-            attention_kwargs=attention_kwargs,
-            return_dict=False,
-        )[0]
+        with set_forward_context(
+            current_timestep=i,
+            attn_metadata=None,
+            forward_batch=None,
+        ):
+            noise_pred = transformer.forward(
+                hidden_states=latent_model_input,
+                timestep=timestep,
+                encoder_hidden_states=prompt_embeds,
+                attention_kwargs=attention_kwargs,
+                return_dict=False,
+            )[0]
         noise_pred = noise_pred.to(prompt_embeds.dtype)
 
         # Classifier-free guidance
         if do_classifier_free_guidance:
-            noise_uncond = transformer(
-                hidden_states=latent_model_input,
-                timestep=timestep,
-                encoder_hidden_states=negative_prompt_embeds,
-                attention_kwargs=attention_kwargs,
-                return_dict=False,
-            )[0]
+            with set_forward_context(
+                current_timestep=i,
+                attn_metadata=None,
+                forward_batch=None,
+            ):
+                noise_uncond = transformer.forward(
+                    hidden_states=latent_model_input,
+                    timestep=timestep,
+                    encoder_hidden_states=negative_prompt_embeds,
+                    attention_kwargs=attention_kwargs,
+                    return_dict=False,
+                )[0]
             noise_pred = noise_uncond + guidance_scale * (noise_pred - noise_uncond)
 
         # SDE step with log probability
@@ -377,14 +409,19 @@ def wan_pipeline_with_logprob(
         if kl_reward > 0 and not determistic:
             # Use reference model (disable adapter if using LoRA)
             latent_model_input_ref = torch.cat([latents_ori] * 2) if do_classifier_free_guidance else latents_ori
-            with transformer.disable_adapter() if hasattr(transformer, 'disable_adapter') else torch.no_grad():
-                noise_pred_ref = transformer(
-                    hidden_states=latent_model_input_ref,
-                    timestep=timestep,
-                    encoder_hidden_states=prompt_embeds,
-                    attention_kwargs=attention_kwargs,
-                    return_dict=False,
-                )[0]
+            with set_forward_context(
+                current_timestep=i,
+                attn_metadata=None,
+                forward_batch=None,
+            ):
+                with transformer.disable_adapter() if hasattr(transformer, 'disable_adapter') else torch.no_grad():
+                    noise_pred_ref = transformer.forward(
+                        hidden_states=latent_model_input_ref,
+                        timestep=timestep,
+                        encoder_hidden_states=prompt_embeds,
+                        attention_kwargs=attention_kwargs,
+                        return_dict=False,
+                    )[0]
             noise_pred_ref = noise_pred_ref.to(prompt_embeds.dtype)
             
             # Perform guidance for reference model
@@ -453,4 +490,4 @@ def wan_pipeline_with_logprob(
     else:
         video = latents
 
-    return video, all_latents, all_log_probs, all_kl
+    return video, all_latents, all_log_probs, all_kl, prompt_ids

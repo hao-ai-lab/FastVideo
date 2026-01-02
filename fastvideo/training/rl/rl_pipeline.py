@@ -41,6 +41,8 @@ from fastvideo.dataset.rl_prompt_dataset import build_rl_prompt_dataloader
 from copy import deepcopy
 from collections.abc import Iterator
 
+from fastvideo.forward_context import set_forward_context
+
 logger = init_logger(__name__)
 
 
@@ -82,6 +84,9 @@ class RLPipeline(TrainingPipeline):
         # Sampling pipeline for generating videos with log probabilities
         # Will be initialized in initialize_training_pipeline
         self.sampling_pipeline: WanPipeline | None = None
+
+        # Set CFG guidace scale
+        self.guidance_scale = fastvideo_args.rl_args.guidance_scale
         
         # Per-prompt stat tracker for advantage normalization
         # Will be initialized in initialize_training_pipeline
@@ -121,7 +126,7 @@ class RLPipeline(TrainingPipeline):
             dataset_type=rl_dataset_type,
             split='train',
             train_batch_size=training_args.train_batch_size,
-            test_batch_size=8,  # Hardcoded for now
+            test_batch_size=4,  # Hardcoded for now
             k=rl_num_image_per_prompt,
             seed=training_args.seed if training_args.seed is not None else 42,
             train_num_workers=training_args.dataloader_num_workers,
@@ -323,7 +328,7 @@ class RLPipeline(TrainingPipeline):
         if self.sampling_pipeline is None:
             raise RuntimeError("Sampling pipeline not initialized. Call initialize_training_pipeline first.")
         
-        logger.debug("Collecting trajectories with GRPO sampling")
+        logger.info("Collecting trajectories with GRPO sampling")
         
         # Get prompts from batch
         # Prompts can be in input_kwargs["prompts"] or in infos
@@ -358,17 +363,6 @@ class RLPipeline(TrainingPipeline):
         sample_time_per_prompt = 1  # config.sample.sample_time_per_prompt - hardcoded
         kl_reward = getattr(self.training_args.rl_args, 'rl_kl_reward', 0.0)
         
-        # Get tokenizer for prompt_ids
-        tokenizer = self.get_module("tokenizer")
-        
-        # Tokenize prompts to get prompt_ids for stat tracking
-        prompt_ids = tokenizer(
-            prompts,
-            padding="max_length",
-            max_length=512,
-            truncation=True,
-            return_tensors="pt"
-        ).input_ids.to(get_local_torch_device())
         
         # Prepare negative prompt embeddings for CFG
         negative_prompt = [""] * batch_size
@@ -395,7 +389,8 @@ class RLPipeline(TrainingPipeline):
                 # - all_latents: List of latents at each step [num_steps+1] of [B, C, T, H, W]
                 # - all_log_probs: List of log probs at each step [num_steps] of [B]
                 # - all_kl: List of KL divergences [num_steps] of [B]
-                videos, latents_list, log_probs_list, kl_list = wan_pipeline_with_logprob(
+                # - prompt_ids: Tokenized prompt IDs [B, seq_len]
+                videos, latents_list, log_probs_list, kl_list, prompt_ids = wan_pipeline_with_logprob(
                     self.sampling_pipeline,
                     prompt=prompts,
                     negative_prompt=negative_prompt if guidance_scale > 1.0 else None,
@@ -483,7 +478,7 @@ class RLPipeline(TrainingPipeline):
         else:
             training_batch.input_kwargs["prompts"] = prompts
         
-        logger.debug(
+        logger.info(
             "Trajectory collection complete: batch_size=%d, latents_shape=%s, log_probs_shape=%s",
             training_batch.latents.shape[0],
             training_batch.latents.shape,
@@ -517,7 +512,7 @@ class RLPipeline(TrainingPipeline):
         if self.reward_models is None:
             raise RuntimeError("Reward models not initialized. Call initialize_training_pipeline first.")
         
-        logger.debug("Computing rewards from reward models")
+        logger.info("Computing rewards from reward models")
         
         # Get final latents (after all denoising steps)
         # training_batch.latents is [B, num_steps+1, C, T, H, W]
@@ -530,35 +525,35 @@ class RLPipeline(TrainingPipeline):
         
         # Decode latents to videos
         # Apply VAE normalization (Wan VAE specific)
-        latents_to_decode = final_latents.to(vae.dtype)
+        # latents_to_decode = final_latents.to(vae.dtype)
         
         # Wan VAE requires denormalization before decoding
         if hasattr(vae, 'config') and hasattr(vae.config, 'latents_mean') and hasattr(vae.config, 'latents_std'):
-            z_dim = getattr(vae.config, 'z_dim', latents_to_decode.shape[1])
+            z_dim = getattr(vae.config, 'z_dim', final_latents.shape[1])
             latents_mean = (
-                torch.tensor(vae.config.latents_mean, device=device, dtype=latents_to_decode.dtype)
+                torch.tensor(vae.config.latents_mean, device=device, dtype=final_latents.dtype)
                 .view(1, z_dim, 1, 1, 1)
             )
             latents_std = (
-                1.0 / torch.tensor(vae.config.latents_std, device=device, dtype=latents_to_decode.dtype)
+                1.0 / torch.tensor(vae.config.latents_std, device=device, dtype=final_latents.dtype)
                 .view(1, z_dim, 1, 1, 1)
             )
-            latents_to_decode = latents_to_decode / latents_std + latents_mean
+            final_latents = final_latents / latents_std + latents_mean
         elif hasattr(vae, 'latents_mean') and hasattr(vae, 'latents_std'):
-            z_dim = latents_to_decode.shape[1]
+            z_dim = final_latents.shape[1]
             latents_mean = (
-                torch.tensor(vae.latents_mean, device=device, dtype=latents_to_decode.dtype)
+                torch.tensor(vae.latents_mean, device=device, dtype=final_latents.dtype)
                 .view(1, z_dim, 1, 1, 1)
             )
             latents_std = (
-                1.0 / torch.tensor(vae.latents_std, device=device, dtype=latents_to_decode.dtype)
+                1.0 / torch.tensor(vae.latents_std, device=device, dtype=final_latents.dtype)
                 .view(1, z_dim, 1, 1, 1)
             )
-            latents_to_decode = latents_to_decode / latents_std + latents_mean
+            final_latents = final_latents / latents_std + latents_mean
         
         # Decode using VAE
         with torch.no_grad():
-            videos = vae.decode(latents_to_decode)
+            videos = vae.decode(final_latents)
             # VAE.decode returns tensor directly (not tuple)
             # Postprocess video: convert from [-1, 1] to [0, 1]
             videos = (videos / 2 + 0.5).clamp(0, 1)
@@ -589,7 +584,7 @@ class RLPipeline(TrainingPipeline):
         training_batch.reward_mean = reward_stats["reward_mean"]
         training_batch.reward_std = reward_stats["reward_std"]
         
-        logger.debug("Rewards computed: mean=%.3f, std=%.3f, kl_reward=%.3f",
+        logger.info("Rewards computed: mean=%.3f, std=%.3f, kl_reward=%.3f",
                     reward_stats["reward_mean"],
                     reward_stats["reward_std"],
                     kl_reward)
@@ -639,7 +634,7 @@ class RLPipeline(TrainingPipeline):
         if self.stat_tracker is None:
             raise RuntimeError("Stat tracker not initialized. Call initialize_training_pipeline first.")
         
-        logger.debug("Computing advantages with per-prompt stat tracking")
+        logger.info("Computing advantages with per-prompt stat tracking")
         
         # Get prompts from prompt_ids (decode token IDs to strings)
         if training_batch.prompt_ids is not None:
@@ -693,7 +688,7 @@ class RLPipeline(TrainingPipeline):
         training_batch.advantage_mean = advantages.mean().item()
         training_batch.advantage_std = advantages.std().item()
         
-        logger.debug("Advantages computed: mean=%.3f, std=%.3f, per_prompt=%s",
+        logger.info("Advantages computed: mean=%.3f, std=%.3f, per_prompt=%s",
                     training_batch.advantage_mean,
                     training_batch.advantage_std,
                     per_prompt_stat_tracking)
@@ -705,6 +700,7 @@ class RLPipeline(TrainingPipeline):
         latents: torch.Tensor,
         next_latents: torch.Tensor,
         timesteps: torch.Tensor,
+        current_timestep: int,
         prompt_embeds: torch.Tensor,
         negative_prompt_embeds: torch.Tensor | None = None,
         guidance_scale: float = 4.5,
@@ -731,12 +727,16 @@ class RLPipeline(TrainingPipeline):
             Otherwise:
                 (prev_sample, log_prob, prev_sample_mean, std_dev_t * sqrt_dt)
         """
+        logger.info(f"computing log prob for timestep {current_timestep}")
+
         scheduler = self.get_module("scheduler")
         transformer = self.get_module("transformer")
         
         # Prepare latent input
-        latent_model_input = latents.to(transformer.dtype)
-        timestep = timesteps.to(transformer.dtype)
+        # latent_model_input = latents.to(transformer.dtype)
+        # timestep = timesteps.to(transformer.dtype)
+        latent_model_input = latents
+        timestep = timesteps.to(self.device)
         
         # Predict noise with transformer
         if guidance_scale > 1.0 and negative_prompt_embeds is not None:
@@ -746,29 +746,40 @@ class RLPipeline(TrainingPipeline):
             latent_model_input_cfg = torch.cat([latent_model_input] * 2)
             prompt_embeds_cfg = torch.cat([negative_prompt_embeds, prompt_embeds])
             timestep_cfg = timestep.repeat(2)
-            
-            noise_pred = transformer(
-                hidden_states=latent_model_input_cfg,
-                timestep=timestep_cfg,
-                encoder_hidden_states=prompt_embeds_cfg,
-                return_dict=False,
-            )[0]
-            noise_pred = noise_pred.to(prompt_embeds.dtype)
+            with set_forward_context(
+                current_timestep=current_timestep,
+                attn_metadata=None,
+                forward_batch=None,
+            ):
+                noise_pred = transformer.forward(
+                    hidden_states=latent_model_input_cfg,
+                    timestep=timestep_cfg,
+                    encoder_hidden_states=prompt_embeds_cfg,
+                    return_dict=False,
+                )[0]
+            # noise_pred = noise_pred.to(prompt_embeds.dtype)
+            noise_pred = noise_pred
             
             # Split and apply guidance
             noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
             noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
         else:
-            # No CFG
-            noise_pred = transformer(
-                hidden_states=latent_model_input,
-                timestep=timestep,
-                encoder_hidden_states=prompt_embeds,
-                return_dict=False,
-            )[0]
-            noise_pred = noise_pred.to(prompt_embeds.dtype)
+            with set_forward_context(
+                current_timestep=current_timestep,
+                attn_metadata=None,
+                forward_batch=None,
+            ):
+                # No CFG
+                noise_pred = transformer.forward(
+                    hidden_states=latent_model_input,
+                    timestep=timestep,
+                    encoder_hidden_states=prompt_embeds,
+                    return_dict=False,
+                )[0]
+                # noise_pred = noise_pred.to(prompt_embeds.dtype)
+            noise_pred = noise_pred
         
-        # Compute log probability using SDE step
+        # Compute log probability using SDE stepFinitiali
         # Use next_latents as prev_sample to compute log prob of the actual transition
         return sde_step_with_logprob(
             scheduler,
@@ -814,7 +825,7 @@ class RLPipeline(TrainingPipeline):
         # --rl-kl-beta -> kl_beta (via dest)
         clip_range = self.training_args.rl_args.grpo_policy_clip_range
         kl_beta = self.training_args.rl_args.kl_beta
-        guidance_scale = 4.5  # Hardcoded
+        guidance_scale = self.guidance_scale
         adv_clip_max = 10.0  # Hardcoded (advantage clipping)
         
         # Get data from training batch
@@ -838,7 +849,8 @@ class RLPipeline(TrainingPipeline):
             # Encode prompts
             text_encoder = self.get_module("text_encoder")
             tokenizer = self.get_module("tokenizer")
-            device = next(self.transformer.parameters()).device
+            # device = next(self.transformer.parameters()).device
+            device = self.device 
             
             # Normalize to list
             if isinstance(prompts, str):
@@ -859,7 +871,8 @@ class RLPipeline(TrainingPipeline):
                     attention_mask=text_inputs["attention_mask"],
                     output_hidden_states=True,
                 )
-                prompt_embeds = outputs.last_hidden_state.to(self.transformer.dtype)
+                # prompt_embeds = outputs.last_hidden_state.to(self.transformer.dtype)
+                prompt_embeds = outputs.last_hidden_state
         
         # Get negative prompt embeddings
         negative_prompt_embeds = training_batch.negative_prompt_embeds
@@ -867,7 +880,8 @@ class RLPipeline(TrainingPipeline):
             # Generate negative prompt embeddings if needed
             text_encoder = self.get_module("text_encoder")
             tokenizer = self.get_module("tokenizer")
-            device = next(self.transformer.parameters()).device
+            # device = next(self.transformer.parameters()).device
+            device = self.device
             
             batch_size = prompt_embeds.shape[0]
             negative_prompts = [""] * batch_size
@@ -886,7 +900,8 @@ class RLPipeline(TrainingPipeline):
                     attention_mask=neg_text_inputs["attention_mask"],
                     output_hidden_states=True,
                 )
-                negative_prompt_embeds = neg_outputs.last_hidden_state.to(self.transformer.dtype)
+                # negative_prompt_embeds = neg_outputs.last_hidden_state.to(self.transformer.dtype)
+                negative_prompt_embeds = neg_outputs.last_hidden_state
         
         # Handle advantages shape: if [B], expand to [B, num_steps]
         if advantages.dim() == 1:
@@ -918,6 +933,7 @@ class RLPipeline(TrainingPipeline):
                 latents_j,
                 next_latents_j,
                 timesteps_j,
+                j,
                 prompt_embeds,
                 negative_prompt_embeds,
                 guidance_scale,
@@ -933,6 +949,7 @@ class RLPipeline(TrainingPipeline):
                                 latents_j,
                                 next_latents_j,
                                 timesteps_j,
+                                j,
                                 prompt_embeds,
                                 negative_prompt_embeds,
                                 guidance_scale,
@@ -1022,7 +1039,7 @@ class RLPipeline(TrainingPipeline):
         """
         # # Check if we're in warmup phase (do SFT instead of RL)
         # if training_batch.current_timestep < self.training_args.rl_args.rl_warmup_steps:
-        #     logger.debug("In warmup phase, using standard SFT training")
+        #     logger.info("In warmup phase, using standard SFT training")
         #     return super().train_one_step(training_batch)
 
         training_batch = self._prepare_training(training_batch)
@@ -1098,8 +1115,7 @@ class RLPipeline(TrainingPipeline):
     def set_trainable(self) -> None:
         """Set which parameters should be trainable."""
         # Policy (transformer) is trainable
-        for param in self.transformer.parameters():
-            param.requires_grad = True
+        super().set_trainable()
 
         # GRPO doesn't use value models, so no value model training needed
 
