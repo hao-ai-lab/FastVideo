@@ -32,15 +32,15 @@ else:
 
 # TurboDiffusion parameters (1-4 step generation with RCM scheduler + SLA attention)
 TURBODIFFUSION_PARAMS = {
-    "num_gpus": 1,
+    "num_gpus": 2,
     "model_path": "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers",
     "height": 480,
     "width": 832,
-    "num_frames": 45,
+    "num_frames": 81,
     "num_inference_steps": 4,  # TurboDiffusion uses 1-4 steps
     "guidance_scale": 1.0,  # No CFG for TurboDiffusion
-    "seed": 1024,
-    "sp_size": 1,
+    "seed": 42,
+    "sp_size": 2,
     "tp_size": 1,
     "fps": 24,
 }
@@ -157,3 +157,7 @@ def test_turbodiffusion_inference_similarity(prompt, model_id):
         f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
         f"for {model_id} with backend {ATTENTION_BACKEND}"
     )
+
+
+if __name__ == '__main__':
+    test_turbodiffusion_inference_similarity("Will Smith casually eats noodles, his relaxed demeanor contrasting with the energetic background of a bustling street food market. The scene captures a mix of humor and authenticity. Mid-shot framing, vibrant lighting.", "TurboWan2.1-T2V-1.3B-Diffusers")
