@@ -19,6 +19,8 @@ from typing import Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import triton
+import triton.language as tl
 
 from fastvideo.attention.backends.abstract import (
     AttentionBackend,
@@ -26,10 +28,89 @@ from fastvideo.attention.backends.abstract import (
     AttentionMetadata,
     AttentionMetadataBuilder,
 )
-from fastvideo.attention.backends.sla_kernels import _attention, get_block_map
+from fastvideo_kernel.triton_kernels.sla_triton import _attention
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
+
+
+# ============================================================================
+# SLA Utility functions (moved from sla_kernels/utils.py)
+# ============================================================================
+
+@triton.jit
+def compress_kernel(
+    X, XM,
+    L: tl.constexpr,
+    D: tl.constexpr,
+    BLOCK_L: tl.constexpr,
+):
+    idx_l = tl.program_id(0)
+    idx_bh = tl.program_id(1)
+
+    offs_l = idx_l * BLOCK_L + tl.arange(0, BLOCK_L)
+    offs_d = tl.arange(0, D)
+
+    x_offset = idx_bh * L * D
+    xm_offset = idx_bh * ((L + BLOCK_L - 1) // BLOCK_L) * D
+    x = tl.load(X + x_offset + offs_l[:, None] * D + offs_d[None, :], mask=offs_l[:, None] < L)
+
+    nx = min(BLOCK_L, L - idx_l * BLOCK_L)
+    x_mean = tl.sum(x, axis=0, dtype=tl.float32) / nx
+    tl.store(XM + xm_offset + idx_l * D + offs_d, x_mean.to(XM.dtype.element_ty))
+
+
+def mean_pool(x: torch.Tensor, BLK: int) -> torch.Tensor:
+    """Mean pool tensor along sequence dimension with block size BLK."""
+    assert x.is_contiguous()
+
+    B, H, L, D = x.shape
+    L_BLOCKS = (L + BLK - 1) // BLK
+    x_mean = torch.empty((B, H, L_BLOCKS, D), device=x.device, dtype=x.dtype)
+
+    grid = (L_BLOCKS, B * H)
+    compress_kernel[grid](x, x_mean, L, D, BLK)
+    return x_mean
+
+
+def get_block_map(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    topk_ratio: float,
+    BLKQ: int = 64,
+    BLKK: int = 64,
+) -> tuple[torch.Tensor, torch.Tensor, int]:
+    """Compute sparse block map for attention based on QK similarity.
+    
+    Args:
+        q: Query tensor of shape (B, H, L, D)
+        k: Key tensor of shape (B, H, L, D)
+        topk_ratio: Ratio of key blocks to attend to (0-1)
+        BLKQ: Query block size
+        BLKK: Key block size
+        
+    Returns:
+        sparse_map: Binary mask of shape (B, H, num_q_blocks, num_k_blocks)
+        lut: Top-k indices of shape (B, H, num_q_blocks, topk)
+        topk: Number of key blocks selected
+    """
+    arg_k = k - torch.mean(k, dim=-2, keepdim=True)  # smooth-k technique from SageAttention
+    pooled_qblocks = mean_pool(q, BLKQ)
+    pooled_kblocks = mean_pool(arg_k, BLKK)
+    pooled_score = pooled_qblocks @ pooled_kblocks.transpose(-1, -2)
+
+    K = pooled_score.shape[-1]
+    topk = min(K, int(topk_ratio * K))
+    lut = torch.topk(pooled_score, topk, dim=-1, sorted=False).indices
+
+    sparse_map = torch.zeros_like(pooled_score, dtype=torch.int8)
+    sparse_map.scatter_(-1, lut, 1)
+    return sparse_map, lut, topk
+
+
+# ============================================================================
+# SLA Backend classes
+# ============================================================================
 
 
 class SLAAttentionBackend(AttentionBackend):
