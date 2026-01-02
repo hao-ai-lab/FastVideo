@@ -264,6 +264,7 @@ class WanTransformerBlock(nn.Module):
             causal=False,
             supported_attention_backends=supported_attention_backends,
             prefix=f"{prefix}.attn1")
+        logger.info(f"WanTransformerBlock {prefix}: self-attention backend = {self.attn1.backend}")
         self.hidden_dim = dim
         self.num_attention_heads = num_heads
         dim_head = dim // num_heads
