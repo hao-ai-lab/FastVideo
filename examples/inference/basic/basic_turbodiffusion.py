@@ -30,8 +30,9 @@ def main() -> None:
         prompt,
         output_path=OUTPUT_PATH,
         save_video=True,
-        num_inference_steps=4,  # TurboDiffusion uses 1-4 steps
-        guidance_scale=1.0,  # No CFG for TurboDiffusion
+        num_inference_steps=4,
+        seed=42,
+        guidance_scale=1.0,
     )
 
     # Generate another video with a different prompt, without reloading the model!
@@ -47,6 +48,7 @@ def main() -> None:
         output_path=OUTPUT_PATH,
         save_video=True,
         num_inference_steps=4,
+        seed=42,
         guidance_scale=1.0,
     )
 
