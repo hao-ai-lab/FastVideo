@@ -41,8 +41,8 @@ def parse_args():
 
 def load_prompts(args):
     """Load prompts from file or use single prompt."""
-    if args.prompt:
-        return [args.prompt]
+    # if args.prompt:
+    #     return [args.prompt]
     
     if args.prompts_file and os.path.exists(args.prompts_file):
         with open(args.prompts_file, 'r') as f:
@@ -58,9 +58,9 @@ def main():
     prompts = load_prompts(args)
 
     # Create video generator with TurboDiffusion pipeline
-    # The pipeline auto-downloads TurboDiffusion checkpoint from HuggingFace
+    # Now loads directly from pre-converted HF repo (no .pth loading needed)
     generator = VideoGenerator.from_pretrained(
-        "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers",  # Pre-converted weights
         num_gpus=args.num_gpus,
         override_pipeline_cls_name="TurboDiffusionPipeline",
     )
@@ -76,7 +76,7 @@ def main():
             num_frames=args.num_frames,
             height=args.height,
             width=args.width,
-            seed=args.seed + i,  # Different seed for each prompt
+            seed=args.seed,
             output_path=args.output_path,
             save_video=True,
             guidance_scale=1.0,  # TurboDiffusion doesn't use CFG
