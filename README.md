@@ -5,42 +5,6 @@
 
 FastVideo features an end-to-end unified pipeline for accelerating diffusion models, starting from data preprocessing to model training, finetuning, distillation, and inference. FastVideo is designed to be modular and extensible, allowing users to easily add new optimizations and techniques. Whether it is training-free optimizations or post-training optimizations, FastVideo has you covered.
 
-## Model Coverage
-FastVideo ships with ready-to-run recipes across multiple families of diffusion video models. Explore the auto-generated example docs below for the exact scripts and model IDs supported out of the box.
-
-### Inference
-
-| Model | Task |
-| --- | --- |
-| [Wan2.1 T2V 1.3B](docs/inference/examples/basic.md#additional-files) | Text-to-Video |
-| [Wan2.2 T2V A14B](docs/inference/examples/basic.md#additional-files) | Text-to-Video |
-| [Wan2.2 I2V A14B](docs/inference/examples/basic.md#additional-files) | Image-to-Video |
-| [Wan2.2 TI2V 5B](docs/inference/examples/basic.md#additional-files) | Text-and-Image-to-Video |
-| [SFWan2.2 T2V A14B (Causal)](docs/inference/examples/basic.md#additional-files) | Text-to-Video |
-| [SFWan2.2 I2V A14B (Causal)](docs/inference/examples/basic.md#additional-files) | Image-to-Video |
-| [Wan2.1 Fun 1.3B Control](docs/inference/examples/basic.md#additional-files) | Control |
-| [HunyuanVideo 1.5](docs/inference/examples/basic.md#additional-files) | Text-to-Video |
-| [Matrix Game 2.0](docs/inference/examples/basic.md#additional-files) | Multimodal Video |
-
-### Training
-
-Training examples are split between basic finetuning recipes and the distillation families (bidirectional/DMD2 vs. causal/self-forcing) so it's easy to pick the right post-training path. See the [training recipes overview](docs/training/training_recipes.md) for a step-by-step walkthrough of the Wan2.1 T2V 1.3B "Basic" recipe, including LoRA and distillation variants.
-
-| Model | Method | Task |
-| --- | --- | --- |
-| [Wan2.1 T2V 1.3B](docs/training/examples/wan_t2v_1.3B.md) | Basic finetuning | Text-to-Video finetuning |
-| [Wan2.1 I2V 14B 480p](docs/training/examples/wan_i2v_14B_480p.md) | Basic finetuning | Image-to-Video finetuning |
-| [Wan2.1 VSA](docs/training/examples/Wan2.1-VSA.md) | Basic finetuning | Sparse-attention finetuning |
-
-### Distillation
-
-| Model | Method | Task |
-| --- | --- | --- |
-| [Wan2.1 T2V](docs/distillation/examples/Wan2.1-T2V.md) | Bidirectional distillation (DMD2) | Text-to-Video distillation |
-| [Wan2.2 TI2V 5B](docs/distillation/examples/Wan2.2-TI2V-5B-Diffusers.md) | Bidirectional distillation (DMD2) | Text-and-Image-to-Video distillation |
-| [SFWan2.1 T2V](docs/distillation/examples/SFWan2.1-T2V.md) | Causal distillation (self-forcing/SFwan) | Causal Text-to-Video distillation |
-| [SFWan2.2 T2V A14B](docs/distillation/examples/SFWan2.2-A14B.md) | Causal distillation (self-forcing/SFwan) | Text-to-Video distillation |
-
 <p align="center">
     | 🕹️ <a href="https://fastwan.fastvideo.org/"<b>Online Demo</b></a> | <a href="https://hao-ai-lab.github.io/FastVideo"><b>Documentation</b></a> | <a href="https://hao-ai-lab.github.io/FastVideo/inference/inference_quick_start/"><b> Quick Start</b></a> | 🤗 <a href="https://huggingface.co/collections/FastVideo/fastwan-6886a305d9799c8cd1496408"  target="_blank"><b>FastWan</b></a>  | 🟣💬 <a href="https://join.slack.com/t/fastvideo/shared_invite/zt-3f4lao1uq-u~Ipx6Lt4J27AlD2y~IdLQ" target="_blank"> <b>Slack</b> </a> |  🟣💬 <a href="https://ibb.co/c7g1qdD" target="_blank"> <b> WeChat </b> </a> |
 </p>
