@@ -282,13 +282,14 @@ class RCMScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         x_denoised = sample - t_cur * model_output
         
         # Generate noise for SDE sampling
-        # Note: We don't use the generator here because it may be on CPU
-        # while the sample is on CUDA, causing device mismatch
+        if isinstance(generator, list):
+            generator = generator[0]
         noise = torch.randn(
             sample.shape,
             dtype=torch.float32,
-            device=sample.device,
-        ).to(torch.float64)
+            device="cpu",
+            generator=generator,
+        ).to(sample.device).to(torch.float64)
 
         prev_sample = (1 - t_next) * x_denoised + t_next * noise
 

@@ -35,14 +35,14 @@ def parse_args():
     parser.add_argument("--width", type=int, default=832, help="Video width")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--output_path", type=str, default="outputs/", help="Output dir")
-    parser.add_argument("--num_gpus", type=int, default=1, help="Number of GPUs")
+    parser.add_argument("--num_gpus", type=int, default=2, help="Number of GPUs")
     return parser.parse_args()
 
 
 def load_prompts(args):
     """Load prompts from file or use single prompt."""
-    # if args.prompt:
-    #     return [args.prompt]
+    if args.prompt:
+        return [args.prompt]
     
     if args.prompts_file and os.path.exists(args.prompts_file):
         with open(args.prompts_file, 'r') as f:
