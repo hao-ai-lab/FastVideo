@@ -1,7 +1,7 @@
 # FastVideo CLI Inference
 
 The FastVideo CLI provides a quick way to access the FastVideo inference pipeline for video generation. For more advanced usage,
-see the Python interface [here](https://hao-ai-lab.github.io/FastVideo/inference/examples/basic.html).
+see the Python interface [here](examples/basic.md).
 
 ## Basic Usage
 

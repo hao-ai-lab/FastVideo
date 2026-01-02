@@ -78,7 +78,7 @@ uv pip install -e .
 ## Development Environment Setup
 
 If you're planning to contribute to FastVideo please see the following page:
-[Contributor Guide](#developer-overview)
+[Contributor Guide](../../contributing/overview.md)
 
 ## Hardware Requirements
 
