@@ -48,6 +48,7 @@ def main():
     )
 
     # Generate video
+    # Note: guidance_scale=1.0 disables CFG - TurboDiffusion is distilled without CFG
     generator.generate_video(
         args.prompt,
         num_inference_steps=args.num_inference_steps,
@@ -57,6 +58,7 @@ def main():
         seed=args.seed,
         output_path=args.output_path,
         save_video=True,
+        guidance_scale=1.0,  # TurboDiffusion doesn't use CFG
     )
 
 
