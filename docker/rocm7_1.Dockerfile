@@ -36,7 +36,7 @@ RUN echo "# Placeholder" > README.md
 RUN source $HOME/.local/bin/env && \
     uv venv --python 3.10 --seed /opt/venv && \
     source /opt/venv/bin/activate && \
-    uv pip install --no-cache-dir --upgrade pip 
+    uv pip install --no-cache-dir --upgrade pip
 
 COPY . .
 
@@ -48,11 +48,11 @@ RUN source $HOME/.local/bin/env && \
     echo 'source /opt/venv/bin/activate' >> /root/.bashrc && \
     echo 'if [ -n "$ZSH_VERSION" ] && [ -f ~/.zshrc ]; then . ~/.zshrc; elif [ -f ~/.bashrc ]; then . ~/.bashrc; fi' > /root/.profile
 
-# Install STA (Sliding Tile Attention)
+# Install FastVideo Unified Kernel
 RUN source $HOME/.local/bin/env && \
     source /opt/venv/bin/activate && \
-    cd csrc/attn/sliding_tile_attn && \
+    cd fastvideo-kernel && \
     git submodule update --init --recursive && \
-    SKIP_SM90_EXT=1 pip install --no-build-isolation -e .
+    ./build.sh --rocm
 
 EXPOSE 22

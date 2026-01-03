@@ -360,7 +360,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
         current_vsa_sparsity = training_batch.current_vsa_sparsity
         assert latents_shape is not None
         assert training_batch.timesteps is not None
-        if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
+        if envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
+            if not vsa_available:
+                raise ImportError(
+                    "FASTVIDEO_ATTENTION_BACKEND is set to VIDEO_SPARSE_ATTN, "
+                    "but fastvideo_kernel is not correctly installed or detected. "
+                    "Please ensure fastvideo-kernel is installed.")
             training_batch.attn_metadata = VideoSparseAttentionMetadataBuilder(  # type: ignore
             ).build(  # type: ignore
                 raw_latent_shape=latents_shape[2:5],
@@ -368,7 +373,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 patch_size=patch_size,
                 VSA_sparsity=current_vsa_sparsity,
                 device=get_local_torch_device())
-        elif vmoba_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN":
+        elif envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN":
+            if not vmoba_available:
+                raise ImportError(
+                    "FASTVIDEO_ATTENTION_BACKEND is set to VMOBA_ATTN, "
+                    "but fastvideo_kernel (or flash_attn>=2.7.4) is not correctly installed."
+                )
             moba_params = self.training_args.moba_config.copy()
             moba_params.update({
                 "current_timestep":

@@ -851,12 +851,12 @@ def set_random_seed(seed: int) -> None:
 
 @lru_cache(maxsize=1)
 def is_vsa_available() -> bool:
-    return importlib.util.find_spec("vsa") is not None
+    return importlib.util.find_spec("fastvideo_kernel.ops") is not None
 
 
 @lru_cache(maxsize=1)
 def is_vmoba_available() -> bool:
-    if importlib.util.find_spec("csrc.attn.vmoba_attn.vmoba") is None:
+    if importlib.util.find_spec("fastvideo_kernel.vmoba") is None:
         return False
     try:
         import flash_attn

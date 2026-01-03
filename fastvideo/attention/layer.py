@@ -50,6 +50,10 @@ class DistributedAttention(nn.Module):
                                   num_kv_heads=num_kv_heads,
                                   prefix=f"{prefix}.impl",
                                   **extra_impl_args)
+        # Register attn_impl as submodule if it has learnable parameters (e.g., SLA's proj_l)
+        # This ensures its parameters are included in state_dict() for saving/loading
+        if isinstance(self.attn_impl, nn.Module):
+            self.add_module('attn_impl', self.attn_impl)
         self.num_heads = num_heads
         self.head_size = head_size
         self.num_kv_heads = num_kv_heads

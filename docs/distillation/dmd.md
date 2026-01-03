@@ -13,7 +13,7 @@ We provide two distilled models:
 Both models are trained on **61×448×832** resolution but support generating videos with **any resolution** (1.3B  model mainly support 480P, 14B model support 480P and 720P, quality may degrade for different resolutions).
 
 ## ⚙️ Inference
-First install [VSA](https://hao-ai-lab.github.io/FastVideo/video_sparse_attention/installation). Set `MODEL_BASE` to your own model path and run:
+First install [VSA](../attention/vsa/index.md). Set `MODEL_BASE` to your own model path and run:
 
 ```bash
 bash scripts/inference/v1_inference_wan_dmd.sh
