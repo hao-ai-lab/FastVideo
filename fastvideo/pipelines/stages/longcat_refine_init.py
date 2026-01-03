@@ -257,11 +257,15 @@ class LongCatRefineInitStage(PipelineStage):
                     num_cond_frames_added, num_noise_frames_added,
                     new_num_frames)
 
-        # VAE encode
-        logger.info("Encoding stage1 video with VAE...")
+        # VAE encode with tiling for memory efficiency
+        logger.info("Encoding stage1 video with VAE (tiling enabled)...")
         vae_dtype = next(self.vae.parameters()).dtype
         vae_device = next(self.vae.parameters()).device
         video_up = video_up.to(dtype=vae_dtype, device=vae_device)
+
+        # Enable tiling for large video encoding
+        if hasattr(self.vae, 'enable_tiling'):
+            self.vae.enable_tiling()
 
         with torch.no_grad():
             latent_dist = self.vae.encode(video_up)
@@ -301,10 +305,14 @@ class LongCatRefineInitStage(PipelineStage):
 
         logger.info("Applied t_thresh=%s noise mixing", t_thresh)
 
-        # Store in batch
-        batch.latents = latent_up.to(dtype)
+        # Store in batch - ensure correct dtype and device
+        # The latents need to be on the same device as the transformer (CUDA)
+        target_device = batch.prompt_embeds[0].device
+        batch.latents = latent_up.to(device=target_device, dtype=dtype)
         batch.raw_latent_shape = latent_up.shape
 
+        logger.info("Latents device: %s, dtype: %s", batch.latents.device,
+                    batch.latents.dtype)
         logger.info("LongCat refinement initialization complete")
 
         return batch
