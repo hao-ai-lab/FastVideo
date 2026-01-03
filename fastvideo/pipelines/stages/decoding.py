@@ -76,25 +76,25 @@ class DecodingStage(PipelineStage):
         vae_autocast_enabled = (
             vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
-        # denormalization for MatrixGame VAE
-        # z = z * std + mean during decode
-        if (hasattr(self.vae.config, 'latents_mean')
-                and hasattr(self.vae.config, 'latents_std')):
-            # Convert config values to tensors
-            latents_mean = torch.tensor(self.vae.config.latents_mean,
+        # Some VAEs handle latent (de)normalization internally.
+        skip_denorm = bool(getattr(self.vae, "handles_latent_denorm", False))
+        cfg = getattr(self.vae, "config", None)
+
+        if (not skip_denorm and cfg is not None
+                and hasattr(cfg, 'latents_mean')
+                and hasattr(cfg, 'latents_std')):
+            latents_mean = torch.tensor(cfg.latents_mean,
                                         device=latents.device,
                                         dtype=latents.dtype).view(
                                             1, -1, 1, 1, 1)
 
-            latents_std = torch.tensor(self.vae.config.latents_std,
+            latents_std = torch.tensor(cfg.latents_std,
                                        device=latents.device,
                                        dtype=latents.dtype).view(
                                            1, -1, 1, 1, 1)
 
-            # Apply denormalization: z = z * std + mean
             latents = latents * latents_std + latents_mean
-        elif hasattr(self.vae, 'scaling_factor'):
-            # Standard VAE scaling
+        elif (not skip_denorm and hasattr(self.vae, 'scaling_factor')):
             if isinstance(self.vae.scaling_factor, torch.Tensor):
                 latents = latents / self.vae.scaling_factor.to(
                     latents.device, latents.dtype)

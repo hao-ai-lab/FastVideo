@@ -67,6 +67,7 @@ def maybe_load_fsdp_model(
     default_dtype: torch.dtype,
     param_dtype: torch.dtype,
     reduce_dtype: torch.dtype,
+    strict: bool = True,
     cpu_offload: bool = False,
     fsdp_inference: bool = False,
     output_dtype: torch.dtype | None = None,
@@ -141,7 +142,7 @@ def maybe_load_fsdp_model(
         weight_iterator,
         device,
         default_dtype,
-        strict=True,
+        strict=strict,
         cpu_offload=cpu_offload,
         param_names_mapping=param_names_mapping_fn,
     )
@@ -293,6 +294,26 @@ def load_model_from_full_model_state_dict(
     for target_param_name, full_tensor in custom_param_sd.items():
         meta_sharded_param = meta_sd.get(target_param_name)
         if meta_sharded_param is None:
+            # Some checkpoints include extra entries that are not part of the
+            # instantiated model's state_dict (e.g. `_extra_state` keys from
+            # some FSDP checkpoint formats). These can be safely skipped.
+            if (target_param_name.endswith("._extra_state")
+                    or target_param_name.endswith("_extra_state")):
+                logger.warning(
+                    "Skipping non-parameter checkpoint key: %s",
+                    target_param_name,
+                )
+                continue
+
+            # For non-strict loads, treat this as an "unexpected key" and skip it
+            # (mirrors torch.nn.Module.load_state_dict(strict=False)).
+            if not strict:
+                logger.warning(
+                    "Skipping unexpected checkpoint key (not present in model): %s",
+                    target_param_name,
+                )
+                continue
+
             raise ValueError(
                 f"Parameter {target_param_name} not found in custom model state dict. The hf to custom mapping may be incorrect."
             )
