@@ -268,6 +268,7 @@ class TextEncoderLoader(ComponentLoader):
             target_device,
             fastvideo_args,
             encoder_precision,
+            use_text_encoder_override=True,
         )
 
     def load_model(
@@ -277,6 +278,7 @@ class TextEncoderLoader(ComponentLoader):
         target_device: torch.device,
         fastvideo_args: FastVideoArgs,
         dtype: str = "fp16",
+        use_text_encoder_override: bool = False, # prevent subclasses from misusing
     ):
         use_cpu_offload = (
             fastvideo_args.text_encoder_cpu_offload
@@ -293,7 +295,7 @@ class TextEncoderLoader(ComponentLoader):
             )
 
         # Set quantization config if specified
-        if fastvideo_args.override_text_encoder_quant is not None:
+        if use_text_encoder_override and fastvideo_args.override_text_encoder_quant is not None:
             if fastvideo_args.override_text_encoder_safetensors is None:
                 raise ValueError(
                     "override_text_encoder_quant is set but override_text_encoder_safetensors is None"
@@ -310,7 +312,7 @@ class TextEncoderLoader(ComponentLoader):
                 model: TextEncoder = model_cls(model_config)  # type: ignore
 
             weights_to_load = {name for name, _ in model.named_parameters()}
-            if fastvideo_args.override_text_encoder_safetensors is not None:
+            if use_text_encoder_override and fastvideo_args.override_text_encoder_safetensors is not None:
                 loaded_weights: set[str] = model.load_weights(
                     safetensors_weights_iterator(
                         [fastvideo_args.override_text_encoder_safetensors],
