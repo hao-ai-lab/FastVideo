@@ -528,6 +528,8 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         # Update paths with folder prefix
         for item in data_items:
             item["path"] = opj(folder, item["path"])
+            if "action_path" in item and item["action_path"]:
+                item["action_path"] = opj(folder, item["action_path"])
 
         return data_items
 
