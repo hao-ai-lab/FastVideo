@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapt from https://github.com/vllm-project/vllm/blob/releases/v0.11.0/vllm/executor/ray_distributed_executor.py
 
+import asyncio
 from collections import defaultdict
 import os
 import cloudpickle
@@ -268,6 +269,47 @@ class RayDistributedExecutor(Executor):
                 self.tp_driver_workers.append(worker)
             else:
                 self.non_driver_workers.append(worker)
+
+    def execute_streaming_reset(
+            self, forward_batch: ForwardBatch,
+            fastvideo_args: FastVideoArgs) -> dict[str, Any]:
+        responses: list[dict[str, Any]] = self.collective_rpc(
+            "execute_streaming_reset",
+            kwargs={
+                "forward_batch": forward_batch,
+                "fastvideo_args": fastvideo_args,
+            },
+        )
+        return responses[0]
+
+    def execute_streaming_step(self,
+                               keyboard_action=None,
+                               mouse_action=None) -> ForwardBatch:
+        responses: list[ForwardBatch] = self.collective_rpc(
+            "execute_streaming_step",
+            kwargs={
+                "keyboard_action": keyboard_action,
+                "mouse_action": mouse_action,
+            },
+        )
+        return responses[0]
+
+    async def execute_streaming_step_async(self,
+                                           keyboard_action=None,
+                                           mouse_action=None) -> ForwardBatch:
+        kwargs = {
+            "keyboard_action": keyboard_action,
+            "mouse_action": mouse_action,
+        }
+        futures = [
+            w.execute_method.remote("execute_streaming_step", **kwargs)
+            for w in self.workers
+        ]
+        responses = await asyncio.gather(*futures)
+        return responses[0]
+
+    def execute_streaming_clear(self) -> None:
+        self.collective_rpc("execute_streaming_clear")
 
     def execute_forward(self, forward_batch: ForwardBatch,
                         fastvideo_args: FastVideoArgs) -> ForwardBatch:

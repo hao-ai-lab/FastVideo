@@ -50,32 +50,7 @@ class DecodingStage(PipelineStage):
         result.add_check("output", batch.output, [V.is_tensor, V.with_dims(5)])
         return result
 
-    @torch.no_grad()
-    def decode(self, latents: torch.Tensor,
-               fastvideo_args: FastVideoArgs) -> torch.Tensor:
-        """
-        Decode latent representations into pixel space using VAE.
-        
-        Args:
-            latents: Input latent tensor with shape (batch, channels, frames, height_latents, width_latents)
-            fastvideo_args: Configuration containing:
-                - disable_autocast: Whether to disable automatic mixed precision (default: False)
-                - pipeline_config.vae_precision: VAE computation precision ("fp32", "fp16", "bf16")
-                - pipeline_config.vae_tiling: Whether to enable VAE tiling for memory efficiency
-            
-        Returns:
-            Decoded video tensor with shape (batch, channels, frames, height, width), 
-            normalized to [0, 1] range and moved to CPU as float32
-        """
-        self.vae = self.vae.to(get_local_torch_device())
-        latents = latents.to(get_local_torch_device())
-
-        # Setup VAE precision
-        vae_dtype = PRECISION_TO_TYPE[
-            fastvideo_args.pipeline_config.vae_precision]
-        vae_autocast_enabled = (
-            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
-
+    def _denormalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
         # denormalization for MatrixGame VAE
         # z = z * std + mean during decode
         if (hasattr(self.vae.config, 'latents_mean')
@@ -109,6 +84,35 @@ class DecodingStage(PipelineStage):
                                                         latents.dtype)
                 else:
                     latents += self.vae.shift_factor
+        return latents
+
+    @torch.no_grad()
+    def decode(self, latents: torch.Tensor,
+               fastvideo_args: FastVideoArgs) -> torch.Tensor:
+        """
+        Decode latent representations into pixel space using VAE.
+        
+        Args:
+            latents: Input latent tensor with shape (batch, channels, frames, height_latents, width_latents)
+            fastvideo_args: Configuration containing:
+                - disable_autocast: Whether to disable automatic mixed precision (default: False)
+                - pipeline_config.vae_precision: VAE computation precision ("fp32", "fp16", "bf16")
+                - pipeline_config.vae_tiling: Whether to enable VAE tiling for memory efficiency
+            
+        Returns:
+            Decoded video tensor with shape (batch, channels, frames, height, width), 
+            normalized to [0, 1] range and moved to CPU as float32
+        """
+        self.vae = self.vae.to(get_local_torch_device())
+        latents = latents.to(get_local_torch_device())
+
+        # Setup VAE precision
+        vae_dtype = PRECISION_TO_TYPE[
+            fastvideo_args.pipeline_config.vae_precision]
+        vae_autocast_enabled = (
+            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+
+        latents = self._denormalize_latents(latents)
 
         # Decode latents
         with torch.autocast(device_type="cuda",
@@ -125,6 +129,57 @@ class DecodingStage(PipelineStage):
         # Normalize image to [0, 1] range
         image = (image / 2 + 0.5).clamp(0, 1)
         return image
+
+    @torch.no_grad()
+    def streaming_decode(
+        self,
+        latents: torch.Tensor,
+        fastvideo_args: FastVideoArgs,
+        cache: list[torch.Tensor | None] | None = None,
+        is_first_chunk: bool = False,
+    ) -> tuple[torch.Tensor, list[torch.Tensor | None]]:
+        """
+        Decode latent representations into pixel space using VAE with streaming cache.
+        
+        Args:
+            latents: Input latent tensor with shape (batch, channels, frames, height_latents, width_latents)
+            fastvideo_args: Configuration object.
+            cache: VAE cache from previous call, or None to initialize a new cache.
+            is_first_chunk: Whether this is the first chunk.
+            
+        Returns:
+            A tuple of (decoded_frames, updated_cache).
+        """
+        self.vae = self.vae.to(get_local_torch_device())
+        latents = latents.to(get_local_torch_device())
+
+        # Setup VAE precision
+        vae_dtype = PRECISION_TO_TYPE[
+            fastvideo_args.pipeline_config.vae_precision]
+        vae_autocast_enabled = (
+            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+
+        latents = self._denormalize_latents(latents)
+
+        # Initialize cache if needed
+        if cache is None:
+            cache = self.vae.get_streaming_cache()
+
+        # Decode latents with streaming
+        with torch.autocast(device_type="cuda",
+                            dtype=vae_dtype,
+                            enabled=vae_autocast_enabled):
+            if fastvideo_args.pipeline_config.vae_tiling:
+                self.vae.enable_tiling()
+            if not vae_autocast_enabled:
+                latents = latents.to(vae_dtype)
+            image, cache = self.vae.streaming_decode(latents, cache,
+                                                     is_first_chunk)
+
+        # Normalize image to [0, 1] range
+        image = (image / 2 + 0.5).clamp(0, 1)
+        assert cache is not None, "cache should not be None after streaming_decode"
+        return image, cache
 
     @torch.no_grad()
     def forward(
