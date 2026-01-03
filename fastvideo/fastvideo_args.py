@@ -12,6 +12,7 @@ from typing import Any, TYPE_CHECKING
 from fastvideo.configs.configs import PreprocessConfig
 from fastvideo.configs.pipelines.base import PipelineConfig, STA_Mode
 from fastvideo.configs.utils import clean_cli_args
+from fastvideo.layers.quantization import QUANTIZATION_METHODS, QuantizationMethods
 from fastvideo.logger import init_logger
 from fastvideo.utils import FlexibleArgumentParser, StoreBoolean
 
@@ -170,6 +171,10 @@ class FastVideoArgs:
         "transformer": True,
         "vae": True,
     })
+
+    override_text_encoder_safetensors: str | None = None  # path to safetensors file for text encoder override
+    override_text_encoder_quant: QuantizationMethods = None
+
     override_transformer_cls_name: str | None = None
     init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
     init_weights_from_safetensors_2: str = ""  # path to safetensors file for initial weight loading for transformer_2
@@ -475,6 +480,19 @@ class FastVideoArgs:
             action=StoreBoolean,
             default=FastVideoArgs.enable_stage_verification,
             help="Enable input/output verification for pipeline stages",
+        )
+        parser.add_argument(
+            "--override-text-encoder-safetensors",
+            type=str,
+            default=FastVideoArgs.override_text_encoder_safetensors,
+            help="Path to safetensors file for text encoder override",
+        )
+        parser.add_argument(
+            "--override-text-encoder-quant",
+            type=str,
+            choices=QUANTIZATION_METHODS,
+            default=FastVideoArgs.override_text_encoder_quant,
+            help="Quantization method for text encoder override",
         )
         parser.add_argument(
             "--override-transformer-cls-name",
