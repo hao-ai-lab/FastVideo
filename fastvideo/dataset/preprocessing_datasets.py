@@ -40,6 +40,7 @@ class PreprocessBatch:
     num_frames: int | None = None
     sample_frame_index: list[int] | None = None
     sample_num_frames: int | None = None
+    action_path: str | None = None
 
     # Processed data
     pixel_values: torch.Tensor | None = None
@@ -470,8 +471,11 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
 
         # Initialize tokenizer
         tokenizer_path = os.path.join(args.model_path, "tokenizer")
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path,
-                                                  cache_dir=args.cache_dir)
+        if os.path.exists(tokenizer_path):
+            tokenizer = AutoTokenizer.from_pretrained(tokenizer_path,
+                                                      cache_dir=args.cache_dir)
+        else:
+            tokenizer = None
 
         # Initialize processing stages
         self._init_stages(args, transform, transform_topcrop, tokenizer)
@@ -495,11 +499,14 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         self.video_transform_stage = VideoTransformStage(transform)
         self.image_transform_stage = ImageTransformStage(
             transform, transform_topcrop)
-        self.text_encoding_stage = TextEncodingStage(
-            tokenizer=tokenizer,
-            text_max_length=args.text_max_length,
-            cfg_rate=args.training_cfg_rate,
-            seed=self.seed)
+        if tokenizer is not None:
+            self.text_encoding_stage = TextEncodingStage(
+                tokenizer=tokenizer,
+                text_max_length=args.text_max_length,
+                cfg_rate=args.training_cfg_rate,
+                seed=self.seed)
+        else:
+            self.text_encoding_stage = None
 
     def _load_raw_data(self) -> list[dict]:
         """Load raw data from JSON files."""
@@ -542,7 +549,8 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
                                     cap=item["cap"],
                                     resolution=item.get("resolution"),
                                     fps=item.get("fps"),
-                                    duration=item.get("duration"))
+                                    duration=item.get("duration"),
+                                    action_path=item.get("action_path"))
 
             # Apply filtering stages
             if not self._apply_filter_stages(batch, filter_counts):
@@ -604,20 +612,27 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         # Apply transformation stages
         batch = self.video_transform_stage.process(batch)
         batch = self.image_transform_stage.process(batch)
-        batch = self.text_encoding_stage.process(batch)
+        if self.text_encoding_stage is not None:
+            batch = self.text_encoding_stage.process(batch)
 
         # Build result dictionary
         result = {
             "pixel_values": batch.pixel_values,
-            "text": batch.text,
-            "input_ids": batch.input_ids,
-            "cond_mask": batch.cond_mask,
             "path": batch.path,
         }
+
+        if batch.text is not None:
+            result["text"] = batch.text
+            result["input_ids"] = batch.input_ids
+            result["cond_mask"] = batch.cond_mask
 
         # Add video-specific fields
         if batch.is_video:
             result.update({"fps": batch.fps, "duration": batch.duration})
+        
+        # Add action_path
+        if batch.action_path:
+            result["action_path"] = batch.action_path
 
         return result
 
