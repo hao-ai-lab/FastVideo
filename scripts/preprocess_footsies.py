@@ -32,8 +32,8 @@ class FootsiesPreprocessor(ComposedPipelineBase):
             latent = self.get_module("vae").encode(video).mean
         vae = self.get_module("vae")
         if hasattr(vae, "shift_factor") and vae.shift_factor is not None:
-            latent = latent - vae.shift_factor
-        latent = latent * vae.scaling_factor
+            latent = latent - vae.shift_factor.to(latent.device)
+        latent = latent * vae.scaling_factor.to(latent.device)
         return latent.cpu().numpy()[0]
 
     def encode_clip(self, pil_image):
@@ -51,8 +51,8 @@ class FootsiesPreprocessor(ComposedPipelineBase):
             latent = self.get_module("vae").encode(video).mean
         vae = self.get_module("vae")
         if hasattr(vae, "shift_factor") and vae.shift_factor is not None:
-            latent = latent - vae.shift_factor
-        latent = latent * vae.scaling_factor
+            latent = latent - vae.shift_factor.to(latent.device)
+        latent = latent * vae.scaling_factor.to(latent.device)
         return latent.cpu().numpy()[0]
 
 
