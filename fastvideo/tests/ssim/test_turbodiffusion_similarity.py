@@ -12,6 +12,7 @@ import pytest
 
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
+from fastvideo.tests.ssim.model_resolver import resolve_ssim_model_path
 from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_results
 from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
@@ -94,10 +95,10 @@ def test_turbodiffusion_inference_similarity(prompt, model_id):
         "fps": BASE_PARAMS["fps"],
     }
 
-    generator = VideoGenerator.from_pretrained(
-        model_path=BASE_PARAMS["model_path"],
-        **init_kwargs
+    resolved_model_path = resolve_ssim_model_path(
+        model_id=model_id, model_ref=BASE_PARAMS["model_path"]
     )
+    generator = VideoGenerator.from_pretrained(model_path=resolved_model_path, **init_kwargs)
     generator.generate_video(prompt, **generation_kwargs)
 
     if isinstance(generator.executor, MultiprocExecutor):
