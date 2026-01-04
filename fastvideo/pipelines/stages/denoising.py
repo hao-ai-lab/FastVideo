@@ -253,19 +253,37 @@ class DenoisingStage(PipelineStage):
 
                 if boundary_timestep is None or t >= boundary_timestep:
                     if (fastvideo_args.dit_cpu_offload
+                            and not fastvideo_args.dit_layerwise_offload
                             and self.transformer_2 is not None and next(
                                 self.transformer_2.parameters()).device.type
                             == 'cuda'):
                         self.transformer_2.to('cpu')
                     current_model = self.transformer
+                    if (fastvideo_args.dit_cpu_offload
+                            and not fastvideo_args.dit_layerwise_offload
+                            and not fastvideo_args.use_fsdp_inference
+                            and current_model is not None):
+                        transformer_device = next(
+                            current_model.parameters()).device.type
+                        if transformer_device == 'cpu':
+                            current_model.to(get_local_torch_device())
                     current_guidance_scale = batch.guidance_scale
                 else:
                     # low-noise stage in wan2.2
-                    if fastvideo_args.dit_cpu_offload and next(
-                            self.transformer.parameters(
-                            )).device.type == 'cuda':
+                    if (fastvideo_args.dit_cpu_offload
+                            and not fastvideo_args.dit_layerwise_offload
+                            and next(self.transformer.parameters()).device.type
+                            == 'cuda'):
                         self.transformer.to('cpu')
                     current_model = self.transformer_2
+                    if (fastvideo_args.dit_cpu_offload
+                            and not fastvideo_args.dit_layerwise_offload
+                            and not fastvideo_args.use_fsdp_inference
+                            and current_model is not None):
+                        transformer_2_device = next(
+                            current_model.parameters()).device.type
+                        if transformer_2_device == 'cpu':
+                            current_model.to(get_local_torch_device())
                     current_guidance_scale = batch.guidance_scale_2
                 assert current_model is not None, "current_model is None"
 
@@ -457,6 +475,16 @@ class DenoisingStage(PipelineStage):
 
         # Update batch with final latents
         batch.latents = latents
+
+        if fastvideo_args.dit_layerwise_offload:
+            mgr = getattr(self.transformer, "_layerwise_offload_manager", None)
+            if mgr is not None and getattr(mgr, "enabled", False):
+                mgr.release_all()
+            if self.transformer_2 is not None:
+                mgr2 = getattr(self.transformer_2, "_layerwise_offload_manager",
+                               None)
+                if mgr2 is not None and getattr(mgr2, "enabled", False):
+                    mgr2.release_all()
 
         # Save STA mask search results if needed
         if st_attn_available and self.attn_backend == SlidingTileAttentionBackend and fastvideo_args.STA_mode == STA_Mode.STA_SEARCHING:
