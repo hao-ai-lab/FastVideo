@@ -6,8 +6,8 @@ export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-MODEL_PATH="path"
-DATA_DIR="path"
+MODEL_PATH="Matrix-Game-2.0-Base-Diffusers"
+DATA_DIR="footsies-dataset/preprocessed/combined_parquet_dataset"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 NUM_GPUS=2
 export CUDA_VISIBLE_DEVICES=0, 1
