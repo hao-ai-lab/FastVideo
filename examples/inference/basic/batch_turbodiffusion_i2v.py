@@ -17,7 +17,7 @@ from fastvideo import VideoGenerator
 
 # Paths
 ASSETS_DIR = "/mnt/fast-disks/hao_lab/loay/TurboDiffusion/assets/i2v_inputs"
-LOCAL_MODEL_PATH = "/mnt/fast-disks/hao_lab/loay/FastVideo/TurboWan2.2-I2V-Local"
+MODEL_PATH = "loayrashid/TurboWan2.2-I2V-A14B-Diffusers"
 OUTPUT_PATH = "video_samples_turbodiffusion_i2v_batch"
 
 # Prompts from prompts.txt (paired with i2v_input_0.jpg through i2v_input_6.jpg)
@@ -54,9 +54,9 @@ def main() -> None:
     os.makedirs(OUTPUT_PATH, exist_ok=True)
 
     # Initialize generator
-    print(f"\nLoading model from: {LOCAL_MODEL_PATH}")
+    print(f"\nLoading model from: {MODEL_PATH}")
     generator = VideoGenerator.from_pretrained(
-        LOCAL_MODEL_PATH,
+        MODEL_PATH,
         num_gpus=2,
         override_pipeline_cls_name="TurboDiffusionI2VPipeline",
     )

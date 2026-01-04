@@ -6,7 +6,7 @@ os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "SLA_ATTN"
 from fastvideo import VideoGenerator
 
 # Use local model path
-LOCAL_MODEL_PATH = "/mnt/fast-disks/hao_lab/loay/FastVideo/TurboWan2.2-I2V-Local"
+MODEL_PATH = "loayrashid/TurboWan2.2-I2V-A14B-Diffusers"
 OUTPUT_PATH = "video_samples_turbodiffusion_i2v"
 
 
@@ -14,7 +14,7 @@ def main() -> None:
     # TurboDiffusion I2V: 1-4 step image-to-video generation
     # Uses RCM scheduler with sigma_max=200 for I2V
     generator = VideoGenerator.from_pretrained(
-        LOCAL_MODEL_PATH,  # Local path to converted model
+        MODEL_PATH,
         num_gpus=2,
         override_pipeline_cls_name="TurboDiffusionI2VPipeline",
     )
