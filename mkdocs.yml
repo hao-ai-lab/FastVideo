@@ -135,6 +135,7 @@ nav:
       - Optimizations: inference/examples/optimizations.md
       - STA Mask Search: inference/examples/sta_mask_search.md
   - Training:
+    - Overview: training/overview.md
     - Data Preprocessing: training/data_preprocess.md
     - Fine-tuning: training/finetune.md
     - Examples:
