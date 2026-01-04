@@ -190,7 +190,7 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
         sampling_param.prompt = validation_batch['prompt']
         sampling_param.height = training_args.num_height
         sampling_param.width = training_args.num_width
-        sampling_param.image_path = validation_batch['video_path']
+        sampling_param.image_path = validation_batch.get('image_path') or validation_batch.get('video_path')
         sampling_param.num_inference_steps = num_inference_steps
         sampling_param.data_type = "video"
         assert self.seed is not None
