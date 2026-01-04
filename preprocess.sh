@@ -8,9 +8,10 @@ python fastvideo/pipelines/preprocess/v1_preprocess.py \
     --data_merge_path /workspace/footsies-dataset/merge.txt \
     --output_dir /workspace/footsies-dataset/preprocessed/ \
     --preprocess_task matrixgame \
-    --num_frames 77 \
+    --num_frames 81 \
     --max_height 480 \
     --max_width 832 \
-    --preprocess_video_batch_size 2 \
-    --dataloader_num_workers 4 \
-    --samples_per_file 64
+    --preprocess_video_batch_size 1 \
+    --dataloader_num_workers 0 \
+    --samples_per_file 8 \
+    --flush_frequency 32
