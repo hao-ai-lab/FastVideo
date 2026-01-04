@@ -26,110 +26,16 @@ For I2V models, you need everything from T2V plus additional image conditioning.
 | **First frame latent** | VAE-encoded representation of the first frame, used as the conditioning image. |
 | **CLIP features** | Image embeddings from a CLIP vision encoder for the conditioning frame. |
 
-## Input Dataset Formats
+## Preprocessing
 
-FastVideo supports two dataset formats for preprocessing:
+Before training, you need to preprocess your raw videos and captions into Parquet files containing precomputed latents and embeddings.
 
-### HuggingFace Datasets (`--preprocess.dataset_type hf`)
+FastVideo supports two input formats:
 
-Load datasets directly from the HuggingFace Hub or local HF datasets. The dataset should have:
+- **HuggingFace datasets** — load directly from HF Hub or local HF datasets
+- **Merged datasets** — local folder with videos and a `videos2caption.json` metadata file
 
-- A `video` column containing video file paths or binary data
-- A `caption` column containing text prompts
-
-```bash
-# Example: preprocessing a HuggingFace dataset
-torchrun --nproc_per_node=2 \
-    -m fastvideo.pipelines.preprocess.v1_preprocessing_new \
-    --model_path "Wan-AI/Wan2.1-T2V-1.3B-Diffusers" \
-    --mode preprocess \
-    --workload_type t2v \
-    --preprocess.dataset_type hf \
-    --preprocess.dataset_path "your-org/your-video-dataset" \
-    --preprocess.dataset_output_dir "data/output_processed/"
-```
-
-### Merged Dataset (`--preprocess.dataset_type merged`)
-
-A local folder-based format with videos and a JSON metadata file:
-
-```
-your_dataset/
-├── videos/
-│   ├── video_001.mp4
-│   ├── video_002.mp4
-│   └── ...
-└── videos2caption.json
-```
-
-The `videos2caption.json` maps video filenames to captions:
-
-```json
-[
-  {"path": "video_001.mp4", "cap": "A cat playing with yarn..."},
-  {"path": "video_002.mp4", "cap": "Ocean waves at sunset..."}
-]
-```
-
-## Preprocessing Pipeline
-
-The new preprocessing pipeline (`v1_preprocessing_new`) encodes raw videos and captions into training-ready Parquet files. Key parameters:
-
-| Parameter | Description |
-|-----------|-------------|
-| `--workload_type` | Task type: `t2v` or `i2v` |
-| `--preprocess.dataset_type` | Input format: `hf` or `merged` |
-| `--preprocess.dataset_path` | Path to dataset (HF repo ID or local folder) |
-| `--preprocess.dataset_output_dir` | Output directory for Parquet files |
-| `--preprocess.video_loader_type` | Video decoder: `torchcodec` or `torchvision` |
-
-### T2V Preprocessing Example
-
-```bash
-torchrun --nproc_per_node=2 \
-    -m fastvideo.pipelines.preprocess.v1_preprocessing_new \
-    --model_path "Wan-AI/Wan2.1-T2V-1.3B-Diffusers" \
-    --mode preprocess \
-    --workload_type t2v \
-    --preprocess.dataset_type merged \
-    --preprocess.dataset_path "data/your_dataset/" \
-    --preprocess.dataset_output_dir "data/your_dataset_processed/" \
-    --preprocess.video_loader_type torchvision \
-    --preprocess.max_height 480 \
-    --preprocess.max_width 832 \
-    --preprocess.num_frames 77 \
-    --preprocess.train_fps 16
-```
-
-### I2V Preprocessing Example
-
-```bash
-torchrun --nproc_per_node=2 \
-    -m fastvideo.pipelines.preprocess.v1_preprocessing_new \
-    --model_path "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers" \
-    --mode preprocess \
-    --workload_type i2v \
-    --preprocess.dataset_type merged \
-    --preprocess.dataset_path "data/your_dataset/" \
-    --preprocess.dataset_output_dir "data/your_dataset_processed/" \
-    --preprocess.video_loader_type torchvision \
-    --preprocess.max_height 480 \
-    --preprocess.max_width 832 \
-    --preprocess.num_frames 77 \
-    --preprocess.train_fps 16
-```
-
-For more details, see [Data Preprocessing](data_preprocess.md).
-
-## Output Format
-
-Preprocessing outputs a Parquet dataset containing:
-
-- `vae_latent_bytes` — encoded video latent
-- `text_embedding_bytes` — text encoder output
-- `clip_feature_bytes` — CLIP image features (I2V only)
-- `first_frame_latent_bytes` — first frame latent (I2V only)
-- Metadata: shapes, dtypes, and sample identifiers
+**→ See [Data Preprocessing](data_preprocess.md) for full details and examples.**
 
 ## Training Examples
 
