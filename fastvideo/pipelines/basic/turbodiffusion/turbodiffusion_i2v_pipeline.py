@@ -43,13 +43,6 @@ class TurboDiffusionI2VPipeline(LoRAPipeline, ComposedPipelineBase):
         logger.info("Initializing RCM scheduler for TurboDiffusion I2V (sigma_max=200)")
         self.modules["scheduler"] = RCMScheduler(sigma_max=200.0)
 
-        # Store checkpoint paths for high/low noise models
-        self._turbodiffusion_checkpoint = getattr(fastvideo_args,
-                                                  'turbodiffusion_checkpoint',
-                                                  None)
-        # Boundary for switching high->low noise model (default 0.9)
-        self._boundary = getattr(fastvideo_args, 'boundary', 0.9)
-
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""
 

@@ -36,11 +36,6 @@ class TurboDiffusionPipeline(LoRAPipeline, ComposedPipelineBase):
         logger.info("Initializing RCM scheduler for TurboDiffusion")
         self.modules["scheduler"] = RCMScheduler(sigma_max=80.0)
 
-        # Store checkpoint path for later loading
-        self._turbodiffusion_checkpoint = getattr(fastvideo_args,
-                                                  'turbodiffusion_checkpoint',
-                                                  None)
-
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""
 
