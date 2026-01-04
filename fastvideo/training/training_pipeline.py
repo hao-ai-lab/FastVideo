@@ -47,6 +47,7 @@ from fastvideo.training.training_utils import (
     shard_latents_across_sp)
 from fastvideo.utils import (is_vmoba_available, is_vsa_available,
                              set_random_seed, shallow_asdict)
+from fastvideo.optim.muon import get_muon_optimizer
 
 vsa_available = is_vsa_available()
 vmoba_available = is_vmoba_available()
@@ -130,12 +131,18 @@ class TrainingPipeline(LoRAPipeline, ABC):
         betas_str = training_args.betas
         betas = tuple(float(x.strip()) for x in betas_str.split(","))
 
-        self.optimizer = torch.optim.AdamW(
-            params_to_optimize,
+        # self.optimizer = torch.optim.AdamW(
+        #     params_to_optimize,
+        #     lr=training_args.learning_rate,
+        #     betas=betas,
+        #     weight_decay=training_args.weight_decay,
+        #     eps=1e-8,
+        # )
+
+        self.optimizer = get_muon_optimizer(
+            self.transformer,
             lr=training_args.learning_rate,
-            betas=betas,
             weight_decay=training_args.weight_decay,
-            eps=1e-8,
         )
 
         self.init_steps = 0
@@ -663,7 +670,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     "grad_norm": grad_norm,
                     "vsa_sparsity": current_vsa_sparsity,
                 }
-                metrics["batch_size"] = int(training_batch.raw_latent_shape[0])
+                # metrics["batch_size"] = int(training_batch.raw_latent_shape[0])
 
                 patch_t, patch_h, patch_w = self.training_args.pipeline_config.dit_config.patch_size
                 seq_len = (training_batch.raw_latent_shape[2] // patch_t) * (
@@ -675,14 +682,14 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 else:
                     context_len = 0
 
-                metrics["dit_seq_len"] = int(seq_len)
-                metrics["context_len"] = context_len
+                # metrics["dit_seq_len"] = int(seq_len)
+                # metrics["context_len"] = context_len
 
-                arch_config = self.training_args.pipeline_config.dit_config.arch_config
+                # arch_config = self.training_args.pipeline_config.dit_config.arch_config
 
-                metrics["hidden_dim"] = arch_config.hidden_size
-                metrics["num_layers"] = arch_config.num_layers
-                metrics["ffn_dim"] = arch_config.ffn_dim
+                # metrics["hidden_dim"] = arch_config.hidden_size
+                # metrics["num_layers"] = arch_config.num_layers
+                # metrics["ffn_dim"] = arch_config.ffn_dim
 
                 self.tracker.log(metrics, step)
             if step % self.training_args.training_state_checkpointing_steps == 0:
@@ -695,12 +702,13 @@ class TrainingPipeline(LoRAPipeline, ABC):
                                     self.noise_random_generator)
                 self.transformer.train()
                 self.sp_group.barrier()
+
+            if self.training_args.log_visualization and step % self.training_args.visualization_steps == 0:
+                self.visualize_intermediate_latents(training_batch, self.training_args, step)
+                
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 with self.profiler_controller.region(
                         "profiler_region_training_validation"):
-                    if self.training_args.log_visualization:
-                        self.visualize_intermediate_latents(
-                            training_batch, self.training_args, step)
                     self._log_validation(self.transformer, self.training_args,
                                          step)
                     gpu_memory_usage = current_platform.get_torch_device(
