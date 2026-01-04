@@ -36,6 +36,7 @@ from fastvideo.models.loader.weight_utils import (
 )
 from fastvideo.models.registry import ModelRegistry
 from fastvideo.utils import PRECISION_TO_TYPE
+from fastvideo.models.layerwise_offload import LayerwiseOffloadManager
 
 logger = init_logger(__name__)
 
@@ -609,6 +610,36 @@ class TransformerLoader(ComponentLoader):
         )
 
         model = model.eval()
+
+        if fastvideo_args.dit_layerwise_offload and hasattr(model, "blocks"):
+            # Check if this is a Wan model (only Wan models support layerwise offload)
+            is_wan_model = "Wan" in cls_name
+            if not is_wan_model:
+                logger.warning(
+                    "Layerwise offload is currently only supported for Wan models. "
+                    "Model class '%s' does not support layerwise offload. "
+                    "Disabling layerwise offload for this model.",
+                    cls_name
+                )
+            else:
+                try:
+                    num_layers = len(getattr(model, "blocks"))
+                except TypeError:
+                    num_layers = None
+                if isinstance(num_layers, int) and num_layers > 0:
+                    # Ensure model is on the correct device (CUDA) before initializing manager
+                    # This ensures non-managed parameters (embeddings, final norms) are on GPU
+                    model = model.to(get_local_torch_device())
+                    mgr = LayerwiseOffloadManager(
+                        model,
+                        module_list_attr="blocks",
+                        num_layers=num_layers,
+                        enabled=True,
+                        pin_cpu_memory=fastvideo_args.pin_cpu_memory,
+                        auto_initialize=True,
+                    )
+                    setattr(model, "_layerwise_offload_manager", mgr)
+
         return model
 
 

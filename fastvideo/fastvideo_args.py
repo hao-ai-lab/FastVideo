@@ -133,6 +133,7 @@ class FastVideoArgs:
     # CPU offload parameters
     dit_cpu_offload: bool = True
     use_fsdp_inference: bool = True
+    dit_layerwise_offload: bool = False
     text_encoder_cpu_offload: bool = True
     image_encoder_cpu_offload: bool = True
     vae_cpu_offload: bool = True
@@ -422,6 +423,11 @@ class FastVideoArgs:
             "Use CPU offload for DiT inference. Enable if run out of memory with FSDP.",
         )
         parser.add_argument(
+            "--dit-layerwise-offload",
+            action=StoreBoolean,
+            help="Enable layerwise CPU offload with async H2D prefetch overlap.",
+        )
+        parser.add_argument(
             "--use-fsdp-inference",
             action=StoreBoolean,
             help=
@@ -603,6 +609,19 @@ class FastVideoArgs:
 
         if current_platform.is_mps():
             self.use_fsdp_inference = False
+            self.dit_layerwise_offload = False
+
+        if self.dit_layerwise_offload:
+            if self.use_fsdp_inference:
+                logger.warning(
+                    "dit_layerwise_offload is enabled, automatically disabling use_fsdp_inference."
+                )
+                self.use_fsdp_inference = False
+            if self.dit_cpu_offload:
+                logger.warning(
+                    "dit_layerwise_offload is enabled, automatically disabling dit_cpu_offload."
+                )
+                self.dit_cpu_offload = False
 
         # Validate mode and inference_mode consistency
         assert isinstance(
