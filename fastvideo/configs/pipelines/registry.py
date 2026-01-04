@@ -88,6 +88,8 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "stepvideo" in id.lower(),
     "cosmos":
     lambda id: "cosmos" in id.lower(),
+    "turbodiffusion":
+    lambda id: "turbodiffusion" in id.lower() or "turbowan" in id.lower(),
     # Add other pipeline architecture detectors
 }
 
@@ -106,7 +108,8 @@ PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "wanimagetovideo": WanI2V480PConfig,
     "wandmdpipeline": FastWan2_1_T2V_480P_Config,
     "wancausaldmdpipeline": SelfForcingWanT2V480PConfig,
-    "stepvideo": StepVideoT2VConfig
+    "stepvideo": StepVideoT2VConfig,
+    "turbodiffusion": Wan2_2_I2V_A14B_Config,
     # Other fallbacks by architecture
 }
 
