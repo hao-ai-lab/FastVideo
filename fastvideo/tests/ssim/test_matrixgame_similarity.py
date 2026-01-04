@@ -7,6 +7,7 @@ import pytest
 from fastvideo import VideoGenerator
 from fastvideo.models.dits.matrix_game.utils import create_action_presets
 from fastvideo.logger import init_logger
+from fastvideo.tests.ssim.model_resolver import resolve_ssim_model_path
 from fastvideo.tests.utils import (
     compute_video_ssim_torchvision,
     write_ssim_results,
@@ -108,9 +109,10 @@ def test_matrixgame_similarity(prompt, ATTENTION_BACKEND, model_id):
         "save_video": True,
     }
 
-    generator = VideoGenerator.from_pretrained(
-        model_path=BASE_PARAMS["model_path"], **init_kwargs
+    resolved_model_path = resolve_ssim_model_path(
+        model_id=model_id, model_ref=BASE_PARAMS["model_path"]
     )
+    generator = VideoGenerator.from_pretrained(model_path=resolved_model_path, **init_kwargs)
     generator.generate_video(prompt, **generation_kwargs)
 
     if isinstance(generator.executor, MultiprocExecutor):
