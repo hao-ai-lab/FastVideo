@@ -115,7 +115,7 @@ if __name__ == "__main__":
     parser.add_argument("--image_dir", type=str, required=True, help="Directory containing PNG images")
     parser.add_argument("--output_dir", type=str, required=True, help="Output directory for videos and metadata")
     parser.add_argument("--fps", type=int, default=30, help="Frame rate for output videos")
-    parser.add_argument("--max_frames", type=int, default=77, help="Maximum frames per video segment")
+    parser.add_argument("--max_frames", type=int, default=81, help="Maximum frames per video segment")
     
     args = parser.parse_args()
     main()
