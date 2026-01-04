@@ -6,18 +6,18 @@ export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-MODEL_PATH="path"
+MODEL_PATH="checkpoints/matrixgame_phase1/checkpoint_final"
 DATA_DIR="path"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
-NUM_GPUS=8
-# export CUDA_VISIBLE_DEVICES=4,5
+NUM_GPUS=2
+export CUDA_VISIBLE_DEVICES=0, 1
 # IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
   --tracker_project_name "matrixgame_finetune_phase2"
   --output_dir "checkpoints/matrixgame_phase2"
-  --max_train_steps 2000
+  --max_train_steps 120000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
@@ -53,17 +53,17 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 100
+  --validation_steps 2000
   --validation_sampling_steps "40"
   --validation_guidance_scale "6.0"
 )
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 1e-5
+  --learning_rate 2e-5
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 1000
-  --training_state_checkpointing_steps 1000
+  --weight_only_checkpointing_steps 5000
+  --training_state_checkpointing_steps 10000
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )
@@ -78,7 +78,6 @@ miscellaneous_args=(
   --dit_precision "fp32"
   --num_euler_timesteps 50
   --ema_start_step 0
-  --enable_gradient_checkpointing_type "full"
 )
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
