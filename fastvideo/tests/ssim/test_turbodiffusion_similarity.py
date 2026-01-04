@@ -179,7 +179,7 @@ TURBODIFFUSION_I2V_MODEL_TO_PARAMS = {
 }
 
 TURBODIFFUSION_I2V_TEST_PROMPTS = [
-    "POV selfie video, ultra-messy and extremely fast. A white cat in sunglasses stands on a surfboard with a neutral look when the board suddenly whips sideways, throwing cat and camera into the water.",
+    "An astronaut hatching from an egg, on the surface of the moon, the darkness and depth of space realised in the background. High quality, ultrarealistic detail and breath-taking movie-like camera shot.",
 ]
 
 TURBODIFFUSION_I2V_IMAGE_PATHS = [
