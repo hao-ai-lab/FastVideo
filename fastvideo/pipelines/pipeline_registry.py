@@ -24,6 +24,7 @@ _PIPELINE_NAME_TO_ARCHITECTURE_NAME: dict[str, str] = {
     "WanVideoToVideoPipeline": "wan",
     "WanCausalDMDPipeline": "wan",
     "TurboDiffusionPipeline": "turbodiffusion",
+    "TurboDiffusionI2VPipeline": "turbodiffusion",
     "StepVideoPipeline": "stepvideo",
     "HunyuanVideoPipeline": "hunyuan",
     "HunyuanVideo15Pipeline": "hunyuan15",
