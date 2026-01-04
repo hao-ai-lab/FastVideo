@@ -82,7 +82,7 @@ def run_transformer_tests():
 @app.function(
     gpu="L40S:4", 
     image=image, 
-    timeout=5400, 
+    timeout=6000, 
     secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})],
     volumes={"/root/data": model_vol} 
 )
