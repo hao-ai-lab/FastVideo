@@ -82,7 +82,7 @@ def run_transformer_tests():
 @app.function(
     gpu="L40S:4", 
     image=image, 
-    timeout=2700, 
+    timeout=3600,
     secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})],
     volumes={"/root/data": model_vol} 
 )
@@ -122,7 +122,7 @@ def run_kernel_tests():
 def run_inference_tests_vmoba():
     run_test('python fastvideo/tests/inference/vmoba/test_vmoba_inference.py')
 
-@app.function(gpu="L40S:1", image=image, timeout=3600)
+@app.function(gpu="L40S:1", image=image, timeout=1200)
 def run_inference_lora_tests():
     run_test("pytest ./fastvideo/tests/inference/lora/test_lora_inference_similarity.py -vs")
 
