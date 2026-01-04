@@ -47,7 +47,7 @@ VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 training_args=(
   --tracker_project_name "matrixgame_distill_self_forcing"
   --output_dir "checkpoints/matrixgame_causal"
-  --max_train_steps 20000
+  --max_train_steps 10000  # 6k ODE pairs + 4k self-forcing
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
@@ -93,7 +93,7 @@ validation_args=(
 )
 
 optimizer_args=(
-  --learning_rate 1e-5
+  --learning_rate 6e-6
   --mixed_precision "bf16"
   --training_state_checkpointing_steps 500
   --weight_only_checkpointing_steps 500
