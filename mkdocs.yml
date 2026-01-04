@@ -130,12 +130,21 @@ nav:
     - Support Matrix: inference/support_matrix.md
     - CLI: inference/cli.md
     - Add Pipeline: inference/add_pipeline.md
-    - Examples: inference/examples/examples_inference_index.md
+    - Examples:
+      - Basic: inference/examples/basic.md
+      - Optimizations: inference/examples/optimizations.md
+      - STA Mask Search: inference/examples/sta_mask_search.md
   - Training:
-    - Training Recipes: training/training_recipes.md
+    - Overview: training/overview.md
     - Data Preprocessing: training/data_preprocess.md
     - Fine-tuning: training/finetune.md
-    - Examples: training/examples/examples_training_index.md
+    - Examples:
+      - Training Index: training/examples/examples_training_index.md
+      - Wan T2V 1.3B: training/examples/wan_t2v_1.3B.md
+      - Wan I2V 14B 480p: training/examples/wan_i2v_14B_480p.md
+      - Wan2.1 Fun 1.3B InP: training/examples/Wan2.1-Fun-1.3B-InP.md
+      - Wan2.1 VSA: training/examples/Wan2.1-VSA.md
+      - Fine-tuning: training/examples/finetune.md
   - Distillation:
     - Data Preprocessing: distillation/data_preprocess.md
     - DMD: distillation/dmd.md
