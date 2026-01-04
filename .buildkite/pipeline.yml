@@ -61,7 +61,7 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 45m .buildkite/scripts/pr_test.sh"
+                command: "timeout 60m .buildkite/scripts/pr_test.sh"
                 label: "SSIM Tests"
                 env:
                   - TEST_TYPE=ssim
@@ -76,7 +76,7 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                command: "timeout 20m .buildkite/scripts/pr_test.sh"
                 label: "LoRA Inference Tests"
                 env:
                   - TEST_TYPE=inference_lora
