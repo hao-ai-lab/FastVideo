@@ -55,11 +55,21 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "FastVideo/Matrix-Game-2.0-Base-Diffusers": MatrixGameI2V480PConfig,
     "FastVideo/Matrix-Game-2.0-GTA-Diffusers": MatrixGameI2V480PConfig,
     "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers": MatrixGameI2V480PConfig,
+    # LongCat Video models
+    "FastVideo/LongCat-Video-T2V-Diffusers": LongCatT2V480PConfig,
+    "FastVideo/LongCat-Video-I2V-Diffusers": LongCatT2V480PConfig,
+    "FastVideo/LongCat-Video-VC-Diffusers": LongCatT2V480PConfig,
     # Add other specific weight variants
 }
 
 # For determining pipeline type from model ID
 PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
+    "longcatimagetovideo":
+    lambda id: "longcatimagetovideo" in id.lower(),
+    "longcatvideocontinuation":
+    lambda id: "longcatvideocontinuation" in id.lower(),
+    "longcat":
+    lambda id: "longcat" in id.lower(),
     "hunyuan":
     lambda id: "hunyuan" in id.lower(),
     "hunyuan15":
@@ -78,13 +88,13 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "stepvideo" in id.lower(),
     "cosmos":
     lambda id: "cosmos" in id.lower(),
-    "longcat":
-    lambda id: "longcat" in id.lower(),
     # Add other pipeline architecture detectors
 }
 
 # Fallback configs when exact match isn't found but architecture is detected
 PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
+    "longcatimagetovideo": LongCatT2V480PConfig,
+    "longcatvideocontinuation": LongCatT2V480PConfig,
     "longcat": LongCatT2V480PConfig,
     "hunyuan":
     HunyuanConfig,  # Base Hunyuan config as fallback for any Hunyuan variant

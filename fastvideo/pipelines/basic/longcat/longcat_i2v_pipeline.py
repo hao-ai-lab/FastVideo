@@ -1,9 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-LongCat video diffusion pipeline implementation.
+LongCat Image-to-Video pipeline implementation.
 
-This module implements the LongCat video diffusion pipeline using FastVideo's
-modular pipeline architecture.
+This module implements I2V (Image-to-Video) generation for LongCat using Tier 3
+conditioning with timestep masking, num_cond_latents support, and RoPE skipping.
+
+Supports:
+- Basic I2V (50 steps, guidance_scale=4.0)
+- Distilled I2V with LoRA (16 steps, guidance_scale=1.0)
+- Refinement I2V for 720p upscaling (with refinement LoRA + BSA)
 """
 
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -12,20 +17,27 @@ from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.stages import (
     DecodingStage,
     InputValidationStage,
-    LatentPreparationStage,
     TextEncodingStage,
     TimestepPreparationStage,
 )
-from fastvideo.pipelines.stages.longcat_denoising import LongCatDenoisingStage
+from fastvideo.pipelines.stages.longcat_image_vae_encoding import LongCatImageVAEEncodingStage
+from fastvideo.pipelines.stages.longcat_i2v_latent_preparation import LongCatI2VLatentPreparationStage
+from fastvideo.pipelines.stages.longcat_i2v_denoising import LongCatI2VDenoisingStage
 from fastvideo.pipelines.stages.longcat_refine_init import LongCatRefineInitStage
 from fastvideo.pipelines.stages.longcat_refine_timestep import LongCatRefineTimestepStage
 
 logger = init_logger(__name__)
 
 
-class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
+class LongCatImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
     """
-    LongCat video diffusion pipeline with LoRA support.
+    LongCat Image-to-Video pipeline.
+    
+    Generates video from a single input image using Tier 3 I2V conditioning:
+    - Per-frame timestep masking (timestep[:, 0] = 0)
+    - num_cond_latents parameter to transformer
+    - RoPE skipping for conditioning frames
+    - Selective denoising (skip first frame in scheduler)
     """
 
     _required_config_modules = [
@@ -34,25 +46,19 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         """Initialize LongCat-specific components."""
-
-        # Enable BSA (Block Sparse Attention) if configured
+        # Same BSA initialization as base LongCat pipeline
         pipeline_config = fastvideo_args.pipeline_config
         transformer = self.get_module("transformer", None)
         if transformer is None:
-            raise RuntimeError(
-                "Transformer module not found during initializing LongCat pipeline."
-            )
-        # If user toggles BSA via CLI/config
+            return
+
+        # Enable BSA if configured
         if pipeline_config.enable_bsa:
-            # Build effective BSA params:
-            # 1) from explicit CLI overrides if provided
-            # 2) else from pipeline_config.bsa_params
-            # 3) else fall back to reasonable defaults
-            bsa_params_cfg = pipeline_config.bsa_params
-            sparsity = pipeline_config.bsa_sparsity
-            cdf_threshold = pipeline_config.bsa_cdf_threshold
-            chunk_q = pipeline_config.bsa_chunk_q
-            chunk_k = pipeline_config.bsa_chunk_k
+            bsa_params_cfg = getattr(pipeline_config, 'bsa_params', None) or {}
+            sparsity = getattr(pipeline_config, 'bsa_sparsity', None)
+            cdf_threshold = getattr(pipeline_config, 'bsa_cdf_threshold', None)
+            chunk_q = getattr(pipeline_config, 'bsa_chunk_q', None)
+            chunk_k = getattr(pipeline_config, 'bsa_chunk_k', None)
 
             effective_bsa_params = dict(bsa_params_cfg) if isinstance(
                 bsa_params_cfg, dict) else {}
@@ -64,79 +70,79 @@ class LongCatPipeline(LoRAPipeline, ComposedPipelineBase):
                 effective_bsa_params['chunk_3d_shape_q'] = chunk_q
             if chunk_k is not None:
                 effective_bsa_params['chunk_3d_shape_k'] = chunk_k
-            # Provide defaults if still missing
+
+            # Provide defaults
             effective_bsa_params.setdefault('sparsity', 0.9375)
             effective_bsa_params.setdefault('chunk_3d_shape_q', [4, 4, 4])
             effective_bsa_params.setdefault('chunk_3d_shape_k', [4, 4, 4])
 
             if hasattr(transformer, 'enable_bsa'):
-                logger.info(
-                    "Enabling Block Sparse Attention (BSA) for LongCat transformer"
-                )
+                logger.info("Enabling BSA for LongCat I2V transformer")
                 transformer.enable_bsa()
-                # Propagate params to all attention modules
                 if hasattr(transformer, 'blocks'):
                     try:
                         for blk in transformer.blocks:
                             if hasattr(blk, 'self_attn'):
                                 blk.self_attn.bsa_params = effective_bsa_params
                     except Exception as e:
-                        logger.warning(
-                            "Failed to set BSA params on all blocks: %s", e)
-                logger.info("BSA parameters in effect: %s",
-                            effective_bsa_params)
-            else:
-                logger.warning(
-                    "BSA is enabled in config but transformer does not support it"
-                )
+                        logger.warning("Failed to set BSA params: %s", e)
+                logger.info("BSA parameters: %s", effective_bsa_params)
         else:
-            # Explicitly disable if present
             if hasattr(transformer, 'disable_bsa'):
                 transformer.disable_bsa()
 
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
-        """Set up pipeline stages with proper dependency injection."""
+    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+        """Set up I2V-specific pipeline stages."""
 
+        # 1. Input validation
         self.add_stage(stage_name="input_validation_stage",
                        stage=InputValidationStage())
 
+        # 2. Text encoding (same as T2V)
         self.add_stage(stage_name="prompt_encoding_stage",
                        stage=TextEncodingStage(
                            text_encoders=[self.get_module("text_encoder")],
                            tokenizers=[self.get_module("tokenizer")],
                        ))
 
-        # Add refine initialization stage (will be skipped if not refining)
+        # 3. Image VAE encoding (for I2V - skipped in refinement mode)
+        self.add_stage(
+            stage_name="image_vae_encoding_stage",
+            stage=LongCatImageVAEEncodingStage(vae=self.get_module("vae")))
+
+        # 4. Refinement initialization (skipped if not refining)
         self.add_stage(stage_name="longcat_refine_init_stage",
                        stage=LongCatRefineInitStage(vae=self.get_module("vae")))
 
-        # First prepare generic timesteps (for non-refine paths)
+        # 5. Timestep preparation (generic)
         self.add_stage(stage_name="timestep_preparation_stage",
                        stage=TimestepPreparationStage(
                            scheduler=self.get_module("scheduler")))
 
-        # Then override timesteps for refinement (will be a no-op if not refining),
-        # matching LongCat's generate_refine schedule.
+        # 6. Refinement timestep override (skipped if not refining)
         self.add_stage(stage_name="longcat_refine_timestep_stage",
                        stage=LongCatRefineTimestepStage(
                            scheduler=self.get_module("scheduler")))
 
+        # 7. Latent preparation with I2V conditioning
         self.add_stage(stage_name="latent_preparation_stage",
-                       stage=LatentPreparationStage(
+                       stage=LongCatI2VLatentPreparationStage(
                            scheduler=self.get_module("scheduler"),
-                           transformer=self.get_module("transformer", None)))
+                           transformer=self.get_module("transformer")))
 
+        # 8. Denoising with I2V support
         self.add_stage(stage_name="denoising_stage",
-                       stage=LongCatDenoisingStage(
+                       stage=LongCatI2VDenoisingStage(
                            transformer=self.get_module("transformer"),
                            transformer_2=self.get_module("transformer_2", None),
                            scheduler=self.get_module("scheduler"),
                            vae=self.get_module("vae"),
                            pipeline=self))
 
+        # 9. Decoding
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae"),
                                            pipeline=self))
 
 
-EntryClass = LongCatPipeline
+EntryClass = LongCatImageToVideoPipeline
