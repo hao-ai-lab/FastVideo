@@ -660,7 +660,8 @@ class TransformerLoader(ComponentLoader):
             pin_cpu_memory=fastvideo_args.pin_cpu_memory,
             fsdp_inference=fastvideo_args.use_fsdp_inference,
             # TODO(will): make these configurable
-            default_dtype=default_dtype,
+            default_dtype=
+            ,
             param_dtype=torch.bfloat16,
             reduce_dtype=torch.float32,
             output_dtype=None,

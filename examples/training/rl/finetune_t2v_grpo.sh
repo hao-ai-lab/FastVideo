@@ -30,7 +30,7 @@ training_args=(
   # --train_sp_batch_size 4
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 20
+  --num_latent_t 2
   --num_height 480
   --num_width 832
   --num_frames 77
@@ -104,7 +104,8 @@ miscellaneous_args=(
   --inference_mode False
   --checkpoints_total_limit 3
   --training_cfg_rate 0.0  # No CFG during training (CFG used in sampling)
-  --dit_precision "fp32"
+  # --dit_precision "fp32"
+  --dit_precision "bf16"
   --num_euler_timesteps 50
   --ema_start_step 0
   # --resume_from_checkpoint "checkpoints/wan_t2v_grpo/checkpoint-XXX"

@@ -204,7 +204,10 @@ def wan_pipeline_with_logprob(
     """
     # Get device from transformer
     transformer = pipeline.get_module("transformer")
-    # device = next(transformer.parameters()).device
+
+    # transformer_dtype = next(transformer.parameters()).dtype
+    transformer_dtype = torch.bfloat16
+    logger.info("Transformer dtype: %s", transformer_dtype)
     
     # Get scheduler and other modules
     scheduler = pipeline.get_module("scheduler")
@@ -283,10 +286,9 @@ def wan_pipeline_with_logprob(
 
     # logger.info("wan_pipeline_with_logprob's transformer class type: %s", type(transformer))
     # logger.info("Variables in transformer: %s", str(dir(transformer)))
-    # transformer_dtype = transformer.torch_dtype
-    # prompt_embeds = prompt_embeds.to(transformer_dtype)
-    # if negative_prompt_embeds is not None:
-    #     negative_prompt_embeds = negative_prompt_embeds.to(transformer_dtype)
+    prompt_embeds = prompt_embeds.to(transformer_dtype)
+    if negative_prompt_embeds is not None:
+        negative_prompt_embeds = negative_prompt_embeds.to(transformer_dtype)
 
     # Prepare timesteps
     scheduler.set_timesteps(num_inference_steps, device=pipeline.device)
@@ -317,7 +319,7 @@ def wan_pipeline_with_logprob(
                         latents_shape[1:],
                         generator=gen,
                         device=pipeline.device,
-                        dtype=torch.float32,
+                        dtype=transformer_dtype,
                     )
                     for gen in generator
                 ]
@@ -327,12 +329,12 @@ def wan_pipeline_with_logprob(
                     latents_shape,
                     generator=generator,
                     device=pipeline.device,
-                    dtype=torch.float32,
+                    dtype=transformer_dtype,
                 )
         else:
-            latents = torch.randn(latents_shape, device=pipeline.device, dtype=torch.float32)
+            latents = torch.randn(latents_shape, device=pipeline.device, dtype=transformer_dtype)
     else:
-        latents = latents.to(device=pipeline.device, dtype=torch.float32)
+        latents = latents.to(device=pipeline.device, dtype=transformer_dtype)
 
     # conver latents to DTensor for compatibility with fsdp model
     # latents = DTensor.from_local(latents)
