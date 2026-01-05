@@ -11,13 +11,11 @@ FastVideo supports the following hardware platforms:
 ### Using pip
 
 ```bash
+# Create and activate a new conda environment
+conda create -n fastvideo python=3.12
+conda activate fastvideo
+
 pip install fastvideo
-```
-
-### Using conda
-
-```bash
-conda install -c conda-forge fastvideo
 ```
 
 ### From source
@@ -26,6 +24,12 @@ conda install -c conda-forge fastvideo
 git clone https://github.com/hao-ai-lab/FastVideo.git
 cd FastVideo
 pip install -e .
+```
+
+Also optionally install flash-attn:
+
+```bash
+pip install flash-attn --no-build-isolation
 ```
 
 ## Hardware Requirements

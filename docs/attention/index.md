@@ -41,7 +41,7 @@ Clone the repository and build the kernel:
 
 ```bash
 # Clone recursively to get ThunderKittens submodule
-git clone --recursive https://github.com/hao-ai-lab/FastVideo.git
+git clone https://github.com/hao-ai-lab/FastVideo.git
 cd FastVideo/fastvideo-kernel
 
 # Build and install
