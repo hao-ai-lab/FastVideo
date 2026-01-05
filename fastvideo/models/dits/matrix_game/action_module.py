@@ -314,7 +314,7 @@ class ActionModule(nn.Module):
             ## TODO: adding cache here
             if is_causal:
                 if kv_cache_mouse is None:
-                    assert q.shape[0] ==  k.shape[0] and q.shape[0] % 880 == 0 # == 880, f"{q.shape[0]},{k.shape[0]}"
+                    assert q.shape[0] ==  k.shape[0] and q.shape[0] % S == 0 # == 880, f"{q.shape[0]},{k.shape[0]}"
                     padded_length = math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
                     padded_q = torch.cat(
                         [q,
@@ -415,7 +415,7 @@ class ActionModule(nn.Module):
             q = self.key_attn_q_norm(q).to(v)
             k = self.key_attn_k_norm(k).to(v)
             S = th * tw
-            assert S == 880
+            # assert S == 880
             # position embed 
             if use_rope_keyboard: 
                 B, TS, H, D = q.shape
@@ -430,7 +430,7 @@ class ActionModule(nn.Module):
 
                 if is_causal:
                     if kv_cache_keyboard is None:
-                        assert q.shape[0] == k.shape[0] and q.shape[0] % 880 == 0 
+                        assert q.shape[0] == k.shape[0] and q.shape[0] % S == 0 
 
                         padded_length = math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
                         padded_q = torch.cat(
@@ -480,7 +480,7 @@ class ActionModule(nn.Module):
                         else:
                             local_end_index = kv_cache_keyboard["local_end_index"].item() + current_end - kv_cache_keyboard["global_end_index"].item()
                             local_start_index = local_end_index - num_new_tokens
-                        assert k.shape[0] == 880 # BS == 1 or the cache should not be saved/ load method should be modified
+                        assert k.shape[0] == S # BS == 1 or the cache should not be saved/ load method should be modified
                         kv_cache_keyboard["k"][:, local_start_index:local_end_index] = k[:1]
                         kv_cache_keyboard["v"][:, local_start_index:local_end_index] = v[:1]
 
