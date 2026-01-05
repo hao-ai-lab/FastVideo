@@ -654,7 +654,10 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 seq_len = (training_batch.raw_latent_shape[2] // patch_t) * (
                     training_batch.raw_latent_shape[3] //
                     patch_h) * (training_batch.raw_latent_shape[4] // patch_w)
-                context_len = int(training_batch.encoder_hidden_states.shape[1])
+                if training_batch.encoder_hidden_states is not None:
+                    context_len = int(training_batch.encoder_hidden_states.shape[1])
+                else:
+                    context_len = 0
 
                 metrics["dit_seq_len"] = int(seq_len)
                 metrics["context_len"] = context_len

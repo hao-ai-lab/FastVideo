@@ -30,28 +30,39 @@ def get_torch_tensors_from_row_dict(row_dict,
     """
     return_dict = {}
     for key in keys:
-        shape, bytes = None, None
+        shape, bytes_data, dtype_str = None, None, None
         if isinstance(key, tuple):
             for k in key:
                 try:
                     shape = row_dict[f"{k}_shape"]
-                    bytes = row_dict[f"{k}_bytes"]
+                    bytes_data = row_dict[f"{k}_bytes"]
+                    dtype_str = row_dict.get(f"{k}_dtype", "torch.float32")
                 except KeyError:
                     continue
             key = key[0]
-            if shape is None or bytes is None:
+            if shape is None or bytes_data is None:
                 raise ValueError(f"Key {key} not found in row_dict")
         else:
             shape = row_dict[f"{key}_shape"]
-            bytes = row_dict[f"{key}_bytes"]
+            bytes_data = row_dict[f"{key}_bytes"]
+            dtype_str = row_dict.get(f"{key}_dtype", "torch.float32")
+
+        # Parse dtype
+        if dtype_str.startswith("torch."):
+            dtype_str = dtype_str.replace("torch.", "")
+        target_dtype = getattr(torch, dtype_str, torch.float32)
 
         # TODO (peiyuan): read precision
         if key == 'text_embedding' and (rng.random()
                                         if rng else random.random()) < cfg_rate:
-            data = np.zeros((512, 4096), dtype=np.float32)
+            # Fallback to float32 zeros
+            if len(shape) >= 2:
+                data = torch.zeros(shape, dtype=target_dtype)
+            else:
+                data = torch.zeros((512, 4096), dtype=torch.float32) # Fallback default
         else:
-            data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
-        data = torch.from_numpy(data)
+            data = torch.frombuffer(bytes_data, dtype=target_dtype).reshape(shape).clone()
+        
         if len(data.shape) == 3:
             B, L, D = data.shape
             assert B == 1, "Batch size must be 1"
@@ -149,14 +160,24 @@ def collate_rows_from_parquet_schema(rows,
                 if len(bytes_data) == 0:
                     tensor = torch.zeros(0, dtype=torch.bfloat16)
                 else:
-                    # Convert bytes to tensor using float32 as default
+                    # Get dtype from row
+                    dtype_key = f"{tensor_name}_dtype"
+                    dtype_str = row.get(dtype_key, "torch.float32")
+                    if dtype_str.startswith("torch."):
+                        dtype_str = dtype_str.replace("torch.", "")
+                    target_dtype = getattr(torch, dtype_str, torch.float32)
+
+                    # Convert bytes to tensor
                     if tensor_name == 'text_embedding' and (rng.random(
                     ) if rng else random.random()) < cfg_rate:
-                        data = np.zeros((512, 4096), dtype=np.float32)
+                        if len(shape) >= 2:
+                            data = torch.zeros(shape, dtype=target_dtype)
+                        else:
+                            data = torch.zeros((512, 4096), dtype=torch.float32)
                     else:
-                        data = np.frombuffer(
-                            bytes_data, dtype=np.float32).reshape(shape).copy()
-                    tensor = torch.from_numpy(data)
+                        data = torch.frombuffer(
+                            bytes_data, dtype=target_dtype).reshape(shape).clone()
+                    tensor = data
                     # if len(data.shape) == 3:
                     #     B, L, D = tensor.shape
                     #     assert B == 1, "Batch size must be 1"
@@ -188,6 +209,27 @@ def collate_rows_from_parquet_schema(rows,
 
             batch_data[tensor_name] = torch.stack(padded_tensors)
             batch_data['text_attention_mask'] = torch.stack(attention_masks)
+        elif tensor_name == 'keyboard_cond':
+            # Special handling: convert 1D bit-flag action values [T] to 2D multi-hot [T, 3]
+            num_bits = 3
+            converted_tensors = []
+            for tensor in tensor_list:
+                if tensor.numel() > 0:
+                    T = tensor.shape[0]
+                    multi_hot = torch.zeros(T, num_bits, dtype=torch.bfloat16)
+                    action_values = tensor.long()
+                    # Decode each bit
+                    for bit_idx in range(num_bits):
+                        multi_hot[:, bit_idx] = ((action_values >> bit_idx) & 1).float()
+                    converted_tensors.append(multi_hot)
+                else:
+                    converted_tensors.append(torch.zeros(0, num_bits, dtype=torch.bfloat16))
+            try:
+                batch_data[tensor_name] = torch.stack(converted_tensors)
+            except ValueError as e:
+                shapes = [t.shape for t in converted_tensors]
+                raise ValueError(
+                    f"Failed to stack keyboard_cond tensors. Shapes: {shapes}. Error: {e}") from e
         else:
             # Stack all tensors to preserve batch consistency
             # Don't filter out None or empty tensors as this breaks batch sizing

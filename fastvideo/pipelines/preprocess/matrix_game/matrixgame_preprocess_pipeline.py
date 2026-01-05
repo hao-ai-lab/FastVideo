@@ -134,17 +134,40 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
         if "action_path" in valid_data and valid_data["action_path"]:
             keyboard_cond_list = []
             mouse_cond_list = []
+            num_bits = 3
             for action_path in valid_data["action_path"]:
                 if action_path:
                     action_data = np.load(action_path, allow_pickle=True)
                     if isinstance(action_data, np.ndarray) and action_data.dtype == np.dtype('O'):
                         action_dict = action_data.item()
                         if "keyboard" in action_dict:
-                            keyboard_cond_list.append(action_dict["keyboard"])
+                            keyboard_raw = action_dict["keyboard"]
+                            # Convert 1D bit-flag values to 2D multi-hot encoding
+                            if isinstance(keyboard_raw, np.ndarray):
+                                if keyboard_raw.ndim == 1:
+                                    # [T] -> [T, num_bits]
+                                    T = len(keyboard_raw)
+                                    multi_hot = np.zeros((T, num_bits), dtype=np.float32)
+                                    action_values = keyboard_raw.astype(int)
+                                    for bit_idx in range(num_bits):
+                                        multi_hot[:, bit_idx] = ((action_values >> bit_idx) & 1).astype(np.float32)
+                                    keyboard_cond_list.append(multi_hot)
+                                else:
+                                    keyboard_cond_list.append(keyboard_raw.astype(np.float32))
+                            else:
+                                keyboard_cond_list.append(keyboard_raw)
                         if "mouse" in action_dict:
                             mouse_cond_list.append(action_dict["mouse"])
                     else:
-                        keyboard_cond_list.append(action_data)
+                        if isinstance(action_data, np.ndarray) and action_data.ndim == 1:
+                            T = len(action_data)
+                            multi_hot = np.zeros((T, num_bits), dtype=np.float32)
+                            action_values = action_data.astype(int)
+                            for bit_idx in range(num_bits):
+                                multi_hot[:, bit_idx] = ((action_values >> bit_idx) & 1).astype(np.float32)
+                            keyboard_cond_list.append(multi_hot)
+                        else:
+                            keyboard_cond_list.append(action_data)
             if keyboard_cond_list:
                 features["keyboard_cond"] = keyboard_cond_list
             if mouse_cond_list:
