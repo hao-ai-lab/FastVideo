@@ -66,7 +66,12 @@ else:
     _flash_attention_forward = None
     flash_attn_varlen_func = None
 
-assert is_flash_attn_2_available(), "flash_attn_2 not available. run pip install flash_attn"
+if not is_flash_attn_2_available():
+    warnings.warn(
+        "flash_attn_2 not available. Falling back to SDPA attention for Qwen2.5-VL. "
+        "Install flash-attn for better performance.",
+        RuntimeWarning,
+    )
 
 logger = logging.get_logger(__name__)
 
@@ -272,6 +277,11 @@ QWEN2_5_VL_VISION_ATTENTION_CLASSES = {
     "sdpa": Qwen2_5_VLVisionSdpaAttention,
 }
 
+# If FlashAttention2 is not available, transparently fall back to SDPA.
+if not is_flash_attn_2_available():
+    QWEN2_5_VL_VISION_ATTENTION_CLASSES["flash_attention_2"] = (
+        Qwen2_5_VLVisionSdpaAttention
+    )
 
 class Qwen2_5_VLVisionBlock(nn.Module):
     def __init__(self, config, attn_implementation: str = "sdpa") -> None:
@@ -944,6 +954,10 @@ QWEN2_5_VL_ATTENTION_CLASSES = {
 }
 
 
+# If FlashAttention2 is not available, transparently fall back to SDPA.
+if not is_flash_attn_2_available():
+    QWEN2_5_VL_ATTENTION_CLASSES["flash_attention_2"] = Qwen2_5_VLSdpaAttention
+    
 class Qwen2_5_VLDecoderLayer(nn.Module):
     def __init__(self, config: Qwen2_5_VLConfig, layer_idx: int):
         super().__init__()
