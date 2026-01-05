@@ -99,13 +99,13 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
             training_batch.mouse_cond = None
             training_batch.keyboard_cond = None
         else:
-            if 'mouse_cond' in batch:
+            if 'mouse_cond' in batch and batch['mouse_cond'].numel() > 0:
                 training_batch.mouse_cond = batch['mouse_cond'].to(
                     get_local_torch_device(), dtype=torch.bfloat16)
             else:
                 training_batch.mouse_cond = None
 
-            if 'keyboard_cond' in batch:
+            if 'keyboard_cond' in batch and batch['keyboard_cond'].numel() > 0:
                 training_batch.keyboard_cond = batch['keyboard_cond'].to(
                     get_local_torch_device(), dtype=torch.bfloat16)
             else:
@@ -211,6 +211,8 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
             eta=0.0,
             VSA_sparsity=training_args.VSA_sparsity,
         )
+        if "image" in validation_batch and validation_batch["image"] is not None:
+             batch.pil_image = validation_batch["image"]
 
         return batch
 
