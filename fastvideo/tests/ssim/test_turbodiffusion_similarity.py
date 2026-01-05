@@ -152,7 +152,7 @@ def test_turbodiffusion_inference_similarity(prompt, model_id):
         logger.error("Failed to write SSIM results to file")
 
     # TurboDiffusion uses fewer steps, may have slightly lower SSIM
-    min_acceptable_ssim = 0.90
+    min_acceptable_ssim = 0.95
     assert mean_ssim >= min_acceptable_ssim, (
         f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
         f"for {model_id} with backend {ATTENTION_BACKEND}"
@@ -290,7 +290,7 @@ def test_turbodiffusion_i2v_inference_similarity(prompt, model_id):
         logger.error("Failed to write SSIM results to file")
 
     # TurboDiffusion I2V uses fewer steps, may have slightly lower SSIM
-    min_acceptable_ssim = 0.90
+    min_acceptable_ssim = 0.95
     assert mean_ssim >= min_acceptable_ssim, (
         f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
         f"for {model_id} with backend {ATTENTION_BACKEND}"
