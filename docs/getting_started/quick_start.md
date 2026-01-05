@@ -15,6 +15,12 @@ conda activate fastvideo
 pip install fastvideo
 ```
 
+Also optionally install flash-attn:
+
+```bash
+pip install flash-attn --no-build-isolation
+```
+
 ## Basic Usage
 
 ### Text-to-Video Generation
