@@ -1,10 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-TurboDiffusion Video Pipeline Implementation.
+TurboDiffusion I2V (Image-to-Video) Pipeline Implementation.
 
-This module contains an implementation of the TurboDiffusion video diffusion pipeline
-for 1-4 step video generation using rCM (recurrent Consistency Model) sampling
-with SLA (Sparse-Linear Attention).
+This module contains an implementation of the TurboDiffusion I2V pipeline
+for 1-4 step image-to-video generation using rCM (recurrent Consistency Model)
+sampling with SLA (Sparse-Linear Attention).
+
+Key differences from T2V:
+- Uses dual models (high/low noise) with boundary switching
+- sigma_max=200 (vs 80 for T2V)
+- Mask conditioning with encoded first frame
 """
 
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -12,7 +17,8 @@ from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_rcm import RCMScheduler
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
-                                        DenoisingStage, InputValidationStage,
+                                        DenoisingStage, ImageVAEEncodingStage,
+                                        InputValidationStage,
                                         LatentPreparationStage,
                                         TextEncodingStage,
                                         TimestepPreparationStage)
@@ -20,21 +26,24 @@ from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
 logger = init_logger(__name__)
 
 
-class TurboDiffusionPipeline(LoRAPipeline, ComposedPipelineBase):
+class TurboDiffusionI2VPipeline(LoRAPipeline, ComposedPipelineBase):
     """
-    TurboDiffusion video pipeline for 1-4 step generation.
-    
-    Uses RCM scheduler and SLA attention for fast, high-quality video generation.
+    TurboDiffusion I2V pipeline for 1-4 step image-to-video generation.
+
+    Uses RCM scheduler, SLA attention, and dual model switching for
+    high-quality I2V generation.
     """
 
     _required_config_modules = [
-        "text_encoder", "tokenizer", "vae", "transformer", "scheduler"
+        "text_encoder", "tokenizer", "vae", "transformer", "transformer_2",
+        "scheduler"
     ]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        # Use RCM scheduler for TurboDiffusion
-        logger.info("Initializing RCM scheduler for TurboDiffusion")
-        self.modules["scheduler"] = RCMScheduler(sigma_max=80.0)
+        # Use RCM scheduler with higher sigma_max for I2V
+        logger.info(
+            "Initializing RCM scheduler for TurboDiffusion I2V (sigma_max=200)")
+        self.modules["scheduler"] = RCMScheduler(sigma_max=200.0)
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
         """Set up pipeline stages with proper dependency injection."""
@@ -60,6 +69,10 @@ class TurboDiffusionPipeline(LoRAPipeline, ComposedPipelineBase):
                            scheduler=self.get_module("scheduler"),
                            transformer=self.get_module("transformer", None)))
 
+        # I2V: Encode initial image to latent space
+        self.add_stage(stage_name="image_latent_preparation_stage",
+                       stage=ImageVAEEncodingStage(vae=self.get_module("vae")))
+
         self.add_stage(stage_name="denoising_stage",
                        stage=DenoisingStage(
                            transformer=self.get_module("transformer"),
@@ -73,4 +86,4 @@ class TurboDiffusionPipeline(LoRAPipeline, ComposedPipelineBase):
                                            pipeline=self))
 
 
-EntryClass = TurboDiffusionPipeline
+EntryClass = TurboDiffusionI2VPipeline
