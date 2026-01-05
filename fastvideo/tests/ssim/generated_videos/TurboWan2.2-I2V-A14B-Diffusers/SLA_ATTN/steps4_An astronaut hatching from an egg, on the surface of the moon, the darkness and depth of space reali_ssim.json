@@ -1,0 +1,11 @@
+{
+  "mean_ssim": 1.0,
+  "min_ssim": 1.0,
+  "max_ssim": 1.0,
+  "reference_video": "/FastVideo/fastvideo/tests/ssim/L40S_reference_videos/TurboWan2.2-I2V-A14B-Diffusers/SLA_ATTN/An astronaut hatching from an egg, on the surface of the moon, the darkness and depth of space reali.mp4",
+  "generated_video": "/FastVideo/fastvideo/tests/ssim/generated_videos/TurboWan2.2-I2V-A14B-Diffusers/SLA_ATTN/An astronaut hatching from an egg, on the surface of the moon, the darkness and depth of space reali.mp4",
+  "parameters": {
+    "num_inference_steps": 4,
+    "prompt": "An astronaut hatching from an egg, on the surface of the moon, the darkness and depth of space realised in the background. High quality, ultrarealistic detail and breath-taking movie-like camera shot."
+  }
+}
