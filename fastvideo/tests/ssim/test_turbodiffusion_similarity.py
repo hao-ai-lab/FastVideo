@@ -22,7 +22,7 @@ device_reference_folder_suffix = '_reference_videos'
 
 if "A40" in device_name:
     device_reference_folder = "A40" + device_reference_folder_suffix
-elif "L40S" in device_name:
+elif "L40S" in device_name or "H100" in device_name:
     device_reference_folder = "L40S" + device_reference_folder_suffix
 else:
     # device_reference_folder = "L40S" + device_reference_folder_suffix
@@ -163,9 +163,9 @@ def test_turbodiffusion_inference_similarity(prompt, model_id):
 TURBODIFFUSION_I2V_PARAMS = {
     "num_gpus": 2,
     "model_path": "loayrashid/TurboWan2.2-I2V-A14B-Diffusers",
-    "height": 720,
-    "width": 1280,
-    "num_frames": 81,
+    "height": 480,
+    "width": 832,
+    "num_frames": 45,
     "num_inference_steps": 4,  # TurboDiffusion uses 1-4 steps
     "guidance_scale": 1.0,  # No CFG for TurboDiffusion
     "seed": 42,
