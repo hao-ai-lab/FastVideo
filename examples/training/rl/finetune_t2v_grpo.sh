@@ -43,9 +43,9 @@ parallel_args=(
   --num_gpus $NUM_GPUS 
   --sp_size $NUM_GPUS 
   --tp_size $NUM_GPUS
-  # --hsdp_replicate_dim 1
-  # --hsdp_shard_dim $NUM_GPUS
-  --use-fsdp-inference False
+  --hsdp_replicate_dim 1
+  --hsdp_shard_dim $NUM_GPUS
+  # --use-fsdp-inference False
 )
 
 # Model arguments
@@ -84,6 +84,7 @@ optimizer_args=(
 
 # RL-specific arguments
 rl_args=(
+  --inference_mode False
   --rl_mode True
   --rl_algorithm "grpo"
   --rl_kl_beta 0.004  # KL regularization coefficient
@@ -104,8 +105,8 @@ miscellaneous_args=(
   --inference_mode False
   --checkpoints_total_limit 3
   --training_cfg_rate 0.0  # No CFG during training (CFG used in sampling)
-  # --dit_precision "fp32"
-  --dit_precision "bf16"
+  --dit_precision "fp32"
+  # --dit_precision "bf16"
   --num_euler_timesteps 50
   --ema_start_step 0
   # --resume_from_checkpoint "checkpoints/wan_t2v_grpo/checkpoint-XXX"

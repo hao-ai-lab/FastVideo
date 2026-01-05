@@ -64,10 +64,7 @@ def maybe_load_fsdp_model(
     device: torch.device,
     hsdp_replicate_dim: int,
     hsdp_shard_dim: int,
-    
-    
-    
-    : torch.dtype,
+    default_dtype: torch.dtype,
     param_dtype: torch.dtype,
     reduce_dtype: torch.dtype,
     strict: bool = True,
@@ -101,8 +98,7 @@ def maybe_load_fsdp_model(
         model = model_cls(**init_params)
 
     # Check if we should use FSDP
-    # use_fsdp = training_mode or fsdp_inference
-    use_fsdp = False
+    use_fsdp = training_mode or fsdp_inference
 
     # Disable FSDP for MPS as it's not compatible
     from fastvideo.platforms import current_platform
