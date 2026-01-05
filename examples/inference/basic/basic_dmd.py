@@ -21,6 +21,7 @@ def main():
         dit_cpu_offload=False,
         vae_cpu_offload=False,
         VSA_sparsity=0.8,
+        init_weights_from_safetensors="/mnt/weka/home/hao.zhang/wl/release/dmd_distill_1.3_4n_syn/checkpoint-900_weight_only/generator_inference_transformer"
     )
     load_end_time = time.perf_counter()
     load_time = load_end_time - load_start_time

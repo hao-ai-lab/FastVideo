@@ -21,8 +21,12 @@ class ModelWrapper(torch.distributed.checkpoint.stateful.Stateful):
         state_dict = get_model_state_dict(
             self.model)  # type: ignore[no-any-return]
         # filter out non-trainable parameters
+        # Note: activation checkpointing adds ._checkpoint_wrapped_module. prefix
+        # to parameter names, but get_model_state_dict returns normalized keys.
+        # We need to normalize the parameter names for proper matching.
         param_requires_grad = set([
-            k for k, v in dict(self.model.named_parameters()).items()
+            k.replace("._checkpoint_wrapped_module.", ".")
+            for k, v in dict(self.model.named_parameters()).items()
             if v.requires_grad
         ])
         state_dict = {

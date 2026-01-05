@@ -116,6 +116,44 @@ def get_sigmas(noise_scheduler,
     return sigma
 
 
+def _is_lora_training(transformer: torch.nn.Module) -> bool:
+    """Best-effort check for LoRA fine-tuning.
+
+    We treat a run as LoRA training when the model already contains LoRA
+    layers with trainable parameters. This avoids touching consolidated
+    full-model weights which are not updated during LoRA-only training.
+    """
+
+    state_keys = transformer.state_dict().keys()
+    return any("lora_" in name for name in state_keys)
+
+
+def _save_lora_adapter(cpu_state: dict[str, Any], adapter_path: str) -> None:
+    """Persist only the LoRA adapter weights for LoRA training runs.
+    
+    Args:
+        cpu_state: Pre-gathered state dict from gather_state_dict_on_cpu_rank0.
+                   Using the pre-gathered state dict avoids issues with invalid
+                   tensor storage pointers in FSDP-wrapped models.
+        adapter_path: Path to save the LoRA adapter safetensors file.
+    """
+
+    lora_state = {
+        name: tensor.detach().clone().cpu().contiguous()
+        for name, tensor in cpu_state.items() if "lora_" in name
+    }
+
+    if len(lora_state) == 0:
+        logger.warning(
+            "LoRA training detected but no LoRA parameters found to save.")
+        return
+
+    os.makedirs(os.path.dirname(adapter_path), exist_ok=True)
+    save_file(lora_state, adapter_path)
+    logger.info("Saved LoRA adapter with %d tensors to %s", len(lora_state),
+                adapter_path)
+
+
 def save_checkpoint(transformer,
                     rank,
                     output_dir,
@@ -161,35 +199,43 @@ def save_checkpoint(transformer,
 
     cpu_state = gather_state_dict_on_cpu_rank0(transformer, device=None)
     if rank == 0:
-        # Save model weights (consolidated)
-        transformer_save_dir = os.path.join(save_dir, "transformer")
-        os.makedirs(transformer_save_dir, exist_ok=True)
-        weight_path = os.path.join(transformer_save_dir,
-                                   "diffusion_pytorch_model.safetensors")
-        logger.info("rank: %s, saving consolidated checkpoint to %s",
-                    rank,
-                    weight_path,
-                    local_main_process_only=False)
+        if _is_lora_training(transformer):
+            adapter_path = os.path.join(save_dir, "lora_adapter.safetensors")
+            _save_lora_adapter(cpu_state, adapter_path)
+            logger.info(
+                "LoRA training detected; saved adapter instead of consolidated weights."
+            )
+        else:
+            # Save model weights (consolidated)
+            transformer_save_dir = os.path.join(save_dir, "transformer")
+            os.makedirs(transformer_save_dir, exist_ok=True)
+            weight_path = os.path.join(transformer_save_dir,
+                                       "diffusion_pytorch_model.safetensors")
+            logger.info("rank: %s, saving consolidated checkpoint to %s",
+                        rank,
+                        weight_path,
+                        local_main_process_only=False)
 
-        # Convert training format to diffusers format and save
-        diffusers_state_dict = custom_to_hf_state_dict(
-            cpu_state, transformer.reverse_param_names_mapping)
-        save_file(diffusers_state_dict, weight_path)
+            # Convert training format to diffusers format and save
+            diffusers_state_dict = custom_to_hf_state_dict(
+                cpu_state, transformer.reverse_param_names_mapping)
+            save_file(diffusers_state_dict, weight_path)
 
-        logger.info("rank: %s, consolidated checkpoint saved to %s",
-                    rank,
-                    weight_path,
-                    local_main_process_only=False)
+            logger.info("rank: %s, consolidated checkpoint saved to %s",
+                        rank,
+                        weight_path,
+                        local_main_process_only=False)
 
-        # Save model config
-        config_dict = transformer.hf_config
-        if "dtype" in config_dict:
-            del config_dict["dtype"]  # TODO
-        config_path = os.path.join(transformer_save_dir, "config.json")
-        # save dict as json
-        with open(config_path, "w") as f:
-            json.dump(config_dict, f, indent=4)
-        logger.info("--> checkpoint saved at step %s to %s", step, weight_path)
+            # Save model config
+            config_dict = transformer.hf_config
+            if "dtype" in config_dict:
+                del config_dict["dtype"]  # TODO
+            config_path = os.path.join(transformer_save_dir, "config.json")
+            # save dict as json
+            with open(config_path, "w") as f:
+                json.dump(config_dict, f, indent=4)
+            logger.info("--> checkpoint saved at step %s to %s", step,
+                        weight_path)
 
 
 def save_distillation_checkpoint(
@@ -421,37 +467,44 @@ def save_distillation_checkpoint(
                                                device=None)
 
     if rank == 0:
-        # Save generator model weights (consolidated) for inference
-        os.makedirs(inference_save_dir, exist_ok=True)
-        weight_path = os.path.join(inference_save_dir,
-                                   "diffusion_pytorch_model.safetensors")
-        logger.info(
-            "rank: %s, saving consolidated generator inference checkpoint to %s",
-            rank,
-            weight_path,
-            local_main_process_only=False)
+        if _is_lora_training(generator_transformer):
+            adapter_path = os.path.join(save_dir, "lora_adapter.safetensors")
+            _save_lora_adapter(cpu_state, adapter_path)
+            logger.info(
+                "LoRA training detected; saved adapter instead of consolidated generator weights."
+            )
+        else:
+            # Save generator model weights (consolidated) for inference
+            os.makedirs(inference_save_dir, exist_ok=True)
+            weight_path = os.path.join(inference_save_dir,
+                                       "diffusion_pytorch_model.safetensors")
+            logger.info(
+                "rank: %s, saving consolidated generator inference checkpoint to %s",
+                rank,
+                weight_path,
+                local_main_process_only=False)
 
-        # Convert training format to diffusers format and save
-        diffusers_state_dict = custom_to_hf_state_dict(
-            cpu_state, generator_transformer.reverse_param_names_mapping)
-        save_file(diffusers_state_dict, weight_path)
+            # Convert training format to diffusers format and save
+            diffusers_state_dict = custom_to_hf_state_dict(
+                cpu_state, generator_transformer.reverse_param_names_mapping)
+            save_file(diffusers_state_dict, weight_path)
 
-        logger.info(
-            "rank: %s, consolidated generator inference checkpoint saved to %s",
-            rank,
-            weight_path,
-            local_main_process_only=False)
+            logger.info(
+                "rank: %s, consolidated generator inference checkpoint saved to %s",
+                rank,
+                weight_path,
+                local_main_process_only=False)
 
-        # Save model config
-        config_dict = generator_transformer.hf_config
-        if "dtype" in config_dict:
-            del config_dict["dtype"]  # TODO
-        config_path = os.path.join(inference_save_dir, "config.json")
-        # save dict as json
-        with open(config_path, "w") as f:
-            json.dump(config_dict, f, indent=4)
-        logger.info("--> distillation checkpoint saved at step %s to %s", step,
-                    weight_path)
+            # Save model config
+            config_dict = generator_transformer.hf_config
+            if "dtype" in config_dict:
+                del config_dict["dtype"]  # TODO
+            config_path = os.path.join(inference_save_dir, "config.json")
+            # save dict as json
+            with open(config_path, "w") as f:
+                json.dump(config_dict, f, indent=4)
+            logger.info("--> distillation checkpoint saved at step %s to %s",
+                        step, weight_path)
 
         # Save generator_2 model weights (consolidated) for inference (MoE support)
         if generator_transformer_2 is not None:
@@ -599,8 +652,9 @@ def load_distillation_checkpoint(
                        checkpoint_path)
         return 0
 
-    # Extract step number from checkpoint path
-    step = int(os.path.basename(checkpoint_path).split('-')[-1])
+    # Extract step number from checkpoint path (normpath handles trailing slashes)
+    step = int(
+        os.path.basename(os.path.normpath(checkpoint_path)).split('-')[-1])
 
     if rank == 0:
         logger.info("Loading distillation checkpoint from step %s", step)
