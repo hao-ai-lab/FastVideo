@@ -17,6 +17,9 @@ def main() -> None:
         num_gpus=1,
         # TurboDiffusion uses a custom pipeline with RCM scheduler
         override_pipeline_cls_name="TurboDiffusionPipeline",
+
+        # set to false if using RTX 4090 
+        # pin_cpu_memory=False,
     )
 
     # Generate videos with the same simple API, regardless of GPU count
