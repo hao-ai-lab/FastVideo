@@ -30,8 +30,8 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
     "StepVideoModel": ("dits", "stepvideo", "StepVideoModel"),
     "CosmosTransformer3DModel": ("dits", "cosmos", "CosmosTransformer3DModel"),
-    "LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"),  # Wrapper (Phase 1)
-    "LongCatTransformer3DModel": ("dits", "longcat", "LongCatTransformer3DModel"),  # Native (Phase 2)
+    "LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"),
+    "LongCatTransformer3DModel": ("dits", "longcat", "LongCatTransformer3DModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
