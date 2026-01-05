@@ -9,7 +9,6 @@ This stage implements Tier 3 I2V denoising:
 4. CFG-zero optimized guidance
 """
 
-import time
 import torch
 from tqdm import tqdm
 
@@ -64,13 +63,8 @@ class LongCatI2VDenoisingStage(LongCatDenoisingStage):
         num_cond_latents = getattr(batch, 'num_cond_latents', 0)
 
         if num_cond_latents > 0:
-            logger.info(f"I2V Denoising: num_cond_latents={num_cond_latents}, "
-                        f"latent_shape={latents.shape}")
-
-        # DEBUG: Check devices
-        logger.info(
-            f"DEBUG devices: latents={latents.device}, timesteps={timesteps.device}, "
-            f"prompt_embeds={prompt_embeds.device}")
+            logger.info("I2V Denoising: num_cond_latents=%s, latent_shape=%s",
+                        num_cond_latents, latents.shape)
 
         # Prepare negative prompts for CFG
         if do_classifier_free_guidance:
@@ -93,12 +87,10 @@ class LongCatI2VDenoisingStage(LongCatDenoisingStage):
 
         # Denoising loop
         num_inference_steps = len(timesteps)
-        step_times = []
 
         with tqdm(total=num_inference_steps,
                   desc="I2V Denoising") as progress_bar:
             for i, t in enumerate(timesteps):
-                step_start = time.time()
 
                 # 1. Expand latents for CFG
                 if do_classifier_free_guidance:
@@ -123,7 +115,6 @@ class LongCatI2VDenoisingStage(LongCatDenoisingStage):
 
                 # 4. Run transformer with num_cond_latents
                 batch.is_cfg_negative = False
-                transformer_start = time.time()
                 with set_forward_context(
                         current_timestep=i,
                         attn_metadata=None,
@@ -136,11 +127,8 @@ class LongCatI2VDenoisingStage(LongCatDenoisingStage):
                         encoder_hidden_states=prompt_embeds_combined,
                         timestep=timestep,
                         encoder_attention_mask=prompt_attention_mask_combined,
-                        num_cond_latents=
-                        num_cond_latents,  # NEW: for RoPE skipping
+                        num_cond_latents=num_cond_latents,
                     )
-                torch.cuda.synchronize()
-                transformer_time = time.time() - transformer_start
 
                 # 5. Apply CFG with optimized scale
                 if do_classifier_free_guidance:
@@ -176,25 +164,7 @@ class LongCatI2VDenoisingStage(LongCatDenoisingStage):
                                                   latents,
                                                   return_dict=False)[0]
 
-                step_time = time.time() - step_start
-                step_times.append(step_time)
-
-                # Log timing for first few steps
-                if i < 3:
-                    logger.info(
-                        f"Step {i}: total={step_time:.2f}s, transformer={transformer_time:.2f}s"
-                    )
-                    logger.info(
-                        f"  Devices: latent_input={latent_model_input.device}, timestep={timestep.device}"
-                    )
-
                 progress_bar.update()
-
-        # Log average timing
-        avg_time = sum(step_times) / len(step_times)
-        logger.info(
-            f"Average step time: {avg_time:.2f}s (total: {sum(step_times):.1f}s)"
-        )
 
         # Update batch with denoised latents
         batch.latents = latents

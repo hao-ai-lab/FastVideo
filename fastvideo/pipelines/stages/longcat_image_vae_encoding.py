@@ -125,7 +125,8 @@ class LongCatImageVAEEncodingStage(PipelineStage):
 
         return batch
 
-    def retrieve_latents(self, encoder_output, generator):
+    def retrieve_latents(self, encoder_output: object,
+                         generator: torch.Generator | None) -> torch.Tensor:
         """Sample from VAE posterior."""
         # WAN VAE returns an object with .sample() method
         if hasattr(encoder_output, 'sample'):
@@ -137,7 +138,7 @@ class LongCatImageVAEEncodingStage(PipelineStage):
         else:
             raise AttributeError("Could not access latents from encoder output")
 
-    def normalize_latents(self, latents):
+    def normalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
         """
         Apply LongCat-specific latent normalization.
         
