@@ -64,7 +64,7 @@ class LongCatDenoisingStage(DenoisingStage):
             The batch with denoised latents.
         """
         if not fastvideo_args.model_loaded["transformer"]:
-            from fastvideo.models.model_loader import TransformerLoader
+            from fastvideo.models.loader.component_loader import TransformerLoader
             loader = TransformerLoader()
             self.transformer = loader.load(
                 fastvideo_args.model_paths["transformer"], fastvideo_args)
