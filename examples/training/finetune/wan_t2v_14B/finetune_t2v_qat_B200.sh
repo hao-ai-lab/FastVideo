@@ -1,4 +1,14 @@
 #!/bin/bash
+#SBATCH --job-name=wan_t2v_14B_finetune_sage3
+#SBATCH --partition=all
+#SBATCH --nodes=2
+#SBATCH --gres=gpu:4
+#SBATCH --ntasks-per-node=4
+#SBATCH --output=logs/wan_t2v_14B_finetune_sage3_%j.out
+#SBATCH --error=logs/wan_t2v_14B_finetune_sage3_%j.err
+
+source .venv/bin/activate
+
 
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
@@ -10,22 +20,30 @@ export WANDB_API_KEY=2f25ad37933894dbf0966c838c0b8494987f9f2f
 MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"
 DATA_DIR=data/Wan-Syn_77x448x832_600k
 VALIDATION_DATASET_FILE="examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json"
-NUM_GPUS=4
+NUM_GPUS=8
 # export CUDA_VISIBLE_DEVICES=4,5
+
+set -euo pipefail
+
+# ---- torchrun rendezvous (multi-node) ----
+# Launch ONE torchrun per node (via srun) and let torchrun spawn 4 workers per node.
+MASTER_ADDR="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)"
+MASTER_PORT="${MASTER_PORT:-29500}"
+export MASTER_ADDR MASTER_PORT
 
 
 # Training arguments
 training_args=(
   --tracker_project_name "wan_t2v_finetune_qat"
-  --output_dir "checkpoints/wan_t2v_finetune_qat_14B"
+  --output_dir "checkpoints/wan_t2v_finetune_sage3_14B"
   --max_train_steps 4000
-  --train_batch_size 16
+  --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 21
+  --num_latent_t 20
   --num_height 720
   --num_width 1280
-  --num_frames 81
+  --num_frames 77
   --enable_gradient_checkpointing_type "full"
   --generator_4bit_attn True
 )
@@ -33,7 +51,7 @@ training_args=(
 # Parallel arguments
 parallel_args=(
   --num_gpus $NUM_GPUS 
-  --sp_size $NUM_GPUS
+  --sp_size 8
   --tp_size 1
   --hsdp_replicate_dim 1
   --hsdp_shard_dim $NUM_GPUS
@@ -81,14 +99,18 @@ miscellaneous_args=(
   --seed 1000
 )
 
-torchrun \
-  --nnodes 1 \
-  --nproc_per_node $NUM_GPUS \
-    fastvideo/training/wan_training_pipeline.py \
-    "${parallel_args[@]}" \
-    "${model_args[@]}" \
-    "${dataset_args[@]}" \
-    "${training_args[@]}" \
-    "${optimizer_args[@]}" \
-    "${validation_args[@]}" \
-    "${miscellaneous_args[@]}"
+srun --nodes="$SLURM_NNODES" --ntasks="$SLURM_NNODES" --ntasks-per-node=1 \
+  torchrun \
+    --nnodes "$SLURM_NNODES" \
+    --nproc_per_node 4 \
+    --rdzv_backend c10d \
+    --rdzv_endpoint "${MASTER_ADDR}:${MASTER_PORT}" \
+    --node_rank "$SLURM_NODEID" \
+      fastvideo/training/wan_training_pipeline.py \
+      "${parallel_args[@]}" \
+      "${model_args[@]}" \
+      "${dataset_args[@]}" \
+      "${training_args[@]}" \
+      "${optimizer_args[@]}" \
+      "${validation_args[@]}" \
+      "${miscellaneous_args[@]}"

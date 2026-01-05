@@ -28,7 +28,7 @@ from fastvideo.logger import init_logger
 from test_quantization_precision import get_fake_quant
 from qat_attn import attention
 from qat_attn import _attn_bwd_preprocess, _attn_bwd_dq_cross, _attn_bwd_dkdv_cross, _attn_bwd
-# from fastvideo.attention.backends.sageattn.api import triton_group_mean
+from fastvideo.attention.backends.sageattn.api import triton_group_mean
 logger = init_logger(__name__)
 
 from math import sqrt
@@ -336,6 +336,7 @@ class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
         ctx.causal = is_causal
         ctx.IS_QAT = True
         ctx.k_mean = k_mean
+        ctx.smooth_q = True
         ctx.save_for_backward(q_BHLD, k_BHLD, v_BHLD, out_BHLD, softmax_lse)
         return out_BHLD
 
@@ -367,12 +368,17 @@ class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
             BLOCK_M=PRE_BLOCK, HEAD_DIM=ctx.HEAD_DIM
         )
 
+        q_m = None
+        if ctx.smooth_q:
+            _, q_m = triton_group_mean(q_BHLD)
+            q_m = q_m.repeat_interleave(q_BHLD.shape[2] // q_m.shape[2], dim=2)  # B,H,L,D
+
         if N_CTX_Q == N_CTX_KV:
             # Use existing kernel for self-attention (same sequence lengths)
             grid = ((N_CTX_KV + BLOCK_N1 - 1) // BLOCK_N1, 1, BATCH * N_HEAD)
             _attn_bwd[grid](
                 q_BHLD, arg_k, v_BHLD, ctx.sm_scale, do, dq_BHLD, dk_BHLD, dv_BHLD,
-                M_BHLD, delta,
+                M_BHLD, delta, q_m,
                 q_BHLD.stride(0), q_BHLD.stride(1), q_BHLD.stride(2), q_BHLD.stride(3),
                 N_HEAD, N_CTX_KV,
                 ctx.k_mean,
@@ -383,6 +389,7 @@ class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
                 CAUSAL=ctx.causal,
                 IS_QAT=ctx.IS_QAT,
                 SMOOTH_K=True,
+                SMOOTH_Q=ctx.smooth_q,
                 two_level_quant_P=True,
                 fake_quant_P=True,
                 num_warps=NUM_WARPS,
@@ -413,7 +420,8 @@ class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
                 two_level_quant_P=True,
                 fake_quant_P=True,
                 num_warps=NUM_WARPS,
-                num_stages=NUM_STAGES
+                num_stages=NUM_STAGES,
+                SMOOTH_Q=ctx.smooth_q,
             )
     
         return dq_BHLD, dk_BHLD, dv_BHLD, None, None, None, None 
@@ -500,8 +508,8 @@ class SageAttention3Impl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        # output = sageattn_blackwell_with_16bit_bwd(query, key, value, is_causal=self.causal)
-        output = sageattn_blackwell_with_triton_bwd(query, key, value, is_causal=self.causal)
+        output = sageattn_blackwell_with_16bit_bwd(query, key, value, is_causal=self.causal)
+        # output = sageattn_blackwell_with_triton_bwd(query, key, value, is_causal=self.causal)
         # output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
         # output = qat_attn(query, key, value, is_causal=self.causal)
         return output

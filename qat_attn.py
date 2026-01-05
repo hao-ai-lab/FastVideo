@@ -9,6 +9,7 @@ import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
 
 from quant_utils import fake_quantize_q, fake_quantize_kv, fake_quantize
+# from fastvideo.attention.backends.sageattn.api import triton_group_mean
 
 
 def is_cuda():
@@ -309,7 +310,7 @@ def _attn_bwd_preprocess(O, DO,
 def _attn_bwd_dkdv(dk, dv,
                    Q, k, v, qk_scale,
                    DO,
-                   M, D,
+                   M, D, Q_MEAN,
                    # shared by Q/K/V/DO.
                    stride_tok, stride_d,
                    H, N_CTX, BLOCK_M1: tl.constexpr,
@@ -320,12 +321,15 @@ def _attn_bwd_dkdv(dk, dv,
                    MASK: tl.constexpr,
                    IS_QAT: tl.constexpr,
                    two_level_quant_P: tl.constexpr = False,
-                   fake_quant_P: tl.constexpr = True):
+                   fake_quant_P: tl.constexpr = True,
+                   SMOOTH_Q: tl.constexpr = False):
     offs_m = start_m + tl.arange(0, BLOCK_M1)
     offs_n = start_n + tl.arange(0, BLOCK_N1)
     offs_k = tl.arange(0, HEAD_DIM)
     q_ptrs = Q + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
     do_ptrs = DO + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
+    if SMOOTH_Q:
+        q_m_ptrs = Q_MEAN + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
     # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
     curr_m = start_m
@@ -334,6 +338,8 @@ def _attn_bwd_dkdv(dk, dv,
         offs_m = curr_m + tl.arange(0, BLOCK_M1)
         q_valid = offs_m < N_CTX
         q = tl.load(q_ptrs, mask=q_valid[:, None])
+        if SMOOTH_Q:
+            q_m = tl.load(q_m_ptrs, mask=q_valid[:, None])
         # Load m before computing qk to reduce pipeline stall.
         m = tl.load(M + offs_m, mask=q_valid)
         qk = tl.dot(q, tl.trans(k))
@@ -363,10 +369,14 @@ def _attn_bwd_dkdv(dk, dv,
         ds = p * (dp - Di[:, None])
         ds = ds.to(tl.bfloat16)
         dk += tl.dot(tl.trans(ds), q)
+        if SMOOTH_Q:
+            dk += tl.sum(ds, axis=1, keep_dims=True) * q_m
         # Increment pointers.
         curr_m += step_m
         q_ptrs += step_m * stride_tok
         do_ptrs += step_m * stride_tok
+        if SMOOTH_Q:
+            q_m_ptrs += step_m * stride_tok
     return dk, dv
 
 
@@ -511,7 +521,7 @@ def _attn_bwd_dq_cross(Q, K, V, sm_scale,
 @triton.jit
 def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
                          DO, DK, DV,
-                         M, D,
+                         M, D, Q_MEAN,
                          stride_z_q, stride_z_kv, stride_h_q, stride_h_kv, 
                          stride_tok_q, stride_tok_kv, stride_d_q, stride_d_kv,
                          H, N_CTX_Q, N_CTX_KV,
@@ -520,7 +530,8 @@ def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
                          HEAD_DIM: tl.constexpr,
                          IS_QAT: tl.constexpr,
                          two_level_quant_P: tl.constexpr = False,
-                         fake_quant_P: tl.constexpr = True
+                         fake_quant_P: tl.constexpr = True,
+                         SMOOTH_Q: tl.constexpr = False
                          ):
     # Apply scale AFTER dot product for better precision
     RCP_LN2: tl.constexpr = 1.4426950408889634  # = 1.0 / ln(2)
@@ -537,6 +548,9 @@ def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
     DV += adj_kv
     M += off_chz
     D += off_chz
+
+    if SMOOTH_Q:
+        Q_MEAN += adj_q
 
     pid = tl.program_id(0)
     start_n = pid * BLOCK_N1
@@ -582,6 +596,10 @@ def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
         ds = ds.to(tl.bfloat16)
         dk += tl.dot(tl.trans(ds), q)
 
+        if SMOOTH_Q:
+            q_m = tl.load(Q_MEAN + offs_m[:, None] * stride_tok_q + offs_k[None, :] * stride_d_q, mask=q_valid[:, None])
+            dk += tl.sum(ds, axis=1, keep_dims=True) * q_m
+
     dv_ptrs = DV + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv
     tl.store(dv_ptrs, dv, mask=kv_valid[:, None])
 
@@ -594,7 +612,7 @@ def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
 def _attn_bwd(Q, K, V, sm_scale,
               DO,
               DQ, DK, DV,
-              M, D,
+              M, D, Q_MEAN,
               # shared by Q/K/V/DO.
               stride_z, stride_h, stride_tok, stride_d,
               H, N_CTX,
@@ -609,7 +627,8 @@ def _attn_bwd(Q, K, V, sm_scale,
               IS_QAT: tl.constexpr,
               SMOOTH_K: tl.constexpr,
               two_level_quant_P: tl.constexpr = False,
-              fake_quant_P: tl.constexpr = True):
+              fake_quant_P: tl.constexpr = True,
+              SMOOTH_Q: tl.constexpr = False):
 
     bhid = tl.program_id(2)
     off_chz = (bhid * N_CTX).to(tl.int64)
@@ -626,6 +645,9 @@ def _attn_bwd(Q, K, V, sm_scale,
     DV += adj
     M += off_chz
     D += off_chz
+
+    if SMOOTH_Q:
+        Q_MEAN += adj
 
     # load scales
     offs_k = tl.arange(0, HEAD_DIM)
@@ -660,7 +682,7 @@ def _attn_bwd(Q, K, V, sm_scale,
             dk, dv,
             Q, k, v, qk_scale,
             DO,
-            M, D,
+            M, D, Q_MEAN,
             stride_tok, stride_d,
             H, N_CTX,
             MASK_BLOCK_M1, BLOCK_N1, HEAD_DIM,
@@ -668,7 +690,8 @@ def _attn_bwd(Q, K, V, sm_scale,
             MASK=True,
             IS_QAT=IS_QAT,
             two_level_quant_P=two_level_quant_P,
-            fake_quant_P=fake_quant_P
+            fake_quant_P=fake_quant_P,
+            SMOOTH_Q=SMOOTH_Q
         )
 
         start_m += num_steps * MASK_BLOCK_M1
@@ -683,7 +706,7 @@ def _attn_bwd(Q, K, V, sm_scale,
         dk, dv,
         Q, k, v, qk_scale,
         DO,
-        M, D,
+        M, D, Q_MEAN,
         stride_tok, stride_d,
         H, N_CTX,
         BLOCK_M1, BLOCK_N1, HEAD_DIM,
@@ -691,7 +714,8 @@ def _attn_bwd(Q, K, V, sm_scale,
         MASK=False,
         IS_QAT=IS_QAT,
         two_level_quant_P=two_level_quant_P,
-        fake_quant_P=fake_quant_P
+        fake_quant_P=fake_quant_P,
+        SMOOTH_Q=SMOOTH_Q
     )
 
     dv_ptrs = DV + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
@@ -773,12 +797,13 @@ class _attention(torch.autograd.Function):
         causal,
         sm_scale,
         use_qat_qkv_backward=True,
-        smooth_k=False,
+        smooth_k=True,
         warp_specialize=True,
         IS_QAT=True,
-        two_level_quant_P=False,
+        two_level_quant_P=True,
         fake_quant_P=True,
-        use_high_prec_o=True
+        use_high_prec_o=False,
+        smooth_q=False
     ):
         # shape constraints
         HEAD_DIM_Q, HEAD_DIM_K = q.shape[-1], k.shape[-1]
@@ -963,6 +988,7 @@ class _attention(torch.autograd.Function):
         ctx.smooth_k = smooth_k
         ctx.two_level_quant_P = two_level_quant_P
         ctx.fake_quant_P = fake_quant_P
+        ctx.smooth_q = smooth_q
         return o
 
     @staticmethod
@@ -997,12 +1023,17 @@ class _attention(torch.autograd.Function):
             BLOCK_M=PRE_BLOCK, HEAD_DIM=ctx.HEAD_DIM
         )
 
+        q_m = None
+        if ctx.smooth_q:
+            # _, q_m = triton_group_mean(q)
+            q_m = q_m.repeat_interleave(q.shape[2] // q_m.shape[2], dim=2)  # B,H,L,D
+
         if N_CTX_Q == N_CTX_KV:
             # Use existing kernel for self-attention (same sequence lengths)
             grid = ((N_CTX_KV + BLOCK_N1 - 1) // BLOCK_N1, 1, BATCH * N_HEAD)
             _attn_bwd[grid](
                 q, arg_k, v, ctx.sm_scale, do, dq, dk, dv,
-                M, delta,
+                M, delta, q_m,
                 q.stride(0), q.stride(1), q.stride(2), q.stride(3),
                 N_HEAD, N_CTX_KV,
                 ctx.k_mean,
@@ -1015,6 +1046,7 @@ class _attention(torch.autograd.Function):
                 SMOOTH_K=ctx.smooth_k,
                 two_level_quant_P=ctx.two_level_quant_P,
                 fake_quant_P=ctx.fake_quant_P,
+                SMOOTH_Q=ctx.smooth_q,
                 num_warps=NUM_WARPS,
                 num_stages=NUM_STAGES
             )
@@ -1043,7 +1075,8 @@ class _attention(torch.autograd.Function):
                 two_level_quant_P=ctx.two_level_quant_P,
                 fake_quant_P=ctx.fake_quant_P,
                 num_warps=NUM_WARPS,
-                num_stages=NUM_STAGES
+                num_stages=NUM_STAGES,
+                SMOOTH_Q=ctx.smooth_q,
             )
 
         return dq, dk, dv, None, None, None, None, None, None, None, None, None
