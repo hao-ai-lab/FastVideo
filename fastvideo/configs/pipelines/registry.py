@@ -103,8 +103,6 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "wancausaldmdpipeline" in id.lower(),
     "stepvideo":
     lambda id: "stepvideo" in id.lower(),
-    "cosmos25":
-    lambda id: "cosmos25" in id.lower(),
     "cosmos":
     lambda id: "cosmos" in id.lower() and ("2.5" not in id.lower(
     ) and "2_5" not in id.lower() and "25" not in id.lower()),
