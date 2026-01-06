@@ -62,7 +62,7 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "FastVideo/LongCat-Video-T2V-Diffusers": LongCatT2V480PConfig,
     "FastVideo/LongCat-Video-I2V-Diffusers": LongCatT2V480PConfig,
     "FastVideo/LongCat-Video-VC-Diffusers": LongCatT2V480PConfig,
-    # TurboDiffusion specific configs
+    # TurboDiffusion models
     "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers": TurboDiffusionT2V_1_3B_Config,
     "loayrashid/TurboWan2.1-T2V-14B-Diffusers": TurboDiffusionT2V_14B_Config,
     "loayrashid/TurboWan2.2-I2V-A14B-Diffusers": TurboDiffusionI2V_A14B_Config,
@@ -116,7 +116,7 @@ PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "wandmdpipeline": FastWan2_1_T2V_480P_Config,
     "wancausaldmdpipeline": SelfForcingWanT2V480PConfig,
     "stepvideo": StepVideoT2VConfig,
-    "turbodiffusion": TurboDiffusionT2V_1_3B_Config,  # Default to T2V config for fallback
+    "turbodiffusion": TurboDiffusionT2V_1_3B_Config, 
     # Other fallbacks by architecture
 }
 

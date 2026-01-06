@@ -15,8 +15,6 @@ def main() -> None:
         "loayrashid/TurboWan2.1-T2V-14B-Diffusers",
         # 14B model needs more GPUs
         num_gpus=2,
-        # TurboDiffusion uses a custom pipeline with RCM scheduler
-        # override_pipeline_cls_name="TurboDiffusionPipeline",
     )
 
     prompt = (

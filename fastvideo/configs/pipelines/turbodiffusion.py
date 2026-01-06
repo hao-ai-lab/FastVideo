@@ -32,7 +32,7 @@ class TurboDiffusionT2VConfig(PipelineConfig):
     vae_tiling: bool = False
     vae_sp: bool = False
 
-    # Denoising stage - TurboDiffusion uses different flow_shift
+    # Denoising stage
     flow_shift: float | None = 3.0
     
     # No boundary_ratio for T2V (single model)
@@ -93,8 +93,6 @@ class TurboDiffusionI2VConfig(PipelineConfig):
     # Denoising stage
     flow_shift: float | None = 5.0
     
-    # Boundary ratio for switching between high-noise and low-noise models
-    # 0.9 means switch at 90% of the way through denoising
     boundary_ratio: float | None = 0.9
 
     # Text encoding stage
