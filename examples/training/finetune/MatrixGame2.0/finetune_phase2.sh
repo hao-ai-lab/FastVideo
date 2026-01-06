@@ -18,7 +18,7 @@ training_args=(
   --tracker_project_name "matrixgame_finetune_phase2"
   --output_dir "checkpoints/matrixgame_phase2"
   # --max_train_steps 120000
-  --max_train_steps 10000
+  --max_train_steps 6000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
