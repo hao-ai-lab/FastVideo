@@ -153,6 +153,8 @@ nav:
     - Video Sparse Attention: attention/vsa/index.md
     - Sliding Tile Attention: attention/sta/index.md
     - Adding a New Attention Backend: attention/developer/index.md
+  - Utilities:
+    - LoRA: utilities/lora.md
   - Design:
     - Overview: design/overview.md
   - Developer Guide:
