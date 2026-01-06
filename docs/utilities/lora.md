@@ -13,6 +13,7 @@ python scripts/lora_extraction/extract_lora.py \
 ```
 
 **Options:**
+
 - `--base`: Base model (HuggingFace ID or local path)
 - `--ft`: Fine-tuned model (HuggingFace ID or local path)
 - `--out`: Output adapter file
@@ -30,6 +31,7 @@ python scripts/lora_extraction/merge_lora.py \
 ```
 
 **Options:**
+
 - `--base`: Base model (HuggingFace ID or local path)
 - `--adapter`: LoRA adapter file (.safetensors)
 - `--ft`: Fine-tuned model (for configuration)
@@ -54,6 +56,7 @@ python scripts/lora_extraction/lora_inference_comparison.py \
 ```
 
 **Options:**
+
 - `--base`: Merged model or base model path
 - `--ft`: Fine-tuned model (reference)
 - `--adapter`: Path to adapter or NONE
