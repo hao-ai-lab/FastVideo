@@ -26,6 +26,11 @@ from fastvideo.configs.sample.wan import (
     SelfForcingWan2_2_T2V_A14B_480P_SamplingParam,
     MatrixGame2_SamplingParam,
 )
+from fastvideo.configs.sample.turbodiffusion import (
+    TurboDiffusionT2V_1_3B_SamplingParam,
+    TurboDiffusionT2V_14B_SamplingParam,
+    TurboDiffusionI2V_A14B_SamplingParam,
+)
 # isort: on
 from fastvideo.logger import init_logger
 from fastvideo.utils import (maybe_download_model_index,
@@ -84,6 +89,11 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "FastVideo/Matrix-Game-2.0-GTA-Diffusers": MatrixGame2_SamplingParam,
     "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers": MatrixGame2_SamplingParam,
 
+    # TurboDiffusion models
+    "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers": TurboDiffusionT2V_1_3B_SamplingParam,
+    "loayrashid/TurboWan2.1-T2V-14B-Diffusers": TurboDiffusionT2V_14B_SamplingParam,
+    "loayrashid/TurboWan2.2-I2V-A14B-Diffusers": TurboDiffusionI2V_A14B_SamplingParam,
+
     # Add other specific weight variants
 }
 
@@ -105,6 +115,8 @@ SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "wancausaldmdpipeline" in id.lower(),
     "matrixgame":
     lambda id: "matrixgame" in id.lower() or "matrix-game" in id.lower(),
+    "turbodiffusion":
+    lambda id: "turbodiffusion" in id.lower() or "turbowan" in id.lower(),
     # Add other pipeline architecture detectors
 }
 
@@ -121,6 +133,7 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
     "wancausaldmdpipeline": SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam,
     "stepvideo": StepVideoT2VSamplingParam,
     "matrixgame": MatrixGame2_SamplingParam,
+    "turbodiffusion": TurboDiffusionT2V_1_3B_SamplingParam,  # Default to T2V for fallback
     # Other fallbacks by architecture
 }
 

@@ -16,7 +16,7 @@ def main() -> None:
         # 14B model needs more GPUs
         num_gpus=2,
         # TurboDiffusion uses a custom pipeline with RCM scheduler
-        override_pipeline_cls_name="TurboDiffusionPipeline",
+        # override_pipeline_cls_name="TurboDiffusionPipeline",
     )
 
     prompt = (
@@ -28,9 +28,7 @@ def main() -> None:
         prompt,
         output_path=OUTPUT_PATH,
         save_video=True,
-        num_inference_steps=4,
         seed=42,
-        guidance_scale=1.0,
     )
 
     # Generate another video with a different prompt, without reloading the model!
@@ -45,9 +43,7 @@ def main() -> None:
         prompt2,
         output_path=OUTPUT_PATH,
         save_video=True,
-        num_inference_steps=4,
         seed=42,
-        guidance_scale=1.0,
     )
 
 

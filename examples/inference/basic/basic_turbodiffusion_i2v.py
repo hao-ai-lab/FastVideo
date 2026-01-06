@@ -13,10 +13,10 @@ OUTPUT_PATH = "video_samples_turbodiffusion_i2v"
 def main() -> None:
     # TurboDiffusion I2V: 1-4 step image-to-video generation
     # Uses RCM scheduler with sigma_max=200 for I2V
+    # Pipeline class and parameters are automatically detected from model config
     generator = VideoGenerator.from_pretrained(
         MODEL_PATH,
         num_gpus=2,
-        override_pipeline_cls_name="TurboDiffusionI2VPipeline",
     )
 
     # Example prompt and image for I2V
@@ -31,9 +31,7 @@ def main() -> None:
         image_path=image_path,
         output_path=OUTPUT_PATH,
         save_video=True,
-        num_inference_steps=4,
         seed=42,
-        guidance_scale=1.0,
     )
 
 
