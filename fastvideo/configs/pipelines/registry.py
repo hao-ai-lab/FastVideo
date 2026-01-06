@@ -10,6 +10,9 @@ from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuan15 import Hunyuan15T2V480PConfig, Hunyuan15T2V720PConfig
 from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
+from fastvideo.configs.pipelines.turbodiffusion import (
+    TurboDiffusionT2V_1_3B_Config, TurboDiffusionT2V_14B_Config,
+    TurboDiffusionI2V_A14B_Config)
 
 # isort: off
 from fastvideo.configs.pipelines.wan import (
@@ -59,6 +62,10 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "FastVideo/LongCat-Video-T2V-Diffusers": LongCatT2V480PConfig,
     "FastVideo/LongCat-Video-I2V-Diffusers": LongCatT2V480PConfig,
     "FastVideo/LongCat-Video-VC-Diffusers": LongCatT2V480PConfig,
+    # TurboDiffusion models
+    "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers": TurboDiffusionT2V_1_3B_Config,
+    "loayrashid/TurboWan2.1-T2V-14B-Diffusers": TurboDiffusionT2V_14B_Config,
+    "loayrashid/TurboWan2.2-I2V-A14B-Diffusers": TurboDiffusionI2V_A14B_Config,
     # Add other specific weight variants
 }
 
@@ -109,7 +116,7 @@ PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "wandmdpipeline": FastWan2_1_T2V_480P_Config,
     "wancausaldmdpipeline": SelfForcingWanT2V480PConfig,
     "stepvideo": StepVideoT2VConfig,
-    "turbodiffusion": Wan2_2_I2V_A14B_Config,
+    "turbodiffusion": TurboDiffusionT2V_1_3B_Config,
     # Other fallbacks by architecture
 }
 
