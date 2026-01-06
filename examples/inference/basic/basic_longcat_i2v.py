@@ -5,7 +5,7 @@ This script demonstrates LongCat I2V inference using the FastVideo Python API.
 LongCat I2V takes an input image and generates a video from it.
 
 It runs both basic generation (50 steps) and distill+refine generation
-(16 steps distill + 50 steps refinement to 768p with BSA).
+(16 steps distill + 50 steps refinement to 720p with BSA).
 
 Usage:
     python examples/inference/basic/basic_longcat_i2v.py
