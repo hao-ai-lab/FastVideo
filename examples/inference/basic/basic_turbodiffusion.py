@@ -21,7 +21,7 @@ def main() -> None:
     )
 
     # Generate videos with the same simple API, regardless of GPU count
-    # TurboDiffusion defaults: guidance_scale=1.0and num_inference_steps=4 (from config)
+    # TurboDiffusion defaults: guidance_scale=1.0 and num_inference_steps=4 (from config)
     prompt = (
         "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
         "wide with interest. The playful yet serene atmosphere is complemented by soft "
