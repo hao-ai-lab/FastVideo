@@ -25,7 +25,7 @@ class TurboDiffusionT2V_1_3B_SamplingParam(SamplingParam):
     # Denoising stage - TurboDiffusion uses 1-4 steps with no CFG
     guidance_scale: float = 1.0
     num_inference_steps: int = 4
-    
+
     # No negative prompt needed for TurboDiffusion (no CFG)
     negative_prompt: str | None = None
 
@@ -45,7 +45,7 @@ class TurboDiffusionT2V_14B_SamplingParam(SamplingParam):
     # Denoising stage - TurboDiffusion uses 1-4 steps with no CFG
     guidance_scale: float = 1.0
     num_inference_steps: int = 4
-    
+
     # No negative prompt needed for TurboDiffusion (no CFG)
     negative_prompt: str | None = None
 
@@ -65,9 +65,9 @@ class TurboDiffusionI2V_A14B_SamplingParam(SamplingParam):
     # Denoising stage - TurboDiffusion uses 1-4 steps with no CFG
     guidance_scale: float = 1.0
     num_inference_steps: int = 4
-    
+
     # Note: boundary_ratio is set in the pipeline config (TurboDiffusionI2VConfig),
     # not here. This keeps sampling params and pipeline config separate.
-    
+
     # No negative prompt needed for TurboDiffusion (no CFG)
     negative_prompt: str | None = None

@@ -116,7 +116,7 @@ PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "wandmdpipeline": FastWan2_1_T2V_480P_Config,
     "wancausaldmdpipeline": SelfForcingWanT2V480PConfig,
     "stepvideo": StepVideoT2VConfig,
-    "turbodiffusion": TurboDiffusionT2V_1_3B_Config, 
+    "turbodiffusion": TurboDiffusionT2V_1_3B_Config,
     # Other fallbacks by architecture
 }
 

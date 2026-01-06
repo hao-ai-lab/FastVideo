@@ -34,7 +34,7 @@ class TurboDiffusionT2VConfig(PipelineConfig):
 
     # Denoising stage
     flow_shift: float | None = 3.0
-    
+
     # No boundary_ratio for T2V (single model)
     boundary_ratio: float | None = None
 
@@ -92,7 +92,7 @@ class TurboDiffusionI2VConfig(PipelineConfig):
 
     # Denoising stage
     flow_shift: float | None = 5.0
-    
+
     boundary_ratio: float | None = 0.9
 
     # Text encoding stage
