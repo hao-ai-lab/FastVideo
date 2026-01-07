@@ -17,13 +17,14 @@ def main():
 
     num_frames = 81
     action_patterns = [
-        [0, 0, 1],
+        [0, 0, 1], # left
         [0, 0, 0],
-        [0, 1, 0],
+        [0, 1, 0], # right
     ]
     keyboard_cond = torch.zeros(num_frames, 3, dtype=torch.bfloat16)
     for i in range(num_frames):
-        pattern = action_patterns[i % 3]
+        # pattern = action_patterns[(i // 3) % len(action_patterns)]
+        pattern = action_patterns[1]
         keyboard_cond[i] = torch.tensor(pattern, dtype=torch.bfloat16)
     grid_sizes = torch.tensor([21, 60, 104])
     image_path = "footsies-dataset/validate/episode_020_part_000_first_frame.png"
