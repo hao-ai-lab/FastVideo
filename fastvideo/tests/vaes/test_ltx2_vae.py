@@ -34,11 +34,12 @@ def _load_weights(path: Path) -> dict[str, torch.Tensor]:
 
 
 def _select_vae_weights(weights: dict[str, torch.Tensor], prefix: str) -> dict[str, torch.Tensor]:
-    filtered = {
-        k.replace(prefix, ""): v
-        for k, v in weights.items()
-        if k.startswith(prefix) or k.startswith("vae.per_channel_statistics.")
-    }
+    filtered: dict[str, torch.Tensor] = {}
+    for name, tensor in weights.items():
+        if name.startswith(prefix):
+            filtered[name.replace(prefix, "")] = tensor
+        elif name.startswith("vae.per_channel_statistics."):
+            filtered[name.replace("vae.", "")] = tensor
     print(f"[LTX2 VAE TEST] Selected {len(filtered)} tensors for {prefix}")
     return filtered
 

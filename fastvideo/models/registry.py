@@ -51,6 +51,7 @@ _TEXT_ENCODER_MODELS = {
     "STEP1TextEncoder": ("encoders", "stepllm", "STEP1TextEncoder"),
     "BertModel": ("encoders", "clip", "CLIPTextModel"),
     "Qwen2_5_VLTextModel": ("encoders", "qwen2_5", "Qwen2_5_VLTextModel"),
+    "LTX2GemmaTextEncoderModel": ("encoders", "gemma", "LTX2GemmaTextEncoderModel"),
 }
 
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {

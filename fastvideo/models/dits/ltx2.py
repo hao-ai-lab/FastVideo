@@ -15,8 +15,10 @@ import torch
 import torch.nn as nn
 from einops import rearrange, repeat
 
+from fastvideo.attention.backends.sdpa import SDPAMetadata
 from fastvideo.attention.layer import LocalAttention
 from fastvideo.configs.models.dits import LTX2VideoConfig
+from fastvideo.forward_context import get_forward_context, set_forward_context
 from fastvideo.models.dits.base import CachableDiT
 from fastvideo.platforms import AttentionBackendEnum
 
@@ -731,6 +733,14 @@ class LTXSelfAttention(nn.Module):
             causal=False,
             supported_attention_backends=supported_attention_backends,
         )
+        self.attn_masked = LocalAttention(
+            num_heads=heads,
+            head_size=dim_head,
+            dropout_rate=0,
+            softmax_scale=None,
+            causal=False,
+            supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA,),
+        )
 
     def forward(
         self,
@@ -757,7 +767,30 @@ class LTXSelfAttention(nn.Module):
         q = q.view(b, q_len, self.heads, self.dim_head)
         k = k.view(b, k_len, self.heads, self.dim_head)
         v = v.view(b, k_len, self.heads, self.dim_head)
-        out = self.attn(q, k, v)
+        if mask is not None:
+            if mask.ndim == 2:
+                mask = mask.unsqueeze(0)
+            if mask.ndim == 3:
+                mask = mask.unsqueeze(1)
+            try:
+                forward_ctx = get_forward_context()
+                current_timestep = forward_ctx.current_timestep
+                forward_batch = forward_ctx.forward_batch
+            except AssertionError:
+                current_timestep = 0
+                forward_batch = None
+            attn_metadata = SDPAMetadata(
+                current_timestep=current_timestep,
+                attn_mask=mask,
+            )
+            with set_forward_context(
+                current_timestep=current_timestep,
+                attn_metadata=attn_metadata,
+                forward_batch=forward_batch,
+            ):
+                out = self.attn_masked(q, k, v)
+        else:
+            out = self.attn(q, k, v)
         out = out.view(b, q_len, -1)
         return self.to_out(out)
 

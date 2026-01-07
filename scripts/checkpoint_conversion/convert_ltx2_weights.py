@@ -103,6 +103,31 @@ def _filter_transformer_config(config: dict) -> dict:
     return filtered
 
 
+def _build_text_embedding_projection_config() -> dict:
+    return {
+        "architectures": ["LTX2GemmaTextEncoderModel"],
+        "hidden_size": 3840,
+        "num_hidden_layers": 48,
+        "num_attention_heads": 30,
+        "text_len": 1024,
+        "pad_token_id": 0,
+        "eos_token_id": 2,
+        "gemma_model_path": "",
+        "gemma_dtype": "bfloat16",
+        "padding_side": "left",
+        "feature_extractor_in_features": 3840 * 49,
+        "feature_extractor_out_features": 3840,
+        "connector_num_attention_heads": 30,
+        "connector_attention_head_dim": 128,
+        "connector_num_layers": 2,
+        "connector_positional_embedding_theta": 10000.0,
+        "connector_positional_embedding_max_pos": [1],
+        "connector_rope_type": "interleaved",
+        "connector_double_precision_rope": False,
+        "connector_num_learnable_registers": 128,
+    }
+
+
 def _split_component_weights(weights: dict[str, torch.Tensor]) -> dict[str, OrderedDict]:
     components: dict[str, OrderedDict] = {name: OrderedDict() for name in COMPONENT_PREFIXES}
     for key, value in weights.items():
@@ -175,7 +200,7 @@ def convert_components(
         "vae": metadata_config.get("vae"),
         "audio_vae": metadata_config.get("audio_vae"),
         "vocoder": metadata_config.get("vocoder"),
-        "text_embedding_projection": metadata_config.get("text_embedding_projection"),
+        "text_embedding_projection": _build_text_embedding_projection_config(),
     }
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -226,6 +251,15 @@ def main() -> None:
         action="store_true",
         help="Only convert transformer weights (no component split).",
     )
+    parser.add_argument(
+        "--components",
+        type=str,
+        default="",
+        help=(
+            "Comma-separated component list to write "
+            "(transformer,vae,audio_vae,vocoder,text_embedding_projection)."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -244,16 +278,23 @@ def main() -> None:
         raise FileNotFoundError(f"No safetensors found in {source_dir}")
     metadata_path = shards[0]
     metadata_config = _read_metadata_config(metadata_path)
+    components_to_write: set[str] | None = None
     if args.transformer_only:
-        convert_components(
-            source_dir,
-            output_dir,
-            metadata_config,
-            args.class_name,
-            components_to_write={"transformer"},
-        )
-    else:
-        convert_components(source_dir, output_dir, metadata_config, args.class_name)
+        components_to_write = {"transformer"}
+    elif args.components:
+        components_to_write = {
+            component.strip()
+            for component in args.components.split(",")
+            if component.strip()
+        }
+
+    convert_components(
+        source_dir,
+        output_dir,
+        metadata_config,
+        args.class_name,
+        components_to_write=components_to_write,
+    )
 
     if args.update_config:
         if source_dir.is_dir():
