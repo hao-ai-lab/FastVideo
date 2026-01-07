@@ -54,6 +54,7 @@ _TEXT_ENCODER_MODELS = {
     "Reason1TextEncoder": ("encoders", "reason1", "Reason1TextEncoder"),
     "Qwen2_5_VLForConditionalGeneration":
     ("encoders", "reason1", "Reason1TextEncoder"),
+    "LTX2GemmaTextEncoderModel": ("encoders", "gemma", "LTX2GemmaTextEncoderModel"),
 }
 
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
