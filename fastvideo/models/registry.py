@@ -32,7 +32,6 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "CosmosTransformer3DModel": ("dits", "cosmos", "CosmosTransformer3DModel"),
     "LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"),
     "LongCatTransformer3DModel": ("dits", "longcat", "LongCatTransformer3DModel"),
-    "LTX2Transformer3DModel": ("dits", "ltx2", "LTX2Transformer3DModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
@@ -64,8 +63,7 @@ _VAE_MODELS = {
     ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
     "AutoencoderKLHunyuanVideo15": ("vaes", "hunyuan15vae", "AutoencoderKLHunyuanVideo15"),
     "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
-    "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo"),
-    "CausalVideoAutoencoder": ("vaes", "ltx2vae", "LTX2CausalVideoAutoencoder"),
+    "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo")
 }
 
 _SCHEDULERS = {
