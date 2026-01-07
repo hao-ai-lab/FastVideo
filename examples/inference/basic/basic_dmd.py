@@ -14,7 +14,7 @@ def main():
         model_name,
         # FastVideo will automatically handle distributed setup
         num_gpus=1,
-        use_fsdp_inference=True,
+        use_fsdp_inference=False, # set to True if GPU is out of memory
         # Adjust these offload parameters if you have < 32GB of VRAM
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True, # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
