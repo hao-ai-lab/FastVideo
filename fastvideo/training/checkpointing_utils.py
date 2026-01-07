@@ -58,7 +58,7 @@ class OptimizerWrapper(torch.distributed.checkpoint.stateful.Stateful):
             self.model,
             self.optimizer,
             optim_state_dict=state_dict,
-            options=StateDictOptions(flatten_optimizer_state_dict=True),
+            options=StateDictOptions(flatten_optimizer_state_dict=True, strict=False),
         )
 
 

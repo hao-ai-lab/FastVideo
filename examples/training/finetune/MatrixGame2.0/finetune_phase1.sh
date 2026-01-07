@@ -8,7 +8,7 @@ export TOKENIZERS_PARALLELISM=false
 
 MODEL_PATH="SkyReels-V2-I2V-1.3B-540P-Diffusers"
 DATA_DIR="footsies-dataset/preprocessed/combined_parquet_dataset"
-VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
+VALIDATION_DATASET_FILE="$(dirname "$0")/validation_phase1.json"
 NUM_GPUS=1
 export CUDA_VISIBLE_DEVICES=0
 # IP=[MASTER NODE IP]

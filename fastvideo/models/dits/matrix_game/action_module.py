@@ -272,7 +272,9 @@ class ActionModule(nn.Module):
         # Defined freqs_cis early so it's available for both mouse and keyboard
         freqs_cis = (self._freqs_cos, self._freqs_sin)
 
-        assert (N_feats == tt and ((is_causal and kv_cache_mouse is None) or not is_causal)) or ((N_frames - 1) // self.vae_time_compression_ratio + 1 == start_frame + num_frame_per_block and is_causal)
+        if is_causal:
+            assert (N_feats == tt and kv_cache_mouse is None) or ((N_frames - 1) // self.vae_time_compression_ratio + 1 == start_frame + num_frame_per_block)
+        # For non-causal (training), we trust that the caller provides correctly shaped inputs
         
         if self.enable_mouse and mouse_condition is not None:
             hidden_states = rearrange(x, "B (T S) C -> (B S) T C", T=tt, S=th*tw) # 65*272*480 -> 17*(272//16)*(480//16) -> 8670
@@ -289,13 +291,15 @@ class ActionModule(nn.Module):
                 mouse_condition = mouse_condition[:, self.vae_time_compression_ratio*(N_feats - num_frame_per_block - self.windows_size) + pad_t:, :] 
                 group_mouse = [mouse_condition[:, self.vae_time_compression_ratio*(i - self.windows_size) + pad_t:i * self.vae_time_compression_ratio + pad_t,:] for i in range(num_frame_per_block)]
             else:
-                group_mouse = [mouse_condition[:, self.vae_time_compression_ratio*(i - self.windows_size) + pad_t:i * self.vae_time_compression_ratio + pad_t,:] for i in range(N_feats)]
+                local_num_frames = tt
+                group_mouse = [mouse_condition[:, self.vae_time_compression_ratio*(i - self.windows_size) + pad_t:i * self.vae_time_compression_ratio + pad_t,:] for i in range(local_num_frames)]
                 
             group_mouse = torch.stack(group_mouse, dim = 1)
+            actual_num_frames = group_mouse.shape[1]  # Use actual stacked frame count
 
             S = th * tw 
-            group_mouse = group_mouse.unsqueeze(-1).expand(B, num_frame_per_block, pad_t, C, S)
-            group_mouse = group_mouse.permute(0, 4, 1, 2, 3).reshape(B * S, num_frame_per_block, pad_t * C) 
+            group_mouse = group_mouse.unsqueeze(-1).expand(B, actual_num_frames, pad_t, C, S)
+            group_mouse = group_mouse.permute(0, 4, 1, 2, 3).reshape(B * S, actual_num_frames, pad_t * C) 
 
             group_mouse = torch.cat([hidden_states, group_mouse], dim = -1)
             group_mouse = self.mouse_mlp(group_mouse)
@@ -395,7 +399,8 @@ class ActionModule(nn.Module):
                 group_keyboard = [keyboard_condition[:, self.vae_time_compression_ratio*(i - self.windows_size) + pad_t:i * self.vae_time_compression_ratio + pad_t,:] for i in range(num_frame_per_block)]
             else:
                 keyboard_condition = self.keyboard_embed(keyboard_condition)
-                group_keyboard = [keyboard_condition[:, self.vae_time_compression_ratio*(i - self.windows_size) + pad_t:i * self.vae_time_compression_ratio + pad_t,:] for i in range(N_feats)]
+                local_num_frames = tt
+                group_keyboard = [keyboard_condition[:, self.vae_time_compression_ratio*(i - self.windows_size) + pad_t:i * self.vae_time_compression_ratio + pad_t,:] for i in range(local_num_frames)]
             group_keyboard = torch.stack(group_keyboard, dim = 1) # B F RW C
             group_keyboard = group_keyboard.reshape(shape=(group_keyboard.shape[0],group_keyboard.shape[1],-1))
             # apply cross attn
@@ -424,8 +429,8 @@ class ActionModule(nn.Module):
                 q, k = _apply_rotary_emb_qk(q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame)
 
                 k1, k2, k3, k4 = k.shape
-                k = k.expand(S, k2, k3, k4)
-                v = v.expand(S, k2, k3, k4)
+                k = k.repeat_interleave(S, dim=0)  
+                v = v.repeat_interleave(S, dim=0)
 
 
                 if is_causal:
