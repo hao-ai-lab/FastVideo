@@ -10,6 +10,7 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 import torch
+import triton
 try:
     # Use local version first (avoids issues with installed package)
     from fastvideo.attention.backends.sageattn import sageattn_blackwell
@@ -40,6 +41,7 @@ except ImportError:
 
 logger = init_logger(__name__)
 from flashinfer import SfLayout, mm_fp4, nvfp4_quantize
+from quant_utils import fake_quantize_q, fake_quantize_kv
 
 def fp_16_qk(q, k):
     qk = torch.matmul(q, k) / torch.sqrt(torch.tensor(q.shape[-1], device=q.device, dtype=q.dtype))
@@ -321,7 +323,7 @@ def sageattn_blackwell_with_16bit_bwd(q_BLHD, k_BLHD, v_BLHD, is_causal=False, p
 
 class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, q_BHLD, k_BHLD, v_BHLD, softmax_scale, softmax_lse, is_causal=False, per_block_mean=True):
+    def forward(ctx, q_BHLD, k_BHLD, v_BHLD, softmax_scale, softmax_lse, is_causal=False, per_block_mean=True, use_global_sf=True):
         k_mean = k_BHLD.mean(dim=(0, 1, 2), keepdim=True).view(-1)
 
         out_BHLD = sageattn_blackwell(
@@ -336,6 +338,7 @@ class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
         ctx.causal = is_causal
         ctx.IS_QAT = True
         ctx.k_mean = k_mean
+        ctx.use_global_sf = use_global_sf
         ctx.save_for_backward(q_BHLD, k_BHLD, v_BHLD, out_BHLD, softmax_lse)
         return out_BHLD
 
@@ -355,9 +358,6 @@ class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
         NUM_WARPS = 4
         BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 64, 64, 64, 64
         BLK_SLICE_FACTOR = 1
-        # NOTE: K is NOT pre-scaled here - scaling is applied AFTER qk dot product in kernels
-        # This improves precision by avoiding rounding errors in K before the dot product
-        arg_k = k_BHLD
         pre_grid = ((N_CTX_Q + PRE_BLOCK - 1) // PRE_BLOCK, BATCH * N_HEAD)
         delta = torch.empty_like(M_BHLD)
         _attn_bwd_preprocess[pre_grid](
@@ -367,12 +367,55 @@ class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
             BLOCK_M=PRE_BLOCK, HEAD_DIM=ctx.HEAD_DIM
         )
 
+        fake_q = torch.empty_like(q_BHLD)
+        fake_k = torch.empty_like(k_BHLD)
+        fake_v = torch.empty_like(v_BHLD)
+
+        grid_1 = (triton.cdiv(q_BHLD.shape[2], BLOCK_M1), q_BHLD.shape[0] * q_BHLD.shape[1], 1)
+        grid_2 = (triton.cdiv(k_BHLD.shape[2], BLOCK_N2), q_BHLD.shape[0] * q_BHLD.shape[1], 1)
+
+        fake_quantize_q[grid_1](
+            q_BHLD, fake_q,
+            q_BHLD.stride(0), q_BHLD.stride(1),
+            q_BHLD.stride(2), q_BHLD.stride(3),
+            fake_q.stride(0), fake_q.stride(1),
+            fake_q.stride(2), fake_q.stride(3),
+            N_HEAD, N_CTX_Q,
+            BLOCK_M=BLOCK_M1, HEAD_DIM=ctx.HEAD_DIM, use_global_sf=ctx.use_global_sf
+        )
+
+        fake_quantize_kv[grid_2](
+            k_BHLD, v_BHLD, fake_k, fake_v,
+            k_BHLD.stride(0), k_BHLD.stride(1),
+            k_BHLD.stride(2), k_BHLD.stride(3),
+            fake_k.stride(0), fake_k.stride(1),
+            fake_k.stride(2), fake_k.stride(3),
+            N_HEAD, N_CTX_KV,
+            BLOCK_N=BLOCK_N2, HEAD_DIM=ctx.HEAD_DIM, use_global_sf=ctx.use_global_sf
+        )
+
+        # Use fake quantized tensors for gradient computation (QAT)
+        # NOTE: The reassignment below only changes local variable references.
+        # The gradients (dq_BHLD, dk_BHLD, dv_BHLD) computed using fake_q/fake_k/fake_v
+        # will still correctly backpropagate to the original q_BHLD/k_BHLD/v_BHLD tensors
+        # from ctx.saved_tensors, because those original tensors remain in the computation graph.
+        q_BHLD = fake_q
+        k_BHLD = fake_k
+        v_BHLD = fake_v
+
+        # NOTE: K is NOT pre-scaled here - scaling is applied AFTER qk dot product in kernels
+        # This improves precision by avoiding rounding errors in K before the dot product
+        arg_k = k_BHLD
+
         if N_CTX_Q == N_CTX_KV:
             # Use existing kernel for self-attention (same sequence lengths)
             grid = ((N_CTX_KV + BLOCK_N1 - 1) // BLOCK_N1, 1, BATCH * N_HEAD)
+            # Q_MEAN is required by the kernel signature but only used if SMOOTH_Q=True
+            # Since we're not using SMOOTH_Q, create a dummy tensor with the same shape as q_BHLD
+            q_mean = torch.empty_like(q_BHLD)
             _attn_bwd[grid](
                 q_BHLD, arg_k, v_BHLD, ctx.sm_scale, do, dq_BHLD, dk_BHLD, dv_BHLD,
-                M_BHLD, delta,
+                M_BHLD, delta, q_mean,
                 q_BHLD.stride(0), q_BHLD.stride(1), q_BHLD.stride(2), q_BHLD.stride(3),
                 N_HEAD, N_CTX_KV,
                 ctx.k_mean,
@@ -385,6 +428,7 @@ class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
                 SMOOTH_K=True,
                 two_level_quant_P=True,
                 fake_quant_P=True,
+                use_global_sf=ctx.use_global_sf,
                 num_warps=NUM_WARPS,
                 num_stages=NUM_STAGES
             )
@@ -403,8 +447,11 @@ class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
                 SMOOTH_K=True,
             )
             grid_dkdv = ((N_CTX_KV + BLOCK_N1 - 1) // BLOCK_N1, 1, BATCH * N_HEAD)
+            # Q_MEAN is required by the kernel signature but only used if SMOOTH_Q=True
+            # Since we're not using SMOOTH_Q, create a dummy tensor with the same shape as q_BHLD
+            q_mean = torch.empty_like(q_BHLD)
             _attn_bwd_dkdv_cross[grid_dkdv](
-                q_BHLD, arg_k, v_BHLD, ctx.sm_scale, do, dk_BHLD, dv_BHLD, M_BHLD, delta,
+                q_BHLD, arg_k, v_BHLD, ctx.sm_scale, do, dk_BHLD, dv_BHLD, M_BHLD, delta, q_mean,
                 q_BHLD.stride(0), k_BHLD.stride(0), q_BHLD.stride(1), k_BHLD.stride(1), q_BHLD.stride(2), k_BHLD.stride(2), q_BHLD.stride(3), k_BHLD.stride(3),
                 N_HEAD, N_CTX_Q, N_CTX_KV,
                 BLOCK_M1=BLOCK_M1, BLOCK_N1=BLOCK_N1,
@@ -412,13 +459,14 @@ class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
                 IS_QAT=ctx.IS_QAT,
                 two_level_quant_P=True,
                 fake_quant_P=True,
+                use_global_sf=ctx.use_global_sf,
                 num_warps=NUM_WARPS,
                 num_stages=NUM_STAGES
             )
-    
-        return dq_BHLD, dk_BHLD, dv_BHLD, None, None, None, None 
+        
+        return dq_BHLD, dk_BHLD, dv_BHLD, None, None, None, None, None 
 
-def sageattn_blackwell_with_triton_bwd(q_BLHD, k_BLHD, v_BLHD, is_causal=False, per_block_mean=True):
+def sageattn_blackwell_with_triton_bwd(q_BLHD, k_BLHD, v_BLHD, is_causal=False, per_block_mean=True, use_global_sf=False):
     softmax_scale = 1.0 / sqrt(q_BLHD.shape[-1])
     # FA forward only to get softmax_lse (which is shape BHL)
     # Use no_grad to prevent autograd from tracking this call
@@ -437,14 +485,14 @@ def sageattn_blackwell_with_triton_bwd(q_BLHD, k_BLHD, v_BLHD, is_causal=False, 
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
     v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
-    out_BHLD = _SageAttnBlackwellWithTritonBwd.apply(q_BHLD, k_BHLD, v_BHLD, softmax_scale, softmax_lse, is_causal, per_block_mean)
+    out_BHLD = _SageAttnBlackwellWithTritonBwd.apply(q_BHLD, k_BHLD, v_BHLD, softmax_scale, softmax_lse, is_causal, per_block_mean, use_global_sf)
     return out_BHLD.permute(0, 2, 1, 3).contiguous()
 
-def qat_attn(q_BLHD, k_BLHD, v_BLHD, is_causal=False):
+def qat_attn(q_BLHD, k_BLHD, v_BLHD, is_causal=False, use_global_sf=True):
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
     v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
-    o_BHLD = attention(q_BHLD, k_BHLD, v_BHLD, is_causal, 1.0 / sqrt(q_BLHD.shape[-1]))
+    o_BHLD = attention(q_BHLD, k_BHLD, v_BHLD, is_causal, 1.0 / sqrt(q_BLHD.shape[-1]), use_global_sf=use_global_sf)
     return o_BHLD.permute(0, 2, 1, 3).contiguous()
 
 

@@ -6,11 +6,12 @@ from nvfp4_utils import _compute_quant_and_scale, _compute_dequant
 def fake_quantize(src_tensor, valid_src_mask, BLOCK_SIZE_OUT_DIM: tl.constexpr, 
                     BLOCK_SIZE_QUANT_DIM: tl.constexpr, 
                     dst_dtype: tl.constexpr,
+                    use_global_sf: tl.constexpr = True,
                     two_level_quant_P: tl.constexpr = False):
     high_prec_src_tensor = src_tensor
     src_tensor, src_scale, src_s_dec = _compute_quant_and_scale(src_tensor=src_tensor, 
                                                                 valid_src_mask=valid_src_mask,
-                                                                use_global_sf=True,
+                                                                use_global_sf=use_global_sf,
                                                                 two_level_quant_P=two_level_quant_P)
     src_tensor = _compute_dequant(mx_tensor=src_tensor, 
                                   scale=src_scale, 
@@ -27,7 +28,8 @@ def fake_quantize_q(Q, fake_Q, stride_z_q, stride_h_q,
                     fake_stride_tok_q, fake_stride_d_q,
                     H, N_CTX_Q,
                     BLOCK_M: tl.constexpr,
-                    HEAD_DIM: tl.constexpr):
+                    HEAD_DIM: tl.constexpr,
+                    use_global_sf: tl.constexpr = True):
     bhid = tl.program_id(1)
     adj_q = (stride_h_q * (bhid % H) + stride_z_q * (bhid // H))
     fake_adj_q = (fake_stride_h_q * (bhid % H) + fake_stride_z_q * (bhid // H))
@@ -41,7 +43,7 @@ def fake_quantize_q(Q, fake_Q, stride_z_q, stride_h_q,
 
     q_valid = offs_m < N_CTX_Q
     q = tl.load(Q + offs_m[:, None] * stride_tok_q + offs_k[None, :] * stride_d_q, mask=q_valid[:, None], other=0.0)
-    q, _ = fake_quantize(src_tensor=q, valid_src_mask=q_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_M, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=q.dtype)
+    q, _ = fake_quantize(src_tensor=q, valid_src_mask=q_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_M, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=q.dtype, use_global_sf=use_global_sf)
     tl.store(fake_Q + offs_m[:, None] * fake_stride_tok_q + offs_k[None, :] * fake_stride_d_q, q, mask=q_valid[:, None])
 
 @triton.jit
@@ -51,7 +53,8 @@ def fake_quantize_kv(K, V, fake_K, fake_V, stride_z_kv, stride_h_kv,
                     fake_stride_tok_kv, fake_stride_d_kv,
                     H, N_CTX_KV,
                     BLOCK_N: tl.constexpr,
-                    HEAD_DIM: tl.constexpr):
+                    HEAD_DIM: tl.constexpr,
+                    use_global_sf: tl.constexpr = True):
     bhid = tl.program_id(1)
     adj_kv = (stride_h_kv * (bhid % H) + stride_z_kv * (bhid // H))
     fake_adj_kv = (fake_stride_h_kv * (bhid % H) + fake_stride_z_kv * (bhid // H))
@@ -68,7 +71,7 @@ def fake_quantize_kv(K, V, fake_K, fake_V, stride_z_kv, stride_h_kv,
     kv_valid = offs_n < N_CTX_KV
     k_block = tl.load(K + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv, mask=kv_valid[:, None], other=0.0)
     v_block = tl.load(V + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv, mask=kv_valid[:, None], other=0.0)
-    k, _ = fake_quantize(src_tensor=k_block, valid_src_mask=kv_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_N, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=k_block.dtype)
-    v, _ = fake_quantize(src_tensor=v_block, valid_src_mask=kv_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_N, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=v_block.dtype)
+    k, _ = fake_quantize(src_tensor=k_block, valid_src_mask=kv_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_N, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=k_block.dtype, use_global_sf=use_global_sf)
+    v, _ = fake_quantize(src_tensor=v_block, valid_src_mask=kv_valid[:, None], BLOCK_SIZE_OUT_DIM=BLOCK_N, BLOCK_SIZE_QUANT_DIM=HEAD_DIM, dst_dtype=v_block.dtype, use_global_sf=use_global_sf)
     tl.store(fake_K + offs_n[:, None] * fake_stride_tok_kv + offs_k[None, :] * fake_stride_d_kv, k, mask=kv_valid[:, None])
     tl.store(fake_V + offs_n[:, None] * fake_stride_tok_kv + offs_k[None, :] * fake_stride_d_kv, v, mask=kv_valid[:, None])

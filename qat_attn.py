@@ -45,7 +45,8 @@ def _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid,
                     STAGE: tl.constexpr, offs_m: tl.constexpr, offs_n: tl.constexpr,
                     N_CTX: tl.constexpr, warp_specialize: tl.constexpr, IS_HOPPER: tl.constexpr,
                     IS_QAT: tl.constexpr,
-                    two_level_quant_P: tl.constexpr = False):
+                    two_level_quant_P: tl.constexpr = False,
+                    use_global_sf: tl.constexpr = True):
     # range of values handled by this stage (kv blocks)
     if STAGE == 1:
         lo, hi = 0, start_m * BLOCK_M
@@ -85,7 +86,8 @@ def _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid,
                 BLOCK_SIZE_OUT_DIM=BLOCK_M,
                 BLOCK_SIZE_QUANT_DIM=BLOCK_N,
                 dst_dtype=dtype,
-                two_level_quant_P=two_level_quant_P
+                two_level_quant_P=two_level_quant_P,
+                use_global_sf=use_global_sf
             )
             l_ij = tl.sum(high_prec_p, 1)
         else:
@@ -199,6 +201,7 @@ def _attn_fwd(sm_scale, M,
               IS_HOPPER: tl.constexpr,
               IS_QAT: tl.constexpr,
               two_level_quant_P: tl.constexpr = False,
+              use_global_sf: tl.constexpr = True,
               ):
     dtype = tl.float8e5 if FP8_OUTPUT else tl.bfloat16
     tl.static_assert(BLOCK_N <= HEAD_DIM)
@@ -263,7 +266,7 @@ def _attn_fwd(sm_scale, M,
             offset_y_kv, dtype, start_m, qk_scale,
             BLOCK_M, HEAD_DIM, BLOCK_N,
             4 - STAGE, offs_m, offs_n, N_CTX_KV,
-            warp_specialize, IS_HOPPER, IS_QAT, two_level_quant_P
+            warp_specialize, IS_HOPPER, IS_QAT, two_level_quant_P, use_global_sf
         )
     # stage 2: on-band
     if STAGE & 2:
@@ -273,7 +276,7 @@ def _attn_fwd(sm_scale, M,
             offset_y_kv, dtype, start_m, qk_scale,
             BLOCK_M, HEAD_DIM, BLOCK_N,
             2, offs_m, offs_n, N_CTX_KV,
-            warp_specialize, IS_HOPPER, IS_QAT, two_level_quant_P
+            warp_specialize, IS_HOPPER, IS_QAT, two_level_quant_P, use_global_sf
         )
     # epilogue
     m_i += tl.math.log2(l_i)
@@ -322,7 +325,8 @@ def _attn_bwd_dkdv(dk, dv,
                    IS_QAT: tl.constexpr,
                    two_level_quant_P: tl.constexpr = False,
                    fake_quant_P: tl.constexpr = True,
-                   SMOOTH_Q: tl.constexpr = False):
+                   SMOOTH_Q: tl.constexpr = False,
+                   use_global_sf: tl.constexpr = True):
     offs_m = start_m + tl.arange(0, BLOCK_M1)
     offs_n = start_n + tl.arange(0, BLOCK_N1)
     offs_k = tl.arange(0, HEAD_DIM)
@@ -359,7 +363,8 @@ def _attn_bwd_dkdv(dk, dv,
                 BLOCK_SIZE_OUT_DIM=BLOCK_M1,
                 BLOCK_SIZE_QUANT_DIM=BLOCK_N1,
                 dst_dtype=p.dtype,
-                two_level_quant_P=two_level_quant_P
+                two_level_quant_P=two_level_quant_P,
+                use_global_sf=use_global_sf
             )
         dv += tl.dot(tl.trans(p_quant.to(tl.bfloat16)), do)
         # D (= delta) is pre-divided by ds_scale.
@@ -531,7 +536,8 @@ def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
                          IS_QAT: tl.constexpr,
                          two_level_quant_P: tl.constexpr = False,
                          fake_quant_P: tl.constexpr = True,
-                         SMOOTH_Q: tl.constexpr = False
+                         SMOOTH_Q: tl.constexpr = False,
+                         use_global_sf: tl.constexpr = True
                          ):
     # Apply scale AFTER dot product for better precision
     RCP_LN2: tl.constexpr = 1.4426950408889634  # = 1.0 / ln(2)
@@ -586,7 +592,8 @@ def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
                 BLOCK_SIZE_OUT_DIM=BLOCK_M1,
                 BLOCK_SIZE_QUANT_DIM=BLOCK_N1,
                 dst_dtype=p.dtype,
-                two_level_quant_P=two_level_quant_P
+                two_level_quant_P=two_level_quant_P,
+                use_global_sf=use_global_sf
             )
         dv += tl.dot(tl.trans(p_quant.to(tl.bfloat16)), do)
 
@@ -628,7 +635,8 @@ def _attn_bwd(Q, K, V, sm_scale,
               SMOOTH_K: tl.constexpr,
               two_level_quant_P: tl.constexpr = False,
               fake_quant_P: tl.constexpr = True,
-              SMOOTH_Q: tl.constexpr = False):
+              SMOOTH_Q: tl.constexpr = False,
+              use_global_sf: tl.constexpr = True):
 
     bhid = tl.program_id(2)
     off_chz = (bhid * N_CTX).to(tl.int64)
@@ -691,7 +699,8 @@ def _attn_bwd(Q, K, V, sm_scale,
             IS_QAT=IS_QAT,
             two_level_quant_P=two_level_quant_P,
             fake_quant_P=fake_quant_P,
-            SMOOTH_Q=SMOOTH_Q
+            SMOOTH_Q=SMOOTH_Q,
+            use_global_sf=use_global_sf
         )
 
         start_m += num_steps * MASK_BLOCK_M1
@@ -715,7 +724,8 @@ def _attn_bwd(Q, K, V, sm_scale,
         IS_QAT=IS_QAT,
         two_level_quant_P=two_level_quant_P,
         fake_quant_P=fake_quant_P,
-        SMOOTH_Q=SMOOTH_Q
+        SMOOTH_Q=SMOOTH_Q,
+        use_global_sf=use_global_sf
     )
 
     dv_ptrs = DV + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
@@ -803,7 +813,8 @@ class _attention(torch.autograd.Function):
         two_level_quant_P=True,
         fake_quant_P=True,
         use_high_prec_o=False,
-        smooth_q=False
+        smooth_q=False,
+        use_global_sf=True
     ):
         # shape constraints
         HEAD_DIM_Q, HEAD_DIM_K = q.shape[-1], k.shape[-1]
@@ -968,6 +979,7 @@ class _attention(torch.autograd.Function):
             IS_HOPPER=is_hopper(),
             IS_QAT=IS_QAT,
             two_level_quant_P=two_level_quant_P,
+            use_global_sf=use_global_sf,
             num_warps=4,
             num_stages=2,
             **extra_kern_args
@@ -989,6 +1001,7 @@ class _attention(torch.autograd.Function):
         ctx.two_level_quant_P = two_level_quant_P
         ctx.fake_quant_P = fake_quant_P
         ctx.smooth_q = smooth_q
+        ctx.use_global_sf = use_global_sf
         return o
 
     @staticmethod
@@ -1047,6 +1060,7 @@ class _attention(torch.autograd.Function):
                 two_level_quant_P=ctx.two_level_quant_P,
                 fake_quant_P=ctx.fake_quant_P,
                 SMOOTH_Q=ctx.smooth_q,
+                use_global_sf=ctx.use_global_sf,
                 num_warps=NUM_WARPS,
                 num_stages=NUM_STAGES
             )
@@ -1074,12 +1088,13 @@ class _attention(torch.autograd.Function):
                 IS_QAT=ctx.IS_QAT,
                 two_level_quant_P=ctx.two_level_quant_P,
                 fake_quant_P=ctx.fake_quant_P,
+                SMOOTH_Q=ctx.smooth_q,
+                use_global_sf=ctx.use_global_sf,
                 num_warps=NUM_WARPS,
                 num_stages=NUM_STAGES,
-                SMOOTH_Q=ctx.smooth_q,
             )
 
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None
 
 
 attention = _attention.apply
