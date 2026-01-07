@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
+import os
 import pytest
 
 import torch
 import numpy as np
+
+os.environ["FASTVIDEO_LIGHT_IMPORT"] = "1"
 
 from fastvideo.distributed import (maybe_init_distributed_environment_and_model_parallel,
                                       cleanup_dist_env_and_memory)

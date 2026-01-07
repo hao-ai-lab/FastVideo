@@ -24,7 +24,6 @@
 # limitations under the License.
 """Rotary Positional Embeddings."""
 from typing import Any
-
 import torch
 
 from fastvideo.distributed.parallel_state import get_sp_group
