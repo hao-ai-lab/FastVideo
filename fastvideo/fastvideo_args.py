@@ -132,7 +132,7 @@ class FastVideoArgs:
 
     # CPU offload parameters
     dit_cpu_offload: bool = True
-    use_fsdp_inference: bool = True
+    use_fsdp_inference: bool = False
     dit_layerwise_offload: bool = False
     text_encoder_cpu_offload: bool = True
     image_encoder_cpu_offload: bool = True
@@ -431,7 +431,9 @@ class FastVideoArgs:
             "--use-fsdp-inference",
             action=StoreBoolean,
             help=
-            "Use FSDP for inference by sharding the model weights. Latency is very low due to prefetch--enable if run out of memory.",
+            "Use FSDP for inference by sharding the model weights. FSDP helps reduce GPU memory usage but may introduce"
+            +
+            " weight transfer overhead depending on the specific setup. Enable if run out of memory.",
         )
         parser.add_argument(
             "--text-encoder-cpu-offload",
