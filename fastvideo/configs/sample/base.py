@@ -70,6 +70,12 @@ class SamplingParam:
     # Misc
     save_video: bool = True
     return_frames: bool = False
+    # Return controls for non-`return_frames` code paths.
+    # When `return_frames=True`, `generate_video()` returns the raw frames list.
+    # Otherwise, it returns a dict; these flags control which bulky fields are
+    # included in that dict.
+    return_frames_in_dict: bool = False
+    return_samples: bool = False
     return_trajectory_latents: bool = False  # returns all latents for each timestep
     return_trajectory_decoded: bool = False  # returns decoded latents for each timestep
 
@@ -215,6 +221,19 @@ class SamplingParam:
             action="store_true",
             default=SamplingParam.return_frames,
             help="Whether to return the raw frames",
+        )
+        parser.add_argument(
+            "--return-frames-in-dict",
+            action="store_true",
+            default=SamplingParam.return_frames_in_dict,
+            help=
+            "Include frames in the returned dict (ignored if --return-frames is set)",
+        )
+        parser.add_argument(
+            "--return-samples",
+            action="store_true",
+            default=SamplingParam.return_samples,
+            help="Include model samples tensor in the returned dict",
         )
         parser.add_argument(
             "--image-path",
