@@ -55,7 +55,7 @@ TURBODIFFUSION_TEST_PROMPTS = [
 
 
 @pytest.mark.skip(
-    reason="TurboDiffusion SSIM tests are skipped",
+    reason="Temporarily disabled due to OOM issues in CI. TODO: Investigate and re-enable.",
 )
 @pytest.mark.parametrize("prompt", TURBODIFFUSION_TEST_PROMPTS)
 @pytest.mark.parametrize("model_id", list(TURBODIFFUSION_MODEL_TO_PARAMS.keys()))
