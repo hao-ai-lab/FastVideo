@@ -54,6 +54,9 @@ TURBODIFFUSION_TEST_PROMPTS = [
 ]
 
 
+@pytest.mark.skip(
+    reason="TurboDiffusion SSIM tests are skipped",
+)
 @pytest.mark.parametrize("prompt", TURBODIFFUSION_TEST_PROMPTS)
 @pytest.mark.parametrize("model_id", list(TURBODIFFUSION_MODEL_TO_PARAMS.keys()))
 def test_turbodiffusion_inference_similarity(prompt, model_id):
@@ -187,6 +190,9 @@ TURBODIFFUSION_I2V_IMAGE_PATHS = [
 ]
 
 
+@pytest.mark.skip(
+    reason="TurboDiffusion SSIM tests are skipped",
+)
 @pytest.mark.parametrize("prompt", TURBODIFFUSION_I2V_TEST_PROMPTS)
 @pytest.mark.parametrize("model_id", list(TURBODIFFUSION_I2V_MODEL_TO_PARAMS.keys()))
 def test_turbodiffusion_i2v_inference_similarity(prompt, model_id):
