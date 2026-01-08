@@ -22,6 +22,9 @@ from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.latent_preparation import (
     Cosmos25LatentPreparationStage, CosmosLatentPreparationStage,
     LatentPreparationStage)
+from fastvideo.pipelines.stages.ltx2_denoising import LTX2DenoisingStage
+from fastvideo.pipelines.stages.ltx2_latent_preparation import (
+    LTX2LatentPreparationStage)
 from fastvideo.pipelines.stages.matrixgame_denoising import (
     MatrixGameCausalDenoisingStage)
 from fastvideo.pipelines.stages.stepvideo_encoding import (
@@ -44,6 +47,7 @@ __all__ = [
     "LatentPreparationStage",
     "CosmosLatentPreparationStage",
     "Cosmos25LatentPreparationStage",
+    "LTX2LatentPreparationStage",
     "ConditioningStage",
     "DenoisingStage",
     "DmdDenoisingStage",
@@ -51,6 +55,7 @@ __all__ = [
     "MatrixGameCausalDenoisingStage",
     "CosmosDenoisingStage",
     "Cosmos25DenoisingStage",
+    "LTX2DenoisingStage",
     "EncodingStage",
     "DecodingStage",
     "ImageEncodingStage",

@@ -10,7 +10,6 @@ from safetensors import safe_open
 from safetensors.torch import load_file
 from torch.testing import assert_close
 
-os.environ.setdefault("FASTVIDEO_LIGHT_IMPORT", "1")
 
 repo_root = Path(__file__).resolve().parents[3]
 ltx_core_path = repo_root / "LTX-2" / "packages" / "ltx-core" / "src"
@@ -35,11 +34,16 @@ def _load_weights(path: Path) -> dict[str, torch.Tensor]:
 
 def _select_vae_weights(weights: dict[str, torch.Tensor], prefix: str) -> dict[str, torch.Tensor]:
     filtered: dict[str, torch.Tensor] = {}
+    alt_prefix = prefix.replace("vae.", "")
     for name, tensor in weights.items():
         if name.startswith(prefix):
             filtered[name.replace(prefix, "")] = tensor
+        elif alt_prefix and name.startswith(alt_prefix):
+            filtered[name.replace(alt_prefix, "")] = tensor
         elif name.startswith("vae.per_channel_statistics."):
             filtered[name.replace("vae.", "")] = tensor
+        elif name.startswith("per_channel_statistics."):
+            filtered[name] = tensor
     print(f"[LTX2 VAE TEST] Selected {len(filtered)} tensors for {prefix}")
     return filtered
 
@@ -63,16 +67,24 @@ def _load_into_model(model: torch.nn.Module, weights: dict[str, torch.Tensor]) -
 
 
 def test_ltx2_vae_parity():
-    model_path = Path(
+    diffusers_root = Path(
+        os.getenv("LTX2_DIFFUSERS_PATH", "converted/ltx2_diffusers")
+    )
+    official_path = Path(
         os.getenv(
-            "LTX2_MODEL_PATH",
+            "LTX2_OFFICIAL_PATH",
             "official_ltx_weights/ltx-2-19b-distilled.safetensors",
         )
     )
-    if not model_path.exists():
-        pytest.skip(f"LTX-2 weights not found at {model_path}")
+    fastvideo_path = Path(
+        os.getenv("LTX2_VAE_PATH", str(diffusers_root / "vae"))
+    )
+    if not official_path.exists():
+        pytest.skip(f"LTX-2 weights not found at {official_path}")
+    if not fastvideo_path.exists():
+        pytest.skip(f"LTX-2 diffusers VAE not found at {fastvideo_path}")
 
-    config = _load_metadata(model_path)
+    config = _load_metadata(official_path)
     if "vae" not in config:
         pytest.skip("VAE config not found in safetensors metadata.")
 
@@ -81,11 +93,24 @@ def test_ltx2_vae_parity():
     except ImportError as exc:
         pytest.skip(f"LTX-2 import failed: {exc}")
 
-    weights = _load_weights(model_path)
-    encoder_weights = _select_vae_weights(weights, "vae.encoder.")
-    decoder_weights = _select_vae_weights(weights, "vae.decoder.")
+    ref_weights = _load_weights(official_path)
+    encoder_weights = _select_vae_weights(ref_weights, "vae.encoder.")
+    decoder_weights = _select_vae_weights(ref_weights, "vae.decoder.")
     if not encoder_weights or not decoder_weights:
         pytest.skip("VAE weights not found in safetensors file.")
+
+    fastvideo_weights_path = fastvideo_path / "model.safetensors"
+    if not fastvideo_weights_path.exists():
+        pytest.skip(f"FastVideo VAE weights not found at {fastvideo_weights_path}")
+    fastvideo_weights = _load_weights(fastvideo_weights_path)
+    fastvideo_encoder_weights = _select_vae_weights(
+        fastvideo_weights, "encoder."
+    )
+    fastvideo_decoder_weights = _select_vae_weights(
+        fastvideo_weights, "decoder."
+    )
+    if not fastvideo_encoder_weights or not fastvideo_decoder_weights:
+        pytest.skip("FastVideo VAE weights not found in diffusers file.")
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     precision = torch.bfloat16 if torch.cuda.is_available() else torch.float32
@@ -96,11 +121,11 @@ def test_ltx2_vae_parity():
     ref_decoder = VideoDecoderConfigurator.from_config(config).to(device=device, dtype=precision)
 
     loaded_fastvideo_encoder, missing_fastvideo_encoder = _load_into_model(
-        fastvideo_encoder.model, encoder_weights
+        fastvideo_encoder.model, fastvideo_encoder_weights
     )
     loaded_ref_encoder, missing_ref_encoder = _load_into_model(ref_encoder, encoder_weights)
     loaded_fastvideo_decoder, missing_fastvideo_decoder = _load_into_model(
-        fastvideo_decoder.model, decoder_weights
+        fastvideo_decoder.model, fastvideo_decoder_weights
     )
     loaded_ref_decoder, missing_ref_decoder = _load_into_model(ref_decoder, decoder_weights)
 

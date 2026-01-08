@@ -1388,6 +1388,7 @@ class LTX2Transformer3DModel(CachableDiT):
         encoder_hidden_states: torch.Tensor | list[torch.Tensor],
         timestep: torch.LongTensor,
         encoder_hidden_states_image: torch.Tensor | list[torch.Tensor] | None = None,
+        encoder_attention_mask: torch.Tensor | None = None,
         guidance=None,
         **kwargs,
     ) -> torch.Tensor:
@@ -1405,7 +1406,7 @@ class LTX2Transformer3DModel(CachableDiT):
             timesteps=timestep,
             positions=positions,
             context=encoder_hidden_states,
-            context_mask=None,
+            context_mask=encoder_attention_mask,
         )
         video_out, _ = self.model(
             video=video_modality,

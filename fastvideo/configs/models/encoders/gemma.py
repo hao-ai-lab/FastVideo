@@ -35,6 +35,10 @@ class LTX2GemmaArchConfig(TextEncoderArchConfig):
     connector_double_precision_rope: bool = False
     connector_num_learnable_registers: int | None = 128
 
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.tokenizer_kwargs["padding"] = "max_length"
+
 
 @dataclass
 class LTX2GemmaConfig(TextEncoderConfig):

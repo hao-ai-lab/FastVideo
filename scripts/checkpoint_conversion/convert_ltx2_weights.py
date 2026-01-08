@@ -10,6 +10,7 @@ import glob
 import json
 import os
 import re
+import shutil
 from collections import OrderedDict
 from pathlib import Path
 
@@ -103,7 +104,9 @@ def _filter_transformer_config(config: dict) -> dict:
     return filtered
 
 
-def _build_text_embedding_projection_config() -> dict:
+def _build_text_embedding_projection_config(
+    gemma_model_path: str = "",
+) -> dict:
     return {
         "architectures": ["LTX2GemmaTextEncoderModel"],
         "hidden_size": 3840,
@@ -112,7 +115,7 @@ def _build_text_embedding_projection_config() -> dict:
         "text_len": 1024,
         "pad_token_id": 0,
         "eos_token_id": 2,
-        "gemma_model_path": "",
+        "gemma_model_path": gemma_model_path,
         "gemma_dtype": "bfloat16",
         "padding_side": "left",
         "feature_extractor_in_features": 3840 * 49,
@@ -126,6 +129,19 @@ def _build_text_embedding_projection_config() -> dict:
         "connector_double_precision_rope": False,
         "connector_num_learnable_registers": 128,
     }
+
+
+def _wrap_component_config(
+    component_name: str,
+    component_config: dict | None,
+    class_name: str | None = None,
+) -> dict | None:
+    if component_config is None:
+        return None
+    wrapped = {component_name: component_config}
+    if class_name is not None:
+        wrapped["_class_name"] = class_name
+    return wrapped
 
 
 def _split_component_weights(weights: dict[str, torch.Tensor]) -> dict[str, OrderedDict]:
@@ -153,8 +169,14 @@ def _split_component_weights(weights: dict[str, torch.Tensor]) -> dict[str, Orde
     return {name: weights for name, weights in components.items() if weights}
 
 
-def _write_component(output_dir: Path, name: str, weights: OrderedDict, config: dict | None) -> None:
-    component_dir = output_dir / name
+def _write_component(
+    output_dir: Path,
+    name: str,
+    weights: OrderedDict,
+    config: dict | None,
+    dir_name: str | None = None,
+) -> None:
+    component_dir = output_dir / (dir_name or name)
     component_dir.mkdir(parents=True, exist_ok=True)
     output_file = component_dir / "model.safetensors"
     save_file(weights, str(output_file))
@@ -168,12 +190,43 @@ def _write_component(output_dir: Path, name: str, weights: OrderedDict, config: 
         print(f"Saved {name} config to {config_path}")
 
 
+def _build_model_index(
+    transformer_class_name: str,
+    vae_class_name: str,
+    pipeline_class_name: str,
+    diffusers_version: str,
+) -> dict:
+    return {
+        "_class_name": pipeline_class_name,
+        "_diffusers_version": diffusers_version,
+        "transformer": ["diffusers", transformer_class_name],
+        "vae": ["diffusers", vae_class_name],
+        "text_encoder": ["transformers", "LTX2GemmaTextEncoderModel"],
+        "tokenizer": ["transformers", "AutoTokenizer"],
+        "audio_vae": ["diffusers", "LTX2AudioDecoder"],
+        "vocoder": ["diffusers", "LTX2Vocoder"],
+    }
+
+
+def _write_model_index(output_dir: Path, model_index: dict) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    model_index_path = output_dir / "model_index.json"
+    with model_index_path.open("w", encoding="utf-8") as f:
+        json.dump(model_index, f, indent=2)
+        f.write("\n")
+    print(f"Saved model_index.json to {model_index_path}")
+
+
 def convert_components(
     source_path: Path,
     output_dir: Path,
     metadata_config: dict,
     transformer_class_name: str,
     components_to_write: set[str] | None = None,
+    emit_diffusers_repo: bool = True,
+    pipeline_class_name: str = "LTX2Pipeline",
+    diffusers_version: str = "0.33.0.dev0",
+    gemma_model_path: str = "",
 ) -> None:
     shards = _find_shards(source_path)
     if not shards:
@@ -197,15 +250,61 @@ def convert_components(
 
     component_configs: dict[str, dict | None] = {
         "transformer": transformer_config or None,
-        "vae": metadata_config.get("vae"),
-        "audio_vae": metadata_config.get("audio_vae"),
-        "vocoder": metadata_config.get("vocoder"),
-        "text_embedding_projection": _build_text_embedding_projection_config(),
+        "vae": _wrap_component_config(
+            "vae",
+            metadata_config.get("vae"),
+            class_name="CausalVideoAutoencoder",
+        ),
+        "audio_vae": _wrap_component_config(
+            "audio_vae",
+            metadata_config.get("audio_vae"),
+            class_name="LTX2AudioDecoder",
+        ),
+        "vocoder": _wrap_component_config(
+            "vocoder",
+            metadata_config.get("vocoder"),
+            class_name="LTX2Vocoder",
+        ),
+        "text_embedding_projection": _build_text_embedding_projection_config(
+            gemma_model_path=gemma_model_path
+        ),
     }
 
     output_dir.mkdir(parents=True, exist_ok=True)
     for name, component_weights in split_weights.items():
         _write_component(output_dir, name, component_weights, component_configs.get(name))
+        if emit_diffusers_repo and name == "text_embedding_projection":
+            _write_component(
+                output_dir,
+                name,
+                component_weights,
+                component_configs.get(name),
+                dir_name="text_encoder",
+            )
+    if emit_diffusers_repo:
+        required_for_index = {
+            "transformer",
+            "vae",
+            "audio_vae",
+            "vocoder",
+            "text_embedding_projection",
+        }
+        if components_to_write is not None and not required_for_index.issubset(components_to_write):
+            print("Skipping model_index.json; not all diffusers components were written.")
+            return
+        if not required_for_index.issubset(split_weights.keys()):
+            print("Skipping model_index.json; missing diffusers components in weights.")
+            return
+        vae_class_name = (component_configs.get("vae") or {}).get(
+            "_class_name", "CausalVideoAutoencoder"
+        )
+        model_index = _build_model_index(
+            transformer_class_name=transformer_class_name,
+            vae_class_name=vae_class_name,
+            pipeline_class_name=pipeline_class_name,
+            diffusers_version=diffusers_version,
+        )
+        _write_model_index(output_dir, model_index)
 
 
 def update_transformer_config(config_path: Path, class_name: str) -> None:
@@ -247,6 +346,24 @@ def main() -> None:
     parser.add_argument("--update-config", action="store_true", help="Update source config.json _class_name")
     parser.add_argument("--class-name", type=str, default="LTX2Transformer3DModel")
     parser.add_argument(
+        "--diffusers-repo",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Emit a diffusers-style repo layout with model_index.json.",
+    )
+    parser.add_argument(
+        "--pipeline-class-name",
+        type=str,
+        default="LTX2Pipeline",
+        help="Pipeline class name for model_index.json.",
+    )
+    parser.add_argument(
+        "--diffusers-version",
+        type=str,
+        default="0.33.0.dev0",
+        help="Diffusers version for model_index.json.",
+    )
+    parser.add_argument(
         "--transformer-only",
         action="store_true",
         help="Only convert transformer weights (no component split).",
@@ -259,6 +376,12 @@ def main() -> None:
             "Comma-separated component list to write "
             "(transformer,vae,audio_vae,vocoder,text_embedding_projection)."
         ),
+    )
+    parser.add_argument(
+        "--gemma-path",
+        type=str,
+        default="",
+        help="Optional local Gemma model path to copy into the output repo.",
     )
 
     args = parser.parse_args()
@@ -288,12 +411,28 @@ def main() -> None:
             if component.strip()
         }
 
+    gemma_model_path = ""
+    if args.gemma_path:
+        gemma_src = Path(args.gemma_path)
+        if not gemma_src.is_dir():
+            raise ValueError(f"--gemma-path must be a directory: {gemma_src}")
+        gemma_dest = output_dir / "text_encoder" / "gemma"
+        if gemma_dest.exists():
+            shutil.rmtree(gemma_dest)
+        gemma_dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(gemma_src, gemma_dest)
+        gemma_model_path = "gemma"
+
     convert_components(
         source_dir,
         output_dir,
         metadata_config,
         args.class_name,
         components_to_write=components_to_write,
+        emit_diffusers_repo=args.diffusers_repo,
+        pipeline_class_name=args.pipeline_class_name,
+        diffusers_version=args.diffusers_version,
+        gemma_model_path=gemma_model_path,
     )
 
     if args.update_config:
