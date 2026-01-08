@@ -5,7 +5,7 @@ LTX-2 video VAE wrappers using the official ltx-core implementation.
 
 from pathlib import Path
 import sys
-from typing import Any
+from typing import Any, Iterable
 
 import torch
 import torch.nn as nn
@@ -21,6 +21,9 @@ def _require_ltx2():
 
     try:
         from ltx_core.model.video_vae import (  # type: ignore
+            SpatialTilingConfig,
+            TemporalTilingConfig,
+            TilingConfig,
             VideoDecoder,
             VideoDecoderConfigurator,
             VideoEncoder,
@@ -31,13 +34,32 @@ def _require_ltx2():
             "LTX-2 sources are required. Ensure FastVideo/LTX-2 is present."
         ) from exc
 
-    return VideoDecoder, VideoDecoderConfigurator, VideoEncoder, VideoEncoderConfigurator
+    return (
+        SpatialTilingConfig,
+        TemporalTilingConfig,
+        TilingConfig,
+        VideoDecoder,
+        VideoDecoderConfigurator,
+        VideoEncoder,
+        VideoEncoderConfigurator,
+    )
+
+
+def _concat_tiled_chunks(chunks: Iterable[torch.Tensor]) -> torch.Tensor:
+    chunk_list = list(chunks)
+    if not chunk_list:
+        raise ValueError("No chunks produced by tiled decode.")
+    if len(chunk_list) == 1:
+        return chunk_list[0]
+    return torch.cat(chunk_list, dim=2)
 
 
 class LTX2VideoEncoder(nn.Module):
     def __init__(self, config: dict[str, Any]):
         super().__init__()
-        VideoDecoder, VideoDecoderConfigurator, VideoEncoder, VideoEncoderConfigurator = _require_ltx2()
+        (SpatialTilingConfig, TemporalTilingConfig, TilingConfig, VideoDecoder,
+         VideoDecoderConfigurator, VideoEncoder,
+         VideoEncoderConfigurator) = _require_ltx2()
         self.model: VideoEncoder = VideoEncoderConfigurator.from_config(config)
 
     def forward(self, sample: torch.Tensor) -> torch.Tensor:
@@ -47,7 +69,9 @@ class LTX2VideoEncoder(nn.Module):
 class LTX2VideoDecoder(nn.Module):
     def __init__(self, config: dict[str, Any]):
         super().__init__()
-        VideoDecoder, VideoDecoderConfigurator, VideoEncoder, VideoEncoderConfigurator = _require_ltx2()
+        (SpatialTilingConfig, TemporalTilingConfig, TilingConfig, VideoDecoder,
+         VideoDecoderConfigurator, VideoEncoder,
+         VideoEncoderConfigurator) = _require_ltx2()
         self.model: VideoDecoder = VideoDecoderConfigurator.from_config(config)
 
     def forward(
@@ -67,10 +91,14 @@ class LTX2CausalVideoAutoencoder(nn.Module):
     def __init__(self, config: dict[str, Any]):
         super().__init__()
         self.config = config
-        VideoDecoder, VideoDecoderConfigurator, VideoEncoder, VideoEncoderConfigurator = _require_ltx2()
+        (self._SpatialTilingConfig, self._TemporalTilingConfig,
+         self._TilingConfig, VideoDecoder, VideoDecoderConfigurator,
+         VideoEncoder, VideoEncoderConfigurator) = _require_ltx2()
 
         self.encoder = VideoEncoderConfigurator.from_config(config)
         self.decoder = VideoDecoderConfigurator.from_config(config)
+        self._tiling_config: Any | None = None
+        self._use_tiling: bool = False
 
     def encode(self, x: torch.Tensor) -> DiagonalGaussianDistribution:
         means = self.encoder(x)
@@ -83,8 +111,37 @@ class LTX2CausalVideoAutoencoder(nn.Module):
         timestep: torch.Tensor | None = None,
         generator: torch.Generator | None = None,
     ) -> torch.Tensor:
+        if self._use_tiling:
+            if self._tiling_config is None:
+                self._tiling_config = self._TilingConfig.default()
+            chunks = self.decoder.tiled_decode(
+                z,
+                tiling_config=self._tiling_config,
+                timestep=timestep,
+                generator=generator,
+            )
+            return _concat_tiled_chunks(chunks)
         return self.decoder(z, timestep=timestep, generator=generator)
 
     def enable_tiling(self) -> None:
-        # LTX-2 VAE does not implement FastVideo tiling; no-op to satisfy pipeline calls.
-        return None
+        self._use_tiling = True
+        if self._tiling_config is None:
+            self._tiling_config = self._TilingConfig.default()
+
+    def set_tiling_config(
+        self,
+        spatial_tile_size_in_pixels: int = 512,
+        spatial_tile_overlap_in_pixels: int = 64,
+        temporal_tile_size_in_frames: int = 64,
+        temporal_tile_overlap_in_frames: int = 24,
+    ) -> None:
+        self._tiling_config = self._TilingConfig(
+            spatial_config=self._SpatialTilingConfig(
+                tile_size_in_pixels=spatial_tile_size_in_pixels,
+                tile_overlap_in_pixels=spatial_tile_overlap_in_pixels,
+            ),
+            temporal_config=self._TemporalTilingConfig(
+                tile_size_in_frames=temporal_tile_size_in_frames,
+                tile_overlap_in_frames=temporal_tile_overlap_in_frames,
+            ),
+        )

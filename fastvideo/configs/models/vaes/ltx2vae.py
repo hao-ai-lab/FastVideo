@@ -33,11 +33,13 @@ class LTX2VAEArchConfig(VAEArchConfig):
     temporal_compression_ratio: int = 8
     spatial_compression_ratio: int = 32
 
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        # Keep parent invariants if needed
-
 
 @dataclass
 class LTX2VAEConfig(VAEConfig):
     arch_config: VAEArchConfig = field(default_factory=LTX2VAEArchConfig)
+
+    # LTX-2 tiling defaults (match ltx_core.video_vae.TilingConfig.default()).
+    ltx2_spatial_tile_size_in_pixels: int = 512
+    ltx2_spatial_tile_overlap_in_pixels: int = 64
+    ltx2_temporal_tile_size_in_frames: int = 64
+    ltx2_temporal_tile_overlap_in_frames: int = 24

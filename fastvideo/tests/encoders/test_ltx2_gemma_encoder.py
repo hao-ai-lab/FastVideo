@@ -38,16 +38,18 @@ def _load_connector_weights(path: str) -> dict[str, torch.Tensor]:
     reason="LTX-2 Gemma encoder parity test requires CUDA.",
 )
 def test_ltx2_gemma_text_encoder_parity():
+    diffusers_root = Path(
+        os.getenv("LTX2_DIFFUSERS_PATH", "converted/ltx2_diffusers")
+    )
     text_encoder_path = os.getenv(
         "LTX2_TEXT_ENCODER_PATH",
-        str(repo_root / "converted" / "ltx2" / "text_embedding_projection"),
+        str(diffusers_root / "text_encoder"),
     )
-    gemma_model_path = os.getenv("LTX2_GEMMA_MODEL_PATH", "")
+    gemma_model_path = str(Path(text_encoder_path) / "gemma")
     if not os.path.isdir(text_encoder_path):
         pytest.skip(f"LTX-2 text encoder weights not found at {text_encoder_path}")
     if not gemma_model_path or not os.path.isdir(gemma_model_path):
-        pytest.skip("LTX2_GEMMA_MODEL_PATH must point to a local Gemma model.")
-    os.environ["LTX2_GEMMA_MODEL_PATH"] = gemma_model_path
+        pytest.skip("Gemma weights not found in text_encoder/gemma.")
 
     try:
         from ltx_core.text_encoders.gemma.embeddings_connector import (

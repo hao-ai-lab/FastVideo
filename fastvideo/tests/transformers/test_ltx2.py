@@ -1,15 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
-import re
 from pathlib import Path
 import sys
 
 import pytest
 import torch
-from safetensors.torch import load_file
 from torch.testing import assert_close
 
-os.environ.setdefault("FASTVIDEO_LIGHT_IMPORT", "1")
 os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29513")
 
@@ -25,122 +22,17 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.models.loader.component_loader import TransformerLoader
 
 
-def _load_safetensors(path: Path) -> dict[str, torch.Tensor]:
-    if path.is_file():
-        print(f"[LTX2 TEST] Loading weights from file: {path}")
-        return load_file(str(path))
-    if not path.is_dir():
-        raise FileNotFoundError(f"LTX-2 weights not found at {path}")
-
-    model_file = path / "model.safetensors"
-    if model_file.exists():
-        print(f"[LTX2 TEST] Loading weights from file: {model_file}")
-        return load_file(str(model_file))
-
-    index_files = list(path.glob("*.safetensors.index.json"))
-    if index_files:
-        print(f"[LTX2 TEST] Loading weights from index: {index_files[0]}")
-        index = index_files[0].read_text(encoding="utf-8")
-        weight_map = __import__("json").loads(index)["weight_map"]
-        shards = sorted({path / shard for shard in weight_map.values()})
-    else:
-        shards = sorted(Path(p) for p in path.glob("*.safetensors"))
-    print(f"[LTX2 TEST] Loading {len(shards)} shard(s) from {path}")
-    if not shards:
-        raise FileNotFoundError(f"No safetensors found in {path}")
-    weights: dict[str, torch.Tensor] = {}
-    for shard in shards:
-        print(f"[LTX2 TEST] Loading shard: {shard}")
-        weights.update(load_file(str(shard)))
-    print(f"[LTX2 TEST] Loaded {len(weights)} total tensors")
-    return weights
+def _read_transformer_config(config: dict) -> dict:
+    transformer_config = config.get("transformer", {})
+    if not transformer_config:
+        raise ValueError("Missing transformer config in LTX-2 metadata.")
+    return transformer_config
 
 
-def _normalize_keys(weights: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-    if any(k.startswith("model.diffusion_model.") for k in weights):
-        normalized = {
-            k.replace("model.diffusion_model.", ""): v
-            for k, v in weights.items()
-            if k.startswith("model.diffusion_model.")
-        }
-        print(f"[LTX2 TEST] Normalized model.diffusion_model.* -> {len(normalized)} tensors")
-        return normalized
-    if any(k.startswith("diffusion_model.") for k in weights):
-        normalized = {
-            k.replace("diffusion_model.", ""): v
-            for k, v in weights.items()
-            if k.startswith("diffusion_model.")
-        }
-        print(f"[LTX2 TEST] Normalized diffusion_model.* -> {len(normalized)} tensors")
-        return normalized
-    if any(k.startswith("model.") for k in weights):
-        normalized = {k.replace("model.", ""): v for k, v in weights.items()}
-        print(f"[LTX2 TEST] Normalized model.* -> {len(normalized)} tensors")
-        return normalized
-    print(f"[LTX2 TEST] No normalization applied; {len(weights)} tensors")
-    return weights
-
-
-def _select_transformer_weights(weights: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-    allowed_prefixes = (
-        "patchify_proj.",
-        "adaln_single.",
-        "caption_projection.",
-        "audio_patchify_proj.",
-        "audio_adaln_single.",
-        "audio_caption_projection.",
-        "transformer_blocks.",
-        "scale_shift_table",
-        "audio_scale_shift_table",
-        "av_ca_",
-        "norm_out.",
-        "audio_norm_out.",
-        "proj_out.",
-        "audio_proj_out.",
-        "video_args_preprocessor.",
-    )
-    filtered = {
-        k: v
-        for k, v in weights.items()
-        if k.startswith(allowed_prefixes)
-        and not k.startswith("audio_embeddings_connector.")
-        and not k.startswith("video_embeddings_connector.")
-    }
-    print(f"[LTX2 TEST] Selected transformer tensors: {len(filtered)}")
-    return filtered
-
-
-def _infer_arch(weights: dict[str, torch.Tensor]) -> dict[str, int]:
-    patch_key = None
-    if "patchify_proj.weight" in weights:
-        patch_key = "patchify_proj.weight"
-    else:
-        patch_key = next(
-            (k for k in weights if k.endswith(".patchify_proj.weight") and "audio_" not in k),
-            None,
-        )
-    if patch_key is None:
-        raise KeyError("patchify_proj.weight not found in LTX-2 weights.")
-    in_channels = weights[patch_key].shape[1]
-    inner_dim = weights[patch_key].shape[0]
-
-    caption_key = next((k for k in weights if k.endswith("caption_projection.linear_1.weight")), None)
-    caption_channels = weights[caption_key].shape[1] if caption_key else inner_dim
-
-    block_indices = [
-        int(m.group(1))
-        for k in weights
-        if (m := re.match(r"transformer_blocks\.(\d+)\.", k))
-    ]
-    num_layers = max(block_indices) + 1 if block_indices else 0
-
-    num_heads_candidates = [32, 16, 64, 8]
-    num_attention_heads = next((h for h in num_heads_candidates if inner_dim % h == 0), 32)
-    attention_head_dim = inner_dim // num_attention_heads
-
-    patch_size = 2
-    num_channels_latents = 16
-    for candidate in (16, 32, 64, 128):
+def _infer_patch_params(in_channels: int) -> tuple[int, int]:
+    patch_size = 1
+    num_channels_latents = 128
+    for candidate in (8, 16, 32, 64, 128):
         if in_channels % candidate != 0:
             continue
         patch_volume = in_channels // candidate
@@ -149,37 +41,11 @@ def _infer_arch(weights: dict[str, torch.Tensor]) -> dict[str, int]:
             patch_size = root
             num_channels_latents = candidate
             break
-
-    arch = {
-        "in_channels": in_channels,
-        "out_channels": in_channels,
-        "inner_dim": inner_dim,
-        "caption_channels": caption_channels,
-        "num_layers": num_layers,
-        "num_attention_heads": num_attention_heads,
-        "attention_head_dim": attention_head_dim,
-        "num_channels_latents": num_channels_latents,
-        "patch_size": patch_size,
-    }
-    print(f"[LTX2 TEST] Inferred arch: {arch}")
-    return arch
-
-
-def _load_into_model(model: torch.nn.Module, weights: dict[str, torch.Tensor]) -> int:
-    model_state = model.state_dict()
-    filtered = {
-        k: v
-        for k, v in weights.items()
-        if k in model_state and model_state[k].shape == v.shape
-    }
     print(
-        f"[LTX2 TEST] Loading {len(filtered)} / {len(model_state)} tensors "
-        f"from {len(weights)} available weights"
+        f"[LTX2 TEST] Inferred patch_size={patch_size}, "
+        f"num_channels_latents={num_channels_latents}"
     )
-    if not filtered:
-        return 0
-    model.load_state_dict(filtered, strict=False)
-    return len(filtered)
+    return patch_size, num_channels_latents
 
 
 def _attach_block_sum_logging(
@@ -262,6 +128,9 @@ def _attach_block_detail_logging(
 
 def test_ltx2_transformer_parity():
     torch.manual_seed(42)
+    diffusers_root = Path(
+        os.getenv("LTX2_DIFFUSERS_PATH", "converted/ltx2_diffusers")
+    )
     official_path = Path(
         os.getenv(
             "LTX2_OFFICIAL_PATH",
@@ -271,7 +140,7 @@ def test_ltx2_transformer_parity():
     fastvideo_path = Path(
         os.getenv(
             "LTX2_FASTVIDEO_PATH",
-            "converted/ltx2/transformer",
+            str(diffusers_root / "transformer"),
         )
     )
     if not official_path.exists():
@@ -282,35 +151,69 @@ def test_ltx2_transformer_parity():
     try:
         from ltx_core.components.patchifiers import VideoLatentPatchifier
         from ltx_core.guidance.perturbations import BatchedPerturbationConfig
-        from ltx_core.model.transformer import LTXModel
-        from ltx_core.model.transformer.model import LTXModelType
+        from ltx_core.loader.sft_loader import SafetensorsModelStateDictLoader
+        from ltx_core.loader.single_gpu_model_builder import SingleGPUModelBuilder
+        from ltx_core.model.transformer import (LTXModelConfigurator,
+                                                LTXV_MODEL_COMFY_RENAMING_MAP)
         from ltx_core.model.transformer.modality import Modality
-        from ltx_core.model.transformer.attention import AttentionFunction
-        from ltx_core.model.transformer.rope import LTXRopeType
         from ltx_core.types import VideoLatentShape
     except ImportError as exc:
         pytest.skip(f"LTX-2 import failed: {exc}")
 
-    ref_raw_weights = _load_safetensors(official_path)
-    ref_weights = _normalize_keys(ref_raw_weights)
-    ref_weights = _select_transformer_weights(ref_weights)
-    if not ref_weights:
-        pytest.skip("No transformer weights found in safetensors file.")
-    arch = _infer_arch(ref_weights)
-    if arch["num_layers"] == 0:
-        pytest.skip("Could not infer transformer block count from LTX-2 weights.")
+    config_loader = SafetensorsModelStateDictLoader()
+    metadata = config_loader.metadata(str(official_path))
+    transformer_config = _read_transformer_config(metadata)
 
     config = LTX2VideoConfig()
     cfg = config.arch_config
-    cfg.in_channels = arch["in_channels"]
-    cfg.out_channels = arch["out_channels"]
-    cfg.num_layers = arch["num_layers"]
-    cfg.num_attention_heads = arch["num_attention_heads"]
-    cfg.attention_head_dim = arch["attention_head_dim"]
-    cfg.cross_attention_dim = arch["inner_dim"]
-    cfg.caption_channels = arch["caption_channels"]
-    cfg.num_channels_latents = arch["num_channels_latents"]
-    cfg.patch_size = (1, arch["patch_size"], arch["patch_size"])
+    cfg.num_attention_heads = transformer_config.get("num_attention_heads",
+                                                     cfg.num_attention_heads)
+    cfg.attention_head_dim = transformer_config.get("attention_head_dim",
+                                                    cfg.attention_head_dim)
+    cfg.num_layers = transformer_config.get("num_layers", cfg.num_layers)
+    cfg.cross_attention_dim = transformer_config.get(
+        "cross_attention_dim", cfg.cross_attention_dim)
+    cfg.caption_channels = transformer_config.get("caption_channels",
+                                                  cfg.caption_channels)
+    cfg.norm_eps = transformer_config.get("norm_eps", cfg.norm_eps)
+    cfg.attention_type = transformer_config.get("attention_type",
+                                                cfg.attention_type)
+    cfg.positional_embedding_theta = transformer_config.get(
+        "positional_embedding_theta", cfg.positional_embedding_theta)
+    cfg.positional_embedding_max_pos = transformer_config.get(
+        "positional_embedding_max_pos", cfg.positional_embedding_max_pos)
+    cfg.timestep_scale_multiplier = transformer_config.get(
+        "timestep_scale_multiplier", cfg.timestep_scale_multiplier)
+    cfg.use_middle_indices_grid = transformer_config.get(
+        "use_middle_indices_grid", cfg.use_middle_indices_grid)
+    cfg.rope_type = transformer_config.get("rope_type", cfg.rope_type)
+    cfg.double_precision_rope = transformer_config.get(
+        "double_precision_rope",
+        transformer_config.get("frequencies_precision", "")
+        == "float64",
+    )
+    cfg.audio_num_attention_heads = transformer_config.get(
+        "audio_num_attention_heads", cfg.audio_num_attention_heads)
+    cfg.audio_attention_head_dim = transformer_config.get(
+        "audio_attention_head_dim", cfg.audio_attention_head_dim)
+    cfg.audio_in_channels = transformer_config.get("audio_in_channels",
+                                                   cfg.audio_in_channels)
+    cfg.audio_out_channels = transformer_config.get("audio_out_channels",
+                                                    cfg.audio_out_channels)
+    cfg.audio_cross_attention_dim = transformer_config.get(
+        "audio_cross_attention_dim", cfg.audio_cross_attention_dim)
+    cfg.audio_positional_embedding_max_pos = transformer_config.get(
+        "audio_positional_embedding_max_pos",
+        cfg.audio_positional_embedding_max_pos,
+    )
+    cfg.av_ca_timestep_scale_multiplier = transformer_config.get(
+        "av_ca_timestep_scale_multiplier", cfg.av_ca_timestep_scale_multiplier)
+    cfg.in_channels = transformer_config.get("in_channels", cfg.in_channels)
+    cfg.out_channels = transformer_config.get("out_channels", cfg.out_channels)
+
+    patch_size, num_channels_latents = _infer_patch_params(cfg.in_channels)
+    cfg.patch_size = (1, patch_size, patch_size)
+    cfg.num_channels_latents = num_channels_latents
 
     if not torch.cuda.is_available():
         pytest.skip("LTX-2 transformer parity test requires CUDA for attention backends.")
@@ -330,44 +233,14 @@ def test_ltx2_transformer_parity():
     loader = TransformerLoader()
     fastvideo_model = loader.load(str(fastvideo_path), args).to(device=device, dtype=precision)
 
-    reference_attention = AttentionFunction.PYTORCH
-    reference_attn_env = os.getenv("LTX2_REFERENCE_ATTN")
-    if reference_attn_env:
-        reference_attention = AttentionFunction(reference_attn_env)
-    else:
-        fastvideo_attn_backend = os.getenv("FASTVIDEO_ATTENTION_BACKEND")
-        if fastvideo_attn_backend == "FLASH_ATTN":
-            reference_attention = AttentionFunction.FLASH_ATTENTION_3
-
-    reference_model = LTXModel(
-        model_type=LTXModelType.AudioVideo,
-        num_attention_heads=cfg.num_attention_heads,
-        attention_head_dim=cfg.attention_head_dim,
-        in_channels=cfg.in_channels,
-        out_channels=cfg.out_channels,
-        num_layers=cfg.num_layers,
-        cross_attention_dim=cfg.cross_attention_dim,
-        norm_eps=cfg.norm_eps,
-        caption_channels=cfg.caption_channels,
-        positional_embedding_theta=cfg.positional_embedding_theta,
-        positional_embedding_max_pos=cfg.positional_embedding_max_pos,
-        timestep_scale_multiplier=cfg.timestep_scale_multiplier,
-        use_middle_indices_grid=cfg.use_middle_indices_grid,
-        attention_type=reference_attention,
-        rope_type=LTXRopeType(cfg.rope_type),
-        double_precision_rope=cfg.double_precision_rope,
-        audio_num_attention_heads=cfg.audio_num_attention_heads,
-        audio_attention_head_dim=cfg.audio_attention_head_dim,
-        audio_in_channels=cfg.audio_in_channels,
-        audio_out_channels=cfg.audio_out_channels,
-        audio_cross_attention_dim=cfg.audio_cross_attention_dim,
-        audio_positional_embedding_max_pos=cfg.audio_positional_embedding_max_pos,
-        av_ca_timestep_scale_multiplier=cfg.av_ca_timestep_scale_multiplier,
-    ).to(device=device, dtype=precision)
-
-    loaded_reference = _load_into_model(reference_model, ref_weights)
-    if loaded_reference == 0:
-        pytest.skip("No matching keys loaded into LTX-2 transformer models.")
+    reference_builder = SingleGPUModelBuilder(
+        model_class_configurator=LTXModelConfigurator,
+        model_path=str(official_path),
+        model_sd_ops=LTXV_MODEL_COMFY_RENAMING_MAP,
+    )
+    reference_model = reference_builder.build(
+        device=device, dtype=precision).to(device=device, dtype=precision)
+    reference_model.set_gradient_checkpointing(False)
 
     fastvideo_model.eval()
     reference_model.eval()
@@ -455,4 +328,4 @@ def test_ltx2_transformer_parity():
             print(f"[LTX2 TEST] FastVideo model output shape: {fastvideo_out.shape}")
     assert ref_out.shape == fastvideo_out.shape
     assert ref_out.dtype == fastvideo_out.dtype
-    assert_close(ref_out, fastvideo_out, atol=1e-2, rtol=1e-2)
+    assert_close(ref_out, fastvideo_out, atol=1e-4, rtol=1e-4)

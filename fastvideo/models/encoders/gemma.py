@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 from typing import Iterable
 
 import torch
@@ -272,12 +271,10 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
     @property
     def gemma_model(self) -> Gemma3ForConditionalGeneration:
         if self._gemma_model is None:
-            gemma_path = self.gemma_model_path or os.getenv(
-                "LTX2_GEMMA_MODEL_PATH", ""
-            )
+            gemma_path = self.gemma_model_path
             if not gemma_path:
                 raise ValueError(
-                    "gemma_model_path must be set to load Gemma weights."
+                    "gemma_model_path must be set (expected text_encoder/gemma)."
                 )
             dtype = getattr(torch, self.gemma_dtype, torch.bfloat16)
             self._gemma_model = Gemma3ForConditionalGeneration.from_pretrained(

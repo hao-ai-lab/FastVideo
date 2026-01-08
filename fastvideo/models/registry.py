@@ -69,6 +69,12 @@ _VAE_MODELS = {
     "CausalVideoAutoencoder": ("vaes", "ltx2vae", "LTX2CausalVideoAutoencoder"),
 }
 
+_AUDIO_MODELS = {
+    "LTX2AudioEncoder": ("audio", "ltx2_audio_vae", "LTX2AudioEncoder"),
+    "LTX2AudioDecoder": ("audio", "ltx2_audio_vae", "LTX2AudioDecoder"),
+    "LTX2Vocoder": ("audio", "ltx2_audio_vae", "LTX2Vocoder"),
+}
+
 _SCHEDULERS = {
     "FlowMatchEulerDiscreteScheduler":
     ("schedulers", "scheduling_flow_match_euler_discrete",
@@ -88,6 +94,7 @@ _FAST_VIDEO_MODELS = {
     **_TEXT_ENCODER_MODELS,
     **_IMAGE_ENCODER_MODELS,
     **_VAE_MODELS,
+    **_AUDIO_MODELS,
     **_SCHEDULERS,
 }
 

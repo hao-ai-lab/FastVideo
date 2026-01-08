@@ -7,7 +7,6 @@ import pytest
 import torch
 from torch.testing import assert_close
 
-os.environ.setdefault("FASTVIDEO_LIGHT_IMPORT", "1")
 os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29513")
 
@@ -35,6 +34,9 @@ from fastvideo.tests.transformers.test_ltx2 import (
 
 def test_ltx2_transformer_audio_parity():
     torch.manual_seed(42)
+    diffusers_root = Path(
+        os.getenv("LTX2_DIFFUSERS_PATH", "converted/ltx2_diffusers")
+    )
     official_path = Path(
         os.getenv(
             "LTX2_OFFICIAL_PATH",
@@ -44,7 +46,7 @@ def test_ltx2_transformer_audio_parity():
     fastvideo_path = Path(
         os.getenv(
             "LTX2_FASTVIDEO_PATH",
-            "converted/ltx2/transformer",
+            str(diffusers_root / "transformer"),
         )
     )
     if not official_path.exists():
