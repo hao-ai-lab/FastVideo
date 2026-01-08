@@ -107,7 +107,7 @@ If you encounter CUDA out of memory errors:
 - Try a smaller model or use distilled versions
 - Use `num_gpus` > 1 if multiple GPUs are available
 - Try enabling FSDP inference with `use_fsdp_inference=True` (may slow down generation)
-- Try enableling DiT layerwise offload with `dit_layerwise_offload=True` (now only a few models support this, but may introduce less overhead than FSDP)
+- Try enabling DiT layerwise offload with `dit_layerwise_offload=True` (now only a few models support this, but may introduce less overhead than FSDP)
 
 ### Slow Generation
 
