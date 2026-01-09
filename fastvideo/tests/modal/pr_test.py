@@ -47,9 +47,11 @@ def run_test(pytest_command: str):
         checkout_command = f"git checkout {git_commit}"
         print(f"Using direct commit checkout: {checkout_command}")
     
+    # source $HOME/.local/bin/env &&
+    # source /opt/venv/bin/activate &&
     command = f"""
-    source $HOME/.local/bin/env &&
-    source /opt/venv/bin/activate &&
+    [ -f $HOME/.local/bin/env ] && source $HOME/.local/bin/env || true
+    [ -f /opt/venv/bin/activate ] && source /opt/venv/bin/activate || true
     git clone {git_repo} /FastVideo &&
     cd /FastVideo &&
     {checkout_command} &&
@@ -86,6 +88,8 @@ def run_transformer_tests():
     secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})],
     volumes={"/root/data": model_vol} 
 )
+# import os
+# print(f"CPU RAM: {os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024**3):.1f} GB")
 def run_ssim_tests():
     run_test("export MODEL_PATH='/root/data/weights' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/ssim -vs")
 
