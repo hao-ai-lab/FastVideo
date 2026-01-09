@@ -50,8 +50,8 @@ def run_test(pytest_command: str):
     # source $HOME/.local/bin/env &&
     # source /opt/venv/bin/activate &&
     command = f"""
-    [ -f $HOME/.local/bin/env ] && source $HOME/.local/bin/env || true
-    [ -f /opt/venv/bin/activate ] && source /opt/venv/bin/activate || true
+    source $HOME/.local/bin/env &&
+    source /opt/venv/bin/activate &&
     git clone {git_repo} /FastVideo &&
     cd /FastVideo &&
     {checkout_command} &&
