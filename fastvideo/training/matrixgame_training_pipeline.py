@@ -214,6 +214,18 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
         if "image" in validation_batch and validation_batch["image"] is not None:
              batch.pil_image = validation_batch["image"]
 
+        if "keyboard_cond" in validation_batch and validation_batch["keyboard_cond"] is not None:
+            keyboard_cond = validation_batch["keyboard_cond"]
+            keyboard_cond = torch.tensor(keyboard_cond, dtype=torch.bfloat16)
+            keyboard_cond = keyboard_cond.unsqueeze(0)
+            batch.keyboard_cond = keyboard_cond
+
+        if "mouse_cond" in validation_batch and validation_batch["mouse_cond"] is not None:
+            mouse_cond = validation_batch["mouse_cond"]
+            mouse_cond = torch.tensor(mouse_cond, dtype=torch.bfloat16)
+            mouse_cond = mouse_cond.unsqueeze(0)
+            batch.mouse_cond = mouse_cond
+
         return batch
 
 
