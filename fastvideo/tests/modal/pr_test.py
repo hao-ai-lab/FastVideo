@@ -47,8 +47,6 @@ def run_test(pytest_command: str):
         checkout_command = f"git checkout {git_commit}"
         print(f"Using direct commit checkout: {checkout_command}")
     
-    # source $HOME/.local/bin/env &&
-    # source /opt/venv/bin/activate &&
     command = f"""
     source $HOME/.local/bin/env &&
     source /opt/venv/bin/activate &&

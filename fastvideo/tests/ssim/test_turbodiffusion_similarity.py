@@ -163,7 +163,6 @@ def test_turbodiffusion_inference_similarity(prompt, model_id):
 
 
 # TurboDiffusion I2V parameters (dual-model with RCM scheduler + SLA attention)
-# Uses 4 GPUs with sp_size=4 to keep both transformers in VRAM (avoids CPU RAM bottleneck)
 TURBODIFFUSION_I2V_PARAMS = {
     "num_gpus": 4,
     "model_path": "loayrashid/TurboWan2.2-I2V-A14B-Diffusers",
@@ -173,7 +172,7 @@ TURBODIFFUSION_I2V_PARAMS = {
     "num_inference_steps": 4,  # TurboDiffusion uses 1-4 steps
     "guidance_scale": 1.0,  # No CFG for TurboDiffusion
     "seed": 42,
-    "sp_size": 4,  # Shard across all 4 GPUs to fit both transformers in VRAM
+    "sp_size": 4,
     "tp_size": 1,
     "fps": 24,
 }
@@ -191,9 +190,6 @@ TURBODIFFUSION_I2V_IMAGE_PATHS = [
 ]
 
 
-# @pytest.mark.skip(
-#     reason="Temporarily disabled due to OOM issues in CI. TODO: Investigate and re-enable.",
-# )
 @pytest.mark.parametrize("prompt", TURBODIFFUSION_I2V_TEST_PROMPTS)
 @pytest.mark.parametrize("model_id", list(TURBODIFFUSION_I2V_MODEL_TO_PARAMS.keys()))
 def test_turbodiffusion_i2v_inference_similarity(prompt, model_id):
