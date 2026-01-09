@@ -2,10 +2,10 @@
 
 GPU_NUM=1 # 2,4,8
 MODEL_PATH="Matrix-Game-2.0-Base-Diffusers"
-DATA_MERGE_PATH="footsies-dataset/merge.txt"
-OUTPUT_DIR="footsies-dataset/preprocessed/"
+DATA_MERGE_PATH="footsies-dataset-1/merge.txt"
+OUTPUT_DIR="footsies-dataset-1/preprocessed/"
 
-export CUDA_VISIBLE_DEVICES=0
+# export CUDA_VISIBLE_DEVICES=0
 export MASTER_ADDR=localhost
 export MASTER_PORT=29500
 export RANK=0
@@ -19,7 +19,7 @@ python fastvideo/pipelines/preprocess/v1_preprocess.py \
     --max_height 480 \
     --max_width 832 \
     --num_frames 81 \
-    --dataloader_num_workers 4 \
+    --dataloader_num_workers 0 \
     --output_dir=$OUTPUT_DIR \
     --samples_per_file 64 \
     --flush_frequency 64 \

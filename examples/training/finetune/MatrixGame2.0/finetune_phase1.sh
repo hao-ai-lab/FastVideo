@@ -6,11 +6,11 @@ export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-MODEL_PATH="SkyReels-V2-I2V-1.3B-540P-Diffusers"
-DATA_DIR="footsies-dataset/preprocessed/combined_parquet_dataset"
+MODEL_PATH="MatrixGame-before-finetune1"
+DATA_DIR="footsies-dataset-1/preprocessed/combined_parquet_dataset"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation_phase1.json"
-NUM_GPUS=1
-export CUDA_VISIBLE_DEVICES=0
+NUM_GPUS=8
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 # IP=[MASTER NODE IP]
 
 # Training arguments
@@ -18,14 +18,14 @@ training_args=(
   --tracker_project_name "matrixgame_finetune_phase1"
   --output_dir "checkpoints/matrixgame_phase1"
   # --max_train_steps 5000
-  --max_train_steps 2000
-  --train_batch_size 1
+  --max_train_steps 250
+  --train_batch_size 2
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
-  --num_latent_t 8
+  --gradient_accumulation_steps 2
+  --num_latent_t 20
   --num_height 480
   --num_width 832
-  --num_frames 81
+  --num_frames 77
   --enable_gradient_checkpointing_type "full"
   --disable_action_cond  # Phase 1: disable action conditioning
 )
@@ -33,10 +33,10 @@ training_args=(
 # Parallel arguments
 parallel_args=(
   --num_gpus $NUM_GPUS
-  --sp_size $NUM_GPUS
+  --sp_size 2
   --tp_size 1
-  --hsdp_replicate_dim 1
-  --hsdp_shard_dim $NUM_GPUS
+  --hsdp_replicate_dim 4
+  --hsdp_shard_dim 2
 )
 
 # Model arguments
@@ -55,7 +55,7 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 500
+  --validation_steps 10
   --validation_sampling_steps "40"
   --validation_guidance_scale "6.0"
 )
@@ -64,8 +64,8 @@ validation_args=(
 optimizer_args=(
   --learning_rate 2e-5
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 1000
-  --training_state_checkpointing_steps 1000
+  --weight_only_checkpointing_steps 10
+  --training_state_checkpointing_steps 10
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )
