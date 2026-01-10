@@ -1,4 +1,4 @@
-from fastvideo.hooks.hooks import ForwardHook
+from fastvideo.hooks.hooks import ForwardHook, ModuleHookManager
 from torch import nn
 from typing import Any
 import torch
@@ -30,15 +30,14 @@ class EventHook(ForwardHook):
 def test_hook_execution_order():
     """Test that hooks are executed in the correct order: LIFO for pre-hooks, FIFO for post-hooks."""
     # Create a simple model
-    model = nn.Linear(10, 10)
+    model = nn.Linear(10, 20)
 
     # Create event list to track hook execution order
     events = []
 
     # Create and push hooks in order: A then B
-    from fastvideo.hooks.hooks import ModuleHookManager
 
-    manager = ModuleHookManager.get_or_default(model)
+    manager = ModuleHookManager.get_from_or_default(model)
 
     hook_a = EventHook("A", events)
     hook_b = EventHook("B", events)

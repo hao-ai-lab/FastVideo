@@ -62,7 +62,13 @@ class ModuleHookManager:
         self._original_forward = module.forward
 
     @classmethod
-    def get_or_default(cls, module: nn.Module) -> "ModuleHookManager":
+    def get_from(cls, module: nn.Module) -> "ModuleHookManager | None":
+        if hasattr(module, cls.module_hook_attribute):
+            return getattr(module, cls.module_hook_attribute)
+        return None
+
+    @classmethod
+    def get_from_or_default(cls, module: nn.Module) -> "ModuleHookManager":
         if not hasattr(module, cls.module_hook_attribute):
             setattr(module, cls.module_hook_attribute, cls(module))
 
@@ -79,6 +85,14 @@ class ModuleHookManager:
             module.forward = functools.partial(forward_hook_wrapper, module)
 
         return getattr(module, cls.module_hook_attribute)
+
+    @staticmethod
+    def remove_from_manager(module: nn.Module) -> None:
+        if hasattr(module, ModuleHookManager.module_hook_attribute):
+            manager: ModuleHookManager = getattr(
+                module, ModuleHookManager.module_hook_attribute)
+            module.forward = manager._original_forward
+            delattr(module, ModuleHookManager.module_hook_attribute)
 
     def _check_manager_attached(self) -> None:
         if not hasattr(self.module, self.module_hook_attribute):
