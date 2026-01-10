@@ -172,6 +172,7 @@ class FastVideoArgs:
     ltx2_vae_spatial_tile_overlap_in_pixels: int | None = None
     ltx2_vae_temporal_tile_size_in_frames: int | None = None
     ltx2_vae_temporal_tile_overlap_in_frames: int | None = None
+    ltx2_initial_latent_path: str | None = None
 
     # model paths for correct deallocation
     model_paths: dict[str, str] = field(default_factory=dict)
@@ -398,6 +399,12 @@ class FastVideoArgs:
             type=int,
             default=FastVideoArgs.ltx2_vae_temporal_tile_overlap_in_frames,
             help="LTX-2 VAE temporal tile overlap in frames.",
+        )
+        parser.add_argument(
+            "--ltx2-initial-latent-path",
+            type=str,
+            default=FastVideoArgs.ltx2_initial_latent_path,
+            help="Path to load/save a precomputed LTX-2 initial latent.",
         )
 
         # LoRA parameters (inference-time adapter loading)

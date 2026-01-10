@@ -3,15 +3,34 @@
 Latent preparation stage for LTX-2 pipelines.
 """
 
+import os
+from pathlib import Path
+
 import torch
 from diffusers.utils.torch_utils import randn_tensor
 
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
+
+logger = init_logger(__name__)
+
+
+def _debug_log_line(message: str) -> None:
+    if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") != "1":
+        return
+    log_path = os.getenv("LTX2_PIPELINE_DEBUG_PATH", "")
+    if not log_path:
+        return
+    log_dir = os.path.dirname(log_path)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(message + "\n")
 
 
 class LTX2LatentPreparationStage(PipelineStage):
@@ -60,6 +79,7 @@ class LTX2LatentPreparationStage(PipelineStage):
         num_frames = latent_num_frames if latent_num_frames is not None else batch.num_frames
         height = batch.height
         width = batch.width
+        latent_path = fastvideo_args.ltx2_initial_latent_path
 
         if height is None or width is None:
             raise ValueError("Height and width must be provided")
@@ -82,16 +102,37 @@ class LTX2LatentPreparationStage(PipelineStage):
                 f"You have passed a list of generators of length {len(generator)}, "
                 f"but requested an effective batch size of {batch_size}.")
 
+        latents_source = "provided"
         if latents is None:
-            latents = randn_tensor(
-                shape,
-                generator=generator,
-                device=device,
-                dtype=dtype,
-            )
+            if latent_path:
+                loaded_latents = self._load_initial_latent(latent_path, device, dtype)
+                if loaded_latents is not None:
+                    latents = loaded_latents
+                    latents_source = "loaded"
+                else:
+                    latents = randn_tensor(
+                        shape,
+                        generator=generator,
+                        device=device,
+                        dtype=dtype,
+                    )
+                    self._save_initial_latent(latent_path, latents)
+                    latents_source = "generated"
+            else:
+                latents = randn_tensor(
+                    shape,
+                    generator=generator,
+                    device=device,
+                    dtype=dtype,
+                )
+                latents_source = "generated"
         else:
             latents = latents.to(device)
 
+        if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
+            _debug_log_line(
+                f"fastvideo:initial_latent:source={latents_source} sum={latents.float().sum().item():.6f}"
+            )
         batch.latents = latents
         batch.raw_latent_shape = shape
         return batch
@@ -104,6 +145,38 @@ class LTX2LatentPreparationStage(PipelineStage):
                                  arch_config.temporal_compression_ratio)
         video_length = batch.num_frames
         return int((video_length - 1) // temporal_scale_factor + 1)
+
+    def _load_initial_latent(
+        self,
+        latent_path: str,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> torch.Tensor | None:
+        path = Path(latent_path)
+        if not path.exists():
+            return None
+        payload = torch.load(path, map_location=device)
+        if isinstance(payload, dict):
+            if "video_latent" in payload:
+                latent = payload["video_latent"]
+            elif "latent" in payload:
+                latent = payload["latent"]
+            else:
+                latent = None
+        else:
+            latent = payload
+        if not torch.is_tensor(latent):
+            raise TypeError(f"Expected tensor for initial latent in {path}")
+        logger.info("[LTX2] Loaded initial latent from %s", path)
+        return latent.to(device=device, dtype=dtype)
+
+    def _save_initial_latent(self, latent_path: str, latents: torch.Tensor) -> None:
+        path = Path(latent_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            return
+        torch.save({"video_latent": latents.detach().cpu()}, path)
+        logger.info("[LTX2] Saved initial latent to %s", path)
 
     def verify_input(self, batch: ForwardBatch,
                      fastvideo_args: FastVideoArgs) -> VerificationResult:

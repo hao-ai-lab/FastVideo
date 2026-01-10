@@ -125,6 +125,18 @@ def _attach_block_detail_logging(
             if hasattr(block, name):
                 getattr(block, name).register_forward_hook(_hook_factory(idx, name))
 
+    def _output_hook(name: str):
+        def _hook(_module, _inputs, outputs):  # noqa: ANN001
+            out = outputs[0] if isinstance(outputs, tuple) else outputs
+            out_sum = _format_sum(out if torch.is_tensor(out) else None)
+            with log_path.open("a", encoding="utf-8") as f:
+                f.write(f"{label}:output:{name}:out_sum={out_sum}\n")
+        return _hook
+
+    for name in ("proj_out", "audio_proj_out"):
+        if hasattr(model, name):
+            getattr(model, name).register_forward_hook(_output_hook(name))
+
 
 def test_ltx2_transformer_parity():
     torch.manual_seed(42)
