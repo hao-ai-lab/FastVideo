@@ -86,7 +86,10 @@ class LTX2Pipeline(ComposedPipelineBase):
         required_modules = self.required_config_modules
         modules: dict[str, Any] = {}
 
-        for module_name, (transformers_or_diffusers, _) in model_index.items():
+        for module_name, module_spec in model_index.items():
+            if not isinstance(module_spec, list) or len(module_spec) < 1:
+                continue
+            transformers_or_diffusers = module_spec[0]
             if transformers_or_diffusers is None:
                 if module_name in self.required_config_modules:
                     self.required_config_modules.remove(module_name)

@@ -145,25 +145,40 @@ class DecodingStage(PipelineStage):
         """
         debug_vae = os.getenv("LTX2_DEBUG_VAE_LOG", "0") == "1"
         debug_vae_abort = os.getenv("LTX2_DEBUG_VAE_ABORT", "0") == "1"
+        debug_pipeline = os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1"
         self.vae = self.vae.to(get_local_torch_device())
         latents = latents.to(get_local_torch_device())
 
         # Setup VAE precision
         vae_dtype = PRECISION_TO_TYPE[
             fastvideo_args.pipeline_config.vae_precision]
+        disable_vae_autocast = os.getenv("LTX2_DISABLE_VAE_AUTOCAST",
+                                         "1") == "1"
         vae_autocast_enabled = (
-            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast and (
+                not disable_vae_autocast)
 
         if debug_vae:
             _log_tensor_stats("latents_in", latents)
             if _log_non_finite("latents_in", latents) and debug_vae_abort:
                 raise RuntimeError("Non-finite latents before VAE decode.")
+        if debug_pipeline:
+            _log_tensor_stats("latents_in", latents)
 
         latents = self._denormalize_latents(latents)
         if debug_vae:
             _log_tensor_stats("latents_denorm", latents)
             if _log_non_finite("latents_denorm", latents) and debug_vae_abort:
                 raise RuntimeError("Non-finite latents after denormalize.")
+        if debug_pipeline:
+            _log_tensor_stats("latents_denorm", latents)
+
+        if os.getenv("LTX2_DISABLE_VAE_NOISE", "1") == "1":
+            decoder = getattr(self.vae, "decoder", None)
+            if decoder is not None and hasattr(decoder, "decode_noise_scale"):
+                decoder.decode_noise_scale = 0.0
+            elif hasattr(self.vae, "decode_noise_scale"):
+                self.vae.decode_noise_scale = 0.0
 
         # Decode latents
         with torch.autocast(device_type="cuda",
@@ -181,6 +196,8 @@ class DecodingStage(PipelineStage):
             _log_tensor_stats("decoded_raw", image)
             if _log_non_finite("decoded_raw", image) and debug_vae_abort:
                 raise RuntimeError("Non-finite decoded output.")
+        if debug_pipeline:
+            _log_tensor_stats("decoded_raw", image)
 
         # Normalize image to [0, 1] range
         image = (image / 2 + 0.5).clamp(0, 1)
@@ -188,6 +205,8 @@ class DecodingStage(PipelineStage):
             _log_tensor_stats("decoded_norm", image)
             if _log_non_finite("decoded_norm", image) and debug_vae_abort:
                 raise RuntimeError("Non-finite decoded output after clamp.")
+        if debug_pipeline:
+            _log_tensor_stats("decoded_norm", image)
         return image
 
     @torch.no_grad()

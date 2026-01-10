@@ -244,7 +244,16 @@ class TextEncoderLoader(ComponentLoader):
         model_config.pop("model_type", None)
         model_config.pop("tokenizer_class", None)
         model_config.pop("torch_dtype", None)
-        gemma_path = model_config.get("gemma_model_path", "")
+        repo_root = os.path.dirname(model_path)
+        index_path = os.path.join(repo_root, "model_index.json")
+        gemma_path = ""
+        if os.path.isfile(index_path):
+            try:
+                with open(index_path, encoding="utf-8") as f:
+                    model_index = json.load(f)
+                gemma_path = model_index.get("gemma_model_path", "")
+            except json.JSONDecodeError:
+                gemma_path = ""
         if not gemma_path:
             candidate = os.path.normpath(os.path.join(model_path, "gemma"))
             if os.path.isdir(candidate):
@@ -253,8 +262,27 @@ class TextEncoderLoader(ComponentLoader):
         if gemma_path:
             if not os.path.isabs(gemma_path):
                 model_config["gemma_model_path"] = os.path.normpath(
-                    os.path.join(model_path, gemma_path)
+                    os.path.join(repo_root, gemma_path)
                 )
+        transformer_config_path = os.path.join(
+            repo_root, "transformer", "config.json"
+        )
+        if os.path.isfile(transformer_config_path):
+            try:
+                with open(transformer_config_path, encoding="utf-8") as f:
+                    transformer_config = json.load(f)
+                if (
+                    "connector_double_precision_rope" not in model_config
+                    or not model_config["connector_double_precision_rope"]
+                ):
+                    if transformer_config.get("double_precision_rope") is True:
+                        model_config["connector_double_precision_rope"] = True
+                if "connector_rope_type" not in model_config:
+                    rope_type = transformer_config.get("rope_type")
+                    if rope_type is not None:
+                        model_config["connector_rope_type"] = rope_type
+            except json.JSONDecodeError:
+                pass
         logger.info("HF Model config: %s", model_config)
 
         # @TODO(Wei): Better way to handle this?
@@ -468,8 +496,20 @@ class TokenizerLoader(ComponentLoader):
             # in v0, this was same string as encoder_name "ClipTextModel"
             # TODO(will): pass these tokenizer kwargs from inference args? Maybe
             # other method of config?
-            padding_size="right",
         )
+        padding_side = None
+        if hasattr(fastvideo_args.pipeline_config, "text_encoder_configs"):
+            try:
+                arch_config = fastvideo_args.pipeline_config.text_encoder_configs[
+                    0
+                ].arch_config
+                padding_side = getattr(arch_config, "padding_side", None)
+            except Exception:
+                padding_side = None
+        if padding_side:
+            tokenizer.padding_side = padding_side
+        if tokenizer.pad_token is None and tokenizer.eos_token is not None:
+            tokenizer.pad_token = tokenizer.eos_token
         logger.info("Loaded tokenizer: %s", tokenizer.__class__.__name__)
         return tokenizer
 

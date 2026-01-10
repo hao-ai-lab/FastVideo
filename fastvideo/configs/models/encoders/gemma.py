@@ -30,8 +30,8 @@ class LTX2GemmaArchConfig(TextEncoderArchConfig):
     connector_num_layers: int = 2
     connector_positional_embedding_theta: float = 10000.0
     connector_positional_embedding_max_pos: list[int] = field(
-        default_factory=lambda: [1])
-    connector_rope_type: str = "interleaved"
+        default_factory=lambda: [4096])
+    connector_rope_type: str = "split"
     connector_double_precision_rope: bool = False
     connector_num_learnable_registers: int | None = 128
 

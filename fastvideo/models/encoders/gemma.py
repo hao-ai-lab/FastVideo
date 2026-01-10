@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from typing import Iterable
 
 import torch
@@ -13,13 +14,37 @@ from fastvideo.models.encoders.base import TextEncoder
 from fastvideo.models.dits.ltx2 import (
     FeedForward,
     LTXRopeType,
-    LTXSelfAttention,
+    apply_ltx_rotary_emb,
     generate_ltx_freq_grid_np,
     generate_ltx_freq_grid_pytorch,
     precompute_ltx_freqs_cis,
 )
 from fastvideo.models.loader.weight_utils import default_weight_loader
 from fastvideo.platforms import AttentionBackendEnum
+
+
+def _debug_log_line(message: str) -> None:
+    if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") != "1":
+        return
+    log_path = os.getenv("LTX2_PIPELINE_DEBUG_PATH", "")
+    if not log_path:
+        return
+    log_dir = os.path.dirname(log_path)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(message + "\n")
+
+
+def _debug_gemma_log_line(message: str) -> None:
+    log_path = os.getenv("LTX2_FASTVIDEO_GEMMA_LOG", "")
+    if not log_path:
+        return
+    log_dir = os.path.dirname(log_path)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(message + "\n")
 
 
 @dataclass(frozen=True)
@@ -57,17 +82,13 @@ class _BasicTransformerBlock1D(nn.Module):
         norm_eps: float = 1e-6,
     ) -> None:
         super().__init__()
-        self.attn1 = LTXSelfAttention(
+        self.attn1 = _GemmaAttention(
             query_dim=dim,
             context_dim=None,
             heads=heads,
             dim_head=dim_head,
             norm_eps=norm_eps,
             rope_type=rope_type,
-            supported_attention_backends=(
-                AttentionBackendEnum.FLASH_ATTN,
-                AttentionBackendEnum.TORCH_SDPA,
-            ),
         )
         self.ff = FeedForward(dim, dim_out=dim)
         self.norm_eps = norm_eps
@@ -101,6 +122,77 @@ class _BasicTransformerBlock1D(nn.Module):
         if hidden_states.ndim == 4:
             hidden_states = hidden_states.squeeze(1)
         return hidden_states
+
+
+class _GemmaAttention(nn.Module):
+    """Attention implementation aligned with LTX-2 text encoder."""
+
+    def __init__(
+        self,
+        query_dim: int,
+        context_dim: int | None,
+        heads: int,
+        dim_head: int,
+        norm_eps: float,
+        rope_type: LTXRopeType,
+    ) -> None:
+        super().__init__()
+        inner_dim = dim_head * heads
+        context_dim = query_dim if context_dim is None else context_dim
+
+        self.heads = heads
+        self.dim_head = dim_head
+        self.rope_type = rope_type
+
+        self.q_norm = torch.nn.RMSNorm(inner_dim, eps=norm_eps)
+        self.k_norm = torch.nn.RMSNorm(inner_dim, eps=norm_eps)
+        self.to_q = nn.Linear(query_dim, inner_dim, bias=True)
+        self.to_k = nn.Linear(context_dim, inner_dim, bias=True)
+        self.to_v = nn.Linear(context_dim, inner_dim, bias=True)
+        self.to_out = nn.Sequential(nn.Linear(inner_dim, query_dim, bias=True), nn.Identity())
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        context: torch.Tensor | None = None,
+        mask: torch.Tensor | None = None,
+        pe: tuple[torch.Tensor, torch.Tensor] | None = None,
+        k_pe: tuple[torch.Tensor, torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        q = self.to_q(x)
+        context = x if context is None else context
+        k = self.to_k(context)
+        v = self.to_v(context)
+
+        q = self.q_norm(q)
+        k = self.k_norm(k)
+
+        if pe is not None:
+            q = apply_ltx_rotary_emb(q, pe, self.rope_type)
+            k = apply_ltx_rotary_emb(k, pe if k_pe is None else k_pe, self.rope_type)
+
+        b, q_len, _ = q.shape
+        k_len = k.shape[1]
+        q = q.view(b, q_len, self.heads, self.dim_head).transpose(1, 2)
+        k = k.view(b, k_len, self.heads, self.dim_head).transpose(1, 2)
+        v = v.view(b, k_len, self.heads, self.dim_head).transpose(1, 2)
+
+        if mask is not None:
+            if mask.ndim == 2:
+                mask = mask.unsqueeze(0)
+            if mask.ndim == 3:
+                mask = mask.unsqueeze(1)
+
+        out = torch.nn.functional.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            attn_mask=mask,
+            dropout_p=0.0,
+            is_causal=False,
+        )
+        out = out.transpose(1, 2).reshape(b, q_len, -1)
+        return self.to_out(out)
 
 
 class Embeddings1DConnector(nn.Module):
@@ -282,6 +374,14 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
                 local_files_only=True,
                 torch_dtype=dtype,
             )
+            if os.getenv("FASTVIDEO_ATTENTION_BACKEND") == "TORCH_SDPA":
+                torch.backends.cuda.enable_flash_sdp(False)
+                torch.backends.cuda.enable_mem_efficient_sdp(False)
+                torch.backends.cuda.enable_math_sdp(True)
+                if hasattr(self._gemma_model.config, "attn_implementation"):
+                    self._gemma_model.config.attn_implementation = "sdpa"
+                if hasattr(self._gemma_model.config, "_attn_implementation"):
+                    self._gemma_model.config._attn_implementation = "sdpa"
             device = next(self.feature_extractor_linear.parameters()).device
             self._gemma_model.to(device=device)
             self._gemma_model.eval()
@@ -294,6 +394,16 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
         padding_side: str,
     ) -> torch.Tensor:
         encoded_text_features = torch.stack(hidden_states, dim=-1)
+        if os.getenv("LTX2_FASTVIDEO_GEMMA_LOG", ""):
+            for idx, layer in enumerate(hidden_states):
+                _debug_gemma_log_line(
+                    f"fastvideo:gemma_hidden_state_{idx}"
+                    f":sum={layer.float().sum().item():.6f}"
+                )
+            _debug_gemma_log_line(
+                "fastvideo:gemma_hidden_states_stack"
+                f":sum={encoded_text_features.float().sum().item():.6f}"
+            )
         encoded_text_features_dtype = encoded_text_features.dtype
         sequence_lengths = attention_mask.sum(dim=-1)
         normed_text_features = _norm_and_concat_padded_batch(
@@ -365,9 +475,26 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
             attention_mask,
             padding_side=self.padding_side,
         )
+        if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
+            _debug_log_line(
+                "fastvideo:gemma_feature"
+                f":sum={encoded_inputs.float().sum().item():.6f} "
+                f"shape={tuple(encoded_inputs.shape)}"
+            )
         video_encoding, audio_encoding, attention_mask = self._run_connectors(
             encoded_inputs, attention_mask
         )
+        if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
+            _debug_log_line(
+                "fastvideo:gemma_video_encoding"
+                f":sum={video_encoding.float().sum().item():.6f} "
+                f"shape={tuple(video_encoding.shape)}"
+            )
+            _debug_log_line(
+                "fastvideo:gemma_audio_encoding"
+                f":sum={audio_encoding.float().sum().item():.6f} "
+                f"shape={tuple(audio_encoding.shape)}"
+            )
 
         hidden_states = (audio_encoding, ) if output_hidden_states else None
         return BaseEncoderOutput(

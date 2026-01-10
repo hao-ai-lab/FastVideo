@@ -7,6 +7,8 @@ from dataclasses import dataclass, replace
 from enum import Enum
 import functools
 import math
+import os
+from pathlib import Path
 from typing import Any, Optional, Tuple, Callable
 
 import numpy as np
@@ -211,6 +213,48 @@ class VideoLatentShape(tuple):
         return torch.Size(self)
 
 
+class AudioLatentShape(tuple):
+    """Helper for (B, C, T, F) audio latent shapes."""
+
+    @property
+    def batch(self) -> int:
+        return self[0]
+
+    @property
+    def channels(self) -> int:
+        return self[1]
+
+    @property
+    def frames(self) -> int:
+        return self[2]
+
+    @property
+    def mel_bins(self) -> int:
+        return self[3]
+
+    def to_torch_shape(self) -> torch.Size:
+        return torch.Size(self)
+
+    @staticmethod
+    def from_torch_shape(shape: torch.Size) -> "AudioLatentShape":
+        return AudioLatentShape(shape)
+
+    @staticmethod
+    def from_duration(
+        batch: int,
+        duration: float,
+        channels: int,
+        mel_bins: int,
+        sample_rate: int,
+        hop_length: int,
+        audio_latent_downsample_factor: int,
+    ) -> "AudioLatentShape":
+        latents_per_second = float(sample_rate) / float(
+            hop_length) / float(audio_latent_downsample_factor)
+        return AudioLatentShape(
+            (batch, channels, round(duration * latents_per_second), mel_bins))
+
+
 class VideoLatentPatchifier:
     """Patchify/unpatchify latent tokens for LTX-2."""
     def __init__(self, patch_size: int):
@@ -280,10 +324,180 @@ class VideoLatentPatchifier:
         return latent_coords
 
 
+class AudioLatentPatchifier:
+    """Patchify/unpatchify audio latents and compute timing bounds."""
+
+    def __init__(
+        self,
+        patch_size: int,
+        sample_rate: int,
+        hop_length: int,
+        audio_latent_downsample_factor: int,
+        is_causal: bool = True,
+        shift: int = 0,
+    ) -> None:
+        self.hop_length = hop_length
+        self.sample_rate = sample_rate
+        self.audio_latent_downsample_factor = audio_latent_downsample_factor
+        self.is_causal = is_causal
+        self.shift = shift
+        self._patch_size = (1, patch_size, patch_size)
+
+    def get_token_count(self, tgt_shape: AudioLatentShape) -> int:
+        return tgt_shape.frames
+
+    def patchify(self, latents: torch.Tensor) -> torch.Tensor:
+        return rearrange(latents, "b c t f -> b t (c f)")
+
+    def unpatchify(
+        self,
+        latents: torch.Tensor,
+        output_shape: AudioLatentShape,
+    ) -> torch.Tensor:
+        return rearrange(
+            latents,
+            "b t (c f) -> b c t f",
+            c=output_shape.channels,
+            f=output_shape.mel_bins,
+        )
+
+    def get_patch_grid_bounds(
+        self,
+        output_shape: AudioLatentShape,
+        device: Optional[torch.device] = None,
+    ) -> torch.Tensor:
+        start_timings = self._get_audio_latent_time_in_sec(
+            self.shift,
+            output_shape.frames + self.shift,
+            torch.float32,
+            device,
+        )
+        start_timings = start_timings.unsqueeze(0).expand(output_shape.batch,
+                                                          -1).unsqueeze(1)
+
+        end_timings = self._get_audio_latent_time_in_sec(
+            self.shift + 1,
+            output_shape.frames + self.shift + 1,
+            torch.float32,
+            device,
+        )
+        end_timings = end_timings.unsqueeze(0).expand(output_shape.batch,
+                                                      -1).unsqueeze(1)
+
+        return torch.stack([start_timings, end_timings], dim=-1)
+
+    def _get_audio_latent_time_in_sec(
+        self,
+        start_latent: int,
+        end_latent: int,
+        dtype: torch.dtype,
+        device: Optional[torch.device],
+    ) -> torch.Tensor:
+        resolved_device = device or torch.device("cpu")
+        audio_latent_frame = torch.arange(
+            start_latent, end_latent, dtype=dtype, device=resolved_device)
+        audio_mel_frame = audio_latent_frame * self.audio_latent_downsample_factor
+        if self.is_causal:
+            causal_offset = 1
+            audio_mel_frame = (
+                audio_mel_frame + causal_offset -
+                self.audio_latent_downsample_factor).clamp(min=0)
+        return audio_mel_frame * self.hop_length / self.sample_rate
+
+
+def _get_pixel_coords(
+    latent_coords: torch.Tensor,
+    scale_factors: tuple[int, int, int],
+    fps: float | None,
+    causal_fix: bool = True,
+) -> torch.Tensor:
+    broadcast_shape = [1] * latent_coords.ndim
+    broadcast_shape[1] = -1
+    scale_tensor = torch.tensor(
+        scale_factors,
+        device=latent_coords.device,
+        dtype=torch.float32,
+    ).view(*broadcast_shape)
+    pixel_coords = latent_coords.to(torch.float32) * scale_tensor
+    if causal_fix:
+        pixel_coords[:, 0, ...] = (
+            pixel_coords[:, 0, ...] + 1 - scale_factors[0]).clamp(min=0)
+    if fps:
+        pixel_coords[:, 0, ...] = pixel_coords[:, 0, ...] / fps
+    return pixel_coords
+
+
+def _to_denoised(
+    sample: torch.Tensor,
+    velocity: torch.Tensor,
+    sigma: torch.Tensor,
+    calc_dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    if isinstance(sigma, torch.Tensor):
+        sigma = sigma.to(calc_dtype)
+    while sigma.ndim < sample.ndim:
+        sigma = sigma.unsqueeze(-1)
+    return (sample.to(calc_dtype) - velocity.to(calc_dtype) * sigma).to(sample.dtype)
+
+
+def _debug_block_log_line(message: str) -> None:
+    if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") != "1":
+        return
+    log_path = os.getenv("LTX2_PIPELINE_DEBUG_PATH", "")
+    if not log_path:
+        return
+    log_dir = os.path.dirname(log_path)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(message + "\n")
+
+
+def _debug_transformer_args(prefix: str, args: "TransformerArgs | None") -> None:
+    if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") != "1" or args is None:
+        return
+    pe_cos, pe_sin = args.positional_embeddings
+    cross_cos = None
+    cross_sin = None
+    if args.cross_positional_embeddings is not None:
+        cross_cos, cross_sin = args.cross_positional_embeddings
+    mask = args.context_mask
+    if mask is None:
+        mask_summary = "mask=None"
+    else:
+        finite = torch.isfinite(mask)
+        finite_sum = mask[finite].sum().item() if finite.any() else 0.0
+        mask_summary = (
+            f"mask_min={mask.min().item():.6f} "
+            f"mask_max={mask.max().item():.6f} "
+            f"mask_finite_sum={finite_sum:.6f} "
+            f"mask_finite_count={finite.sum().item()}"
+        )
+    _debug_block_log_line(
+        f"{prefix}:x_sum={args.x.float().sum().item():.6f} "
+        f"context_sum={args.context.float().sum().item():.6f} "
+        f"t_sum={args.timesteps.float().sum().item():.6f} "
+        f"emb_sum={args.embedded_timestep.float().sum().item():.6f} "
+        f"pe_cos_sum={pe_cos.float().sum().item():.6f} "
+        f"pe_sin_sum={pe_sin.float().sum().item():.6f} "
+        f"cross_pe_cos_sum={(cross_cos.float().sum().item() if cross_cos is not None else 0.0):.6f} "
+        f"cross_pe_sin_sum={(cross_sin.float().sum().item() if cross_sin is not None else 0.0):.6f} "
+        f"{mask_summary}"
+    )
+
+
 class LTXRopeType(Enum):
     """LTX-2 rotary variants (interleaved vs split)."""
     INTERLEAVED = "interleaved"
     SPLIT = "split"
+
+
+DEFAULT_LTX2_SCALE_FACTORS = (8, 32, 32)
+DEFAULT_LTX2_AUDIO_CHANNELS = 8
+DEFAULT_LTX2_AUDIO_MEL_BINS = 16
+DEFAULT_LTX2_AUDIO_SAMPLE_RATE = 16000
+DEFAULT_LTX2_AUDIO_HOP_LENGTH = 160
+DEFAULT_LTX2_AUDIO_DOWNSAMPLE = 4
 
 
 def apply_ltx_rotary_emb(
@@ -535,6 +749,10 @@ class TransformerArgsPreprocessor:
         attention_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         batch_size = x.shape[0]
+        if context.device != x.device:
+            context = context.to(x.device)
+        if attention_mask is not None and attention_mask.device != x.device:
+            attention_mask = attention_mask.to(x.device)
         context = self.caption_projection(context)
         context = context.view(batch_size, -1, x.shape[-1])
         return context, attention_mask
@@ -791,7 +1009,7 @@ class LTXSelfAttention(nn.Module):
                 out = self.attn_masked(q, k, v)
         else:
             out = self.attn(q, k, v)
-        out = out.view(b, q_len, -1)
+        out = out.reshape(b, q_len, -1)
         return self.to_out(out)
 
 
@@ -1013,6 +1231,14 @@ class BasicAVTransformerBlock(torch.nn.Module):
             )
             ax_scaled = torch.nn.functional.rms_norm(ax, (ax.shape[-1],), eps=self.norm_eps) * (1 + ascale_mlp) + ashift_mlp
             ax = ax + self.audio_ff(ax_scaled) * agate_mlp
+
+        if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
+            video_sum = vx.float().sum().item() if vx is not None else 0.0
+            audio_sum = ax.float().sum().item() if ax is not None else 0.0
+            _debug_block_log_line(
+                f"fastvideo:block={self.idx}:video_sum={video_sum:.6f} "
+                f"audio_sum={audio_sum:.6f}"
+            )
 
         return (
             replace(video, x=vx) if video is not None else None,
@@ -1306,6 +1532,14 @@ class LTXModel(torch.nn.Module):
         video: Modality | None,
         audio: Modality | None,
     ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
+            _debug_block_log_line(
+                "fastvideo:patchify_proj"
+                f":video_w_sum={self.patchify_proj.weight.float().sum().item():.6f} "
+                f"video_b_sum={self.patchify_proj.bias.float().sum().item():.6f} "
+                f"audio_w_sum={self.audio_patchify_proj.weight.float().sum().item():.6f} "
+                f"audio_b_sum={self.audio_patchify_proj.bias.float().sum().item():.6f}"
+            )
         if not self.model_type.is_video_enabled() and video is not None:
             raise ValueError("Video is not enabled for this model")
         if not self.model_type.is_audio_enabled() and audio is not None:
@@ -1313,6 +1547,8 @@ class LTXModel(torch.nn.Module):
 
         video_args = self.video_args_preprocessor.prepare(video) if video is not None else None
         audio_args = self.audio_args_preprocessor.prepare(audio) if audio is not None else None
+        _debug_transformer_args("fastvideo:prep_video", video_args)
+        _debug_transformer_args("fastvideo:prep_audio", audio_args)
         video_out, audio_out = self._process_transformer_blocks(video_args, audio_args)
 
         vx = (
@@ -1377,10 +1613,75 @@ class LTX2Transformer3DModel(CachableDiT):
         )
 
         self.patchifier = VideoLatentPatchifier(patch_size=arch.patch_size[1])
+        self.audio_patchifier = AudioLatentPatchifier(
+            patch_size=DEFAULT_LTX2_AUDIO_MEL_BINS,
+            sample_rate=DEFAULT_LTX2_AUDIO_SAMPLE_RATE,
+            hop_length=DEFAULT_LTX2_AUDIO_HOP_LENGTH,
+            audio_latent_downsample_factor=DEFAULT_LTX2_AUDIO_DOWNSAMPLE,
+            is_causal=True,
+            shift=0,
+        )
 
         self.hidden_size = arch.num_attention_heads * arch.attention_head_dim
         self.num_attention_heads = arch.num_attention_heads
         self.num_channels_latents = arch.num_channels_latents
+
+        if os.getenv("LTX2_DEBUG_DETAIL", "0") == "1":
+            detail_path = os.getenv("LTX2_PIPELINE_DEBUG_DETAIL_PATH", "")
+            if detail_path:
+                self._attach_debug_detail_hooks(detail_path)
+
+    def _attach_debug_detail_hooks(self, log_path: str) -> None:
+        path = Path(log_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            path.unlink()
+
+        def _format_sum(tensor: torch.Tensor | None) -> str:
+            if tensor is None:
+                return "None"
+            return f"{tensor.float().sum().item():.6f}"
+
+        def _hook_factory(block_idx: int, name: str):
+            def _hook(_module, _inputs, outputs):  # noqa: ANN001
+                if isinstance(outputs, tuple):
+                    out = outputs[0]
+                else:
+                    out = outputs
+                out_sum = _format_sum(out if torch.is_tensor(out) else None)
+                with path.open("a", encoding="utf-8") as f:
+                    f.write(f"fastvideo:{block_idx}:{name}:out_sum={out_sum}\n")
+            return _hook
+
+        for block in self.model.transformer_blocks:
+            idx = block.idx
+            for name in (
+                "attn1",
+                "attn2",
+                "ff",
+                "audio_attn1",
+                "audio_attn2",
+                "audio_ff",
+                "audio_to_video_attn",
+                "video_to_audio_attn",
+            ):
+                if hasattr(block, name):
+                    getattr(block, name).register_forward_hook(
+                        _hook_factory(idx, name))
+
+        def _output_hook(label: str):
+            def _hook(_module, _inputs, outputs):  # noqa: ANN001
+                out = outputs[0] if isinstance(outputs, tuple) else outputs
+                out_sum = _format_sum(out if torch.is_tensor(out) else None)
+                with path.open("a", encoding="utf-8") as f:
+                    f.write(f"fastvideo:output:{label}:out_sum={out_sum}\n")
+            return _hook
+
+        if hasattr(self.model, "proj_out"):
+            self.model.proj_out.register_forward_hook(_output_hook("proj_out"))
+        if hasattr(self.model, "audio_proj_out"):
+            self.model.audio_proj_out.register_forward_hook(
+                _output_hook("audio_proj_out"))
 
     def forward(
         self,
@@ -1390,6 +1691,10 @@ class LTX2Transformer3DModel(CachableDiT):
         encoder_hidden_states_image: torch.Tensor | list[torch.Tensor] | None = None,
         encoder_attention_mask: torch.Tensor | None = None,
         guidance=None,
+        audio_hidden_states: torch.Tensor | None = None,
+        audio_encoder_hidden_states: torch.Tensor | None = None,
+        audio_timestep: torch.Tensor | None = None,
+        audio_encoder_attention_mask: torch.Tensor | None = None,
         **kwargs,
     ) -> torch.Tensor:
         if isinstance(encoder_hidden_states, list):
@@ -1399,6 +1704,23 @@ class LTX2Transformer3DModel(CachableDiT):
         positions = self.patchifier.get_patch_grid_bounds(
             video_shape, device=hidden_states.device
         )
+        fps = None
+        try:
+            forward_ctx = get_forward_context()
+        except AssertionError:
+            forward_ctx = None
+        if forward_ctx is not None and forward_ctx.forward_batch is not None:
+            fps_value = forward_ctx.forward_batch.fps
+            if isinstance(fps_value, list):
+                fps_value = fps_value[0] if fps_value else None
+            if fps_value is not None:
+                fps = float(fps_value)
+        positions = _get_pixel_coords(
+            positions,
+            DEFAULT_LTX2_SCALE_FACTORS,
+            fps=fps,
+            causal_fix=True,
+        ).to(hidden_states.dtype)
         latents = self.patchifier.patchify(hidden_states)
         video_modality = Modality(
             enabled=True,
@@ -1408,8 +1730,69 @@ class LTX2Transformer3DModel(CachableDiT):
             context=encoder_hidden_states,
             context_mask=encoder_attention_mask,
         )
-        video_out, _ = self.model(
+        if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
+            video_head = latents.flatten()[:8].float().tolist()
+            video_flat = latents.float().flatten()
+            video_checksum = (video_flat * torch.arange(video_flat.numel(), device=video_flat.device)).sum().item()
+            _debug_block_log_line(
+                "fastvideo:modality_video"
+                f":latent_sum={latents.float().sum().item():.6f} "
+                f"latent_shape={tuple(latents.shape)} "
+                f"positions_sum={positions.float().sum().item():.6f} "
+                f"positions_shape={tuple(positions.shape)} "
+                f"latent_head={video_head} "
+                f"latent_checksum={video_checksum:.6f}"
+            )
+        audio_modality = None
+        audio_shape = None
+        if audio_hidden_states is not None and audio_encoder_hidden_states is not None and audio_timestep is not None:
+            audio_shape = AudioLatentShape.from_torch_shape(
+                audio_hidden_states.shape)
+            audio_positions = self.audio_patchifier.get_patch_grid_bounds(
+                audio_shape, device=audio_hidden_states.device)
+            audio_latents = self.audio_patchifier.patchify(
+                audio_hidden_states)
+            audio_modality = Modality(
+                enabled=True,
+                latent=audio_latents,
+                timesteps=audio_timestep,
+                positions=audio_positions,
+                context=audio_encoder_hidden_states,
+                context_mask=audio_encoder_attention_mask,
+            )
+            if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
+                audio_head = audio_latents.flatten()[:8].float().tolist()
+                audio_flat = audio_latents.float().flatten()
+                audio_checksum = (audio_flat * torch.arange(audio_flat.numel(), device=audio_flat.device)).sum().item()
+                _debug_block_log_line(
+                    "fastvideo:modality_audio"
+                    f":latent_sum={audio_latents.float().sum().item():.6f} "
+                    f"latent_shape={tuple(audio_latents.shape)} "
+                    f"positions_sum={audio_positions.float().sum().item():.6f} "
+                    f"positions_shape={tuple(audio_positions.shape)} "
+                    f"latent_head={audio_head} "
+                    f"latent_checksum={audio_checksum:.6f}"
+                )
+        video_out, audio_out = self.model(
             video=video_modality,
-            audio=None,
+            audio=audio_modality,
         )
-        return self.patchifier.unpatchify(video_out, output_shape=video_shape)
+        if video_out is not None and video_modality is not None:
+            video_out = _to_denoised(
+                video_modality.latent,
+                video_out,
+                video_modality.timesteps,
+            )
+        if audio_out is not None and audio_modality is not None:
+            audio_out = _to_denoised(
+                audio_modality.latent,
+                audio_out,
+                audio_modality.timesteps,
+            )
+        video_out = self.patchifier.unpatchify(
+            video_out, output_shape=video_shape)
+        if audio_out is None or audio_shape is None:
+            return video_out
+        audio_out = self.audio_patchifier.unpatchify(
+            audio_out, output_shape=audio_shape)
+        return video_out, audio_out
