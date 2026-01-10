@@ -38,6 +38,7 @@ from fastvideo.training.training_utils import (
 )
 from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
 from fastvideo.distributed import get_local_torch_device
+from fastvideo.utils import get_compute_dtype
 from fastvideo.dataset.rl_prompt_dataset import build_rl_prompt_dataloader
 from copy import deepcopy
 from collections.abc import Iterator
@@ -580,7 +581,7 @@ class RLPipeline(TrainingPipeline):
         
         # Decode using VAE
         with torch.no_grad():
-            videos = vae.decode(final_latents)
+            videos = vae.decode(final_latents.float())
             # VAE.decode returns tensor directly (not tuple)
             # Postprocess video: convert from [-1, 1] to [0, 1]
             videos = (videos / 2 + 0.5).clamp(0, 1)
@@ -778,11 +779,13 @@ class RLPipeline(TrainingPipeline):
         scheduler = self.get_module("scheduler")
         transformer = self.get_module("transformer")
         
-        # Prepare latent input
-        # latent_model_input = latents.to(transformer.dtype)
-        # timestep = timesteps.to(transformer.dtype)
-        latent_model_input = latents
+        # Prepare latent input - cast to compute dtype for FSDP
+        compute_dtype = get_compute_dtype()
+        latent_model_input = latents.to(compute_dtype)
         timestep = timesteps.to(self.device)
+        prompt_embeds = prompt_embeds.to(compute_dtype)
+        if negative_prompt_embeds is not None:
+            negative_prompt_embeds = negative_prompt_embeds.to(compute_dtype)
         
         # Predict noise with transformer
         if guidance_scale > 1.0 and negative_prompt_embeds is not None:
@@ -797,7 +800,7 @@ class RLPipeline(TrainingPipeline):
                 attn_metadata=None,
                 forward_batch=None,
             ):
-                noise_pred = transformer.forward(
+                noise_pred = transformer(
                     hidden_states=latent_model_input_cfg,
                     timestep=timestep_cfg,
                     encoder_hidden_states=prompt_embeds_cfg,
@@ -816,7 +819,7 @@ class RLPipeline(TrainingPipeline):
                 forward_batch=None,
             ):
                 # No CFG
-                noise_pred = transformer.forward(
+                noise_pred = transformer(
                     hidden_states=latent_model_input,
                     timestep=timestep,
                     encoder_hidden_states=prompt_embeds,

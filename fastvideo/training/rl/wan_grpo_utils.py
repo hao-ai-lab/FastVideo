@@ -28,6 +28,7 @@ from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler
 )
 from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
+from fastvideo.utils import get_compute_dtype
 
 logger = init_logger(__name__)
 
@@ -206,8 +207,10 @@ def wan_pipeline_with_logprob(
     transformer = pipeline.get_module("transformer")
 
     # transformer_dtype = next(transformer.parameters()).dtype
-    transformer_dtype = torch.bfloat16
-    logger.info("Transformer dtype: %s", transformer_dtype)
+    # transformer_dtype = torch.bfloat16
+    # use get_compute_dtype() to get dtype based on mixed precision 
+    transformer_dtype = get_compute_dtype()
+    logger.info("Transformer compute dtype: %s", transformer_dtype)
     
     # Get scheduler and other modules
     scheduler = pipeline.get_module("scheduler")
@@ -368,7 +371,7 @@ def wan_pipeline_with_logprob(
             attn_metadata=None,
             forward_batch=None,
         ):
-            noise_pred = transformer.forward(
+            noise_pred = transformer(
                 hidden_states=latent_model_input,
                 timestep=timestep,
                 encoder_hidden_states=prompt_embeds,
@@ -384,7 +387,7 @@ def wan_pipeline_with_logprob(
                 attn_metadata=None,
                 forward_batch=None,
             ):
-                noise_uncond = transformer.forward(
+                noise_uncond = transformer(
                     hidden_states=latent_model_input,
                     timestep=timestep,
                     encoder_hidden_states=negative_prompt_embeds,
@@ -402,6 +405,8 @@ def wan_pipeline_with_logprob(
             determistic=determistic,
             return_pixel_log_prob=return_pixel_log_prob
         )
+        # sde_step_with_logprob returns fp32 
+        latents = latents.to(transformer_dtype)
         prev_latents = latents.clone()
 
         all_latents.append(latents)
@@ -417,7 +422,7 @@ def wan_pipeline_with_logprob(
                 forward_batch=None,
             ):
                 with transformer.disable_adapter() if hasattr(transformer, 'disable_adapter') else torch.no_grad():
-                    noise_pred_ref = transformer.forward(
+                    noise_pred_ref = transformer(
                         hidden_states=latent_model_input_ref,
                         timestep=timestep,
                         encoder_hidden_states=prompt_embeds,
@@ -483,7 +488,7 @@ def wan_pipeline_with_logprob(
         
         # Decode using VAE
         with torch.no_grad():
-            video = vae.decode(latents)
+            video = vae.decode(latents.float())
             # VAE.decode returns tensor directly (not tuple)
             
             # Postprocess video: convert from [-1, 1] to [0, 1]
