@@ -423,6 +423,7 @@ class LTX2DenoisingStage(PipelineStage):
                 _log_tensor_stats("latents", latents, step_index)
 
         batch.latents = latents
+        batch.extra["ltx2_audio_latents"] = audio_latents
         logger.info("[LTX2] Denoising done.")
         return batch
 
