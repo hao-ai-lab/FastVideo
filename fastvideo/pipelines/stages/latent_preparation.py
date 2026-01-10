@@ -530,6 +530,14 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
                 video = torch.cat([video, padding], dim=2)
 
             if self.vae is not None:
+                # Cosmos25WanVAE.encode() chunks time with `temporal_window` and
+                # can fail when the final chunk has length 1 (cache+1 => 2 < kernel 3).
+                # Pad one extra frame in that specific case to keep chunking stable.
+                tw = int(getattr(self.vae, "temporal_window", 0) or 0)
+                if tw > 0 and ((int(video.size(2)) - 1) % tw) == 1:
+                    last = video[:, :, -1:]
+                    video = torch.cat([video, last], dim=2)
+
                 self.vae = self.vae.to(device)
                 self.vae = self.vae.to(dtype=video.dtype)
 
