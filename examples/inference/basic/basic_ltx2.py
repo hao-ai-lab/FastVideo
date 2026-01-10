@@ -2,12 +2,27 @@ import os
 from fastvideo import VideoGenerator
 
 PROMPT = (
-    "A curious raccoon peers through a vibrant field of yellow sunflowers."
+    "A warm sunny backyard. The camera starts in a tight cinematic close-up "
+    "of a woman and a man in their 30s, facing each other with serious "
+    "expressions. The woman, emotional and dramatic, says softly, \"That's "
+    "it... Dad's lost it. And we've lost Dad.\" The man exhales, slightly "
+    "annoyed: \"Stop being so dramatic, Jess.\" A beat. He glances aside, "
+    "then mutters defensively, \"He's just having fun.\" The camera slowly "
+    "pans right, revealing the grandfather in the garden wearing enormous "
+    "butterfly wings, waving his arms in the air like he's trying to take "
+    "off. He shouts, \"Wheeeew!\" as he flaps his wings with full commitment. "
+    "The woman covers her face, on the verge of tears. The tone is deadpan, "
+    "absurd, and quietly tragic."
 )
 
 NEGATIVE_PROMPT = (
-    "low quality, blurry, distorted, artifacts, jpeg compression"
+    "worst quality, low quality, blurry, jittery, unstable motion, distorted, "
+    "watermark, text, logo, flickering, static"
 )
+
+# 481 frames at 24fps = ~20 seconds
+NUM_FRAMES = 481
+FPS = 24
 
 
 def main() -> None:
@@ -29,12 +44,14 @@ def main() -> None:
         ltx2_vae_temporal_tile_overlap_in_frames=24,
     )
 
-    output_path = "outputs_video/ltx2_basic"
+    output_path = "outputs_video/ltx2_basic/backyard_drama.mp4"
     generator.generate_video(
         prompt=PROMPT,
         negative_prompt=NEGATIVE_PROMPT,
         output_path=output_path,
         save_video=True,
+        num_frames=NUM_FRAMES,
+        fps=FPS,
     )
     generator.shutdown()
 

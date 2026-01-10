@@ -247,6 +247,7 @@ class TextEncoderLoader(ComponentLoader):
         repo_root = os.path.dirname(model_path)
         index_path = os.path.join(repo_root, "model_index.json")
         gemma_path = ""
+        gemma_path_from_candidate = False
         if os.path.isfile(index_path):
             try:
                 with open(index_path, encoding="utf-8") as f:
@@ -258,8 +259,9 @@ class TextEncoderLoader(ComponentLoader):
             candidate = os.path.normpath(os.path.join(model_path, "gemma"))
             if os.path.isdir(candidate):
                 gemma_path = candidate
+                gemma_path_from_candidate = True
                 model_config["gemma_model_path"] = gemma_path
-        if gemma_path:
+        if gemma_path and not gemma_path_from_candidate:
             if not os.path.isabs(gemma_path):
                 model_config["gemma_model_path"] = os.path.normpath(
                     os.path.join(repo_root, gemma_path)

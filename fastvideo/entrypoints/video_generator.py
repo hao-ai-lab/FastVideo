@@ -395,9 +395,9 @@ class VideoGenerator:
             logger.info("Saved video to %s", output_path)
             audio = output_batch.extra.get("audio")
             audio_sample_rate = output_batch.extra.get("audio_sample_rate")
-            if audio is not None and audio_sample_rate is not None:
-                if not self._mux_audio(output_path, audio, audio_sample_rate):
-                    logger.warning("Audio mux failed; saved video without audio.")
+            if (audio is not None and audio_sample_rate is not None and
+                    not self._mux_audio(output_path, audio, audio_sample_rate)):
+                logger.warning("Audio mux failed; saved video without audio.")
 
         if batch.return_frames:
             return frames
@@ -476,7 +476,7 @@ class VideoGenerator:
             except subprocess.CalledProcessError:
                 return False
 
-            os.replace(out_path, video_path)
+            shutil.move(out_path, video_path)
         return True
 
     def set_lora_adapter(self,
