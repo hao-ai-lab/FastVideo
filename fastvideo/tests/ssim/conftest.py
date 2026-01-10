@@ -36,6 +36,31 @@ def get_cpu_memory_info():
     )
 
 
+def get_disk_info():
+    """Get disk space info for HuggingFace cache and root directories."""
+    if not PSUTIL_AVAILABLE:
+        return "psutil not available"
+    
+    paths_to_check = [
+        ("HF Cache", os.path.expanduser("~/.cache/huggingface")),
+        ("Root", "/"),
+    ]
+    
+    info_lines = []
+    for name, path in paths_to_check:
+        try:
+            if os.path.exists(path):
+                disk = psutil.disk_usage(path)
+                free = disk.free / 1024**3  # GB
+                total = disk.total / 1024**3  # GB
+                used_percent = disk.percent
+                info_lines.append(f"{name}: {free:.1f}GB free / {total:.1f}GB total ({used_percent}% used)")
+        except (OSError, PermissionError):
+            info_lines.append(f"{name}: unable to read")
+    
+    return " | ".join(info_lines) if info_lines else "No disk info available"
+
+
 def get_gpu_memory_info():
     """Get memory info for all available GPUs."""
     if not torch.cuda.is_available():
@@ -64,6 +89,7 @@ def log_memory(request):
     print(f"[MEMORY] BEFORE {test_name}")
     print(f"[GPU] {get_gpu_memory_info()}")
     print(f"[CPU] {get_cpu_memory_info()}")
+    print(f"[DISK] {get_disk_info()}")
     print(f"{'='*60}")
     
     yield
@@ -73,6 +99,7 @@ def log_memory(request):
     print(f"[MEMORY] AFTER {test_name} (before cleanup)")
     print(f"[GPU] {get_gpu_memory_info()}")
     print(f"[CPU] {get_cpu_memory_info()}")
+    print(f"[DISK] {get_disk_info()}")
     
     # Force cleanup
     gc.collect()
@@ -96,6 +123,7 @@ def log_module_memory(request):
     print(f"[MODULE START] {module_name}")
     print(f"[GPU] {get_gpu_memory_info()}")
     print(f"[CPU] {get_cpu_memory_info()}")
+    print(f"[DISK] {get_disk_info()}")
     print(f"{'#'*60}\n")
     
     yield
@@ -110,4 +138,5 @@ def log_module_memory(request):
     print(f"[MODULE END] {module_name}")
     print(f"[GPU] {get_gpu_memory_info()}")
     print(f"[CPU] {get_cpu_memory_info()}")
+    print(f"[DISK] {get_disk_info()}")
     print(f"{'#'*60}\n")
