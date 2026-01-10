@@ -18,6 +18,10 @@ import numpy as np
 import torch
 import torchvision
 from einops import rearrange
+import shutil
+import subprocess
+import tempfile
+import wave
 
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -389,6 +393,11 @@ class VideoGenerator:
         if batch.save_video:
             imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
             logger.info("Saved video to %s", output_path)
+            audio = output_batch.extra.get("audio")
+            audio_sample_rate = output_batch.extra.get("audio_sample_rate")
+            if audio is not None and audio_sample_rate is not None:
+                if not self._mux_audio(output_path, audio, audio_sample_rate):
+                    logger.warning("Audio mux failed; saved video without audio.")
 
         if batch.return_frames:
             return frames
@@ -396,6 +405,7 @@ class VideoGenerator:
             return {
                 "samples": samples,
                 "frames": frames,
+                "audio": output_batch.extra.get("audio"),
                 "prompts": prompt,
                 "size": (target_height, target_width, batch.num_frames),
                 "generation_time": gen_time,
@@ -404,6 +414,70 @@ class VideoGenerator:
                 "trajectory_timesteps": output_batch.trajectory_timesteps,
                 "trajectory_decoded": output_batch.trajectory_decoded,
             }
+
+    @staticmethod
+    def _mux_audio(
+        video_path: str,
+        audio: torch.Tensor | np.ndarray,
+        sample_rate: int,
+    ) -> bool:
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            logger.warning("ffmpeg not found; cannot mux audio.")
+            return False
+
+        if torch.is_tensor(audio):
+            audio_np = audio.detach().cpu().float().numpy()
+        else:
+            audio_np = np.asarray(audio, dtype=np.float32)
+
+        if audio_np.ndim == 1:
+            audio_np = audio_np[:, None]
+        elif audio_np.ndim == 2:
+            if audio_np.shape[0] <= 8 and audio_np.shape[1] > audio_np.shape[0]:
+                audio_np = audio_np.T
+        else:
+            logger.warning("Unexpected audio shape %s; skipping mux.",
+                           audio_np.shape)
+            return False
+
+        audio_np = np.clip(audio_np, -1.0, 1.0)
+        audio_int16 = (audio_np * 32767.0).astype(np.int16)
+        num_channels = audio_int16.shape[1]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wav_path = os.path.join(tmpdir, "audio.wav")
+            out_path = os.path.join(tmpdir, "muxed.mp4")
+            with wave.open(wav_path, "wb") as wav_file:
+                wav_file.setnchannels(num_channels)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(sample_rate)
+                wav_file.writeframes(audio_int16.tobytes())
+
+            cmd = [
+                ffmpeg,
+                "-y",
+                "-i",
+                video_path,
+                "-i",
+                wav_path,
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",
+                "-shortest",
+                out_path,
+            ]
+            try:
+                subprocess.run(cmd,
+                               check=True,
+                               stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+            except subprocess.CalledProcessError:
+                return False
+
+            os.replace(out_path, video_path)
+        return True
 
     def set_lora_adapter(self,
                          lora_nickname: str,

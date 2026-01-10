@@ -13,6 +13,7 @@ from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages import (DecodingStage, InputValidationStage,
+                                        LTX2AudioDecodingStage,
                                         LTX2DenoisingStage,
                                         LTX2LatentPreparationStage,
                                         TextEncodingStage)
@@ -27,6 +28,8 @@ class LTX2Pipeline(ComposedPipelineBase):
         "tokenizer",
         "transformer",
         "vae",
+        "audio_vae",
+        "vocoder",
     ]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
@@ -53,6 +56,14 @@ class LTX2Pipeline(ComposedPipelineBase):
             stage_name="denoising_stage",
             stage=LTX2DenoisingStage(
                 transformer=self.get_module("transformer"), ),
+        )
+
+        self.add_stage(
+            stage_name="audio_decoding_stage",
+            stage=LTX2AudioDecodingStage(
+                audio_decoder=self.get_module("audio_vae"),
+                vocoder=self.get_module("vocoder"),
+            ),
         )
 
         self.add_stage(
