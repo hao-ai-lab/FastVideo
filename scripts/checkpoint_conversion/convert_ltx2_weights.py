@@ -124,9 +124,9 @@ def _build_text_embedding_projection_config(
         "connector_attention_head_dim": 128,
         "connector_num_layers": 2,
         "connector_positional_embedding_theta": 10000.0,
-        "connector_positional_embedding_max_pos": [1],
-        "connector_rope_type": "interleaved",
-        "connector_double_precision_rope": False,
+        "connector_positional_embedding_max_pos": [4096],
+        "connector_rope_type": "split",
+        "connector_double_precision_rope": True,
         "connector_num_learnable_registers": 128,
     }
 
