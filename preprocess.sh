@@ -16,9 +16,9 @@ python fastvideo/pipelines/preprocess/v1_preprocess.py \
     --data_merge_path $DATA_MERGE_PATH \
     --preprocess_video_batch_size 4 \
     --seed 42 \
-    --max_height 480 \
-    --max_width 832 \
-    --num_frames 81 \
+    --max_height 352 \
+    --max_width 640 \
+    --num_frames 77 \
     --dataloader_num_workers 0 \
     --output_dir=$OUTPUT_DIR \
     --samples_per_file 64 \

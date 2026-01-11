@@ -23,8 +23,8 @@ training_args=(
   --train_sp_batch_size 1
   --gradient_accumulation_steps 2
   --num_latent_t 20
-  --num_height 480
-  --num_width 832
+  --num_height 352
+  --num_width 640
   --num_frames 77
   --enable_gradient_checkpointing_type "full"
   --disable_action_cond  # Phase 1: disable action conditioning
