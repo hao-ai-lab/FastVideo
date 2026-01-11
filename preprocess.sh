@@ -22,5 +22,6 @@ python fastvideo/pipelines/preprocess/v1_preprocess.py \
     --dataloader_num_workers 0 \
     --output_dir=$OUTPUT_DIR \
     --samples_per_file 64 \
+    --train_fps 25 \
     --flush_frequency 64 \
     --preprocess_task matrixgame
