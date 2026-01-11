@@ -59,7 +59,7 @@ class ModuleHookManager:
     def __init__(self, module: nn.Module):
         self.module = module
         self.forward_hooks: dict[str, ForwardHook] = {}
-        self._original_forward = module.forward
+        self.original_forward = module.forward
 
     @classmethod
     def get_from(cls, module: nn.Module) -> "ModuleHookManager | None":
@@ -77,7 +77,7 @@ class ModuleHookManager:
                                                      cls.module_hook_attribute)
                 for hook in manager.forward_hooks.values():
                     args, kwargs = hook.pre_forward(mod, *args, **kwargs)
-                output = manager._original_forward(*args, **kwargs)
+                output = manager.original_forward(*args, **kwargs)
                 for hook in reversed(manager.forward_hooks.values()):
                     output = hook.post_forward(mod, output)
                 return output
@@ -91,7 +91,7 @@ class ModuleHookManager:
         if hasattr(module, ModuleHookManager.module_hook_attribute):
             manager: ModuleHookManager = getattr(
                 module, ModuleHookManager.module_hook_attribute)
-            module.forward = manager._original_forward
+            module.forward = manager.original_forward
             delattr(module, ModuleHookManager.module_hook_attribute)
 
     def _check_manager_attached(self) -> None:
