@@ -35,7 +35,8 @@ from fastvideo.models.loader.weight_utils import (
 )
 from fastvideo.models.registry import ModelRegistry
 from fastvideo.utils import PRECISION_TO_TYPE, is_pin_memory_available
-from fastvideo.models.layerwise_offload import LayerwiseOffloadManager
+from fastvideo.hooks.layerwise_offload import enable_layerwise_offload
+from fastvideo.hooks.hooks import ModuleHookManager
 
 logger = init_logger(__name__)
 
@@ -280,7 +281,7 @@ class TextEncoderLoader(ComponentLoader):
         target_device: torch.device,
         fastvideo_args: FastVideoArgs,
         dtype: str = "fp16",
-        use_text_encoder_override: bool = False, # prevent subclasses from misusing
+        use_text_encoder_override: bool = False,  # prevent subclasses from misusing
     ):
         use_cpu_offload = (
             fastvideo_args.text_encoder_cpu_offload
@@ -297,7 +298,10 @@ class TextEncoderLoader(ComponentLoader):
             )
 
         # Set quantization config if specified
-        if use_text_encoder_override and fastvideo_args.override_text_encoder_quant is not None:
+        if (
+            use_text_encoder_override
+            and fastvideo_args.override_text_encoder_quant is not None
+        ):
             if fastvideo_args.override_text_encoder_safetensors is None:
                 raise ValueError(
                     "override_text_encoder_quant is set but override_text_encoder_safetensors is None"
@@ -314,7 +318,10 @@ class TextEncoderLoader(ComponentLoader):
                 model: TextEncoder = model_cls(model_config)  # type: ignore
 
             weights_to_load = {name for name, _ in model.named_parameters()}
-            if use_text_encoder_override and fastvideo_args.override_text_encoder_safetensors is not None:
+            if (
+                use_text_encoder_override
+                and fastvideo_args.override_text_encoder_safetensors is not None
+            ):
                 loaded_weights: set[str] = model.load_weights(
                     safetensors_weights_iterator(
                         [fastvideo_args.override_text_encoder_safetensors],
@@ -342,7 +349,6 @@ class TextEncoderLoader(ComponentLoader):
 
             if use_cpu_offload:
                 pin_cpu_memory = fastvideo_args.pin_cpu_memory and is_pin_memory_available()
-                pin_cpu_memory = False
                 # Disable FSDP for MPS as it's not compatible
                 if current_platform.is_mps():
                     logger.info(
@@ -674,34 +680,8 @@ class TransformerLoader(ComponentLoader):
         model = model.eval()
 
         if fastvideo_args.dit_layerwise_offload and hasattr(model, "blocks"):
-            # Check if this is a Wan model (only Wan models support layerwise offload)
-            is_wan_model = "Wan" in cls_name
-            if not is_wan_model:
-                logger.warning(
-                    "Layerwise offload is currently only supported for Wan models. "
-                    "Model class '%s' does not support layerwise offload. "
-                    "Disabling layerwise offload for this model.",
-                    cls_name
-                )
-            else:
-                try:
-                    num_layers = len(getattr(model, "blocks"))
-                except TypeError:
-                    num_layers = None
-                if isinstance(num_layers, int) and num_layers > 0:
-                    # Ensure model is on the correct device (CUDA) before initializing manager
-                    # This ensures non-managed parameters (embeddings, final norms) are on GPU
-                    model = model.to(get_local_torch_device())
-                    mgr = LayerwiseOffloadManager(
-                        model,
-                        module_list_attr="blocks",
-                        num_layers=num_layers,
-                        enabled=True,
-                        pin_cpu_memory=fastvideo_args.pin_cpu_memory,
-                        auto_initialize=True,
-                    )
-                    setattr(model, "_layerwise_offload_manager", mgr)
-
+            if ModuleHookManager.get_from(model) is None:
+                enable_layerwise_offload(model)
         return model
 
 
