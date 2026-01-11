@@ -5,8 +5,8 @@
       "image_path": "../../../../footsies-dataset/validate/episode_020_part_000_first_frame.png",
       "video_path": null,
       "num_inference_steps": 40,
-      "height": 480,
-      "width": 832,
+      "height": 352,
+      "width": 640,
       "num_frames": 77,
       "keyboard_cond": [
         [
@@ -421,8 +421,8 @@
       "image_path": "../../../../footsies-dataset/validate/episode_020_part_000_first_frame.png",
       "video_path": null,
       "num_inference_steps": 40,
-      "height": 480,
-      "width": 832,
+      "height": 352,
+      "width": 640,
       "num_frames": 77,
       "keyboard_cond": [
         [
@@ -837,8 +837,8 @@
       "image_path": "../../../../footsies-dataset/validate/episode_020_part_000_first_frame.png",
       "video_path": null,
       "num_inference_steps": 40,
-      "height": 480,
-      "width": 832,
+      "height": 352,
+      "width": 640,
       "num_frames": 77,
       "keyboard_cond": [
         [
@@ -1253,8 +1253,8 @@
       "image_path": "../../../../footsies-dataset/validate/episode_020_part_000_first_frame.png",
       "video_path": null,
       "num_inference_steps": 40,
-      "height": 480,
-      "width": 832,
+      "height": 352,
+      "width": 640,
       "num_frames": 77,
       "keyboard_cond": [
         [
