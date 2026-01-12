@@ -137,3 +137,18 @@ class Hunyuan15T2V720PConfig(Hunyuan15T2V480PConfig):
 
     # HunyuanConfig-specific parameters with defaults
     flow_shift: int = 9
+
+
+class Hunyuan15I2V480PConfig(PipelineConfig):
+    """Base configuration for HunYuan pipeline architecture."""
+
+    # HunyuanConfig-specific parameters with defaults
+    dit_config: DiTConfig = field(default_factory=HunyuanVideo15Config)
+    # VAE
+    vae_config: VAEConfig = field(default_factory=Hunyuan15VAEConfig)
+    # Denoising stage
+    flow_shift: int = 5
+
+    # Text encoding stage
+    text_encoder_configs: tuple[EncoderConfig, ...] = field(
+        default_factory=lambda: (Qwen2_5_VLConfig(), T5Config()))
