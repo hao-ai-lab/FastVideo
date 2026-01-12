@@ -14,8 +14,7 @@ class LTX2GemmaArchConfig(TextEncoderArchConfig):
     hidden_size: int = 3840
     num_hidden_layers: int = 48
     num_attention_heads: int = 30
-    # Match official LTXVGemmaTokenizer max_length=256
-    text_len: int = 256
+    text_len: int = 1024
     pad_token_id: int = 0
     eos_token_id: int = 2
 
