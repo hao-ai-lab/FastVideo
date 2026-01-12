@@ -52,6 +52,7 @@ class LayerwiseOffloadState:
 
     @torch.compiler.disable
     def prefetch_params(self):
+        compute_stream = torch.cuda.current_stream()
         with torch.cuda.stream(self.async_copy_stream):
             for name, param in self.module_ref.named_parameters():
                 if not self._will_offload(name):
@@ -59,6 +60,9 @@ class LayerwiseOffloadState:
                 assert name not in self.gpu_named_parameters
                 gpu_param = self.cpu_named_parameters[name].to(
                     self.device, non_blocking=True)
+                gpu_param.record_stream(
+                    compute_stream
+                )  # ensure tensor will not be freed until forward is completed
                 self.gpu_named_parameters[name] = gpu_param
 
     @torch.compiler.disable
