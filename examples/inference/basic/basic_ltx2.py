@@ -31,12 +31,12 @@ NEGATIVE_PROMPT = (
     "flat lighting, inconsistent tone, cinematic oversaturation, stylized filters, or AI artifacts."
 )
 
-# Official LTX-2 distilled defaults: num_frames = (8 x K) + 1, e.g. 121 frames at 24fps = ~5 seconds
+
 NUM_FRAMES = 121
 FPS = 24
-HEIGHT = 512   # DEFAULT_1_STAGE_HEIGHT
-WIDTH = 768    # DEFAULT_1_STAGE_WIDTH
-SEED = 10      # DEFAULT_SEED
+HEIGHT = 512 
+WIDTH = 768
+SEED = 10
 
 
 def main() -> None:
