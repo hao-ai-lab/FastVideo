@@ -84,10 +84,6 @@ class RLPipeline(TrainingPipeline):
         self.value_optimizer: torch.optim.Optimizer | None = None
         self.value_scheduler: Any | None = None
         
-        # Sampling pipeline for generating videos with log probabilities
-        # Will be initialized in initialize_training_pipeline
-        self.sampling_pipeline: WanPipeline | None = None
-
         # Set CFG guidace scale
         self.guidance_scale = fastvideo_args.rl_args.guidance_scale
         
@@ -161,9 +157,6 @@ class RLPipeline(TrainingPipeline):
         )
         logger.info("Loaded reward models: %s", self.reward_models)
 
-        # Initialize sampling pipeline for trajectory collection
-        self._initialize_sampling_pipeline(training_args)
-
         # define self.transformer_dtype
         transformer = self.get_module("transformer")
         if hasattr(transformer, 'module'):
@@ -223,39 +216,6 @@ class RLPipeline(TrainingPipeline):
             logger.info("Created separate optimizer and scheduler for value model")
             logger.info("Value model trainable parameters: %s B",
                        round(count_trainable(self.value_model) / 1e9, 3))
-
-    def _initialize_sampling_pipeline(self, training_args: TrainingArgs) -> None:
-        """
-        Initialize a WanPipeline for sampling videos with log probabilities.
-        
-        This pipeline is used for on-policy trajectory collection during RL training.
-        It shares the transformer with the training pipeline but runs in eval mode.
-        """
-        logger.info("Initializing sampling pipeline for trajectory collection...")
-        
-        # Create a copy of training args for inference mode
-        args_copy = deepcopy(training_args)
-        args_copy.inference_mode = True
-        
-        # Create WanPipeline for sampling, sharing the transformer
-        self.sampling_pipeline = WanPipeline.from_pretrained(
-            training_args.model_path,
-            args=args_copy,  # type: ignore
-            inference_mode=True,
-            loaded_modules={
-                "transformer": self.get_module("transformer"),
-            },
-            tp_size=training_args.tp_size,
-            sp_size=training_args.sp_size,
-            num_gpus=training_args.num_gpus,
-            pin_cpu_memory=training_args.pin_cpu_memory,
-            dit_cpu_offload=True
-        )
-        
-        # Ensure transformer is in eval mode for sampling
-        self.sampling_pipeline.get_module("transformer").eval()
-        
-        logger.info("Sampling pipeline initialized")
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         """
@@ -336,8 +296,6 @@ class RLPipeline(TrainingPipeline):
             - prompt_embeds: [B, seq_len, hidden_dim] - prompt embeddings used
             - negative_prompt_embeds: [B, seq_len, hidden_dim] - negative embeddings for CFG
         """
-        if self.sampling_pipeline is None:
-            raise RuntimeError("Sampling pipeline not initialized. Call initialize_training_pipeline first.")
         
         logger.info("Collecting trajectories with GRPO sampling")
         
@@ -366,13 +324,13 @@ class RLPipeline(TrainingPipeline):
         # Get sampling configuration (hardcoded for now, as per plan)
         # These should come from config later
         num_inference_steps = self.training_args.num_latent_t  # config.sample.num_steps - hardcoded
-        guidance_scale = 4.5  # config.sample.guidance_scale - hardcoded
-        num_frames = self.training_args.num_frames if self.training_args.num_frames > 0 else 33
-        height = self.training_args.num_height if self.training_args.num_height > 0 else 240
-        width = self.training_args.num_width if self.training_args.num_width > 0 else 416
+        guidance_scale = 1.0  # no cfg for now
+        num_frames = self.training_args.num_frames
+        height = self.training_args.num_height
+        width = self.training_args.num_width
         num_videos_per_prompt = 1  # Each prompt in batch generates one video (batch already has repeated prompts if needed)
         sample_time_per_prompt = 1  # config.sample.sample_time_per_prompt - hardcoded
-        kl_reward = getattr(self.training_args.rl_args, 'rl_kl_reward', 0.0)
+        kl_reward = getattr(self.training_args.rl_args, 'kl_reward', 0.0)
         
         
         # Prepare negative prompt embeddings for CFG
@@ -387,10 +345,14 @@ class RLPipeline(TrainingPipeline):
         all_prompt_embeds_list = []
         all_negative_prompt_embeds_list = []
         all_prompt_ids_list = []
+
+        # debugging: vram usage
+        mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
+        logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
         
         # Set transformer to eval mode for sampling
         self.transformer.eval()
-        
+
         with torch.no_grad():
             # Sample multiple times per prompt if needed
             for sample_idx in range(sample_time_per_prompt):
@@ -401,8 +363,12 @@ class RLPipeline(TrainingPipeline):
                 # - all_log_probs: List of log probs at each step [num_steps] of [B]
                 # - all_kl: List of KL divergences [num_steps] of [B]
                 # - prompt_ids: Tokenized prompt IDs [B, seq_len]
+
+                # debugging: vram usage
+                mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
+                logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+
                 videos, latents_list, log_probs_list, kl_list, prompt_ids = wan_pipeline_with_logprob(
-                    # self.sampling_pipeline,
                     self,
                     prompt=prompts,
                     negative_prompt=negative_prompt if guidance_scale > 1.0 else None,
@@ -417,6 +383,10 @@ class RLPipeline(TrainingPipeline):
                     determistic=False,  # Use stochastic sampling
                     kl_reward=kl_reward,
                 )
+
+                # debugging: vram usage
+                mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
+                logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
                 
                 # Stack latents: latents_list is [num_steps+1] where each element is [B, C, T, H, W]
                 # Stack along a new dimension: [B, num_steps+1, C, T, H, W]
@@ -430,6 +400,11 @@ class RLPipeline(TrainingPipeline):
                 # Stack along a new dimension: [B, num_steps]
                 # Note: kl_list is always returned (zeros if kl_reward == 0)
                 kl = torch.stack(kl_list, dim=1) if len(kl_list) > 0 else None
+
+                # debugging: shape of pipeline outputs
+                logger.info(f"latents.shape: {latents.shape}")
+                logger.info(f"log_probs.shape: {log_probs.shape}")
+                logger.info(f"kl.shape: {kl.shape}")
                 
                 # Get timesteps from scheduler
                 scheduler = self.get_module("scheduler")

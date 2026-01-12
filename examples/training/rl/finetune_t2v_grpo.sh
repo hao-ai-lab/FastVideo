@@ -30,10 +30,10 @@ training_args=(
   # --train_sp_batch_size 4
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 2
-  --num_height 480
-  --num_width 832
-  --num_frames 77
+  --num_latent_t 5
+  --num_height 240
+  --num_width 416
+  --num_frames 33
   --lora_rank 32
   --lora_training True
 )

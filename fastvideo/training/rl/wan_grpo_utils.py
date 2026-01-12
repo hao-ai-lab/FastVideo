@@ -16,9 +16,11 @@ Key adaptations:
 """
 
 import math
+import time
 from typing import Any, Callable, Dict, List, Optional, Union, Tuple
 
 import torch
+from tqdm import tqdm
 from diffusers.utils.torch_utils import randn_tensor
 from torch.distributed.tensor import DTensor
 
@@ -354,16 +356,20 @@ def wan_pipeline_with_logprob(
     logger.info(f"latents: {type(latents)}")
     logger.info(f"prompt_embeds: {type(prompt_embeds)}")
 
-    for i, t in enumerate(timesteps):
+    # Progress bar for denoising loop
+    progress_bar = tqdm(
+        enumerate(timesteps),
+        total=len(timesteps),
+        desc="Denoising steps",
+        unit="step"
+    )
+    
+    for i, t in progress_bar:
+        step_start_time = time.time()
         latents_ori = latents.clone()
         # latent_model_input = latents.to(transformer_dtype)
         latent_model_input = latents
         timestep = t.expand(latents.shape[0]) if isinstance(t, torch.Tensor) else torch.tensor([t] * latents.shape[0], device=pipeline.device)
-
-        # Print all arguments of fastvideo_args that contain 'fsdp' in their name and their values
-        fsdp_args = {k: v for k, v in vars(pipeline.fastvideo_args).items() if 'fsdp' in k.lower()}
-        for k, v in fsdp_args.items():
-            logger.info(f"FSDP param: {k} = {v}")
 
         # Predict noise with transformer
         with set_forward_context(
@@ -454,6 +460,10 @@ def wan_pipeline_with_logprob(
         else:
             # No KL reward, set to zero
             all_kl.append(torch.zeros(len(latents), device=latents.device))
+        
+        # Update progress bar with timing information
+        step_time = time.time() - step_start_time
+        progress_bar.set_postfix({"step_time": f"{step_time:.2f}s", "timestep": f"{t.item() if isinstance(t, torch.Tensor) else t:.1f}"})
 
     # Decode latents to video if needed
     if output_type != "latent":
