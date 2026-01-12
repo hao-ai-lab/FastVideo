@@ -110,6 +110,7 @@ miscellaneous_args=(
   --num_euler_timesteps 50
   --ema_start_step 0
   # --resume_from_checkpoint "checkpoints/wan_t2v_grpo/checkpoint-XXX"
+  --enable-gradient-checkpointing-type "full"
 )
 
 torchrun \

@@ -17,18 +17,17 @@ Key adaptations:
 
 import math
 import time
-from typing import Any, Callable, Dict, List, Optional, Union, Tuple
+import os
+from typing import Any
 
 import torch
 from tqdm import tqdm
 from diffusers.utils.torch_utils import randn_tensor
-from torch.distributed.tensor import DTensor
 
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
-    FlowUniPCMultistepScheduler
-)
+    FlowUniPCMultistepScheduler)
 from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
 from fastvideo.utils import get_compute_dtype
 
@@ -38,14 +37,14 @@ logger = init_logger(__name__)
 def sde_step_with_logprob(
     scheduler: FlowUniPCMultistepScheduler,
     model_output: torch.FloatTensor,
-    timestep: Union[float, torch.FloatTensor],
+    timestep: float | torch.FloatTensor,
     sample: torch.FloatTensor,
-    prev_sample: Optional[torch.FloatTensor] = None,
-    generator: Optional[torch.Generator] = None,
+    prev_sample: torch.FloatTensor | None = None,
+    generator: torch.Generator | None = None,
     determistic: bool = False,
     return_pixel_log_prob: bool = False,
     return_dt_and_std_dev_t: bool = False
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, ...]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, ...]:
     """
     Predict the sample from the previous timestep by reversing the SDE. 
     This function propagates the flow process from the learned model outputs 
@@ -71,6 +70,12 @@ def sde_step_with_logprob(
         Otherwise:
             (prev_sample, log_prob, prev_sample_mean, std_dev_t * sqrt_dt)
     """
+    mem_used, power_draw = os.popen(
+        "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+    ).read().strip().split(", ")
+    logger.info(
+        f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+
     # Convert all variables to fp32 for numerical stability
     model_output = model_output.float()
     sample = sample.float()
@@ -82,35 +87,47 @@ def sde_step_with_logprob(
     if isinstance(timestep, torch.Tensor):
         if timestep.ndim == 0:
             timestep = timestep.unsqueeze(0)
-        step_indices = [scheduler.index_for_timestep(t.item()) for t in timestep]
+        step_indices = [
+            scheduler.index_for_timestep(t.item()) for t in timestep
+        ]
     else:
         step_indices = [scheduler.index_for_timestep(timestep)]
 
     prev_step_indices = [step + 1 for step in step_indices]
 
+    mem_used, power_draw = os.popen(
+        "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+    ).read().strip().split(", ")
+    logger.info(
+        f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+
     # Move sigmas to sample device
     sigmas = scheduler.sigmas.to(sample.device)
-    
+
     # Get sigma values for current and previous steps
     sigma = sigmas[step_indices].view(-1, 1, 1, 1, 1)
     sigma_prev = sigmas[prev_step_indices].view(-1, 1, 1, 1, 1)
     sigma_max = sigmas[0].item()  # First sigma (highest)
     sigma_min = sigmas[-1].item()  # Last sigma (lowest)
-    
+
     dt = sigma_prev - sigma
+
+    mem_used, power_draw = os.popen(
+        "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+    ).read().strip().split(", ")
+    logger.info(
+        f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
 
     # Compute std_dev_t and prev_sample_mean using SDE formulation
     std_dev_t = sigma_min + (sigma_max - sigma_min) * sigma
-    prev_sample_mean = (
-        sample * (1 + std_dev_t**2 / (2 * sigma) * dt) +
-        model_output * (1 + std_dev_t**2 * (1 - sigma) / (2 * sigma)) * dt
-    )
+    prev_sample_mean = (sample * (1 + std_dev_t**2 / (2 * sigma) * dt) +
+                        model_output * (1 + std_dev_t**2 * (1 - sigma) /
+                                        (2 * sigma)) * dt)
 
     if prev_sample is not None and generator is not None:
         raise ValueError(
             "Cannot pass both generator and prev_sample. Please make sure that either `generator` or"
-            " `prev_sample` stays `None`."
-        )
+            " `prev_sample` stays `None`.")
 
     # Sample prev_sample if not provided
     if prev_sample is None:
@@ -134,10 +151,17 @@ def sde_step_with_logprob(
     # Assuming Gaussian distribution: N(prev_sample_mean, (std_dev_t * sqrt_dt)^2)
     std_dev_sqrt_dt = std_dev_t * sqrt_dt
     log_prob = (
-        -((prev_sample.detach() - prev_sample_mean) ** 2) / (2 * (std_dev_sqrt_dt**2))
-        - torch.log(std_dev_sqrt_dt + 1e-8)  # Add small epsilon for numerical stability
-        - torch.log(torch.sqrt(2 * torch.as_tensor(math.pi, device=sample.device)))
-    )
+        -((prev_sample.detach() - prev_sample_mean)**2) /
+        (2 * (std_dev_sqrt_dt**2)) - torch.log(
+            std_dev_sqrt_dt + 1e-8)  # Add small epsilon for numerical stability
+        - torch.log(
+            torch.sqrt(2 * torch.as_tensor(math.pi, device=sample.device))))
+
+    mem_used, power_draw = os.popen(
+        "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+    ).read().strip().split(", ")
+    logger.info(
+        f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
 
     # Mean along all but batch dimension
     log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
@@ -149,26 +173,27 @@ def sde_step_with_logprob(
 
 def wan_pipeline_with_logprob(
     pipeline: WanPipeline,
-    prompt: Union[str, List[str]] = None,
-    negative_prompt: Union[str, List[str]] = None,
+    prompt: str | list[str] = None,
+    negative_prompt: str | list[str] = None,
     height: int = 480,
     width: int = 832,
     num_frames: int = 81,
     num_inference_steps: int = 50,
     guidance_scale: float = 5.0,
-    num_videos_per_prompt: Optional[int] = 1,
-    generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
-    latents: Optional[torch.Tensor] = None,
-    prompt_embeds: Optional[torch.Tensor] = None,
-    negative_prompt_embeds: Optional[torch.Tensor] = None,
-    output_type: Optional[str] = "pt",
+    num_videos_per_prompt: int | None = 1,
+    generator: torch.Generator | list[torch.Generator] | None = None,
+    latents: torch.Tensor | None = None,
+    prompt_embeds: torch.Tensor | None = None,
+    negative_prompt_embeds: torch.Tensor | None = None,
+    output_type: str | None = "pt",
     return_dict: bool = False,
-    attention_kwargs: Optional[Dict[str, Any]] = None,
+    attention_kwargs: dict[str, Any] | None = None,
     max_sequence_length: int = 512,
     determistic: bool = False,
     kl_reward: float = 0.0,
     return_pixel_log_prob: bool = False,
-    ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor], List[torch.Tensor], Optional[torch.Tensor]]:
+) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor],
+           list[torch.Tensor], torch.Tensor | None]:
     """
     Wan pipeline with log probability computation for GRPO training.
 
@@ -210,10 +235,10 @@ def wan_pipeline_with_logprob(
 
     # transformer_dtype = next(transformer.parameters()).dtype
     # transformer_dtype = torch.bfloat16
-    # use get_compute_dtype() to get dtype based on mixed precision 
+    # use get_compute_dtype() to get dtype based on mixed precision
     transformer_dtype = get_compute_dtype()
     logger.info("Transformer compute dtype: %s", transformer_dtype)
-    
+
     # Get scheduler and other modules
     scheduler = pipeline.get_module("scheduler")
     vae = pipeline.get_module("vae")
@@ -235,25 +260,23 @@ def wan_pipeline_with_logprob(
         # This is a simplified encoding - for full pipeline encoding, use TextEncodingStage
         text_encoder = pipeline.get_module("text_encoder")
         tokenizer = pipeline.get_module("tokenizer")
-        
+
         # Normalize to list
         if isinstance(prompt, str):
             prompts_list = [prompt]
         else:
             prompts_list = prompt
-        
+
         # Tokenize prompts
-        text_inputs = tokenizer(
-            prompts_list,
-            padding="max_length",
-            max_length=max_sequence_length,
-            truncation=True,
-            return_tensors="pt"
-        ).to(pipeline.device)
-        
+        text_inputs = tokenizer(prompts_list,
+                                padding="max_length",
+                                max_length=max_sequence_length,
+                                truncation=True,
+                                return_tensors="pt").to(pipeline.device)
+
         # Store prompt_ids for return
         prompt_ids = text_inputs["input_ids"]
-        
+
         # Encode with text encoder
         with torch.no_grad():
             outputs = text_encoder(
@@ -263,22 +286,20 @@ def wan_pipeline_with_logprob(
             )
             # Get last hidden state (Wan typically uses last hidden state)
             prompt_embeds = outputs.last_hidden_state
-        
+
         # Encode negative prompts if CFG is enabled
         if guidance_scale > 1.0:
             if negative_prompt is None:
                 negative_prompt = [""] * len(prompts_list)
             elif isinstance(negative_prompt, str):
                 negative_prompt = [negative_prompt]
-            
-            neg_text_inputs = tokenizer(
-                negative_prompt,
-                padding="max_length",
-                max_length=max_sequence_length,
-                truncation=True,
-                return_tensors="pt"
-            ).to(pipeline.device)
-            
+
+            neg_text_inputs = tokenizer(negative_prompt,
+                                        padding="max_length",
+                                        max_length=max_sequence_length,
+                                        truncation=True,
+                                        return_tensors="pt").to(pipeline.device)
+
             with torch.no_grad():
                 neg_outputs = text_encoder(
                     neg_text_inputs["input_ids"],
@@ -305,7 +326,7 @@ def wan_pipeline_with_logprob(
     # Get VAE scale factors
     vae_scale_factor_spatial = vae.spatial_compression_ratio
     vae_scale_factor_temporal = vae.temporal_compression_ratio
-    
+
     if latents is None:
         # Generate random latents
         # Note: num_frames in latents accounts for temporal compression
@@ -325,8 +346,7 @@ def wan_pipeline_with_logprob(
                         generator=gen,
                         device=pipeline.device,
                         dtype=transformer_dtype,
-                    )
-                    for gen in generator
+                    ) for gen in generator
                 ]
                 latents = torch.stack(latents, dim=0)
             else:
@@ -337,7 +357,9 @@ def wan_pipeline_with_logprob(
                     dtype=transformer_dtype,
                 )
         else:
-            latents = torch.randn(latents_shape, device=pipeline.device, dtype=transformer_dtype)
+            latents = torch.randn(latents_shape,
+                                  device=pipeline.device,
+                                  dtype=transformer_dtype)
     else:
         latents = latents.to(device=pipeline.device, dtype=transformer_dtype)
 
@@ -352,30 +374,30 @@ def wan_pipeline_with_logprob(
     do_classifier_free_guidance = guidance_scale > 1.0
 
     # Debug
-    logger.info(f"Tensor type issue debugging:")
+    logger.info("Tensor type issue debugging:")
     logger.info(f"latents: {type(latents)}")
     logger.info(f"prompt_embeds: {type(prompt_embeds)}")
 
     # Progress bar for denoising loop
-    progress_bar = tqdm(
-        enumerate(timesteps),
-        total=len(timesteps),
-        desc="Denoising steps",
-        unit="step"
-    )
-    
+    progress_bar = tqdm(enumerate(timesteps),
+                        total=len(timesteps),
+                        desc="Denoising steps",
+                        unit="step")
+
     for i, t in progress_bar:
         step_start_time = time.time()
         latents_ori = latents.clone()
         # latent_model_input = latents.to(transformer_dtype)
         latent_model_input = latents
-        timestep = t.expand(latents.shape[0]) if isinstance(t, torch.Tensor) else torch.tensor([t] * latents.shape[0], device=pipeline.device)
+        timestep = t.expand(latents.shape[0]) if isinstance(
+            t, torch.Tensor) else torch.tensor([t] * latents.shape[0],
+                                               device=pipeline.device)
 
         # Predict noise with transformer
         with set_forward_context(
-            current_timestep=i,
-            attn_metadata=None,
-            forward_batch=None,
+                current_timestep=i,
+                attn_metadata=None,
+                forward_batch=None,
         ):
             noise_pred = transformer(
                 hidden_states=latent_model_input,
@@ -389,9 +411,9 @@ def wan_pipeline_with_logprob(
         # Classifier-free guidance
         if do_classifier_free_guidance:
             with set_forward_context(
-                current_timestep=i,
-                attn_metadata=None,
-                forward_batch=None,
+                    current_timestep=i,
+                    attn_metadata=None,
+                    forward_batch=None,
             ):
                 noise_uncond = transformer(
                     hidden_states=latent_model_input,
@@ -400,7 +422,8 @@ def wan_pipeline_with_logprob(
                     attention_kwargs=attention_kwargs,
                     return_dict=False,
                 )[0]
-            noise_pred = noise_uncond + guidance_scale * (noise_pred - noise_uncond)
+            noise_pred = noise_uncond + guidance_scale * (noise_pred -
+                                                          noise_uncond)
 
         # SDE step with log probability
         latents, log_prob, prev_latents_mean, std_dev_t = sde_step_with_logprob(
@@ -409,9 +432,8 @@ def wan_pipeline_with_logprob(
             t.unsqueeze(0) if isinstance(t, torch.Tensor) else t,
             latents.float(),
             determistic=determistic,
-            return_pixel_log_prob=return_pixel_log_prob
-        )
-        # sde_step_with_logprob returns fp32 
+            return_pixel_log_prob=return_pixel_log_prob)
+        # sde_step_with_logprob returns fp32
         latents = latents.to(transformer_dtype)
         prev_latents = latents.clone()
 
@@ -421,13 +443,16 @@ def wan_pipeline_with_logprob(
         # Compute KL divergence if kl_reward > 0 (for KL reward in sampling)
         if kl_reward > 0 and not determistic:
             # Use reference model (disable adapter if using LoRA)
-            latent_model_input_ref = torch.cat([latents_ori] * 2) if do_classifier_free_guidance else latents_ori
+            latent_model_input_ref = torch.cat(
+                [latents_ori] *
+                2) if do_classifier_free_guidance else latents_ori
             with set_forward_context(
-                current_timestep=i,
-                attn_metadata=None,
-                forward_batch=None,
+                    current_timestep=i,
+                    attn_metadata=None,
+                    forward_batch=None,
             ):
-                with transformer.disable_adapter() if hasattr(transformer, 'disable_adapter') else torch.no_grad():
+                with transformer.disable_adapter() if hasattr(
+                        transformer, 'disable_adapter') else torch.no_grad():
                     noise_pred_ref = transformer(
                         hidden_states=latent_model_input_ref,
                         timestep=timestep,
@@ -436,11 +461,13 @@ def wan_pipeline_with_logprob(
                         return_dict=False,
                     )[0]
             noise_pred_ref = noise_pred_ref.to(prompt_embeds.dtype)
-            
+
             # Perform guidance for reference model
             if do_classifier_free_guidance:
-                noise_pred_uncond_ref, noise_pred_text_ref = noise_pred_ref.chunk(2)
-                noise_pred_ref = noise_pred_uncond_ref + guidance_scale * (noise_pred_text_ref - noise_pred_uncond_ref)
+                noise_pred_uncond_ref, noise_pred_text_ref = noise_pred_ref.chunk(
+                    2)
+                noise_pred_ref = noise_pred_uncond_ref + guidance_scale * (
+                    noise_pred_text_ref - noise_pred_uncond_ref)
 
             # Compute reference log prob
             _, ref_log_prob, ref_prev_latents_mean, ref_std_dev_t = sde_step_with_logprob(
@@ -451,56 +478,65 @@ def wan_pipeline_with_logprob(
                 prev_sample=prev_latents.float(),
                 determistic=determistic,
             )
-            
+
             # Compute KL divergence: KL = (mean_diff)^2 / (2 * std^2)
-            assert torch.allclose(std_dev_t, ref_std_dev_t), "std_dev_t should match between current and reference"
-            kl = (prev_latents_mean - ref_prev_latents_mean) ** 2 / (2 * std_dev_t ** 2)
+            assert torch.allclose(
+                std_dev_t, ref_std_dev_t
+            ), "std_dev_t should match between current and reference"
+            kl = (prev_latents_mean - ref_prev_latents_mean)**2 / (2 *
+                                                                   std_dev_t**2)
             kl = kl.mean(dim=tuple(range(1, kl.ndim)))
             all_kl.append(kl)
         else:
             # No KL reward, set to zero
             all_kl.append(torch.zeros(len(latents), device=latents.device))
-        
+
         # Update progress bar with timing information
         step_time = time.time() - step_start_time
-        progress_bar.set_postfix({"step_time": f"{step_time:.2f}s", "timestep": f"{t.item() if isinstance(t, torch.Tensor) else t:.1f}"})
+        progress_bar.set_postfix({
+            "step_time":
+            f"{step_time:.2f}s",
+            "timestep":
+            f"{t.item() if isinstance(t, torch.Tensor) else t:.1f}"
+        })
 
     # Decode latents to video if needed
     if output_type != "latent":
         latents = latents.to(vae.dtype)
-        
+
         # Apply VAE normalization (Wan VAE specific)
         # Wan VAE requires denormalization before decoding
-        if hasattr(vae, 'config') and hasattr(vae.config, 'latents_mean') and hasattr(vae.config, 'latents_std'):
+        if hasattr(vae, 'config') and hasattr(vae.config,
+                                              'latents_mean') and hasattr(
+                                                  vae.config, 'latents_std'):
             # Get z_dim from config or VAE
             z_dim = getattr(vae.config, 'z_dim', latents.shape[1])
-            latents_mean = (
-                torch.tensor(vae.config.latents_mean, device=latents.device, dtype=latents.dtype)
-                .view(1, z_dim, 1, 1, 1)
-            )
+            latents_mean = (torch.tensor(vae.config.latents_mean,
+                                         device=latents.device,
+                                         dtype=latents.dtype).view(
+                                             1, z_dim, 1, 1, 1))
             latents_std = (
-                1.0 / torch.tensor(vae.config.latents_std, device=latents.device, dtype=latents.dtype)
-                .view(1, z_dim, 1, 1, 1)
-            )
+                1.0 / torch.tensor(vae.config.latents_std,
+                                   device=latents.device,
+                                   dtype=latents.dtype).view(1, z_dim, 1, 1, 1))
             latents = latents / latents_std + latents_mean
         elif hasattr(vae, 'latents_mean') and hasattr(vae, 'latents_std'):
             # Alternative: check if latents_mean/std are direct attributes
             z_dim = latents.shape[1]
-            latents_mean = (
-                torch.tensor(vae.latents_mean, device=latents.device, dtype=latents.dtype)
-                .view(1, z_dim, 1, 1, 1)
-            )
-            latents_std = (
-                1.0 / torch.tensor(vae.latents_std, device=latents.device, dtype=latents.dtype)
-                .view(1, z_dim, 1, 1, 1)
-            )
+            latents_mean = (torch.tensor(vae.latents_mean,
+                                         device=latents.device,
+                                         dtype=latents.dtype).view(
+                                             1, z_dim, 1, 1, 1))
+            latents_std = (1.0 / torch.tensor(
+                vae.latents_std, device=latents.device,
+                dtype=latents.dtype).view(1, z_dim, 1, 1, 1))
             latents = latents / latents_std + latents_mean
-        
+
         # Decode using VAE
         with torch.no_grad():
             video = vae.decode(latents.float())
             # VAE.decode returns tensor directly (not tuple)
-            
+
             # Postprocess video: convert from [-1, 1] to [0, 1]
             # FastVideo VAE typically outputs in [-1, 1] range
             video = (video / 2 + 0.5).clamp(0, 1)

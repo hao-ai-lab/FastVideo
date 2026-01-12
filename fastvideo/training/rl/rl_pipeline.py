@@ -21,33 +21,23 @@ from fastvideo.fastvideo_args import TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.training.training_pipeline import TrainingPipeline
-from fastvideo.training.rl.rewards import (
-    create_reward_models,
-    MultiRewardAggregator,
-    ValueModel
-)
+from fastvideo.training.rl.rewards import (create_reward_models,
+                                           MultiRewardAggregator, ValueModel)
 from .rl_utils import (
-    sample_random_timesteps,
     compute_reward_statistics,
 )
 from fastvideo.training.rl.wan_grpo_utils import wan_pipeline_with_logprob, sde_step_with_logprob
 from fastvideo.training.rl.stat_tracking import PerPromptStatTracker
-from fastvideo.training.training_utils import (
-    get_scheduler,
-    count_trainable
-)
-from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
-from fastvideo.distributed import get_local_torch_device
+from fastvideo.training.training_utils import (get_scheduler, count_trainable)
 from fastvideo.utils import get_compute_dtype
 from fastvideo.dataset.rl_prompt_dataset import build_rl_prompt_dataloader
-from copy import deepcopy
-from collections.abc import Iterator
 
 from fastvideo.forward_context import set_forward_context
 
 logger = init_logger(__name__)
 # mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
 # logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+
 
 class RLPipeline(TrainingPipeline):
     """
@@ -61,40 +51,36 @@ class RLPipeline(TrainingPipeline):
     - GRPO policy loss with clipping and KL regularization
     """
 
-    def __init__(
-        self,
-        model_path: str,
-        fastvideo_args: TrainingArgs,
-        required_config_modules: list[str] | None = None,
-        loaded_modules: dict[str, nn.Module] | None = None
-    ) -> None:
+    def __init__(self,
+                 model_path: str,
+                 fastvideo_args: TrainingArgs,
+                 required_config_modules: list[str] | None = None,
+                 loaded_modules: dict[str, nn.Module] | None = None) -> None:
         """Initialize RL pipeline."""
         if not fastvideo_args.rl_args.rl_mode:
             logger.warning(
                 "rl_mode is False, but RLPipeline is being initialized. "
-                "Setting rl_mode=True."
-            )
+                "Setting rl_mode=True.")
             fastvideo_args.rl_args.rl_mode = True
 
-        super().__init__(model_path, fastvideo_args, required_config_modules, loaded_modules)
+        super().__init__(model_path, fastvideo_args, required_config_modules,
+                         loaded_modules)
 
         # RL-specific components (will be initialized in initialize_training_pipeline)
         self.reward_models: MultiRewardAggregator | None = None
         self.value_model: ValueModel | None = None
         self.value_optimizer: torch.optim.Optimizer | None = None
         self.value_scheduler: Any | None = None
-        
+
         # Set CFG guidace scale
         self.guidance_scale = fastvideo_args.rl_args.guidance_scale
-        
+
         # Per-prompt stat tracker for advantage normalization
         # Will be initialized in initialize_training_pipeline
         self.stat_tracker: PerPromptStatTracker | None = None
 
-        logger.info(
-            "Initialized RLPipeline with algorithm: %s",
-            fastvideo_args.rl_args.rl_algorithm
-        )
+        logger.info("Initialized RLPipeline with algorithm: %s",
+                    fastvideo_args.rl_args.rl_algorithm)
 
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
@@ -105,7 +91,7 @@ class RLPipeline(TrainingPipeline):
         # Call parent initialization for basic setup (optimizer, scheduler, etc.)
         # But we'll override the dataloader initialization
         super().initialize_training_pipeline(training_args)
-        
+
         # Override dataloader with RL prompt dataloader
         # Get RL dataset configuration from training_args
         rl_dataset_path = training_args.rl_dataset_path if training_args.rl_dataset_path else training_args.data_path
@@ -113,12 +99,12 @@ class RLPipeline(TrainingPipeline):
         rl_num_image_per_prompt = training_args.rl_num_image_per_prompt  # k parameter
         num_replicas = 1  # Single GPU training
         rank = 0  # Single GPU training
-        
+
         logger.info("Initializing RL prompt dataloader...")
         logger.info("  dataset_path: %s", rl_dataset_path)
         logger.info("  dataset_type: %s", rl_dataset_type)
         logger.info("  num_image_per_prompt (k): %s", rl_num_image_per_prompt)
-        
+
         # Build RL prompt dataloader
         train_dataloader, test_dataloader, train_dataset, test_dataset = build_rl_prompt_dataloader(
             dataset_path=rl_dataset_path,
@@ -131,44 +117,43 @@ class RLPipeline(TrainingPipeline):
             train_num_workers=training_args.dataloader_num_workers,
             test_num_workers=0,
             num_replicas=num_replicas,
-            rank=rank
-        )
-               
+            rank=rank)
+
         self.train_dataloader = train_dataloader
         self.train_dataset = train_dataset
         self.train_loader_iter = iter(self.train_dataloader)
         self.current_epoch = 0
-        
+
         logger.info("train_dataloader length: %s", len(self.train_dataloader))
 
         self.num_update_steps_per_epoch = math.ceil(
-                len(self.train_dataloader) /
-                training_args.gradient_accumulation_steps * training_args.sp_size /
-                training_args.train_sp_batch_size)
+            len(self.train_dataloader) /
+            training_args.gradient_accumulation_steps * training_args.sp_size /
+            training_args.train_sp_batch_size)
         self.num_train_epochs = math.ceil(training_args.max_train_steps /
-                                            self.num_update_steps_per_epoch)
+                                          self.num_update_steps_per_epoch)
 
         logger.info("Initializing RL-specific components...")
 
         # Initialize reward models (GRPO always uses reward models)
         self.reward_models = create_reward_models(
             reward_models=training_args.rl_args.reward_models,
-            device=str(self.device)
-        )
+            device=str(self.device))
         logger.info("Loaded reward models: %s", self.reward_models)
 
-        # define self.transformer_dtype
-        transformer = self.get_module("transformer")
-        if hasattr(transformer, 'module'):
-            self.transformer_dtype = next(transformer.module.parameters()).dtype
-        else:
-            self.transformer_dtype = next(transformer.parameters()).dtype
-        logger.info("Transformer dtype: %s", self.transformer_dtype)
-        
+        # # define self.transformer_dtype
+        # transformer = self.get_module("transformer")
+        # if hasattr(transformer, 'module'):
+        #     self.transformer_dtype = next(transformer.module.parameters()).dtype
+        # else:
+        #     self.transformer_dtype = next(transformer.parameters()).dtype
+        # logger.info("Transformer dtype: %s", self.transformer_dtype)
+
         # Initialize per-prompt stat tracker for advantage normalization
         global_std = getattr(training_args.rl_args, 'rl_global_std', False)
         self.stat_tracker = PerPromptStatTracker(global_std=global_std)
-        logger.info("Initialized PerPromptStatTracker with global_std=%s", global_std)
+        logger.info("Initialized PerPromptStatTracker with global_std=%s",
+                    global_std)
 
         logger.info("RL pipeline initialization complete")
 
@@ -176,20 +161,15 @@ class RLPipeline(TrainingPipeline):
         """Initialize the value model and its optimizer."""
         if training_args.rl_args.value_model_share_backbone:
             # Share transformer backbone with policy
-            logger.info("Value model will share backbone with policy transformer")
-            self.value_model = ValueModel(
-                self.transformer,
-                share_backbone=True
-            )
+            logger.info(
+                "Value model will share backbone with policy transformer")
+            self.value_model = ValueModel(self.transformer, share_backbone=True)
         else:
             # Separate value model (clone transformer architecture)
             logger.info("Creating separate value model")
             # TODO: Implement separate value model initialization
             # For now, use shared backbone
-            self.value_model = ValueModel(
-                self.transformer,
-                share_backbone=True
-            )
+            self.value_model = ValueModel(self.transformer, share_backbone=True)
 
         # Create optimizer and scheduler for value model
         if not training_args.rl_args.value_model_share_backbone:
@@ -213,9 +193,10 @@ class RLPipeline(TrainingPipeline):
                 last_epoch=self.init_steps - 1,
             )
 
-            logger.info("Created separate optimizer and scheduler for value model")
+            logger.info(
+                "Created separate optimizer and scheduler for value model")
             logger.info("Value model trainable parameters: %s B",
-                       round(count_trainable(self.value_model) / 1e9, 3))
+                        round(count_trainable(self.value_model) / 1e9, 3))
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         """
@@ -239,39 +220,42 @@ class RLPipeline(TrainingPipeline):
                 logger.info("Starting epoch %s", self.current_epoch)
                 self.train_loader_iter = iter(self.train_dataloader)
                 batch = next(self.train_loader_iter)
-            
+
             # RL prompt dataloader returns (prompts, metadatas) tuple
             prompts, metadatas = batch
-            
+
             # Store prompts and metadatas in training_batch for use in collect_trajectories
             if training_batch.input_kwargs is None:
                 training_batch.input_kwargs = {}
             training_batch.input_kwargs["prompts"] = prompts
             training_batch.input_kwargs["metadata"] = metadatas
-            
+
             # Also store in infos for compatibility (convert metadatas to info_list format)
             if metadatas:
-                training_batch.infos = [
-                    {"prompt": prompt, "metadata": metadata}
-                    for prompt, metadata in zip(prompts, metadatas)
-                ]
+                training_batch.infos = [{
+                    "prompt": prompt,
+                    "metadata": metadata
+                } for prompt, metadata in zip(prompts, metadatas, strict=False)]
             else:
-                training_batch.infos = [
-                    {"prompt": prompt, "caption": prompt}
-                    for prompt in prompts
-                ]
-        
+                training_batch.infos = [{
+                    "prompt": prompt,
+                    "caption": prompt
+                } for prompt in prompts]
+
         return training_batch
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         """Initialize validation pipeline for RL (similar to base implementation)."""
         # For now, reuse the base implementation
         # In the future, we can add RL-specific validation (e.g., compare old vs new policy)
-        logger.info("RL validation pipeline will be implemented based on task requirements")
+        logger.info(
+            "RL validation pipeline will be implemented based on task requirements"
+        )
         # Set validation_pipeline to None for now
         self.validation_pipeline = None
 
-    def collect_trajectories(self, training_batch: TrainingBatch) -> TrainingBatch:
+    def collect_trajectories(self,
+                             training_batch: TrainingBatch) -> TrainingBatch:
         """
         Collect on-policy trajectories by generating videos with log probabilities.
         
@@ -296,9 +280,9 @@ class RLPipeline(TrainingPipeline):
             - prompt_embeds: [B, seq_len, hidden_dim] - prompt embeddings used
             - negative_prompt_embeds: [B, seq_len, hidden_dim] - negative embeddings for CFG
         """
-        
+
         logger.info("Collecting trajectories with GRPO sampling")
-        
+
         # Get prompts from batch
         # Prompts can be in input_kwargs["prompts"] or in infos
         prompts = None
@@ -315,12 +299,12 @@ class RLPipeline(TrainingPipeline):
                 "Cannot find prompts in training_batch. "
                 "Prompts should be in input_kwargs['prompts'] or infos[]['prompt'/'caption']"
             )
-        
+
         # Normalize to list
         if isinstance(prompts, str):
             prompts = [prompts]
         batch_size = len(prompts)
-        
+
         # Get sampling configuration (hardcoded for now, as per plan)
         # These should come from config later
         num_inference_steps = self.training_args.num_latent_t  # config.sample.num_steps - hardcoded
@@ -331,12 +315,11 @@ class RLPipeline(TrainingPipeline):
         num_videos_per_prompt = 1  # Each prompt in batch generates one video (batch already has repeated prompts if needed)
         sample_time_per_prompt = 1  # config.sample.sample_time_per_prompt - hardcoded
         kl_reward = getattr(self.training_args.rl_args, 'kl_reward', 0.0)
-        
-        
+
         # Prepare negative prompt embeddings for CFG
         negative_prompt = [""] * batch_size
         negative_prompt_embeds = None
-        
+
         # Collect samples (multiple samples per prompt if sample_time_per_prompt > 1)
         all_latents_list = []
         all_log_probs_list = []
@@ -347,9 +330,12 @@ class RLPipeline(TrainingPipeline):
         all_prompt_ids_list = []
 
         # debugging: vram usage
-        mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
-        logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-        
+        mem_used, power_draw = os.popen(
+            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+        ).read().strip().split(", ")
+        logger.info(
+            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+
         # Set transformer to eval mode for sampling
         self.transformer.eval()
 
@@ -365,13 +351,18 @@ class RLPipeline(TrainingPipeline):
                 # - prompt_ids: Tokenized prompt IDs [B, seq_len]
 
                 # debugging: vram usage
-                mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
-                logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+                mem_used, power_draw = os.popen(
+                    "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+                ).read().strip().split(", ")
+                logger.info(
+                    f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W"
+                )
 
                 videos, latents_list, log_probs_list, kl_list, prompt_ids = wan_pipeline_with_logprob(
                     self,
                     prompt=prompts,
-                    negative_prompt=negative_prompt if guidance_scale > 1.0 else None,
+                    negative_prompt=negative_prompt
+                    if guidance_scale > 1.0 else None,
                     height=height,
                     width=width,
                     num_frames=num_frames,
@@ -379,23 +370,28 @@ class RLPipeline(TrainingPipeline):
                     guidance_scale=guidance_scale,
                     num_videos_per_prompt=num_videos_per_prompt,
                     generator=self.noise_random_generator,
-                    output_type="latent",  # Return latents, not decoded videos (videos decoded in compute_rewards)
+                    output_type=
+                    "latent",  # Return latents, not decoded videos (videos decoded in compute_rewards)
                     determistic=False,  # Use stochastic sampling
                     kl_reward=kl_reward,
                 )
 
                 # debugging: vram usage
-                mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
-                logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-                
+                mem_used, power_draw = os.popen(
+                    "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+                ).read().strip().split(", ")
+                logger.info(
+                    f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W"
+                )
+
                 # Stack latents: latents_list is [num_steps+1] where each element is [B, C, T, H, W]
                 # Stack along a new dimension: [B, num_steps+1, C, T, H, W]
                 latents = torch.stack(latents_list, dim=1)
-                
+
                 # Stack log_probs: log_probs_list is [num_steps] where each element is [B]
                 # Stack along a new dimension: [B, num_steps]
                 log_probs = torch.stack(log_probs_list, dim=1)
-                
+
                 # Stack KL: kl_list is [num_steps] where each element is [B]
                 # Stack along a new dimension: [B, num_steps]
                 # Note: kl_list is always returned (zeros if kl_reward == 0)
@@ -405,26 +401,30 @@ class RLPipeline(TrainingPipeline):
                 logger.info(f"latents.shape: {latents.shape}")
                 logger.info(f"log_probs.shape: {log_probs.shape}")
                 logger.info(f"kl.shape: {kl.shape}")
-                
+
                 # Get timesteps from scheduler
                 scheduler = self.get_module("scheduler")
-                timesteps = scheduler.timesteps.repeat(batch_size, 1)  # [B, num_steps]
-                
+                timesteps = scheduler.timesteps.repeat(batch_size,
+                                                       1)  # [B, num_steps]
+
                 # Get prompt embeddings (they were computed inside wan_pipeline_with_logprob)
                 # For now, we'll recompute them if needed, or store None and recompute later
                 # Actually, we can get them from the pipeline's last encoding
                 # For simplicity, we'll store None and recompute when needed
                 prompt_embeds = None  # Will be recomputed if needed
-                
+
                 # Store in lists
                 all_latents_list.append(latents)
                 all_log_probs_list.append(log_probs)
-                all_kl_list.append(kl)  # kl is always computed (may be zeros if kl_reward == 0)
+                all_kl_list.append(
+                    kl
+                )  # kl is always computed (may be zeros if kl_reward == 0)
                 all_timesteps_list.append(timesteps)
                 all_prompt_embeds_list.append(prompt_embeds)
-                all_negative_prompt_embeds_list.append(None)  # Will be set if needed
+                all_negative_prompt_embeds_list.append(
+                    None)  # Will be set if needed
                 all_prompt_ids_list.append(prompt_ids)
-        
+
         # Concatenate across sample_time_per_prompt dimension (if sample_time_per_prompt > 1)
         if sample_time_per_prompt > 1:
             # Shape: [B * sample_time_per_prompt, num_steps+1, C, T, H, W]
@@ -434,24 +434,27 @@ class RLPipeline(TrainingPipeline):
             # Shape: [B * sample_time_per_prompt, num_steps]
             training_batch.timesteps = torch.cat(all_timesteps_list, dim=0)
             # Store KL if computed
-            training_batch.kl = torch.cat(all_kl_list, dim=0) if all_kl_list[0] is not None else None
+            training_batch.kl = torch.cat(
+                all_kl_list, dim=0) if all_kl_list[0] is not None else None
             # Store prompt_ids (repeat for each sample)
             training_batch.prompt_ids = torch.cat(all_prompt_ids_list, dim=0)
         else:
             # Single sample per prompt
-            training_batch.latents = all_latents_list[0]  # [B, num_steps+1, C, T, H, W]
+            training_batch.latents = all_latents_list[
+                0]  # [B, num_steps+1, C, T, H, W]
             training_batch.log_probs = all_log_probs_list[0]  # [B, num_steps]
             training_batch.timesteps = all_timesteps_list[0]  # [B, num_steps]
-            training_batch.kl = all_kl_list[0] if len(all_kl_list) > 0 and all_kl_list[0] is not None else None
+            training_batch.kl = all_kl_list[0] if len(
+                all_kl_list) > 0 and all_kl_list[0] is not None else None
             training_batch.prompt_ids = all_prompt_ids_list[0]  # [B, seq_len]
-        
+
         # Store old log probs for importance ratio computation
         training_batch.old_log_probs = training_batch.log_probs.clone()
-        
+
         # Store prompt_embeds and negative_prompt_embeds (None for now, will be recomputed if needed)
         training_batch.prompt_embeds = None
         training_batch.negative_prompt_embeds = None
-        
+
         # Store prompts in input_kwargs for reward computation
         if training_batch.input_kwargs is None:
             training_batch.input_kwargs = {}
@@ -465,16 +468,17 @@ class RLPipeline(TrainingPipeline):
         else:
             training_batch.input_kwargs["prompts"] = prompts
 
-        mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
-        logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-        
+        mem_used, power_draw = os.popen(
+            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+        ).read().strip().split(", ")
+        logger.info(
+            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+
         logger.info(
             "Trajectory collection complete: batch_size=%d, latents_shape=%s, log_probs_shape=%s",
-            training_batch.latents.shape[0],
-            training_batch.latents.shape,
-            training_batch.log_probs.shape
-        )
-        
+            training_batch.latents.shape[0], training_batch.latents.shape,
+            training_batch.log_probs.shape)
+
         return training_batch
 
     def compute_rewards(self, training_batch: TrainingBatch) -> TrainingBatch:
@@ -500,82 +504,108 @@ class RLPipeline(TrainingPipeline):
             - reward_std: Std of rewards
         """
         if self.reward_models is None:
-            raise RuntimeError("Reward models not initialized. Call initialize_training_pipeline first.")
-        
+            raise RuntimeError(
+                "Reward models not initialized. Call initialize_training_pipeline first."
+            )
+
         logger.info("Computing rewards from reward models")
-        mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
-        logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-        
+        mem_used, power_draw = os.popen(
+            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+        ).read().strip().split(", ")
+        logger.info(
+            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+
         # Get final latents (after all denoising steps)
         # training_batch.latents is [B, num_steps+1, C, T, H, W]
         # We want the final latents at index -1: [B, C, T, H, W]
-        logger.info(f"training_batch.latents.shape: {training_batch.latents.shape}")
+        logger.info(
+            f"training_batch.latents.shape: {training_batch.latents.shape}")
         final_latents = training_batch.latents[:, -1]  # [B, C, T, H, W]
 
-        mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
-        logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-        
+        mem_used, power_draw = os.popen(
+            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+        ).read().strip().split(", ")
+        logger.info(
+            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+
         # Get VAE for decoding
         vae = self.get_module("vae")
         device = final_latents.device
-        
+
         # Decode latents to videos
         # Apply VAE normalization (Wan VAE specific)
         # latents_to_decode = final_latents.to(vae.dtype)
 
-        mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
-        logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-        
+        mem_used, power_draw = os.popen(
+            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+        ).read().strip().split(", ")
+        logger.info(
+            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+
         # Wan VAE requires denormalization before decoding
-        if hasattr(vae, 'config') and hasattr(vae.config, 'latents_mean') and hasattr(vae.config, 'latents_std'):
+        if hasattr(vae, 'config') and hasattr(vae.config,
+                                              'latents_mean') and hasattr(
+                                                  vae.config, 'latents_std'):
             z_dim = getattr(vae.config, 'z_dim', final_latents.shape[1])
-            latents_mean = (
-                torch.tensor(vae.config.latents_mean, device=device, dtype=final_latents.dtype)
-                .view(1, z_dim, 1, 1, 1)
-            )
+            latents_mean = (torch.tensor(vae.config.latents_mean,
+                                         device=device,
+                                         dtype=final_latents.dtype).view(
+                                             1, z_dim, 1, 1, 1))
             latents_std = (
-                1.0 / torch.tensor(vae.config.latents_std, device=device, dtype=final_latents.dtype)
-                .view(1, z_dim, 1, 1, 1)
-            )
+                1.0 /
+                torch.tensor(vae.config.latents_std,
+                             device=device,
+                             dtype=final_latents.dtype).view(1, z_dim, 1, 1, 1))
             final_latents = final_latents / latents_std + latents_mean
         elif hasattr(vae, 'latents_mean') and hasattr(vae, 'latents_std'):
             z_dim = final_latents.shape[1]
-            latents_mean = (
-                torch.tensor(vae.latents_mean, device=device, dtype=final_latents.dtype)
-                .view(1, z_dim, 1, 1, 1)
-            )
-            latents_std = (
-                1.0 / torch.tensor(vae.latents_std, device=device, dtype=final_latents.dtype)
-                .view(1, z_dim, 1, 1, 1)
-            )
+            latents_mean = (torch.tensor(vae.latents_mean,
+                                         device=device,
+                                         dtype=final_latents.dtype).view(
+                                             1, z_dim, 1, 1, 1))
+            latents_std = (1.0 / torch.tensor(
+                vae.latents_std, device=device, dtype=final_latents.dtype).view(
+                    1, z_dim, 1, 1, 1))
             final_latents = final_latents / latents_std + latents_mean
 
-        mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
-        logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+        mem_used, power_draw = os.popen(
+            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+        ).read().strip().split(", ")
+        logger.info(
+            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
         logger.info(f"final_latents.shape: {final_latents.shape}")
-        
+
         # Decode using VAE
         with torch.no_grad():
             videos = vae.decode(final_latents.float())
             # VAE.decode returns tensor directly (not tuple)
             # Postprocess video: convert from [-1, 1] to [0, 1]
             videos = (videos / 2 + 0.5).clamp(0, 1)
-        
-        mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
-        logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+
+        mem_used, power_draw = os.popen(
+            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+        ).read().strip().split(", ")
+        logger.info(
+            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
 
         # Get prompts for reward computation
-        prompts = training_batch.input_kwargs.get("prompts") if training_batch.input_kwargs else None
+        prompts = training_batch.input_kwargs.get(
+            "prompts") if training_batch.input_kwargs else None
         if prompts is None:
-            raise ValueError("Prompts not found in training_batch.input_kwargs. Required for reward computation.")
-        
+            raise ValueError(
+                "Prompts not found in training_batch.input_kwargs. Required for reward computation."
+            )
+
         # Compute rewards using reward models
         # Note: reward_models.compute_reward expects videos [B, C, T, H, W] and prompts [B]
         reward_scores = self.reward_models.compute_reward(videos, prompts)
 
-        mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
-        logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-        
+        mem_used, power_draw = os.popen(
+            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+        ).read().strip().split(", ")
+        logger.info(
+            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+
         # Apply KL reward penalty if configured
         # In FlowGRPO: rewards["avg"] = rewards["avg"] - kl_reward * kl
         kl_reward = getattr(self.training_args.rl_args, 'rl_kl_reward', 0.0)
@@ -585,25 +615,30 @@ class RLPipeline(TrainingPipeline):
             kl_penalty = training_batch.kl.mean(dim=1)  # [B]
             reward_scores = reward_scores - kl_reward * kl_penalty
 
-        mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
-        logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-        
+        mem_used, power_draw = os.popen(
+            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+        ).read().strip().split(", ")
+        logger.info(
+            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+
         # Store reward scores
         training_batch.reward_scores = reward_scores
-        
+
         # Compute reward statistics
         reward_stats = compute_reward_statistics(training_batch.reward_scores)
         training_batch.reward_mean = reward_stats["reward_mean"]
         training_batch.reward_std = reward_stats["reward_std"]
 
-        mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
-        logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-        
+        mem_used, power_draw = os.popen(
+            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+        ).read().strip().split(", ")
+        logger.info(
+            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+
         logger.info("Rewards computed: mean=%.3f, std=%.3f, kl_reward=%.3f",
-                    reward_stats["reward_mean"],
-                    reward_stats["reward_std"],
+                    reward_stats["reward_mean"], reward_stats["reward_std"],
                     kl_reward)
-        
+
         return training_batch
 
     def compute_values(self, training_batch: TrainingBatch) -> TrainingBatch:
@@ -620,7 +655,8 @@ class RLPipeline(TrainingPipeline):
         # Keeping for API compatibility but returning early
         return training_batch
 
-    def compute_advantages(self, training_batch: TrainingBatch) -> TrainingBatch:
+    def compute_advantages(self,
+                           training_batch: TrainingBatch) -> TrainingBatch:
         """
         Compute advantages using per-prompt stat tracking and normalization.
         
@@ -645,37 +681,42 @@ class RLPipeline(TrainingPipeline):
         """
         if training_batch.reward_scores is None:
             raise ValueError("Rewards must be computed before advantages")
-        
+
         if self.stat_tracker is None:
-            raise RuntimeError("Stat tracker not initialized. Call initialize_training_pipeline first.")
-        
+            raise RuntimeError(
+                "Stat tracker not initialized. Call initialize_training_pipeline first."
+            )
+
         logger.info("Computing advantages with per-prompt stat tracking")
-        mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
-        logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-        
+        mem_used, power_draw = os.popen(
+            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+        ).read().strip().split(", ")
+        logger.info(
+            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+
         # Get prompts from prompt_ids (decode token IDs to strings)
         if training_batch.prompt_ids is not None:
             tokenizer = self.get_module("tokenizer")
             prompt_ids_np = training_batch.prompt_ids.cpu().numpy()
-            prompts = tokenizer.batch_decode(prompt_ids_np, skip_special_tokens=True)
+            prompts = tokenizer.batch_decode(prompt_ids_np,
+                                             skip_special_tokens=True)
         elif training_batch.input_kwargs is not None and "prompts" in training_batch.input_kwargs:
             prompts = training_batch.input_kwargs["prompts"]
         else:
             raise ValueError(
                 "Cannot find prompts for stat tracking. "
-                "Need either prompt_ids or input_kwargs['prompts']"
-            )
-        
+                "Need either prompt_ids or input_kwargs['prompts']")
+
         # Get rewards
         rewards = training_batch.reward_scores
-        
+
         # Check if per-prompt stat tracking is enabled
         per_prompt_stat_tracking = getattr(
-            self.training_args.rl_args, 
-            'rl_per_prompt_stat_tracking', 
+            self.training_args.rl_args,
+            'rl_per_prompt_stat_tracking',
             True  # Default to True for GRPO
         )
-        
+
         if per_prompt_stat_tracking:
             # Use PerPromptStatTracker for per-prompt normalization
             # This computes (reward - mean_per_prompt) / std_per_prompt
@@ -684,35 +725,39 @@ class RLPipeline(TrainingPipeline):
                 rewards=rewards,
                 type='grpo'  # GRPO-style normalization
             )
-            advantages = torch.as_tensor(advantages_np, device=rewards.device, dtype=rewards.dtype)
+            advantages = torch.as_tensor(advantages_np,
+                                         device=rewards.device,
+                                         dtype=rewards.dtype)
         else:
             # Global normalization: (reward - global_mean) / global_std
             advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-4)
-        
+
         # Get values (use zeros if algorithm doesn't use value model)
         if training_batch.values is not None:
             values = training_batch.values
         else:
             values = torch.zeros_like(rewards)
-        
+
         # Compute returns: returns = advantages + values
         # For GRPO, we typically don't use value models, so returns = advantages
         returns = advantages + values
-        
+
         # Store in training batch
         training_batch.advantages = advantages
         training_batch.returns = returns
         training_batch.advantage_mean = advantages.mean().item()
         training_batch.advantage_std = advantages.std().item()
 
-        mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
-        logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-        
+        mem_used, power_draw = os.popen(
+            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+        ).read().strip().split(", ")
+        logger.info(
+            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+
         logger.info("Advantages computed: mean=%.3f, std=%.3f, per_prompt=%s",
-                    training_batch.advantage_mean,
-                    training_batch.advantage_std,
+                    training_batch.advantage_mean, training_batch.advantage_std,
                     per_prompt_stat_tracking)
-        
+
         return training_batch
 
     def _compute_log_prob_for_timestep(
@@ -748,12 +793,15 @@ class RLPipeline(TrainingPipeline):
                 (prev_sample, log_prob, prev_sample_mean, std_dev_t * sqrt_dt)
         """
         logger.info(f"computing log prob for timestep {current_timestep}")
-        mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
-        logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+        mem_used, power_draw = os.popen(
+            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+        ).read().strip().split(", ")
+        logger.info(
+            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
 
         scheduler = self.get_module("scheduler")
         transformer = self.get_module("transformer")
-        
+
         # Prepare latent input - cast to compute dtype for FSDP
         compute_dtype = get_compute_dtype()
         latent_model_input = latents.to(compute_dtype)
@@ -761,19 +809,26 @@ class RLPipeline(TrainingPipeline):
         prompt_embeds = prompt_embeds.to(compute_dtype)
         if negative_prompt_embeds is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(compute_dtype)
-        
+
+        mem_used, power_draw = os.popen(
+            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+        ).read().strip().split(", ")
+        logger.info(
+            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+
         # Predict noise with transformer
         if guidance_scale > 1.0 and negative_prompt_embeds is not None:
             # Classifier-free guidance: concatenate negative and positive prompts
             # For CFG, we need to run transformer twice or concatenate inputs
             # FlowGRPO concatenates: [negative_embeds, positive_embeds]
             latent_model_input_cfg = torch.cat([latent_model_input] * 2)
-            prompt_embeds_cfg = torch.cat([negative_prompt_embeds, prompt_embeds])
+            prompt_embeds_cfg = torch.cat(
+                [negative_prompt_embeds, prompt_embeds])
             timestep_cfg = timestep.repeat(2)
             with set_forward_context(
-                current_timestep=current_timestep,
-                attn_metadata=None,
-                forward_batch=None,
+                    current_timestep=current_timestep,
+                    attn_metadata=None,
+                    forward_batch=None,
             ):
                 noise_pred = transformer(
                     hidden_states=latent_model_input_cfg,
@@ -783,15 +838,16 @@ class RLPipeline(TrainingPipeline):
                 )[0]
             # noise_pred = noise_pred.to(prompt_embeds.dtype)
             noise_pred = noise_pred
-            
+
             # Split and apply guidance
             noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+            noise_pred = noise_pred_uncond + guidance_scale * (
+                noise_pred_text - noise_pred_uncond)
         else:
             with set_forward_context(
-                current_timestep=current_timestep,
-                attn_metadata=None,
-                forward_batch=None,
+                    current_timestep=current_timestep,
+                    attn_metadata=None,
+                    forward_batch=None,
             ):
                 # No CFG
                 noise_pred = transformer(
@@ -801,8 +857,14 @@ class RLPipeline(TrainingPipeline):
                     return_dict=False,
                 )[0]
                 # noise_pred = noise_pred.to(prompt_embeds.dtype)
-            noise_pred = noise_pred
-        
+            noise_pred
+
+        mem_used, power_draw = os.popen(
+            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+        ).read().strip().split(", ")
+        logger.info(
+            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+
         # Compute log probability using SDE step
         # Use next_latents as prev_sample to compute log prob of the actual transition
         return sde_step_with_logprob(
@@ -811,12 +873,10 @@ class RLPipeline(TrainingPipeline):
             timesteps,
             latents.float(),
             prev_sample=next_latents.float(),
-            return_dt_and_std_dev_t=return_dt_and_std_dev_t
-        )
+            return_dt_and_std_dev_t=return_dt_and_std_dev_t)
 
     def _compute_grpo_loss(
-        self,
-        training_batch: TrainingBatch
+            self, training_batch: TrainingBatch
     ) -> tuple[torch.Tensor, dict[str, Any]]:
         """
         Compute GRPO loss (policy loss + KL loss).
@@ -843,8 +903,11 @@ class RLPipeline(TrainingPipeline):
             total_loss: Total loss for backward pass
             metrics: Dictionary with loss components and diagnostics
         """
-        mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
-        logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
+        mem_used, power_draw = os.popen(
+            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+        ).read().strip().split(", ")
+        logger.info(
+            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
 
         # Get configuration from RLArgs
         # Note: CLI arguments map to RLArgs fields:
@@ -854,13 +917,13 @@ class RLPipeline(TrainingPipeline):
         kl_beta = self.training_args.rl_args.kl_beta
         guidance_scale = self.guidance_scale
         adv_clip_max = 10.0  # Hardcoded (advantage clipping)
-        
+
         # Get data from training batch
         latents = training_batch.latents  # [B, num_steps+1, C, T, H, W]
         timesteps = training_batch.timesteps  # [B, num_steps]
         old_log_probs = training_batch.old_log_probs  # [B, num_steps]
         advantages = training_batch.advantages  # [B, num_steps] or [B]
-        
+
         # Get prompt embeddings
         # If not stored, recompute from prompts
         if training_batch.prompt_embeds is not None:
@@ -869,29 +932,30 @@ class RLPipeline(TrainingPipeline):
             prompt_embeds = training_batch.encoder_hidden_states
         else:
             # Recompute prompt embeddings from prompts
-            prompts = training_batch.input_kwargs.get("prompts") if training_batch.input_kwargs else None
+            prompts = training_batch.input_kwargs.get(
+                "prompts") if training_batch.input_kwargs else None
             if prompts is None:
-                raise ValueError("Cannot find prompts or prompt embeddings in training_batch")
-            
+                raise ValueError(
+                    "Cannot find prompts or prompt embeddings in training_batch"
+                )
+
             # Encode prompts
             text_encoder = self.get_module("text_encoder")
             tokenizer = self.get_module("tokenizer")
             # device = next(self.transformer.parameters()).device
-            device = self.device 
-            
+            device = self.device
+
             # Normalize to list
             if isinstance(prompts, str):
                 prompts = [prompts]
-            
+
             # Tokenize and encode
-            text_inputs = tokenizer(
-                prompts,
-                padding="max_length",
-                max_length=512,
-                truncation=True,
-                return_tensors="pt"
-            ).to(device)
-            
+            text_inputs = tokenizer(prompts,
+                                    padding="max_length",
+                                    max_length=512,
+                                    truncation=True,
+                                    return_tensors="pt").to(device)
+
             with torch.no_grad():
                 outputs = text_encoder(
                     text_inputs["input_ids"],
@@ -900,7 +964,7 @@ class RLPipeline(TrainingPipeline):
                 )
                 # prompt_embeds = outputs.last_hidden_state.to(self.transformer.dtype)
                 prompt_embeds = outputs.last_hidden_state
-        
+
         # Get negative prompt embeddings
         negative_prompt_embeds = training_batch.negative_prompt_embeds
         if negative_prompt_embeds is None and guidance_scale > 1.0:
@@ -909,18 +973,16 @@ class RLPipeline(TrainingPipeline):
             tokenizer = self.get_module("tokenizer")
             # device = next(self.transformer.parameters()).device
             device = self.device
-            
+
             batch_size = prompt_embeds.shape[0]
             negative_prompts = [""] * batch_size
-            
-            neg_text_inputs = tokenizer(
-                negative_prompts,
-                padding="max_length",
-                max_length=512,
-                truncation=True,
-                return_tensors="pt"
-            ).to(device)
-            
+
+            neg_text_inputs = tokenizer(negative_prompts,
+                                        padding="max_length",
+                                        max_length=512,
+                                        truncation=True,
+                                        return_tensors="pt").to(device)
+
             with torch.no_grad():
                 neg_outputs = text_encoder(
                     neg_text_inputs["input_ids"],
@@ -929,26 +991,23 @@ class RLPipeline(TrainingPipeline):
                 )
                 # negative_prompt_embeds = neg_outputs.last_hidden_state.to(self.transformer.dtype)
                 negative_prompt_embeds = neg_outputs.last_hidden_state
-        
+
         # Handle advantages shape: if [B], expand to [B, num_steps]
         if advantages.dim() == 1:
             advantages = advantages.unsqueeze(1).expand(-1, timesteps.shape[1])
-        
+
         batch_size, num_steps = timesteps.shape
-        
+
         # Accumulate losses across timesteps
         policy_losses = []
         kl_losses = []
         clip_fractions = []
         importance_ratios = []
         approx_kls = []
-        
+
         # Get transformer for reference model computation
         transformer = self.get_module("transformer")
 
-        mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
-        logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-        
         # Loop over timesteps
         for j in range(num_steps):
             # Get latents and next_latents for this timestep
@@ -957,7 +1016,14 @@ class RLPipeline(TrainingPipeline):
             timesteps_j = timesteps[:, j]  # [B]
             old_log_probs_j = old_log_probs[:, j]  # [B]
             advantages_j = advantages[:, j]  # [B]
-            
+
+            mem_used, power_draw = os.popen(
+                "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+            ).read().strip().split(", ")
+            logger.info(
+                f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W"
+            )
+
             # Compute log probability with current policy
             prev_sample, log_prob, prev_sample_mean, std_dev_t, dt = self._compute_log_prob_for_timestep(
                 latents_j,
@@ -967,9 +1033,15 @@ class RLPipeline(TrainingPipeline):
                 prompt_embeds,
                 negative_prompt_embeds,
                 guidance_scale,
-                return_dt_and_std_dev_t=True
+                return_dt_and_std_dev_t=True)
+
+            mem_used, power_draw = os.popen(
+                "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+            ).read().strip().split(", ")
+            logger.info(
+                f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W"
             )
-            
+
             # Compute reference log probability with adapter disabled (if using LoRA)
             if kl_beta > 0:
                 with torch.no_grad():
@@ -983,31 +1055,40 @@ class RLPipeline(TrainingPipeline):
                                 prompt_embeds,
                                 negative_prompt_embeds,
                                 guidance_scale,
-                                return_dt_and_std_dev_t=True
-                            )
+                                return_dt_and_std_dev_t=True)
                     else:
                         # No adapter to disable, use current model (shouldn't happen in practice)
                         prev_sample_mean_ref = prev_sample_mean.detach()
                         std_dev_t_ref = std_dev_t.detach()
                         dt_ref = dt.detach()
-                
+
                 # Compute KL loss: KL = (mean_diff)^2 / (2 * (std_dev_t * dt)^2)
                 # FlowGRPO uses: kl_loss = ((prev_sample_mean - prev_sample_mean_ref) ** 2).mean(dim=(1,2,3), keepdim=True) / (2 * (std_dev_t * dt_ref) ** 2)
                 # For videos [B, C, T, H, W], we average over all spatial/channel dims except batch
                 # Note: std_dev_t and dt_ref are already broadcast to [B, 1, 1, 1, 1]
-                kl_loss_j = ((prev_sample_mean - prev_sample_mean_ref) ** 2).mean(dim=(1, 2, 3, 4), keepdim=True) / (2 * (std_dev_t * dt_ref) ** 2 + 1e-8)
+                kl_loss_j = ((prev_sample_mean - prev_sample_mean_ref)**2).mean(
+                    dim=(1, 2, 3, 4),
+                    keepdim=True) / (2 * (std_dev_t * dt_ref)**2 + 1e-8)
                 kl_loss_j = kl_loss_j.mean()  # Average over batch dimension
                 kl_losses.append(kl_loss_j)
             else:
                 kl_losses.append(torch.tensor(0.0, device=log_prob.device))
-            
+
+            mem_used, power_draw = os.popen(
+                "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+            ).read().strip().split(", ")
+            logger.info(
+                f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W"
+            )
+
             # GRPO policy loss computation
             # Clip advantages
-            advantages_j_clipped = torch.clamp(advantages_j, -adv_clip_max, adv_clip_max)
-            
+            advantages_j_clipped = torch.clamp(advantages_j, -adv_clip_max,
+                                               adv_clip_max)
+
             # Compute importance ratio
             ratio = torch.exp(log_prob - old_log_probs_j)
-            
+
             # Clipped surrogate objective
             unclipped_loss = -advantages_j_clipped * ratio
             clipped_loss = -advantages_j_clipped * torch.clamp(
@@ -1017,37 +1098,40 @@ class RLPipeline(TrainingPipeline):
             )
             policy_loss_j = torch.maximum(unclipped_loss, clipped_loss).mean()
             policy_losses.append(policy_loss_j)
-            
+
             # Compute diagnostics
             with torch.no_grad():
                 # Clip fraction
-                clip_fraction_j = ((ratio < 1.0 - clip_range) | (ratio > 1.0 + clip_range)).float().mean()
+                clip_fraction_j = ((ratio < 1.0 - clip_range) |
+                                   (ratio > 1.0 + clip_range)).float().mean()
                 clip_fractions.append(clip_fraction_j)
-                
+
                 # Importance ratio
                 importance_ratios.append(ratio.mean())
-                
+
                 # Approximate KL (using log prob difference)
-                approx_kl_j = 0.5 * torch.mean((log_prob - old_log_probs_j) ** 2)
+                approx_kl_j = 0.5 * torch.mean((log_prob - old_log_probs_j)**2)
                 approx_kls.append(approx_kl_j)
-        
+
         # Average losses across timesteps
         policy_loss = torch.stack(policy_losses).mean()
-        kl_loss = torch.stack(kl_losses).mean() if kl_beta > 0 else torch.tensor(0.0, device=policy_loss.device)
-        
+        kl_loss = torch.stack(kl_losses).mean(
+        ) if kl_beta > 0 else torch.tensor(0.0, device=policy_loss.device)
+
         # Total loss
         total_loss = policy_loss + kl_beta * kl_loss
-        
+
         # Compute metrics
         metrics = {
             "policy_loss": policy_loss.item(),
             "kl_loss": kl_loss.item() if kl_beta > 0 else 0.0,
             "total_loss": total_loss.item(),
             "clip_fraction": torch.stack(clip_fractions).mean().item(),
-            "importance_ratio_mean": torch.stack(importance_ratios).mean().item(),
+            "importance_ratio_mean":
+            torch.stack(importance_ratios).mean().item(),
             "approx_kl": torch.stack(approx_kls).mean().item(),
         }
-        
+
         return total_loss, metrics
 
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
@@ -1067,12 +1151,14 @@ class RLPipeline(TrainingPipeline):
         Returns:
             Updated training_batch with loss and metrics
         """
-        # # Check if we're in warmup phase (do SFT instead of RL)
-        # if training_batch.current_timestep < self.training_args.rl_args.rl_warmup_steps:
-        #     logger.info("In warmup phase, using standard SFT training")
-        #     return super().train_one_step(training_batch)
-
         training_batch = self._prepare_training(training_batch)
+
+        # debugging: vram usage
+        mem_used, power_draw = os.popen(
+            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+        ).read().strip().split(", ")
+        logger.info(
+            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
 
         # Gradient accumulation loop
         for _ in range(self.training_args.gradient_accumulation_steps):
@@ -1099,19 +1185,26 @@ class RLPipeline(TrainingPipeline):
             if training_batch.log_probs is not None and training_batch.old_log_probs is not None:
                 # Compute GRPO loss (policy loss + KL loss)
                 total_loss, metrics = self._compute_grpo_loss(training_batch)
-                
+
                 # Store metrics in training batch
                 training_batch.policy_loss = metrics.get("policy_loss", 0.0)
-                training_batch.kl_divergence = metrics.get("kl_loss", 0.0)  # KL loss is the KL divergence
-                training_batch.importance_ratio = metrics.get("importance_ratio_mean", 1.0)
+                training_batch.kl_divergence = metrics.get(
+                    "kl_loss", 0.0)  # KL loss is the KL divergence
+                training_batch.importance_ratio = metrics.get(
+                    "importance_ratio_mean", 1.0)
                 training_batch.clip_fraction = metrics.get("clip_fraction", 0.0)
                 training_batch.value_loss = 0.0  # GRPO doesn't use value loss
                 training_batch.entropy = 0.0  # Not computed for now
-                
-                # Backward pass with scaled loss
-                scaled_loss = total_loss / self.training_args.gradient_accumulation_steps
-                scaled_loss.backward()
-                
+
+                with self.tracker.timed(
+                        "timing/forward_backward"), set_forward_context(
+                            current_timestep=training_batch.current_timestep,
+                            attn_metadata=training_batch.attn_metadata):
+
+                    # Backward pass with scaled loss
+                    scaled_loss = total_loss / self.training_args.gradient_accumulation_steps
+                    scaled_loss.backward()
+
                 # Accumulate total loss
                 if training_batch.total_loss is None:
                     training_batch.total_loss = 0.0
@@ -1133,12 +1226,9 @@ class RLPipeline(TrainingPipeline):
         # Use a simple threshold check (hardcoded for now)
         kl_threshold = 0.1  # Hardcoded
         if training_batch.kl_divergence > kl_threshold:
-            logger.warning(
-                "High KL divergence at step %d: %.4f > %.4f",
-                training_batch.current_timestep,
-                training_batch.kl_divergence,
-                kl_threshold
-            )
+            logger.warning("High KL divergence at step %d: %.4f > %.4f",
+                           training_batch.current_timestep,
+                           training_batch.kl_divergence, kl_threshold)
 
         return training_batch
 
@@ -1157,10 +1247,8 @@ class RLPipeline(TrainingPipeline):
         logger.info("Set trainable parameters for RL training")
 
 
-def create_rl_pipeline(
-    model_path: str,
-    training_args: TrainingArgs
-) -> RLPipeline:
+def create_rl_pipeline(model_path: str,
+                       training_args: TrainingArgs) -> RLPipeline:
     """
     Factory function to create RL pipeline.
 
