@@ -847,7 +847,15 @@ class FinalLayer(nn.Module):
 
     def forward(self, x, c):
         # What the heck HF? Why you change the scale and shift order here???
+        print(f"c.shape: {c.shape}")
         scale, shift = self.adaLN_modulation(c).chunk(2, dim=-1)
+        print(f"scale.shape: {scale.shape}")
+        print(f"scale.unsqueeze(1).shape: {scale.unsqueeze(1).shape}")
+        print(f"shift.shape: {shift.shape}")
+        print(f"shift.unsqueeze(1).shape: {shift.unsqueeze(1).shape}")
+        print(f"x.shape: {x.shape}")
+        print(f"self.norm_final(x).shape: {self.norm_final(x).shape}")
+        exit()
         x = self.norm_final(x) * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
         x, _ = self.linear(x)
         return x
