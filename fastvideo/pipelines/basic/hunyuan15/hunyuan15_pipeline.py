@@ -59,8 +59,10 @@ class HunyuanVideo15Pipeline(ComposedPipelineBase):
                            transformer=self.get_module("transformer")))
 
         self.add_stage(stage_name="image_encoding_stage",
-                       stage=Hy15ImageEncodingStage(image_encoder=None,
-                                                    image_processor=None))
+                       stage=Hy15ImageEncodingStage(
+                           image_encoder=self.get_module("image_encoder", None),
+                           image_processor=self.get_module("feature_extractor", None),
+                           vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",
                        stage=DenoisingStage(

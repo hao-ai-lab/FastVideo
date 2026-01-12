@@ -22,6 +22,8 @@ from fastvideo.pipelines.stages.latent_preparation import (
     CosmosLatentPreparationStage, LatentPreparationStage)
 from fastvideo.pipelines.stages.matrixgame_denoising import (
     MatrixGameCausalDenoisingStage)
+from fastvideo.pipelines.stages.hyworld_denoising import (
+    HyWorldDenoisingStage)
 from fastvideo.pipelines.stages.stepvideo_encoding import (
     StepvideoPromptEncodingStage)
 from fastvideo.pipelines.stages.text_encoding import TextEncodingStage
@@ -44,6 +46,7 @@ __all__ = [
     "DmdDenoisingStage",
     "CausalDMDDenosingStage",
     "MatrixGameCausalDenoisingStage",
+    "HyWorldDenoisingStage",
     "CosmosDenoisingStage",
     "EncodingStage",
     "DecodingStage",

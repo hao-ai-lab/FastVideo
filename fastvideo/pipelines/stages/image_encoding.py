@@ -103,27 +103,155 @@ class ImageEncodingStage(PipelineStage):
 class Hy15ImageEncodingStage(ImageEncodingStage):
     """
     Stage for encoding image prompts into embeddings for HunyuanVideo1.5 models.
+    
+    Uses SigLIP (or other vision encoder) to encode reference images for I2V tasks.
+    Also encodes reference image with VAE for conditional latent.
     """
+    
+    # SigLIP normalization constants
+    SIGLIP_MEAN = [0.5, 0.5, 0.5]
+    SIGLIP_STD = [0.5, 0.5, 0.5]
+    
+    def __init__(self, image_encoder=None, image_processor=None, vae=None):
+        super().__init__(image_encoder=image_encoder, image_processor=image_processor)
+        self.vae = vae
 
     def verify_input(self, batch: ForwardBatch,
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify image encoding stage inputs."""
         return VerificationResult()
 
+    @torch.no_grad()
     def forward(self, batch: ForwardBatch,
                 fastvideo_args: FastVideoArgs) -> ForwardBatch:
         """
-        Encode the prompt into image encoder hidden states.
+        Encode the prompt into image encoder hidden states and VAE latents.
+        
+        For I2V: 
+            - encodes the reference image using SigLIP → image_embeds
+            - encodes the reference image using VAE → image_latent
+        For T2V: creates zero embeddings
         """
+        device = get_local_torch_device()
+        
+        # Default vision embed dimensions for HunyuanVideo1.5/HyWorld
+        num_vision_tokens = 729  # (384/14)^2 for SigLIP
+        vision_dim = 1152  # SigLIP hidden size
+        
         if batch.pil_image is None:
+            # T2V case: create zero embeddings for image_embeds
             batch.image_embeds = [
-                torch.zeros(1, 729, 1152, device=get_local_torch_device())
+                torch.zeros(1, num_vision_tokens, vision_dim, device=device)
             ]
+            # T2V: create zero latents for image_latent
+            # Shape: [B, 33, 1, H, W] where 33 = 32 latent channels + 1 mask
+            raw_latent_shape = list(batch.raw_latent_shape)
+            batch.image_latent = torch.zeros(
+                1, 33, 1, raw_latent_shape[3], raw_latent_shape[4],
+                device=device
+            )
+        else:
+            image = batch.pil_image
+            
+            # 1. Encode with SigLIP for image_embeds
+            if self.image_encoder is not None:
+                self.image_encoder = self.image_encoder.to(device)
+                
+                # Preprocess image for SigLIP
+                if hasattr(self.image_processor, 'preprocess'):
+                    image_inputs = self.image_processor.preprocess(
+                        images=image, return_tensors="pt"
+                    ).to(device=device)
+                    pixel_values = image_inputs['pixel_values']
+                else:
+                    from torchvision import transforms as T
+                    import numpy as np
+                    
+                    transform = T.Compose([
+                        T.Resize((384, 384), interpolation=T.InterpolationMode.BICUBIC),
+                        T.ToTensor(),
+                        T.Normalize(mean=self.SIGLIP_MEAN, std=self.SIGLIP_STD),
+                    ])
+                    
+                    if isinstance(image, np.ndarray):
+                        from PIL import Image
+                        image = Image.fromarray(image)
+                        
+                    pixel_values = transform(image).unsqueeze(0).to(device)
+                
+                with set_forward_context(current_timestep=0, attn_metadata=None):
+                    outputs = self.image_encoder(pixel_values=pixel_values)
+                    image_embeds = outputs.last_hidden_state
+                
+                batch.image_embeds = [image_embeds]
+                
+                if fastvideo_args.image_encoder_cpu_offload:
+                    self.image_encoder.to('cpu')
+            else:
+                batch.image_embeds = [
+                    torch.zeros(1, num_vision_tokens, vision_dim, device=device)
+                ]
+            
+            # 2. Encode with VAE for image_latent (conditional latent for I2V)
+            if self.vae is not None:
+                from torchvision import transforms as T
+                import numpy as np
+                from PIL import Image as PILImage
+                
+                # Get target size from batch
+                height = batch.height
+                width = batch.width
+                
+                # Preprocess image for VAE
+                if isinstance(image, np.ndarray):
+                    image = PILImage.fromarray(image)
+                
+                # Resize and center crop to target resolution
+                transform = T.Compose([
+                    T.Resize(min(height, width), interpolation=T.InterpolationMode.BICUBIC),
+                    T.CenterCrop((height, width)),
+                    T.ToTensor(),  # [0, 1]
+                ])
+                
+                ref_image_tensor = transform(image).unsqueeze(0)  # [1, 3, H, W]
+                # Normalize to [-1, 1] for VAE
+                ref_image_tensor = (ref_image_tensor * 2.0 - 1.0).to(device)
+                # Add temporal dimension: [1, 3, 1, H, W]
+                ref_image_tensor = ref_image_tensor.unsqueeze(2)
+                
+                # Encode with VAE
+                self.vae = self.vae.to(device)
+                with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=True):
+                    print(f"ref_image_tensor.shape: {ref_image_tensor.shape}")
+                    cond_latents = self.vae.encode(ref_image_tensor).mode()
+                    print(f"cond_latents.shape: {cond_latents.shape}")
+                    if hasattr(self.vae, 'config') and hasattr(self.vae.config, 'scaling_factor'):
+                        cond_latents = cond_latents * self.vae.config.scaling_factor
+                
+                # cond_latents shape: [1, 32, 1, H//8, W//8]
+                # Add mask channel (1 for first frame condition)
+                mask_ones = torch.ones(
+                    1, 1, 1, cond_latents.shape[3], cond_latents.shape[4],
+                    device=device, dtype=cond_latents.dtype
+                )
+                # Concatenate: [1, 33, 1, H//8, W//8]
+                batch.image_latent = torch.cat([cond_latents, mask_ones], dim=1)
+                
+                if fastvideo_args.vae_cpu_offload:
+                    self.vae.to('cpu')
+            else:
+                # No VAE available, create zero latents
+                raw_latent_shape = list(batch.raw_latent_shape)
+                batch.image_latent = torch.zeros(
+                    1, 33, 1, raw_latent_shape[3], raw_latent_shape[4],
+                    device=device
+                )
 
+        # Initialize video latent placeholder
         raw_latent_shape = list(batch.raw_latent_shape)
         raw_latent_shape[1] = 1
-        batch.video_latent = torch.zeros(tuple(raw_latent_shape),
-                                         device=get_local_torch_device())
+        batch.video_latent = torch.zeros(tuple(raw_latent_shape), device=device)
+        
         return batch
 
 
