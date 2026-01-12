@@ -679,9 +679,11 @@ class TransformerLoader(ComponentLoader):
 
         model = model.eval()
 
-        if fastvideo_args.dit_layerwise_offload and hasattr(model, "blocks"):
-            if ModuleHookManager.get_from(model) is None:
-                enable_layerwise_offload(model)
+        if (
+            fastvideo_args.dit_layerwise_offload
+            and ModuleHookManager.get_from(model) is None
+        ):
+            enable_layerwise_offload(model)
         return model
 
 
