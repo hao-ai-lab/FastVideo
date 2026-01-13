@@ -2,7 +2,7 @@
   "data": [
     {
       "caption": "all_left",
-      "image_path": "../../../../footsies-dataset/validate/episode_020_part_000_first_frame.png",
+      "image_path": "../../../../footsies-dataset/validate/episode_000_part_000_first_frame.png",
       "video_path": null,
       "num_inference_steps": 40,
       "height": 352,
@@ -418,7 +418,7 @@
     },
     {
       "caption": "all_right",
-      "image_path": "../../../../footsies-dataset/validate/episode_020_part_000_first_frame.png",
+      "image_path": "../../../../footsies-dataset/validate/episode_000_part_000_first_frame.png",
       "video_path": null,
       "num_inference_steps": 40,
       "height": 352,
@@ -834,7 +834,7 @@
     },
     {
       "caption": "all_idle",
-      "image_path": "../../../../footsies-dataset/validate/episode_020_part_000_first_frame.png",
+      "image_path": "../../../../footsies-dataset/validate/episode_000_part_000_first_frame.png",
       "video_path": null,
       "num_inference_steps": 40,
       "height": 352,
@@ -1250,7 +1250,7 @@
     },
     {
       "caption": "alternating_left_idle_right",
-      "image_path": "../../../../footsies-dataset/validate/episode_020_part_000_first_frame.png",
+      "image_path": "../../../../footsies-dataset/validate/episode_000_part_000_first_frame.png",
       "video_path": null,
       "num_inference_steps": 40,
       "height": 352,

@@ -7,7 +7,7 @@ export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 MODEL_PATH="MatrixGame-before-finetune1"
-DATA_DIR="footsies-dataset-1/preprocessed/combined_parquet_dataset"
+DATA_DIR="footsies-dataset/preprocessed/combined_parquet_dataset"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation_phase2.json"
 NUM_GPUS=8
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7

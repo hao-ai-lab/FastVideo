@@ -134,7 +134,7 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
         if "action_path" in valid_data and valid_data["action_path"]:
             keyboard_cond_list = []
             mouse_cond_list = []
-            num_bits = 3
+            num_bits = 6
             for action_path in valid_data["action_path"]:
                 if action_path:
                     action_data = np.load(action_path, allow_pickle=True)
@@ -150,10 +150,17 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
                                     multi_hot = np.zeros((T, num_bits), dtype=np.float32)
                                     action_values = keyboard_raw.astype(int)
                                     for bit_idx in range(num_bits):
-                                        multi_hot[:, bit_idx] = ((action_values >> bit_idx) & 1).astype(np.float32)
+                                        target_idx = (2 - (bit_idx % 3)) + 3 * (bit_idx // 3)
+                                        if target_idx < num_bits:
+                                            multi_hot[:, target_idx] = ((action_values >> bit_idx) & 1).astype(np.float32)
                                     keyboard_cond_list.append(multi_hot)
                                 else:
-                                    keyboard_cond_list.append(keyboard_raw.astype(np.float32))
+                                    # If already 2D, pad to num_bits if necessary
+                                    k_data = keyboard_raw.astype(np.float32)
+                                    if k_data.ndim == 2 and k_data.shape[-1] < num_bits:
+                                        padding = np.zeros((k_data.shape[0], num_bits - k_data.shape[-1]), dtype=np.float32)
+                                        k_data = np.concatenate([k_data, padding], axis=-1)
+                                    keyboard_cond_list.append(k_data)
                             else:
                                 keyboard_cond_list.append(keyboard_raw)
                         if "mouse" in action_dict:
@@ -164,10 +171,17 @@ class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
                             multi_hot = np.zeros((T, num_bits), dtype=np.float32)
                             action_values = action_data.astype(int)
                             for bit_idx in range(num_bits):
-                                multi_hot[:, bit_idx] = ((action_values >> bit_idx) & 1).astype(np.float32)
+                                target_idx = (2 - (bit_idx % 3)) + 3 * (bit_idx // 3)
+                                if target_idx < num_bits:
+                                    multi_hot[:, target_idx] = ((action_values >> bit_idx) & 1).astype(np.float32)
                             keyboard_cond_list.append(multi_hot)
                         else:
-                            keyboard_cond_list.append(action_data)
+                            # If already 2D, pad to num_bits if necessary
+                            k_data = action_data.astype(np.float32)
+                            if k_data.ndim == 2 and k_data.shape[-1] < num_bits:
+                                padding = np.zeros((k_data.shape[0], num_bits - k_data.shape[-1]), dtype=np.float32)
+                                k_data = np.concatenate([k_data, padding], axis=-1)
+                            keyboard_cond_list.append(k_data)
             if keyboard_cond_list:
                 features["keyboard_cond"] = keyboard_cond_list
             if mouse_cond_list:
