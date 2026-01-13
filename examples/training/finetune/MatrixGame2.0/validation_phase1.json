@@ -2,7 +2,7 @@
   "data": [
     {
       "caption": "validation_sample",
-      "image_path": "../../../../footsies-dataset/validate/episode_020_part_000_first_frame.png",
+      "image_path": "../../../../footsies-dataset/validate/episode_000_part_000_first_frame.png",
       "video_path": null,
       "num_inference_steps": 40,
       "height": 352,
