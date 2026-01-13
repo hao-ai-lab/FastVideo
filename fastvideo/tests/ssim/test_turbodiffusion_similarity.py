@@ -54,9 +54,6 @@ TURBODIFFUSION_TEST_PROMPTS = [
 ]
 
 
-@pytest.mark.skip(
-    reason="Temporarily disabled due to OOM issues in CI. TODO: Investigate and re-enable.",
-)
 @pytest.mark.parametrize("prompt", TURBODIFFUSION_TEST_PROMPTS)
 @pytest.mark.parametrize("model_id", list(TURBODIFFUSION_MODEL_TO_PARAMS.keys()))
 def test_turbodiffusion_inference_similarity(prompt, model_id):
@@ -164,7 +161,7 @@ def test_turbodiffusion_inference_similarity(prompt, model_id):
 
 # TurboDiffusion I2V parameters (dual-model with RCM scheduler + SLA attention)
 TURBODIFFUSION_I2V_PARAMS = {
-    "num_gpus": 2,
+    "num_gpus": 4,
     "model_path": "loayrashid/TurboWan2.2-I2V-A14B-Diffusers",
     "height": 480,
     "width": 832,
@@ -172,7 +169,7 @@ TURBODIFFUSION_I2V_PARAMS = {
     "num_inference_steps": 4,  # TurboDiffusion uses 1-4 steps
     "guidance_scale": 1.0,  # No CFG for TurboDiffusion
     "seed": 42,
-    "sp_size": 2,
+    "sp_size": 4,
     "tp_size": 1,
     "fps": 24,
 }
@@ -190,9 +187,6 @@ TURBODIFFUSION_I2V_IMAGE_PATHS = [
 ]
 
 
-@pytest.mark.skip(
-    reason="Temporarily disabled due to OOM issues in CI. TODO: Investigate and re-enable.",
-)
 @pytest.mark.parametrize("prompt", TURBODIFFUSION_I2V_TEST_PROMPTS)
 @pytest.mark.parametrize("model_id", list(TURBODIFFUSION_I2V_MODEL_TO_PARAMS.keys()))
 def test_turbodiffusion_i2v_inference_similarity(prompt, model_id):
@@ -224,6 +218,8 @@ def test_turbodiffusion_i2v_inference_similarity(prompt, model_id):
         "sp_size": BASE_PARAMS["sp_size"],
         "tp_size": BASE_PARAMS["tp_size"],
         "override_pipeline_cls_name": "TurboDiffusionI2VPipeline",
+        # Keep both transformers in VRAM - avoids CPU RAM bottleneck
+        "dit_cpu_offload": False,
     }
 
     generation_kwargs = {
