@@ -495,12 +495,12 @@ def qat_attn(q_BLHD, k_BLHD, v_BLHD, is_causal=False, use_global_sf=True):
     v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
 
     use_qat_qkv_backward = True
-    smooth_k = True
+    smooth_k = False
     warp_specialize = True
     IS_QAT = True
-    two_level_quant_P = True
+    two_level_quant_P = False
     fake_quant_P = True
-    use_high_prec_o = False
+    use_high_prec_o = True
     smooth_q = False
     sm_scale = 1.0 / sqrt(q_BHLD.shape[-1])
     o_BHLD = attention(q_BHLD, k_BHLD, v_BHLD, is_causal, sm_scale,
