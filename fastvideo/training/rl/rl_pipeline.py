@@ -84,7 +84,145 @@ class RLPipeline(TrainingPipeline):
 
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
-        pass
+        """
+        Generate validation videos, calculate rewards, and log to tracker.
+        (Single GPU Version)
+        """
+        # --- 1. Setup & Config ---
+        training_args.inference_mode = True
+        training_args.dit_cpu_offload = False
+        
+        if not training_args.log_validation:
+            return
+        if self.validation_pipeline is None:
+            raise ValueError("Validation pipeline is not set")
+
+        logger.info("Starting validation")
+
+        # --- 2. Data Preparation ---
+        # Prepare Negative Embeddings
+        neg_prompt_embed = self.compute_text_embeddings(
+            [""], 
+            self.get_module("text_encoder"),
+            self.get_module("tokenizer"),
+            max_sequence_length=512, 
+            device=self.device
+        )
+        sample_neg_prompt_embeds = neg_prompt_embed.repeat(self.training_args.rl_args.sample_test_batch_size, 1, 1)
+
+        
+        # Setup Dataset
+        validation_dataset = ValidationDataset(training_args.validation_dataset_file)
+        validation_dataloader = DataLoader(validation_dataset,
+                                        batch_size=training_args.eval_batch_size, # Ensure this arg exists
+                                        num_workers=0)
+
+        self.transformer.eval()
+
+        # --- 3. Inference Loop ---
+        # Container for results
+        step_results = {
+            "videos": [],
+            "captions": [],
+            "rewards": defaultdict(list)
+        }
+
+        for batch_idx, validation_batch in enumerate(validation_dataloader):
+            # Extract prompts
+            prompts, prompt_metadata = validation_batch
+
+            # Compute Embeddings
+            prompt_embeds = self.compute_text_embeddings(
+                prompts,
+                self.get_module("text_encoder"),
+                self.get_module("tokenizer"),
+                max_sequence_length=512,
+                device=self.device
+            )
+            if len(prompt_embeds)<len(sample_neg_prompt_embeds):
+                sample_neg_prompt_embeds  = sample_neg_prompt_embeds [:len(prompt_embeds)]
+
+            # Run Inference
+            with torch.no_grad():
+                videos, latents, log_probs, _ = wan_pipeline_with_logprob(
+                    self.validation_pipeline,
+                    prompt_embeds=prompt_embeds,
+                    negative_prompt_embeds=sample_neg_prompt_embeds,
+                    num_inference_steps=self.training_args.rl_args.eval_num_steps,
+                    guidance_scale=self.training_args.rl_args.eval_guidance_scale,
+                    output_type="pt",
+                    return_dict=False,
+                    num_frames=self.training_args.frames,
+                    height=self.training_args.height,
+                    width=self.training_args.width,
+                    determistic=True,
+                )
+
+            # Check Reward Calculation
+            
+            # future_rewards = self.executor.submit(self.reward_fn, videos, prompts, prompt_metadata, only_strict=False)
+            # rewards_dict, _ = future_rewards.result()
+            rewards_dict = self.reward_models.compute_rewards(videos, prompts, return_individual=True)
+
+            # --- 5. Process Outputs ---
+            # Store Rewards
+            for k, v in rewards_dict.items():
+                step_results["rewards"][k].append(v)
+
+            # Store Videos (Convert to numpy uint8)
+            # Using the correct rearrange logic we discussed: b c t h w -> b t h w c
+            video_permuted = videos.permute(0, 2, 3, 4, 1)
+            
+            for v_idx, video_tensor in enumerate(video_permuted):
+                video_np = (video_tensor.cpu().numpy() * 255).astype(np.uint8)
+                step_results["videos"].append(video_np)
+                step_results["captions"].append(prompts[v_idx])
+
+        # --- 6. Consolidate Results (No Distributed Gathering) ---
+        # Flatten the rewards lists into single arrays
+        all_rewards = {k: np.concatenate(v) for k, v in step_results["rewards"].items()}
+        all_videos = step_results["videos"]
+        all_captions = step_results["captions"]
+
+        # --- 7. Logging ---
+        # Save Videos
+        video_filenames = []
+        os.makedirs(training_args.output_dir, exist_ok=True)
+        
+        num_samples_to_save = min(15, len(all_videos))
+        
+        for i in range(num_samples_to_save):
+            filename = os.path.join(
+                training_args.output_dir,
+                f"val_step_{global_step}_idx_{i}.mp4"
+            )
+            imageio.mimsave(filename, all_videos[i], fps=8, codec="libx264")
+            video_filenames.append(filename)
+
+        # Log to Tracker
+        if hasattr(self.tracker, "log_artifacts"):
+            wandb_videos = []
+            for i in range(num_samples_to_save):
+                # Create caption with reward stats
+                reward_str = " | ".join(f"{k}: {all_rewards[k][i]:.2f}" for k in all_rewards)
+                full_caption = f"{all_captions[i][:100]} | {reward_str}"
+                
+                wandb_videos.append(
+                    wandb.Video(video_filenames[i], caption=full_caption, fps=8)
+                )
+            
+            # Calculate Mean Rewards
+            mean_rewards = {f"eval_reward_{k}": np.mean(v) for k, v in all_rewards.items()}
+            
+            logs = {
+                "eval_images": wandb_videos,
+                **mean_rewards
+            }
+            self.tracker.log_artifacts(logs, global_step)
+
+
+        training_args.inference_mode = False
+        self.transformer.train()  
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         """Initialize the RL training pipeline with algorithm, reward and value models."""
