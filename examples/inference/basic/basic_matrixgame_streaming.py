@@ -46,7 +46,7 @@ async def main():
         config["model_path"],
         # FastVideo will automatically handle distributed setup
         num_gpus=1,
-        use_fsdp_inference=True,
+        use_fsdp_inference=False, # set to True if GPU is out of memory
         dit_cpu_offload=True, # DiT need to be offloaded for MoE
         vae_cpu_offload=False,
         text_encoder_cpu_offload=True,

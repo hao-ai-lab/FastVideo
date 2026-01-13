@@ -55,7 +55,7 @@ def basic_generation():
     generator = VideoGenerator.from_pretrained(
         "FastVideo/LongCat-Video-I2V-Diffusers",
         num_gpus=1,
-        use_fsdp_inference=True,
+        use_fsdp_inference=False, # set to True if GPU is out of memory
         dit_cpu_offload=False,
         vae_cpu_offload=True,
         text_encoder_cpu_offload=True,
