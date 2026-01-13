@@ -18,30 +18,23 @@ from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.logger import init_logger
-from fastvideo.models.dits.ltx2 import (AudioLatentShape,
-                                        DEFAULT_LTX2_AUDIO_CHANNELS,
-                                        DEFAULT_LTX2_AUDIO_DOWNSAMPLE,
-                                        DEFAULT_LTX2_AUDIO_HOP_LENGTH,
-                                        DEFAULT_LTX2_AUDIO_MEL_BINS,
-                                        DEFAULT_LTX2_AUDIO_SAMPLE_RATE,
-                                        VideoLatentShape)
+from fastvideo.models.dits.ltx2 import (
+    AudioLatentShape, DEFAULT_LTX2_AUDIO_CHANNELS,
+    DEFAULT_LTX2_AUDIO_DOWNSAMPLE, DEFAULT_LTX2_AUDIO_HOP_LENGTH,
+    DEFAULT_LTX2_AUDIO_MEL_BINS, DEFAULT_LTX2_AUDIO_SAMPLE_RATE,
+    VideoLatentShape)
 from fastvideo.utils import PRECISION_TO_TYPE
 
 BASE_SHIFT_ANCHOR = 1024
 MAX_SHIFT_ANCHOR = 4096
 
+# Official distilled sigma schedule (8 denoising steps)
+# From LTX-2/packages/ltx-pipelines/src/ltx_pipelines/utils/constants.py
+DISTILLED_SIGMA_VALUES = [
+    1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0
+]
+
 logger = init_logger(__name__)
-
-
-def _debug_log_line(message: str) -> None:
-    log_path = os.getenv("LTX2_PIPELINE_DEBUG_PATH", "")
-    if not log_path:
-        return
-    log_dir = os.path.dirname(log_path)
-    if log_dir:
-        os.makedirs(log_dir, exist_ok=True)
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(message + "\n")
 
 
 def _log_non_finite(
@@ -153,7 +146,6 @@ class LTX2DenoisingStage(PipelineStage):
         verbose_logs = os.getenv("LTX2_DEBUG_DENOISE_LOG", "0") == "1"
         step_log_interval = int(
             os.getenv("LTX2_DEBUG_DENOISE_LOG_INTERVAL", "1"))
-        debug_pipeline = os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1"
         if batch.latents is None:
             raise ValueError("Latents must be provided before denoising.")
 
@@ -184,11 +176,22 @@ class LTX2DenoisingStage(PipelineStage):
                             ) and not fastvideo_args.disable_autocast and (
                                 not disable_autocast)
 
-        sigmas = _ltx2_sigmas(
-            steps=batch.num_inference_steps,
-            latent=None,
-            device=latents.device,
-        )
+        # Use official distilled sigma schedule for 8 steps (distilled models)
+        use_distilled_sigmas = os.getenv("LTX2_USE_DISTILLED_SIGMAS",
+                                         "1") == "1"
+        if use_distilled_sigmas and batch.num_inference_steps == 8:
+            sigmas = torch.tensor(
+                DISTILLED_SIGMA_VALUES,
+                device=latents.device,
+                dtype=torch.float32,
+            )
+            logger.info("[LTX2] Using official distilled sigma schedule")
+        else:
+            sigmas = _ltx2_sigmas(
+                steps=batch.num_inference_steps,
+                latent=None,
+                device=latents.device,
+            )
         if hasattr(self.transformer, "patchifier"):
             video_shape = VideoLatentShape.from_torch_shape(latents.shape)
             token_count = self.transformer.patchifier.get_token_count(
@@ -202,8 +205,7 @@ class LTX2DenoisingStage(PipelineStage):
         )
         audio_prompt_embeds = batch.extra.get("ltx2_audio_prompt_embeds")
         audio_neg_embeds = batch.extra.get("ltx2_audio_negative_embeds")
-        audio_context_p = audio_prompt_embeds[
-            0] if audio_prompt_embeds else None
+        audio_context_p = audio_prompt_embeds[0] if audio_prompt_embeds else None
         audio_context_n = audio_neg_embeds[0] if audio_neg_embeds else None
         audio_latents = None
         audio_timestep_template = None
@@ -259,17 +261,6 @@ class LTX2DenoisingStage(PipelineStage):
                     audio_shape.channels,
                     audio_shape.mel_bins,
                 ).permute(0, 2, 1, 3).contiguous()
-            if debug_pipeline:
-                audio_flat = audio_latents_patch.float().flatten()
-                audio_checksum = (
-                    audio_flat * torch.arange(
-                        audio_flat.numel(), device=audio_flat.device)
-                ).sum().item()
-                _debug_log_line(
-                    f"fastvideo:initial_audio_latent:sum={audio_latents.float().sum().item():.6f} "
-                    f"shape={tuple(audio_latents.shape)} "
-                    f"patch_checksum={audio_checksum:.6f}"
-                )
             audio_timestep_template = torch.ones(
                 (latents.shape[0], audio_shape.frames),
                 device=latents.device,
@@ -284,12 +275,6 @@ class LTX2DenoisingStage(PipelineStage):
             tuple(sigmas.shape),
             tuple(latents.shape),
         )
-        if debug_pipeline:
-            _debug_log_line(
-                f"fastvideo:denoise_start:steps={batch.num_inference_steps} "
-                f"latents_sum={latents.float().sum().item():.6f} "
-                f"prompt_sum={prompt_embeds.float().sum().item():.6f}"
-            )
 
         if debug_nans:
             if _log_non_finite("latents_start", latents):
@@ -321,9 +306,8 @@ class LTX2DenoisingStage(PipelineStage):
                     sigma_next.item(),
                 )
             timestep = timestep_template * sigma
-            audio_timestep = (audio_timestep_template *
-                              sigma if audio_timestep_template is not None else
-                              None)
+            audio_timestep = (audio_timestep_template * sigma
+                              if audio_timestep_template is not None else None)
 
             with torch.autocast(
                     device_type="cuda",
@@ -366,8 +350,8 @@ class LTX2DenoisingStage(PipelineStage):
                     pos_denoised = pos_denoised + (batch.guidance_scale - 1) * (
                         pos_denoised - neg_denoised)
                     if pos_audio is not None and neg_audio is not None:
-                        pos_audio = pos_audio + (batch.guidance_scale - 1) * (
-                            pos_audio - neg_audio)
+                        pos_audio = pos_audio + (batch.guidance_scale -
+                                                 1) * (pos_audio - neg_audio)
 
             if debug_nans:
                 if _log_non_finite("pos_denoised", pos_denoised, step_index):
@@ -391,18 +375,6 @@ class LTX2DenoisingStage(PipelineStage):
                     device=latents.device,
                     dtype=torch.float32,
                 )
-            if debug_pipeline:
-                log_line = (
-                    f"fastvideo:step={step_index}:sigma={sigma.item():.6f} "
-                    f"denoised_sum={pos_denoised.float().sum().item():.6f} "
-                    f"latent_sum={latents.float().sum().item():.6f}"
-                )
-                if pos_audio is not None and audio_latents is not None:
-                    log_line += (
-                        f" audio_denoised_sum={pos_audio.float().sum().item():.6f} "
-                        f"audio_latent_sum={audio_latents.float().sum().item():.6f}"
-                    )
-                _debug_log_line(log_line)
             dt = sigma_next - sigma
             velocity = ((latents.float() - pos_denoised.float()) /
                         sigma_value).to(latents.dtype)
@@ -411,9 +383,9 @@ class LTX2DenoisingStage(PipelineStage):
             if pos_audio is not None and audio_latents is not None:
                 audio_velocity = ((audio_latents.float() - pos_audio.float()) /
                                   sigma_value).to(audio_latents.dtype)
-                audio_latents = (
-                    audio_latents.float() + audio_velocity.float() * dt).to(
-                        audio_latents.dtype)
+                audio_latents = (audio_latents.float() +
+                                 audio_velocity.float() * dt).to(
+                                     audio_latents.dtype)
             if debug_nans and _log_non_finite("latents", latents, step_index):
                 if abort_on_nans:
                     raise RuntimeError(
