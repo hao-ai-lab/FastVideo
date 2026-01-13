@@ -367,41 +367,42 @@ class _SageAttnBlackwellWithTritonBwd(torch.autograd.Function):
             BLOCK_M=PRE_BLOCK, HEAD_DIM=ctx.HEAD_DIM
         )
 
-        fake_q = torch.empty_like(q_BHLD)
-        fake_k = torch.empty_like(k_BHLD)
-        fake_v = torch.empty_like(v_BHLD)
+        if ctx.IS_QAT:
+            fake_q = torch.empty_like(q_BHLD)
+            fake_k = torch.empty_like(k_BHLD)
+            fake_v = torch.empty_like(v_BHLD)
 
-        grid_1 = (triton.cdiv(q_BHLD.shape[2], BLOCK_M1), q_BHLD.shape[0] * q_BHLD.shape[1], 1)
-        grid_2 = (triton.cdiv(k_BHLD.shape[2], BLOCK_N2), q_BHLD.shape[0] * q_BHLD.shape[1], 1)
+            grid_1 = (triton.cdiv(q_BHLD.shape[2], BLOCK_M1), q_BHLD.shape[0] * q_BHLD.shape[1], 1)
+            grid_2 = (triton.cdiv(k_BHLD.shape[2], BLOCK_N2), q_BHLD.shape[0] * q_BHLD.shape[1], 1)
 
-        fake_quantize_q[grid_1](
-            q_BHLD, fake_q,
-            q_BHLD.stride(0), q_BHLD.stride(1),
-            q_BHLD.stride(2), q_BHLD.stride(3),
-            fake_q.stride(0), fake_q.stride(1),
-            fake_q.stride(2), fake_q.stride(3),
-            N_HEAD, N_CTX_Q,
-            BLOCK_M=BLOCK_M1, HEAD_DIM=ctx.HEAD_DIM, use_global_sf=ctx.use_global_sf
-        )
+            fake_quantize_q[grid_1](
+                q_BHLD, fake_q,
+                q_BHLD.stride(0), q_BHLD.stride(1),
+                q_BHLD.stride(2), q_BHLD.stride(3),
+                fake_q.stride(0), fake_q.stride(1),
+                fake_q.stride(2), fake_q.stride(3),
+                N_HEAD, N_CTX_Q,
+                BLOCK_M=BLOCK_M1, HEAD_DIM=ctx.HEAD_DIM, use_global_sf=ctx.use_global_sf
+            )
 
-        fake_quantize_kv[grid_2](
-            k_BHLD, v_BHLD, fake_k, fake_v,
-            k_BHLD.stride(0), k_BHLD.stride(1),
-            k_BHLD.stride(2), k_BHLD.stride(3),
-            fake_k.stride(0), fake_k.stride(1),
-            fake_k.stride(2), fake_k.stride(3),
-            N_HEAD, N_CTX_KV,
-            BLOCK_N=BLOCK_N2, HEAD_DIM=ctx.HEAD_DIM, use_global_sf=ctx.use_global_sf
-        )
+            fake_quantize_kv[grid_2](
+                k_BHLD, v_BHLD, fake_k, fake_v,
+                k_BHLD.stride(0), k_BHLD.stride(1),
+                k_BHLD.stride(2), k_BHLD.stride(3),
+                fake_k.stride(0), fake_k.stride(1),
+                fake_k.stride(2), fake_k.stride(3),
+                N_HEAD, N_CTX_KV,
+                BLOCK_N=BLOCK_N2, HEAD_DIM=ctx.HEAD_DIM, use_global_sf=ctx.use_global_sf
+            )
 
-        # Use fake quantized tensors for gradient computation (QAT)
-        # NOTE: The reassignment below only changes local variable references.
-        # The gradients (dq_BHLD, dk_BHLD, dv_BHLD) computed using fake_q/fake_k/fake_v
-        # will still correctly backpropagate to the original q_BHLD/k_BHLD/v_BHLD tensors
-        # from ctx.saved_tensors, because those original tensors remain in the computation graph.
-        q_BHLD = fake_q
-        k_BHLD = fake_k
-        v_BHLD = fake_v
+            # Use fake quantized tensors for gradient computation (QAT)
+            # NOTE: The reassignment below only changes local variable references.
+            # The gradients (dq_BHLD, dk_BHLD, dv_BHLD) computed using fake_q/fake_k/fake_v
+            # will still correctly backpropagate to the original q_BHLD/k_BHLD/v_BHLD tensors
+            # from ctx.saved_tensors, because those original tensors remain in the computation graph.
+            q_BHLD = fake_q
+            k_BHLD = fake_k
+            v_BHLD = fake_v
 
         # NOTE: K is NOT pre-scaled here - scaling is applied AFTER qk dot product in kernels
         # This improves precision by avoiding rounding errors in K before the dot product
@@ -492,7 +493,19 @@ def qat_attn(q_BLHD, k_BLHD, v_BLHD, is_causal=False, use_global_sf=True):
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
     v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
-    o_BHLD = attention(q_BHLD, k_BHLD, v_BHLD, is_causal, 1.0 / sqrt(q_BLHD.shape[-1]), use_global_sf=use_global_sf)
+
+    use_qat_qkv_backward = True
+    smooth_k = True
+    warp_specialize = True
+    IS_QAT = True
+    two_level_quant_P = True
+    fake_quant_P = True
+    use_high_prec_o = False
+    smooth_q = False
+    sm_scale = 1.0 / sqrt(q_BHLD.shape[-1])
+    o_BHLD = attention(q_BHLD, k_BHLD, v_BHLD, is_causal, sm_scale,
+                       use_qat_qkv_backward, smooth_k, warp_specialize, IS_QAT,
+                       two_level_quant_P, fake_quant_P, use_high_prec_o, smooth_q, use_global_sf)
     return o_BHLD.permute(0, 2, 1, 3).contiguous()
 
 
@@ -549,7 +562,7 @@ class SageAttention3Impl(AttentionImpl):
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         # output = sageattn_blackwell_with_16bit_bwd(query, key, value, is_causal=self.causal)
-        output = sageattn_blackwell_with_triton_bwd(query, key, value, is_causal=self.causal)
+        # output = sageattn_blackwell_with_triton_bwd(query, key, value, is_causal=self.causal)
         # output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
-        # output = qat_attn(query, key, value, is_causal=self.causal)
+        output = qat_attn(query, key, value, is_causal=self.causal)
         return output
