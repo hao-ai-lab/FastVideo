@@ -13,7 +13,7 @@ def main():
         model_name,
         # FastVideo will automatically handle distributed setup
         num_gpus=1,
-        use_fsdp_inference=True,
+        use_fsdp_inference=False, # set to True if GPU is out of memory
         text_encoder_cpu_offload=False,
         dit_cpu_offload=False,
     )
