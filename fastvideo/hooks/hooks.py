@@ -3,7 +3,6 @@
 from abc import ABC, abstractmethod
 import functools
 from typing import Any
-from collections.abc import Callable
 from torch import nn
 
 
@@ -40,17 +39,6 @@ class ForwardHook(ABC):
     def post_forward(self, module: nn.Module, output: Any) -> Any:
         """Called after the module's forward method is executed."""
         return output
-
-    def _wrap_forward(self, module: nn.Module, *args, **kwargs) -> Callable:
-
-        def forward_wrapper(module: nn.Module, *args, **kwargs) -> Any:
-            modified_args, modified_kwargs = self.pre_forward(
-                module, *args, **kwargs)
-            output = module.forward(*modified_args, **modified_kwargs)
-            modified_output = self.post_forward(module, output)
-            return modified_output
-
-        return functools.partial(forward_wrapper, module)
 
 
 class ModuleHookManager:
