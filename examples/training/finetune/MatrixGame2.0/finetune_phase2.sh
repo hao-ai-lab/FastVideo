@@ -19,9 +19,9 @@ training_args=(
   --output_dir "checkpoints/matrixgame_phase2"
   # --max_train_steps 120000
   --max_train_steps 1000
-  --train_batch_size 2
+  --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 2
+  --gradient_accumulation_steps 4
   --num_latent_t 20
   --num_height 352
   --num_width 640
