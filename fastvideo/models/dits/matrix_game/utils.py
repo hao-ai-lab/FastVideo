@@ -157,8 +157,8 @@ def load_initial_image(image_path: str = None) -> Image.Image:
     return Image.new("RGB", (640, 352), (128, 128, 128))
 
 def create_action_presets(num_frames: int, keyboard_dim: int = 4, seed: int = None):
-    if keyboard_dim not in (2, 4, 7):
-        raise ValueError(f"keyboard_dim must be 2, 4, or 7, got {keyboard_dim}")
+    if keyboard_dim not in (2, 4, 6, 7):
+        raise ValueError(f"keyboard_dim must be 2, 4, 6, or 7, got {keyboard_dim}")
     if num_frames % 4 != 1:
         raise ValueError("Matrix-Game conditioning expects num_frames to be 4k+1.")
 
@@ -181,6 +181,11 @@ def create_action_presets(num_frames: int, keyboard_dim: int = 4, seed: int = No
         actions_double_action = []
         actions_single_camera = ["camera_l", "camera_r"]
         keyboard_idx = {"forward": 0, "back": 1}
+    elif keyboard_dim == 6:
+        actions_single_action = ["forward", "back", "left", "right"]
+        actions_double_action = ["forward_left", "forward_right"]
+        actions_single_camera = ["camera_l", "camera_r"]
+        keyboard_idx = {"forward": 0, "back": 1, "left": 2, "right": 3, "t1": 4, "t2": 5}
     else:  # keyboard_dim == 7
         # Temple Run model: still, w, s, left, right, a, d (no mouse)
         actions_single_action = ["forward", "back", "left", "right"]

@@ -197,6 +197,11 @@ class SelfForcingWan2_2_T2V480PConfig(Wan2_2_T2V_A14B_Config):
 # ============= Matrix Game ===================
 # =============================================
 @dataclass
+class MatrixGameBaseI2V480PConfig(WanI2V480PConfig):
+    dit_config: DiTConfig = field(default_factory=MatrixGameWanVideoConfig)
+    flow_shift: float | None = 5.0
+
+@dataclass
 class MatrixGameI2V480PConfig(WanI2V480PConfig):
     dit_config: DiTConfig = field(default_factory=MatrixGameWanVideoConfig)
 
