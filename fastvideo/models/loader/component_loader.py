@@ -36,7 +36,6 @@ from fastvideo.models.loader.weight_utils import (
 from fastvideo.models.registry import ModelRegistry
 from fastvideo.utils import PRECISION_TO_TYPE, is_pin_memory_available
 from fastvideo.hooks.layerwise_offload import enable_layerwise_offload
-from fastvideo.hooks.hooks import ModuleHookManager
 
 logger = init_logger(__name__)
 

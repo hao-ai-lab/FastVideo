@@ -2,6 +2,9 @@ from typing import Any
 import torch
 from torch import nn
 from fastvideo.hooks.hooks import ForwardHook, ModuleHookManager
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 def _tensor_placeholder(tensor: torch.Tensor,
@@ -16,6 +19,7 @@ class LayerwiseOffloadState:
     def __init__(
         self,
         async_copy_stream: torch.cuda.Stream,
+        device: torch.device,
         next_state: "LayerwiseOffloadState | None" = None,
     ) -> None:
         self.async_copy_stream = async_copy_stream
@@ -23,7 +27,7 @@ class LayerwiseOffloadState:
         self.gpu_named_parameters: dict[str, torch.Tensor] = {}
         self.cpu_named_parameters: dict[str, torch.Tensor] = {}
         self.module_ref: nn.Module = None  # type: ignore
-        self.device: torch.device = torch.device("cuda")
+        self.device: torch.device = device
 
     def _will_offload(self, name: str) -> bool:
         return True
@@ -88,26 +92,30 @@ class LayerwiseOffloadHook(ForwardHook):
         return "LayerwiseOffloadHook"
 
     def pre_forward(self, module: nn.Module, *args, **kwargs):
-        self.state.wait_and_replace_params(
-        )  # pyright: ignore[reportAttributeAccessIssue]
+        self.state.wait_and_replace_params()  # pyright: ignore
         if self.state.next_state is not None:
-            self.state.next_state.prefetch_params(
-            )  # pyright: ignore[reportAttributeAccessIssue]
+            self.state.next_state.prefetch_params()  # pyright: ignore
         return args, kwargs
 
     def post_forward(self, module: torch.nn.Module, output: Any):
-        self.state.release_gpu_params(
-        )  # pyright: ignore[reportAttributeAccessIssue]
+        self.state.release_gpu_params()  # pyright: ignore
         return output
 
 
-def enable_layerwise_offload(model: nn.Module, ):
+def enable_layerwise_offload(model: nn.Module):
+    if torch.cuda.is_available():
+        device = torch.device("cuda", torch.cuda.current_device())
+    else:
+        logger.warning(
+            "CUDA is not available. Layerwise offloading is disabled.")
+        return
     state_list = []
     async_stream = torch.cuda.Stream()
     for name, submodule in model.named_children():
         if isinstance(submodule, nn.ModuleList):
             for idx, module_entry in enumerate(submodule):
-                state = LayerwiseOffloadState(async_copy_stream=async_stream)
+                state = LayerwiseOffloadState(async_copy_stream=async_stream,
+                                              device=device)
                 state_list.append(state)
                 hook_mgr = ModuleHookManager.get_from_or_default(module_entry)
                 hook = LayerwiseOffloadHook(state)
