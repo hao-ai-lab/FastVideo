@@ -100,9 +100,9 @@ class ImageEncodingStage(PipelineStage):
         return result
 
 
-class Hy15ImageEncodingStage(ImageEncodingStage):
+class HyWorldImageEncodingStage(ImageEncodingStage):
     """
-    Stage for encoding image prompts into embeddings for HunyuanVideo1.5 models.
+    Stage for encoding image prompts into embeddings for HyWorld models.
     
     Uses SigLIP (or other vision encoder) to encode reference images for I2V tasks.
     Also encodes reference image with VAE for conditional latent.
@@ -168,11 +168,21 @@ class Hy15ImageEncodingStage(ImageEncodingStage):
             if self.image_encoder is not None:
                 self.image_encoder = self.image_encoder.to(device)
                 
+                # Get model dtype for proper precision matching (HY-WorldPlay uses fp16)
+                model_dtype = next(self.image_encoder.parameters()).dtype
+                
                 # Preprocess image for SigLIP
                 if hasattr(self.image_processor, 'preprocess'):
+                    # Convert to numpy array first (matching HY-WorldPlay flow)
+                    import numpy as np
+                    if not isinstance(image, np.ndarray):
+                        image_np = np.array(image)
+                    else:
+                        image_np = image
+                    
                     image_inputs = self.image_processor.preprocess(
-                        images=image, return_tensors="pt"
-                    ).to(device=device)
+                        images=image_np, return_tensors="pt"
+                    ).to(device=device, dtype=model_dtype)  # Match model dtype!
                     pixel_values = image_inputs['pixel_values']
                 else:
                     from torchvision import transforms as T
@@ -188,7 +198,7 @@ class Hy15ImageEncodingStage(ImageEncodingStage):
                         from PIL import Image
                         image = Image.fromarray(image)
                         
-                    pixel_values = transform(image).unsqueeze(0).to(device)
+                    pixel_values = transform(image).unsqueeze(0).to(device, dtype=model_dtype)
                 
                 with set_forward_context(current_timestep=0, attn_metadata=None):
                     outputs = self.image_encoder(pixel_values=pixel_values)

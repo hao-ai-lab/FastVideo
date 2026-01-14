@@ -16,7 +16,7 @@ from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
                                         LatentPreparationStage,
                                         TextEncodingStage,
                                         TimestepPreparationStage,
-                                        Hy15ImageEncodingStage)
+                                        HyWorldImageEncodingStage)
 
 logger = init_logger(__name__)
 
@@ -36,7 +36,7 @@ class HyWorldPipeline(ComposedPipelineBase):
     # Note: guider (ClassifierFreeGuidance) is not needed - FastVideo handles CFG differently
     # Note: text_encoder_2/tokenizer_2 are not used - HyWorld only uses a single LLM-based text encoder
     _required_config_modules = [
-        "text_encoder", "tokenizer", "text_encoder_2", "tokenizer_2", "vae", "transformer", "scheduler",
+        "text_encoder", "tokenizer", "vae", "transformer", "scheduler", "text_encoder_2", "tokenizer_2",
         "image_encoder", "feature_extractor"
     ]
 
@@ -46,17 +46,10 @@ class HyWorldPipeline(ComposedPipelineBase):
         self.add_stage(stage_name="input_validation_stage",
                        stage=InputValidationStage())
 
-        # HyWorld uses only a single text encoder (no text_encoder_2/tokenizer_2)
         self.add_stage(stage_name="prompt_encoding_stage_primary",
                        stage=TextEncodingStage(
-                           text_encoders=[
-                               self.get_module("text_encoder"),
-                               self.get_module("text_encoder_2")
-                           ],
-                           tokenizers=[
-                               self.get_module("tokenizer"),
-                               self.get_module("tokenizer_2")
-                           ],
+                           text_encoders=[self.get_module("text_encoder"), self.get_module("text_encoder_2")],
+                           tokenizers=[self.get_module("tokenizer"), self.get_module("tokenizer_2")]
                        ))
 
         self.add_stage(stage_name="conditioning_stage",
@@ -72,7 +65,7 @@ class HyWorldPipeline(ComposedPipelineBase):
                            transformer=self.get_module("transformer")))
 
         self.add_stage(stage_name="image_encoding_stage",
-                       stage=Hy15ImageEncodingStage(
+                       stage=HyWorldImageEncodingStage(
                            image_encoder=self.get_module("image_encoder", None),
                            image_processor=self.get_module("feature_extractor", None),
                            vae=self.get_module("vae")))

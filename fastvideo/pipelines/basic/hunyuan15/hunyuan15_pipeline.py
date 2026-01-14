@@ -14,7 +14,7 @@ from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
                                         LatentPreparationStage,
                                         TextEncodingStage,
                                         TimestepPreparationStage,
-                                        Hy15ImageEncodingStage)
+                                        HyWorldImageEncodingStage)
 
 # TODO(will): move PRECISION_TO_TYPE to better place
 
@@ -59,7 +59,7 @@ class HunyuanVideo15Pipeline(ComposedPipelineBase):
                            transformer=self.get_module("transformer")))
 
         self.add_stage(stage_name="image_encoding_stage",
-                       stage=Hy15ImageEncodingStage(
+                       stage=HyWorldImageEncodingStage(
                            image_encoder=self.get_module("image_encoder", None),
                            image_processor=self.get_module("feature_extractor", None),
                            vae=self.get_module("vae")))

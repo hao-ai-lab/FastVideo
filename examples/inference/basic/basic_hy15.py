@@ -20,22 +20,31 @@ def main():
         # image_encoder_cpu_offload=False,
     )
 
+    # prompt = (
+    #     "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
+    #     "wide with interest. The playful yet serene atmosphere is complemented by soft "
+    #     "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
+    # )
+
     prompt = (
-        "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
-        "wide with interest. The playful yet serene atmosphere is complemented by soft "
-        "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
+        'A paved pathway leads towards a stone arch bridge spanning a calm body of water.  '
+        'Lush green trees and foliage line the path and the far bank of the water. '
+        'A traditional-style pavilion with a tiered, reddish-brown roof sits on the far shore. '
+        'The water reflects the surrounding greenery and the sky.  '
+        'The scene is bathed in soft, natural light, creating a tranquil and serene atmosphere. '
+        'The pathway is composed of large, rectangular stones, and the bridge is constructed of light gray stone.  '
+        'The overall composition emphasizes the peaceful and harmonious nature of the landscape.'
     )
+    video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, negative_prompt="", num_frames=121, fps=24)
 
-    video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, negative_prompt="", num_frames=81, fps=16)
+    # prompt2 = (
+    #     "A majestic lion strides across the golden savanna, its powerful frame "
+    #     "glistening under the warm afternoon sun. The tall grass ripples gently in "
+    #     "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
+    #     "embodying the raw energy of the wild. Low angle, steady tracking shot, "
+    #     "cinematic.")
 
-    prompt2 = (
-        "A majestic lion strides across the golden savanna, its powerful frame "
-        "glistening under the warm afternoon sun. The tall grass ripples gently in "
-        "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
-        "embodying the raw energy of the wild. Low angle, steady tracking shot, "
-        "cinematic.")
-
-    video2 = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=True, negative_prompt="", num_frames=81, fps=16)
+    # video2 = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=True, negative_prompt="", num_frames=121, fps=24)
 
 
 if __name__ == "__main__":

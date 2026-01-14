@@ -19,6 +19,7 @@ from fastvideo import VideoGenerator
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.utils import shallow_asdict, align_to
 from fastvideo.logger import init_logger
+from PIL import Image
 
 # Import HyWorld utilities from FastVideo
 from fastvideo.models.dits.hyworld import (
@@ -27,6 +28,78 @@ from fastvideo.models.dits.hyworld import (
 )
 
 logger = init_logger(__name__)
+
+
+# ============================================================================
+# Resolution bucket utilities (from HY-WorldPlay)
+# ============================================================================
+
+# Target resolution configs (matching HY-WorldPlay)
+TARGET_SIZE_CONFIG = {
+    "360p": {"bucket_hw_base_size": 480, "bucket_hw_bucket_stride": 16},
+    "480p": {"bucket_hw_base_size": 640, "bucket_hw_bucket_stride": 16},
+    "720p": {"bucket_hw_base_size": 960, "bucket_hw_bucket_stride": 16},
+    "1080p": {"bucket_hw_base_size": 1440, "bucket_hw_bucket_stride": 16},
+}
+
+
+def generate_crop_size_list(base_size=256, patch_size=16, max_ratio=4.0):
+    """Generate valid (width, height) bucket sizes."""
+    num_patches = round((base_size / patch_size) ** 2)
+    assert max_ratio >= 1.0
+    crop_size_list = []
+    wp, hp = num_patches, 1
+    while wp > 0:
+        if max(wp, hp) / min(wp, hp) <= max_ratio:
+            crop_size_list.append((hp * patch_size, wp * patch_size))  # (height, width)
+        if (hp + 1) * wp <= num_patches:
+            hp += 1
+        else:
+            wp -= 1
+    return crop_size_list
+
+
+def get_closest_resolution(image_height, image_width, target_resolution="480p"):
+    """
+    Get closest supported resolution for given image dimensions.
+    
+    Args:
+        image_height: Height of input image
+        image_width: Width of input image  
+        target_resolution: Target resolution string (e.g., "480p", "720p")
+        
+    Returns:
+        tuple[int, int]: (height, width) of closest supported resolution
+    """
+    config = TARGET_SIZE_CONFIG[target_resolution]
+    bucket_hw_base_size = config["bucket_hw_base_size"]
+    bucket_hw_bucket_stride = config["bucket_hw_bucket_stride"]
+    
+    crop_size_list = generate_crop_size_list(bucket_hw_base_size, bucket_hw_bucket_stride)
+    aspect_ratios = np.array([round(float(h) / float(w), 5) for h, w in crop_size_list])
+    
+    # Find closest aspect ratio
+    image_ratio = float(image_height) / float(image_width)
+    closest_idx = np.abs(aspect_ratios - image_ratio).argmin()
+    closest_size = crop_size_list[closest_idx]
+    
+    return closest_size[0], closest_size[1]  # (height, width)
+
+
+def get_resolution_from_image(image_path, target_resolution="480p"):
+    """
+    Automatically determine resolution from input image.
+    
+    Args:
+        image_path: Path to input image
+        target_resolution: Target resolution tier ("480p", "720p", etc.)
+        
+    Returns:
+        tuple[int, int]: (height, width) matching HY-WorldPlay's bucket selection
+    """
+    img = Image.open(image_path)
+    img_width, img_height = img.size
+    return get_closest_resolution(img_height, img_width, target_resolution)
 
 
 class HyWorldVideoGenerator(VideoGenerator):
@@ -191,16 +264,19 @@ def main():
     # )
 
     SEED = 1
-    NUM_FRAMES = 125
-    HEIGHT = 480
-    WIDTH = 832  # 16:9 aspect ratio for 480p
-    POSE = 'a-31'  # Forward movement for 31 latents
+    NUM_FRAMES = 61
+    TARGET_RESOLUTION = "480p"  # Options: "360p", "480p", "720p", "1080p"
+    POSE = 'a-15'  # Forward movement for 31 latents
 
     # Check if image exists
     if not os.path.exists(IMAGE_PATH):
         print(f"Warning: Image path {IMAGE_PATH} does not exist. Image-to-video requires an image.")
         print("Please set IMAGE_PATH environment variable or update the IMAGE_PATH in the script.")
         return
+
+    # Automatically determine resolution from input image (matching HY-WorldPlay)
+    HEIGHT, WIDTH = get_resolution_from_image(IMAGE_PATH, TARGET_RESOLUTION)
+    print(f"Auto-selected resolution: {HEIGHT}x{WIDTH} (from {TARGET_RESOLUTION} buckets)")
 
     # FastVideo will automatically use the optimal default arguments for the model
     generator = HyWorldVideoGenerator.from_pretrained(

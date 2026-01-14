@@ -176,7 +176,7 @@ class HyWorldDenoisingStage(DenoisingStage):
         else:
             points_local = points_local.to(device)
 
-        # Use conditional latents directly (already prepared by Hy15ImageEncodingStage)
+        # Use conditional latents directly (prepared by HyWorldImageEncodingStage)
         # batch.image_latent is already [1, 33, T, H, W] with first frame encoded, rest zeros
         cond_latents = batch.image_latent
 
