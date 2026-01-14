@@ -75,7 +75,7 @@ class HyWorldDenoisingStage(DenoisingStage):
         Returns:
             The batch with denoised latents.
         """
-
+        
         pipeline = self.pipeline() if self.pipeline else None
         if not fastvideo_args.model_loaded["transformer"]:
             loader = TransformerLoader()
@@ -147,22 +147,6 @@ class HyWorldDenoisingStage(DenoisingStage):
             },
         )
 
-        pos_cond_kwargs = self.prepare_extra_func_kwargs(
-            self.transformer.forward,
-            {
-                "encoder_hidden_states_2": batch.clip_embedding_pos,
-                "encoder_attention_mask": batch.prompt_attention_mask,
-            },
-        )
-
-        neg_cond_kwargs = self.prepare_extra_func_kwargs(
-            self.transformer.forward,
-            {
-                "encoder_hidden_states_2": batch.clip_embedding_neg,
-                "encoder_attention_mask": batch.negative_attention_mask,
-            },
-        )
-
         action_kwargs = self.prepare_extra_func_kwargs(
             self.transformer.forward,
             {
@@ -192,10 +176,9 @@ class HyWorldDenoisingStage(DenoisingStage):
         else:
             points_local = points_local.to(device)
 
-        # Prepare conditional latents if needed (for i2v)
-        latent_frames = latents.shape[2]
-        cond_latents = batch.image_latent.repeat(1, 1, latent_frames, 1, 1)
-        cond_latents[:, :, 1:, :, :] = 0.0 if cond_latents is not None else None
+        # Use conditional latents directly (already prepared by Hy15ImageEncodingStage)
+        # batch.image_latent is already [1, 33, T, H, W] with first frame encoded, rest zeros
+        cond_latents = batch.image_latent
 
         # Calculate chunk configuration
         latent_frames = latents.shape[2]
@@ -330,22 +313,27 @@ class HyWorldDenoisingStage(DenoisingStage):
                         # Note: batch size 1 for sequential CFG (matching original HY-WorldPlay)
                         transformer_kwargs = {
                             **image_kwargs,
-                            **pos_cond_kwargs,
                             **action_kwargs,
                             "timestep": t_expand,  # [num_frames] num_frames = 16
                             "timestep_txt": t_expand_txt,  # [1]
                             "viewmats": viewmats_input.to(target_dtype),  # [1, num_frames, 4, 4]
                             "Ks": Ks_input.to(target_dtype),  # [1, num_frames, 3, 3]
                         }
+
+                        # Set encoder_attention_mask for positive/negative conditioning
+                        pos_transformer_kwargs = {**transformer_kwargs, "encoder_attention_mask": batch.prompt_attention_mask}
+                        neg_transformer_kwargs = {**transformer_kwargs, "encoder_attention_mask": batch.negative_attention_mask}
+
+
                         # ref_image_tensor.shape: torch.Size([1, 3, 1, 480, 832])
                         # cond_latents.shape: torch.Size([1, 32, 1, 30, 52])
                         # encoder_hidden_states_image: torch.Size([1, 729, 1152])
                         # encoder_attention_mask: torch.Size([1, 1000])
-                        for key, value in transformer_kwargs.items():
-                            if key != "encoder_hidden_states_image" and key != "encoder_attention_mask":
-                                print(f"{key}: {value.shape if isinstance(value, torch.Tensor) else value}")
-                            else:
-                                print(f"{key}: {value[0].shape}")
+                        # for key, value in transformer_kwargs.items():
+                        #     if key != "encoder_hidden_states_image" and key != "encoder_attention_mask":
+                        #         print(f"{key}: {value.shape if isinstance(value, torch.Tensor) else value}")
+                        #     else:
+                        #         print(f"{key}: {value[0].shape}")
 
                         if action_input is not None:
                             transformer_kwargs["action"] = action_input.to(target_dtype)
@@ -355,16 +343,21 @@ class HyWorldDenoisingStage(DenoisingStage):
                             attn_metadata=None,
                             forward_batch=batch,
                         ):
+                            save_kwargs = transformer_kwargs.copy()
+                            save_kwargs["latents_concat"] = latents_concat
+                            save_kwargs["prompt_embeds"] = prompt_embeds
+                            # torch.save(save_kwargs, "save_kwargs.pth")
+                            # exit()
                             noise_pred = current_model(
                                 latents_concat,
                                 prompt_embeds,
-                                **transformer_kwargs,
+                                **pos_transformer_kwargs,
                             )
                             
-                        print(f"noise_pred.shape: {noise_pred.shape}")
-                        print("batch.guidance_scale", batch.guidance_scale)
-                        print("batch.do_classifier_free_guidance", batch.do_classifier_free_guidance)
-                        print("batch.guidance_rescale", batch.guidance_rescale)
+                        # print(f"noise_pred.shape: {noise_pred.shape}") torch.Size([1, 32, 16, 30, 52])
+                        # print("batch.guidance_scale", batch.guidance_scale) 6.0
+                        # print("batch.do_classifier_free_guidance", batch.do_classifier_free_guidance) True
+                        # print("batch.guidance_rescale", batch.guidance_rescale) 0.0
 
                         if batch.do_classifier_free_guidance:
                             batch.is_cfg_negative = True
@@ -376,7 +369,7 @@ class HyWorldDenoisingStage(DenoisingStage):
                                 noise_pred_uncond = current_model(
                                     latents_concat,
                                     neg_prompt_embeds,
-                                    **transformer_kwargs,
+                                    **neg_transformer_kwargs,
                                 )
 
                             noise_pred_text = noise_pred

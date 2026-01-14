@@ -3,60 +3,88 @@
 HyWorld video diffusion pipeline implementation.
 
 This module contains an implementation of the HyWorld video diffusion pipeline
-that inherits from HunyuanVideo15Pipeline, using the HyWorld-specific denoising stage
+using the modular pipeline architecture with HyWorld-specific denoising stage
 for chunk-based video generation with context frame selection.
 """
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.pipelines.basic.hunyuan15.hunyuan15_pipeline import (
-    HunyuanVideo15Pipeline)
-from fastvideo.pipelines.stages import HyWorldDenoisingStage
+from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
+from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
+                                        HyWorldDenoisingStage,
+                                        InputValidationStage,
+                                        LatentPreparationStage,
+                                        TextEncodingStage,
+                                        TimestepPreparationStage,
+                                        Hy15ImageEncodingStage)
 
 logger = init_logger(__name__)
 
 
-class HyWorldPipeline(HunyuanVideo15Pipeline):
+class HyWorldPipeline(ComposedPipelineBase):
     """
     HyWorld video diffusion pipeline.
 
-    This pipeline extends HunyuanVideo15Pipeline by using HyWorldDenoisingStage
-    instead of the standard DenoisingStage. The HyWorld denoising stage implements
-    chunk-based video generation with context frame selection for 3D-aware generation.
+    This pipeline implements chunk-based video generation with context frame
+    selection for 3D-aware generation using HyWorldDenoisingStage.
 
-    All other stages remain the same as HunyuanVideo15Pipeline.
+    Note: HyWorld only uses a single LLM-based text encoder, unlike SDXL-style
+    dual encoder setups. The text_encoder_2/tokenizer_2 are not used.
     """
 
     # Include image_encoder and feature_extractor for I2V support with SigLIP
     # Note: guider (ClassifierFreeGuidance) is not needed - FastVideo handles CFG differently
+    # Note: text_encoder_2/tokenizer_2 are not used - HyWorld only uses a single LLM-based text encoder
     _required_config_modules = [
-        "text_encoder", "text_encoder_2", "tokenizer", "tokenizer_2", "vae",
-        "transformer", "scheduler", "image_encoder", "feature_extractor"
+        "text_encoder", "tokenizer", "text_encoder_2", "tokenizer_2", "vae", "transformer", "scheduler",
+        "image_encoder", "feature_extractor"
     ]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
         """Set up pipeline stages with HyWorld-specific denoising stage."""
-        # Call parent to set up all stages
-        super().create_pipeline_stages(fastvideo_args)
-        
-        # Replace the denoising_stage with HyWorldDenoisingStage
-        # Find the index of the old denoising_stage in _stages list
-        old_denoising_stage = self.denoising_stage
-        for i, stage in enumerate(self._stages):
-            if stage is old_denoising_stage:
-                # Create new HyWorld denoising stage
-                new_denoising_stage = HyWorldDenoisingStage(
-                    transformer=self.get_module("transformer"),
-                    scheduler=self.get_module("scheduler"),
-                    pipeline=self)
-                
-                # Replace in stages list
-                self._stages[i] = new_denoising_stage
-                # Replace in stage name mapping
-                self._stage_name_mapping["denoising_stage"] = new_denoising_stage
-                # Replace attribute
-                setattr(self, "denoising_stage", new_denoising_stage)
-                break
+
+        self.add_stage(stage_name="input_validation_stage",
+                       stage=InputValidationStage())
+
+        # HyWorld uses only a single text encoder (no text_encoder_2/tokenizer_2)
+        self.add_stage(stage_name="prompt_encoding_stage_primary",
+                       stage=TextEncodingStage(
+                           text_encoders=[
+                               self.get_module("text_encoder"),
+                               self.get_module("text_encoder_2")
+                           ],
+                           tokenizers=[
+                               self.get_module("tokenizer"),
+                               self.get_module("tokenizer_2")
+                           ],
+                       ))
+
+        self.add_stage(stage_name="conditioning_stage",
+                       stage=ConditioningStage())
+
+        self.add_stage(stage_name="timestep_preparation_stage",
+                       stage=TimestepPreparationStage(
+                           scheduler=self.get_module("scheduler")))
+
+        self.add_stage(stage_name="latent_preparation_stage",
+                       stage=LatentPreparationStage(
+                           scheduler=self.get_module("scheduler"),
+                           transformer=self.get_module("transformer")))
+
+        self.add_stage(stage_name="image_encoding_stage",
+                       stage=Hy15ImageEncodingStage(
+                           image_encoder=self.get_module("image_encoder", None),
+                           image_processor=self.get_module("feature_extractor", None),
+                           vae=self.get_module("vae")))
+
+        self.add_stage(stage_name="denoising_stage",
+                       stage=HyWorldDenoisingStage(
+                           transformer=self.get_module("transformer"),
+                           scheduler=self.get_module("scheduler"),
+                           pipeline=self))
+
+        self.add_stage(stage_name="decoding_stage",
+                       stage=DecodingStage(vae=self.get_module("vae")))
 
 
 EntryClass = HyWorldPipeline

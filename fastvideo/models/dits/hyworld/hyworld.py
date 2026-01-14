@@ -350,26 +350,19 @@ class HyWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
         temb = self.time_in(timestep, timestep_r=timestep_r)
         temb_txt = self.time_in(timestep_txt, timestep_r=timestep_r)
 
-        # Debug: print shapes to identify the mismatch
-        print(f"[DEBUG HyWorld forward] timestep.shape: {timestep.shape}")
-        print(f"[DEBUG HyWorld forward] temb.shape after time_in: {temb.shape}")
-        print(f"[DEBUG HyWorld forward] action.shape: {action.shape if action is not None else None}")
-        print(f"[DEBUG HyWorld forward] batch_size: {batch_size}, post_patch_num_frames: {post_patch_num_frames}")
-        print(f"[DEBUG HyWorld forward] post_patch_height: {post_patch_height}, post_patch_width: {post_patch_width}")
-
-        # Add action conditioning 
-        # Then broadcast timestep embedding to match sequence length (one per spatial token)
-        # [B*T, C] -> [B, T*H*W, C] -> [B*T*H*W, C]
+        # Add action conditioning if provided
+        # temb shape: [B*T, C] where T = num_frames
         if action is not None:
-            action_emb = self.action_in(action.reshape(-1))
-            print(f"[DEBUG HyWorld forward] action_emb.shape: {action_emb.shape}")
-            temb = temb + action_emb
+            temb = temb + self.action_in(action.reshape(-1))
         
-        print(f"[DEBUG HyWorld forward] temb.shape before repeat: {temb.shape}")
+        # Keep a per-batch version for FinalLayer (average over frames)
+        # [B*T, C] -> [B, T, C] -> [B, C]
+        temb_final = temb.view(batch_size, -1, temb.shape[-1]).mean(dim=1)
+        
+        # Broadcast timestep embedding for transformer blocks (one per spatial token)
+        # [B*T, C] -> [B, T*H*W, C] -> [B*T*H*W, C]
         temb = repeat(temb, "(B T) C -> B (T H W) C", B=batch_size, H=post_patch_height, W=post_patch_width)
-        print(f"[DEBUG HyWorld forward] temb.shape after repeat: {temb.shape}")
         temb = rearrange(temb, "B S C -> (B S) C")
-        print(f"[DEBUG HyWorld forward] temb.shape after rearrange: {temb.shape}")
 
         hidden_states = self.img_in(hidden_states)
         hidden_states, original_seq_len = sequence_model_parallel_shard(hidden_states, dim=1)
@@ -520,8 +513,9 @@ class HyWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
                 )
 
         # Final layer processing
+        # Use temb_final [B, C] instead of broadcasted temb [B*S, C] to avoid broadcast explosion
         hidden_states = sequence_model_parallel_all_gather_with_unpad(hidden_states, original_seq_len, dim=1)
-        hidden_states = self.final_layer(hidden_states, temb)
+        hidden_states = self.final_layer(hidden_states, temb_final)
         # Unpatchify to get original shape
         hidden_states = unpatchify(hidden_states, post_patch_num_frames, post_patch_height, post_patch_width, self.patch_size, self.out_channels)
 

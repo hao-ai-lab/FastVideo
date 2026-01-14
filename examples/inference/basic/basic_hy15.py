@@ -9,9 +9,9 @@ def main():
     # If a local path is provided, FastVideo will make a best effort
     # attempt to identify the optimal arguments.
     generator = VideoGenerator.from_pretrained(
-        "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+        "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v",
         # FastVideo will automatically handle distributed setup
-        num_gpus=1,
+        num_gpus=4,
         use_fsdp_inference=True,
         dit_cpu_offload=True,
         vae_cpu_offload=True,

@@ -24,7 +24,7 @@ logger = init_logger(__name__)
 class HunyuanVideo15Pipeline(ComposedPipelineBase):
 
     _required_config_modules = [
-        "text_encoder", "text_encoder_2", "tokenizer", "tokenizer_2", "vae",
+        "text_encoder", "text_encoder_2", "tokenizer", "tokenizer_2", "image_encoder", "feature_extractor", "vae",
         "transformer", "scheduler"
     ]
 
@@ -73,4 +73,10 @@ class HunyuanVideo15Pipeline(ComposedPipelineBase):
                        stage=DecodingStage(vae=self.get_module("vae")))
 
 
-EntryClass = HunyuanVideo15Pipeline
+# Alias for I2V pipeline - same implementation, different class name for registry
+class HunyuanVideo15ImageToVideoPipeline(HunyuanVideo15Pipeline):
+    """I2V pipeline alias - uses the same implementation as T2V."""
+    pass
+
+
+EntryClass = [HunyuanVideo15Pipeline, HunyuanVideo15ImageToVideoPipeline]

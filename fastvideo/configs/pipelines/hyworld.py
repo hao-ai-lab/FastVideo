@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
 
-from fastvideo.configs.models import DiTConfig, EncoderConfig
+from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import HyWorldConfig as HyWorldDiTConfig
 from fastvideo.configs.models.encoders import SiglipVisionConfig
+from fastvideo.configs.models.vaes import HyWorldVAEConfig
 from fastvideo.configs.pipelines.hunyuan15 import Hunyuan15T2V480PConfig
 
 
@@ -14,6 +15,9 @@ class HyWorldConfig(Hunyuan15T2V480PConfig):
     # HyWorldConfig-specific parameters with defaults
     # DiT - override with HyWorld-specific config
     dit_config: DiTConfig = field(default_factory=HyWorldDiTConfig)
+    
+    # VAE - use HyWorld VAE with temporal caching support
+    vae_config: VAEConfig = field(default_factory=HyWorldVAEConfig)
     
     # SigLIP image encoder for I2V
     image_encoder_config: EncoderConfig = field(default_factory=SiglipVisionConfig)

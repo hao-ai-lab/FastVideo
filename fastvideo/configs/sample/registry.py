@@ -48,6 +48,10 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     Hunyuan15_480P_SamplingParam,
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v":
     Hunyuan15_720P_SamplingParam,
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v":
+    Hunyuan15_480P_SamplingParam,
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_i2v":
+    Hunyuan15_720P_SamplingParam,
     "/mnt/weka/home/hao.zhang/mhuo/data/hyworld":
     HyWorld_SamplingParam,
     "FastVideo/stepvideo-t2v-diffusers":
@@ -120,12 +124,14 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
 
 # For determining pipeline type from model ID
 SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
+    "hunyuan15imagetovideo":
+    lambda id: "hunyuan15imagetovideo" in id.lower() or "hunyuanvideo15imagetovideo" in id.lower(),
     "hunyuan":
     lambda id: "hunyuan" in id.lower(),
     "hunyuan15":
     lambda id: "hunyuan15" in id.lower(),
-    "hy-world":
-    lambda id: "hy-world" in id.lower(),
+    "hyworld":
+    lambda id: "hyworld" in id.lower(),
     "wanpipeline":
     lambda id: "wanpipeline" in id.lower(),
     "wanimagetovideo":
@@ -145,11 +151,13 @@ SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
 
 # Fallback configs when exact match isn't found but architecture is detected
 SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
+    "hunyuan15imagetovideo":
+    Hunyuan15_480P_SamplingParam,  # HunyuanVideo 1.5 I2V fallback (same as T2V)
     "hunyuan":
     HunyuanSamplingParam,  # Base Hunyuan config as fallback for any Hunyuan variant
     "hunyuan15":
     Hunyuan15_480P_SamplingParam,  # Base Hunyuan15 config as fallback for any Hunyuan15 variant
-    "hy-world":
+    "hyworld":
     HyWorld_SamplingParam,  # HyWorld-specific config as fallback for any HyWorld variant
     "wanpipeline":
     WanT2V_1_3B_SamplingParam,  # Base Wan config as fallback for any Wan variant
@@ -166,9 +174,10 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
 
 def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
     """Get the appropriate sampling param for specific pretrained weights."""
-
+    print(f"pipeline_name_or_path: {pipeline_name_or_path}")
     # First try exact match for specific weights
     if pipeline_name_or_path in SAMPLING_PARAM_REGISTRY:
+        print(f"pipeline_name_or_path: {pipeline_name_or_path}")
         return SAMPLING_PARAM_REGISTRY[pipeline_name_or_path]
 
     # Try partial matches (for local paths that might include the weight ID)
@@ -188,8 +197,6 @@ def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
         )
     else:
         config = maybe_download_model_index(pipeline_name_or_path)
-
-    pipeline_name = config["_class_name"]
 
     # If no match, try to use the fallback config
     fallback_config = None

@@ -194,7 +194,7 @@ def main():
     NUM_FRAMES = 125
     HEIGHT = 480
     WIDTH = 832  # 16:9 aspect ratio for 480p
-    POSE = 'w-31'  # Forward movement for 31 latents
+    POSE = 'a-31'  # Forward movement for 31 latents
 
     # Check if image exists
     if not os.path.exists(IMAGE_PATH):
