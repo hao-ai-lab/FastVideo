@@ -217,6 +217,7 @@ def test_turbodiffusion_i2v_inference_similarity(prompt, model_id):
         "override_pipeline_cls_name": "TurboDiffusionI2VPipeline",
         # Keep both transformers in VRAM - avoids CPU RAM bottleneck
         "dit_cpu_offload": False,
+        "use_fsdp_inference": True,
     }
 
     generation_kwargs = {
