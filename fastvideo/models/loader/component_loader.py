@@ -678,7 +678,7 @@ class TransformerLoader(ComponentLoader):
 
         model = model.eval()
 
-        if fastvideo_args.dit_layerwise_offload:
+        if fastvideo_args.inference_mode and fastvideo_args.dit_layerwise_offload:
             enable_layerwise_offload(model)
         return model
 
