@@ -60,7 +60,7 @@ class OcrScorerVideo(BaseRewardModel):
         """
         # Extract target text from prompt
         try:
-            target_text = prompt.replace('"', '').replace(' ', '').lower()
+            target_text = prompt.split('"')[1].replace(' ', '').lower()
         except IndexError:
             logger.warning("Failed to extract quoted text from prompt: %s",
                            prompt)
@@ -92,18 +92,22 @@ class OcrScorerVideo(BaseRewardModel):
 
             # Run OCR
             try:
-                result = self.ocr.predict(frame)
-                page = result[0] if result else {}
-                recognized_text = "".join(
-                    text if score > 0 else "" for text, score in zip(
-                        page["rec_texts"], page["rec_scores"], strict=False))
+               result = self.ocr.ocr(frame, cls=False)
+               if result and result[0]:
+                    recognized_text = "".join([line[1][0] for line in result[0] if line[1][1] > 0])
+               else:
+                   recognized_text = ""
+            
             except Exception as e:
                 logger.debug("OCR failed on frame %d: %s", frame_idx, str(e))
                 recognized_text = ''
 
             recognized_text = recognized_text.replace(' ', '').lower()
-            dist = min(distance(recognized_text, target_text), len(target_text))
-            reward = 1.0 - dist / len(target_text)
+            if target_text in recognized_text:
+                    dist = 0
+                else:
+                    dist = distance(recognized_text, target_text)
+            dist = min(dist, len(target_text))
             if reward > 0:
                 frame_rewards.append(reward)
 
