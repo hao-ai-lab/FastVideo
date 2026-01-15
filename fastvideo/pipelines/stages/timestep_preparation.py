@@ -123,3 +123,32 @@ class TimestepPreparationStage(PipelineStage):
         result.add_check("timesteps", batch.timesteps,
                          [V.is_tensor, V.with_dims(1)])
         return result
+
+
+class Cosmos25TimestepPreparationStage(TimestepPreparationStage):
+    """Cosmos 2.5 timestep preparation with scheduler-specific kwargs."""
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        scheduler = self.scheduler
+        device = get_local_torch_device()
+        num_inference_steps = batch.num_inference_steps
+
+        extra_kwargs: dict = {}
+        sig = inspect.signature(scheduler.set_timesteps)
+        if "shift" in sig.parameters:
+            extra_kwargs["shift"] = fastvideo_args.pipeline_config.flow_shift
+        # Prefer the canonical diffusers kwarg name if available.
+        if "use_karras_sigmas" in sig.parameters:
+            extra_kwargs["use_karras_sigmas"] = True
+        elif "use_kerras_sigma" in sig.parameters:
+            extra_kwargs["use_kerras_sigma"] = True
+
+        scheduler.set_timesteps(num_inference_steps,
+                                device=device,
+                                **extra_kwargs)
+        batch.timesteps = scheduler.timesteps
+        return batch

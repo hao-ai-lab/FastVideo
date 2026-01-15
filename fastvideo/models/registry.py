@@ -30,8 +30,9 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
     "StepVideoModel": ("dits", "stepvideo", "StepVideoModel"),
     "CosmosTransformer3DModel": ("dits", "cosmos", "CosmosTransformer3DModel"),
-    "LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"),
-    "LongCatTransformer3DModel": ("dits", "longcat", "LongCatTransformer3DModel"),
+    "Cosmos25Transformer3DModel": ("dits", "cosmos2_5", "Cosmos25Transformer3DModel"),
+    "LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"),  # Wrapper (Phase 1)
+    "LongCatTransformer3DModel": ("dits", "longcat", "LongCatTransformer3DModel"),  # Native (Phase 2)
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
@@ -50,6 +51,9 @@ _TEXT_ENCODER_MODELS = {
     "STEP1TextEncoder": ("encoders", "stepllm", "STEP1TextEncoder"),
     "BertModel": ("encoders", "clip", "CLIPTextModel"),
     "Qwen2_5_VLTextModel": ("encoders", "qwen2_5", "Qwen2_5_VLTextModel"),
+    "Reason1TextEncoder": ("encoders", "reason1", "Reason1TextEncoder"),
+    "Qwen2_5_VLForConditionalGeneration":
+    ("encoders", "reason1", "Reason1TextEncoder"),
 }
 
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
@@ -72,6 +76,8 @@ _SCHEDULERS = {
      "FlowMatchEulerDiscreteScheduler"),
     "UniPCMultistepScheduler":
     ("schedulers", "scheduling_unipc_multistep", "UniPCMultistepScheduler"),
+    "FlowUniPCMultistepScheduler":
+    ("schedulers", "scheduling_flow_unipc_multistep", "FlowUniPCMultistepScheduler"),
     "SelfForcingFlowMatchScheduler":
     ("schedulers", "scheduling_self_forcing_flow_match",
      "SelfForcingFlowMatchScheduler"),
