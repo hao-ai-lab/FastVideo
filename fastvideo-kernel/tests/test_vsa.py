@@ -264,7 +264,6 @@ def generate_error_graphs_qkdiff(h, d, error_mode='all'):
 
     print("-" * 150)
 
-@pytest.mark.skip()
 def test_video_sparse_attention_backward():
     if not torch.cuda.is_available():
         return
