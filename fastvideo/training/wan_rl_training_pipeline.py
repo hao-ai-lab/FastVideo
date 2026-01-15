@@ -21,7 +21,9 @@ class WanRLTrainingPipeline(RLPipeline):
     
     This pipeline extends RLPipeline with Wan-specific initialization.
     """
-    _required_config_modules = ["scheduler", "transformer", "vae", "text_encoder", "tokenizer"]
+    _required_config_modules = [
+        "scheduler", "transformer", "vae", "text_encoder", "tokenizer"
+    ]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         self.modules["scheduler"] = FlowUniPCMultistepScheduler(
@@ -34,25 +36,24 @@ class WanRLTrainingPipeline(RLPipeline):
         pass
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
-        # logger.info("Initializing validation pipeline...")
-        # args_copy = deepcopy(training_args)
+        logger.info("Initializing validation pipeline...")
+        args_copy = deepcopy(training_args)
 
-        # args_copy.inference_mode = True
-        # validation_pipeline = WanPipeline.from_pretrained(
-        #     training_args.model_path,
-        #     args=args_copy,  # type: ignore
-        #     inference_mode=True,
-        #     loaded_modules={
-        #         "transformer": self.get_module("transformer"),
-        #     },
-        #     tp_size=training_args.tp_size,
-        #     sp_size=training_args.sp_size,
-        #     num_gpus=training_args.num_gpus,
-        #     pin_cpu_memory=training_args.pin_cpu_memory,
-        #     dit_cpu_offload=True)
+        args_copy.inference_mode = True
+        validation_pipeline = WanPipeline.from_pretrained(
+            training_args.model_path,
+            args=args_copy,  # type: ignore
+            inference_mode=True,
+            loaded_modules={
+                "transformer": self.get_module("transformer"),
+            },
+            tp_size=training_args.tp_size,
+            sp_size=training_args.sp_size,
+            num_gpus=training_args.num_gpus,
+            pin_cpu_memory=training_args.pin_cpu_memory,
+            dit_cpu_offload=True)
 
-        # self.validation_pipeline = validation_pipeline
-        pass
+        self.validation_pipeline = validation_pipeline
 
 
 def main(args) -> None:

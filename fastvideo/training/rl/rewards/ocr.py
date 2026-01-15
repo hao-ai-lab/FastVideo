@@ -2,13 +2,15 @@ from paddleocr import PaddleOCR
 import torch
 import numpy as np
 from Levenshtein import distance
-from typing import Any, Union, List
+from typing import Any
 from PIL import Image
 
+from fastvideo.distributed import (get_local_torch_device)
 from fastvideo.training.rl.rewards.base import BaseRewardModel
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
+
 
 class OcrScorerVideo(BaseRewardModel):
     """
@@ -18,12 +20,10 @@ class OcrScorerVideo(BaseRewardModel):
     sampling frames at a specified interval and averaging the OCR scores.
     """
 
-    def __init__(
-        self,
-        model_path: str | None = None,
-        device: str = "cuda",
-        frame_interval: int = 4
-    ):
+    def __init__(self,
+                 model_path: str | None = None,
+                 device: str = "cuda",
+                 frame_interval: int = 4):
         """
         OCR reward calculator for videos
 
@@ -38,16 +38,16 @@ class OcrScorerVideo(BaseRewardModel):
         self.ocr = PaddleOCR(
             use_angle_cls=False,
             lang="en",
-            device=device,
+            use_gpu=True if get_local_torch_device().type == "cuda" else False,
+            show_log=False  # Disable unnecessary log output
         )
 
-        logger.info(
-            "Initialized OcrScorerVideo (device=%s, frame_interval=%d)",
-            device,
-            frame_interval
-        )
+        logger.info("Initialized OcrScorerVideo (device=%s, frame_interval=%d)",
+                    device, frame_interval)
 
-    def _process_single_video(self, frames: Union[np.ndarray | List[Image.Image]], prompt: str) -> float:
+    def _process_single_video(self, frames: torch.Tensor | np.ndarray
+                                                  | list[Image.Image],
+                              prompt: str) -> float:
         """
         Process a single video (list of frames) and return its OCR reward.
 
@@ -60,9 +60,10 @@ class OcrScorerVideo(BaseRewardModel):
         """
         # Extract target text from prompt
         try:
-            target_text = prompt.split('"')[1].replace(' ', '').lower()
+            target_text = prompt.replace('"', '').replace(' ', '').lower()
         except IndexError:
-            logger.warning("Failed to extract quoted text from prompt: %s", prompt)
+            logger.warning("Failed to extract quoted text from prompt: %s",
+                           prompt)
             target_text = prompt.replace(' ', '').lower()
 
         if not target_text:
@@ -74,11 +75,16 @@ class OcrScorerVideo(BaseRewardModel):
         # Sample frames at specified interval
         for frame_idx in range(0, num_frames, self.frame_interval):
             frame = frames[frame_idx]
+
+            if isinstance(frame, torch.Tensor):
+                frame = frame.detach().cpu().numpy()
+
             if isinstance(frame, Image.Image):
                 frame = np.array(frame.convert("RGB"))
 
             if frame.dtype != np.uint8:
-                frame = (frame * 255).astype(np.uint8) if frame.max() <= 1.0 else frame.astype(np.uint8)
+                frame = (frame * 255).astype(
+                    np.uint8) if frame.max() <= 1.0 else frame.astype(np.uint8)
 
             # Handle frame shape: transpose [C, H, W] to [H, W, C]
             if frame.ndim == 3 and frame.shape[0] == 3:
@@ -89,9 +95,8 @@ class OcrScorerVideo(BaseRewardModel):
                 result = self.ocr.predict(frame)
                 page = result[0] if result else {}
                 recognized_text = "".join(
-                    text if score > 0 else ""
-                    for text, score in zip(page["rec_texts"], page["rec_scores"])
-                )
+                    text if score > 0 else "" for text, score in zip(
+                        page["rec_texts"], page["rec_scores"], strict=False))
             except Exception as e:
                 logger.debug("OCR failed on frame %d: %s", frame_idx, str(e))
                 recognized_text = ''
@@ -102,15 +107,13 @@ class OcrScorerVideo(BaseRewardModel):
             if reward > 0:
                 frame_rewards.append(reward)
 
-        return sum(frame_rewards) / len(frame_rewards) if frame_rewards else 0.0
+        return sum([reward / len(frame_rewards)
+                    for reward in frame_rewards]) if frame_rewards else 0.0
 
     @torch.no_grad()
-    def compute_reward(
-        self,
-        videos: Union[List[np.ndarray] | List[List[Image.Image]]],
-        prompts: List[str],
-        **kwargs: Any
-    ) -> torch.Tensor:
+    def compute_reward(self, videos: list[np.ndarray]
+                                           | list[list[Image.Image]],
+                       prompts: list[str], **kwargs: Any) -> torch.Tensor:
         """
         Calculate OCR reward by evaluating sampled frames across the video.
 
@@ -122,9 +125,21 @@ class OcrScorerVideo(BaseRewardModel):
         Returns:
             Reward tensor [B] with averaged OCR similarity scores across frames
         """
-        assert len(videos) == len(prompts), f"Number of videos ({len(videos)}) must match number of prompts ({len(prompts)})"
+        assert len(videos) == len(
+            prompts
+        ), f"Number of videos ({len(videos)}) must match number of prompts ({len(prompts)})"
 
-        rewards = [self._process_single_video(video, prompt) for video, prompt in zip(videos, prompts)]
+        rewards = [
+            self._process_single_video(video, prompt)
+            for video, prompt in zip(videos, prompts, strict=False)
+        ]
+        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
+
+        # Check for NaN or Inf values
+        if torch.isnan(rewards).any() or torch.isinf(rewards).any():
+            logger.warning(
+                "NaN or Inf detected in OCR rewards, returning zero tensor")
+            return torch.zeros_like(rewards)
 
         # Convert to tensor
-        return torch.tensor(rewards, dtype=torch.float32, device=self.device)
+        return rewards

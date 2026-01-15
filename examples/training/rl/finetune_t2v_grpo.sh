@@ -65,9 +65,9 @@ dataset_args=(
 
 # Validation arguments
 validation_args=(
-  --log_validation 
+  --log_validation True
   --validation_dataset_file $VALIDATION_DATASET_FILE
-  --validation_steps 200
+  --validation_steps 5
   --validation_sampling_steps "50" 
   --validation_guidance_scale "6.0"
 )
@@ -76,8 +76,8 @@ validation_args=(
 optimizer_args=(
   --learning_rate 5e-5
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 400
-  --training_state_checkpointing_steps 400
+  --weight_only_checkpointing_steps 10
+  --training_state_checkpointing_steps 10
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )
@@ -93,6 +93,7 @@ rl_args=(
   --rl_global_std False  # Use per-prompt std (recommended for GRPO)
   --rl_per_prompt_stat_tracking True  # Enable per-prompt stat tracking
   --rl_warmup_steps 0  # Number of warmup steps (SFT before RL)
+  --reward-models "{\"paddle_ocr\": 1.0}" # use video_ocr reward function
 )
 
 # CFG arguments

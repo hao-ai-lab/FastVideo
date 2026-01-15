@@ -17,7 +17,6 @@ Key adaptations:
 
 import math
 import time
-import os
 from typing import Any
 
 import torch
@@ -70,11 +69,6 @@ def sde_step_with_logprob(
         Otherwise:
             (prev_sample, log_prob, prev_sample_mean, std_dev_t * sqrt_dt)
     """
-    mem_used, power_draw = os.popen(
-        "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-    ).read().strip().split(", ")
-    logger.info(
-        f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
 
     # Convert all variables to fp32 for numerical stability
     model_output = model_output.float()
@@ -95,12 +89,6 @@ def sde_step_with_logprob(
 
     prev_step_indices = [step + 1 for step in step_indices]
 
-    mem_used, power_draw = os.popen(
-        "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-    ).read().strip().split(", ")
-    logger.info(
-        f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-
     # Move sigmas to sample device
     sigmas = scheduler.sigmas.to(sample.device)
 
@@ -111,12 +99,6 @@ def sde_step_with_logprob(
     sigma_min = sigmas[-1].item()  # Last sigma (lowest)
 
     dt = sigma_prev - sigma
-
-    mem_used, power_draw = os.popen(
-        "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-    ).read().strip().split(", ")
-    logger.info(
-        f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
 
     # Compute std_dev_t and prev_sample_mean using SDE formulation
     std_dev_t = sigma_min + (sigma_max - sigma_min) * sigma
@@ -156,12 +138,6 @@ def sde_step_with_logprob(
             std_dev_sqrt_dt + 1e-8)  # Add small epsilon for numerical stability
         - torch.log(
             torch.sqrt(2 * torch.as_tensor(math.pi, device=sample.device))))
-
-    mem_used, power_draw = os.popen(
-        "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-    ).read().strip().split(", ")
-    logger.info(
-        f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
 
     # Mean along all but batch dimension
     log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))

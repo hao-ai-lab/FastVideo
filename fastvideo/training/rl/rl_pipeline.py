@@ -12,11 +12,19 @@ Reference:
 
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader
+import torchvision
 from typing import Any
 
 import math
 import os
+import imageio
+from einops import rearrange
+import numpy as np
 
+from fastvideo.dataset.validation_dataset import ValidationDataset
+from fastvideo.configs.sample import SamplingParam
+from fastvideo.distributed import (get_world_group)
 from fastvideo.fastvideo_args import TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import TrainingBatch
@@ -24,8 +32,7 @@ from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.rl.rewards import (create_reward_models,
                                            MultiRewardAggregator, ValueModel)
 from .rl_utils import (
-    compute_reward_statistics,
-)
+    compute_reward_statistics, )
 from fastvideo.training.rl.wan_grpo_utils import wan_pipeline_with_logprob, sde_step_with_logprob
 from fastvideo.training.rl.stat_tracking import PerPromptStatTracker
 from fastvideo.training.training_utils import (get_scheduler, count_trainable)
@@ -35,8 +42,6 @@ from fastvideo.dataset.rl_prompt_dataset import build_rl_prompt_dataloader
 from fastvideo.forward_context import set_forward_context
 
 logger = init_logger(__name__)
-# mem_used, power_draw = os.popen("nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits").read().strip().split(", ")
-# logger.info(f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
 
 
 class RLPipeline(TrainingPipeline):
@@ -82,16 +87,153 @@ class RLPipeline(TrainingPipeline):
         logger.info("Initialized RLPipeline with algorithm: %s",
                     fastvideo_args.rl_args.rl_algorithm)
 
+    # @torch.no_grad()
+    # def _log_validation(self, transformer, training_args, global_step) -> None:
+    #     """
+    #     Generate validation videos, calculate rewards, and log to tracker.
+    #     (Single GPU Version)
+    #     """
+    #     # --- 1. Setup & Config ---
+    #     training_args.inference_mode = True
+    #     training_args.dit_cpu_offload = False
+
+    #     if not training_args.log_validation:
+    #         return
+    #     if self.validation_pipeline is None:
+    #         raise ValueError("Validation pipeline is not set")
+
+    #     logger.info("Starting validation")
+
+    #     # --- 2. Data Preparation ---
+    #     # Prepare Negative Embeddings
+    #     neg_prompt_embed = self.compute_text_embeddings(
+    #         [""],
+    #         self.get_module("text_encoder"),
+    #         self.get_module("tokenizer"),
+    #         max_sequence_length=512,
+    #         device=self.device
+    #     )
+    #     sample_neg_prompt_embeds = neg_prompt_embed.repeat(self.training_args.rl_args.sample_test_batch_size, 1, 1)
+
+    #     # Setup Dataset
+    #     validation_dataset = ValidationDataset(training_args.validation_dataset_file)
+    #     validation_dataloader = DataLoader(validation_dataset,
+    #                                     batch_size=training_args.eval_batch_size, # Ensure this arg exists
+    #                                     num_workers=0)
+
+    #     self.transformer.eval()
+
+    #     # --- 3. Inference Loop ---
+    #     # Container for results
+    #     step_results = {
+    #         "videos": [],
+    #         "captions": [],
+    #         "rewards": defaultdict(list)
+    #     }
+
+    #     for batch_idx, validation_batch in enumerate(validation_dataloader):
+    #         # Extract prompts
+    #         prompts, prompt_metadata = validation_batch
+
+    #         # Compute Embeddings
+    #         prompt_embeds = self.compute_text_embeddings(
+    #             prompts,
+    #             self.get_module("text_encoder"),
+    #             self.get_module("tokenizer"),
+    #             max_sequence_length=512,
+    #             device=self.device
+    #         )
+    #         if len(prompt_embeds)<len(sample_neg_prompt_embeds):
+    #             sample_neg_prompt_embeds  = sample_neg_prompt_embeds [:len(prompt_embeds)]
+
+    #         # Run Inference
+    #         with torch.no_grad():
+    #             videos, latents, log_probs, _ = wan_pipeline_with_logprob(
+    #                 self.validation_pipeline,
+    #                 prompt_embeds=prompt_embeds,
+    #                 negative_prompt_embeds=sample_neg_prompt_embeds,
+    #                 num_inference_steps=self.training_args.rl_args.eval_num_steps,
+    #                 guidance_scale=self.training_args.rl_args.eval_guidance_scale,
+    #                 output_type="pt",
+    #                 return_dict=False,
+    #                 num_frames=self.training_args.frames,
+    #                 height=self.training_args.height,
+    #                 width=self.training_args.width,
+    #                 determistic=True,
+    #             )
+
+    #         # Check Reward Calculation
+
+    #         # future_rewards = self.executor.submit(self.reward_fn, videos, prompts, prompt_metadata, only_strict=False)
+    #         # rewards_dict, _ = future_rewards.result()
+    #         rewards_dict = self.reward_models.compute_rewards(videos, prompts, return_individual=True)
+
+    #         # --- 5. Process Outputs ---
+    #         # Store Rewards
+    #         for k, v in rewards_dict.items():
+    #             step_results["rewards"][k].append(v)
+
+    #         # Store Videos (Convert to numpy uint8)
+    #         # Using the correct rearrange logic we discussed: b c t h w -> b t h w c
+    #         video_permuted = videos.permute(0, 2, 3, 4, 1)
+
+    #         for v_idx, video_tensor in enumerate(video_permuted):
+    #             video_np = (video_tensor.cpu().numpy() * 255).astype(np.uint8)
+    #             step_results["videos"].append(video_np)
+    #             step_results["captions"].append(prompts[v_idx])
+
+    #     # --- 6. Consolidate Results (No Distributed Gathering) ---
+    #     # Flatten the rewards lists into single arrays
+    #     all_rewards = {k: np.concatenate(v) for k, v in step_results["rewards"].items()}
+    #     all_videos = step_results["videos"]
+    #     all_captions = step_results["captions"]
+
+    #     # --- 7. Logging ---
+    #     # Save Videos
+    #     video_filenames = []
+    #     os.makedirs(training_args.output_dir, exist_ok=True)
+
+    #     num_samples_to_save = min(15, len(all_videos))
+
+    #     for i in range(num_samples_to_save):
+    #         filename = os.path.join(
+    #             training_args.output_dir,
+    #             f"val_step_{global_step}_idx_{i}.mp4"
+    #         )
+    #         imageio.mimsave(filename, all_videos[i], fps=8, codec="libx264")
+    #         video_filenames.append(filename)
+
+    #     # Log to Tracker
+    #     if hasattr(self.tracker, "log_artifacts"):
+    #         wandb_videos = []
+    #         for i in range(num_samples_to_save):
+    #             # Create caption with reward stats
+    #             reward_str = " | ".join(f"{k}: {all_rewards[k][i]:.2f}" for k in all_rewards)
+    #             full_caption = f"{all_captions[i][:100]} | {reward_str}"
+
+    #             wandb_videos.append(
+    #                 wandb.Video(video_filenames[i], caption=full_caption, fps=8)
+    #             )
+
+    #         # Calculate Mean Rewards
+    #         mean_rewards = {f"eval_reward_{k}": np.mean(v) for k, v in all_rewards.items()}
+
+    #         logs = {
+    #             "eval_images": wandb_videos,
+    #             **mean_rewards
+    #         }
+    #         self.tracker.log_artifacts(logs, global_step)
+
+    #     training_args.inference_mode = False
+    #     self.transformer.train()
+
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
         """
-        Generate validation videos, calculate rewards, and log to tracker.
-        (Single GPU Version)
+        Generate a validation video and log it to the configured tracker to check the quality during training.
         """
-        # --- 1. Setup & Config ---
         training_args.inference_mode = True
         training_args.dit_cpu_offload = False
-        
         if not training_args.log_validation:
             return
         if self.validation_pipeline is None:
@@ -99,130 +241,132 @@ class RLPipeline(TrainingPipeline):
 
         logger.info("Starting validation")
 
-        # --- 2. Data Preparation ---
-        # Prepare Negative Embeddings
-        neg_prompt_embed = self.compute_text_embeddings(
-            [""], 
-            self.get_module("text_encoder"),
-            self.get_module("tokenizer"),
-            max_sequence_length=512, 
-            device=self.device
-        )
-        sample_neg_prompt_embeds = neg_prompt_embed.repeat(self.training_args.rl_args.sample_test_batch_size, 1, 1)
+        # Create sampling parameters if not provided
+        sampling_param = SamplingParam.from_pretrained(training_args.model_path)
 
-        
-        # Setup Dataset
-        validation_dataset = ValidationDataset(training_args.validation_dataset_file)
+        # Prepare validation prompts
+        logger.info('rank: %s: fastvideo_args.validation_dataset_file: %s',
+                    self.global_rank,
+                    training_args.validation_dataset_file,
+                    local_main_process_only=False)
+        validation_dataset = ValidationDataset(
+            training_args.validation_dataset_file)
         validation_dataloader = DataLoader(validation_dataset,
-                                        batch_size=training_args.eval_batch_size, # Ensure this arg exists
-                                        num_workers=0)
+                                           batch_size=None,
+                                           num_workers=0)
 
         self.transformer.eval()
+        if getattr(self, "transformer_2", None) is not None:
+            self.transformer_2.eval()
 
-        # --- 3. Inference Loop ---
-        # Container for results
-        step_results = {
-            "videos": [],
-            "captions": [],
-            "rewards": defaultdict(list)
-        }
+        validation_steps = training_args.validation_sampling_steps.split(",")
+        validation_steps = [int(step) for step in validation_steps]
+        validation_steps = [step for step in validation_steps if step > 0]
+        # Log validation results for this step
+        world_group = get_world_group()
+        num_sp_groups = world_group.world_size // self.sp_group.world_size
 
-        for batch_idx, validation_batch in enumerate(validation_dataloader):
-            # Extract prompts
-            prompts, prompt_metadata = validation_batch
+        # Process each validation prompt for each validation step
+        for num_inference_steps in validation_steps:
+            logger.info("rank: %s: num_inference_steps: %s",
+                        self.global_rank,
+                        num_inference_steps,
+                        local_main_process_only=False)
+            step_videos: list[np.ndarray] = []
+            step_captions: list[str] = []
 
-            # Compute Embeddings
-            prompt_embeds = self.compute_text_embeddings(
-                prompts,
-                self.get_module("text_encoder"),
-                self.get_module("tokenizer"),
-                max_sequence_length=512,
-                device=self.device
-            )
-            if len(prompt_embeds)<len(sample_neg_prompt_embeds):
-                sample_neg_prompt_embeds  = sample_neg_prompt_embeds [:len(prompt_embeds)]
+            for validation_batch in validation_dataloader:
+                batch = self._prepare_validation_batch(sampling_param,
+                                                       training_args,
+                                                       validation_batch,
+                                                       num_inference_steps)
+                logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
+                            self.global_rank,
+                            self.rank_in_sp_group,
+                            batch.prompt,
+                            local_main_process_only=False)
 
-            # Run Inference
-            with torch.no_grad():
-                videos, latents, log_probs, _ = wan_pipeline_with_logprob(
-                    self.validation_pipeline,
-                    prompt_embeds=prompt_embeds,
-                    negative_prompt_embeds=sample_neg_prompt_embeds,
-                    num_inference_steps=self.training_args.rl_args.eval_num_steps,
-                    guidance_scale=self.training_args.rl_args.eval_guidance_scale,
-                    output_type="pt",
-                    return_dict=False,
-                    num_frames=self.training_args.frames,
-                    height=self.training_args.height,
-                    width=self.training_args.width,
-                    determistic=True,
-                )
+                assert batch.prompt is not None and isinstance(
+                    batch.prompt, str)
+                step_captions.append(batch.prompt)
 
-            # Check Reward Calculation
-            
-            # future_rewards = self.executor.submit(self.reward_fn, videos, prompts, prompt_metadata, only_strict=False)
-            # rewards_dict, _ = future_rewards.result()
-            rewards_dict = self.reward_models.compute_rewards(videos, prompts, return_individual=True)
+                # Run validation inference
+                output_batch = self.validation_pipeline.forward(
+                    batch, training_args)
+                samples = output_batch.output
 
-            # --- 5. Process Outputs ---
-            # Store Rewards
-            for k, v in rewards_dict.items():
-                step_results["rewards"][k].append(v)
+                if self.rank_in_sp_group != 0:
+                    continue
 
-            # Store Videos (Convert to numpy uint8)
-            # Using the correct rearrange logic we discussed: b c t h w -> b t h w c
-            video_permuted = videos.permute(0, 2, 3, 4, 1)
-            
-            for v_idx, video_tensor in enumerate(video_permuted):
-                video_np = (video_tensor.cpu().numpy() * 255).astype(np.uint8)
-                step_results["videos"].append(video_np)
-                step_results["captions"].append(prompts[v_idx])
+                # Compute rewards using reward models
+                # Note: reward_models.compute_reward expects samples [B, C, T, H, W] and prompts [B]
+                reward_scores = self.reward_models.compute_reward(
+                    samples, [batch.prompt])
+                logger.info(f"samples.shape: {samples.shape}")
+                logger.info(f"Validation prompts: {batch.prompt}")
+                logger.info(f"Validation prompts: {batch.prompt}")
+                logger.info(f"Validation reward scores: {reward_scores}")
 
-        # --- 6. Consolidate Results (No Distributed Gathering) ---
-        # Flatten the rewards lists into single arrays
-        all_rewards = {k: np.concatenate(v) for k, v in step_results["rewards"].items()}
-        all_videos = step_results["videos"]
-        all_captions = step_results["captions"]
+                # Process outputs
+                video = rearrange(samples, "b c t h w -> t b c h w")
+                frames = []
+                for x in video:
+                    x = torchvision.utils.make_grid(x, nrow=6)
+                    x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+                    frames.append((x * 255).numpy().astype(np.uint8))
+                step_videos.append(frames)
 
-        # --- 7. Logging ---
-        # Save Videos
-        video_filenames = []
-        os.makedirs(training_args.output_dir, exist_ok=True)
-        
-        num_samples_to_save = min(15, len(all_videos))
-        
-        for i in range(num_samples_to_save):
-            filename = os.path.join(
-                training_args.output_dir,
-                f"val_step_{global_step}_idx_{i}.mp4"
-            )
-            imageio.mimsave(filename, all_videos[i], fps=8, codec="libx264")
-            video_filenames.append(filename)
+            # Only sp_group leaders (rank_in_sp_group == 0) need to send their
+            # results to global rank 0
+            if self.rank_in_sp_group == 0:
+                if self.global_rank == 0:
+                    # Global rank 0 collects results from all sp_group leaders
+                    all_videos = step_videos  # Start with own results
+                    all_captions = step_captions
 
-        # Log to Tracker
-        if hasattr(self.tracker, "log_artifacts"):
-            wandb_videos = []
-            for i in range(num_samples_to_save):
-                # Create caption with reward stats
-                reward_str = " | ".join(f"{k}: {all_rewards[k][i]:.2f}" for k in all_rewards)
-                full_caption = f"{all_captions[i][:100]} | {reward_str}"
-                
-                wandb_videos.append(
-                    wandb.Video(video_filenames[i], caption=full_caption, fps=8)
-                )
-            
-            # Calculate Mean Rewards
-            mean_rewards = {f"eval_reward_{k}": np.mean(v) for k, v in all_rewards.items()}
-            
-            logs = {
-                "eval_images": wandb_videos,
-                **mean_rewards
-            }
-            self.tracker.log_artifacts(logs, global_step)
+                    # Receive from other sp_group leaders
+                    for sp_group_idx in range(1, num_sp_groups):
+                        src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
+                        recv_videos = world_group.recv_object(src=src_rank)
+                        recv_captions = world_group.recv_object(src=src_rank)
+                        all_videos.extend(recv_videos)
+                        all_captions.extend(recv_captions)
 
+                    video_filenames = []
+                    for i, (video, caption) in enumerate(
+                            zip(all_videos, all_captions, strict=True)):
+                        os.makedirs(training_args.output_dir, exist_ok=True)
+                        filename = os.path.join(
+                            training_args.output_dir,
+                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
+                        )
+                        imageio.mimsave(filename, video, fps=sampling_param.fps)
+                        video_filenames.append(filename)
 
+                    artifacts = []
+                    for filename, caption in zip(video_filenames,
+                                                 all_captions,
+                                                 strict=True):
+                        video_artifact = self.tracker.video(filename,
+                                                            caption=caption)
+                        if video_artifact is not None:
+                            artifacts.append(video_artifact)
+                    if artifacts:
+                        logs = {
+                            f"validation_videos_{num_inference_steps}_steps":
+                            artifacts
+                        }
+                        self.tracker.log_artifacts(logs, global_step)
+                else:
+                    # Other sp_group leaders send their results to global rank 0
+                    world_group.send_object(step_videos, dst=0)
+                    world_group.send_object(step_captions, dst=0)
+
+        # Re-enable gradients for training
         training_args.inference_mode = False
-        self.transformer.train()  
+        self.transformer.train()
+        if getattr(self, "transformer_2", None) is not None:
+            self.transformer_2.train()
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         """Initialize the RL training pipeline with algorithm, reward and value models."""
@@ -259,6 +403,8 @@ class RLPipeline(TrainingPipeline):
 
         self.train_dataloader = train_dataloader
         self.train_dataset = train_dataset
+        self.test_dataloader = test_dataloader
+        self.test_dataset = test_dataset
         self.train_loader_iter = iter(self.train_dataloader)
         self.current_epoch = 0
 
@@ -467,13 +613,6 @@ class RLPipeline(TrainingPipeline):
         all_negative_prompt_embeds_list = []
         all_prompt_ids_list = []
 
-        # debugging: vram usage
-        mem_used, power_draw = os.popen(
-            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-        ).read().strip().split(", ")
-        logger.info(
-            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-
         # Set transformer to eval mode for sampling
         self.transformer.eval()
 
@@ -487,14 +626,6 @@ class RLPipeline(TrainingPipeline):
                 # - all_log_probs: List of log probs at each step [num_steps] of [B]
                 # - all_kl: List of KL divergences [num_steps] of [B]
                 # - prompt_ids: Tokenized prompt IDs [B, seq_len]
-
-                # debugging: vram usage
-                mem_used, power_draw = os.popen(
-                    "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-                ).read().strip().split(", ")
-                logger.info(
-                    f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W"
-                )
 
                 videos, latents_list, log_probs_list, kl_list, prompt_ids = wan_pipeline_with_logprob(
                     self,
@@ -512,14 +643,6 @@ class RLPipeline(TrainingPipeline):
                     "latent",  # Return latents, not decoded videos (videos decoded in compute_rewards)
                     determistic=False,  # Use stochastic sampling
                     kl_reward=kl_reward,
-                )
-
-                # debugging: vram usage
-                mem_used, power_draw = os.popen(
-                    "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-                ).read().strip().split(", ")
-                logger.info(
-                    f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W"
                 )
 
                 # Stack latents: latents_list is [num_steps+1] where each element is [B, C, T, H, W]
@@ -606,12 +729,6 @@ class RLPipeline(TrainingPipeline):
         else:
             training_batch.input_kwargs["prompts"] = prompts
 
-        mem_used, power_draw = os.popen(
-            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-        ).read().strip().split(", ")
-        logger.info(
-            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-
         logger.info(
             "Trajectory collection complete: batch_size=%d, latents_shape=%s, log_probs_shape=%s",
             training_batch.latents.shape[0], training_batch.latents.shape,
@@ -646,25 +763,12 @@ class RLPipeline(TrainingPipeline):
                 "Reward models not initialized. Call initialize_training_pipeline first."
             )
 
-        logger.info("Computing rewards from reward models")
-        mem_used, power_draw = os.popen(
-            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-        ).read().strip().split(", ")
-        logger.info(
-            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-
         # Get final latents (after all denoising steps)
         # training_batch.latents is [B, num_steps+1, C, T, H, W]
         # We want the final latents at index -1: [B, C, T, H, W]
         logger.info(
             f"training_batch.latents.shape: {training_batch.latents.shape}")
         final_latents = training_batch.latents[:, -1]  # [B, C, T, H, W]
-
-        mem_used, power_draw = os.popen(
-            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-        ).read().strip().split(", ")
-        logger.info(
-            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
 
         # Get VAE for decoding
         vae = self.get_module("vae")
@@ -673,12 +777,6 @@ class RLPipeline(TrainingPipeline):
         # Decode latents to videos
         # Apply VAE normalization (Wan VAE specific)
         # latents_to_decode = final_latents.to(vae.dtype)
-
-        mem_used, power_draw = os.popen(
-            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-        ).read().strip().split(", ")
-        logger.info(
-            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
 
         # Wan VAE requires denormalization before decoding
         if hasattr(vae, 'config') and hasattr(vae.config,
@@ -706,25 +804,12 @@ class RLPipeline(TrainingPipeline):
                     1, z_dim, 1, 1, 1))
             final_latents = final_latents / latents_std + latents_mean
 
-        mem_used, power_draw = os.popen(
-            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-        ).read().strip().split(", ")
-        logger.info(
-            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-        logger.info(f"final_latents.shape: {final_latents.shape}")
-
         # Decode using VAE
         with torch.no_grad():
             videos = vae.decode(final_latents.float())
             # VAE.decode returns tensor directly (not tuple)
             # Postprocess video: convert from [-1, 1] to [0, 1]
             videos = (videos / 2 + 0.5).clamp(0, 1)
-
-        mem_used, power_draw = os.popen(
-            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-        ).read().strip().split(", ")
-        logger.info(
-            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
 
         # Get prompts for reward computation
         prompts = training_batch.input_kwargs.get(
@@ -734,15 +819,10 @@ class RLPipeline(TrainingPipeline):
                 "Prompts not found in training_batch.input_kwargs. Required for reward computation."
             )
 
+        logger.info(f"videos.shape: {videos.shape}")
         # Compute rewards using reward models
         # Note: reward_models.compute_reward expects videos [B, C, T, H, W] and prompts [B]
         reward_scores = self.reward_models.compute_reward(videos, prompts)
-
-        mem_used, power_draw = os.popen(
-            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-        ).read().strip().split(", ")
-        logger.info(
-            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
 
         # Apply KL reward penalty if configured
         # In FlowGRPO: rewards["avg"] = rewards["avg"] - kl_reward * kl
@@ -753,12 +833,6 @@ class RLPipeline(TrainingPipeline):
             kl_penalty = training_batch.kl.mean(dim=1)  # [B]
             reward_scores = reward_scores - kl_reward * kl_penalty
 
-        mem_used, power_draw = os.popen(
-            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-        ).read().strip().split(", ")
-        logger.info(
-            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-
         # Store reward scores
         training_batch.reward_scores = reward_scores
 
@@ -767,15 +841,10 @@ class RLPipeline(TrainingPipeline):
         training_batch.reward_mean = reward_stats["reward_mean"]
         training_batch.reward_std = reward_stats["reward_std"]
 
-        mem_used, power_draw = os.popen(
-            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-        ).read().strip().split(", ")
-        logger.info(
-            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-
         logger.info("Rewards computed: mean=%.3f, std=%.3f, kl_reward=%.3f",
                     reward_stats["reward_mean"], reward_stats["reward_std"],
                     kl_reward)
+        logger.info(f"reward_scores: {reward_scores}")
 
         return training_batch
 
@@ -824,13 +893,6 @@ class RLPipeline(TrainingPipeline):
             raise RuntimeError(
                 "Stat tracker not initialized. Call initialize_training_pipeline first."
             )
-
-        logger.info("Computing advantages with per-prompt stat tracking")
-        mem_used, power_draw = os.popen(
-            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-        ).read().strip().split(", ")
-        logger.info(
-            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
 
         # Get prompts from prompt_ids (decode token IDs to strings)
         if training_batch.prompt_ids is not None:
@@ -886,12 +948,6 @@ class RLPipeline(TrainingPipeline):
         training_batch.advantage_mean = advantages.mean().item()
         training_batch.advantage_std = advantages.std().item()
 
-        mem_used, power_draw = os.popen(
-            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-        ).read().strip().split(", ")
-        logger.info(
-            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-
         logger.info("Advantages computed: mean=%.3f, std=%.3f, per_prompt=%s",
                     training_batch.advantage_mean, training_batch.advantage_std,
                     per_prompt_stat_tracking)
@@ -931,11 +987,6 @@ class RLPipeline(TrainingPipeline):
                 (prev_sample, log_prob, prev_sample_mean, std_dev_t * sqrt_dt)
         """
         logger.info(f"computing log prob for timestep {current_timestep}")
-        mem_used, power_draw = os.popen(
-            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-        ).read().strip().split(", ")
-        logger.info(
-            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
 
         scheduler = self.get_module("scheduler")
         transformer = self.get_module("transformer")
@@ -947,12 +998,6 @@ class RLPipeline(TrainingPipeline):
         prompt_embeds = prompt_embeds.to(compute_dtype)
         if negative_prompt_embeds is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(compute_dtype)
-
-        mem_used, power_draw = os.popen(
-            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-        ).read().strip().split(", ")
-        logger.info(
-            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
 
         # Predict noise with transformer
         if guidance_scale > 1.0 and negative_prompt_embeds is not None:
@@ -997,12 +1042,6 @@ class RLPipeline(TrainingPipeline):
                 # noise_pred = noise_pred.to(prompt_embeds.dtype)
             noise_pred
 
-        mem_used, power_draw = os.popen(
-            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-        ).read().strip().split(", ")
-        logger.info(
-            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-
         # Compute log probability using SDE step
         # Use next_latents as prev_sample to compute log prob of the actual transition
         return sde_step_with_logprob(
@@ -1041,11 +1080,6 @@ class RLPipeline(TrainingPipeline):
             total_loss: Total loss for backward pass
             metrics: Dictionary with loss components and diagnostics
         """
-        mem_used, power_draw = os.popen(
-            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-        ).read().strip().split(", ")
-        logger.info(
-            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
 
         # Get configuration from RLArgs
         # Note: CLI arguments map to RLArgs fields:
@@ -1155,13 +1189,6 @@ class RLPipeline(TrainingPipeline):
             old_log_probs_j = old_log_probs[:, j]  # [B]
             advantages_j = advantages[:, j]  # [B]
 
-            mem_used, power_draw = os.popen(
-                "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-            ).read().strip().split(", ")
-            logger.info(
-                f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W"
-            )
-
             # Compute log probability with current policy
             prev_sample, log_prob, prev_sample_mean, std_dev_t, dt = self._compute_log_prob_for_timestep(
                 latents_j,
@@ -1172,13 +1199,6 @@ class RLPipeline(TrainingPipeline):
                 negative_prompt_embeds,
                 guidance_scale,
                 return_dt_and_std_dev_t=True)
-
-            mem_used, power_draw = os.popen(
-                "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-            ).read().strip().split(", ")
-            logger.info(
-                f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W"
-            )
 
             # Compute reference log probability with adapter disabled (if using LoRA)
             if kl_beta > 0:
@@ -1211,13 +1231,6 @@ class RLPipeline(TrainingPipeline):
                 kl_losses.append(kl_loss_j)
             else:
                 kl_losses.append(torch.tensor(0.0, device=log_prob.device))
-
-            mem_used, power_draw = os.popen(
-                "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-            ).read().strip().split(", ")
-            logger.info(
-                f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W"
-            )
 
             # GRPO policy loss computation
             # Clip advantages
@@ -1291,13 +1304,6 @@ class RLPipeline(TrainingPipeline):
         """
         training_batch = self._prepare_training(training_batch)
 
-        # debugging: vram usage
-        mem_used, power_draw = os.popen(
-            "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
-        ).read().strip().split(", ")
-        logger.info(
-            f"GPU 3 | VRAM used: {mem_used} MiB | Power draw: {power_draw} W")
-
         # Gradient accumulation loop
         for _ in range(self.training_args.gradient_accumulation_steps):
             # Get next batch of prompts (skip normalization steps for RL)
@@ -1309,6 +1315,12 @@ class RLPipeline(TrainingPipeline):
 
             # 1. Collect trajectories (generates latents and log_probs)
             training_batch = self.collect_trajectories(training_batch)
+
+            mem_used, power_draw = os.popen(
+                "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+            ).read().strip().split(", ")
+            logger.info(
+                f"After trajectory collection, VRAM used: {mem_used} MiB")
 
             # 2. Compute rewards
             training_batch = self.compute_rewards(training_batch)
@@ -1342,6 +1354,11 @@ class RLPipeline(TrainingPipeline):
                     # Backward pass with scaled loss
                     scaled_loss = total_loss / self.training_args.gradient_accumulation_steps
                     scaled_loss.backward()
+
+                mem_used, power_draw = os.popen(
+                    "nvidia-smi -i 3 --query-gpu=memory.used,power.draw --format=csv,noheader,nounits"
+                ).read().strip().split(", ")
+                logger.info(f"After loss.backward(), VRAM used: {mem_used} MiB")
 
                 # Accumulate total loss
                 if training_batch.total_loss is None:
