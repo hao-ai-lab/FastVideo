@@ -1,10 +1,10 @@
 # export WANDB_MODE="offline"
 GPU_NUM=8 # 2,4,8
-MODEL_PATH="/data/wenxing.wang/models/Hunyuan-video/ckpts"
+MODEL_PATH="/data/yanguo.sun/hunyuan-video/HunyuanVideo/ckpts"
 MODEL_TYPE="hunyuan"
-DATA_MERGE_PATH="/data/wenxing.wang/OpenVid-1M/OpenVidHD/video_sample/merge.txt"
-OUTPUT_DIR="/data/wenxing.wang/dataset/Image-Vid-Finetune-HunYuan"
-VALIDATION_PATH="/data/wenxing.wang/OpenVid-1M/OpenVidHD/validation_dataset/prompt.txt"
+DATA_MERGE_PATH="/data/yanguo.sun/hunyuan-video/OpenVidHD/merge.txt"
+OUTPUT_DIR="/data/yanguo.sun/hunyuan-video/datasets"
+VALIDATION_PATH="/data/yanguo.sun/hunyuan-video/OpenVidHD/validation_dataset/prompt.txt"
 
 torchrun --nproc_per_node=$GPU_NUM \
     fastvideo/data_preprocess/preprocess_vae_latents.py \
@@ -13,7 +13,7 @@ torchrun --nproc_per_node=$GPU_NUM \
     --train_batch_size=1 \
     --max_height=720 \
     --max_width=1280 \
-    --num_frames=93 \
+    --num_frames=125 \
     --dataloader_num_workers 4 \
     --output_dir=$OUTPUT_DIR \
     --model_type $MODEL_TYPE \

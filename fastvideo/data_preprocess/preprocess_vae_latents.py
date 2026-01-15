@@ -44,6 +44,8 @@ def main(args):
             with torch.autocast("musa", dtype=autocast_type):
                 latents = vae.encode(data["pixel_values"].to(encoder_device))["latent_dist"].sample()
             for idx, video_path in enumerate(data["path"]):
+                if len(json_data) > 400:
+                    break
                 video_name = os.path.basename(video_path).split(".")[0]
                 latent_path = os.path.join(args.output_dir, "latent", video_name + ".pt")
                 torch.save(latents[idx].to(torch.bfloat16), latent_path)
@@ -53,6 +55,9 @@ def main(args):
                 item["caption"] = data["text"][idx]
                 json_data.append(item)
                 print(f"{video_name} processed")
+            if len(json_data) > 400:
+                break
+    print(f'!!!!!!! Processed {len(json_data)} samples !!!!!!')
     dist.barrier()
     local_data = json_data
     gathered_data = [None] * world_size

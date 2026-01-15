@@ -130,7 +130,7 @@ def prepare_dataset_json(folder_path,
     # Create merge.txt
     merge_file = folder_path / "merge.txt"
     with open(merge_file, 'w') as f:
-        f.write(f"{folder_path}/video_sample,{output_file}\n")
+        f.write(f"{folder_path},{output_file}\n")
 
     print(f"Dataset information saved to {output_file}")
     print(f"Merge file created at {merge_file}")

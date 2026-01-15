@@ -207,6 +207,11 @@ def main(args):
         args.dit_model_name_or_path,
         args.pretrained_model_name_or_path,
         torch.float32 if args.master_weight_type == "fp32" else torch.bfloat16,
+        use_fused_rmsnorm=args.use_fused_rmsnorm,
+        use_fused_rope=args.use_fused_rope,
+        num_frames=args.num_frames,
+        num_height=args.num_height,
+        num_width=args.num_width,
     )
 
     if args.use_lora:
@@ -256,6 +261,7 @@ def main(args):
         transformer.config.lora_target_modules = ["to_k", "to_q", "to_v", "to_out.0"]
         transformer._no_split_modules = [no_split_module.__name__ for no_split_module in no_split_modules]
         fsdp_kwargs["auto_wrap_policy"] = fsdp_kwargs["auto_wrap_policy"](transformer)
+    # transformer = transformer.to(memory_format=torch.channels_last) # transform layout to NHWC
     transformer = FSDP(
         transformer,
         **fsdp_kwargs,
@@ -393,13 +399,14 @@ def main(args):
         step_times.append(step_time)
         avg_step_time = sum(step_times) / len(step_times)
 
-        progress_bar.set_postfix({
-            "loss": f"{loss:.4f}",
-            "step_time": f"{step_time:.2f}s",
-            "grad_norm": grad_norm,
-        })
-        progress_bar.update(1)
+        # progress_bar.set_postfix({
+        #     "loss": f"{loss:.4f}",
+        #     "step_time": f"{step_time:.2f}s",
+        #     "grad_norm": grad_norm,
+        # })
+        # progress_bar.update(1)
         if rank == 0:
+            print(f'!!!!!! rank {rank} step {step} loss: {loss:.4f} step_time: {step_time:.2f}s grad_norm: {grad_norm:.2f}')
             wandb.log(
                 {
                     "train_loss": loss,
@@ -657,6 +664,18 @@ if __name__ == "__main__":
         type=str,
         default="fp32",
         help="Weight type to use - fp32 or bf16.",
+    )
+    parser.add_argument(
+        "--use_fused_rmsnorm",
+        action="store_true",
+        default=False,
+        help="use torch fused rmsnorm implementation",
+    )
+    parser.add_argument(
+        "--use_fused_rope",
+        action="store_true",
+        default=False,
+        help="use torch fused rope implementation",
     )
 
     args = parser.parse_args()

@@ -135,6 +135,7 @@ def apply_rotary_emb(
     xk: torch.Tensor,
     freqs_cis: Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]],
     head_first: bool = False,
+    use_fused_rope: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Apply rotary embeddings to input tensors using the given frequency tensor.
@@ -155,22 +156,27 @@ def apply_rotary_emb(
 
     """
     xk_out = None
-    if isinstance(freqs_cis, tuple):
-        cos, sin = reshape_for_broadcast(freqs_cis, xq, head_first)  # [S, D]
-        cos, sin = cos.to(xq.device), sin.to(xq.device)
-        # real * cos - imag * sin
-        # imag * cos + real * sin
-        xq_out = (xq.float() * cos + rotate_half(xq.float()) * sin).type_as(xq)
-        xk_out = (xk.float() * cos + rotate_half(xk.float()) * sin).type_as(xk)
+    if use_fused_rope:
+        freqs_cis = freqs_cis.to(xq.device)
+        xq_out = torch.rope(xq.float(), freq_cis=freqs_cis, rotary_interleaved=True, batch_first=True, multi_latent_attention=False).type_as(xq)
+        xk_out = torch.rope(xk.float(), freq_cis=freqs_cis, rotary_interleaved=True, batch_first=True, multi_latent_attention=False).type_as(xk)
     else:
-        # view_as_complex will pack [..., D/2, 2](real) to [..., D/2](complex)
-        xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))  # [B, S, H, D//2]
-        freqs_cis = reshape_for_broadcast(freqs_cis, xq_, head_first).to(xq.device)  # [S, D//2] --> [1, S, 1, D//2]
-        # (real, imag) * (cos, sin) = (real * cos - imag * sin, imag * cos + real * sin)
-        # view_as_real will expand [..., D/2](complex) to [..., D/2, 2](real)
-        xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3).type_as(xq)
-        xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))  # [B, S, H, D//2]
-        xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3).type_as(xk)
+        if isinstance(freqs_cis, tuple):
+            cos, sin = reshape_for_broadcast(freqs_cis, xq, head_first)  # [S, D]
+            cos, sin = cos.to(xq.device), sin.to(xq.device)
+            # real * cos - imag * sin
+            # imag * cos + real * sin
+            xq_out = (xq.float() * cos + rotate_half(xq.float()) * sin).type_as(xq)
+            xk_out = (xk.float() * cos + rotate_half(xk.float()) * sin).type_as(xk)
+        else:
+            # view_as_complex will pack [..., D/2, 2](real) to [..., D/2](complex)
+            xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))  # [B, S, H, D//2]
+            freqs_cis = reshape_for_broadcast(freqs_cis, xq_, head_first).to(xq.device)  # [S, D//2] --> [1, S, 1, D//2]
+            # (real, imag) * (cos, sin) = (real * cos - imag * sin, imag * cos + real * sin)
+            # view_as_real will expand [..., D/2](complex) to [..., D/2, 2](real)
+            xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3).type_as(xq)
+            xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))  # [B, S, H, D//2]
+            xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3).type_as(xk)
 
     return xq_out, xk_out
 
@@ -183,6 +189,7 @@ def get_nd_rotary_pos_embed(
     use_real=False,
     theta_rescale_factor: Union[float, List[float]] = 1.0,
     interpolation_factor: Union[float, List[float]] = 1.0,
+    use_fused_rope: bool = False,
 ):
     """
     This is a n-d version of precompute_freqs_cis, which is a RoPE for tokens with n-d structure.
@@ -229,16 +236,19 @@ def get_nd_rotary_pos_embed(
             use_real=use_real,
             theta_rescale_factor=theta_rescale_factor[i],
             interpolation_factor=interpolation_factor[i],
+            use_fused_rope=use_fused_rope,
         )  # 2 x [WHD, rope_dim_list[i]]
         embs.append(emb)
-
-    if use_real:
-        cos = torch.cat([emb[0] for emb in embs], dim=1)  # (WHD, D/2)
-        sin = torch.cat([emb[1] for emb in embs], dim=1)  # (WHD, D/2)
-        return cos, sin
+    if use_fused_rope:
+        return torch.cat(embs, dim=1)  # (WHD, D)
     else:
-        emb = torch.cat(embs, dim=1)  # (WHD, D/2)
-        return emb
+        if use_real:
+            cos = torch.cat([emb[0] for emb in embs], dim=1)  # (WHD, D/2)
+            sin = torch.cat([emb[1] for emb in embs], dim=1)  # (WHD, D/2)
+            return cos, sin
+        else:
+            emb = torch.cat(embs, dim=1)  # (WHD, D/2)
+            return emb
 
 
 def get_1d_rotary_pos_embed(
@@ -248,6 +258,7 @@ def get_1d_rotary_pos_embed(
     use_real: bool = False,
     theta_rescale_factor: float = 1.0,
     interpolation_factor: float = 1.0,
+    use_fused_rope: bool = False,
 ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
     """
     Precompute the frequency tensor for complex exponential (cis) with given dimensions.
@@ -280,10 +291,15 @@ def get_1d_rotary_pos_embed(
     freqs = 1.0 / (theta**(torch.arange(0, dim, 2)[:(dim // 2)].float() / dim))  # [D/2]
     # assert interpolation_factor == 1.0, f"interpolation_factor: {interpolation_factor}"
     freqs = torch.outer(pos * interpolation_factor, freqs)  # [S, D/2]
-    if use_real:
-        freqs_cos = freqs.cos().repeat_interleave(2, dim=1)  # [S, D]
-        freqs_sin = freqs.sin().repeat_interleave(2, dim=1)  # [S, D]
-        return freqs_cos, freqs_sin
+    if use_fused_rope:
+        return freqs.repeat_interleave(2, dim=1)  # [S, D]
+        # return freqs.repeat(1, 2)  # [S, D] 但排列为 [freq1, freq2, ..., freq1, freq2, ...]
+        # return freqs_block
     else:
-        freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64     # [S, D/2]
-        return freqs_cis
+        if use_real:
+            freqs_cos = freqs.cos().repeat_interleave(2, dim=1)  # [S, D]
+            freqs_sin = freqs.sin().repeat_interleave(2, dim=1)  # [S, D]
+            return freqs_cos, freqs_sin
+        else:
+            freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64     # [S, D/2]
+            return freqs_cis

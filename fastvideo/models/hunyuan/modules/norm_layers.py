@@ -11,6 +11,7 @@ class RMSNorm(nn.Module):
         eps: float = 1e-6,
         device=None,
         dtype=None,
+        use_fused_rmsnorm: bool = False,
     ):
         """
         Initialize the RMSNorm normalization layer.
@@ -24,6 +25,7 @@ class RMSNorm(nn.Module):
             weight (nn.Parameter): Learnable scaling parameter.
 
         """
+        self.use_fused_rmsnorm = use_fused_rmsnorm
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.eps = eps
@@ -54,11 +56,14 @@ class RMSNorm(nn.Module):
             torch.Tensor: The output tensor after applying RMSNorm.
 
         """
-        output = self._norm(x.float()).type_as(x)
-        if hasattr(self, "weight"):
-            output = output * self.weight
-        return output
-
+        if self.use_fused_rmsnorm:
+            return torch.nn.functional.rms_norm(x.type_as(self.weight), normalized_shape=(x.shape[-1],), weight=self.weight, eps=self.eps)
+        else:
+            output = self._norm(x.float()).type_as(x)
+            if hasattr(self, "weight"):
+                output = output * self.weight
+            return output
+        
 
 def get_norm_layer(norm_layer):
     """

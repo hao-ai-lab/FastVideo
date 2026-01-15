@@ -37,8 +37,13 @@ class MMDoubleStreamBlock(nn.Module):
         qkv_bias: bool = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[torch.device] = None,
+        use_fused_rmsnorm : bool = False,
+        use_fused_rope : bool = False,
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
+        norm_layer_factory_kwargs = {"device": device, "dtype": dtype}
+        if qk_norm_type == "rms" and use_fused_rmsnorm:
+            norm_layer_factory_kwargs['use_fused_rmsnorm'] = True
         super().__init__()
 
         self.deterministic = False
@@ -56,9 +61,9 @@ class MMDoubleStreamBlock(nn.Module):
 
         self.img_attn_qkv = nn.Linear(hidden_size, hidden_size * 3, bias=qkv_bias, **factory_kwargs)
         qk_norm_layer = get_norm_layer(qk_norm_type)
-        self.img_attn_q_norm = (qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+        self.img_attn_q_norm = (qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **norm_layer_factory_kwargs)
                                 if qk_norm else nn.Identity())
-        self.img_attn_k_norm = (qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+        self.img_attn_k_norm = (qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **norm_layer_factory_kwargs)
                                 if qk_norm else nn.Identity())
         self.img_attn_proj = nn.Linear(hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs)
 
@@ -95,6 +100,7 @@ class MMDoubleStreamBlock(nn.Module):
             **factory_kwargs,
         )
         self.hybrid_seq_parallel_attn = None
+        self.use_fused_rope = use_fused_rope
 
     def enable_deterministic(self):
         self.deterministic = True
@@ -140,16 +146,15 @@ class MMDoubleStreamBlock(nn.Module):
         # Apply RoPE if needed.
         if freqs_cis is not None:
 
-            def shrink_head(encoder_state, dim):
-                local_heads = encoder_state.shape[dim] // mccl_info.sp_size
-                return encoder_state.narrow(dim, mccl_info.rank_within_group * local_heads, local_heads)
+            # def shrink_head(encoder_state, dim):
+            #     local_heads = encoder_state.shape[dim] // mccl_info.sp_size
+            #     return encoder_state.narrow(dim, mccl_info.rank_within_group * local_heads, local_heads)
 
-            freqs_cis = (
-                shrink_head(freqs_cis[0], dim=0),
-                shrink_head(freqs_cis[1], dim=0),
-            )
-
-            img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False)
+            # freqs_cis = (
+            #     shrink_head(freqs_cis[0], dim=0),
+            #     shrink_head(freqs_cis[1], dim=0),
+            # )
+            img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False, use_fused_rope=self.use_fused_rope)
             assert (img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
                     ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
             img_q, img_k = img_qq, img_kk
@@ -212,8 +217,13 @@ class MMSingleStreamBlock(nn.Module):
         qk_scale: float = None,
         dtype: Optional[torch.dtype] = None,
         device: Optional[torch.device] = None,
+        use_fused_rmsnorm : bool = False,
+        use_fused_rope : bool = False,
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
+        norm_layer_factory_kwargs = {"device": device, "dtype": dtype}
+        if qk_norm_type == "rms" and use_fused_rmsnorm:
+            norm_layer_factory_kwargs['use_fused_rmsnorm'] = True
         super().__init__()
 
         self.deterministic = False
@@ -230,9 +240,9 @@ class MMSingleStreamBlock(nn.Module):
         self.linear2 = nn.Linear(hidden_size + mlp_hidden_dim, hidden_size, **factory_kwargs)
 
         qk_norm_layer = get_norm_layer(qk_norm_type)
-        self.q_norm = (qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+        self.q_norm = (qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **norm_layer_factory_kwargs)
                        if qk_norm else nn.Identity())
-        self.k_norm = (qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+        self.k_norm = (qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **norm_layer_factory_kwargs)
                        if qk_norm else nn.Identity())
 
         self.pre_norm = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs)
@@ -245,6 +255,7 @@ class MMSingleStreamBlock(nn.Module):
             **factory_kwargs,
         )
         self.hybrid_seq_parallel_attn = None
+        self.use_fused_rope = use_fused_rope
 
     def enable_deterministic(self):
         self.deterministic = True
@@ -271,19 +282,19 @@ class MMSingleStreamBlock(nn.Module):
         q = self.q_norm(q).to(v)
         k = self.k_norm(k).to(v)
 
-        def shrink_head(encoder_state, dim):
-            local_heads = encoder_state.shape[dim] // mccl_info.sp_size
-            return encoder_state.narrow(dim, mccl_info.rank_within_group * local_heads, local_heads)
+        # def shrink_head(encoder_state, dim):
+        #     local_heads = encoder_state.shape[dim] // mccl_info.sp_size
+        #     return encoder_state.narrow(dim, mccl_info.rank_within_group * local_heads, local_heads)
 
-        freqs_cis = (
-            shrink_head(freqs_cis[0], dim=0),
-            shrink_head(freqs_cis[1], dim=0),
-        )
+        # freqs_cis = (
+        #     shrink_head(freqs_cis[0], dim=0),
+        #     shrink_head(freqs_cis[1], dim=0),
+        # )
 
         img_q, txt_q = q[:, :-txt_len, :, :], q[:, -txt_len:, :, :]
         img_k, txt_k = k[:, :-txt_len, :, :], k[:, -txt_len:, :, :]
         img_v, txt_v = v[:, :-txt_len, :, :], v[:, -txt_len:, :, :]
-        img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False)
+        img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False, use_fused_rope=self.use_fused_rope)
         assert (img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
                 ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
         img_q, img_k = img_qq, img_kk
@@ -355,6 +366,10 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         The dtype of the model.
     device: torch.device
         The device of the model.
+    use_fused_rmsnorm: bool
+        Whether to use fused rmsnorm.
+    use_fused_rope: bool
+        Whether to use fused rope.
     """
 
     @register_to_config
@@ -381,6 +396,11 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         text_states_dim: int = 4096,
         text_states_dim_2: int = 768,
         rope_theta: int = 256,
+        use_fused_rmsnorm: bool = False,
+        use_fused_rope: bool = False,
+        num_frames: int = 16,
+        num_height: int = 64,
+        num_width: int = 64,
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -396,6 +416,11 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         # Alternative: TokenRefiner. See more details (LI-DiT): http://arxiv.org/abs/2406.11831
         self.use_attention_mask = use_attention_mask
         self.text_projection = text_projection
+        self.use_fused_rmsnorm = use_fused_rmsnorm
+        self.use_fused_rope = use_fused_rope
+        # self.num_frames = num_frames
+        # self.num_width = num_width
+        # self.num_height = num_height
 
         if hidden_size % heads_num != 0:
             raise ValueError(f"Hidden size {hidden_size} must be divisible by heads_num {heads_num}")
@@ -448,6 +473,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                 qk_norm_type=qk_norm_type,
                 qkv_bias=qkv_bias,
                 **factory_kwargs,
+                use_fused_rmsnorm = self.use_fused_rmsnorm,
+                use_fused_rope = self.use_fused_rope,
             ) for _ in range(mm_double_blocks_depth)
         ])
 
@@ -461,6 +488,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                 qk_norm=qk_norm,
                 qk_norm_type=qk_norm_type,
                 **factory_kwargs,
+                use_fused_rmsnorm = self.use_fused_rmsnorm,
+                use_fused_rope = self.use_fused_rope,
             ) for _ in range(mm_single_blocks_depth)
         ])
 
@@ -471,6 +500,23 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             get_activation_layer("silu"),
             **factory_kwargs,
         )
+        # tt, th, tw = (
+        #     self.num_frames // self.patch_size[0],  # codespell:ignore
+        #     self.num_height // self.patch_size[1],  # codespell:ignore
+        #     self.num_width // self.patch_size[2],  # codespell:ignore
+        # )
+        # original_tt = mccl_info.sp_size * tt
+        # self.freqs_cis = self.get_rotary_pos_embed((original_tt, th, tw), self.use_fused_rope)
+        # if self.use_fused_rope:
+        #     self.freqs_cis = self.shrink_head(self.freqs_cis, dim=0)
+        # else:
+        #     self.freqs_cos = self.shrink_head(self.freqs_cis[0], dim=0)
+        #     self.freqs_sin = self.shrink_head(self.freqs_cis[1], dim=0)
+        #     self.freqs_cis = (self.freqs_cos, self.freqs_sin)
+
+    def shrink_head(self, encoder_state, dim):
+        local_heads = encoder_state.shape[dim] // mccl_info.sp_size
+        return encoder_state.narrow(dim, mccl_info.rank_within_group * local_heads, local_heads)
 
     def enable_deterministic(self):
         for block in self.double_blocks:
@@ -484,7 +530,7 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         for block in self.single_blocks:
             block.disable_deterministic()
 
-    def get_rotary_pos_embed(self, rope_sizes):
+    def get_rotary_pos_embed(self, rope_sizes, use_fused_rope):
         target_ndim = 3
 
         head_dim = self.hidden_size // self.heads_num
@@ -492,14 +538,15 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         if rope_dim_list is None:
             rope_dim_list = [head_dim // target_ndim for _ in range(target_ndim)]
         assert (sum(rope_dim_list) == head_dim), "sum(rope_dim_list) should equal to head_dim of attention layer"
-        freqs_cos, freqs_sin = get_nd_rotary_pos_embed(
+        freqs = get_nd_rotary_pos_embed(
             rope_dim_list,
             rope_sizes,
             theta=self.rope_theta,
             use_real=True,
             theta_rescale_factor=1,
+            use_fused_rope=use_fused_rope,
         )
-        return freqs_cos, freqs_sin
+        return freqs
         # x: torch.Tensor,
         # t: torch.Tensor,  # Should be in range(0, 1000).
         # text_states: torch.Tensor = None,
@@ -537,7 +584,13 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
             ow // self.patch_size[2],  # codespell:ignore
         )
         original_tt = mccl_info.sp_size * tt
-        freqs_cos, freqs_sin = self.get_rotary_pos_embed((original_tt, th, tw))
+        freqs_cis = self.get_rotary_pos_embed((original_tt, th, tw), self.use_fused_rope)
+        if self.use_fused_rope:
+            freqs_cis = self.shrink_head(freqs_cis, dim=0)
+        else:
+            freqs_cos = self.shrink_head(freqs_cis[0], dim=0)
+            freqs_sin = self.shrink_head(freqs_cis[1], dim=0)
+            freqs_cis = (freqs_cos, freqs_sin)
         # Prepare modulation vectors.
         vec = self.time_in(t)
 
@@ -564,9 +617,9 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         txt_seq_len = txt.shape[1]
         img_seq_len = img.shape[1]
 
-        freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
+        # freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
+        # freqs_cis = (self.freqs_cos, self.freqs_sin) if self.freqs_cos is not None else None
         # --------------------- Pass through DiT blocks ------------------------
-
         for index, block in enumerate(self.double_blocks):
             double_block_args = [img, txt, vec, freqs_cis, text_mask, mask_strategy[index]]
             img, txt = block(*double_block_args)
@@ -580,7 +633,8 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
                     x,
                     vec,
                     txt_seq_len,
-                    (freqs_cos, freqs_sin),
+                    # (freqs_cos, freqs_sin),
+                    freqs_cis,
                     text_mask,
                     mask_strategy[index + len(self.double_blocks)],
                 ]
