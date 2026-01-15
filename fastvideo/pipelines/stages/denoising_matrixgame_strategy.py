@@ -235,6 +235,25 @@ class MatrixGameBlockStrategy(BlockDenoisingStrategy):
 
         current_latents = state.latents[:, :, start_index:start_index +
                                         current_num_frames, :, :]
+
+        noise_generator = None
+        if ctx.noise_pool is not None:
+            latents_device = state.latents.device
+
+            def noise_generator(shape: tuple, dtype: torch.dtype,
+                                step_idx: int) -> torch.Tensor:
+                if step_idx < len(ctx.noise_pool):
+                    noise = ctx.noise_pool[step_idx]
+                    if noise.shape != shape:
+                        noise = noise[:, :shape[1], :, :, :]
+                    return noise.to(device=latents_device, dtype=dtype)
+
+                generator = batch.generator
+                if isinstance(generator, list):
+                    generator = generator[0] if generator else None
+                return torch.randn(shape, dtype=dtype,
+                                   generator=generator).to(latents_device)
+
         current_latents = self.stage._process_single_block(
             current_latents=current_latents,
             batch=batch,
@@ -244,6 +263,7 @@ class MatrixGameBlockStrategy(BlockDenoisingStrategy):
             ctx=ctx,
             action_kwargs=action_kwargs,
             progress_bar=progress_bar,
+            noise_generator=noise_generator,
         )
 
         state.latents[:, :, start_index:start_index +

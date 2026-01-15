@@ -20,6 +20,7 @@ from torch.distributed.fsdp import (CPUOffloadPolicy, FSDPModule,
 from torch.nn.modules.module import _IncompatibleKeys
 
 from fastvideo.logger import init_logger
+from fastvideo.pin_memory import is_pin_memory_available
 from fastvideo.models.loader.utils import (get_param_names_mapping,
                                            hf_to_custom_state_dict)
 from fastvideo.models.loader.weight_utils import safetensors_weights_iterator
@@ -212,6 +213,11 @@ def shard_model(
         "mp_policy": mp_policy,
     }
     if cpu_offload:
+        if pin_cpu_memory and not is_pin_memory_available():
+            logger.warning(
+                "Pinned memory is unavailable; disabling pin_cpu_memory for FSDP offload."
+            )
+            pin_cpu_memory = False
         fsdp_kwargs["offload_policy"] = CPUOffloadPolicy(
             pin_memory=pin_cpu_memory)
 

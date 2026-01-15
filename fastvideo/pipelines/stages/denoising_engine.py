@@ -105,7 +105,7 @@ class DenoisingEngine:
             hook.pre_run(state)
 
         if isinstance(self.strategy, BlockDenoisingStrategy):
-            self._run_blocks(self.strategy, state)
+            self.run_blocks(state)
         else:
             timesteps = state.timesteps
             for i, t in enumerate(timesteps):
@@ -129,10 +129,28 @@ class DenoisingEngine:
 
         return self.strategy.postprocess(state)
 
-    def _run_blocks(self, strategy: BlockDenoisingStrategy,
-                    state: StrategyState) -> None:
-        block_plan = strategy.block_plan(state)
-        for block_idx, block_item in enumerate(block_plan.items):
+    def run_blocks(
+        self,
+        state: StrategyState,
+        *,
+        block_plan=None,
+        start_block: int = 0,
+        num_blocks: int | None = None,
+    ) -> None:
+        if not isinstance(self.strategy, BlockDenoisingStrategy):
+            raise TypeError("run_blocks requires a BlockDenoisingStrategy")
+
+        strategy = self.strategy
+        if block_plan is None:
+            block_plan = strategy.block_plan(state)
+
+        items = block_plan.items
+        end_block = len(items)
+        if num_blocks is not None:
+            end_block = min(end_block, start_block + num_blocks)
+
+        for block_idx in range(start_block, end_block):
+            block_item = items[block_idx]
             block_ctx = strategy.init_block_context(
                 state,
                 block_item,

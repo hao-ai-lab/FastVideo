@@ -11,6 +11,8 @@ from typing import Dict, Set, Optional, Tuple
 
 import torch
 
+from fastvideo.pin_memory import is_pin_memory_available
+
 
 class LayerwiseOffloadManager:
     """A lightweight layerwise CPU offload manager.
@@ -33,6 +35,8 @@ class LayerwiseOffloadManager:
         self.module_list_attr = module_list_attr
         self.num_layers = int(num_layers)
         self.pin_cpu_memory = bool(pin_cpu_memory)
+        if self.pin_cpu_memory and not is_pin_memory_available():
+            self.pin_cpu_memory = False
 
         self.enabled = bool(enabled and torch.cuda.is_available())
         self.device = (

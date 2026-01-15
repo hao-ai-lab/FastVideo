@@ -16,14 +16,6 @@ from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 
 try:
-    from fastvideo.attention.backends.sliding_tile_attn import (
-        SlidingTileAttentionBackend)
-    st_attn_available = True
-except ImportError:
-    st_attn_available = False
-    SlidingTileAttentionBackend = None  # type: ignore
-
-try:
     from fastvideo.attention.backends.video_sparse_attn import (
         VideoSparseAttentionBackend)
     vsa_available = True
@@ -123,6 +115,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
 
         self._streaming_initialized: bool = False
         self._streaming_ctx: BlockProcessingContext | None = None
+        self._streaming_engine = None
+        self._streaming_state = None
+        self._streaming_block_plan = None
 
     def forward(
         self,
@@ -501,123 +496,40 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
 
     def streaming_reset(self, batch: ForwardBatch,
                         fastvideo_args: FastVideoArgs) -> ForwardBatch:
-        target_dtype = torch.bfloat16
-        autocast_enabled = (target_dtype != torch.float32
-                            ) and not fastvideo_args.disable_autocast
+        from fastvideo.pipelines.stages.denoising_engine import DenoisingEngine
+        from fastvideo.pipelines.stages.denoising_matrixgame_strategy import (
+            MatrixGameBlockStrategy)
 
-        latent_seq_length = batch.latents.shape[-1] * batch.latents.shape[-2]
-        patch_size = self.transformer.patch_size
-        patch_ratio = patch_size[-1] * patch_size[-2]
-        self.frame_seq_length = latent_seq_length // patch_ratio
+        strategy = MatrixGameBlockStrategy(self)
+        engine = DenoisingEngine(strategy)
+        state = strategy.prepare(batch, fastvideo_args)
+        block_plan = strategy.block_plan(state)
 
-        timesteps = torch.tensor(
-            fastvideo_args.pipeline_config.dmd_denoising_steps,
-            dtype=torch.long).cpu()
-        if fastvideo_args.pipeline_config.warp_denoising_step:
-            scheduler_timesteps = torch.cat((self.scheduler.timesteps.cpu(),
-                                             torch.tensor([0],
-                                                          dtype=torch.float32)))
-            timesteps = scheduler_timesteps[1000 - timesteps]
-        timesteps = timesteps.to(get_local_torch_device())
+        progress_bar = state.extra.get("progress_bar")
+        if progress_bar is not None:
+            progress_bar.close()
+        state.extra["progress_bar"] = None
 
-        boundary_ratio = getattr(fastvideo_args.pipeline_config.dit_config,
-                                 'boundary_ratio', None)
-        if boundary_ratio is not None:
-            boundary_timestep = boundary_ratio * self.scheduler.num_train_timesteps
-            high_noise_timesteps = timesteps[timesteps >= boundary_timestep]
-        else:
-            boundary_timestep = None
-            high_noise_timesteps = None
-
-        image_embeds = batch.image_embeds
-        if len(image_embeds) > 0:
-            assert torch.isnan(image_embeds[0]).sum() == 0
-            image_embeds = [
-                image_embed.to(target_dtype) for image_embed in image_embeds
-            ]
-
-        # directly set the kwarg.
-        image_kwargs = {"encoder_hidden_states_image": image_embeds}
-        pos_cond_kwargs: dict[str, Any] = {}
-
-        if st_attn_available and self.attn_backend == SlidingTileAttentionBackend:
-            self.prepare_sta_param(batch, fastvideo_args)
-
-        assert batch.latents is not None, "latents must be provided"
-        latents = batch.latents
+        ctx = state.extra["ctx"]
+        latents = state.latents
+        assert latents is not None, "latents must be provided"
         b, c, t, h, w = latents.shape
-        prompt_embeds = batch.prompt_embeds
-        assert torch.isnan(prompt_embeds[0]).sum() == 0
 
-        # Initialize caches
-        kv_cache1 = self._initialize_kv_cache(batch_size=latents.shape[0],
-                                              dtype=target_dtype,
-                                              device=latents.device)
-        kv_cache2 = None
-        if boundary_timestep is not None:
-            kv_cache2 = self._initialize_kv_cache(batch_size=latents.shape[0],
-                                                  dtype=target_dtype,
-                                                  device=latents.device)
-
-        kv_cache_mouse = None
-        kv_cache_keyboard = None
-        if self.use_action_module:
-            kv_cache_mouse, kv_cache_keyboard = self._initialize_action_kv_cache(
-                batch_size=latents.shape[0],
-                dtype=target_dtype,
-                device=latents.device)
-
-        crossattn_cache = self._initialize_crossattn_cache(
-            batch_size=latents.shape[0],
-            max_text_len=257,  # 1 CLS + 256 patch tokens
-            dtype=target_dtype,
-            device=latents.device)
-
-        # Calculate block sizes
-        if t % self.num_frame_per_block != 0:
-            raise ValueError(
-                "num_frames must be divisible by num_frame_per_block for causal denoising"
-            )
-        num_blocks = t // self.num_frame_per_block
-        block_sizes = [self.num_frame_per_block] * num_blocks
-        if boundary_timestep is not None:
-            block_sizes[0] = 1
-
-        # Pre-allocate noise pool
-        num_denoising_steps = len(timesteps)
+        num_denoising_steps = len(state.timesteps)
         noise_shape = (b, self.num_frame_per_block, c, h, w)
         noise_pool = [
             torch.randn(
                 noise_shape,
-                dtype=target_dtype,
+                dtype=ctx.target_dtype,
                 device=latents.device,
-            ) for _ in range(num_denoising_steps - 1)
+            ) for _ in range(max(num_denoising_steps - 1, 0))
         ]
+        ctx.noise_pool = noise_pool
 
-        # Create and store context
-        self._streaming_ctx = BlockProcessingContext(
-            batch=batch,
-            block_idx=0,
-            start_index=0,
-            kv_cache1=kv_cache1,
-            kv_cache2=kv_cache2,
-            kv_cache_mouse=kv_cache_mouse,
-            kv_cache_keyboard=kv_cache_keyboard,
-            crossattn_cache=crossattn_cache,
-            timesteps=timesteps,
-            block_sizes=block_sizes,
-            noise_pool=noise_pool,
-            fastvideo_args=fastvideo_args,
-            target_dtype=target_dtype,
-            autocast_enabled=autocast_enabled,
-            boundary_timestep=boundary_timestep,
-            high_noise_timesteps=high_noise_timesteps,
-            context_noise=getattr(fastvideo_args.pipeline_config,
-                                  "context_noise", 0),
-            image_kwargs=image_kwargs,
-            pos_cond_kwargs=pos_cond_kwargs,
-        )
-
+        self._streaming_engine = engine
+        self._streaming_state = state
+        self._streaming_block_plan = block_plan
+        self._streaming_ctx = ctx
         self._streaming_initialized = True
         return batch
 
@@ -625,23 +537,25 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             self,
             keyboard_action: torch.Tensor | None = None,
             mouse_action: torch.Tensor | None = None) -> ForwardBatch:
-        if not self._streaming_initialized or self._streaming_ctx is None:
+        if (not self._streaming_initialized or self._streaming_ctx is None
+                or self._streaming_engine is None
+                or self._streaming_state is None
+                or self._streaming_block_plan is None):
             raise RuntimeError(
                 "Streaming not initialized! Call streaming_reset first.")
 
         ctx = self._streaming_ctx
-        if ctx.block_idx >= len(ctx.block_sizes):
+        block_plan = self._streaming_block_plan
+        if ctx.block_idx >= len(block_plan.items):
             return ctx.batch
 
         batch = ctx.batch
         latents = batch.latents
         assert latents is not None, "latents must be set in batch"
 
-        current_num_frames = ctx.block_sizes[ctx.block_idx]
-        start_index = ctx.start_index
-
-        current_latents = latents[:, :, start_index:start_index +
-                                  current_num_frames, :, :]
+        block_item = block_plan.items[ctx.block_idx]
+        start_index = block_item.start_index
+        current_num_frames = block_item.num_frames
 
         # Update batch with new actions for this block
         if keyboard_action is not None or mouse_action is not None:
@@ -659,51 +573,15 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                 batch.mouse_cond[:, start_frame:start_frame +
                                  n] = mouse_action.to(batch.mouse_cond.device)
 
-        action_kwargs = self._prepare_action_kwargs(batch, start_index,
-                                                    current_num_frames)
-
-        # Create noise generator that uses pre-allocated noise pool
-        def streaming_noise_generator(shape: tuple, dtype: torch.dtype,
-                                      step_idx: int) -> torch.Tensor:
-            if ctx.noise_pool is not None and step_idx < len(ctx.noise_pool):
-                return ctx.noise_pool[step_idx][:, :shape[1], :, :, :].to(
-                    latents.device)
-            else:
-                # Fallback to dynamic allocation if pool not available
-                return torch.randn(
-                    shape,
-                    dtype=dtype,
-                    generator=(batch.generator[0] if isinstance(
-                        batch.generator, list) else batch.generator)).to(
-                            latents.device)
-
-        current_latents = self._process_single_block(
-            current_latents=current_latents,
-            batch=batch,
-            start_index=start_index,
-            current_num_frames=current_num_frames,
-            timesteps=ctx.timesteps,
-            ctx=ctx,
-            action_kwargs=action_kwargs,
-            noise_generator=streaming_noise_generator,
-        )
-
-        latents[:, :, start_index:start_index +
-                current_num_frames, :, :] = current_latents
-
-        # Update KV caches with clean context
-        self._update_context_cache(
-            current_latents=current_latents,
-            batch=batch,
-            start_index=start_index,
-            current_num_frames=current_num_frames,
-            ctx=ctx,
-            action_kwargs=action_kwargs,
-            context_noise=ctx.context_noise,
+        self._streaming_engine.run_blocks(
+            self._streaming_state,
+            block_plan=block_plan,
+            start_block=ctx.block_idx,
+            num_blocks=1,
         )
 
         # Advance streaming state
-        ctx.start_index += current_num_frames
+        ctx.start_index = start_index + current_num_frames
         ctx.block_idx += 1
 
         return batch
@@ -711,6 +589,9 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
     def streaming_clear(self) -> None:
         self._streaming_initialized = False
         self._streaming_ctx = None
+        self._streaming_engine = None
+        self._streaming_state = None
+        self._streaming_block_plan = None
 
     def verify_input(self, batch: ForwardBatch,
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
