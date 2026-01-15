@@ -66,8 +66,8 @@ class HyWorldPipeline(ComposedPipelineBase):
 
         self.add_stage(stage_name="image_encoding_stage",
                        stage=HyWorldImageEncodingStage(
-                           image_encoder=self.get_module("image_encoder", None),
-                           image_processor=self.get_module("feature_extractor", None),
+                           image_encoder=self.get_module("image_encoder"),
+                           image_processor=self.get_module("feature_extractor"),
                            vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",

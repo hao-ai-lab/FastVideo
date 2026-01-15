@@ -9,9 +9,9 @@ def main():
     # If a local path is provided, FastVideo will make a best effort
     # attempt to identify the optimal arguments.
     generator = VideoGenerator.from_pretrained(
-        "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v",
+        "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
         # FastVideo will automatically handle distributed setup
-        num_gpus=4,
+        num_gpus=1,
         use_fsdp_inference=True,
         dit_cpu_offload=True,
         vae_cpu_offload=True,
@@ -26,15 +26,8 @@ def main():
     #     "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
     # )
 
-    prompt = (
-        'A paved pathway leads towards a stone arch bridge spanning a calm body of water.  '
-        'Lush green trees and foliage line the path and the far bank of the water. '
-        'A traditional-style pavilion with a tiered, reddish-brown roof sits on the far shore. '
-        'The water reflects the surrounding greenery and the sky.  '
-        'The scene is bathed in soft, natural light, creating a tranquil and serene atmosphere. '
-        'The pathway is composed of large, rectangular stones, and the bridge is constructed of light gray stone.  '
-        'The overall composition emphasizes the peaceful and harmonious nature of the landscape.'
-    )
+    prompt='A paved pathway leads towards a stone arch bridge spanning a calm body of water.  Lush green trees and foliage line the path and the far bank of the water. A traditional-style pavilion with a tiered, reddish-brown roof sits on the far shore. The water reflects the surrounding greenery and the sky.  The scene is bathed in soft, natural light, creating a tranquil and serene atmosphere. The pathway is composed of large, rectangular stones, and the bridge is constructed of light gray stone.  The overall composition emphasizes the peaceful and harmonious nature of the landscape.'
+
     video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, negative_prompt="", num_frames=121, fps=24)
 
     # prompt2 = (

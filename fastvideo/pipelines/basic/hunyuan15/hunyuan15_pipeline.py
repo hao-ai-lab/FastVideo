@@ -24,7 +24,7 @@ logger = init_logger(__name__)
 class HunyuanVideo15Pipeline(ComposedPipelineBase):
 
     _required_config_modules = [
-        "text_encoder", "text_encoder_2", "tokenizer", "tokenizer_2", "image_encoder", "feature_extractor", "vae",
+        "text_encoder", "text_encoder_2", "tokenizer", "tokenizer_2", "vae",
         "transformer", "scheduler"
     ]
 

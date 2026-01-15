@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for SigLIP vision encoder."""
+"""Tests for SigLIP vision encoder using HyWorld model."""
 
 import gc
 import os
@@ -13,19 +13,15 @@ from transformers import SiglipVisionModel as HFSiglipVisionModel
 from fastvideo.configs.models.encoders import SiglipVisionConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.utils import maybe_download_model
 
 logger = init_logger(__name__)
 
 os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "29504"
+os.environ["MASTER_PORT"] = "29505"
 
-# SigLIP model path - using the vision model from google/siglip-so400m-patch14-384
-BASE_MODEL_PATH = "google/siglip-so400m-patch14-384"
-MODEL_PATH = maybe_download_model(
-    BASE_MODEL_PATH,
-    local_dir=os.path.join("data", BASE_MODEL_PATH)
-)
+# HyWorld model path - SigLIP image encoder
+MODEL_PATH = "/mnt/weka/home/hao.zhang/mhuo/data/hyworld"
+IMAGE_ENCODER_PATH = os.path.join(MODEL_PATH, "image_encoder")
 
 
 def create_dummy_pixel_values(batch_size: int = 2, image_size: int = 384, num_channels: int = 3):
@@ -101,17 +97,17 @@ def test_siglip_encoder_vs_huggingface():
     
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     
-    logger.info("Loading SigLIP models from %s", MODEL_PATH)
+    logger.info("Loading SigLIP models from %s", IMAGE_ENCODER_PATH)
     
     # Load HuggingFace implementation
-    hf_model = HFSiglipVisionModel.from_pretrained(MODEL_PATH).to(torch.float16).to(device).eval()
+    hf_model = HFSiglipVisionModel.from_pretrained(IMAGE_ENCODER_PATH).to(torch.float16).to(device).eval()
     
     # Load the config and extract vision_config
-    with open(os.path.join(MODEL_PATH, "config.json")) as f:
+    with open(os.path.join(IMAGE_ENCODER_PATH, "config.json")) as f:
         full_config = json.load(f)
     
     # Get vision config from the full config
-    vision_config_dict = full_config.get("vision_config", {})
+    vision_config_dict = full_config.get("vision_config", full_config)
     
     # Create FastVideo config with vision-specific settings
     from fastvideo.configs.models.encoders.siglip import SiglipVisionArchConfig
@@ -131,7 +127,7 @@ def test_siglip_encoder_vs_huggingface():
     fv_model = SiglipVisionModel(config).to(torch.float16).to(device)
     
     # Load weights from safetensors
-    weights_path = os.path.join(MODEL_PATH, "model.safetensors")
+    weights_path = os.path.join(IMAGE_ENCODER_PATH, "model.safetensors")
     if os.path.exists(weights_path):
         state_dict = load_file(weights_path)
         # Filter to only vision_model weights (keep the vision_model. prefix)

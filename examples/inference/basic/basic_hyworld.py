@@ -241,18 +241,11 @@ OUTPUT_PATH = "video_samples_hyworld"
 
 def main():
     # Parameters matching run.sh from HY-WorldPlay
-    PROMPT = (
-        'A paved pathway leads towards a stone arch bridge spanning a calm body of water.  '
-        'Lush green trees and foliage line the path and the far bank of the water. '
-        'A traditional-style pavilion with a tiered, reddish-brown roof sits on the far shore. '
-        'The water reflects the surrounding greenery and the sky.  '
-        'The scene is bathed in soft, natural light, creating a tranquil and serene atmosphere. '
-        'The pathway is composed of large, rectangular stones, and the bridge is constructed of light gray stone.  '
-        'The overall composition emphasizes the peaceful and harmonious nature of the landscape.'
-    )
+    PROMPT='A paved pathway leads towards a stone arch bridge spanning a calm body of water.  Lush green trees and foliage line the path and the far bank of the water. A traditional-style pavilion with a tiered, reddish-brown roof sits on the far shore. The water reflects the surrounding greenery and the sky.  The scene is bathed in soft, natural light, creating a tranquil and serene atmosphere. The pathway is composed of large, rectangular stones, and the bridge is constructed of light gray stone.  The overall composition emphasizes the peaceful and harmonious nature of the landscape.'
+
 
     # Update these paths to match your setup (from run.sh)
-    IMAGE_PATH = os.getenv("IMAGE_PATH", "assets/hyworld.png")
+    IMAGE_PATH = os.getenv("IMAGE_PATH", "/mnt/weka/home/hao.zhang/mhuo/HY-WorldPlay/assets/img/test.png")
     # MODEL_PATH = os.getenv(
     #     "MODEL_PATH",
     #     "/mnt/weka/home/hao.zhang/.cache/huggingface/hub/models--tencent--HunyuanVideo-1.5/snapshots/9b49404b3f5df2a8f0b31df27a0c7ab872e7b038"

@@ -12,7 +12,7 @@ from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TextEncoderLoader
-from fastvideo.utils import maybe_download_model, PRECISION_TO_TYPE
+from fastvideo.utils import PRECISION_TO_TYPE
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.configs.models.encoders import T5Config
 
@@ -21,13 +21,14 @@ logger = init_logger(__name__)
 os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
+# HyWorld model path
+MODEL_PATH = "/mnt/weka/home/hao.zhang/mhuo/data/hyworld"
+
 
 @pytest.fixture
 def t5_model_paths():
-    base_model_path = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
-    model_path = maybe_download_model(base_model_path)
-    text_encoder_path = os.path.join(model_path, "text_encoder_2")
-    tokenizer_path = os.path.join(model_path, "tokenizer_2")
+    text_encoder_path = os.path.join(MODEL_PATH, "text_encoder_2")
+    tokenizer_path = os.path.join(MODEL_PATH, "tokenizer_2")
     return text_encoder_path, tokenizer_path
 
 
@@ -115,6 +116,9 @@ def test_t5_encoder(t5_model_paths):
                     input_ids=tokens.input_ids,
                     attention_mask=tokens.attention_mask,
                 ).last_hidden_state
+            
+            print("outputs2", outputs2)
+            print("outputs2.shape", outputs2.shape)
 
             # Compare last hidden states
             last_hidden_state1 = outputs1[tokens.attention_mask == 1]

@@ -320,10 +320,12 @@ class HyWorldDenoisingStage(DenoisingStage):
                             "Ks": Ks_input.to(target_dtype),  # [1, num_frames, 3, 3]
                         }
 
+                        if action_input is not None:
+                            transformer_kwargs["action"] = action_input.to(target_dtype)
+                        
                         # Set encoder_attention_mask for positive/negative conditioning
                         pos_transformer_kwargs = {**transformer_kwargs, "encoder_attention_mask": batch.prompt_attention_mask}
                         neg_transformer_kwargs = {**transformer_kwargs, "encoder_attention_mask": batch.negative_attention_mask}
-
 
                         # ref_image_tensor.shape: torch.Size([1, 3, 1, 480, 832])
                         # cond_latents.shape: torch.Size([1, 32, 1, 30, 52])
@@ -335,17 +337,15 @@ class HyWorldDenoisingStage(DenoisingStage):
                         #     else:
                         #         print(f"{key}: {value[0].shape}")
 
-                        if action_input is not None:
-                            transformer_kwargs["action"] = action_input.to(target_dtype)
 
                         with set_forward_context(
                             current_timestep=i,
                             attn_metadata=None,
                             forward_batch=batch,
                         ):
-                            save_kwargs = transformer_kwargs.copy()
-                            save_kwargs["latents_concat"] = latents_concat
-                            save_kwargs["prompt_embeds"] = prompt_embeds
+                            # save_kwargs = pos_transformer_kwargs.copy()
+                            # save_kwargs["latents_concat"] = latents_concat
+                            # save_kwargs["prompt_embeds"] = prompt_embeds
                             # torch.save(save_kwargs, "save_kwargs.pth")
                             # exit()
                             noise_pred = current_model(

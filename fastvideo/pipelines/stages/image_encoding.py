@@ -19,6 +19,7 @@ from fastvideo.logger import init_logger
 from fastvideo.models.vaes.common import ParallelTiledVAE
 from fastvideo.models.vision_utils import (get_default_height_width, normalize,
                                            numpy_to_pt, pil_to_numpy, resize,
+                                           resize_and_center_crop,
                                            create_default_image,
                                            preprocess_reference_image_for_clip)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -121,6 +122,7 @@ class HyWorldImageEncodingStage(ImageEncodingStage):
         """Verify image encoding stage inputs."""
         return VerificationResult()
 
+
     @torch.no_grad()
     def forward(self, batch: ForwardBatch,
                 fastvideo_args: FastVideoArgs) -> ForwardBatch:
@@ -172,38 +174,33 @@ class HyWorldImageEncodingStage(ImageEncodingStage):
                 model_dtype = next(self.image_encoder.parameters()).dtype
                 
                 # Preprocess image for SigLIP
-                if hasattr(self.image_processor, 'preprocess'):
-                    # Convert to numpy array first (matching HY-WorldPlay flow)
-                    import numpy as np
-                    if not isinstance(image, np.ndarray):
-                        image_np = np.array(image)
-                    else:
-                        image_np = image
-                    
-                    image_inputs = self.image_processor.preprocess(
-                        images=image_np, return_tensors="pt"
-                    ).to(device=device, dtype=model_dtype)  # Match model dtype!
-                    pixel_values = image_inputs['pixel_values']
-                else:
-                    from torchvision import transforms as T
-                    import numpy as np
-                    
-                    transform = T.Compose([
-                        T.Resize((384, 384), interpolation=T.InterpolationMode.BICUBIC),
-                        T.ToTensor(),
-                        T.Normalize(mean=self.SIGLIP_MEAN, std=self.SIGLIP_STD),
-                    ])
-                    
-                    if isinstance(image, np.ndarray):
-                        from PIL import Image
-                        image = Image.fromarray(image)
-                        
-                    pixel_values = transform(image).unsqueeze(0).to(device, dtype=model_dtype)
+                # Convert to numpy and resize to target resolution (matching HY-WorldPlay)
+                import numpy as np
                 
+                if not isinstance(image, np.ndarray):
+                    image_np = np.array(image)
+                else:
+                    image_np = image
+                
+                # Resize to target resolution BEFORE SigLIP preprocessing
+                image_np = resize_and_center_crop(
+                    image_np, target_width=batch.width, target_height=batch.height
+                )
+                # torch.save(image_np, "image_np.pth")
+                
+                image_inputs = self.image_processor.preprocess(
+                    images=image_np, return_tensors="pt"
+                ).to(device=device, dtype=model_dtype)  # Match model dtype!
+                pixel_values = image_inputs['pixel_values']
+                
+                # print(pixel_values.shape)
+                # torch.save(pixel_values, "pixel_values.pth")
                 with set_forward_context(current_timestep=0, attn_metadata=None):
                     outputs = self.image_encoder(pixel_values=pixel_values)
                     image_embeds = outputs.last_hidden_state
-                
+                # print(image_embeds.shape)
+                # torch.save(image_embeds, "image_embeds.pth")
+                # exit()
                 batch.image_embeds = [image_embeds]
                 
                 if fastvideo_args.image_encoder_cpu_offload:

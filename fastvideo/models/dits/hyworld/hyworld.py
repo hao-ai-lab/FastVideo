@@ -89,8 +89,8 @@ class HyWorldDoubleStreamBlock(MMDoubleStreamBlock):
         vec_txt: torch.Tensor,
         freqs_cis: tuple,
         seq_attention_mask: torch.Tensor,
-        viewmats: Optional[torch.Tensor] = None,
-        Ks: Optional[torch.Tensor] = None,
+        viewmats: torch.Tensor,
+        Ks: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass with optional ProPE camera conditioning.
@@ -306,13 +306,13 @@ class HyWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
         timestep: torch.LongTensor,
         encoder_hidden_states_image: list[torch.Tensor],
         encoder_attention_mask: list[torch.Tensor],
+        action: torch.Tensor,
+        viewmats: torch.Tensor,
+        Ks: torch.Tensor,
         guidance: Optional[torch.Tensor] = None,
         timestep_r: Optional[torch.LongTensor] = None,
         attention_kwargs: Optional[dict[str, Any]] = None,
         timestep_txt: Optional[torch.LongTensor] = None,
-        action: Optional[torch.Tensor] = None,
-        viewmats: Optional[torch.Tensor] = None,
-        Ks: Optional[torch.Tensor] = None,
     ):
         """
         Forward pass with optional action and camera conditioning.
@@ -352,8 +352,7 @@ class HyWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
 
         # Add action conditioning if provided
         # temb shape: [B*T, C] where T = num_frames
-        if action is not None:
-            temb = temb + self.action_in(action.reshape(-1))
+        temb = temb + self.action_in(action.reshape(-1))
         
         # Keep a per-batch version for FinalLayer (average over frames)
         # [B*T, C] -> [B, T, C] -> [B, C]
@@ -382,18 +381,16 @@ class HyWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
             seq_attention_mask = None
 
         # Prepare camera parameters for ProPE if provided
-        if viewmats is not None:
-            # Broadcast viewmats and Ks to match sequence length
-            viewmats_seq = repeat(
-                viewmats, "B T M N->B (T H W) M N",
-                H=post_patch_height,
-                W=post_patch_width
-            )
-            Ks_seq = repeat(
-                Ks, "B T M N->B (T H W) M N",
-                H=post_patch_height,
-                W=post_patch_width
-            )
+        viewmats_seq = repeat(
+            viewmats, "B T M N->B (T H W) M N",
+            H=post_patch_height,
+            W=post_patch_width
+        )
+        Ks_seq = repeat(
+            Ks, "B T M N->B (T H W) M N",
+            H=post_patch_height,
+            W=post_patch_width
+        )
 
         # qwen text embedding
         encoder_hidden_states = self.txt_in(encoder_hidden_states, timestep_txt, encoder_attention_mask)
