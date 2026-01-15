@@ -70,6 +70,7 @@ def block_sparse_forward_test(
     if raw_kernel:
         out_padded = raw_kernel(q_padded, k_padded, v_padded, idx, num, variable_block_sizes.int())[0]
     else:
+        print("[WARN] Using Triton fallback! Please use the compiled CUDA kernel for true results.")
         from fastvideo_kernel.triton_kernels.block_sparse_attn_triton import triton_block_sparse_attn_forward
         out_padded, _ = triton_block_sparse_attn_forward(
             q_padded, k_padded, v_padded, idx, num, variable_block_sizes
