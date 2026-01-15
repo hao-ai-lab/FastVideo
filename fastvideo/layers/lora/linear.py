@@ -18,6 +18,7 @@ from fastvideo.layers.linear import (ColumnParallelLinear, LinearBase,
                                      QKVParallelLinear, ReplicatedLinear,
                                      RowParallelLinear)
 from fastvideo.layers.vocab_parallel_embedding import VocabParallelEmbedding
+from fastvideo.pin_memory import is_pin_memory_available
 from fastvideo.utils import get_mixed_precision_state
 
 torch._dynamo.config.recompile_limit = 16
@@ -155,8 +156,11 @@ class BaseLayerWithLoRA(nn.Module):
                         get_local_torch_device(),
                         non_blocking=True).full_tensor().to(current_device))
 
-            offload_policy = CPUOffloadPolicy() if "cpu" in str(
-                current_device) else OffloadPolicy()
+            if "cpu" in str(current_device):
+                offload_policy = CPUOffloadPolicy(
+                    pin_memory=is_pin_memory_available())
+            else:
+                offload_policy = OffloadPolicy()
             mp_policy = get_mixed_precision_state().mp_policy
 
             self.base_layer = fully_shard(unsharded_base_layer,

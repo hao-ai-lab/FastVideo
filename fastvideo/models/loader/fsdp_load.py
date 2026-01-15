@@ -215,8 +215,8 @@ def shard_model(
     if cpu_offload:
         if pin_cpu_memory and not is_pin_memory_available():
             logger.warning(
-                "Pinned memory is unavailable; disabling pin_cpu_memory for FSDP offload."
-            )
+                "Pinned memory is unavailable; disabling pin_cpu_memory for "
+                "FSDP offload.")
             pin_cpu_memory = False
         fsdp_kwargs["offload_policy"] = CPUOffloadPolicy(
             pin_memory=pin_cpu_memory)

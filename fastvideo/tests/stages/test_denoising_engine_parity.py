@@ -555,6 +555,61 @@ def test_matrixgame_block_strategy_parity_cpu():
     assert torch.allclose(engine_out.latents, manual_out.latents)
 
 
+def test_matrixgame_block_strategy_streaming_parity_cpu():
+    timesteps = torch.tensor([3, 1], dtype=torch.long)
+    latents = torch.randn(1, 2, 2, 2, 2)
+    args = _make_args()
+    args.pipeline_config.dmd_denoising_steps = [3, 1]
+    scheduler = DummyScheduler(timesteps)
+    scheduler.timesteps = timesteps
+    scheduler.sigmas = scheduler._make_sigmas(timesteps)
+
+    stage_full = DummyMatrixGameStage(DummyTransformer(num_frames_per_block=1),
+                                      scheduler)
+    stage_stream = DummyMatrixGameStage(
+        DummyTransformer(num_frames_per_block=1), DummyScheduler(timesteps))
+
+    batch_full = _make_batch(latents, timesteps, guidance_scale=1.0, seed=10)
+    batch_stream = _make_batch(latents, timesteps, guidance_scale=1.0, seed=10)
+    batch_full.generator = None
+    batch_stream.generator = None
+
+    torch.manual_seed(1234)
+    noise_shape = (latents.shape[0], stage_full.num_frame_per_block,
+                   latents.shape[1], latents.shape[3], latents.shape[4])
+    noise_pool = [
+        torch.randn(noise_shape, dtype=latents.dtype)
+        for _ in range(max(len(timesteps) - 1, 0))
+    ]
+
+    strategy_full = MatrixGameBlockStrategy(stage_full)
+    state_full = strategy_full.prepare(batch_full, args)
+    state_full.extra["ctx"].noise_pool = [t.clone() for t in noise_pool]
+    block_plan_full = strategy_full.block_plan(state_full)
+
+    strategy_stream = MatrixGameBlockStrategy(stage_stream)
+    state_stream = strategy_stream.prepare(batch_stream, args)
+    state_stream.extra["ctx"].noise_pool = [t.clone() for t in noise_pool]
+    block_plan_stream = strategy_stream.block_plan(state_stream)
+
+    engine_full = DenoisingEngine(strategy_full)
+    engine_full.run_blocks(state_full, block_plan=block_plan_full)
+
+    engine_stream = DenoisingEngine(strategy_stream)
+    for block_idx in range(len(block_plan_stream.items)):
+        engine_stream.run_blocks(
+            state_stream,
+            block_plan=block_plan_stream,
+            start_block=block_idx,
+            num_blocks=1,
+        )
+
+    batch_full = strategy_full.postprocess(state_full)
+    batch_stream = strategy_stream.postprocess(state_stream)
+
+    assert torch.allclose(batch_full.latents, batch_stream.latents)
+
+
 @pytest.mark.gpu
 @pytest.mark.skipif(not _cuda_bf16_available(),
                     reason="CUDA BF16 not available")

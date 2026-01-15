@@ -608,6 +608,7 @@ class FastVideoArgs:
     def check_fastvideo_args(self) -> None:
         """Validate inference arguments for consistency"""
         from fastvideo.platforms import current_platform
+        from fastvideo.pin_memory import is_pin_memory_available
 
         if current_platform.is_mps():
             self.use_fsdp_inference = False
@@ -687,6 +688,11 @@ class FastVideoArgs:
             if not self.pipeline_config.vae_config.load_encoder:
                 self.pipeline_config.vae_config.load_encoder = True
             self.preprocess_config.check_preprocess_config()
+
+        if self.pin_cpu_memory and not is_pin_memory_available():
+            logger.warning("Pinned memory is unavailable on this system; "
+                           "disabling pin_cpu_memory.")
+            self.pin_cpu_memory = False
 
 
 _current_fastvideo_args = None

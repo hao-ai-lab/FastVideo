@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     FASTVIDEO_STAGE_LOGGING: bool = False
     FASTVIDEO_HOST_IP: str = ""
     FASTVIDEO_LOOPBACK_IP: str = ""
+    FASTVIDEO_DISABLE_PIN_MEMORY: str | None = None
 
 
 def get_default_cache_root() -> str:
@@ -135,6 +136,10 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Used to force set up loopback IP
     "FASTVIDEO_LOOPBACK_IP":
     lambda: os.getenv("FASTVIDEO_LOOPBACK_IP", ""),
+
+    # Disable pinned memory (e.g., on platforms that do not support it)
+    "FASTVIDEO_DISABLE_PIN_MEMORY":
+    lambda: os.getenv("FASTVIDEO_DISABLE_PIN_MEMORY", None),
 
     # Number of GPUs per worker in Ray, if it is set to be a fraction,
     # it allows ray to schedule multiple actors on a single GPU,
