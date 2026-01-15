@@ -1018,6 +1018,145 @@ class CosmosDenoisingStage(DenoisingStage):
         return result
 
 
+class Cosmos25DenoisingStage(CosmosDenoisingStage):
+    """Denoising stage for Cosmos 2.5 DiT (expects 1D/2D timestep, not 5D)."""
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        pipeline = self.pipeline() if self.pipeline else None
+        if not fastvideo_args.model_loaded["transformer"]:
+            loader = TransformerLoader()
+            self.transformer = loader.load(
+                fastvideo_args.model_paths["transformer"], fastvideo_args)
+            if pipeline:
+                pipeline.add_module("transformer", self.transformer)
+            fastvideo_args.model_loaded["transformer"] = True
+
+        extra_step_kwargs = self.prepare_extra_func_kwargs(
+            self.scheduler.step,
+            {
+                "generator": batch.generator,
+                "eta": batch.eta
+            },
+        )
+
+        if hasattr(self.transformer, 'module'):
+            transformer_dtype = next(self.transformer.module.parameters()).dtype
+        else:
+            transformer_dtype = next(self.transformer.parameters()).dtype
+        target_dtype = transformer_dtype
+        autocast_enabled = (target_dtype != torch.float32
+                            ) and not fastvideo_args.disable_autocast
+
+        latents = batch.latents
+        if latents is None:
+            raise ValueError(
+                "latents must be provided for Cosmos25DenoisingStage")
+        guidance_scale = batch.guidance_scale
+
+        # Use timesteps prepared by Cosmos25TimestepPreparationStage when available.
+        if batch.timesteps is None:
+            self.scheduler.set_timesteps(batch.num_inference_steps,
+                                         device=latents.device)
+            timesteps = self.scheduler.timesteps
+        else:
+            timesteps = batch.timesteps.to(latents.device)
+
+        # Match official behavior: pass fps as a tensor.
+        fps_val = batch.fps if isinstance(batch.fps, int | float) else 24
+        fps_tensor = torch.tensor([fps_val],
+                                  device=latents.device,
+                                  dtype=target_dtype)
+
+        # Cosmos2.5 denoises a 4D latent (C,T,H,W) and the scheduler.step expects (B,C,T,H,W).
+        latents_4d = latents[0]
+
+        # Masks from latent prep stage
+        condition_mask = batch.cond_mask.to(target_dtype) if hasattr(
+            batch, 'cond_mask') else None
+        padding_mask = batch.padding_mask.to(target_dtype) if hasattr(
+            batch, 'padding_mask') else None
+        if condition_mask is None:
+            _, t, h, w = latents_4d.shape
+            condition_mask = torch.zeros(1,
+                                         1,
+                                         t,
+                                         h,
+                                         w,
+                                         device=latents.device,
+                                         dtype=target_dtype)
+        if padding_mask is None:
+            _, _, h, w = latents_4d.shape
+            padding_mask = torch.ones(1,
+                                      1,
+                                      h,
+                                      w,
+                                      device=latents.device,
+                                      dtype=target_dtype)
+
+        # Cosmos2.5 timestep scaling (see compare_pipelines.py): t * 0.001
+        timestep_scale = 0.001
+
+        with self.progress_bar(total=len(timesteps)) as progress_bar:
+            for i, t in enumerate(timesteps):
+                t_val = float(t)
+                timestep_val = t_val * timestep_scale
+                timestep = torch.tensor([[timestep_val]],
+                                        device=latents.device,
+                                        dtype=target_dtype)
+
+                model_hidden_states = latents_4d.unsqueeze(0)
+
+                with (
+                        set_forward_context(current_timestep=int(t_val),
+                                            attn_metadata=None,
+                                            forward_batch=batch),
+                        torch.autocast(device_type="cuda",
+                                       dtype=target_dtype,
+                                       enabled=autocast_enabled),
+                ):
+                    cond_v = self.transformer(
+                        hidden_states=model_hidden_states.to(target_dtype),
+                        encoder_hidden_states=batch.prompt_embeds[0].to(
+                            target_dtype),
+                        timestep=timestep,
+                        fps=fps_tensor,
+                        condition_mask=condition_mask,
+                        padding_mask=padding_mask,
+                        return_dict=False,
+                    )[0]
+
+                    if batch.do_classifier_free_guidance and batch.negative_prompt_embeds:
+                        uncond_v = self.transformer(
+                            hidden_states=model_hidden_states.to(target_dtype),
+                            encoder_hidden_states=batch.
+                            negative_prompt_embeds[0].to(target_dtype),
+                            timestep=timestep,
+                            fps=fps_tensor,
+                            condition_mask=condition_mask,
+                            padding_mask=padding_mask,
+                            return_dict=False,
+                        )[0]
+                        v = uncond_v + guidance_scale * (cond_v - uncond_v)
+                    else:
+                        v = cond_v
+
+                prev = self.scheduler.step(v.unsqueeze(0),
+                                           t,
+                                           latents_4d.unsqueeze(0),
+                                           **extra_step_kwargs,
+                                           return_dict=False)[0]
+                latents_4d = prev.squeeze(0)
+
+                progress_bar.update()
+
+        batch.latents = latents_4d.unsqueeze(0)
+        return batch
+
+
 class DmdDenoisingStage(DenoisingStage):
     """
     Denoising stage for DMD.

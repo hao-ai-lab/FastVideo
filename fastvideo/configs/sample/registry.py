@@ -9,6 +9,7 @@ from fastvideo.configs.sample.hunyuan15 import Hunyuan15_480P_SamplingParam, Hun
 from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
 
 from fastvideo.configs.sample.cosmos import Cosmos_Predict2_2B_Video2World_SamplingParam
+from fastvideo.configs.sample.cosmos2_5 import Cosmos_Predict2_5_2B_Diffusers_SamplingParam
 
 # isort: off
 from fastvideo.configs.sample.wan import (
@@ -96,6 +97,10 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "nvidia/Cosmos-Predict2-2B-Video2World":
     Cosmos_Predict2_2B_Video2World_SamplingParam,
 
+    # Cosmos2.5
+    "KyleShao/Cosmos-Predict2.5-2B-Diffusers":
+    Cosmos_Predict2_5_2B_Diffusers_SamplingParam,
+
     # MatrixGame2.0 models
     "FastVideo/Matrix-Game-2.0-Base-Diffusers":
     MatrixGame2_SamplingParam,
@@ -135,6 +140,10 @@ SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "matrixgame" in id.lower() or "matrix-game" in id.lower(),
     "turbodiffusion":
     lambda id: "turbodiffusion" in id.lower() or "turbowan" in id.lower(),
+    "cosmos25":
+    lambda id: "cosmos2_5" in id.lower(),
+    "cosmos":
+    lambda id: "cosmos" in id.lower() and "2_5" not in id.lower(),
     # Add other pipeline architecture detectors
 }
 
@@ -153,6 +162,8 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
     "matrixgame": MatrixGame2_SamplingParam,
     "turbodiffusion":
     TurboDiffusionT2V_1_3B_SamplingParam,  # Default to T2V for fallback
+    "cosmos25": Cosmos_Predict2_5_2B_Diffusers_SamplingParam,
+    "cosmos": Cosmos_Predict2_2B_Video2World_SamplingParam,
     # Other fallbacks by architecture
 }
 
@@ -176,9 +187,6 @@ def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
 
     if os.path.exists(pipeline_name_or_path):
         config = verify_model_config_and_directory(pipeline_name_or_path)
-        logger.warning(
-            "FastVideo may not correctly identify the optimal sampling param for this model, as the local directory may have been renamed."
-        )
     else:
         config = maybe_download_model_index(pipeline_name_or_path)
 

@@ -51,39 +51,42 @@ class DecodingStage(PipelineStage):
         return result
 
     def _denormalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
-        # denormalization for MatrixGame VAE
-        # z = z * std + mean during decode
-        if (hasattr(self.vae.config, 'latents_mean')
-                and hasattr(self.vae.config, 'latents_std')):
-            # Convert config values to tensors
-            latents_mean = torch.tensor(self.vae.config.latents_mean,
+        """Convert normalized latents into the VAE's expected latent space."""
+        # Some VAEs handle latent (de)normalization internally.
+        if bool(getattr(self.vae, "handles_latent_denorm", False)):
+            return latents
+
+        cfg = getattr(self.vae, "config", None)
+
+        # MatrixGame-style: z = z * std + mean
+        if (cfg is not None and hasattr(cfg, "latents_mean")
+                and hasattr(cfg, "latents_std")):
+            latents_mean = torch.tensor(cfg.latents_mean,
                                         device=latents.device,
                                         dtype=latents.dtype).view(
                                             1, -1, 1, 1, 1)
-
-            latents_std = torch.tensor(self.vae.config.latents_std,
+            latents_std = torch.tensor(cfg.latents_std,
                                        device=latents.device,
                                        dtype=latents.dtype).view(
                                            1, -1, 1, 1, 1)
+            return latents * latents_std + latents_mean
 
-            # Apply denormalization: z = z * std + mean
-            latents = latents * latents_std + latents_mean
-        elif hasattr(self.vae, 'scaling_factor'):
-            # Standard VAE scaling
+        # Diffusers-style: scaling_factor (+ optional shift_factor)
+        if hasattr(self.vae, "scaling_factor"):
             if isinstance(self.vae.scaling_factor, torch.Tensor):
                 latents = latents / self.vae.scaling_factor.to(
                     latents.device, latents.dtype)
             else:
                 latents = latents / self.vae.scaling_factor
 
-            # Apply shifting if needed
-            if (hasattr(self.vae, "shift_factor")
-                    and self.vae.shift_factor is not None):
+            if hasattr(self.vae,
+                       "shift_factor") and self.vae.shift_factor is not None:
                 if isinstance(self.vae.shift_factor, torch.Tensor):
-                    latents += self.vae.shift_factor.to(latents.device,
-                                                        latents.dtype)
+                    latents = latents + self.vae.shift_factor.to(
+                        latents.device, latents.dtype)
                 else:
-                    latents += self.vae.shift_factor
+                    latents = latents + self.vae.shift_factor
+
         return latents
 
     @torch.no_grad()
