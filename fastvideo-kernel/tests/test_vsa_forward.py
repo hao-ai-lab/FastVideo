@@ -156,11 +156,6 @@ def run_forward_qk_diff(
 ) -> Tuple[float, float]:
     """
     Forward-only correctness test for the case S_q != S_kv.
-
-    NOTE:
-      - The Triton backend supports different Q/KV logical lengths via padding.
-      - The SM90 (H100) CUDA backend currently assumes the same number of blocks
-        for Q and KV, so we skip this test there.
     """
     assert torch.cuda.is_available(), "VSA kernels require CUDA"
 
