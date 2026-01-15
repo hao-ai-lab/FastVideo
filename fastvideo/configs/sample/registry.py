@@ -98,7 +98,7 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     Cosmos_Predict2_2B_Video2World_SamplingParam,
 
     # Cosmos2.5
-    "nvidia/Cosmos-Predict2.5-2B-Diffusers":
+    "KyleShao/Cosmos-Predict2.5-2B-Diffusers":
     Cosmos_Predict2_5_2B_Diffusers_SamplingParam,
 
     # MatrixGame2.0 models

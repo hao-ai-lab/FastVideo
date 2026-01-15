@@ -56,7 +56,7 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": Wan2_2_T2V_A14B_Config,
     "Wan-AI/Wan2.2-I2V-A14B-Diffusers": Wan2_2_I2V_A14B_Config,
     "nvidia/Cosmos-Predict2-2B-Video2World": CosmosConfig,
-    "nvidia/Cosmos-Predict2.5-2B-Diffusers": Cosmos25Config,
+    "KyleShao/Cosmos-Predict2.5-2B-Diffusers": Cosmos25Config,
     "FastVideo/Matrix-Game-2.0-Base-Diffusers": MatrixGameI2V480PConfig,
     "FastVideo/Matrix-Game-2.0-GTA-Diffusers": MatrixGameI2V480PConfig,
     "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers": MatrixGameI2V480PConfig,
@@ -95,14 +95,13 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "wancausaldmdpipeline" in id.lower(),
     "stepvideo":
     lambda id: "stepvideo" in id.lower(),
-    "cosmos": 
-    lambda id:  "cosmos" in id.lower() and ("2.5" not in id.lower() and "2_5" not in id.lower() and "25" not in id.lower()),
+    "cosmos":
+    lambda id: "cosmos" in id.lower() and ("2.5" not in id.lower(
+    ) and "2_5" not in id.lower() and "25" not in id.lower()),
     "cosmos25":
     lambda id: "cosmos25" in id.lower(),
     "turbodiffusion":
     lambda id: "turbodiffusion" in id.lower() or "turbowan" in id.lower(),
-    "longcat":
-    lambda id: "longcat" in id.lower(),
     # Add other pipeline architecture detectors
 }
 

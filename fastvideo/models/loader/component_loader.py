@@ -15,7 +15,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from safetensors.torch import load_file as safetensors_load_file
 from torch.distributed import init_device_mesh
-from transformers import AutoImageProcessor, AutoTokenizer
+from transformers import AutoImageProcessor, AutoProcessor, AutoTokenizer
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
 from fastvideo.configs.models import EncoderConfig
@@ -449,6 +449,33 @@ class TokenizerLoader(ComponentLoader):
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the tokenizer based on the model path, and inference args."""
         logger.info("Loading tokenizer from %s", model_path)
+
+        # Cosmos2.5 stores an AutoProcessor config in `tokenizer/config.json` (not a tokenizer
+        # config). Use its `_name_or_path` (e.g. Qwen/Qwen2.5-VL-7B-Instruct) as the source.
+        tokenizer_cfg_path = os.path.join(model_path, "config.json")
+        if os.path.exists(tokenizer_cfg_path):
+            try:
+                with open(tokenizer_cfg_path, "r") as f:
+                    tokenizer_cfg = json.load(f)
+                if isinstance(tokenizer_cfg, dict) and (
+                    tokenizer_cfg.get("_class_name") == "AutoProcessor"
+                    or "processor_type" in tokenizer_cfg
+                ):
+                    src = tokenizer_cfg.get("_name_or_path", "")
+                    if isinstance(src, str) and src.strip():
+                        processor = AutoProcessor.from_pretrained(
+                            src.strip(),
+                            trust_remote_code=True,
+                        )
+                        logger.info(
+                            "Loaded tokenizer/processor from %s: %s",
+                            src,
+                            processor.__class__.__name__,
+                        )
+                        return processor
+            except Exception:
+                # If parsing fails, fall through to AutoTokenizer below.
+                pass
 
         tokenizer = AutoTokenizer.from_pretrained(
             model_path,  # "<path to model>/tokenizer"
