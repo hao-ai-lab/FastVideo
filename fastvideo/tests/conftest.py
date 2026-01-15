@@ -21,3 +21,8 @@ def distributed_setup():
     yield
 
     cleanup_dist_env_and_memory()
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers",
+                            "gpu: requires CUDA with BF16 support")
