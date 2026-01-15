@@ -128,7 +128,8 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         from fastvideo.pipelines.stages.denoising_matrixgame_strategy import (
             MatrixGameBlockStrategy)
 
-        engine = DenoisingEngine(MatrixGameBlockStrategy(self))
+        engine = DenoisingEngine(MatrixGameBlockStrategy(self),
+                                 hooks=self._build_engine_hooks())
         return engine.run(batch, fastvideo_args)
 
     def _prepare_action_kwargs(self, batch: ForwardBatch, start_index: int,
@@ -501,8 +502,12 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
             MatrixGameBlockStrategy)
 
         strategy = MatrixGameBlockStrategy(self)
-        engine = DenoisingEngine(strategy)
+        engine = DenoisingEngine(strategy, hooks=self._build_engine_hooks())
         state = strategy.prepare(batch, fastvideo_args)
+        for hook in engine.hooks:
+            hook.on_init(engine, batch, fastvideo_args)
+        for hook in engine.hooks:
+            hook.pre_run(state)
         block_plan = strategy.block_plan(state)
 
         progress_bar = state.extra.get("progress_bar")
@@ -587,6 +592,13 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
         return batch
 
     def streaming_clear(self) -> None:
+        if (self._streaming_engine is not None
+                and self._streaming_state is not None):
+            batch = (self._streaming_ctx.batch if self._streaming_ctx
+                     is not None else self._streaming_state.extra.get("batch"))
+            if batch is not None:
+                for hook in self._streaming_engine.hooks:
+                    hook.post_run(self._streaming_state, batch)
         self._streaming_initialized = False
         self._streaming_ctx = None
         self._streaming_engine = None

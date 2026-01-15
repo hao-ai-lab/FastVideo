@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     FASTVIDEO_TORCH_PROFILE_REGIONS: str = ""
     FASTVIDEO_SERVER_DEV_MODE: bool = False
     FASTVIDEO_STAGE_LOGGING: bool = False
+    FASTVIDEO_DENOISING_PERF_LOGGING: bool = False
     FASTVIDEO_HOST_IP: str = ""
     FASTVIDEO_LOOPBACK_IP: str = ""
     FASTVIDEO_DISABLE_PIN_MEMORY: str | None = None
@@ -280,6 +281,10 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # taken for each stage
     "FASTVIDEO_STAGE_LOGGING":
     lambda: bool(int(os.getenv("FASTVIDEO_STAGE_LOGGING", "0"))),
+
+    # Enable per-step denoising perf logging hooks
+    "FASTVIDEO_DENOISING_PERF_LOGGING":
+    lambda: bool(int(os.getenv("FASTVIDEO_DENOISING_PERF_LOGGING", "0"))),
 }
 
 # end-env-vars-definition

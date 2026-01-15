@@ -73,8 +73,17 @@ class DenoisingStage(PipelineStage):
             StandardStrategy)
 
         strategy_cls = self.strategy_cls or StandardStrategy
-        engine = DenoisingEngine(strategy_cls(self))
+        engine = DenoisingEngine(strategy_cls(self),
+                                 hooks=self._build_engine_hooks())
         return engine.run(batch, fastvideo_args)
+
+    def _build_engine_hooks(self):
+        import fastvideo.envs as envs
+        if not envs.FASTVIDEO_DENOISING_PERF_LOGGING:
+            return []
+        from fastvideo.pipelines.stages.denoising_engine_hooks import (
+            PerfLoggingHook)
+        return [PerfLoggingHook()]
 
     def prepare_extra_func_kwargs(self, func, kwargs) -> dict[str, Any]:
         """

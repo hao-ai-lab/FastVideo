@@ -11,6 +11,7 @@ from collections.abc import Sequence
 
 import torch
 
+from fastvideo.models.schedulers.adapter import SchedulerAdapter
 from fastvideo.pipelines.stages.denoising_strategies import (
     BlockDenoisingStrategy,
     DenoisingStrategy,
@@ -91,9 +92,11 @@ class DenoisingEngine:
         self,
         strategy: DenoisingStrategy,
         *,
+        scheduler_adapter: SchedulerAdapter | None = None,
         hooks: Sequence[EngineHook] | None = None,
     ) -> None:
         self.strategy = strategy
+        self.scheduler_adapter = scheduler_adapter
         self.hooks = list(hooks) if hooks is not None else []
 
     def run(self, batch: ForwardBatch, args: FastVideoArgs) -> ForwardBatch:
@@ -101,6 +104,8 @@ class DenoisingEngine:
             hook.on_init(self, batch, args)
 
         state = self.strategy.prepare(batch, args)
+        if self.scheduler_adapter is not None:
+            state.extra.setdefault("scheduler_adapter", self.scheduler_adapter)
         for hook in self.hooks:
             hook.pre_run(state)
 
@@ -151,6 +156,9 @@ class DenoisingEngine:
 
         for block_idx in range(start_block, end_block):
             block_item = items[block_idx]
+            t_hook = self._block_hook_t(state, block_idx)
+            for hook in self.hooks:
+                hook.pre_step(state, block_idx, t_hook)
             block_ctx = strategy.init_block_context(
                 state,
                 block_item,
@@ -158,3 +166,12 @@ class DenoisingEngine:
             )
             strategy.process_block(state, block_ctx, block_item)
             strategy.update_context(state, block_ctx, block_item)
+            for hook in self.hooks:
+                hook.post_step(state, block_idx, t_hook)
+
+    def _block_hook_t(self, state: StrategyState,
+                      block_idx: int) -> torch.Tensor:
+        timesteps = state.timesteps
+        if timesteps.numel() > 0:
+            return timesteps[0]
+        return torch.tensor(block_idx, device=state.latents.device)
