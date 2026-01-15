@@ -13,12 +13,13 @@ from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 
 # isort: off
 from fastvideo.pipelines.stages import (
-    ImageEncodingStage, ConditioningStage, DecodingStage, DmdDenoisingStage,
+    ImageEncodingStage, ConditioningStage, DecodingStage, DenoisingStage,
     ImageVAEEncodingStage, InputValidationStage, LatentPreparationStage,
     TextEncodingStage, TimestepPreparationStage)
 # isort: on
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
+from fastvideo.pipelines.stages.denoising_dmd_strategy import DmdStrategy
 
 logger = init_logger(__name__)
 
@@ -69,9 +70,10 @@ class WanImageToVideoDmdPipeline(LoRAPipeline, ComposedPipelineBase):
                        stage=ImageVAEEncodingStage(vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",
-                       stage=DmdDenoisingStage(
+                       stage=DenoisingStage(
                            transformer=self.get_module("transformer"),
-                           scheduler=self.get_module("scheduler")))
+                           scheduler=FlowMatchEulerDiscreteScheduler(shift=8.0),
+                           strategy_cls=DmdStrategy))
 
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))

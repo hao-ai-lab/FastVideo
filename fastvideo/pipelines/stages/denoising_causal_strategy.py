@@ -44,6 +44,82 @@ class CausalBlockStrategy(BlockDenoisingStrategy):
 
     def __init__(self, stage: Any) -> None:
         self.stage = stage
+        self.num_transformer_blocks = 0
+        self.num_frames_per_block = 0
+        self.sliding_window_num_frames = 0
+        self.local_attn_size = -1
+        self.frame_seq_length = 0
+
+    def _ensure_model_constants(self) -> None:
+        transformer = self.stage.transformer
+        self.num_transformer_blocks = len(transformer.blocks)
+        arch_config = transformer.config.arch_config
+        self.num_frames_per_block = arch_config.num_frames_per_block
+        self.sliding_window_num_frames = arch_config.sliding_window_num_frames
+        try:
+            self.local_attn_size = getattr(transformer.model, "local_attn_size",
+                                           -1)
+        except Exception:
+            self.local_attn_size = -1
+
+    def _initialize_kv_cache(self, batch_size, dtype, device) -> list[dict]:
+        kv_cache1 = []
+        num_attention_heads = self.stage.transformer.num_attention_heads
+        attention_head_dim = self.stage.transformer.attention_head_dim
+        if self.local_attn_size != -1:
+            kv_cache_size = self.local_attn_size * self.frame_seq_length
+        else:
+            kv_cache_size = self.frame_seq_length * self.sliding_window_num_frames
+
+        for _ in range(self.num_transformer_blocks):
+            kv_cache1.append({
+                "k":
+                torch.zeros([
+                    batch_size, kv_cache_size, num_attention_heads,
+                    attention_head_dim
+                ],
+                            dtype=dtype,
+                            device=device),
+                "v":
+                torch.zeros([
+                    batch_size, kv_cache_size, num_attention_heads,
+                    attention_head_dim
+                ],
+                            dtype=dtype,
+                            device=device),
+                "global_end_index":
+                torch.tensor([0], dtype=torch.long, device=device),
+                "local_end_index":
+                torch.tensor([0], dtype=torch.long, device=device),
+            })
+
+        return kv_cache1
+
+    def _initialize_crossattn_cache(self, batch_size, max_text_len, dtype,
+                                    device) -> list[dict]:
+        crossattn_cache = []
+        num_attention_heads = self.stage.transformer.num_attention_heads
+        attention_head_dim = self.stage.transformer.attention_head_dim
+        for _ in range(self.num_transformer_blocks):
+            crossattn_cache.append({
+                "k":
+                torch.zeros([
+                    batch_size, max_text_len, num_attention_heads,
+                    attention_head_dim
+                ],
+                            dtype=dtype,
+                            device=device),
+                "v":
+                torch.zeros([
+                    batch_size, max_text_len, num_attention_heads,
+                    attention_head_dim
+                ],
+                            dtype=dtype,
+                            device=device),
+                "is_init":
+                False,
+            })
+        return crossattn_cache
 
     def prepare(self, batch: ForwardBatch,
                 fastvideo_args: FastVideoArgs) -> StrategyState:
@@ -51,6 +127,7 @@ class CausalBlockStrategy(BlockDenoisingStrategy):
         autocast_enabled = (target_dtype != torch.float32
                             ) and not fastvideo_args.disable_autocast
 
+        self._ensure_model_constants()
         latents = batch.latents
         if latents is None:
             raise ValueError("latents must be provided")
@@ -59,7 +136,7 @@ class CausalBlockStrategy(BlockDenoisingStrategy):
         patch_ratio = (
             self.stage.transformer.config.arch_config.patch_size[-1] *
             self.stage.transformer.config.arch_config.patch_size[-2])
-        self.stage.frame_seq_length = latent_seq_length // patch_ratio
+        self.frame_seq_length = latent_seq_length // patch_ratio
 
         independent_first_frame = getattr(self.stage.transformer,
                                           "independent_first_frame", False)
@@ -100,12 +177,12 @@ class CausalBlockStrategy(BlockDenoisingStrategy):
         prompt_embeds = batch.prompt_embeds
         assert torch.isnan(prompt_embeds[0]).sum() == 0
 
-        kv_cache1 = self.stage._initialize_kv_cache(batch_size=latents.shape[0],
-                                                    dtype=target_dtype,
-                                                    device=latents.device)
+        kv_cache1 = self._initialize_kv_cache(batch_size=latents.shape[0],
+                                              dtype=target_dtype,
+                                              device=latents.device)
         kv_cache2 = None
         if boundary_timestep is not None:
-            kv_cache2 = self.stage._initialize_kv_cache(
+            kv_cache2 = self._initialize_kv_cache(
                 batch_size=latents.shape[0],
                 dtype=target_dtype,
                 device=latents.device,
@@ -124,7 +201,7 @@ class CausalBlockStrategy(BlockDenoisingStrategy):
             else:
                 text_len = 0
 
-        crossattn_cache = self.stage._initialize_crossattn_cache(
+        crossattn_cache = self._initialize_crossattn_cache(
             batch_size=latents.shape[0],
             max_text_len=text_len,
             dtype=target_dtype,
@@ -132,12 +209,12 @@ class CausalBlockStrategy(BlockDenoisingStrategy):
         )
 
         num_frames = latents.shape[2]
-        if num_frames % self.stage.num_frames_per_block != 0:
+        if num_frames % self.num_frames_per_block != 0:
             raise ValueError(
                 "num_frames must be divisible by num_frames_per_block for "
                 "causal DMD denoising")
-        num_blocks = num_frames // self.stage.num_frames_per_block
-        block_sizes = [self.stage.num_frames_per_block] * num_blocks
+        num_blocks = num_frames // self.num_frames_per_block
+        block_sizes = [self.num_frames_per_block] * num_blocks
         start_index = 0
 
         if boundary_timestep is not None:
@@ -185,7 +262,7 @@ class CausalBlockStrategy(BlockDenoisingStrategy):
                     kv_cache=kv_cache1,
                     crossattn_cache=crossattn_cache,
                     current_start=(pos_start_base + start_index) *
-                    self.stage.frame_seq_length,
+                    self.frame_seq_length,
                     start_frame=start_index,
                     **image_kwargs,
                     **pos_cond_kwargs,
@@ -198,7 +275,7 @@ class CausalBlockStrategy(BlockDenoisingStrategy):
                         kv_cache=kv_cache2,
                         crossattn_cache=crossattn_cache,
                         current_start=(pos_start_base + start_index) *
-                        self.stage.frame_seq_length,
+                        self.frame_seq_length,
                         start_frame=start_index,
                         **image_kwargs,
                         **pos_cond_kwargs,
@@ -388,7 +465,7 @@ class CausalBlockStrategy(BlockDenoisingStrategy):
                     t_expanded_noise,
                     kv_cache=_get_kv_cache(t_cur),
                     crossattn_cache=crossattn_cache,
-                    current_start=start_index * self.stage.frame_seq_length,
+                    current_start=start_index * self.frame_seq_length,
                     start_frame=start_index,
                     **image_kwargs,
                     **pos_cond_kwargs,
@@ -495,7 +572,7 @@ class CausalBlockStrategy(BlockDenoisingStrategy):
                     t_expanded_context,
                     kv_cache=kv_cache2,
                     crossattn_cache=crossattn_cache,
-                    current_start=start_index * self.stage.frame_seq_length,
+                    current_start=start_index * self.frame_seq_length,
                     start_frame=start_index,
                     **image_kwargs,
                     **pos_cond_kwargs,
@@ -507,7 +584,7 @@ class CausalBlockStrategy(BlockDenoisingStrategy):
                 t_expanded_context,
                 kv_cache=kv_cache1,
                 crossattn_cache=crossattn_cache,
-                current_start=start_index * self.stage.frame_seq_length,
+                current_start=start_index * self.frame_seq_length,
                 start_frame=start_index,
                 **image_kwargs,
                 **pos_cond_kwargs,
@@ -523,7 +600,7 @@ class CausalBlockStrategy(BlockDenoisingStrategy):
 
         latents = state.latents
         if boundary_timestep is not None:
-            num_frames_to_remove = self.stage.num_frames_per_block - 1
+            num_frames_to_remove = self.num_frames_per_block - 1
             latents = latents[:, :, :-num_frames_to_remove, :, :]
 
         batch.latents = latents

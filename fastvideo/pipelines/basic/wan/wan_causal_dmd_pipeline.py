@@ -11,10 +11,11 @@ from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 
 # isort: off
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
-                                        CausalDMDDenosingStage,
-                                        InputValidationStage,
+                                        DenoisingStage, InputValidationStage,
                                         LatentPreparationStage,
                                         TextEncodingStage)
+from fastvideo.pipelines.stages.denoising_causal_strategy import (
+    CausalBlockStrategy)
 # isort: on
 
 logger = init_logger(__name__)
@@ -47,11 +48,12 @@ class WanCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
                            transformer=self.get_module("transformer", None)))
 
         self.add_stage(stage_name="denoising_stage",
-                       stage=CausalDMDDenosingStage(
+                       stage=DenoisingStage(
                            transformer=self.get_module("transformer"),
                            transformer_2=self.get_module("transformer_2", None),
                            scheduler=self.get_module("scheduler"),
-                           vae=self.get_module("vae")))
+                           vae=self.get_module("vae"),
+                           strategy_cls=CausalBlockStrategy))
 
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))

@@ -16,8 +16,6 @@ from fastvideo.configs.pipelines.base import STA_Mode
 from fastvideo.distributed import get_world_group
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
@@ -40,13 +38,15 @@ class DenoisingStage(PipelineStage):
                  scheduler,
                  pipeline=None,
                  transformer_2=None,
-                 vae=None) -> None:
+                 vae=None,
+                 strategy_cls=None) -> None:
         super().__init__()
         self.transformer = transformer
         self.transformer_2 = transformer_2
         self.scheduler = scheduler
         self.vae = vae
         self.pipeline = weakref.ref(pipeline) if pipeline else None
+        self.strategy_cls = strategy_cls
         attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads
         self.attn_backend = get_attn_backend(
             head_size=attn_head_size,
@@ -72,7 +72,8 @@ class DenoisingStage(PipelineStage):
         from fastvideo.pipelines.stages.denoising_standard_strategy import (
             StandardStrategy)
 
-        engine = DenoisingEngine(StandardStrategy(self))
+        strategy_cls = self.strategy_cls or StandardStrategy
+        engine = DenoisingEngine(strategy_cls(self))
         return engine.run(batch, fastvideo_args)
 
     def prepare_extra_func_kwargs(self, func, kwargs) -> dict[str, Any]:
@@ -284,8 +285,9 @@ class DenoisingStage(PipelineStage):
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify denoising stage inputs."""
         result = VerificationResult()
-        result.add_check("timesteps", batch.timesteps,
-                         [V.is_tensor, V.min_dims(1)])
+        if batch.timesteps is not None:
+            result.add_check("timesteps", batch.timesteps,
+                             [V.is_tensor, V.min_dims(1)])
         result.add_check("latents", batch.latents,
                          [V.is_tensor, V.with_dims(5)])
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
@@ -313,75 +315,3 @@ class DenoisingStage(PipelineStage):
         result.add_check("latents", batch.latents,
                          [V.is_tensor, V.with_dims(5)])
         return result
-
-
-class CosmosDenoisingStage(DenoisingStage):
-    """
-    Denoising stage for Cosmos models using FlowMatchEulerDiscreteScheduler.
-    """
-
-    def __init__(self, transformer, scheduler, pipeline=None) -> None:
-        super().__init__(transformer, scheduler, pipeline)
-
-    def forward(
-        self,
-        batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
-    ) -> ForwardBatch:
-        from fastvideo.pipelines.stages.denoising_cosmos_strategy import (
-            CosmosStrategy)
-        from fastvideo.pipelines.stages.denoising_engine import DenoisingEngine
-
-        engine = DenoisingEngine(CosmosStrategy(self))
-        return engine.run(batch, fastvideo_args)
-
-    def verify_input(self, batch: ForwardBatch,
-                     fastvideo_args: FastVideoArgs) -> VerificationResult:
-        """Verify Cosmos denoising stage inputs."""
-        result = VerificationResult()
-        result.add_check("latents", batch.latents,
-                         [V.is_tensor, V.with_dims(5)])
-        result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
-        result.add_check("num_inference_steps", batch.num_inference_steps,
-                         V.positive_int)
-        result.add_check("guidance_scale", batch.guidance_scale,
-                         V.positive_float)
-        result.add_check("do_classifier_free_guidance",
-                         batch.do_classifier_free_guidance, V.bool_value)
-        result.add_check(
-            "negative_prompt_embeds", batch.negative_prompt_embeds, lambda x:
-            not batch.do_classifier_free_guidance or V.list_not_empty(x))
-        return result
-
-    def verify_output(self, batch: ForwardBatch,
-                      fastvideo_args: FastVideoArgs) -> VerificationResult:
-        """Verify Cosmos denoising stage outputs."""
-        result = VerificationResult()
-        result.add_check("latents", batch.latents,
-                         [V.is_tensor, V.with_dims(5)])
-        return result
-
-
-class DmdDenoisingStage(DenoisingStage):
-    """
-    Denoising stage for DMD.
-    """
-
-    def __init__(self, transformer, scheduler) -> None:
-        super().__init__(transformer, scheduler)
-        self.scheduler = FlowMatchEulerDiscreteScheduler(shift=8.0)
-
-    def forward(
-        self,
-        batch: ForwardBatch,
-        fastvideo_args: FastVideoArgs,
-    ) -> ForwardBatch:
-        """
-        Run the denoising loop.
-        """
-        from fastvideo.pipelines.stages.denoising_dmd_strategy import (
-            DmdStrategy)
-        from fastvideo.pipelines.stages.denoising_engine import DenoisingEngine
-
-        engine = DenoisingEngine(DmdStrategy(self))
-        return engine.run(batch, fastvideo_args)

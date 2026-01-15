@@ -105,18 +105,40 @@ class DummyTransformer(torch.nn.Module):
         self.model = SimpleNamespace(local_attn_size=local_attn_size)
         self.independent_first_frame = False
 
-    def forward(self, *args, **kwargs):
-        latent = kwargs.get("hidden_states")
+    def forward(
+        self,
+        hidden_states=None,
+        encoder_hidden_states=None,
+        timestep=None,
+        guidance=None,
+        encoder_hidden_states_image=None,
+        encoder_hidden_states_2=None,
+        encoder_attention_mask=None,
+        mask_strategy=None,
+        mouse_cond=None,
+        keyboard_cond=None,
+        kv_cache=None,
+        crossattn_cache=None,
+        current_start=None,
+        start_frame=None,
+        num_cond_latents=None,
+        *args,
+        **kwargs,
+    ):
+        latent = hidden_states
         if latent is None and args:
             latent = args[0]
         if latent is None:
             raise ValueError("Missing latent input")
-        timestep = kwargs.get("timestep")
-        if timestep is None and len(args) > 2:
-            timestep = args[2]
-        scale = float(torch.as_tensor(timestep).float().mean().item()
-                      ) if timestep is not None else 0.0
+        t_val = timestep
+        if t_val is None and len(args) > 2:
+            t_val = args[2]
+        scale = float(torch.as_tensor(t_val).float().mean().item()
+                      ) if t_val is not None else 0.0
         out = latent * 0.01 + scale
+        out_channels = getattr(self, "out_channels", None)
+        if out_channels is not None and out.shape[1] != out_channels:
+            out = out[:, :out_channels, ...]
         if kwargs.get("return_dict") is False:
             return (out, )
         return out
@@ -408,6 +430,94 @@ def test_standard_strategy_parity_cpu():
     assert torch.allclose(engine_out.latents, manual_out.latents)
 
 
+def test_standard_strategy_parity_i2v_cpu():
+    timesteps = torch.tensor([2, 1], dtype=torch.long)
+    latents = torch.randn(1, 2, 2, 2, 2)
+    args = _make_args()
+    scheduler = DummyScheduler(timesteps)
+    stage_a = DummyStandardStage(DummyTransformer(), scheduler)
+    stage_b = DummyStandardStage(DummyTransformer(), DummyScheduler(timesteps))
+    stage_a.transformer.out_channels = latents.shape[1]
+    stage_b.transformer.out_channels = latents.shape[1]
+
+    batch_a = _make_batch(latents, timesteps, guidance_scale=2.0, seed=5)
+    batch_b = _make_batch(latents, timesteps, guidance_scale=2.0, seed=5)
+
+    cond_gen = torch.Generator().manual_seed(123)
+    image_latent = torch.randn(latents.shape,
+                               generator=cond_gen,
+                               device=latents.device,
+                               dtype=latents.dtype)
+    image_embeds = [
+        torch.randn(1,
+                    4,
+                    8,
+                    generator=cond_gen,
+                    device=latents.device,
+                    dtype=latents.dtype)
+    ]
+
+    batch_a.image_latent = image_latent
+    batch_b.image_latent = image_latent.clone()
+    batch_a.image_embeds = image_embeds
+    batch_b.image_embeds = [image_embeds[0].clone()]
+
+    engine_out = DenoisingEngine(StandardStrategy(stage_a)).run(batch_a, args)
+    manual_out = _run_manual(StandardStrategy(stage_b), batch_b, args)
+
+    assert torch.allclose(engine_out.latents, manual_out.latents)
+
+
+def test_standard_strategy_parity_v2v_cpu():
+    timesteps = torch.tensor([2, 1], dtype=torch.long)
+    latents = torch.randn(1, 2, 2, 2, 2)
+    args = _make_args()
+    scheduler = DummyScheduler(timesteps)
+    stage_a = DummyStandardStage(DummyTransformer(), scheduler)
+    stage_b = DummyStandardStage(DummyTransformer(), DummyScheduler(timesteps))
+    stage_a.transformer.out_channels = latents.shape[1]
+    stage_b.transformer.out_channels = latents.shape[1]
+
+    batch_a = _make_batch(latents, timesteps, guidance_scale=2.0, seed=6)
+    batch_b = _make_batch(latents, timesteps, guidance_scale=2.0, seed=6)
+
+    cond_gen = torch.Generator().manual_seed(456)
+    video_latent = torch.randn(latents.shape,
+                               generator=cond_gen,
+                               device=latents.device,
+                               dtype=latents.dtype)
+
+    batch_a.video_latent = video_latent
+    batch_b.video_latent = video_latent.clone()
+
+    engine_out = DenoisingEngine(StandardStrategy(stage_a)).run(batch_a, args)
+    manual_out = _run_manual(StandardStrategy(stage_b), batch_b, args)
+
+    assert torch.allclose(engine_out.latents, manual_out.latents)
+
+
+def test_standard_strategy_parity_boundary_cpu():
+    timesteps = torch.tensor([2, 1], dtype=torch.long)
+    latents = torch.randn(1, 2, 2, 2, 2)
+    args = _make_args()
+    args.pipeline_config.dit_config.boundary_ratio = 0.75
+    scheduler = DummyScheduler(timesteps)
+    stage_a = DummyStandardStage(DummyTransformer(), scheduler)
+    stage_b = DummyStandardStage(DummyTransformer(), DummyScheduler(timesteps))
+    stage_a.transformer_2 = DummyTransformer()
+    stage_b.transformer_2 = DummyTransformer()
+
+    batch_a = _make_batch(latents, timesteps, guidance_scale=2.0, seed=7)
+    batch_b = _make_batch(latents, timesteps, guidance_scale=2.0, seed=7)
+    batch_a.guidance_scale_2 = 1.5
+    batch_b.guidance_scale_2 = 1.5
+
+    engine_out = DenoisingEngine(StandardStrategy(stage_a)).run(batch_a, args)
+    manual_out = _run_manual(StandardStrategy(stage_b), batch_b, args)
+
+    assert torch.allclose(engine_out.latents, manual_out.latents)
+
+
 def test_cosmos_strategy_parity_cpu():
     timesteps = torch.tensor([2, 1], dtype=torch.long)
     latents = torch.randn(1, 2, 2, 2, 2)
@@ -439,6 +549,47 @@ def test_dmd_strategy_parity_cpu():
 
     batch_a = _make_batch(latents, timesteps, guidance_scale=1.0, seed=2)
     batch_b = _make_batch(latents, timesteps, guidance_scale=1.0, seed=2)
+
+    engine_out = DenoisingEngine(DmdStrategy(stage_a)).run(batch_a, args)
+    manual_out = _run_manual(DmdStrategy(stage_b), batch_b, args)
+
+    assert torch.allclose(engine_out.latents, manual_out.latents)
+
+
+def test_dmd_strategy_parity_i2v_cpu():
+    timesteps = torch.tensor([4, 2], dtype=torch.long)
+    latents = torch.randn(1, 2, 2, 2, 2)
+    args = _make_args()
+    args.pipeline_config.dmd_denoising_steps = [4, 2]
+    scheduler = DummyScheduler(timesteps)
+    scheduler.timesteps = timesteps
+    scheduler.sigmas = scheduler._make_sigmas(timesteps)
+    stage_a = DummyDmdStage(DummyTransformer(), scheduler)
+    stage_b = DummyDmdStage(DummyTransformer(), DummyScheduler(timesteps))
+    stage_a.transformer.out_channels = latents.shape[1]
+    stage_b.transformer.out_channels = latents.shape[1]
+
+    batch_a = _make_batch(latents, timesteps, guidance_scale=1.0, seed=8)
+    batch_b = _make_batch(latents, timesteps, guidance_scale=1.0, seed=8)
+
+    cond_gen = torch.Generator().manual_seed(789)
+    image_latent = torch.randn(latents.shape,
+                               generator=cond_gen,
+                               device=latents.device,
+                               dtype=latents.dtype)
+    image_embeds = [
+        torch.randn(1,
+                    4,
+                    8,
+                    generator=cond_gen,
+                    device=latents.device,
+                    dtype=latents.dtype)
+    ]
+
+    batch_a.image_latent = image_latent
+    batch_b.image_latent = image_latent.clone()
+    batch_a.image_embeds = image_embeds
+    batch_b.image_embeds = [image_embeds[0].clone()]
 
     engine_out = DenoisingEngine(DmdStrategy(stage_a)).run(batch_a, args)
     manual_out = _run_manual(DmdStrategy(stage_b), batch_b, args)

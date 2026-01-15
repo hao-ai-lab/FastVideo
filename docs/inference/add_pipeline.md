@@ -168,6 +168,10 @@ Pipelines are composed of stages, each handling a specific part of the diffusion
 - **DenoisingStage**: Performs denoising diffusion
 - **DecodingStage**: Converts latents to pixels
 
+Note: `DenoisingStage` uses the unified denoising engine under the hood. You
+can inject a custom strategy via `strategy_cls` if a pipeline needs specialized
+denoising behavior.
+
 ### Creating Your Pipeline
 
 ```python
@@ -230,7 +234,7 @@ class MyCustomPipeline(ComposedPipelineBase):
             stage_name="denoising_stage",
             stage=DenoisingStage(
                 transformer=self.get_module("transformer"),
-                scheduler=self.get_module("scheduler")
+                scheduler=self.get_module("scheduler"),
             )
         )
         
@@ -243,6 +247,24 @@ class MyCustomPipeline(ComposedPipelineBase):
     
 # Register the pipeline class
 EntryClass = MyCustomPipeline
+```
+
+### Customizing Denoising Strategies
+
+If your model requires a custom denoising loop, pass a strategy class:
+
+```python
+from fastvideo.pipelines.stages.denoising_cosmos_strategy import (
+    CosmosStrategy)
+
+        self.add_stage(
+            stage_name="denoising_stage",
+            stage=DenoisingStage(
+                transformer=self.get_module("transformer"),
+                scheduler=self.get_module("scheduler"),
+                strategy_cls=CosmosStrategy,
+            )
+        )
 ```
 
 ### Creating Custom Stages (Optional)

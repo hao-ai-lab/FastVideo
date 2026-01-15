@@ -14,10 +14,11 @@ from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 
 # isort: off
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
-                                        DmdDenoisingStage, InputValidationStage,
+                                        DenoisingStage, InputValidationStage,
                                         LatentPreparationStage,
                                         TextEncodingStage,
                                         TimestepPreparationStage)
+from fastvideo.pipelines.stages.denoising_dmd_strategy import DmdStrategy
 # isort: on
 
 logger = init_logger(__name__)
@@ -63,9 +64,10 @@ class WanDMDPipeline(LoRAPipeline, ComposedPipelineBase):
                            use_btchw_layout=True))
 
         self.add_stage(stage_name="denoising_stage",
-                       stage=DmdDenoisingStage(
+                       stage=DenoisingStage(
                            transformer=self.get_module("transformer"),
-                           scheduler=self.get_module("scheduler")))
+                           scheduler=FlowMatchEulerDiscreteScheduler(shift=8.0),
+                           strategy_cls=DmdStrategy))
 
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))

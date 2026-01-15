@@ -11,11 +11,12 @@ from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.pipelines.stages import (ConditioningStage, CosmosDenoisingStage,
+from fastvideo.pipelines.stages import (ConditioningStage, DenoisingStage,
                                         CosmosLatentPreparationStage,
                                         DecodingStage, InputValidationStage,
                                         TextEncodingStage,
                                         TimestepPreparationStage)
+from fastvideo.pipelines.stages.denoising_cosmos_strategy import CosmosStrategy
 
 logger = init_logger(__name__)
 
@@ -73,9 +74,10 @@ class Cosmos2VideoToWorldPipeline(ComposedPipelineBase):
                            vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",
-                       stage=CosmosDenoisingStage(
+                       stage=DenoisingStage(
                            transformer=self.get_module("transformer"),
-                           scheduler=self.get_module("scheduler")))
+                           scheduler=self.get_module("scheduler"),
+                           strategy_cls=CosmosStrategy))
 
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))

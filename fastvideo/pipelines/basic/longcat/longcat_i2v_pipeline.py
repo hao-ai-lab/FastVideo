@@ -16,13 +16,15 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.stages import (
     DecodingStage,
+    DenoisingStage,
     InputValidationStage,
     TextEncodingStage,
     TimestepPreparationStage,
 )
+from fastvideo.pipelines.stages.denoising_longcat_strategy import (
+    LongCatI2VStrategy)
 from fastvideo.pipelines.stages.longcat_image_vae_encoding import LongCatImageVAEEncodingStage
 from fastvideo.pipelines.stages.longcat_i2v_latent_preparation import LongCatI2VLatentPreparationStage
-from fastvideo.pipelines.stages.longcat_i2v_denoising import LongCatI2VDenoisingStage
 from fastvideo.pipelines.stages.longcat_refine_init import LongCatRefineInitStage
 from fastvideo.pipelines.stages.longcat_refine_timestep import LongCatRefineTimestepStage
 
@@ -132,12 +134,13 @@ class LongCatImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
 
         # 8. Denoising with I2V support
         self.add_stage(stage_name="denoising_stage",
-                       stage=LongCatI2VDenoisingStage(
+                       stage=DenoisingStage(
                            transformer=self.get_module("transformer"),
                            transformer_2=self.get_module("transformer_2", None),
                            scheduler=self.get_module("scheduler"),
                            vae=self.get_module("vae"),
-                           pipeline=self))
+                           pipeline=self,
+                           strategy_cls=LongCatI2VStrategy))
 
         # 9. Decoding
         self.add_stage(stage_name="decoding_stage",

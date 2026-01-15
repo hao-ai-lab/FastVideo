@@ -70,6 +70,19 @@ class _BaseLongCatStrategy(DenoisingStrategy):
         return prompt_embeds, prompt_attention_mask, prompt_embeds_combined, \
             prompt_attention_mask_combined
 
+    def optimized_scale(self, positive_flat: torch.Tensor,
+                        negative_flat: torch.Tensor) -> torch.Tensor:
+        """
+        Calculate optimized scale from CFG-zero paper.
+
+        st_star = (v_cond^T * v_uncond) / ||v_uncond||^2
+        """
+        dot_product = torch.sum(positive_flat * negative_flat,
+                                dim=1,
+                                keepdim=True)
+        squared_norm = torch.sum(negative_flat**2, dim=1, keepdim=True) + 1e-8
+        return dot_product / squared_norm
+
     def cfg_combine(self, state: StrategyState,
                     noise_pred: torch.Tensor) -> torch.Tensor:
         return noise_pred
@@ -175,7 +188,7 @@ class LongCatStrategy(_BaseLongCatStrategy):
             B = noise_pred_cond.shape[0]
             positive = noise_pred_cond.reshape(B, -1)
             negative = noise_pred_uncond.reshape(B, -1)
-            st_star = self.stage.optimized_scale(positive, negative)
+            st_star = self.optimized_scale(positive, negative)
             st_star = st_star.view(B, 1, 1, 1, 1)
             noise_pred = (noise_pred_uncond * st_star + state.guidance_scale *
                           (noise_pred_cond - noise_pred_uncond * st_star))
@@ -311,7 +324,7 @@ class LongCatI2VStrategy(_BaseLongCatStrategy):
             B = noise_pred_cond.shape[0]
             positive = noise_pred_cond.reshape(B, -1)
             negative = noise_pred_uncond.reshape(B, -1)
-            st_star = self.stage.optimized_scale(positive, negative)
+            st_star = self.optimized_scale(positive, negative)
             st_star = st_star.view(B, 1, 1, 1, 1)
             noise_pred = (noise_pred_uncond * st_star + state.guidance_scale *
                           (noise_pred_cond - noise_pred_uncond * st_star))
@@ -468,7 +481,7 @@ class LongCatVCStrategy(_BaseLongCatStrategy):
             B = noise_pred_cond.shape[0]
             positive = noise_pred_cond.reshape(B, -1)
             negative = noise_pred_uncond.reshape(B, -1)
-            st_star = self.stage.optimized_scale(positive, negative)
+            st_star = self.optimized_scale(positive, negative)
             st_star = st_star.view(B, 1, 1, 1, 1)
             noise_pred = (noise_pred_uncond * st_star + state.guidance_scale *
                           (noise_pred_cond - noise_pred_uncond * st_star))

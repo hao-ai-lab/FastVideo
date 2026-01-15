@@ -16,14 +16,16 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.stages import (
     DecodingStage,
+    DenoisingStage,
     InputValidationStage,
     TextEncodingStage,
     TimestepPreparationStage,
 )
+from fastvideo.pipelines.stages.denoising_longcat_strategy import (
+    LongCatVCStrategy)
 from fastvideo.pipelines.stages.longcat_video_vae_encoding import LongCatVideoVAEEncodingStage
 from fastvideo.pipelines.stages.longcat_i2v_latent_preparation import LongCatI2VLatentPreparationStage
 from fastvideo.pipelines.stages.longcat_kv_cache_init import LongCatKVCacheInitStage
-from fastvideo.pipelines.stages.longcat_vc_denoising import LongCatVCDenoisingStage
 
 logger = init_logger(__name__)
 
@@ -131,12 +133,13 @@ class LongCatVideoContinuationPipeline(LoRAPipeline, ComposedPipelineBase):
 
         # 7. Denoising with VC and KV cache support
         self.add_stage(stage_name="denoising_stage",
-                       stage=LongCatVCDenoisingStage(
+                       stage=DenoisingStage(
                            transformer=self.get_module("transformer"),
                            transformer_2=self.get_module("transformer_2", None),
                            scheduler=self.get_module("scheduler"),
                            vae=self.get_module("vae"),
-                           pipeline=self))
+                           pipeline=self,
+                           strategy_cls=LongCatVCStrategy))
 
         # 8. Decoding
         self.add_stage(stage_name="decoding_stage",
