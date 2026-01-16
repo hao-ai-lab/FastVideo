@@ -655,7 +655,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     training_batch.raw_latent_shape[3] //
                     patch_h) * (training_batch.raw_latent_shape[4] // patch_w)
                 if training_batch.encoder_hidden_states is not None:
-                    context_len = int(training_batch.encoder_hidden_states.shape[1])
+                    context_len = int(
+                        training_batch.encoder_hidden_states.shape[1])
                 else:
                     context_len = 0
 
