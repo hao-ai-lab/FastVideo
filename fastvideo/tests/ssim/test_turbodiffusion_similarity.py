@@ -94,10 +94,7 @@ def test_turbodiffusion_inference_similarity(prompt, model_id):
         "fps": BASE_PARAMS["fps"],
     }
 
-    generator = VideoGenerator.from_pretrained(
-        model_path=BASE_PARAMS["model_path"],
-        **init_kwargs
-    )
+    generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
     generator.generate_video(prompt, **generation_kwargs)
 
     if isinstance(generator.executor, MultiprocExecutor):

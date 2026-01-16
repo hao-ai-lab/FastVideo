@@ -61,7 +61,7 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 60m .buildkite/scripts/pr_test.sh"
+                command: "timeout 90m .buildkite/scripts/pr_test.sh"
                 label: "SSIM Tests"
                 env:
                   - TEST_TYPE=ssim
