@@ -1,7 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
+"""
+SSIM-based similarity tests for LongCat video generation.
 
+Tests three LongCat modes:
+- T2V (Text-to-Video): 480p video from text prompt
+- I2V (Image-to-Video): 480p video from image + text prompt  
+- VC (Video Continuation): 480p video continuation from input video + text prompt
+
+Sampling parameters are derived from:
+- examples/inference/basic/basic_longcat_t2v.py
+- examples/inference/basic/basic_longcat_i2v.py
+- examples/inference/basic/basic_longcat_vc.py
+
+Note: num_inference_steps is reduced for CI speed (4 steps vs 50 in examples).
+"""
 import os
-import re
 
 import pytest
 import torch
@@ -12,131 +25,7 @@ from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_res
 
 logger = init_logger(__name__)
 
-def _sanitize_filename_component(name: str) -> str:
-    """Sanitize filename to remove invalid characters (same logic as VideoGenerator)."""
-    sanitized = re.sub(r'[\\/:*?"<>|]', '', name)
-    sanitized = sanitized.strip().strip('.')
-    sanitized = re.sub(r'\s+', ' ', sanitized)
-    return sanitized or "video"
-
-
-def _looks_like_local_path(path: str) -> bool:
-    return path.startswith(("/", "./", "../", "weights/", "data/"))
-
-
-def _resolve_longcat_model_path() -> str:
-    """Resolve LongCat model path.
-
-    Logic: Get base path from MODEL_PATH and append 'longcat-native'.
-    """
-    base_path = get_ssim_model_base_dir() or "../weights"
-    
-    model_path = os.path.join(base_path, "longcat-native")
-
-    if _looks_like_local_path(model_path) and not os.path.exists(model_path):
-        raise FileNotFoundError(
-            f"LongCat model path not found: {model_path}. "
-            f"Please ensure MODEL_PATH is set correctly (Current base: {base_path})."
-        )
-    return model_path
-
-def _resolve_longcat_distill_lora_path(model_path: str) -> str:
-    """Resolve distilled LoRA path for LongCat distill/refine stage1.
-
-    Strict: if the path looks local but does not exist, raise immediately.
-    """
-    default_distill_lora = os.path.join(model_path, "lora", "distilled")
-    lora_path = os.getenv("FASTVIDEO_LONGCAT_LORA_PATH", default_distill_lora)
-    if _looks_like_local_path(lora_path) and not os.path.exists(lora_path):
-        raise FileNotFoundError(
-            f"LongCat distilled LoRA path not found: {lora_path}. "
-            "Set FASTVIDEO_LONGCAT_LORA_PATH or place it under <model_path>/lora/distilled."
-        )
-    return lora_path
-
-
-def _resolve_longcat_refine_lora_path(model_path: str) -> str:
-    """Resolve refinement LoRA path for LongCat refine stage.
-
-    Strict: if the path looks local but does not exist, raise immediately.
-    """
-    default_refine_lora = os.path.join(model_path, "lora", "refinement")
-    lora_path = os.getenv("FASTVIDEO_LONGCAT_REFINE_LORA_PATH", default_refine_lora)
-    if _looks_like_local_path(lora_path) and not os.path.exists(lora_path):
-        raise FileNotFoundError(
-            f"LongCat refinement LoRA path not found: {lora_path}. "
-            "Set FASTVIDEO_LONGCAT_REFINE_LORA_PATH or place it under <model_path>/lora/refinement."
-        )
-    return lora_path
-
-
-def _get_generated_video_path(script_dir: str, model_id: str, attention_backend: str,
-                             prompt: str):
-    output_dir = os.path.join(script_dir, "generated_videos", model_id, attention_backend)
-    output_video_stem = _sanitize_filename_component(prompt[:100].strip())
-    generated_video_path = os.path.join(output_dir, f"{output_video_stem}.mp4")
-    return output_dir, output_video_stem, generated_video_path
-
-
-def _should_reuse_existing_video(path: str) -> bool:
-    if not os.path.exists(path):
-        return False
-    # Avoid reusing empty/corrupted files from failed runs.
-    try:
-        return os.path.getsize(path) > 0
-    except OSError:
-        return False
-
-
-def _ensure_longcat_distill_video(prompt: str, attention_backend: str, model_path: str,
-                                  distill_lora_path: str):
-    """Ensure the LongCat distill (stage1) video exists and return its path.
-
-    This is shared by the distill SSIM test and the refine SSIM test (stage1 input).
-    Set FASTVIDEO_SSIM_FORCE_REGEN=1 to always regenerate.
-    """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    model_id = "LongCat-native-distill"
-
-    output_dir, output_video_stem, generated_video_path = _get_generated_video_path(
-        script_dir, model_id, attention_backend, prompt
-    )
-    os.makedirs(output_dir, exist_ok=True)
-
-    force_regen = os.getenv("FASTVIDEO_SSIM_FORCE_REGEN", "").strip() in {"1", "true", "True"}
-    if not force_regen and _should_reuse_existing_video(generated_video_path):
-        logger.info(f"Reusing existing distill video: {generated_video_path}")
-        return output_dir, output_video_stem, generated_video_path
-
-    init_kwargs = {
-        "num_gpus": LONGCAT_DISTILL_PARAMS["num_gpus"],
-        "sp_size": LONGCAT_DISTILL_PARAMS["sp_size"],
-        "tp_size": LONGCAT_DISTILL_PARAMS["tp_size"],
-        # Keep defaults consistent with most tests (memory friendly).
-        "dit_cpu_offload": True,
-        # Explicitly disable BSA for the distill stage (matches official scripts).
-        "enable_bsa": False,
-    }
-
-    generator = VideoGenerator.from_pretrained(model_path=model_path, **init_kwargs)
-    generator.set_lora_adapter(lora_nickname="distilled", lora_path=distill_lora_path)
-    generator.generate_video(
-        prompt,
-        output_path=generated_video_path,
-        height=LONGCAT_DISTILL_PARAMS["height"],
-        width=LONGCAT_DISTILL_PARAMS["width"],
-        num_frames=LONGCAT_DISTILL_PARAMS["num_frames"],
-        num_inference_steps=LONGCAT_DISTILL_PARAMS["num_inference_steps"],
-        guidance_scale=LONGCAT_DISTILL_PARAMS["guidance_scale"],
-        fps=LONGCAT_DISTILL_PARAMS["fps"],
-        seed=LONGCAT_DISTILL_PARAMS["seed"],
-        negative_prompt=LONGCAT_DISTILL_PARAMS["negative_prompt"],
-    )
-    generator.shutdown()
-
-    return output_dir, output_video_stem, generated_video_path
-
-
+# Device-specific reference folder
 device_name = torch.cuda.get_device_name()
 device_reference_folder_suffix = "_reference_videos"
 
@@ -144,350 +33,399 @@ if "A40" in device_name:
     device_reference_folder = "A40" + device_reference_folder_suffix
 elif "L40S" in device_name:
     device_reference_folder = "L40S" + device_reference_folder_suffix
-elif "H100" in device_name: # temporary
+elif "H100" in device_name:
     device_reference_folder = "H100" + device_reference_folder_suffix
 else:
-    raise ValueError(f"Unsupported device for ssim tests: {device_name}")
+    logger.warning(f"Unsupported device for ssim tests: {device_name}")
 
+# Common negative prompt from example scripts
+NEGATIVE_PROMPT = (
+    "Bright tones, overexposed, static, blurred details, subtitles, style, works, "
+    "paintings, images, static, overall gray, worst quality, low quality, JPEG compression "
+    "residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, "
+    "deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, "
+    "three legs, many people in the background, walking backwards"
+)
 
-LONGCAT_DISTILL_PARAMS = {
-    "num_gpus": 4,
-    "sp_size": 1,
-    "tp_size": 1,
-    # NOTE: Speed-optimized settings for SSIM tests.
-    # We intentionally reduce denoising steps and resolution (must be multiples of 4)
-    # to keep runtime manageable in CI.
+# =============================================================================
+# LongCat T2V Parameters (from basic_longcat_t2v.py)
+# =============================================================================
+LONGCAT_T2V_PARAMS = {
+    "num_gpus": 1,
+    "model_path": "FastVideo/LongCat-Video-T2V-Diffusers",
     "height": 480,
     "width": 832,
-    "num_frames": 93,
-    "num_inference_steps": 2,
-    "guidance_scale": 1.0,
-    "fps": 15,
-    "seed": 42,
-    "negative_prompt": "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards",
-}
-
-LONGCAT_BASE_PARAMS = {
-    "num_gpus": 4,
-    "sp_size": 1,
-    "tp_size": 1,
-    "height": 480,
-    "width": 832,
-    "num_frames": 93,
-    "num_inference_steps": 4,
+    "num_frames": 43,
+    "num_inference_steps": 4,  # Reduced from 50 for CI speed
     "guidance_scale": 4.0,
     "fps": 15,
     "seed": 42,
-    "negative_prompt": LONGCAT_DISTILL_PARAMS["negative_prompt"],
+    "negative_prompt": NEGATIVE_PROMPT,
 }
 
-LONGCAT_REFINE_PARAMS = {
-    "num_gpus": 4,
-    "sp_size": 1,
-    "tp_size": 1,
-    "height": 720,
-    "width": 1280,
-    "num_inference_steps": 2,
-    "guidance_scale": 1.0,
+# =============================================================================
+# LongCat I2V Parameters (from basic_longcat_i2v.py)
+# =============================================================================
+LONGCAT_I2V_PARAMS = {
+    "num_gpus": 1,
+    "model_path": "FastVideo/LongCat-Video-I2V-Diffusers",
+    "height": 480,
+    "width": 480,  # Square for I2V
+    "num_frames": 43,
+    "num_inference_steps": 4,  # Reduced from 50 for CI speed
+    "guidance_scale": 4.0,
     "fps": 15,
     "seed": 42,
-    "t_thresh": 0.5,
-    "spatial_refine_only": True,
-    "num_cond_frames": 0,
-    # BSA settings from the official script
-    "enable_bsa": True,
-    "bsa_sparsity": 0.875,
-    "bsa_chunk_q": [4, 4, 8],
-    "bsa_chunk_k": [4, 4, 8],
+    "negative_prompt": NEGATIVE_PROMPT,
 }
 
-LONGCAT_TEST_PROMPTS = [
-    "In a realistic photography style, an asian boy around seven or eight years old sits on a park bench, wearing a light yellow T-shirt, denim shorts, and white sneakers. He holds an ice cream cone with vanilla and chocolate flavors, and beside him is a medium-sized golden Labrador. Smiling, the boy offers the ice cream to the dog, who eagerly licks it with its tongue. The sun is shining brightly, and the background features a green lawn and several tall trees, creating a warm and loving scene.",
-    "Will Smith casually eats noodles, his relaxed demeanor contrasting with the energetic background of a bustling street food market. The scene captures a mix of humor and authenticity. Mid-shot framing, vibrant lighting.",
-    "A lone hiker stands atop a towering cliff, silhouetted against the vast horizon. The rugged landscape stretches endlessly beneath, its earthy tones blending into the soft blues of the sky. The scene captures the spirit of exploration and human resilience. High angle, dynamic framing, with soft natural lighting emphasizing the grandeur of nature.",
-    "A hand with delicate fingers picks up a bright yellow lemon from a wooden bowl filled with lemons and sprigs of mint against a peach-colored background. The hand gently tosses the lemon up and catches it, showcasing its smooth texture. A beige string bag sits beside the bowl, adding a rustic touch to the scene. Additional lemons, one halved, are scattered around the base of the bowl. The even lighting enhances the vibrant colors and creates a fresh, inviting atmosphere.",
-    "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes wide with interest. The playful yet serene atmosphere is complemented by soft natural light filtering through the petals. Mid-shot, warm and cheerful tones.",
-    "A superintelligent humanoid robot waking up. The robot has a sleek metallic body with futuristic design features. Its glowing red eyes are the focal point, emanating a sharp, intense light as it powers on. The scene is set in a dimly lit, high-tech laboratory filled with glowing control panels, robotic arms, and holographic screens. The setting emphasizes advanced technology and an atmosphere of mystery. The ambiance is eerie and dramatic, highlighting the moment of awakening and the robots immense intelligence. Photorealistic style with a cinematic, dark sci-fi aesthetic. Aspect ratio: 16:9 --v 6.1",
-    "fox in the forest close-up quickly turned its head to the left",
-    "Man walking his dog in the woods on a hot sunny day",
+# =============================================================================
+# LongCat VC Parameters (from basic_longcat_vc.py)
+# =============================================================================
+LONGCAT_VC_PARAMS = {
+    "num_gpus": 1,
+    "model_path": "FastVideo/LongCat-Video-VC-Diffusers",
+    "height": 480,
+    "width": 832,
+    "num_frames": 43,
+    "num_inference_steps": 4,  # Reduced from 50 for CI speed
+    "guidance_scale": 4.0,
+    "fps": 15,
+    "seed": 42,
+    "num_cond_frames": 13,
+    "negative_prompt": NEGATIVE_PROMPT,
+}
+
+# Test prompts
+T2V_TEST_PROMPTS = [
+    "In a realistic photography style, a white boy around seven or eight years old "
+    "sits on a park bench, wearing a light blue T-shirt, denim shorts, and white sneakers. "
+    "He holds an ice cream cone with vanilla and chocolate flavors, and beside him is a "
+    "medium-sized golden Labrador. Smiling, the boy offers the ice cream to the dog, "
+    "who eagerly licks it with its tongue. The sun is shining brightly, and the background "
+    "features a green lawn and several tall trees, creating a warm and loving scene.",
 ]
 
-_MAX_PROMPTS = int(os.getenv("FASTVIDEO_SSIM_MAX_PROMPTS", "1"))
-if _MAX_PROMPTS <= 0:
-    _MAX_PROMPTS = 1
-TEST_PROMPTS = LONGCAT_TEST_PROMPTS[:_MAX_PROMPTS]
+I2V_TEST_PROMPTS = [
+    "A woman sits at a wooden table by the window in a cozy café. She reaches out "
+    "with her right hand, picks up the white coffee cup from the saucer, and gently "
+    "brings it to her lips to take a sip. After drinking, she places the cup back on "
+    "the table and looks out the window, enjoying the peaceful atmosphere.",
+]
+
+I2V_IMAGE_PATHS = [
+    "assets/girl.png",
+]
+
+VC_TEST_PROMPTS = [
+    "A person rides a motorcycle along a long, straight road that stretches between "
+    "a body of water and a forested hillside. The rider steadily accelerates, keeping "
+    "the motorcycle centered between the guardrails, while the scenery passes by on "
+    "both sides. The video captures the journey from the rider's perspective, emphasizing "
+    "the sense of motion and adventure.",
+]
+
+VC_VIDEO_PATHS = [
+    "assets/motorcycle.mp4",
+]
 
 
-@pytest.mark.parametrize("prompt", TEST_PROMPTS)
+def _resolve_asset_path(asset_path: str) -> str:
+    """Resolve asset path relative to FastVideo root."""
+    # Check if absolute or already exists
+    if os.path.isabs(asset_path) or os.path.exists(asset_path):
+        return asset_path
+    # Try relative to workspace root
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.abspath(os.path.join(script_dir, "..", "..", ".."))
+    return os.path.join(repo_root, asset_path)
+
+
+@pytest.mark.parametrize("prompt", T2V_TEST_PROMPTS)
 @pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN", "TORCH_SDPA"])
-def test_longcat_distill_similarity(prompt: str, ATTENTION_BACKEND: str):
-    """Generate LongCat (distilled) video and compare with reference via MS-SSIM."""
-    model_path = _resolve_longcat_model_path()
-    distill_lora_path = _resolve_longcat_distill_lora_path(model_path)
-
+def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str):
+    """
+    Test LongCat T2V inference and compare output to reference videos using SSIM.
+    
+    Parameters derived from examples/inference/basic/basic_longcat_t2v.py
+    """
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    model_id = "LongCat-native-distill"
-    output_dir, output_video_stem, generated_video_path = _ensure_longcat_distill_video(
-        prompt=prompt,
-        attention_backend=ATTENTION_BACKEND,
-        model_path=model_path,
-        distill_lora_path=distill_lora_path,
-    )
-
-    assert os.path.exists(
-        generated_video_path), f"Output video was not generated at {generated_video_path}"
-
-    reference_folder = os.path.join(script_dir, device_reference_folder, model_id,
-                                    ATTENTION_BACKEND)
-
-    if not os.path.exists(reference_folder):
-        logger.error("Reference folder missing")
-        raise FileNotFoundError(
-            f"Reference video folder does not exist: {reference_folder}")
-
-    reference_video_name = None
-    for filename in os.listdir(reference_folder):
-        if not filename.endswith(".mp4"):
-            continue
-        base_filename = filename[:-4]
-        if base_filename.startswith(output_video_stem) or _sanitize_filename_component(
-                base_filename) == output_video_stem:
-            reference_video_name = filename
-            break
-
-    if not reference_video_name:
-        logger.error(
-            f"Reference video not found for prompt: {prompt[:100]} with backend: {ATTENTION_BACKEND}"
-        )
-        raise FileNotFoundError("Reference video missing")
-
-    reference_video_path = os.path.join(reference_folder, reference_video_name)
-
-    logger.info(
-        f"Computing SSIM between {reference_video_path} and {generated_video_path}"
-    )
-    ssim_values = compute_video_ssim_torchvision(reference_video_path,
-                                                 generated_video_path,
-                                                 use_ms_ssim=True)
-
-    mean_ssim = ssim_values[0]
-    logger.info(f"SSIM mean value: {mean_ssim}")
-
-    success = write_ssim_results(output_dir, ssim_values, reference_video_path,
-                                 generated_video_path,
-                                 LONGCAT_DISTILL_PARAMS["num_inference_steps"],
-                                 prompt)
-
-    if not success:
-        logger.error("Failed to write SSIM results to file")
-
-    # With reduced steps/resolution, allow a slightly lower SSIM threshold.
-    min_acceptable_ssim = 0.90
-    assert mean_ssim >= min_acceptable_ssim, (
-        f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
-        f"for {model_id} with backend {ATTENTION_BACKEND}")
-
-
-@pytest.mark.parametrize("prompt", TEST_PROMPTS)
-@pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN", "TORCH_SDPA"])
-def test_longcat_base_similarity(prompt: str, ATTENTION_BACKEND: str):
-    """Generate LongCat base (no LoRA) video and compare with reference via MS-SSIM."""
-    model_path = _resolve_longcat_model_path()
-
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-
-    model_id = "LongCat-native-base"
+    model_id = "LongCat-Video-T2V"
+    
     output_dir = os.path.join(script_dir, "generated_videos", model_id, ATTENTION_BACKEND)
+    output_video_name = f"{prompt[:100].strip()}.mp4"
     os.makedirs(output_dir, exist_ok=True)
-
-    output_video_stem = _sanitize_filename_component(prompt[:100].strip())
-    generated_video_path = os.path.join(output_dir, f"{output_video_stem}.mp4")
 
     init_kwargs = {
-        "num_gpus": LONGCAT_BASE_PARAMS["num_gpus"],
-        "sp_size": LONGCAT_BASE_PARAMS["sp_size"],
-        "tp_size": LONGCAT_BASE_PARAMS["tp_size"],
-        "dit_cpu_offload": True,
+        "num_gpus": LONGCAT_T2V_PARAMS["num_gpus"],
+        "use_fsdp_inference": False,
+        "dit_cpu_offload": False,
+        "vae_cpu_offload": True,
+        "text_encoder_cpu_offload": True,
+        "pin_cpu_memory": False,
         "enable_bsa": False,
     }
-    generator = VideoGenerator.from_pretrained(model_path=model_path, **init_kwargs)
-    generator.generate_video(
-        prompt,
-        output_path=generated_video_path,
-        height=LONGCAT_BASE_PARAMS["height"],
-        width=LONGCAT_BASE_PARAMS["width"],
-        num_frames=LONGCAT_BASE_PARAMS["num_frames"],
-        num_inference_steps=LONGCAT_BASE_PARAMS["num_inference_steps"],
-        guidance_scale=LONGCAT_BASE_PARAMS["guidance_scale"],
-        fps=LONGCAT_BASE_PARAMS["fps"],
-        seed=LONGCAT_BASE_PARAMS["seed"],
-        negative_prompt=LONGCAT_BASE_PARAMS["negative_prompt"],
+
+    generation_kwargs = {
+        "output_path": output_dir,
+        "height": LONGCAT_T2V_PARAMS["height"],
+        "width": LONGCAT_T2V_PARAMS["width"],
+        "num_frames": LONGCAT_T2V_PARAMS["num_frames"],
+        "num_inference_steps": LONGCAT_T2V_PARAMS["num_inference_steps"],
+        "guidance_scale": LONGCAT_T2V_PARAMS["guidance_scale"],
+        "fps": LONGCAT_T2V_PARAMS["fps"],
+        "seed": LONGCAT_T2V_PARAMS["seed"],
+        "negative_prompt": LONGCAT_T2V_PARAMS["negative_prompt"],
+    }
+
+    generator = VideoGenerator.from_pretrained(
+        model_path=LONGCAT_T2V_PARAMS["model_path"], **init_kwargs
     )
+    generator.generate_video(prompt, **generation_kwargs)
     generator.shutdown()
 
-    assert os.path.exists(
-        generated_video_path), f"Output video was not generated at {generated_video_path}"
+    generated_video_path = os.path.join(output_dir, output_video_name)
+    assert os.path.exists(generated_video_path), (
+        f"Output video was not generated at {generated_video_path}"
+    )
 
-    reference_folder = os.path.join(script_dir, device_reference_folder, model_id, ATTENTION_BACKEND)
+    # Find reference video
+    reference_folder = os.path.join(
+        script_dir, device_reference_folder, model_id, ATTENTION_BACKEND
+    )
     if not os.path.exists(reference_folder):
-        logger.error("Reference folder missing")
         raise FileNotFoundError(
-            f"Reference video folder does not exist: {reference_folder}")
+            f"Reference video folder does not exist: {reference_folder}"
+        )
 
     reference_video_name = None
     for filename in os.listdir(reference_folder):
-        if not filename.endswith(".mp4"):
-            continue
-        base_filename = filename[:-4]
-        if base_filename.startswith(output_video_stem) or _sanitize_filename_component(
-                base_filename) == output_video_stem:
+        if filename.endswith(".mp4") and prompt[:100].strip() in filename:
             reference_video_name = filename
             break
+
     if not reference_video_name:
-        logger.error(
-            f"Reference video not found for prompt: {prompt[:100]} with backend: {ATTENTION_BACKEND}"
+        raise FileNotFoundError(
+            f"Reference video not found for prompt: {prompt[:50]}... with backend: {ATTENTION_BACKEND}"
         )
-        raise FileNotFoundError("Reference video missing")
 
     reference_video_path = os.path.join(reference_folder, reference_video_name)
-    logger.info(
-        f"Computing SSIM between {reference_video_path} and {generated_video_path}"
+
+    logger.info(f"Computing SSIM between {reference_video_path} and {generated_video_path}")
+    ssim_values = compute_video_ssim_torchvision(
+        reference_video_path, generated_video_path, use_ms_ssim=True
     )
-    ssim_values = compute_video_ssim_torchvision(reference_video_path,
-                                                 generated_video_path,
-                                                 use_ms_ssim=True)
+
     mean_ssim = ssim_values[0]
     logger.info(f"SSIM mean value: {mean_ssim}")
 
-    success = write_ssim_results(output_dir, ssim_values, reference_video_path,
-                                 generated_video_path,
-                                 LONGCAT_BASE_PARAMS["num_inference_steps"],
-                                 prompt)
-    if not success:
-        logger.error("Failed to write SSIM results to file")
+    write_ssim_results(
+        output_dir, ssim_values, reference_video_path, generated_video_path,
+        LONGCAT_T2V_PARAMS["num_inference_steps"], prompt
+    )
 
-    # With reduced steps/resolution, allow a slightly lower SSIM threshold.
     min_acceptable_ssim = 0.90
     assert mean_ssim >= min_acceptable_ssim, (
         f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
-        f"for {model_id} with backend {ATTENTION_BACKEND}")
+        f"for {model_id} with backend {ATTENTION_BACKEND}"
+    )
 
 
-@pytest.mark.parametrize("prompt", TEST_PROMPTS)
-@pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
-def test_longcat_refine_similarity(prompt: str, ATTENTION_BACKEND: str):
-    """Generate LongCat refinement (480p->720p) and compare with reference via MS-SSIM."""
-    model_path = _resolve_longcat_model_path()
-    distill_lora_path = _resolve_longcat_distill_lora_path(model_path)
-    refine_lora_path = _resolve_longcat_refine_lora_path(model_path)
-
+@pytest.mark.parametrize("prompt", I2V_TEST_PROMPTS)
+@pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN", "TORCH_SDPA"])
+def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
+    """
+    Test LongCat I2V inference and compare output to reference videos using SSIM.
+    
+    Parameters derived from examples/inference/basic/basic_longcat_i2v.py
+    """
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
-
-    # --- Stage 1 (distill): reuse if already generated; otherwise generate ---
-    _, stage1_video_stem, stage1_video_path = _ensure_longcat_distill_video(
-        prompt=prompt,
-        attention_backend=ATTENTION_BACKEND,
-        model_path=model_path,
-        distill_lora_path=distill_lora_path,
-    )
-
-    assert os.path.exists(stage1_video_path), (
-        f"Stage1 video was not generated at {stage1_video_path}")
-
-    # --- Stage 2 (refine): 480p -> 720p (spatial + temporal by default) ---
-    model_id = "LongCat-native-refine"
-    output_dir = os.path.join(script_dir, "generated_videos", model_id,
-                              ATTENTION_BACKEND)
+    model_id = "LongCat-Video-I2V"
+    
+    output_dir = os.path.join(script_dir, "generated_videos", model_id, ATTENTION_BACKEND)
+    output_video_name = f"{prompt[:100].strip()}.mp4"
     os.makedirs(output_dir, exist_ok=True)
 
-    refine_video_stem = stage1_video_stem
-    generated_video_path = os.path.join(output_dir, f"{refine_video_stem}.mp4")
+    # Get image path for this prompt
+    prompt_idx = I2V_TEST_PROMPTS.index(prompt)
+    image_path = _resolve_asset_path(I2V_IMAGE_PATHS[prompt_idx])
 
-    refine_init_kwargs = {
-        "num_gpus": LONGCAT_REFINE_PARAMS["num_gpus"],
-        "sp_size": LONGCAT_REFINE_PARAMS["sp_size"],
-        "tp_size": LONGCAT_REFINE_PARAMS["tp_size"],
-        "dit_cpu_offload": True,
-        # VAE can be large at 720p decode/encode paths; keep it CPU-offloaded.
-        "vae_cpu_offload": False,
+    init_kwargs = {
+        "num_gpus": LONGCAT_I2V_PARAMS["num_gpus"],
+        "use_fsdp_inference": False,
+        "dit_cpu_offload": False,
+        "vae_cpu_offload": True,
         "text_encoder_cpu_offload": True,
-        "pin_cpu_memory": True,
-        "enable_bsa": LONGCAT_REFINE_PARAMS["enable_bsa"],
-        "bsa_sparsity": LONGCAT_REFINE_PARAMS["bsa_sparsity"],
-        "bsa_chunk_q": LONGCAT_REFINE_PARAMS["bsa_chunk_q"],
-        "bsa_chunk_k": LONGCAT_REFINE_PARAMS["bsa_chunk_k"],
+        "pin_cpu_memory": False,
+        "enable_bsa": False,
     }
-    refine_generator = VideoGenerator.from_pretrained(model_path=model_path,
-                                                      **refine_init_kwargs)
-    refine_generator.set_lora_adapter(lora_nickname="refinement",
-                                      lora_path=refine_lora_path)
-    refine_generator.generate_video(
-        prompt,
-        output_path=generated_video_path,
-        refine_from=stage1_video_path,
-        t_thresh=LONGCAT_REFINE_PARAMS["t_thresh"],
-        spatial_refine_only=LONGCAT_REFINE_PARAMS["spatial_refine_only"],
-        num_cond_frames=LONGCAT_REFINE_PARAMS["num_cond_frames"],
-        height=LONGCAT_REFINE_PARAMS["height"],
-        width=LONGCAT_REFINE_PARAMS["width"],
-        num_inference_steps=LONGCAT_REFINE_PARAMS["num_inference_steps"],
-        fps=LONGCAT_REFINE_PARAMS["fps"],
-        guidance_scale=LONGCAT_REFINE_PARAMS["guidance_scale"],
-        seed=LONGCAT_REFINE_PARAMS["seed"],
+
+    generation_kwargs = {
+        "output_path": output_dir,
+        "image_path": image_path,
+        "height": LONGCAT_I2V_PARAMS["height"],
+        "width": LONGCAT_I2V_PARAMS["width"],
+        "num_frames": LONGCAT_I2V_PARAMS["num_frames"],
+        "num_inference_steps": LONGCAT_I2V_PARAMS["num_inference_steps"],
+        "guidance_scale": LONGCAT_I2V_PARAMS["guidance_scale"],
+        "fps": LONGCAT_I2V_PARAMS["fps"],
+        "seed": LONGCAT_I2V_PARAMS["seed"],
+        "negative_prompt": LONGCAT_I2V_PARAMS["negative_prompt"],
+    }
+
+    generator = VideoGenerator.from_pretrained(
+        model_path=LONGCAT_I2V_PARAMS["model_path"], **init_kwargs
     )
-    refine_generator.shutdown()
+    generator.generate_video(prompt, **generation_kwargs)
+    generator.shutdown()
 
-    assert os.path.exists(
-        generated_video_path), f"Output video was not generated at {generated_video_path}"
+    generated_video_path = os.path.join(output_dir, output_video_name)
+    assert os.path.exists(generated_video_path), (
+        f"Output video was not generated at {generated_video_path}"
+    )
 
-    reference_folder = os.path.join(script_dir, device_reference_folder, model_id,
-                                    ATTENTION_BACKEND)
+    # Find reference video
+    reference_folder = os.path.join(
+        script_dir, device_reference_folder, model_id, ATTENTION_BACKEND
+    )
     if not os.path.exists(reference_folder):
-        logger.error("Reference folder missing")
         raise FileNotFoundError(
-            f"Reference video folder does not exist: {reference_folder}")
+            f"Reference video folder does not exist: {reference_folder}"
+        )
 
     reference_video_name = None
     for filename in os.listdir(reference_folder):
-        if not filename.endswith(".mp4"):
-            continue
-        base_filename = filename[:-4]
-        if base_filename.startswith(refine_video_stem) or _sanitize_filename_component(
-                base_filename) == refine_video_stem:
+        if filename.endswith(".mp4") and prompt[:100].strip() in filename:
             reference_video_name = filename
             break
 
     if not reference_video_name:
-        logger.error(
-            f"Reference video not found for prompt: {prompt[:100]} with backend: {ATTENTION_BACKEND}"
+        raise FileNotFoundError(
+            f"Reference video not found for prompt: {prompt[:50]}... with backend: {ATTENTION_BACKEND}"
         )
-        raise FileNotFoundError("Reference video missing")
 
     reference_video_path = os.path.join(reference_folder, reference_video_name)
 
-    logger.info(
-        f"Computing SSIM between {reference_video_path} and {generated_video_path}"
+    logger.info(f"Computing SSIM between {reference_video_path} and {generated_video_path}")
+    ssim_values = compute_video_ssim_torchvision(
+        reference_video_path, generated_video_path, use_ms_ssim=True
     )
-    ssim_values = compute_video_ssim_torchvision(reference_video_path,
-                                                 generated_video_path,
-                                                 use_ms_ssim=True)
+
     mean_ssim = ssim_values[0]
     logger.info(f"SSIM mean value: {mean_ssim}")
 
-    success = write_ssim_results(output_dir, ssim_values, reference_video_path,
-                                 generated_video_path,
-                                 LONGCAT_REFINE_PARAMS["num_inference_steps"],
-                                 prompt)
-    if not success:
-        logger.error("Failed to write SSIM results to file")
+    write_ssim_results(
+        output_dir, ssim_values, reference_video_path, generated_video_path,
+        LONGCAT_I2V_PARAMS["num_inference_steps"], prompt
+    )
 
-    # Refinement is especially sensitive; keep a modest threshold for the fast config.
-    min_acceptable_ssim = 0.88
+    min_acceptable_ssim = 0.90
     assert mean_ssim >= min_acceptable_ssim, (
         f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
-        f"for {model_id} with backend {ATTENTION_BACKEND}")
+        f"for {model_id} with backend {ATTENTION_BACKEND}"
+    )
+
+
+@pytest.mark.parametrize("prompt", VC_TEST_PROMPTS)
+@pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN", "TORCH_SDPA"])
+def test_longcat_vc_similarity(prompt: str, ATTENTION_BACKEND: str):
+    """
+    Test LongCat VC (Video Continuation) inference and compare output to reference videos using SSIM.
+    
+    Parameters derived from examples/inference/basic/basic_longcat_vc.py
+    """
+    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    model_id = "LongCat-Video-VC"
+    
+    output_dir = os.path.join(script_dir, "generated_videos", model_id, ATTENTION_BACKEND)
+    output_video_name = f"{prompt[:100].strip()}.mp4"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Get video path for this prompt
+    prompt_idx = VC_TEST_PROMPTS.index(prompt)
+    video_path = _resolve_asset_path(VC_VIDEO_PATHS[prompt_idx])
+    
+    if not os.path.exists(video_path):
+        pytest.skip(f"Input video not found at {video_path}")
+
+    init_kwargs = {
+        "num_gpus": LONGCAT_VC_PARAMS["num_gpus"],
+        "use_fsdp_inference": False,
+        "dit_cpu_offload": False,
+        "vae_cpu_offload": True,
+        "text_encoder_cpu_offload": True,
+        "pin_cpu_memory": False,
+        "enable_bsa": False,
+    }
+
+    generation_kwargs = {
+        "output_path": output_dir,
+        "video_path": video_path,
+        "num_cond_frames": LONGCAT_VC_PARAMS["num_cond_frames"],
+        "height": LONGCAT_VC_PARAMS["height"],
+        "width": LONGCAT_VC_PARAMS["width"],
+        "num_frames": LONGCAT_VC_PARAMS["num_frames"],
+        "num_inference_steps": LONGCAT_VC_PARAMS["num_inference_steps"],
+        "guidance_scale": LONGCAT_VC_PARAMS["guidance_scale"],
+        "fps": LONGCAT_VC_PARAMS["fps"],
+        "seed": LONGCAT_VC_PARAMS["seed"],
+        "negative_prompt": LONGCAT_VC_PARAMS["negative_prompt"],
+    }
+
+    generator = VideoGenerator.from_pretrained(
+        model_path=LONGCAT_VC_PARAMS["model_path"], **init_kwargs
+    )
+    generator.generate_video(prompt, **generation_kwargs)
+    generator.shutdown()
+
+    generated_video_path = os.path.join(output_dir, output_video_name)
+    assert os.path.exists(generated_video_path), (
+        f"Output video was not generated at {generated_video_path}"
+    )
+
+    # Find reference video
+    reference_folder = os.path.join(
+        script_dir, device_reference_folder, model_id, ATTENTION_BACKEND
+    )
+    if not os.path.exists(reference_folder):
+        raise FileNotFoundError(
+            f"Reference video folder does not exist: {reference_folder}"
+        )
+
+    reference_video_name = None
+    for filename in os.listdir(reference_folder):
+        if filename.endswith(".mp4") and prompt[:100].strip() in filename:
+            reference_video_name = filename
+            break
+
+    if not reference_video_name:
+        raise FileNotFoundError(
+            f"Reference video not found for prompt: {prompt[:50]}... with backend: {ATTENTION_BACKEND}"
+        )
+
+    reference_video_path = os.path.join(reference_folder, reference_video_name)
+
+    logger.info(f"Computing SSIM between {reference_video_path} and {generated_video_path}")
+    ssim_values = compute_video_ssim_torchvision(
+        reference_video_path, generated_video_path, use_ms_ssim=True
+    )
+
+    mean_ssim = ssim_values[0]
+    logger.info(f"SSIM mean value: {mean_ssim}")
+
+    write_ssim_results(
+        output_dir, ssim_values, reference_video_path, generated_video_path,
+        LONGCAT_VC_PARAMS["num_inference_steps"], prompt
+    )
+
+    min_acceptable_ssim = 0.90
+    assert mean_ssim >= min_acceptable_ssim, (
+        f"SSIM value {mean_ssim} is below threshold {min_acceptable_ssim} "
+        f"for {model_id} with backend {ATTENTION_BACKEND}"
+    )
