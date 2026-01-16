@@ -179,6 +179,8 @@ class ForwardBatch:
     # Misc
     save_video: bool = True
     return_frames: bool = False
+    return_frames_in_dict: bool = False
+    return_samples: bool = False
 
     # TeaCache parameters
     enable_teacache: bool = False

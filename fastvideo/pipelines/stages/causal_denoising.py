@@ -14,7 +14,7 @@ try:
     from fastvideo.attention.backends.sliding_tile_attn import (
         SlidingTileAttentionBackend)
     st_attn_available = True
-except ImportError:
+except Exception:
     st_attn_available = False
     SlidingTileAttentionBackend = None  # type: ignore
 
@@ -22,7 +22,7 @@ try:
     from fastvideo.attention.backends.video_sparse_attn import (
         VideoSparseAttentionBackend)
     vsa_available = True
-except ImportError:
+except Exception:
     vsa_available = False
     VideoSparseAttentionBackend = None  # type: ignore
 
