@@ -203,8 +203,6 @@ class TextEncodingStage(PipelineStage):
             encoder_config = encoder_cfgs[i]
             preprocess_func = preprocess_funcs[i]
             postprocess_func = postprocess_funcs[i]
-            if fastvideo_args.text_encoder_cpu_offload:
-                text_encoder = text_encoder.to(target_device)
 
             tok_kwargs = dict(encoder_config.tokenizer_kwargs)
             if max_length is not None:
@@ -267,8 +265,6 @@ class TextEncodingStage(PipelineStage):
             embeds_list.append(prompt_embeds)
             if return_attention_mask:
                 attn_masks_list.append(attention_mask)
-            if fastvideo_args.text_encoder_cpu_offload:
-                text_encoder.to("cpu")
 
         return self.return_embeds(embeds_list, attn_masks_list, return_type,
                                   return_attention_mask, indices)

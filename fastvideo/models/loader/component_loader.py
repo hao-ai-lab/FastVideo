@@ -34,7 +34,7 @@ from fastvideo.models.loader.weight_utils import (
     safetensors_weights_iterator,
 )
 from fastvideo.models.registry import ModelRegistry
-from fastvideo.utils import PRECISION_TO_TYPE
+from fastvideo.utils import PRECISION_TO_TYPE, is_pin_memory_available
 from fastvideo.models.layerwise_offload import LayerwiseOffloadManager
 
 logger = init_logger(__name__)
@@ -338,11 +338,44 @@ class TextEncoderLoader(ComponentLoader):
             # Explicitly move model to target device after loading weights
             model = model.to(target_device)
 
+            from fastvideo.platforms import current_platform
+
             if use_cpu_offload:
-                logger.info(
-                    "Text encoder CPU offload enabled; skipping FSDP sharding "
-                    "for text encoder modules."
-                )
+                pin_cpu_memory = fastvideo_args.pin_cpu_memory and is_pin_memory_available()
+                pin_cpu_memory = False
+                # Disable FSDP for MPS as it's not compatible
+                if current_platform.is_mps():
+                    logger.info(
+                        "Disabling FSDP sharding for MPS platform as it's not compatible"
+                    )
+                elif current_platform.is_npu():
+                    mesh = init_device_mesh(
+                        "npu",
+                        mesh_shape=(1, dist.get_world_size()),
+                        mesh_dim_names=("offload", "replicate"),
+                    )
+                    shard_model(
+                        model,
+                        cpu_offload=True,
+                        reshard_after_forward=True,
+                        mesh=mesh["offload"],
+                        fsdp_shard_conditions=model._fsdp_shard_conditions,
+                        pin_cpu_memory=pin_cpu_memory,
+                    )
+                else:
+                    mesh = init_device_mesh(
+                        "cuda",
+                        mesh_shape=(1, dist.get_world_size()),
+                        mesh_dim_names=("offload", "replicate"),
+                    )
+                    shard_model(
+                        model,
+                        cpu_offload=True,
+                        reshard_after_forward=True,
+                        mesh=mesh["offload"],
+                        fsdp_shard_conditions=model._fsdp_shard_conditions,
+                        pin_cpu_memory=pin_cpu_memory,
+                    )
             # We only enable strict check for non-quantized models
             # that have loaded weights tracking currently.
             # if loaded_weights is not None:
