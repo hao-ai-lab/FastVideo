@@ -1,5 +1,6 @@
 import math
 import torch
+from .block_sparse_attn import block_sparse_attn
 from .triton_kernels.block_sparse_attn_triton import triton_block_sparse_attn_forward
 from .triton_kernels.st_attn_triton import sliding_tile_attention_triton
 from .triton_kernels.index import map_to_index
@@ -129,9 +130,8 @@ def video_sparse_attn(
     idx, num = map_to_index(mask)
     
     if block_sparse_fwd is not None:
-        out_s = block_sparse_fwd(
-            q, k, v, idx, num, variable_block_sizes.int()
-        )[0] # block_sparse_fwd returns vector<Tensor>
+        # Use autograd-enabled wrapper so backward works (and still uses SM90 kernel when available)
+        out_s = block_sparse_attn(q, k, v, mask, variable_block_sizes)[0]
     else:
         if q_seq_len != kv_seq_len:
             raise RuntimeError(
@@ -139,8 +139,8 @@ def video_sparse_attn(
                 "is not available. The Triton fallback currently requires q and k/v to have "
                 "the same padded length."
             )
-        out_s, _ = triton_block_sparse_attn_forward(q, k, v, idx, num,
-                                                    variable_block_sizes)
+        # Triton-only forward (kept for environments without the wrapper deps)
+        out_s, _ = triton_block_sparse_attn_forward(q, k, v, idx, num, variable_block_sizes)
 
     if compress_attn_weight is not None:
         return out_c * compress_attn_weight + out_s
