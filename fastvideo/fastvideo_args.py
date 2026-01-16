@@ -944,8 +944,6 @@ class TrainingArgs(FastVideoArgs):
     last_step_only: bool = False  # Only use the last timestep for training
     context_noise: int = 0  # Context noise level for cache updates
 
-    disable_action_cond: bool = False  # Disable action conditioning for phase1
-
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
         provided_args = clean_cli_args(args)
@@ -1367,10 +1365,6 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             default=TrainingArgs.context_noise,
                             help="Context noise level for cache updates")
-        parser.add_argument(
-            "--disable-action-cond",
-            action=StoreBoolean,
-            help="Disable action conditioning for phase 1")
 
         return parser
 
