@@ -16,7 +16,7 @@ from fastvideo.pipelines.preprocess.preprocess_pipeline_t2v import (
     PreprocessPipeline_T2V)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_text import (
     PreprocessPipeline_Text)
-from fastvideo.pipelines.preprocess.matrix_game.matrixgame_preprocess_pipeline import (
+from fastvideo.pipelines.preprocess.matrixgame.matrixgame_preprocess_pipeline import (
     PreprocessPipeline_MatrixGame)
 from fastvideo.utils import maybe_download_model
 
