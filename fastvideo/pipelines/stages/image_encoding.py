@@ -12,6 +12,10 @@ This module contains implementations of encoding stages for diffusion pipelines:
 import PIL
 import torch
 
+from torchvision import transforms
+import numpy as np
+from PIL import Image as PILImage
+
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import ExecutionMode, FastVideoArgs
 from fastvideo.forward_context import set_forward_context
@@ -151,6 +155,13 @@ class HyWorldImageEncodingStage(ImageEncodingStage):
         target_temporal = raw_latent_shape[2]  # T dimension
         latent_height = raw_latent_shape[3]
         latent_width = raw_latent_shape[4]
+
+        vae_dtype = PRECISION_TO_TYPE[
+            fastvideo_args.pipeline_config.vae_precision]
+        vae_autocast_enabled = (
+            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        print(f"vae_dtype: {vae_dtype}")
+        print(f"vae_autocast_enabled: {vae_autocast_enabled}")
         
         if batch.pil_image is None:
             # T2V case: create zero embeddings for image_embeds
@@ -187,7 +198,7 @@ class HyWorldImageEncodingStage(ImageEncodingStage):
                     image_np, target_width=batch.width, target_height=batch.height
                 )
                 # torch.save(image_np, "image_np.pth")
-                
+
                 image_inputs = self.image_processor.preprocess(
                     images=image_np, return_tensors="pt"
                 ).to(device=device, dtype=model_dtype)  # Match model dtype!
@@ -212,43 +223,44 @@ class HyWorldImageEncodingStage(ImageEncodingStage):
             
             # 2. Encode with VAE for image_latent (conditional latent for I2V)
             if self.vae is not None:
-                from torchvision import transforms as T
-                import numpy as np
-                from PIL import Image as PILImage
-                
-                # Get target size from batch
-                height = batch.height
-                width = batch.width
-                
                 # Preprocess image for VAE
                 if isinstance(image, np.ndarray):
                     image = PILImage.fromarray(image)
                 
-                # Resize and center crop to target resolution
-                # Use the same preprocessing as HunyuanVideo-1.5
-                original_width, original_height = image.size
-                scale_factor = max(width / original_width, height / original_height)
+                # Get target size from batch
+                origin_size = image.size
+
+                target_height, target_width = batch.height, batch.width
+                original_width, original_height = origin_size
+
+                scale_factor = max(
+                    target_width / original_width, target_height / original_height
+                )
                 resize_width = int(round(original_width * scale_factor))
                 resize_height = int(round(original_height * scale_factor))
                 
-                transform = T.Compose([
-                    T.Resize((resize_height, resize_width), interpolation=T.InterpolationMode.LANCZOS),
-                    T.CenterCrop((height, width)),
-                    T.ToTensor(),  # [0, 1]
-                    T.Normalize([0.5], [0.5]),  # to [-1, 1]
-                ])
-                
-                ref_image_tensor = transform(image).unsqueeze(0)  # [1, 3, H, W]
-                ref_image_tensor = ref_image_tensor.to(device)
-                # Add temporal dimension: [1, 3, 1, H, W]
-                ref_image_tensor = ref_image_tensor.unsqueeze(2)
+                ref_image_transform = transforms.Compose(
+                    [
+                        transforms.Resize((resize_height, resize_width), interpolation=transforms.InterpolationMode.LANCZOS),
+                        transforms.CenterCrop((target_height, target_width)),
+                        transforms.ToTensor(),
+                        transforms.Normalize([0.5], [0.5])
+                    ]
+                )
+                ref_images_pixel_values = ref_image_transform(image)
+                ref_images_pixel_values = (
+                    ref_images_pixel_values.unsqueeze(0)
+                    .unsqueeze(2)
+                    .to(self.device)
+                )
                 
                 # Encode with VAE
                 self.vae = self.vae.to(device)
-                with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=True):
-                    cond_latents = self.vae.encode(ref_image_tensor).mode()
-                    if hasattr(self.vae, 'config') and hasattr(self.vae.config, 'scaling_factor'):
-                        cond_latents = cond_latents * self.vae.config.scaling_factor
+                with torch.autocast(device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled):
+                    cond_latents = self.vae.encode(
+                        ref_images_pixel_values
+                    ).mode()
+                    cond_latents.mul_(self.vae.config.scaling_factor)
                 
                 # cond_latents shape: [1, 32, 1, H//compression, W//compression]
                 # Expand to full temporal dimension: [1, 32, T, H, W]
