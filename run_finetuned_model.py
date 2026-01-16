@@ -2,9 +2,24 @@ from fastvideo import VideoGenerator
 import torch
 
 
+action_patterns = [
+    [0, 0, 1, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0],
+    [0, 1, 0, 0, 0, 0],
+]
+
+action_map = {
+    tuple(action_patterns[0]): "Left  (0)",
+    tuple(action_patterns[1]): "Stop  (1)",
+    tuple(action_patterns[2]): "Right (2)",
+}
+
+# sequence_indices = [0, 0, 2, 0, 0, 2, 0]
+sequence_indices = [2, 2, 2, 2, 2, 2, 0]
+
 OUTPUT_PATH = "finetune2_output"
 def main():
-    model_path = "/mnt/fast-disks/hao_lab/kaiqin/FastVideo/SkyReels-V2-I2V-1.3B-540P-Diffusers"
+    model_path = "/mnt/fast-disks/hao_lab/kaiqin/FastVideo/Matrix-Game-2.0-Bidirectional-Diffusers"
 
     generator = VideoGenerator.from_pretrained(
         model_path,
@@ -16,18 +31,21 @@ def main():
     )
 
     num_frames = 81
-    action_patterns = [
-        [0, 0, 1], # left
-        [0, 0, 0],
-        [0, 1, 0], # right
-    ]
-    keyboard_cond = torch.zeros(num_frames, 3, dtype=torch.bfloat16)
-    for i in range(num_frames):
-        # pattern = action_patterns[(i // 3) % len(action_patterns)]
-        pattern = action_patterns[1]
-        keyboard_cond[i] = torch.tensor(pattern, dtype=torch.bfloat16)
+    full_sequence = []
+    for action_idx in sequence_indices:
+        action = action_patterns[action_idx]
+        full_sequence.extend([action] * 12)
+
+    current_len = len(full_sequence)
+    if current_len > num_frames:
+        full_sequence = full_sequence[:num_frames]
+    else:
+        full_sequence.extend([action_patterns[1]] * (num_frames - current_len))
+        
+    keyboard_cond = torch.tensor(full_sequence, dtype=torch.bfloat16)
     grid_sizes = torch.tensor([21, 60, 104])
-    image_path = "footsies-dataset/validate/episode_020_part_000_first_frame.png"
+    # image_path = "footsies-dataset/validate/0.png"
+    image_path = "footsies-dataset/validate/1.png"
 
     generator.generate_video(
         prompt="",
