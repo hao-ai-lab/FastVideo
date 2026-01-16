@@ -61,6 +61,11 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
     "MatrixGame3WanModel": ("dits", "matrixgame3", "MatrixGame3WanModel"),
 }
 
+# Text-to-image DiT models (2D image generation)
+_TEXT_TO_IMAGE_DIT_MODELS = {
+    "GlmImageTransformer2DModel": ("dits", "glm_image", "GlmImageTransformer2DModel"),
+}
+
 _TEXT_ENCODER_MODELS = {
     "CLIPTextModel": ("encoders", "clip", "CLIPTextModel"),
     "CLIPTextModelWithProjection":
@@ -87,6 +92,7 @@ _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
 }
 
 _VAE_MODELS = {
+    "AutoencoderKL": ("vaes", "autoencoderkl", "AutoencoderKL"),  # Generic 2D VAE
     "AutoencoderKLHunyuanVideo":
     ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
     "AutoencoderKLCausal3D": ("vaes", "gamecraftvae", "GameCraftVAE"),
@@ -134,6 +140,7 @@ _UPSAMPLERS = {
 _LEGACY_FAST_VIDEO_MODELS = {
     **_TEXT_TO_VIDEO_DIT_MODELS,
     **_IMAGE_TO_VIDEO_DIT_MODELS,
+    **_TEXT_TO_IMAGE_DIT_MODELS,
     **_TEXT_ENCODER_MODELS,
     **_IMAGE_ENCODER_MODELS,
     **_VAE_MODELS,
