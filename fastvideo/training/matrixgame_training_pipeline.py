@@ -186,7 +186,8 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
         sampling_param.prompt = validation_batch['prompt']
         sampling_param.height = training_args.num_height
         sampling_param.width = training_args.num_width
-        sampling_param.image_path = validation_batch.get('image_path') or validation_batch.get('video_path')
+        sampling_param.image_path = validation_batch.get(
+            'image_path') or validation_batch.get('video_path')
         sampling_param.num_inference_steps = num_inference_steps
         sampling_param.data_type = "video"
         assert self.seed is not None
@@ -208,15 +209,17 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
             VSA_sparsity=training_args.VSA_sparsity,
         )
         if "image" in validation_batch and validation_batch["image"] is not None:
-             batch.pil_image = validation_batch["image"]
+            batch.pil_image = validation_batch["image"]
 
-        if "keyboard_cond" in validation_batch and validation_batch["keyboard_cond"] is not None:
+        if "keyboard_cond" in validation_batch and validation_batch[
+                "keyboard_cond"] is not None:
             keyboard_cond = validation_batch["keyboard_cond"]
             keyboard_cond = torch.tensor(keyboard_cond, dtype=torch.bfloat16)
             keyboard_cond = keyboard_cond.unsqueeze(0)
             batch.keyboard_cond = keyboard_cond
 
-        if "mouse_cond" in validation_batch and validation_batch["mouse_cond"] is not None:
+        if "mouse_cond" in validation_batch and validation_batch[
+                "mouse_cond"] is not None:
             mouse_cond = validation_batch["mouse_cond"]
             mouse_cond = torch.tensor(mouse_cond, dtype=torch.bfloat16)
             mouse_cond = mouse_cond.unsqueeze(0)

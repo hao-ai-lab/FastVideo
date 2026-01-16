@@ -30,39 +30,28 @@ def get_torch_tensors_from_row_dict(row_dict,
     """
     return_dict = {}
     for key in keys:
-        shape, bytes_data, dtype_str = None, None, None
+        shape, bytes = None, None
         if isinstance(key, tuple):
             for k in key:
                 try:
                     shape = row_dict[f"{k}_shape"]
-                    bytes_data = row_dict[f"{k}_bytes"]
-                    dtype_str = row_dict.get(f"{k}_dtype", "torch.float32")
+                    bytes = row_dict[f"{k}_bytes"]
                 except KeyError:
                     continue
             key = key[0]
-            if shape is None or bytes_data is None:
+            if shape is None or bytes is None:
                 raise ValueError(f"Key {key} not found in row_dict")
         else:
             shape = row_dict[f"{key}_shape"]
-            bytes_data = row_dict[f"{key}_bytes"]
-            dtype_str = row_dict.get(f"{key}_dtype", "torch.float32")
-
-        # Parse dtype
-        if dtype_str.startswith("torch."):
-            dtype_str = dtype_str.replace("torch.", "")
-        target_dtype = getattr(torch, dtype_str, torch.float32)
+            bytes = row_dict[f"{key}_bytes"]
 
         # TODO (peiyuan): read precision
         if key == 'text_embedding' and (rng.random()
                                         if rng else random.random()) < cfg_rate:
-            # Fallback to float32 zeros
-            if len(shape) >= 2:
-                data = torch.zeros(shape, dtype=target_dtype)
-            else:
-                data = torch.zeros((512, 4096), dtype=torch.float32) # Fallback default
+            data = np.zeros((512, 4096), dtype=np.float32)
         else:
-            data = torch.frombuffer(bytes_data, dtype=target_dtype).reshape(shape).clone()
-        
+            data = np.frombuffer(bytes, dtype=np.float32).reshape(shape).copy()
+        data = torch.from_numpy(data)
         if len(data.shape) == 3:
             B, L, D = data.shape
             assert B == 1, "Batch size must be 1"
@@ -160,24 +149,14 @@ def collate_rows_from_parquet_schema(rows,
                 if len(bytes_data) == 0:
                     tensor = torch.zeros(0, dtype=torch.bfloat16)
                 else:
-                    # Get dtype from row
-                    dtype_key = f"{tensor_name}_dtype"
-                    dtype_str = row.get(dtype_key, "torch.float32")
-                    if dtype_str.startswith("torch."):
-                        dtype_str = dtype_str.replace("torch.", "")
-                    target_dtype = getattr(torch, dtype_str, torch.float32)
-
-                    # Convert bytes to tensor
+                    # Convert bytes to tensor using float32 as default
                     if tensor_name == 'text_embedding' and (rng.random(
                     ) if rng else random.random()) < cfg_rate:
-                        if len(shape) >= 2:
-                            data = torch.zeros(shape, dtype=target_dtype)
-                        else:
-                            data = torch.zeros((512, 4096), dtype=torch.float32)
+                        data = np.zeros((512, 4096), dtype=np.float32)
                     else:
-                        data = torch.frombuffer(
-                            bytes_data, dtype=target_dtype).reshape(shape).clone()
-                    tensor = data
+                        data = np.frombuffer(
+                            bytes_data, dtype=np.float32).reshape(shape).copy()
+                    tensor = torch.from_numpy(data)
                     # if len(data.shape) == 3:
                     #     B, L, D = tensor.shape
                     #     assert B == 1, "Batch size must be 1"

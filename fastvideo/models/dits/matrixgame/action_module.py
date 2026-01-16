@@ -257,6 +257,15 @@ class ActionModule(nn.Module):
         '''
         assert use_rope_keyboard
 
+        target_device = x.device
+        target_dtype = x.dtype
+        if mouse_condition is not None:
+            mouse_condition = mouse_condition.to(device=target_device,
+                                                 dtype=target_dtype)
+        if keyboard_condition is not None:
+            keyboard_condition = keyboard_condition.to(
+                device=target_device, dtype=target_dtype)
+
         B, N_frames, C = keyboard_condition.shape
         assert tt*th*tw == x.shape[1]
         assert ((N_frames - 1) + self.vae_time_compression_ratio) % self.vae_time_compression_ratio == 0
