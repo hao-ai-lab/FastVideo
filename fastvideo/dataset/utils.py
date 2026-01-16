@@ -209,33 +209,6 @@ def collate_rows_from_parquet_schema(rows,
 
             batch_data[tensor_name] = torch.stack(padded_tensors)
             batch_data['text_attention_mask'] = torch.stack(attention_masks)
-        elif tensor_name == 'keyboard_cond':
-            # Special handling: convert 1D bit-flag action values [T] to 2D multi-hot [T, 3]
-            num_bits = 3
-            converted_tensors = []
-            for tensor in tensor_list:
-                if tensor.numel() > 0:
-                    if len(tensor.shape) == 2 and tensor.shape[1] == num_bits:
-                        converted_tensors.append(tensor.to(dtype=torch.bfloat16))
-                    elif len(tensor.shape) == 1:
-                        T = tensor.shape[0]
-                        multi_hot = torch.zeros(T, num_bits, dtype=torch.bfloat16)
-                        action_values = tensor.long()
-                        for bit_idx in range(num_bits):
-                            multi_hot[:, bit_idx] = ((action_values >> bit_idx) & 1).float()
-                        converted_tensors.append(multi_hot)
-                    else:
-                        raise ValueError(
-                            f"Unexpected keyboard_cond tensor shape: {tensor.shape}. "
-                            f"Expected 1D [T] or 2D [T, {num_bits}]")
-                else:
-                    converted_tensors.append(torch.zeros(0, num_bits, dtype=torch.bfloat16))
-            try:
-                batch_data[tensor_name] = torch.stack(converted_tensors)
-            except ValueError as e:
-                shapes = [t.shape for t in converted_tensors]
-                raise ValueError(
-                    f"Failed to stack keyboard_cond tensors. Shapes: {shapes}. Error: {e}") from e
         else:
             # Stack all tensors to preserve batch consistency
             # Don't filter out None or empty tensors as this breaks batch sizing

@@ -5,8 +5,8 @@ import cv2
 def main():
     input_video = "footsies-dataset/videos/episode_000_part_000.mp4"
     output_dir = "footsies-dataset/validate"
-    output_video = os.path.join(output_dir, "episode_000_part_000_cropped.mp4")
-    output_image = os.path.join(output_dir, "episode_000_part_000_first_frame.png")
+    output_video = os.path.join(output_dir, "0.mp4")
+    output_image = os.path.join(output_dir, "0.png")
 
     os.makedirs(output_dir, exist_ok=True)
     cap = cv2.VideoCapture(input_video)
