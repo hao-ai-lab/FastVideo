@@ -108,9 +108,7 @@ def test_matrixgame_similarity(prompt, ATTENTION_BACKEND, model_id):
         "save_video": True,
     }
 
-    generator = VideoGenerator.from_pretrained(
-        model_path=BASE_PARAMS["model_path"], **init_kwargs
-    )
+    generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
     generator.generate_video(prompt, **generation_kwargs)
 
     if isinstance(generator.executor, MultiprocExecutor):
