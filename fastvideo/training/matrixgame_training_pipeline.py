@@ -95,21 +95,17 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
         training_batch.infos = infos
 
         # Action conditioning
-        if getattr(self.training_args, 'disable_action_cond', False):
-            training_batch.mouse_cond = None
-            training_batch.keyboard_cond = None
+        if 'mouse_cond' in batch and batch['mouse_cond'].numel() > 0:
+            training_batch.mouse_cond = batch['mouse_cond'].to(
+                get_local_torch_device(), dtype=torch.bfloat16)
         else:
-            if 'mouse_cond' in batch and batch['mouse_cond'].numel() > 0:
-                training_batch.mouse_cond = batch['mouse_cond'].to(
-                    get_local_torch_device(), dtype=torch.bfloat16)
-            else:
-                training_batch.mouse_cond = None
+            training_batch.mouse_cond = None
 
-            if 'keyboard_cond' in batch and batch['keyboard_cond'].numel() > 0:
-                training_batch.keyboard_cond = batch['keyboard_cond'].to(
-                    get_local_torch_device(), dtype=torch.bfloat16)
-            else:
-                training_batch.keyboard_cond = None
+        if 'keyboard_cond' in batch and batch['keyboard_cond'].numel() > 0:
+            training_batch.keyboard_cond = batch['keyboard_cond'].to(
+                get_local_torch_device(), dtype=torch.bfloat16)
+        else:
+            training_batch.keyboard_cond = None
 
         return training_batch
 

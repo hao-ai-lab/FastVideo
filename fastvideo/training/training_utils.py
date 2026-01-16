@@ -10,7 +10,6 @@ from typing import Any
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
-from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
 from safetensors.torch import save_file
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
@@ -545,7 +544,7 @@ def load_checkpoint(transformer,
                 local_main_process_only=False)
 
     begin_time = time.perf_counter()
-    dcp.load(states, checkpoint_id=dcp_dir, planner=DefaultLoadPlanner(allow_partial_load=True))
+    dcp.load(states, checkpoint_id=dcp_dir)
     end_time = time.perf_counter()
 
     logger.info("rank: %s, distributed checkpoint loaded in %.2f seconds",
