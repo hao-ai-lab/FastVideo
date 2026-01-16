@@ -1,12 +1,11 @@
 #!/bin/bash
-# Phase 2: Training with action
 
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
-MODEL_PATH="MatrixGame-before-finetune1"
+MODEL_PATH="Matrix-Game-2.0-Foundation-Diffusers"
 DATA_DIR="footsies-dataset/preprocessed/combined_parquet_dataset"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 NUM_GPUS=8

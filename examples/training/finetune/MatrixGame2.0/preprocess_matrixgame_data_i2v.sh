@@ -1,7 +1,7 @@
 #!/bin/bash
 
 GPU_NUM=1 # 2,4,8
-MODEL_PATH="Matrix-Game-2.0-Base-Diffusers"
+MODEL_PATH="Matrix-Game-2.0-Foundation-Diffusers"
 DATA_MERGE_PATH="footsies-dataset/merge.txt"
 OUTPUT_DIR="footsies-dataset/preprocessed/"
 
