@@ -270,9 +270,6 @@ def load_transformer(
     master_weight_type,
     use_fused_rmsnorm = False,
     use_fused_rope = False,
-    num_frames = 16,
-    num_height = 64,
-    num_width = 64,
 ):
     if model_type == "mochi":
         if dit_model_name_or_path:
@@ -324,9 +321,6 @@ def load_transformer(
             dtype=master_weight_type,
             use_fused_rmsnorm=use_fused_rmsnorm,
             use_fused_rope=use_fused_rope,
-            num_frames=num_frames,
-            num_height=num_height,
-            num_width=num_width,
         )
         transformer = load_hunyuan_state_dict(transformer, dit_model_name_or_path)
         if master_weight_type == torch.bfloat16:

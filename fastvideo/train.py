@@ -34,6 +34,11 @@ from fastvideo.utils.logging_ import main_print
 from fastvideo.utils.parallel_states import (destroy_sequence_parallel_group, get_sequence_parallel_state,
                                              initialize_sequence_parallel_state)
 from fastvideo.utils.validation import log_validation
+from fastvideo.version import fsdp2_supported
+
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed._composable.fsdp import OffloadPolicy
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.31.0")
@@ -82,7 +87,6 @@ def get_sigmas(noise_scheduler, device, timesteps, n_dim=4, dtype=torch.float32)
     while len(sigma.shape) < n_dim:
         sigma = sigma.unsqueeze(-1)
     return sigma
-
 
 def train_one_step(
     transformer,
@@ -209,9 +213,6 @@ def main(args):
         torch.float32 if args.master_weight_type == "fp32" else torch.bfloat16,
         use_fused_rmsnorm=args.use_fused_rmsnorm,
         use_fused_rope=args.use_fused_rope,
-        num_frames=args.num_frames,
-        num_height=args.num_height,
-        num_width=args.num_width,
     )
 
     if args.use_lora:
@@ -262,11 +263,43 @@ def main(args):
         transformer._no_split_modules = [no_split_module.__name__ for no_split_module in no_split_modules]
         fsdp_kwargs["auto_wrap_policy"] = fsdp_kwargs["auto_wrap_policy"](transformer)
     # transformer = transformer.to(memory_format=torch.channels_last) # transform layout to NHWC
-    transformer = FSDP(
-        transformer,
-        **fsdp_kwargs,
-    )
-    main_print("--> model loaded")
+    if fsdp2_supported:
+        # ==================== FSDP2: 创建设备网格 ====================
+        # 创建一维设备网格用于数据并行
+        device_mesh = init_device_mesh("musa", (world_size,))
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=None,      # 绝大多数参数用BF16
+            reduce_dtype=torch.float32,      # 梯度规约用FP32
+            cast_forward_inputs=False,
+        )
+        offload_policy = None
+        if args.use_cpu_offload:
+            offload_policy = OffloadPolicy()
+        for module_name, module in transformer.named_modules():
+            if module.__class__.__name__ in [m.__name__ for m in no_split_modules]:
+                fully_shard(
+                    module,
+                    mesh=device_mesh,           # 或使用 shard_mesh (如果是2D混合并行)
+                    mp_policy=mp_policy,
+                    offload_policy=offload_policy,
+                    # reshard_after_forward=True,  # 控制前向后是否立即分片以节省内存
+                )
+                main_print(f"  Applied FSDP2 to submodule: {module_name}")
+
+        # 然后包装整个模型
+        fully_shard(
+            transformer,
+            mesh=device_mesh,
+            mp_policy=mp_policy,
+            offload_policy=offload_policy,
+        )
+        main_print("--> model loaded and wrapped with FSDP2")
+    else:
+        transformer = FSDP(
+            transformer,
+            **fsdp_kwargs,
+        )
+        main_print("--> model loaded")
 
     if args.gradient_checkpointing:
         apply_fsdp_checkpointing(transformer, no_split_modules, args.selective_checkpointing)
@@ -375,7 +408,24 @@ def main(args):
     # todo future
     for i in range(init_steps):
         next(loader)
+    profiling_path = os.getenv('TORCH_PROFILING_TRACE', None)
+    if profiling_path is not None:
+        prof = torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.MUSA],
+                schedule=torch.profiler.schedule(wait=0, warmup=5, active=2, repeat=1),
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(profiling_path),
+                profile_memory=True,
+                record_shapes=True,
+                with_stack=True,
+                experimental_config=torch._C._profiler._ExperimentalConfig(verbose=True)
+                )
+    else:
+        prof = None
+    if prof is not None:
+        prof.start()
     for step in range(init_steps + 1, args.max_train_steps + 1):
+        if prof is not None:
+            prof.step()
         start_time = time.perf_counter()
         loss, grad_norm = train_one_step(
             transformer,
@@ -428,6 +478,8 @@ def main(args):
         if args.log_validation and step % args.validation_steps == 0:
             log_validation(args, transformer, device, torch.bfloat16, step, shift=args.shift)
 
+    if prof is not None:
+        prof.stop()
     if args.use_lora:
         save_lora_checkpoint(transformer, optimizer, rank, args.output_dir, args.max_train_steps, pipe)
     else:

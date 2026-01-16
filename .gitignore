@@ -27,6 +27,7 @@ env
 **/build/
 **.pyc
 **.txt
+profiling/
 
 # Distribution / packaging
 build/

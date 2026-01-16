@@ -2,6 +2,7 @@ export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 #export MUDNN_LOG_LEVEL=INFO
 export WANDB_MODE=disabled
+# export TORCH_PROFILING_TRACE=/data/yanguo.sun/hunyuan-video/FastVideo/profiling
 torchrun --nnodes 1 --nproc_per_node 8 \
     fastvideo/train.py \
     --seed 42 \

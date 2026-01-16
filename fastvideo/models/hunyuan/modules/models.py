@@ -398,9 +398,6 @@ class HYVideoDiffusionTransformer(ModelMixin, ConfigMixin):
         rope_theta: int = 256,
         use_fused_rmsnorm: bool = False,
         use_fused_rope: bool = False,
-        num_frames: int = 16,
-        num_height: int = 64,
-        num_width: int = 64,
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
