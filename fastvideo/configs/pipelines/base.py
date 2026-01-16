@@ -73,6 +73,10 @@ class PipelineConfig:
                                   ...] = field(default_factory=lambda:
                                                (postprocess_text, ))
 
+    # Post-decoding hook for custom processing after VAE decoding
+    # This allows pipelines to apply custom transformations to decoded images/videos
+    post_decoding: Callable[[torch.Tensor], torch.Tensor] | None = None
+
     # StepVideo specific parameters
     pos_magic: str | None = None
     neg_magic: str | None = None

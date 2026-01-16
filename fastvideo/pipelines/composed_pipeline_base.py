@@ -335,8 +335,10 @@ class ComposedPipelineBase(ABC):
         logger.info("Loading required modules: %s", required_modules)
 
         modules = {}
-        for module_name, (transformers_or_diffusers,
-                          architecture) in model_index.items():
+        for module_name, value in model_index.items():
+            if module_name.startswith("_"):
+                continue
+            transformers_or_diffusers, architecture = value
             if transformers_or_diffusers is None:
                 logger.warning(
                     "Module %s in model_index.json has null value, removing from required_config_modules",

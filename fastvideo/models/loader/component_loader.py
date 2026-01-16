@@ -90,6 +90,8 @@ class ComponentLoader(ABC):
             "image_processor": (ImageProcessorLoader, "transformers"),
             "feature_extractor": (ImageProcessorLoader, "transformers"),
             "image_encoder": (ImageEncoderLoader, "transformers"),
+            "vision_language_encoder": (VisionLanguageEncoderLoader, "transformers"),
+            "processor": (ProcessorLoader, "transformers"),
         }
 
         if module_type in module_loaders:
@@ -479,6 +481,85 @@ class ImageEncoderLoader(TextEncoderLoader):
         )
 
 
+class VisionLanguageEncoderLoader(ComponentLoader):
+    """Loader for vision-language encoders (e.g., GLM-Image AR model).
+    
+    Vision-language encoders are autoregressive models that generate image tokens
+    from text prompts. They are used in hybrid AR+diffusion models like GLM-Image.
+    """
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        """Load the vision-language encoder based on the model path and inference args.
+        
+        For GLM-Image, this loads GlmImageForConditionalGeneration which has
+        the generate() method for autoregressive token generation.
+        """
+        from transformers import AutoProcessor
+        
+        logger.info("Loading vision-language encoder from %s", model_path)
+        
+        # Load the processor (handles both text and image inputs)
+        try:
+            processor = AutoProcessor.from_pretrained(
+                model_path,
+                trust_remote_code=fastvideo_args.trust_remote_code,
+            )
+            logger.info("Loaded processor: %s", processor.__class__.__name__)
+        except Exception as e:
+            logger.warning("Failed to load processor: %s", e)
+            processor = None
+        
+        # Load the model - try GlmImageForConditionalGeneration directly for GLM-Image
+        # Always use device_map="auto" for AR model since it's needed for inference
+        try:
+            from transformers import GlmImageForConditionalGeneration
+            model = GlmImageForConditionalGeneration.from_pretrained(
+                model_path,
+                trust_remote_code=fastvideo_args.trust_remote_code,
+                torch_dtype=torch.bfloat16,
+                device_map="auto",
+            )
+        except ImportError:
+            # Fallback to AutoModel for other vision-language encoders
+            from transformers import AutoModel
+            model = AutoModel.from_pretrained(
+                model_path,
+                trust_remote_code=fastvideo_args.trust_remote_code,
+                torch_dtype=torch.bfloat16,
+                device_map="auto",
+            )
+        logger.info(
+            "Loaded vision-language encoder: %s",
+            model.__class__.__name__,
+        )
+        
+        # Return both model and processor as a tuple
+        # The processor will be needed for tokenization during inference
+        return (model, processor)
+
+
+class ProcessorLoader(ComponentLoader):
+    """Loader for processors (e.g., GlmImageProcessor for GLM-Image).
+    
+    Processors handle input preprocessing for vision-language models,
+    including chat template application and tokenization.
+    """
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        """Load the processor using AutoProcessor."""
+        from transformers import AutoProcessor
+        
+        logger.info("Loading processor from %s", model_path)
+        
+        processor = AutoProcessor.from_pretrained(
+            model_path,
+            trust_remote_code=fastvideo_args.trust_remote_code,
+        )
+        logger.info("Loaded processor: %s", processor.__class__.__name__)
+        
+        return processor
+
+
 class ImageProcessorLoader(ComponentLoader):
     """Loader for image processor."""
 
@@ -574,6 +655,19 @@ class VAELoader(ComponentLoader):
             )
         else:
             target_device = get_local_torch_device()
+
+        # For generic AutoencoderKL (2D image VAE), load directly from diffusers
+        if class_name == "AutoencoderKL":
+            from diffusers import AutoencoderKL as DiffusersAutoencoderKL
+            dtype = (
+                PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+                if fastvideo_args.pipeline_config.vae_precision
+                else torch.float32
+            )
+            vae = DiffusersAutoencoderKL.from_pretrained(
+                model_path, torch_dtype=dtype
+            ).to(target_device)
+            return vae.eval()
 
         with set_default_torch_dtype(
             PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]

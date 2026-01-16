@@ -3,6 +3,7 @@
 import torch
 import torch.nn as nn
 
+from fastvideo.attention.backends.sdpa import SDPAMetadata
 from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather, sequence_model_parallel_all_to_all_4D)
@@ -301,6 +302,7 @@ class LocalAttention(nn.Module):
         k: torch.Tensor,
         v: torch.Tensor,
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
+        attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Apply local attention between query, key and value tensors.
@@ -324,6 +326,13 @@ class LocalAttention(nn.Module):
             cos, sin = freqs_cis
             q = _apply_rotary_emb(q, cos, sin, is_neox_style=False)
             k = _apply_rotary_emb(k, cos, sin, is_neox_style=False)
+
+        if attention_mask is not None:
+            if ctx_attn_metadata is None:
+                ctx_attn_metadata = SDPAMetadata(current_timestep=0,
+                                                 attn_mask=attention_mask)
+            else:
+                ctx_attn_metadata.attn_mask = attention_mask
 
         output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
         return output

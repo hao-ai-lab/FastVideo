@@ -47,6 +47,11 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
     "CausalMatrixGameWanModel": ("dits", "matrixgame", "CausalMatrixGameWanModel"),
 }
 
+# Text-to-image DiT models (2D image generation)
+_TEXT_TO_IMAGE_DIT_MODELS = {
+    "GlmImageTransformer2DModel": ("dits", "glm_image", "GlmImageTransformer2DModel"),
+}
+
 _TEXT_ENCODER_MODELS = {
     "CLIPTextModel": ("encoders", "clip", "CLIPTextModel"),
     "LlamaModel": ("encoders", "llama", "LlamaModel"),
@@ -69,6 +74,7 @@ _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
 }
 
 _VAE_MODELS = {
+    "AutoencoderKL": ("vaes", "autoencoderkl", "AutoencoderKL"),  # Generic 2D VAE
     "AutoencoderKLHunyuanVideo":
     ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
     "AutoencoderKLHYWorld": ("vaes", "hyworldvae", "AutoencoderKLHYWorld"),
@@ -102,6 +108,7 @@ _SCHEDULERS = {
 _LEGACY_FAST_VIDEO_MODELS = {
     **_TEXT_TO_VIDEO_DIT_MODELS,
     **_IMAGE_TO_VIDEO_DIT_MODELS,
+    **_TEXT_TO_IMAGE_DIT_MODELS,
     **_TEXT_ENCODER_MODELS,
     **_IMAGE_ENCODER_MODELS,
     **_VAE_MODELS,

@@ -51,9 +51,7 @@ class ModelConfig:
         for key, value in source_model_dict.items():
             if key in valid_fields:
                 setattr(arch_config, key, value)
-            else:
-                raise AttributeError(
-                    f"{type(arch_config).__name__} has no field '{key}'")
+            # Skip unknown fields - HF configs often have extra fields we don't need
 
         if hasattr(arch_config, "__post_init__"):
             arch_config.__post_init__()

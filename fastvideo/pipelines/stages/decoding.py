@@ -242,6 +242,13 @@ class DecodingStage(PipelineStage):
                 decoded_frames = self.decode(cur_latent, fastvideo_args)
                 batch.trajectory_decoded.append(decoded_frames.cpu().float())
 
+        # Apply post-decoding hook if configured
+        # This allows pipelines to apply custom transformations after VAE decoding
+        if hasattr(fastvideo_args.pipeline_config, 'post_decoding') and \
+           fastvideo_args.pipeline_config.post_decoding is not None:
+            logger.debug("Applying post_decoding hook")
+            frames = fastvideo_args.pipeline_config.post_decoding(frames)
+
         # Convert to CPU float32 for compatibility
         frames = frames.cpu().float()
 

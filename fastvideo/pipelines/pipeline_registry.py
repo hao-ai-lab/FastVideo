@@ -16,6 +16,7 @@ from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 
 logger = init_logger(__name__)
 
+
 _PREPROCESS_WORKLOAD_TYPE_TO_PIPELINE_NAME: dict[WorkloadType, str] = {
     WorkloadType.I2V: "PreprocessPipelineI2V",
     WorkloadType.T2V: "PreprocessPipelineT2V",
