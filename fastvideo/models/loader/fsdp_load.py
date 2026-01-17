@@ -23,7 +23,7 @@ from fastvideo.logger import init_logger
 from fastvideo.models.loader.utils import (get_param_names_mapping,
                                            hf_to_custom_state_dict)
 from fastvideo.models.loader.weight_utils import safetensors_weights_iterator
-from fastvideo.utils import set_mixed_precision_policy
+from fastvideo.utils import set_mixed_precision_policy, is_pin_memory_available
 
 logger = init_logger(__name__)
 
@@ -107,6 +107,8 @@ def maybe_load_fsdp_model(
         logger.info("Disabling FSDP for MPS platform as it's not compatible")
 
     if use_fsdp:
+        pin_cpu_memory = pin_cpu_memory and is_pin_memory_available()
+        pin_cpu_memory = False
         world_size = hsdp_replicate_dim * hsdp_shard_dim
         if not training_mode and not fsdp_inference:
             hsdp_replicate_dim = world_size

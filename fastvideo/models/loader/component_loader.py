@@ -34,7 +34,7 @@ from fastvideo.models.loader.weight_utils import (
     safetensors_weights_iterator,
 )
 from fastvideo.models.registry import ModelRegistry
-from fastvideo.utils import PRECISION_TO_TYPE
+from fastvideo.utils import PRECISION_TO_TYPE, is_pin_memory_available
 from fastvideo.models.layerwise_offload import LayerwiseOffloadManager
 
 logger = init_logger(__name__)
@@ -341,6 +341,8 @@ class TextEncoderLoader(ComponentLoader):
             from fastvideo.platforms import current_platform
 
             if use_cpu_offload:
+                pin_cpu_memory = fastvideo_args.pin_cpu_memory and is_pin_memory_available()
+                pin_cpu_memory = False
                 # Disable FSDP for MPS as it's not compatible
                 if current_platform.is_mps():
                     logger.info(
@@ -358,7 +360,7 @@ class TextEncoderLoader(ComponentLoader):
                         reshard_after_forward=True,
                         mesh=mesh["offload"],
                         fsdp_shard_conditions=model._fsdp_shard_conditions,
-                        pin_cpu_memory=fastvideo_args.pin_cpu_memory,
+                        pin_cpu_memory=pin_cpu_memory,
                     )
                 else:
                     mesh = init_device_mesh(
@@ -372,7 +374,7 @@ class TextEncoderLoader(ComponentLoader):
                         reshard_after_forward=True,
                         mesh=mesh["offload"],
                         fsdp_shard_conditions=model._fsdp_shard_conditions,
-                        pin_cpu_memory=fastvideo_args.pin_cpu_memory,
+                        pin_cpu_memory=pin_cpu_memory,
                     )
             # We only enable strict check for non-quantized models
             # that have loaded weights tracking currently.
