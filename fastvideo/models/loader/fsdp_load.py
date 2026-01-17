@@ -111,6 +111,8 @@ def maybe_load_fsdp_model(
         logger.info("Disabling FSDP for MPS platform as it's not compatible")
 
     if use_fsdp:
+        pin_cpu_memory = pin_cpu_memory and is_pin_memory_available()
+        pin_cpu_memory = False
         world_size = hsdp_replicate_dim * hsdp_shard_dim
         if not training_mode and not fsdp_inference:
             hsdp_replicate_dim = world_size

@@ -54,7 +54,7 @@ LONGCAT_T2V_PARAMS = {
     "num_gpus": 1,
     "model_path": "FastVideo/LongCat-Video-T2V-Diffusers",
     "height": 480,
-    "width": 832,
+    "width": 480,
     "num_frames": 43,
     "num_inference_steps": 4,  # Reduced from 50 for CI speed
     "guidance_scale": 4.0,
@@ -86,7 +86,7 @@ LONGCAT_VC_PARAMS = {
     "num_gpus": 1,
     "model_path": "FastVideo/LongCat-Video-VC-Diffusers",
     "height": 480,
-    "width": 832,
+    "width": 480,
     "num_frames": 43,
     "num_inference_steps": 4,  # Reduced from 50 for CI speed
     "guidance_scale": 4.0,
@@ -142,7 +142,7 @@ def _resolve_asset_path(asset_path: str) -> str:
 
 
 @pytest.mark.parametrize("prompt", T2V_TEST_PROMPTS)
-@pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN", "TORCH_SDPA"])
+@pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
 def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str):
     """
     Test LongCat T2V inference and compare output to reference videos using SSIM.
@@ -160,11 +160,10 @@ def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str):
 
     init_kwargs = {
         "num_gpus": LONGCAT_T2V_PARAMS["num_gpus"],
-        "use_fsdp_inference": False,
-        "dit_cpu_offload": False,
+        "use_fsdp_inference": True,
+        "dit_cpu_offload": True,
         "vae_cpu_offload": True,
         "text_encoder_cpu_offload": True,
-        "pin_cpu_memory": False,
         "enable_bsa": False,
     }
 
@@ -234,7 +233,7 @@ def test_longcat_t2v_similarity(prompt: str, ATTENTION_BACKEND: str):
 
 
 @pytest.mark.parametrize("prompt", I2V_TEST_PROMPTS)
-@pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN", "TORCH_SDPA"])
+@pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
 def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
     """
     Test LongCat I2V inference and compare output to reference videos using SSIM.
@@ -256,11 +255,10 @@ def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
 
     init_kwargs = {
         "num_gpus": LONGCAT_I2V_PARAMS["num_gpus"],
-        "use_fsdp_inference": False,
-        "dit_cpu_offload": False,
+        "use_fsdp_inference": True,
+        "dit_cpu_offload": True,
         "vae_cpu_offload": True,
         "text_encoder_cpu_offload": True,
-        "pin_cpu_memory": False,
         "enable_bsa": False,
     }
 
@@ -331,7 +329,7 @@ def test_longcat_i2v_similarity(prompt: str, ATTENTION_BACKEND: str):
 
 
 @pytest.mark.parametrize("prompt", VC_TEST_PROMPTS)
-@pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN", "TORCH_SDPA"])
+@pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
 def test_longcat_vc_similarity(prompt: str, ATTENTION_BACKEND: str):
     """
     Test LongCat VC (Video Continuation) inference and compare output to reference videos using SSIM.

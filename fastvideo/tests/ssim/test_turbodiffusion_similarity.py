@@ -32,7 +32,7 @@ else:
 
 # TurboDiffusion parameters (1-4 step generation with RCM scheduler + SLA attention)
 TURBODIFFUSION_PARAMS = {
-    "num_gpus": 2,
+    "num_gpus": 4,
     "model_path": "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers",
     "height": 480,
     "width": 832,
@@ -40,7 +40,7 @@ TURBODIFFUSION_PARAMS = {
     "num_inference_steps": 4,  # TurboDiffusion uses 1-4 steps
     "guidance_scale": 1.0,  # No CFG for TurboDiffusion
     "seed": 42,
-    "sp_size": 2,
+    "sp_size": 4,
     "tp_size": 1,
     "fps": 24,
 }
@@ -217,6 +217,7 @@ def test_turbodiffusion_i2v_inference_similarity(prompt, model_id):
         "override_pipeline_cls_name": "TurboDiffusionI2VPipeline",
         # Keep both transformers in VRAM - avoids CPU RAM bottleneck
         "dit_cpu_offload": False,
+        "use_fsdp_inference": True,
     }
 
     generation_kwargs = {
