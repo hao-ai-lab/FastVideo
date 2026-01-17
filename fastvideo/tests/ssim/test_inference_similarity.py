@@ -26,7 +26,7 @@ else:
 
 # Base parameters from the shell script
 HUNYUAN_PARAMS = {
-    "num_gpus": 2,
+    "num_gpus": 4,
     "model_path": "FastVideo/FastHunyuan-diffusers",
     "height": 720,
     "width": 1280,
@@ -36,7 +36,7 @@ HUNYUAN_PARAMS = {
     "embedded_cfg_scale": 6,
     "flow_shift": 17,
     "seed": 1024,
-    "sp_size": 2,
+    "sp_size": 4,
     "tp_size": 1,
     "vae_sp": True,
     "fps": 24,
@@ -232,7 +232,8 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
         "flow_shift": BASE_PARAMS["flow_shift"],
         "sp_size": BASE_PARAMS["sp_size"],
         "tp_size": BASE_PARAMS["tp_size"],
-        "dit_cpu_offload": True,
+        "use_fsdp_inference": True,
+        "dit_cpu_offload": False,
     }
     if BASE_PARAMS.get("vae_sp"):
         init_kwargs["vae_sp"] = True
