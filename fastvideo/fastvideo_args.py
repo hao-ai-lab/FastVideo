@@ -133,7 +133,7 @@ class FastVideoArgs:
     # CPU offload parameters
     dit_cpu_offload: bool = True
     use_fsdp_inference: bool = False
-    dit_layerwise_offload: bool = False
+    dit_layerwise_offload: bool = True
     text_encoder_cpu_offload: bool = True
     image_encoder_cpu_offload: bool = True
     vae_cpu_offload: bool = True

@@ -93,8 +93,11 @@ def test_merge_lora_weights(model_id):
 
     lora_nickname = lora_config["lora_nickname"]
     lora_path = lora_config["lora_path"]
+    # When layerwise offload is enabled, placeholder tensors cannot be compared directly.
     args = FastVideoArgs.from_kwargs(
         model_path=model_id,
+        dit_layerwise_offload=False,
+        use_fsdp_inference=True,
         dit_cpu_offload=True,
         dit_precision="bf16",
     )
