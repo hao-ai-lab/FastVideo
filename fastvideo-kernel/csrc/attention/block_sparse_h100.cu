@@ -639,7 +639,8 @@ void bwd_attend_ker(const __grid_constant__ bwd_globals<D> g) {
 
     // store kq and vq
 
-    // ensuring all writes are finished
+    // ! the following two line seems unnecessary.
+    // tma::store_async_wait(); // ensure qg is finished
     __syncthreads();
 
     warpgroup::store(kg_smem[0], kg_reg);
@@ -660,145 +661,6 @@ void bwd_attend_ker(const __grid_constant__ bwd_globals<D> g) {
     tma::store_async_wait(); 
 }
 
-
-template<int D>
-void block_sparse_attention_forward_impl(
-    bf16* d_q, bf16* d_k, bf16* d_v, float* d_l, bf16* d_o,
-    int batch, int qo_heads, int kv_heads, int seq_len, int hr,
-    int max_kv_blocks_per_q, 
-    int32_t* q2k_block_sparse_index_ptr,
-    int32_t* q2k_block_sparse_num_ptr,
-    int32_t* block_size_ptr,
-    cudaStream_t stream
-) {
-    using K = fwd_attend_ker_tile_dims<D>;
-    using q_tile    =         st_bf<K::qo_height, K::tile_width>;
-    using k_tile    =         st_bf<K::kv_height, K::tile_width>;
-    using v_tile    =         st_bf<K::kv_height, K::tile_width>;
-    using l_col_vec = col_vec<st_fl<K::qo_height, K::tile_width>>;
-    using o_tile    =         st_bf<K::qo_height, K::tile_width>;
-
-    using q_global = gl<bf16,  -1, -1, -1, -1, q_tile>;
-    using k_global = gl<bf16,  -1, -1, -1, -1, k_tile>;
-    using v_global = gl<bf16,  -1, -1, -1, -1, v_tile>;
-    using l_global = gl<float, -1, -1, -1, -1, l_col_vec>;
-    using o_global = gl<bf16,  -1, -1, -1, -1, o_tile>;
-
-    using globals      = fwd_globals<D>;
-
-    q_global qg_arg{d_q, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), static_cast<uint32_t>(D)};
-    k_global kg_arg{d_k, static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(seq_len), static_cast<uint32_t>(D)};
-    v_global vg_arg{d_v, static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(seq_len), static_cast<uint32_t>(D)};
-    l_global lg_arg{d_l, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,   static_cast<unsigned int>(seq_len)};
-    o_global og_arg{d_o, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), static_cast<uint32_t>(D)};
-
-    globals g{
-        qg_arg, kg_arg, vg_arg, lg_arg, og_arg, 
-        static_cast<int>(seq_len), static_cast<int>(hr), static_cast<int>(max_kv_blocks_per_q), 
-        q2k_block_sparse_index_ptr, q2k_block_sparse_num_ptr, block_size_ptr
-    };
-
-    // Shared memory size for the kernel
-    // 54000 bytes is calibrated for H100 shared memory constraints for these tile sizes
-    constexpr int mem_size = 54000;
-
-    dim3 grid(seq_len/(64), qo_heads, batch);
-
-    cudaFuncSetAttribute(
-        fwd_attend_ker<D>,
-        cudaFuncAttributeMaxDynamicSharedMemorySize,
-        mem_size
-    );
-
-    fwd_attend_ker<D><<<grid, (128), mem_size, stream>>>(g);
-}
-
-template<int D>
-void block_sparse_attention_backward_impl(
-    bf16* d_q, bf16* d_k, bf16* d_v, bf16* d_o, bf16* d_og, float* d_l, float* d_d, float* d_qg, float* d_kg, float* d_vg,
-    int batch, int qo_heads, int kv_heads, int seq_len, int hr, int max_q_blocks_per_kv,
-    int32_t* k2q_block_sparse_index_ptr,
-    int32_t* k2q_block_sparse_num_ptr,
-    int32_t* block_size_ptr,
-    cudaStream_t stream
-) {
-    using G = bwd_attend_ker_tile_dims<D>;
-    using og_tile = st_bf<4*16, D>;
-    using o_tile  = st_bf<4*16, D>;
-    using d_tile  = col_vec<st_fl<4*16, D>>;
-
-    using og_global = gl<bf16,  -1, -1, -1, -1, og_tile>;
-    using o_global  = gl<bf16,  -1, -1, -1, -1, o_tile>;
-    using d_global  = gl<float, -1, -1, -1, -1, d_tile>;
-
-    using prep_globals = bwd_prep_globals<D>;
-
-    constexpr int mem_size_prep = kittens::MAX_SHARED_MEMORY;
-    int threads_prep = PREP_NUM_WARPS * kittens::WARP_THREADS;
-    dim3 grid_bwd_prep(seq_len/(PREP_NUM_WARPS*kittens::TILE_ROW_DIM<bf16>*4), qo_heads, batch);
-
-    og_global prep_og_arg{d_og, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), static_cast<uint32_t>(D)};
-    o_global  prep_o_arg {d_o,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), static_cast<uint32_t>(D)};
-    d_global  prep_d_arg {d_d,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,  static_cast<unsigned int>(seq_len)};
-
-    prep_globals bwd_g{prep_og_arg, prep_o_arg, prep_d_arg};
-
-    cudaFuncSetAttribute(
-        bwd_attend_prep_ker<D>,
-        cudaFuncAttributeMaxDynamicSharedMemorySize,
-        mem_size_prep
-    );
-    bwd_attend_prep_ker<D><<<grid_bwd_prep, threads_prep, mem_size_prep, stream>>>(bwd_g);
-
-    using bwd_q_tile    =         st_bf<G::tile_h_qo, G::tile_width>;
-    using bwd_k_tile    =         st_bf<G::tile_h,    G::tile_width>;
-    using bwd_v_tile    =         st_bf<G::tile_h,    G::tile_width>;
-    using bwd_og_tile   =         st_bf<G::tile_h_qo, G::tile_width>;
-    using bwd_qg_tile   =         st_fl<G::tile_h_qo, G::tile_width>;
-    using bwd_kg_tile   =         st_fl<G::tile_h,    G::tile_width>;
-    using bwd_vg_tile   =         st_fl<G::tile_h,    G::tile_width>;
-    using bwd_l_tile    = row_vec<st_fl<G::tile_h_qo, G::tile_h>>;
-    using bwd_d_tile    = row_vec<st_fl<G::tile_h_qo, G::tile_h>>;
-
-    using bwd_q_global  = gl<bf16,  -1, -1, -1, -1, bwd_q_tile>;
-    using bwd_k_global  = gl<bf16,  -1, -1, -1, -1, bwd_k_tile>;
-    using bwd_v_global  = gl<bf16,  -1, -1, -1, -1, bwd_v_tile>;
-    using bwd_og_global = gl<bf16,  -1, -1, -1, -1, bwd_og_tile>;
-    using bwd_qg_global = gl<float, -1, -1, -1, -1, bwd_qg_tile>;
-    using bwd_kg_global = gl<float, -1, -1, -1, -1, bwd_kg_tile>;
-    using bwd_vg_global = gl<float, -1, -1, -1, -1, bwd_vg_tile>;
-    using bwd_l_global  = gl<float, -1, -1, -1, -1, bwd_l_tile>;
-    using bwd_d_global  = gl<float, -1, -1, -1, -1, bwd_d_tile>;
-
-    using bwd_global_args = bwd_globals<D>;
-
-    bwd_q_global  bwd_q_arg {d_q,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), static_cast<uint32_t>(D)};
-    bwd_k_global  bwd_k_arg {d_k,  static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(seq_len), static_cast<uint32_t>(D)};
-    bwd_v_global  bwd_v_arg {d_v,  static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(seq_len), static_cast<uint32_t>(D)};
-    bwd_og_global bwd_og_arg{d_og, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), static_cast<uint32_t>(D)};
-    bwd_qg_global bwd_qg_arg{d_qg, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), static_cast<uint32_t>(D)};
-    bwd_kg_global bwd_kg_arg{d_kg, static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(seq_len), static_cast<uint32_t>(D)};
-    bwd_vg_global bwd_vg_arg{d_vg, static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(seq_len), static_cast<uint32_t>(D)};
-    bwd_l_global  bwd_l_arg {d_l,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,  static_cast<unsigned int>(seq_len)};
-    bwd_d_global  bwd_d_arg {d_d,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,  static_cast<unsigned int>(seq_len)};
-
-    bwd_global_args bwd_global{bwd_q_arg, bwd_k_arg, bwd_v_arg, bwd_og_arg, bwd_qg_arg, bwd_kg_arg, bwd_vg_arg, bwd_l_arg, bwd_d_arg, 
-                        static_cast<int>(seq_len), static_cast<int>(hr), static_cast<int>(max_q_blocks_per_kv),
-                        k2q_block_sparse_index_ptr, k2q_block_sparse_num_ptr, block_size_ptr};
-
-    dim3 grid_bwd_main(seq_len/64, qo_heads, batch);
-    int threads_main = 128;
-    // Calibrated shared memory sizes for different head dimensions
-    int bwd_mem_size = (D == 64) ? 72000 : 113000;
-
-    cudaFuncSetAttribute(
-        bwd_attend_ker<D>,
-        cudaFuncAttributeMaxDynamicSharedMemorySize,
-        bwd_mem_size
-    );
-    bwd_attend_ker<D><<<grid_bwd_main, threads_main, bwd_mem_size, stream>>>(bwd_global);
-}
-
 #include "pyutils/torch_helpers.cuh"
 #include <ATen/cuda/CUDAContext.h>
 #include <iostream>
@@ -810,23 +672,32 @@ block_sparse_attention_forward(
     torch::Tensor v, 
     torch::Tensor q2k_block_sparse_index, 
     torch::Tensor q2k_block_sparse_num, 
-    torch::Tensor block_size
+    torch::Tensor kv_block_size
 )
 {
     CHECK_INPUT(q);
     CHECK_INPUT(k);
     CHECK_INPUT(v);
 
+    // q shape: (batch, qo_heads, q_seq_len, head_dim)
+    // k shape: (batch, kv_heads, kv_seq_len, head_dim)
+    // v shape: (batch, kv_heads, kv_seq_len, head_dim)
+    // q2k_block_sparse_index shape: (batch, qo_heads, num_q_blocks, max_kv_blocks_per_q)
+    // q2k_block_sparse_num shape: (batch, qo_heads, num_q_blocks)
+    // kv_block_size shape: (num_kv_blocks) This does not need other dimensions because across all batch/heads the padding is the same.
+    
     auto batch    = q.size(0);
-    auto seq_len  = q.size(2); 
+    auto q_seq_len  = q.size(2);
+    auto kv_seq_len = k.size(2);
     auto head_dim = q.size(3); 
     auto qo_heads = q.size(1);
     auto kv_heads = k.size(1);
     auto max_kv_blocks_per_q = q2k_block_sparse_index.size(3);
-    auto num_q_blocks = block_size.size(0);
+    auto num_q_blocks = q2k_block_sparse_index.size(2);
+    auto num_kv_blocks = kv_block_size.size(0);
     TORCH_CHECK(batch==1, "Batch size dim will be removed in the future, please set batch to 1");
-    TORCH_CHECK(num_q_blocks * 64 == seq_len, "This kernel supports variable block size, but it assumes the input sequence is properly padded.");
-    TORCH_CHECK(num_q_blocks == q2k_block_sparse_index.size(2), "Number of Q blocks does not match between q2k_block_sparse_index and block_size");
+    TORCH_CHECK(num_q_blocks * BLOCK_M == q_seq_len, "This kernel supports variable q block size, but it assumes the input sequence is properly padded.");
+    TORCH_CHECK(num_kv_blocks * BLOCK_M == kv_seq_len, "This kernel supports variable kv block size, but it assumes the input sequence is properly padded.");
     // check to see that these dimensions match for all inputs
     TORCH_CHECK(q.size(0) == batch, "Q batch dimension - idx 0 - must match for all inputs");
     TORCH_CHECK(k.size(0) == batch, "K batch dimension - idx 0 - must match for all inputs");
@@ -834,11 +705,9 @@ block_sparse_attention_forward(
     TORCH_CHECK(q2k_block_sparse_index.size(0) == batch, "q2k_block_sparse_index batch dimension - idx 0 - must match for all inputs");
     TORCH_CHECK(q2k_block_sparse_num.size(0) == batch, "q2k_block_sparse_num batch dimension - idx 0 - must match for all inputs");
 
-    TORCH_CHECK(q.size(2) == seq_len, "Q sequence length dimension - idx 2 - must match for all inputs");
-    TORCH_CHECK(k.size(2) == seq_len, "K sequence length dimension - idx 2 - must match for all inputs");
-    TORCH_CHECK(v.size(2) == seq_len, "V sequence length dimension - idx 2 - must match for all inputs");
-    TORCH_CHECK(q2k_block_sparse_index.size(2) == seq_len / BLOCK_M, "q2k_block_sparse_index idx 2 - must match seq_len / BLOCK_M");
-    TORCH_CHECK(q2k_block_sparse_num.size(2) == seq_len / BLOCK_M, "q2k_block_sparse_num idx 2 - must match seq_len / BLOCK_M");
+    TORCH_CHECK(v.size(2) == kv_seq_len, "V sequence length dimension - idx 2 - must match K inputs");
+    TORCH_CHECK(q2k_block_sparse_num.size(2) == num_q_blocks, "q2k_block_sparse_num idx 2 - must match num_q_blocks");
+
 
     TORCH_CHECK(q.size(3) == head_dim, "Q head dimension - idx 3 - must match for all non-vector inputs");
     TORCH_CHECK(k.size(3) == head_dim, "K head dimension - idx 3 - must match for all non-vector inputs");
@@ -864,12 +733,12 @@ block_sparse_attention_forward(
     // for the returned outputs
     torch::Tensor o     = torch::empty({static_cast<const uint>(batch), 
                                         static_cast<const uint>(qo_heads), 
-                                        static_cast<const uint>(seq_len), 
+                                        static_cast<const uint>(q_seq_len), 
                                         static_cast<const uint>(head_dim)}, v.options());
     
     torch::Tensor l_vec = torch::empty({static_cast<const uint>(batch), 
                                         static_cast<const uint>(qo_heads), 
-                                        static_cast<const uint>(seq_len), 
+                                        static_cast<const uint>(q_seq_len), 
                                         static_cast<const uint>(1)}, 
                                         torch::TensorOptions().dtype(torch::kFloat).device(q.device()).memory_format(at::MemoryFormat::Contiguous));
         
@@ -880,32 +749,110 @@ block_sparse_attention_forward(
     float* l_ptr = reinterpret_cast<float*>(l_vec.data_ptr<float>());
     float* d_l   = reinterpret_cast<float*>(l_ptr);
 
+    //cudadevicesynchronize();
     const c10::cuda::OptionalCUDAGuard device_guard(q.device());    
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream(); 
 
-    // Temporated implementation to avoid code duplication between head_dim=64 and 128
     if (head_dim == 64) {
-        block_sparse_attention_forward_impl<64>(
-            d_q, d_k, d_v, d_l, d_o,
-            batch, qo_heads, kv_heads, seq_len, hr,
-            max_kv_blocks_per_q,
-            reinterpret_cast<int32_t*>(q2k_block_sparse_index.data_ptr()),
+        using q_tile    =         st_bf<fwd_attend_ker_tile_dims<64>::qo_height, fwd_attend_ker_tile_dims<64>::tile_width>;
+        using k_tile    =         st_bf<fwd_attend_ker_tile_dims<64>::kv_height, fwd_attend_ker_tile_dims<64>::tile_width>;
+        using v_tile    =         st_bf<fwd_attend_ker_tile_dims<64>::kv_height, fwd_attend_ker_tile_dims<64>::tile_width>;
+        using l_col_vec = col_vec<st_fl<fwd_attend_ker_tile_dims<64>::qo_height, fwd_attend_ker_tile_dims<64>::tile_width>>;
+        using o_tile    =         st_bf<fwd_attend_ker_tile_dims<64>::qo_height, fwd_attend_ker_tile_dims<64>::tile_width>;
+
+        using q_global = gl<bf16,  -1, -1, -1, -1, q_tile>;
+        using k_global = gl<bf16,  -1, -1, -1, -1, k_tile>;
+        using v_global = gl<bf16,  -1, -1, -1, -1, v_tile>;
+        using l_global = gl<float, -1, -1, -1, -1, l_col_vec>;
+        using o_global = gl<bf16,  -1, -1, -1, -1, o_tile>;
+
+        using globals      = fwd_globals<64>;
+
+        q_global qg_arg{d_q, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(q_seq_len), 64U};
+        k_global kg_arg{d_k, static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(kv_seq_len), 64U};
+        v_global vg_arg{d_v, static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(kv_seq_len), 64U};
+        l_global lg_arg{d_l, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,   static_cast<unsigned int>(q_seq_len)};
+        o_global og_arg{d_o, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(q_seq_len), 64U};
+
+        globals g{
+            qg_arg, 
+            kg_arg, 
+            vg_arg, 
+            lg_arg, 
+            og_arg, 
+            static_cast<int>(q_seq_len), 
+            static_cast<int>(hr), 
+            static_cast<int>(max_kv_blocks_per_q), 
+            reinterpret_cast<int32_t*>(q2k_block_sparse_index.data_ptr()), 
             reinterpret_cast<int32_t*>(q2k_block_sparse_num.data_ptr()),
-            reinterpret_cast<int32_t*>(block_size.data_ptr()),
-            stream
+            reinterpret_cast<int32_t*>(kv_block_size.data_ptr())
+        };
+
+        constexpr int mem_size = 54000;
+
+        dim3 grid(q_seq_len/(BLOCK_M), qo_heads, batch);
+
+        cudaFuncSetAttribute(
+            fwd_attend_ker<64>,
+            cudaFuncAttributeMaxDynamicSharedMemorySize,
+            mem_size
         );
-    } else if (head_dim == 128) {
-        block_sparse_attention_forward_impl<128>(
-            d_q, d_k, d_v, d_l, d_o,
-            batch, qo_heads, kv_heads, seq_len, hr,
-            max_kv_blocks_per_q,
-            reinterpret_cast<int32_t*>(q2k_block_sparse_index.data_ptr()),
+
+        fwd_attend_ker<64><<<grid, (128), mem_size, stream>>>(g);
+
+        CHECK_CUDA_ERROR(cudaGetLastError());
+        // cudaStreamSynchronize(stream);
+    }
+
+    if (head_dim == 128) {
+        using q_tile    =         st_bf<fwd_attend_ker_tile_dims<128>::qo_height, fwd_attend_ker_tile_dims<128>::tile_width>;
+        using k_tile    =         st_bf<fwd_attend_ker_tile_dims<128>::kv_height, fwd_attend_ker_tile_dims<128>::tile_width>;
+        using v_tile    =         st_bf<fwd_attend_ker_tile_dims<128>::kv_height, fwd_attend_ker_tile_dims<128>::tile_width>;
+        using l_col_vec = col_vec<st_fl<fwd_attend_ker_tile_dims<128>::qo_height, fwd_attend_ker_tile_dims<128>::tile_width>>;
+        using o_tile    =         st_bf<fwd_attend_ker_tile_dims<128>::qo_height, fwd_attend_ker_tile_dims<128>::tile_width>;
+
+        using q_global = gl<bf16,  -1, -1, -1, -1, q_tile>;
+        using k_global = gl<bf16,  -1, -1, -1, -1, k_tile>;
+        using v_global = gl<bf16,  -1, -1, -1, -1, v_tile>;
+        using l_global = gl<float, -1, -1, -1, -1, l_col_vec>;
+        using o_global = gl<bf16,  -1, -1, -1, -1, o_tile>;
+
+        using globals      = fwd_globals<128>;
+
+        q_global qg_arg{d_q, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(q_seq_len), 128U};
+        k_global kg_arg{d_k, static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(kv_seq_len), 128U};
+        v_global vg_arg{d_v, static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(kv_seq_len), 128U};
+        l_global lg_arg{d_l, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,   static_cast<unsigned int>(q_seq_len)};
+        o_global og_arg{d_o, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(q_seq_len), 128U};
+
+        globals g{
+            qg_arg, 
+            kg_arg, 
+            vg_arg, 
+            lg_arg, 
+            og_arg, 
+            static_cast<int>(q_seq_len), 
+            static_cast<int>(hr), 
+            static_cast<int>(max_kv_blocks_per_q), 
+            reinterpret_cast<int32_t*>(q2k_block_sparse_index.data_ptr()), 
             reinterpret_cast<int32_t*>(q2k_block_sparse_num.data_ptr()),
-            reinterpret_cast<int32_t*>(block_size.data_ptr()),
-            stream
+            reinterpret_cast<int32_t*>(kv_block_size.data_ptr())
+        };
+
+        constexpr int mem_size = 54000;
+
+        dim3 grid(q_seq_len/(BLOCK_M), qo_heads, batch);
+
+        cudaFuncSetAttribute(
+            fwd_attend_ker<128>,
+            cudaFuncAttributeMaxDynamicSharedMemorySize,
+            mem_size
         );
-    } else {
-        TORCH_CHECK(false, "Unsupported head_dim: ", head_dim, ". Only 64 and 128 are supported.");
+
+        fwd_attend_ker<128><<<grid, (128), mem_size, stream>>>(g);
+
+        CHECK_CUDA_ERROR(cudaGetLastError());
+        // cudaStreamSynchronize(stream);
     }
 
     return {o, l_vec};
@@ -921,7 +868,7 @@ block_sparse_attention_backward(torch::Tensor q,
                    torch::Tensor og,
                    torch::Tensor k2q_block_sparse_index,
                    torch::Tensor k2q_block_sparse_num,
-                   torch::Tensor block_size)
+                   torch::Tensor kv_block_size)
 {
     CHECK_INPUT(q);
     CHECK_INPUT(k);
@@ -930,11 +877,23 @@ block_sparse_attention_backward(torch::Tensor q,
     CHECK_INPUT(o);
     CHECK_INPUT(og);
 
+    // q: [batch, qo_heads, q_seq_len, head_dim]
+    // k: [batch, kv_heads, kv_seq_len, head_dim]
+    // v: [batch, kv_heads, kv_seq_len, head_dim]
+    // o: [batch, qo_heads, q_seq_len, head_dim]
+    // l_vec: [batch, qo_heads, q_seq_len, 1]
+    // og: [batch, qo_heads, q_seq_len, head_dim]
+    // k2q_block_sparse_index: [batch, kv_heads, num_kv_blocks, max_num_q_blocks]
+    // k2q_block_sparse_num: [batch, kv_heads, num_kv_blocks]
+    // kv_block_size: [num_kv_blocks]
+
     auto batch    = q.size(0);
-    auto seq_len  = q.size(2);
+    auto q_seq_len  = q.size(2);
+    auto kv_seq_len = k.size(2);
     auto head_dim = q.size(3);
     auto max_q_blocks_per_kv = k2q_block_sparse_index.size(3);
-    TORCH_CHECK(k2q_block_sparse_index.size(2) == block_size.size(0), "k2q_block_sparse_index.size(2) must match block_size.size(0)");
+    auto num_kv_blocks = kv_block_size.size(0);
+    TORCH_CHECK(k2q_block_sparse_index.size(2) == num_kv_blocks, "k2q_block_sparse_index.size(2) must match num_kv_blocks (kv_block_size.size(0))");
     // check to see that these dimensions match for all inputs
     TORCH_CHECK(q.size(0)     == batch, "Q  batch dimension - idx 0 - must match for all inputs");
     TORCH_CHECK(k.size(0)     == batch, "K  batch dimension - idx 0 - must match for all inputs");
@@ -945,23 +904,18 @@ block_sparse_attention_backward(torch::Tensor q,
     TORCH_CHECK(k2q_block_sparse_index.size(0) == batch, "k2q_block_sparse_index batch dimension - idx 0 - must match for all inputs");
     TORCH_CHECK(k2q_block_sparse_num.size(0) == batch, "k2q_block_sparse_num batch dimension - idx 0 - must match for all inputs");
 
-
-    TORCH_CHECK(q.size(2)     == seq_len, "Q  sequence length dimension - idx 2 - must match for all inputs");
-    TORCH_CHECK(k.size(2)     == seq_len, "K  sequence length dimension - idx 2 - must match for all inputs");
-    TORCH_CHECK(v.size(2)     == seq_len, "V  sequence length dimension - idx 2 - must match for all inputs");
-    TORCH_CHECK(l_vec.size(2) == seq_len, "L  sequence length dimension - idx 2 - must match for all inputs");
-    TORCH_CHECK(o.size(2)     == seq_len, "O  sequence length dimension - idx 2 - must match for all inputs");
-    TORCH_CHECK(og.size(2)    == seq_len, "OG sequence length dimension - idx 2 - must match for all inputs");
-    TORCH_CHECK(k2q_block_sparse_index.size(2) == seq_len / BLOCK_N, "k2q_block_sparse_index idx 2 - must match seq_len / BLOCK_N");
-    TORCH_CHECK(k2q_block_sparse_num.size(2) == seq_len / BLOCK_N, "k2q_block_sparse_num idx 2 - must match seq_len / BLOCK_N");
+    TORCH_CHECK(v.size(2)     == kv_seq_len, "V  sequence length dimension - idx 2 - must match K sequence length");
+    TORCH_CHECK(l_vec.size(2) == q_seq_len, "L  sequence length dimension - idx 2 - must match Q sequence length");
+    TORCH_CHECK(o.size(2)     == q_seq_len, "O  sequence length dimension - idx 2 - must match Q sequence length");
+    TORCH_CHECK(og.size(2)    == q_seq_len, "OG sequence length dimension - idx 2 - must match Q sequence length");
+    TORCH_CHECK(k2q_block_sparse_index.size(2) == num_kv_blocks, "k2q_block_sparse_index idx 2 - must match num_kv_blocks (kv_block_size.size(0))");
+    TORCH_CHECK(k2q_block_sparse_num.size(2) == num_kv_blocks, "k2q_block_sparse_num idx 2 - must match num_kv_blocks (kv_block_size.size(0))");
 
     TORCH_CHECK(q.size(3)  == head_dim, "Q  head dimension - idx 3 - must match for all non-vector inputs");
     TORCH_CHECK(k.size(3)  == head_dim, "K  head dimension - idx 3 - must match for all non-vector inputs");
     TORCH_CHECK(v.size(3)  == head_dim, "V  head dimension - idx 3 - must match for all non-vector inputs");
     TORCH_CHECK(o.size(3)  == head_dim, "O  head dimension - idx 3 - must match for all non-vector inputs");
     TORCH_CHECK(og.size(3) == head_dim, "OG head dimension - idx 3 - must match for all non-vector inputs");
-    
-
 
     auto qo_heads = q.size(1);
     auto kv_heads = k.size(1);
@@ -988,20 +942,20 @@ block_sparse_attention_backward(torch::Tensor q,
 
     torch::Tensor qg = torch::zeros({static_cast<const uint>(batch), 
                                      static_cast<const uint>(qo_heads), 
-                                     static_cast<const uint>(seq_len), 
+                                     static_cast<const uint>(q_seq_len), 
                                      static_cast<const uint>(head_dim)},   l_vec.options());
     torch::Tensor kg = torch::zeros({static_cast<const uint>(batch), 
                                      static_cast<const uint>(kv_heads), 
-                                     static_cast<const uint>(seq_len), 
+                                     static_cast<const uint>(kv_seq_len), 
                                      static_cast<const uint>(head_dim)},   l_vec.options());
     torch::Tensor vg = torch::zeros({static_cast<const uint>(batch), 
                                      static_cast<const uint>(kv_heads), 
-                                     static_cast<const uint>(seq_len), 
+                                     static_cast<const uint>(kv_seq_len), 
                                      static_cast<const uint>(head_dim)},   l_vec.options());
     
     torch::Tensor d_vec = torch::empty({static_cast<const uint>(batch), 
                                         static_cast<const uint>(qo_heads), 
-                                        static_cast<const uint>(seq_len), 
+                                        static_cast<const uint>(q_seq_len), 
                                         static_cast<const uint>(1)},       l_vec.options());
 
     float*         qg_ptr = qg.data_ptr<float>();
@@ -1030,7 +984,7 @@ block_sparse_attention_backward(torch::Tensor q,
     //  cudaStreamSynchronize(stream);
 
     // TORCH_CHECK(seq_len % (4*kittens::TILE_DIM*4) == 0, "sequence length must be divisible by 256");
-    dim3 grid_bwd(seq_len/(PREP_NUM_WARPS*kittens::TILE_ROW_DIM<bf16>*4), qo_heads, batch);
+    dim3 grid_bwd(q_seq_len/(PREP_NUM_WARPS*kittens::TILE_ROW_DIM<bf16>*4), qo_heads, batch);
 
     if (head_dim == 64)  {
         using og_tile = st_bf<4*16, 64>;
@@ -1043,9 +997,9 @@ block_sparse_attention_backward(torch::Tensor q,
 
         using bwd_prep_globals = bwd_prep_globals<64>;
 
-        og_global prep_og_arg{d_og, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), 64U};
-        o_global  prep_o_arg {d_o,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), 64U};
-        d_global  prep_d_arg {d_d,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,  static_cast<unsigned int>(seq_len)};
+        og_global prep_og_arg{d_og, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(q_seq_len), 64U};
+        o_global  prep_o_arg {d_o,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(q_seq_len), 64U};
+        d_global  prep_d_arg {d_d,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,  static_cast<unsigned int>(q_seq_len)};
 
         bwd_prep_globals bwd_g{prep_og_arg, prep_o_arg, prep_d_arg};
 
@@ -1082,15 +1036,15 @@ block_sparse_attention_backward(torch::Tensor q,
 
         using bwd_global_args = bwd_globals<64>;
 
-        bwd_q_global  bwd_q_arg {d_q,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), 64U};
-        bwd_k_global  bwd_k_arg {d_k,  static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(seq_len), 64U};
-        bwd_v_global  bwd_v_arg {d_v,  static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(seq_len), 64U};
-        bwd_og_global bwd_og_arg{d_og, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), 64U};
-        bwd_qg_global bwd_qg_arg{d_qg, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), 64U};
-        bwd_kg_global bwd_kg_arg{d_kg, static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(seq_len), 64U};
-        bwd_vg_global bwd_vg_arg{d_vg, static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(seq_len), 64U};
-        bwd_l_global  bwd_l_arg {d_l,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,  static_cast<unsigned int>(seq_len)};
-        bwd_d_global  bwd_d_arg {d_d,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,  static_cast<unsigned int>(seq_len)};
+        bwd_q_global  bwd_q_arg {d_q,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(q_seq_len), 64U};
+        bwd_k_global  bwd_k_arg {d_k,  static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(kv_seq_len), 64U};
+        bwd_v_global  bwd_v_arg {d_v,  static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(kv_seq_len), 64U};
+        bwd_og_global bwd_og_arg{d_og, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(q_seq_len), 64U};
+        bwd_qg_global bwd_qg_arg{d_qg, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(q_seq_len), 64U};
+        bwd_kg_global bwd_kg_arg{d_kg, static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(kv_seq_len), 64U};
+        bwd_vg_global bwd_vg_arg{d_vg, static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(kv_seq_len), 64U};
+        bwd_l_global  bwd_l_arg {d_l,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,  static_cast<unsigned int>(q_seq_len)};
+        bwd_d_global  bwd_d_arg {d_d,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,  static_cast<unsigned int>(q_seq_len)};
 
         bwd_global_args bwd_global{bwd_q_arg, 
                         bwd_k_arg, 
@@ -1101,14 +1055,14 @@ block_sparse_attention_backward(torch::Tensor q,
                         bwd_vg_arg, 
                         bwd_l_arg, 
                         bwd_d_arg, 
-                        static_cast<int>(seq_len), 
+                        static_cast<int>(kv_seq_len), // N is not used in the kernel
                         static_cast<int>(hr),
                         static_cast<int>(max_q_blocks_per_kv),
                         reinterpret_cast<int32_t*>(k2q_block_sparse_index.data_ptr()),
                         reinterpret_cast<int32_t*>(k2q_block_sparse_num.data_ptr()),
-                        reinterpret_cast<int32_t*>(block_size.data_ptr())};
+                        reinterpret_cast<int32_t*>(kv_block_size.data_ptr())};
 
-        dim3 grid_bwd_2(seq_len/64, qo_heads, batch);
+        dim3 grid_bwd_2(kv_seq_len/BLOCK_N, qo_heads, batch);
         threads = 128;
 
         //cudadevicesynchronize();
@@ -1147,9 +1101,9 @@ block_sparse_attention_backward(torch::Tensor q,
 
         using bwd_prep_globals = bwd_prep_globals<128>;
 
-        og_global prep_og_arg{d_og, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), 128U};
-        o_global  prep_o_arg {d_o,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), 128U};
-        d_global  prep_d_arg {d_d,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,  static_cast<unsigned int>(seq_len)};
+        og_global prep_og_arg{d_og, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(q_seq_len), 128U};
+        o_global  prep_o_arg {d_o,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(q_seq_len), 128U};
+        d_global  prep_d_arg {d_d,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,  static_cast<unsigned int>(q_seq_len)};
 
         bwd_prep_globals bwd_g{prep_og_arg, prep_o_arg, prep_d_arg};
 
@@ -1186,15 +1140,15 @@ block_sparse_attention_backward(torch::Tensor q,
 
         using bwd_global_args = bwd_globals<128>;
 
-        bwd_q_global  bwd_q_arg {d_q,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), 128U};
-        bwd_k_global  bwd_k_arg {d_k,  static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(seq_len), 128U};
-        bwd_v_global  bwd_v_arg {d_v,  static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(seq_len), 128U};
-        bwd_og_global bwd_og_arg{d_og, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), 128U};
-        bwd_qg_global bwd_qg_arg{d_qg, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(seq_len), 128U};
-        bwd_kg_global bwd_kg_arg{d_kg, static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(seq_len), 128U};
-        bwd_vg_global bwd_vg_arg{d_vg, static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(seq_len), 128U};
-        bwd_l_global  bwd_l_arg {d_l,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,  static_cast<unsigned int>(seq_len)};
-        bwd_d_global  bwd_d_arg {d_d,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,  static_cast<unsigned int>(seq_len)};
+        bwd_q_global  bwd_q_arg {d_q,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(q_seq_len), 128U};
+        bwd_k_global  bwd_k_arg {d_k,  static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(kv_seq_len), 128U};
+        bwd_v_global  bwd_v_arg {d_v,  static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(kv_seq_len), 128U};
+        bwd_og_global bwd_og_arg{d_og, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(q_seq_len), 128U};
+        bwd_qg_global bwd_qg_arg{d_qg, static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), static_cast<unsigned int>(q_seq_len), 128U};
+        bwd_kg_global bwd_kg_arg{d_kg, static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(kv_seq_len), 128U};
+        bwd_vg_global bwd_vg_arg{d_vg, static_cast<unsigned int>(batch), static_cast<unsigned int>(kv_heads), static_cast<unsigned int>(kv_seq_len), 128U};
+        bwd_l_global  bwd_l_arg {d_l,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,  static_cast<unsigned int>(q_seq_len)};
+        bwd_d_global  bwd_d_arg {d_d,  static_cast<unsigned int>(batch), static_cast<unsigned int>(qo_heads), 1U,  static_cast<unsigned int>(q_seq_len)};
 
         bwd_global_args bwd_global{bwd_q_arg, 
                         bwd_k_arg, 
@@ -1205,14 +1159,14 @@ block_sparse_attention_backward(torch::Tensor q,
                         bwd_vg_arg, 
                         bwd_l_arg, 
                         bwd_d_arg, 
-                        static_cast<int>(seq_len), 
+                        static_cast<int>(kv_seq_len), // N is not used in the kernel
                         static_cast<int>(hr),
                         static_cast<int>(max_q_blocks_per_kv),
                         reinterpret_cast<int32_t*>(k2q_block_sparse_index.data_ptr()),
                         reinterpret_cast<int32_t*>(k2q_block_sparse_num.data_ptr()),
-                        reinterpret_cast<int32_t*>(block_size.data_ptr())};
+                        reinterpret_cast<int32_t*>(kv_block_size.data_ptr())};
 
-        dim3 grid_bwd_2(seq_len/64, qo_heads, batch);
+        dim3 grid_bwd_2(kv_seq_len/BLOCK_N, qo_heads, batch);
         threads = 128;
 
         //cudadevicesynchronize();

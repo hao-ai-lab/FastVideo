@@ -10,6 +10,8 @@ if(GPU_BACKEND STREQUAL "ROCM")
     enable_language(HIP)
 else()
     enable_language(CUDA)
+    # Ensure CUDA toolkit targets (CUDA::cudart, CUDA::cuda_driver, etc.) are available.
+    find_package(CUDAToolkit REQUIRED)
 endif()
 
 # Import common utils if needed, but we keep it simple for now
@@ -152,6 +154,30 @@ if(BUILD_CXX_KERNELS)
     target_compile_options(fastvideo_kernel_ops PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:${CUDA_FLAGS}>
     )
+
+    # Link against Torch libraries to avoid undefined symbols at import time
+    # (e.g., torch::autograd vtables) when loading the extension module.
+    target_link_libraries(fastvideo_kernel_ops PRIVATE ${TORCH_LIBRARIES})
+
+    # Also link against libtorch_python to satisfy Python-binding symbols
+    # (e.g., torch::PyWarningHandler) required by torch/extension.h.
+    execute_process(
+        COMMAND "${Python_EXECUTABLE}" -c "import torch; from pathlib import Path; p=Path(torch.__file__).parent/'lib'; m=sorted(p.glob('libtorch_python*')); print(str(m[0]) if m else '')"
+        OUTPUT_VARIABLE TORCH_PYTHON_LIBRARY_PATH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(TORCH_PYTHON_LIBRARY_PATH)
+        message(STATUS "TORCH_PYTHON_LIBRARY_PATH: ${TORCH_PYTHON_LIBRARY_PATH}")
+        target_link_libraries(fastvideo_kernel_ops PRIVATE "${TORCH_PYTHON_LIBRARY_PATH}")
+    else()
+        message(WARNING "Could not locate libtorch_python; fastvideo_kernel_ops may fail to import.")
+    endif()
+
+    # Link CUDA runtime + driver explicitly (fixes missing symbols like cuGetErrorString at import time)
+    if(NOT GPU_BACKEND STREQUAL "ROCM")
+        target_link_libraries(fastvideo_kernel_ops PRIVATE CUDA::cudart CUDA::cuda_driver)
+    endif()
 
     # We install it to fastvideo_kernel/_C so we can load it to register the ops
     install(TARGETS fastvideo_kernel_ops LIBRARY DESTINATION fastvideo_kernel/_C)

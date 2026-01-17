@@ -13,11 +13,13 @@ from fastvideo_kernel import video_sparse_attn
 
 # q, k, v: [batch_size, num_heads, seq_len, head_dim]
 # variable_block_sizes: Number of valid tokens per block
+# q_variable_block_sizes: Number of valid tokens per q block (can differ from KV for q/k of different lengths)
 # topk: Number of blocks to attend
 
 output = video_sparse_attn(
     q, k, v, 
-    variable_block_sizes=block_sizes, 
+    block_sizes,
+    block_sizes,
     topk=32
 )
 ```

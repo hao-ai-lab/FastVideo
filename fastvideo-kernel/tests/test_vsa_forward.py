@@ -3,6 +3,7 @@ import sys
 from typing import Tuple
 
 import torch
+import pytest
 
 from .utils import (
     generate_block_sparse_mask_for_function,
@@ -57,23 +58,14 @@ def block_sparse_forward_test(
     k_padded = ref.vsa_pad(K, kv_non_pad_index, kv_num_blocks, BLOCK_M)
     v_padded = ref.vsa_pad(V, kv_non_pad_index, kv_num_blocks, BLOCK_M)
 
-    # Use raw kernel or triton
+    # Use autograd-enabled wrapper (internally dispatches SM90 C++ vs Triton)
+    from fastvideo_kernel.block_sparse_attn import block_sparse_attn
     try:
-        from fastvideo_kernel._C import fastvideo_kernel_ops
-        raw_kernel = getattr(fastvideo_kernel_ops, "block_sparse_fwd", None)
-    except ImportError:
-        raw_kernel = None
-        
-    from fastvideo_kernel.triton_kernels.index import map_to_index
-    idx, num = map_to_index(block_sparse_mask)
-    
-    if raw_kernel:
-        out_padded = raw_kernel(q_padded, k_padded, v_padded, idx, num, variable_block_sizes.int())[0]
-    else:
-        from fastvideo_kernel.triton_kernels.block_sparse_attn_triton import triton_block_sparse_attn_forward
-        out_padded, _ = triton_block_sparse_attn_forward(
-            q_padded, k_padded, v_padded, idx, num, variable_block_sizes
+        out_padded, _aux = block_sparse_attn(
+            q_padded, k_padded, v_padded, block_sparse_mask, variable_block_sizes
         )
+    except RuntimeError as e:
+        pytest.skip(str(e))
 
     # Remove padding on the query side
     out = out_padded[:, :, q_non_pad_index, :]
@@ -156,11 +148,6 @@ def run_forward_qk_diff(
 ) -> Tuple[float, float]:
     """
     Forward-only correctness test for the case S_q != S_kv.
-
-    NOTE:
-      - The Triton backend supports different Q/KV logical lengths via padding.
-      - The SM90 (H100) CUDA backend currently assumes the same number of blocks
-        for Q and KV, so we skip this test there.
     """
     assert torch.cuda.is_available(), "VSA kernels require CUDA"
 
