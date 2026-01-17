@@ -234,6 +234,7 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
         "tp_size": BASE_PARAMS["tp_size"],
         "use_fsdp_inference": True,
         "dit_cpu_offload": False,
+        "dit_layerwise_offload": False,
     }
     if BASE_PARAMS.get("vae_sp"):
         init_kwargs["vae_sp"] = True
