@@ -42,37 +42,13 @@ def block_sparse_kernel_test(Q, K, V, block_sparse_mask, variable_block_sizes, q
     q_padded = vsa_pad(Q, q_non_pad_index, q_num_blocks, BLOCK_M)
     k_padded = vsa_pad(K, kv_non_pad_index, kv_num_blocks, BLOCK_M)
     v_padded = vsa_pad(V, kv_non_pad_index, kv_num_blocks, BLOCK_M)
-    # Use raw kernel or triton
-    try:
-        from fastvideo_kernel._C import fastvideo_kernel_ops
-        raw_kernel = getattr(fastvideo_kernel_ops, "block_sparse_fwd", None)
-    except ImportError:
-        raw_kernel = None
+    # Use autograd-enabled wrapper (internally dispatches to SM90 kernel or Triton)
+    from fastvideo_kernel.block_sparse_attn import block_sparse_attn
+    output_padded, _aux = block_sparse_attn(
+        q_padded, k_padded, v_padded, block_sparse_mask, variable_block_sizes
+    )
 
-    from fastvideo_kernel.triton_kernels.index import map_to_index
-
-    
-    # Convert mask to indices
-    # block_sparse_mask is [H, M, N] bool
-    # We need to map it to index.
-    # block_sparse_mask needs to be expanded/reshaped? 
-    # generate_block_sparse_mask_for_function returns [H, NumBlocksQ, NumBlocksKV]
-    
-    # Ops.py logic:
-    # mask = torch.zeros_like(scores, dtype=torch.bool).scatter_(-1, topk_idx, True)
-    # idx, num = map_to_index(mask)
-    
-    idx, num = map_to_index(block_sparse_mask.unsqueeze(0)) # Add batch dim [1, H, M, N]
-    
-    if raw_kernel:
-        out_s = raw_kernel(q_padded, k_padded, v_padded, idx, num, variable_block_sizes.int())
-        output = out_s[0]
-    else:
-        # Fallback to triton testing if C++ not available
-        from fastvideo_kernel.triton_kernels.block_sparse_attn_triton import triton_block_sparse_attn_forward
-        output, _ = triton_block_sparse_attn_forward(q_padded, k_padded, v_padded, idx, num, variable_block_sizes)
-
-    output = output[:, :, q_non_pad_index, :]
+    output = output_padded[:, :, q_non_pad_index, :]
     output.backward(dO)
     return output, Q.grad, K.grad, V.grad
 
@@ -264,7 +240,6 @@ def generate_error_graphs_qkdiff(h, d, error_mode='all'):
 
     print("-" * 150)
 
-@pytest.mark.skip()
 def test_video_sparse_attention_backward():
     if not torch.cuda.is_available():
         return
