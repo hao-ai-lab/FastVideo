@@ -74,7 +74,7 @@ def run_preprocessing():
         "--preprocess.dataloader_num_workers", "0",
         "--preprocess.max_height", "480",
         "--preprocess.max_width", "832",
-        "--preprocess.num_frames", "77",
+        "--preprocess.num_frames", "61",
         "--preprocess.train_fps", "16",
         "--preprocess.samples_per_file", "1",
         "--preprocess.flush_frequency", "1",
@@ -100,26 +100,58 @@ def run_training():
         "--nproc_per_node", NUM_GPUS_PER_NODE_TRAINING,
         TRAIN_ENTRY_FILE_PATH,
         "--model_path", MODEL_PATH,
+        "--inference_mode", "False",  # Required: must be False for training mode
         "--pretrained_model_name_or_path", MODEL_PATH,
         "--data_path", LOCAL_TRAINING_DATA_DIR,
         "--validation_dataset_file", LOCAL_VALIDATION_DATASET_FILE,
 
         "--train_batch_size", "1",
+        "--num_latent_t", "16",  # (61-1)//4 + 1 = 16 for 61 frames with temporal_compression=4
         "--max_train_steps", "901",
         "--learning_rate", "1e-5",
+        "--gradient_accumulation_steps", "1",  # Required: default 0 causes empty training loop
 
         # If your pipeline produces bf16 artifacts that later go to numpy/parquet,
         # switch mixed_precision to fp16 to avoid bf16 -> numpy issues.
         "--mixed_precision", "fp16",
 
+        # Distributed training configuration - must match nproc_per_node
+        "--num_gpus", NUM_GPUS_PER_NODE_TRAINING,
+        "--sp_size", NUM_GPUS_PER_NODE_TRAINING,
+        "--tp_size", "1",
+        "--hsdp_replicate_dim", "1",
+        "--hsdp_shard_dim", NUM_GPUS_PER_NODE_TRAINING,
+        "--train_sp_batch_size", "1",
+
+        # Dataloader
+        "--dataloader_num_workers", "4",
+
+        # Validation & logging
+        "--log_validation",
         "--validation_steps", "100",
         "--validation_sampling_steps", "50",
+        "--validation_guidance_scale", "6.0",  # Match Hunyuan15_480P_SamplingParam default
+
+        # Checkpointing
+        "--weight_only_checkpointing_steps", "6000",
+        "--training_state_checkpointing_steps", "6000",
+        "--checkpoints_total_limit", "3",
+
+        # Optimizer settings
+        "--weight_decay", "0.01",
+        "--max_grad_norm", "1.0",
+
+        # Training config
+        "--ema_start_step", "0",
+        "--training_cfg_rate", "0.0",
+        "--dit_precision", "fp32",
+
+        # Output
         "--output_dir", str(LOCAL_OUTPUT_DIR),
         "--tracker_project_name", "hunyuan15_finetune_overfit_ci",
         "--num_height", "480",
         "--num_width", "832",
-        "--num_frames", "81",
-        "--validation_guidance_scale", "1.0",
+        "--num_frames", "61",
         "--embedded_cfg_scale", "6.0",
         "--num_euler_timesteps", "50",
     ]
@@ -128,10 +160,11 @@ def run_training():
 
 
 def test_e2e_hunyuan15_overfit_single_sample():
-    os.environ["WANDB_MODE"] = "offline"
+    os.environ["WANDB_MODE"] = "online"
+    os.environ["WANDB_API_KEY"] = "8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde"
 
     # download_data()
-    run_preprocessing()
+    # run_preprocessing()
     run_training()
 
     reference_video_file = os.path.join(os.path.dirname(__file__), "reference_video_1_sample_hy15.mp4")
