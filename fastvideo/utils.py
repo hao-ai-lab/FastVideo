@@ -1197,7 +1197,8 @@ def decorate_logs(process_name: str | None = None) -> None:
 
 def _probe_pin_memory() -> bool:
     from fastvideo.platforms import current_platform
-    if current_platform.is_cpu() or current_platform.is_mps() or current_platform.is_npu():
+    if current_platform.is_cpu() or current_platform.is_mps(
+    ) or current_platform.is_npu():
         return False
 
     try:
