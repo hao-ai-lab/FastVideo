@@ -156,8 +156,23 @@ jobs:
           
           # Fix the wheel to be manylinux compliant
           pip install auditwheel
+          # Point auditwheel at torch libs, but do not vendor them into the wheel.
+          TORCH_LIB_DIR=$(python - <<'PY'
+          import os
+          import torch
+
+          print(os.path.join(os.path.dirname(torch.__file__), "lib"))
+          PY
+          )
+          export LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}"
           # Target manylinux_2_35 (Ubuntu 22.04 native)
-          auditwheel repair dist/*.whl --plat manylinux_2_35_x86_64 -w fixed_dist
+          auditwheel repair dist/*.whl --plat manylinux_2_35_x86_64 -w fixed_dist \
+            --exclude libtorch_cuda.so \
+            --exclude libtorch_cpu.so \
+            --exclude libtorch.so \
+            --exclude libc10.so \
+            --exclude libc10_cuda.so \
+            --exclude libtorch_python.so
           # Move fixed wheels back to dist for upload consistency
           rm dist/*.whl
           mv fixed_dist/*.whl dist/
