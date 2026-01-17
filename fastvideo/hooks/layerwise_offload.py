@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from typing import Any
 import torch
 from torch import nn
@@ -85,10 +86,23 @@ class LayerwiseOffloadHook(ForwardHook):
         self.state = state
 
     def on_attach(self, module: nn.Module):
-        self.state.on_init(
-            module)  # pyright: ignore[reportAttributeAccessIssue]
+        self.state.on_init(module)  # pyright: ignore
 
-    def name(self) -> str:
+    def on_detach(self, module: nn.Module):
+        named_parameters = dict(module.named_parameters())
+        for name, cpu_tensor in self.state.cpu_named_parameters.items():
+            if name not in self.state.gpu_named_parameters:
+                if name in named_parameters:
+                    named_parameters[name].data = cpu_tensor.to(
+                        device=self.state.device)
+                else:
+                    logger.warning(
+                        "Parameter {} not found in module during detachment.",
+                        name,
+                    )
+
+    @classmethod
+    def name(cls) -> str:
         return "LayerwiseOffloadHook"
 
     def pre_forward(self, module: nn.Module, *args, **kwargs):
@@ -101,8 +115,20 @@ class LayerwiseOffloadHook(ForwardHook):
         self.state.release_gpu_params()  # pyright: ignore
         return output
 
+    @contextmanager
+    def mutate_params_scope(self):
+        try:
+            # load params to GPU and keep them there
+            self.state.wait_and_replace_params()  # pyright: ignore
+            yield
+        finally:
+            # instead of releasing, we should overwrite the original params since they have been modified
+            self.state.cpu_named_parameters.clear()
+            self.state.gpu_named_parameters.clear()
+            self.state.on_init(self.state.module_ref)  # pyright: ignore
 
-def enable_layerwise_offload(model: nn.Module):
+
+def enable_layerwise_offload(model: nn.Module, is_replace: bool = False):
     if torch.cuda.is_available():
         device = torch.device("cuda", torch.cuda.current_device())
     else:
@@ -119,7 +145,15 @@ def enable_layerwise_offload(model: nn.Module):
                 state_list.append(state)
                 hook_mgr = ModuleHookManager.get_from_or_default(module_entry)
                 hook = LayerwiseOffloadHook(state)
-                hook_mgr.append_forward_hook(hook)
+                if is_replace:
+                    existing_hook = hook_mgr.forward_hooks.get(hook.name())
+                    if existing_hook is not None:
+                        hook_mgr.replace_forward_hook(hook.name(), hook)
+                    else:
+                        raise AssertionError(
+                            f"Expect hook exists in {name} for replacement.")
+                else:
+                    hook_mgr.append_forward_hook(hook)
             break
     if len(state_list) == 0:
         raise ValueError(

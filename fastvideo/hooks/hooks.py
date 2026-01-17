@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
-from abc import ABC, abstractmethod
 import functools
 from typing import Any
 from torch import nn
 
 
-class ForwardHook(ABC):
+class ForwardHook:
     """
     Base class for forward hooks.
     Hooks are used in the way:
@@ -15,9 +14,9 @@ class ForwardHook(ABC):
         modified_output = hook.post_forward(module, output)
     """
 
-    @abstractmethod
-    def name(self) -> str:
-        ...
+    @classmethod
+    def name(cls) -> str:
+        raise NotImplementedError
 
     def on_attach(self, module: nn.Module):  # noqa: B027
         """Called once when the hook is attached to the module."""
@@ -98,11 +97,25 @@ class ModuleHookManager:
         self.forward_hooks[hook.name()] = hook
         hook.on_attach(self.module)
 
-    def remove_forward_hook(self, hook_name: str):
+    def replace_forward_hook(self,
+                             hook_name: str,
+                             new_hook: ForwardHook,
+                             run_on_attach: bool = True):
         self._check_manager_attached()
         if hook_name not in self.forward_hooks:
             raise ValueError(f"No hook with name {hook_name} found.")
-        self.forward_hooks[hook_name].on_detach(self.module)
+        old_hook = self.forward_hooks[hook_name]
+        if run_on_attach:
+            old_hook.on_detach(self.module)
+        self.forward_hooks[hook_name] = new_hook
+        new_hook.on_attach(self.module)
+
+    def remove_forward_hook(self, hook_name: str, run_detach: bool = True):
+        self._check_manager_attached()
+        if hook_name not in self.forward_hooks:
+            raise ValueError(f"No hook with name {hook_name} found.")
+        if run_detach:
+            self.forward_hooks[hook_name].on_detach(self.module)
         del self.forward_hooks[hook_name]
 
     def get_forward_hook(self, hook_name: str) -> ForwardHook | None:
