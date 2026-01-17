@@ -1,0 +1,303 @@
+# SPDX-License-Identifier: Apache-2.0
+from typing import Any
+
+import numpy as np
+import torch
+from PIL import Image
+
+from fastvideo.dataset.dataloader.schema import pyarrow_schema_matrixgame
+from fastvideo.distributed import get_local_torch_device
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.forward_context import set_forward_context
+from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (
+    BasePreprocessPipeline)
+from fastvideo.pipelines.stages import ImageEncodingStage
+
+
+class PreprocessPipeline_MatrixGame(BasePreprocessPipeline):
+    """I2V preprocessing pipeline implementation."""
+
+    _required_config_modules = ["vae", "image_encoder", "image_processor"]
+
+    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
+        self.add_stage(stage_name="image_encoding_stage",
+                       stage=ImageEncodingStage(
+                           image_encoder=self.get_module("image_encoder"),
+                           image_processor=self.get_module("image_processor"),
+                       ))
+
+    def get_pyarrow_schema(self):
+        """Return the PyArrow schema for I2V pipeline."""
+        return pyarrow_schema_matrixgame
+
+    def get_extra_features(self, valid_data: dict[str, Any],
+                           fastvideo_args: FastVideoArgs) -> dict[str, Any]:
+
+        # TODO(will): move these to cpu at some point
+        self.get_module("image_encoder").to(get_local_torch_device())
+        self.get_module("vae").to(get_local_torch_device())
+
+        features = {}
+        """Get CLIP features from the first frame of each video."""
+        first_frame = valid_data["pixel_values"][:, :, 0, :, :].permute(
+            0, 2, 3, 1)  # (B, C, T, H, W) -> (B, H, W, C)
+        _, _, num_frames, height, width = valid_data["pixel_values"].shape
+        # latent_height = height // self.get_module(
+        #     "vae").spatial_compression_ratio
+        # latent_width = width // self.get_module("vae").spatial_compression_ratio
+
+        processed_images = []
+        # Frame has values between -1 and 1
+        for frame in first_frame:
+            frame = (frame + 1) * 127.5
+            frame_pil = Image.fromarray(frame.cpu().numpy().astype(np.uint8))
+            processed_img = self.get_module("image_processor")(
+                images=frame_pil, return_tensors="pt")
+            processed_images.append(processed_img)
+
+        # Get CLIP features
+        pixel_values = torch.cat(
+            [img['pixel_values'] for img in processed_images],
+            dim=0).to(get_local_torch_device())
+        with torch.no_grad():
+            image_inputs = {'pixel_values': pixel_values}
+            with set_forward_context(current_timestep=0, attn_metadata=None):
+                clip_features = self.get_module("image_encoder")(**image_inputs)
+            clip_features = clip_features.last_hidden_state
+
+        features["clip_feature"] = clip_features
+        """Get VAE features from the first frame of each video"""
+        video_conditions = []
+        for frame in first_frame:
+            processed_img = frame.to(device="cpu", dtype=torch.float32)
+            processed_img = processed_img.unsqueeze(0).permute(0, 3, 1,
+                                                               2).unsqueeze(2)
+            # (B, H, W, C) -> (B, C, 1, H, W)
+            video_condition = torch.cat([
+                processed_img,
+                processed_img.new_zeros(processed_img.shape[0],
+                                        processed_img.shape[1], num_frames - 1,
+                                        height, width)
+            ],
+                                        dim=2)
+            video_condition = video_condition.to(
+                device=get_local_torch_device(), dtype=torch.float32)
+            video_conditions.append(video_condition)
+
+        video_conditions = torch.cat(video_conditions, dim=0)
+
+        with torch.autocast(device_type="cuda",
+                            dtype=torch.float32,
+                            enabled=True):
+            encoder_outputs = self.get_module("vae").encode(video_conditions)
+
+        latent_condition = encoder_outputs.mean
+        if (hasattr(self.get_module("vae"), "shift_factor")
+                and self.get_module("vae").shift_factor is not None):
+            if isinstance(self.get_module("vae").shift_factor, torch.Tensor):
+                latent_condition -= self.get_module("vae").shift_factor.to(
+                    latent_condition.device, latent_condition.dtype)
+            else:
+                latent_condition -= self.get_module("vae").shift_factor
+
+        if isinstance(self.get_module("vae").scaling_factor, torch.Tensor):
+            latent_condition = latent_condition * self.get_module(
+                "vae").scaling_factor.to(latent_condition.device,
+                                         latent_condition.dtype)
+        else:
+            latent_condition = latent_condition * self.get_module(
+                "vae").scaling_factor
+
+        # mask_lat_size = torch.ones(batch_size, 1, num_frames, latent_height,
+        #                            latent_width)
+        # mask_lat_size[:, :, list(range(1, num_frames))] = 0
+        # first_frame_mask = mask_lat_size[:, :, 0:1]
+        # first_frame_mask = torch.repeat_interleave(
+        #     first_frame_mask,
+        #     dim=2,
+        #     repeats=self.get_module("vae").temporal_compression_ratio)
+        # mask_lat_size = torch.concat(
+        #     [first_frame_mask, mask_lat_size[:, :, 1:, :]], dim=2)
+        # mask_lat_size = mask_lat_size.view(
+        #     batch_size, -1,
+        #     self.get_module("vae").temporal_compression_ratio, latent_height,
+        #     latent_width)
+        # mask_lat_size = mask_lat_size.transpose(1, 2)
+        # mask_lat_size = mask_lat_size.to(latent_condition.device)
+
+        # image_latent = torch.concat([mask_lat_size, latent_condition], dim=1)
+
+        features["first_frame_latent"] = latent_condition
+
+        if "action_path" in valid_data and valid_data["action_path"]:
+            keyboard_cond_list = []
+            mouse_cond_list = []
+            num_bits = 6
+            for action_path in valid_data["action_path"]:
+                if action_path:
+                    action_data = np.load(action_path, allow_pickle=True)
+                    if isinstance(
+                            action_data,
+                            np.ndarray) and action_data.dtype == np.dtype('O'):
+                        action_dict = action_data.item()
+                        if "keyboard" in action_dict:
+                            keyboard_raw = action_dict["keyboard"]
+                            # Convert 1D bit-flag values to 2D multi-hot encoding
+                            if isinstance(keyboard_raw, np.ndarray):
+                                if keyboard_raw.ndim == 1:
+                                    # [T] -> [T, num_bits]
+                                    T = len(keyboard_raw)
+                                    multi_hot = np.zeros((T, num_bits),
+                                                         dtype=np.float32)
+                                    action_values = keyboard_raw.astype(int)
+                                    for bit_idx in range(num_bits):
+                                        target_idx = (
+                                            2 -
+                                            (bit_idx % 3)) + 3 * (bit_idx // 3)
+                                        if target_idx < num_bits:
+                                            multi_hot[:, target_idx] = (
+                                                (action_values >> bit_idx)
+                                                & 1).astype(np.float32)
+                                    keyboard_cond_list.append(multi_hot)
+                                else:
+                                    # If already 2D, pad to num_bits if necessary
+                                    k_data = keyboard_raw.astype(np.float32)
+                                    if k_data.ndim == 2 and k_data.shape[
+                                            -1] < num_bits:
+                                        padding = np.zeros(
+                                            (k_data.shape[0],
+                                             num_bits - k_data.shape[-1]),
+                                            dtype=np.float32)
+                                        k_data = np.concatenate(
+                                            [k_data, padding], axis=-1)
+                                    keyboard_cond_list.append(k_data)
+                            else:
+                                keyboard_cond_list.append(keyboard_raw)
+                        if "mouse" in action_dict:
+                            mouse_cond_list.append(action_dict["mouse"])
+                    else:
+                        if isinstance(action_data,
+                                      np.ndarray) and action_data.ndim == 1:
+                            T = len(action_data)
+                            multi_hot = np.zeros((T, num_bits),
+                                                 dtype=np.float32)
+                            action_values = action_data.astype(int)
+                            for bit_idx in range(num_bits):
+                                target_idx = (
+                                    2 - (bit_idx % 3)) + 3 * (bit_idx // 3)
+                                if target_idx < num_bits:
+                                    multi_hot[:, target_idx] = (
+                                        (action_values >> bit_idx) & 1).astype(
+                                            np.float32)
+                            keyboard_cond_list.append(multi_hot)
+                        else:
+                            # If already 2D, pad to num_bits if necessary
+                            k_data = action_data.astype(np.float32)
+                            if k_data.ndim == 2 and k_data.shape[-1] < num_bits:
+                                padding = np.zeros(
+                                    (k_data.shape[0],
+                                     num_bits - k_data.shape[-1]),
+                                    dtype=np.float32)
+                                k_data = np.concatenate([k_data, padding],
+                                                        axis=-1)
+                            keyboard_cond_list.append(k_data)
+            if keyboard_cond_list:
+                features["keyboard_cond"] = keyboard_cond_list
+            if mouse_cond_list:
+                features["mouse_cond"] = mouse_cond_list
+
+        return features
+
+    def create_record(
+            self,
+            video_name: str,
+            vae_latent: np.ndarray,
+            text_embedding: np.ndarray,
+            valid_data: dict[str, Any],
+            idx: int,
+            extra_features: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Create a record for the Parquet dataset with CLIP features."""
+        record = super().create_record(video_name=video_name,
+                                       vae_latent=vae_latent,
+                                       text_embedding=text_embedding,
+                                       valid_data=valid_data,
+                                       idx=idx,
+                                       extra_features=extra_features)
+
+        if extra_features and "clip_feature" in extra_features:
+            clip_feature = extra_features["clip_feature"]
+            record.update({
+                "clip_feature_bytes": clip_feature.tobytes(),
+                "clip_feature_shape": list(clip_feature.shape),
+                "clip_feature_dtype": str(clip_feature.dtype),
+            })
+        else:
+            record.update({
+                "clip_feature_bytes": b"",
+                "clip_feature_shape": [],
+                "clip_feature_dtype": "",
+            })
+
+        if extra_features and "first_frame_latent" in extra_features:
+            first_frame_latent = extra_features["first_frame_latent"]
+            record.update({
+                "first_frame_latent_bytes":
+                first_frame_latent.tobytes(),
+                "first_frame_latent_shape":
+                list(first_frame_latent.shape),
+                "first_frame_latent_dtype":
+                str(first_frame_latent.dtype),
+            })
+        else:
+            record.update({
+                "first_frame_latent_bytes": b"",
+                "first_frame_latent_shape": [],
+                "first_frame_latent_dtype": "",
+            })
+
+        if extra_features and "pil_image" in extra_features:
+            pil_image = extra_features["pil_image"]
+            record.update({
+                "pil_image_bytes": pil_image.tobytes(),
+                "pil_image_shape": list(pil_image.shape),
+                "pil_image_dtype": str(pil_image.dtype),
+            })
+        else:
+            record.update({
+                "pil_image_bytes": b"",
+                "pil_image_shape": [],
+                "pil_image_dtype": "",
+            })
+
+        if extra_features and "keyboard_cond" in extra_features:
+            keyboard_cond = extra_features["keyboard_cond"]
+            record.update({
+                "keyboard_cond_bytes": keyboard_cond.tobytes(),
+                "keyboard_cond_shape": list(keyboard_cond.shape),
+                "keyboard_cond_dtype": str(keyboard_cond.dtype),
+            })
+        else:
+            record.update({
+                "keyboard_cond_bytes": b"",
+                "keyboard_cond_shape": [],
+                "keyboard_cond_dtype": "",
+            })
+
+        if extra_features and "mouse_cond" in extra_features:
+            mouse_cond = extra_features["mouse_cond"]
+            record.update({
+                "mouse_cond_bytes": mouse_cond.tobytes(),
+                "mouse_cond_shape": list(mouse_cond.shape),
+                "mouse_cond_dtype": str(mouse_cond.dtype),
+            })
+        else:
+            record.update({
+                "mouse_cond_bytes": b"",
+                "mouse_cond_shape": [],
+                "mouse_cond_dtype": "",
+            })
+
+        return record
+
+
+EntryClass = PreprocessPipeline_MatrixGame

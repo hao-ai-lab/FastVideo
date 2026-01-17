@@ -76,7 +76,7 @@ class WanTimeTextImageEmbedding(nn.Module):
                                  dim,
                                  dim,
                                  bias=True,
-                                 act_type="gelu_pytorch_tanh")
+                                 act_type="gelu_pytorch_tanh") if text_embed_dim > 0 else None
 
         self.image_embedder = None
         if image_embed_dim is not None:
@@ -92,7 +92,10 @@ class WanTimeTextImageEmbedding(nn.Module):
         temb = self.time_embedder(timestep, timestep_seq_len)
         timestep_proj = self.time_modulation(temb)
 
-        encoder_hidden_states = self.text_embedder(encoder_hidden_states)
+        if self.text_embedder is not None:
+            encoder_hidden_states = self.text_embedder(encoder_hidden_states)
+        else:
+            encoder_hidden_states = torch.zeros((timestep.shape[0], 0, temb.shape[-1]), device=temb.device, dtype=temb.dtype)
         if encoder_hidden_states_image is not None:
             assert self.image_embedder is not None
             encoder_hidden_states_image = self.image_embedder(
@@ -179,7 +182,10 @@ class WanT2VCrossAttention(WanSelfAttention):
             v = self.to_v(context)[0].view(b, -1, n, d)
 
         # compute attention
-        x = self.attn(q, k, v)
+        if k.size(1) > 0:
+            x = self.attn(q, k, v)
+        else:
+            x = torch.zeros_like(q)
 
         # output
         x = x.flatten(2)
@@ -227,7 +233,10 @@ class WanI2VCrossAttention(WanSelfAttention):
         v_img = self.add_v_proj(context_img)[0].view(b, -1, n, d)
         img_x = self.attn(q, k_img, v_img)
         # compute attention
-        x = self.attn(q, k, v)
+        if k.size(1) > 0:
+            x = self.attn(q, k, v)
+        else:
+            x = torch.zeros_like(q)
 
         # output
         x = x.flatten(2)
@@ -633,7 +642,7 @@ class WanTransformer3DModel(CachableDiT):
         enable_teacache = forward_batch is not None and forward_batch.enable_teacache
 
         orig_dtype = hidden_states.dtype
-        if not isinstance(encoder_hidden_states, torch.Tensor):
+        if encoder_hidden_states is not None and not isinstance(encoder_hidden_states, torch.Tensor):
             encoder_hidden_states = encoder_hidden_states[0]
         if isinstance(encoder_hidden_states_image,
                       list) and len(encoder_hidden_states_image) > 0:
@@ -705,8 +714,11 @@ class WanTransformer3DModel(CachableDiT):
             timestep_proj = timestep_proj.unflatten(1, (6, -1))
 
         if encoder_hidden_states_image is not None:
-            encoder_hidden_states = torch.concat(
-                [encoder_hidden_states_image, encoder_hidden_states], dim=1)
+            if encoder_hidden_states is not None:
+                encoder_hidden_states = torch.concat(
+                    [encoder_hidden_states_image, encoder_hidden_states], dim=1)
+            else:
+                encoder_hidden_states = encoder_hidden_states_image
 
         if current_platform.is_mps() or current_platform.is_npu():
             encoder_hidden_states = encoder_hidden_states.to(orig_dtype)

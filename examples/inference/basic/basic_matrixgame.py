@@ -1,6 +1,5 @@
 from fastvideo import VideoGenerator
-from fastvideo.configs.pipelines.wan import MatrixGameI2V480PConfig
-from fastvideo.models.dits.matrix_game.utils import create_action_presets
+from fastvideo.models.dits.matrixgame.utils import create_action_presets
 
 import torch
 

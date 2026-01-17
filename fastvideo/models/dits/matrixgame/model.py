@@ -61,14 +61,17 @@ class MatrixGameTimeImageEmbedding(nn.Module):
         timestep_proj = self.time_modulation(temb)
 
         # MatrixGame does not use text embeddings, so we ignore encoder_hidden_states
-        # and return None for the text embedding part
         
         if encoder_hidden_states_image is not None:
             assert self.image_embedder is not None
             encoder_hidden_states_image = self.image_embedder(
                 encoder_hidden_states_image)
 
-        return temb, timestep_proj, None, encoder_hidden_states_image
+        encoder_hidden_states = torch.zeros((timestep.shape[0], 0, temb.shape[-1]),
+                                            device=temb.device,
+                                            dtype=temb.dtype)
+
+        return temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image
 
 
 class MatrixGameCrossAttention(WanSelfAttention):
@@ -313,6 +316,7 @@ class MatrixGameWanModel(BaseDiT):
         inner_dim = config.num_attention_heads * config.attention_head_dim
         self.hidden_size = config.hidden_size
         self.num_attention_heads = config.num_attention_heads
+        self.num_channels_latents = config.out_channels
         self.patch_size = config.patch_size
 
         # 1. Patch & position embedding
@@ -395,7 +399,8 @@ class MatrixGameWanModel(BaseDiT):
             self.num_attention_heads,
             rope_dim_list,
             dtype=torch.float32 if current_platform.is_mps() else torch.float64,
-            rope_theta=10000)
+            rope_theta=10000,
+            do_sp_sharding=True)
         freqs_cos = freqs_cos.to(hidden_states.device)
         freqs_sin = freqs_sin.to(hidden_states.device)
         freqs_cis = (freqs_cos.float(),
