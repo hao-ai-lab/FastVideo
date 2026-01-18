@@ -47,13 +47,13 @@ def sliding_tile_attention(
 
     for head_idx, (t, h, w) in enumerate(window_size):
         sta_fwd(
-            q[:, head_idx:head_idx + 1], k[:, head_idx:head_idx + 1],
-            v[:, head_idx:head_idx + 1], output[:, head_idx:head_idx + 1],
+            q[:, head_idx:head_idx + 1].contiguous(), k[:, head_idx:head_idx + 1].contiguous(),
+            v[:, head_idx:head_idx + 1].contiguous(), output[:, head_idx:head_idx + 1].contiguous(),
             t, h, w, text_length, False, has_text, flag
         )
 
     if has_text:
-        sta_fwd(q, k, v, output, 3, 3, 3, text_length, True, True, flag)
+        sta_fwd(q.contiguous(), k.contiguous(), v.contiguous(), output.contiguous(), 3, 3, 3, text_length, True, True, flag)
 
     return output[:, :, :seq_length]
 
