@@ -5,8 +5,7 @@ from copy import deepcopy
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler,
-)
+    FlowMatchEulerDiscreteScheduler, )
 from fastvideo.training.training_pipeline import TrainingPipeline
 
 from fastvideo.pipelines.basic.hunyuan15.hunyuan15_pipeline import HunyuanVideo15Pipeline
@@ -20,10 +19,14 @@ class Hunyuan15TrainingPipeline(TrainingPipeline):
     """
     _required_config_modules = ["scheduler", "transformer", "vae"]
 
+    def initialize_training_pipeline(self, training_args: TrainingArgs):
+        if training_args.enable_gradient_checkpointing_type is None:
+            training_args.enable_gradient_checkpointing_type = "full"
+        super().initialize_training_pipeline(training_args)
+
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
-            shift=fastvideo_args.pipeline_config.flow_shift
-        )
+            shift=fastvideo_args.pipeline_config.flow_shift)
 
     def create_training_stages(self, training_args: TrainingArgs):
         # reserved for future refactors
@@ -47,6 +50,8 @@ class Hunyuan15TrainingPipeline(TrainingPipeline):
             num_gpus=training_args.num_gpus,
             pin_cpu_memory=training_args.pin_cpu_memory,
             dit_cpu_offload=True,
+            # dit_layerwise_offload=True,
+            use_fsdp_inference=True,
         )
 
         self.validation_pipeline = validation_pipeline

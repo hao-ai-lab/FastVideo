@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import asdict
+import inspect
 import math
 import os
 import time
@@ -174,6 +175,16 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 last_epoch=self.init_steps - 1,
             )
 
+        text_padding_length = training_args.pipeline_config.text_encoder_configs[
+            0].arch_config.text_len  # type: ignore[attr-defined]
+        if not text_padding_length:
+            text_max_lengths = getattr(training_args.pipeline_config,
+                                       "text_encoder_max_lengths", None)
+            if text_max_lengths:
+                text_padding_length = text_max_lengths[0]
+            else:
+                text_padding_length = 512
+
         self.train_dataset, self.train_dataloader = build_parquet_map_style_dataloader(
             training_args.data_path,
             training_args.train_batch_size,
@@ -181,9 +192,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
             num_data_workers=training_args.dataloader_num_workers,
             cfg_rate=training_args.training_cfg_rate,
             drop_last=True,
-            text_padding_length=training_args.pipeline_config.
-            text_encoder_configs[0].arch_config.
-            text_len,  # type: ignore[attr-defined]
+            text_padding_length=text_padding_length,
             seed=self.seed)
 
         self.noise_scheduler = noise_scheduler
@@ -275,7 +284,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         # Automatically detect model type based on VAE class name
         vae = self.get_module("vae")
         vae_class_name = vae.__class__.__name__
-        
+
         # Map VAE class names to model types
         if 'Hunyuan' in vae_class_name:
             model_type = 'hunyuan'
@@ -287,7 +296,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 model_type = 'wan'
             else:
                 model_type = 'hunyuan'
-        
+
         with self.tracker.timed("timing/normalize_input"):
             training_batch.latents = normalize_dit_input(
                 model_type,
@@ -444,6 +453,87 @@ class TrainingPipeline(LoRAPipeline, ABC):
         #         device=training_batch.noisy_model_input.device,
         #         dtype=torch.bfloat16)
         current_model = self.transformer_2 if self.train_transformer_2 else self.transformer
+        if "return_dict" in input_kwargs:
+            try:
+                sig = inspect.signature(current_model.forward)
+            except (TypeError, ValueError):
+                sig = None
+            if sig is not None:
+                params = sig.parameters.values()
+                accepts_kwargs = any(param.kind == inspect.Parameter.VAR_KEYWORD
+                                     for param in params)
+                if ("return_dict" not in sig.parameters and not accepts_kwargs):
+                    input_kwargs = dict(input_kwargs)
+                    input_kwargs.pop("return_dict", None)
+        base_model = current_model
+        for attr in ("module", "_orig_mod"):
+            if hasattr(base_model, attr):
+                base_model = getattr(base_model, attr)
+        if hasattr(base_model, "_fsdp_wrapped_module"):
+            base_model = base_model._fsdp_wrapped_module
+            if hasattr(base_model, "module"):
+                base_model = base_model.module
+        model_config = getattr(base_model, "config", None)
+        if model_config is None:
+            model_config = getattr(current_model, "config", None)
+        if model_config is not None and hasattr(model_config,
+                                                "text_embed_2_dim"):
+            input_kwargs = dict(input_kwargs)
+            text_states = training_batch.encoder_hidden_states
+            text_mask = training_batch.encoder_attention_mask
+            if text_states is None or text_mask is None:
+                raise ValueError(
+                    "HunyuanVideo15 training requires text embeddings and masks"
+                )
+            if not isinstance(input_kwargs.get("encoder_hidden_states"),
+                              (list, tuple)):
+                batch_size = text_states.shape[0]
+                text_2_len = 256
+                if hasattr(self.training_args.pipeline_config,
+                           "text_encoder_max_lengths"):
+                    text_2_len = self.training_args.pipeline_config.text_encoder_max_lengths[
+                        1]
+                text_2_dim = model_config.text_embed_2_dim
+                text_2 = torch.zeros((batch_size, text_2_len, text_2_dim),
+                                     device=text_states.device,
+                                     dtype=text_states.dtype)
+                input_kwargs["encoder_hidden_states"] = [text_states, text_2]
+            if not isinstance(input_kwargs.get("encoder_attention_mask"),
+                              (list, tuple)):
+                batch_size = text_mask.shape[0]
+                text_2_len = 256
+                if hasattr(self.training_args.pipeline_config,
+                           "text_encoder_max_lengths"):
+                    text_2_len = self.training_args.pipeline_config.text_encoder_max_lengths[
+                        1]
+                text_mask_2 = torch.zeros((batch_size, text_2_len),
+                                          device=text_mask.device,
+                                          dtype=text_mask.dtype)
+                input_kwargs["encoder_attention_mask"] = [
+                    text_mask, text_mask_2
+                ]
+            if "encoder_hidden_states_image" not in input_kwargs:
+                image_embeds = training_batch.image_embeds
+                if image_embeds is None or image_embeds.numel() == 0:
+                    batch_size = text_states.shape[0]
+                    image_len = 729
+                    image_dim = model_config.image_embed_dim
+                    image_embeds = torch.zeros(
+                        (batch_size, image_len, image_dim),
+                        device=text_states.device,
+                        dtype=text_states.dtype,
+                    )
+                input_kwargs["encoder_hidden_states_image"] = [image_embeds]
+            hidden_states = input_kwargs.get("hidden_states")
+            if (isinstance(hidden_states, torch.Tensor)
+                    and hidden_states.shape[1] != model_config.in_channels):
+                batch_size, _, t, h, w = hidden_states.shape
+                video_latent = torch.zeros((batch_size, 1, t, h, w),
+                                           device=hidden_states.device,
+                                           dtype=hidden_states.dtype)
+                zeros_latent = torch.zeros_like(hidden_states)
+                input_kwargs["hidden_states"] = torch.cat(
+                    [hidden_states, video_latent, zeros_latent], dim=1)
 
         with self.tracker.timed("timing/forward_backward"), set_forward_context(
                 current_timestep=training_batch.current_timestep,
@@ -610,8 +700,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         self._log_training_info()
 
-        self._log_validation(self.transformer, self.training_args,
-                             self.init_steps)
+        # self._log_validation(self.transformer, self.training_args,
+        #                      self.init_steps)
 
         # Train!
         progress_bar = tqdm(
@@ -666,7 +756,13 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 }
                 metrics["batch_size"] = int(training_batch.raw_latent_shape[0])
 
-                patch_t, patch_h, patch_w = self.training_args.pipeline_config.dit_config.patch_size
+                patch_size = self.training_args.pipeline_config.dit_config.patch_size
+                if isinstance(patch_size, tuple):
+                    patch_t, patch_h, patch_w = patch_size
+                else:
+                    patch_t = patch_size
+                    patch_h = patch_size
+                    patch_w = patch_size
                 seq_len = (training_batch.raw_latent_shape[2] // patch_t) * (
                     training_batch.raw_latent_shape[3] //
                     patch_h) * (training_batch.raw_latent_shape[4] // patch_w)
@@ -679,7 +775,13 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
                 metrics["hidden_dim"] = arch_config.hidden_size
                 metrics["num_layers"] = arch_config.num_layers
-                metrics["ffn_dim"] = arch_config.ffn_dim
+                ffn_dim = getattr(arch_config, "ffn_dim", None)
+                if ffn_dim is None:
+                    mlp_ratio = getattr(arch_config, "mlp_ratio", None)
+                    if mlp_ratio and arch_config.hidden_size:
+                        ffn_dim = int(arch_config.hidden_size * mlp_ratio)
+                if ffn_dim is not None:
+                    metrics["ffn_dim"] = ffn_dim
 
                 self.tracker.log(metrics, step)
             if step % self.training_args.training_state_checkpointing_steps == 0:
@@ -854,8 +956,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 step_captions.append(batch.prompt)
 
                 # Run validation inference
+                # Use the validation pipeline args to match its loaded modules.
+                validation_args = self.validation_pipeline.fastvideo_args
+                if validation_args is None:
+                    validation_args = training_args
                 output_batch = self.validation_pipeline.forward(
-                    batch, training_args)
+                    batch, validation_args)
                 samples = output_batch.output
 
                 if self.rank_in_sp_group != 0:

@@ -53,6 +53,9 @@ def sequence_model_parallel_all_gather_with_unpad(
         Tensor: Gathered and unpadded tensor
     """
 
+    # NCCL all_gather expects contiguous inputs.
+    if not input_.is_contiguous():
+        input_ = input_.contiguous()
     # First gather across all ranks
     gathered = get_sp_group().all_gather(input_, dim)
 

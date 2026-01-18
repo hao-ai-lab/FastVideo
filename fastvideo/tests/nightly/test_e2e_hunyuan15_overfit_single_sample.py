@@ -18,7 +18,7 @@ LOCAL_PREPROCESSED_DATA_DIR = Path(DATA_DIR) / "cats_processed_t2v_hunyuan15"
 LOCAL_OUTPUT_DIR = Path(DATA_DIR) / "outputs_hunyuan15"
 
 NUM_GPUS_PER_NODE_PREPROCESSING = "1"
-NUM_GPUS_PER_NODE_TRAINING = "4"
+NUM_GPUS_PER_NODE_TRAINING = "8"
 
 # entrypoints (adjust to what hunyuan15 scripts use)
 PREPROCESS_ENTRY = ["-m", "fastvideo.pipelines.preprocess.v1_preprocessing_new"]
@@ -145,6 +145,7 @@ def run_training():
         "--ema_start_step", "0",
         "--training_cfg_rate", "0.0",
         "--dit_precision", "fp32",
+        "--enable_gradient_checkpointing_type", "full",
 
         # Output
         "--output_dir", str(LOCAL_OUTPUT_DIR),

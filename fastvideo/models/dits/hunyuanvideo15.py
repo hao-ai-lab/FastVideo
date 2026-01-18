@@ -690,12 +690,15 @@ class SingleTokenRefiner(nn.Module):
         timestep_aware_representations = self.t_embedder(t)
 
         # Get context-aware representations
-        original_dtype = x.dtype
+        target_dtype = self.c_embedder.fc_in.weight.dtype
+        if x.dtype != target_dtype:
+            x = x.to(dtype=target_dtype)
         if mask is None:
             context_aware_representations = x.mean(dim=1)
         else:
-            mask_float = mask.float().unsqueeze(-1)  # [B, L, 1]
-            context_aware_representations = (x * mask_float).sum(dim=1) / mask_float.sum(dim=1)
+            mask_float = mask.to(dtype=target_dtype).unsqueeze(-1)  # [B, L, 1]
+            context_aware_representations = (
+                x * mask_float).sum(dim=1) / mask_float.sum(dim=1)
 
         context_aware_representations = self.c_embedder(
             context_aware_representations)
