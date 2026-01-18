@@ -105,7 +105,8 @@ class LTX2LatentPreparationStage(PipelineStage):
         latents_source = "provided"
         if latents is None:
             if latent_path:
-                loaded_latents = self._load_initial_latent(latent_path, device, dtype)
+                loaded_latents = self._load_initial_latent(
+                    latent_path, device, dtype)
                 if loaded_latents is not None:
                     latents = loaded_latents
                     latents_source = "loaded"
@@ -170,7 +171,8 @@ class LTX2LatentPreparationStage(PipelineStage):
         logger.info("[LTX2] Loaded initial latent from %s", path)
         return latent.to(device=device, dtype=dtype)
 
-    def _save_initial_latent(self, latent_path: str, latents: torch.Tensor) -> None:
+    def _save_initial_latent(self, latent_path: str,
+                             latents: torch.Tensor) -> None:
         path = Path(latent_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():

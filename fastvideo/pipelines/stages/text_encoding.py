@@ -121,8 +121,7 @@ class TextEncodingStage(PipelineStage):
                 neg_sum = neg_embeds_list[0].float().sum().item()
             _debug_log_line(
                 f"fastvideo:text_encode:prompt_sum={prompt_sum:.6f} "
-                f"neg_sum={neg_sum:.6f}"
-            )
+                f"neg_sum={neg_sum:.6f}")
 
         return batch
 
@@ -289,8 +288,7 @@ class TextEncodingStage(PipelineStage):
                     f":encoder_index={i} input_sum={input_sum:.6f} "
                     f"mask_sum={mask_sum:.6f} input_shape={tuple(input_ids.shape)} "
                     f"mask_shape={tuple(attention_mask.shape)} "
-                    f"input_head={input_head} mask_head={mask_head}"
-                )
+                    f"input_head={input_head} mask_head={mask_head}")
 
             with set_forward_context(current_timestep=0, attn_metadata=None):
                 outputs = text_encoder(

@@ -279,16 +279,15 @@ class LTX2DenoisingStage(PipelineStage):
         )
 
         if debug_nans:
-            if _log_non_finite("latents_start", latents):
-                if abort_on_nans:
-                    raise RuntimeError("Non-finite latents before denoising.")
-            if _log_non_finite("prompt_embeds", prompt_embeds):
-                if abort_on_nans:
-                    raise RuntimeError("Non-finite prompt embeddings.")
-            if neg_prompt_embeds is not None and _log_non_finite(
-                    "negative_prompt_embeds", neg_prompt_embeds):
-                if abort_on_nans:
-                    raise RuntimeError("Non-finite negative prompt embeddings.")
+            if _log_non_finite("latents_start", latents) and abort_on_nans:
+                raise RuntimeError("Non-finite latents before denoising.")
+            if _log_non_finite("prompt_embeds",
+                               prompt_embeds) and abort_on_nans:
+                raise RuntimeError("Non-finite prompt embeddings.")
+            if (neg_prompt_embeds is not None and _log_non_finite(
+                    "negative_prompt_embeds", neg_prompt_embeds)
+                    and abort_on_nans):
+                raise RuntimeError("Non-finite negative prompt embeddings.")
         if verbose_logs:
             _log_tensor_stats("latents_start", latents)
             _log_tensor_stats("prompt_embeds", prompt_embeds)
@@ -358,15 +357,15 @@ class LTX2DenoisingStage(PipelineStage):
                                                  1) * (pos_audio - neg_audio)
 
             if debug_nans:
-                if _log_non_finite("pos_denoised", pos_denoised, step_index):
-                    if abort_on_nans:
-                        raise RuntimeError(
-                            f"Non-finite pos_denoised at step {step_index}.")
-                if neg_prompt_embeds is not None and _log_non_finite(
-                        "neg_denoised", neg_denoised, step_index):
-                    if abort_on_nans:
-                        raise RuntimeError(
-                            f"Non-finite neg_denoised at step {step_index}.")
+                if (_log_non_finite("pos_denoised", pos_denoised, step_index)
+                        and abort_on_nans):
+                    raise RuntimeError(
+                        f"Non-finite pos_denoised at step {step_index}.")
+                if (neg_prompt_embeds is not None and _log_non_finite(
+                        "neg_denoised", neg_denoised, step_index)
+                        and abort_on_nans):
+                    raise RuntimeError(
+                        f"Non-finite neg_denoised at step {step_index}.")
             if verbose_logs and step_log_interval > 0 and (
                     step_index % step_log_interval == 0):
                 _log_tensor_stats("pos_denoised", pos_denoised, step_index)
@@ -390,10 +389,9 @@ class LTX2DenoisingStage(PipelineStage):
                 audio_latents = (audio_latents.float() +
                                  audio_velocity.float() * dt).to(
                                      audio_latents.dtype)
-            if debug_nans and _log_non_finite("latents", latents, step_index):
-                if abort_on_nans:
-                    raise RuntimeError(
-                        f"Non-finite latents at step {step_index}.")
+            if (debug_nans and _log_non_finite("latents", latents, step_index)
+                    and abort_on_nans):
+                raise RuntimeError(f"Non-finite latents at step {step_index}.")
             if verbose_logs and step_log_interval > 0 and (
                     step_index % step_log_interval == 0):
                 _log_tensor_stats("latents", latents, step_index)

@@ -157,9 +157,9 @@ class DecodingStage(PipelineStage):
             fastvideo_args.pipeline_config.vae_precision]
         disable_vae_autocast = os.getenv("LTX2_DISABLE_VAE_AUTOCAST",
                                          "1") == "1"
-        vae_autocast_enabled = (
-            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast and (
-                not disable_vae_autocast)
+        vae_autocast_enabled = (vae_dtype != torch.float32
+                                ) and not fastvideo_args.disable_autocast and (
+                                    not disable_vae_autocast)
 
         if debug_vae:
             _log_tensor_stats("latents_in", latents)

@@ -70,7 +70,6 @@ def main():
         local_dir_use_symlinks=False  # We want actual files to modify them
     )
     print("Download complete.")
-    exit()
 
     target_component_dir = os.path.join(args.local_dir, args.component_name)
     if not os.path.exists(target_component_dir):

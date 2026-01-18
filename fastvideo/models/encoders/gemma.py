@@ -374,10 +374,11 @@ class LTX2GemmaTextEncoderModel(TextEncoder):
                 local_files_only=True,
                 torch_dtype=dtype,
             )
+            # Configure model-level attention implementation when using TORCH_SDPA.
+            # Note: torch.backends.cuda.enable_*_sdp() settings should be configured
+            # at application/pipeline initialization level, not here, to avoid
+            # unexpected side effects across the application.
             if os.getenv("FASTVIDEO_ATTENTION_BACKEND") == "TORCH_SDPA":
-                torch.backends.cuda.enable_flash_sdp(False)
-                torch.backends.cuda.enable_mem_efficient_sdp(False)
-                torch.backends.cuda.enable_math_sdp(True)
                 if hasattr(self._gemma_model.config, "attn_implementation"):
                     self._gemma_model.config.attn_implementation = "sdpa"
                 if hasattr(self._gemma_model.config, "_attn_implementation"):
