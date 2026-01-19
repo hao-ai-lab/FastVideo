@@ -85,7 +85,7 @@ WAN_I2V_PARAMS = {
 # Using num_frames=41 for faster CI (still valid: 41 = 8×5 + 1)
 LTX2_T2V_PARAMS = {
     "num_gpus": 2,
-    "model_path": "converted/ltx2_diffusers",
+    "model_path": "FastVideo/LTX2-Distilled-Diffusers",
     "height": 512,
     "width": 768,
     "num_frames": 41,  # Shorter for CI; official default is 121

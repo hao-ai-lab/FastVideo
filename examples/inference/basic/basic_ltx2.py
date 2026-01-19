@@ -25,7 +25,7 @@ SEED = 10
 
 def main() -> None:
     diffusers_path = os.getenv("LTX2_DIFFUSERS_PATH",
-                               "converted/ltx2_diffusers")
+                               "FastVideo/LTX2-Distilled-Diffusers")
 
     generator = VideoGenerator.from_pretrained(
         diffusers_path,
