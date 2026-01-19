@@ -837,7 +837,18 @@ class TransformerLoader(ComponentLoader):
         model = model.eval()
 
         if fastvideo_args.inference_mode and fastvideo_args.dit_layerwise_offload:
-            enable_layerwise_offload(model)
+            # Check if model has nn.ModuleList for layerwise offload compatibility
+            has_module_list = any(
+                isinstance(m, nn.ModuleList) for m in model.children()
+            )
+            if has_module_list:
+                enable_layerwise_offload(model)
+            else:
+                logger.warning(
+                    "Layerwise offload requested but model %s does not have "
+                    "nn.ModuleList structure. Skipping layerwise offload.",
+                    cls_name
+                )
         return model
 
 
