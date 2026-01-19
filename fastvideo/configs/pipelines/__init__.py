@@ -17,5 +17,6 @@ __all__ = [
     "Hunyuan15T2V480PConfig", "Hunyuan15T2V720PConfig", "SlidingTileAttnConfig",
     "WanT2V480PConfig", "WanI2V480PConfig", "WanT2V720PConfig",
     "WanI2V720PConfig", "StepVideoT2VConfig", "SelfForcingWanT2V480PConfig",
-    "CosmosConfig", "Cosmos25Config", "LTX2T2VConfig", "get_pipeline_config_cls_from_name"
+    "CosmosConfig", "Cosmos25Config", "LTX2T2VConfig",
+    "get_pipeline_config_cls_from_name"
 ]
