@@ -23,6 +23,7 @@ from fastvideo.configs.sample import SamplingParam
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch
+from fastvideo.entrypoints.generation_types import GenerationResult, OutputOptions
 from fastvideo.utils import align_to, shallow_asdict
 from fastvideo.worker.executor import Executor
 
@@ -107,6 +108,8 @@ class VideoGenerator:
         keyboard_cond: torch.Tensor | None = None,
         grid_sizes: tuple[int, int, int] | list[int] | torch.Tensor
         | None = None,
+        output_options: OutputOptions | None = None,
+        return_format: str = "legacy",
         **kwargs,
     ) -> dict[str, Any] | list[np.ndarray] | list[dict[str, Any]]:
         """
@@ -137,6 +140,11 @@ class VideoGenerator:
             sampling_param = SamplingParam.from_pretrained(
                 self.fastvideo_args.model_path)
 
+        if return_format not in ("legacy", "dataclass"):
+            raise ValueError(
+                "return_format must be 'legacy' or 'dataclass', got "
+                f"{return_format!r}")
+
         # Add action control inputs to kwargs if provided
         if mouse_cond is not None:
             kwargs['mouse_cond'] = mouse_cond
@@ -145,7 +153,18 @@ class VideoGenerator:
         if grid_sizes is not None:
             kwargs['grid_sizes'] = grid_sizes
 
-        sampling_param.update(kwargs)
+        # Only apply generation-time overrides that actually exist on
+        # SamplingParam. Other kwargs (e.g. monitoring, callbacks) should not
+        # be treated as sampling fields.
+        sampling_updates = {
+            key: value
+            for key, value in kwargs.items() if hasattr(sampling_param, key)
+        }
+        sampling_param.update(sampling_updates)
+        sampling_param.check_sampling_param()
+
+        output_options = self._resolve_output_options(sampling_param,
+                                                      output_options)
 
         if self.fastvideo_args.prompt_txt is not None or sampling_param.prompt_path is not None:
             prompt_txt_path = sampling_param.prompt_path or self.fastvideo_args.prompt_txt
@@ -174,10 +193,14 @@ class VideoGenerator:
                     result = self._generate_single_video(
                         prompt=batch_prompt,
                         sampling_param=sampling_param,
+                        output_options=output_options,
+                        return_format=return_format,
                         **kwargs)
 
                     # Add prompt info to result
-                    if isinstance(result, dict):
+                    if isinstance(result, GenerationResult):
+                        pass
+                    elif isinstance(result, dict):
                         result["prompt_index"] = i
                         result["prompt"] = batch_prompt
 
@@ -189,6 +212,10 @@ class VideoGenerator:
                     logger.error("Failed to generate video for prompt %d: %s",
                                  i + 1, e)
                     continue
+                monitor = kwargs.get("monitor")
+                if monitor is not None and hasattr(monitor, "print_stats"):
+                    monitor.print_stats(
+                        f"INTERNAL: After prompt {i + 1}/{len(prompts)}")
 
             logger.info(
                 "Completed batch processing. Generated %d videos successfully.",
@@ -203,7 +230,25 @@ class VideoGenerator:
         kwargs["output_path"] = output_path
         return self._generate_single_video(prompt=prompt,
                                            sampling_param=sampling_param,
+                                           output_options=output_options,
+                                           return_format=return_format,
                                            **kwargs)
+
+    def _resolve_output_options(
+            self, sampling_param: SamplingParam,
+            output_options: OutputOptions | None) -> OutputOptions:
+        if output_options is not None:
+            return output_options
+
+        return OutputOptions(
+            save_video=None,
+            return_frames=sampling_param.return_frames,
+            include_frames=getattr(sampling_param, "return_frames_in_dict",
+                                   False),
+            include_samples=getattr(sampling_param, "return_samples", False),
+            include_trajectory_latents=sampling_param.return_trajectory_latents,
+            include_trajectory_decoded=sampling_param.return_trajectory_decoded,
+        )
 
     def _prepare_output_path(
         self,
@@ -270,8 +315,10 @@ class VideoGenerator:
         self,
         prompt: str,
         sampling_param: SamplingParam | None = None,
+        output_options: OutputOptions | None = None,
+        return_format: str = "legacy",
         **kwargs,
-    ) -> dict[str, Any] | list[np.ndarray]:
+    ) -> dict[str, Any] | list[np.ndarray] | GenerationResult:
         """Internal method for single video generation"""
         # Create a copy of inference args to avoid modifying the original
         fastvideo_args = self.fastvideo_args
@@ -368,6 +415,17 @@ class VideoGenerator:
             VSA_sparsity=fastvideo_args.VSA_sparsity,
         )
 
+        if output_options is None:
+            output_options = self._resolve_output_options(sampling_param, None)
+
+        if output_options.save_video is not None:
+            batch.save_video = output_options.save_video
+        batch.return_frames = output_options.return_frames
+        batch.return_frames_in_dict = output_options.include_frames
+        batch.return_samples = output_options.include_samples
+        batch.return_trajectory_latents = output_options.include_trajectory_latents
+        batch.return_trajectory_decoded = output_options.include_trajectory_decoded
+
         # Run inference
         start_time = time.perf_counter()
         output_batch = self.executor.execute_forward(batch, fastvideo_args)
@@ -377,33 +435,55 @@ class VideoGenerator:
         gen_time = time.perf_counter() - start_time
         logger.info("Generated successfully in %.2f seconds", gen_time)
 
-        # Process outputs
-        videos = rearrange(samples, "b c t h w -> t b c h w")
-        frames = []
-        for x in videos:
-            x = torchvision.utils.make_grid(x, nrow=6)
-            x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-            frames.append((x * 255).numpy().astype(np.uint8))
+        frames: list[np.ndarray] | None = None
+        need_frames = batch.save_video or batch.return_frames or batch.return_frames_in_dict
+        if need_frames:
+            # Process outputs into CPU frames (potentially large).
+            videos = rearrange(samples, "b c t h w -> t b c h w")
+            frames = []
+            for x in videos:
+                x = torchvision.utils.make_grid(x, nrow=6)
+                x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+                frames.append((x * 255).numpy().astype(np.uint8))
 
-        # Save video if requested
-        if batch.save_video:
-            imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
-            logger.info("Saved video to %s", output_path)
+            if batch.save_video:
+                imageio.mimsave(output_path,
+                                frames,
+                                fps=batch.fps,
+                                format="mp4")
+                logger.info("Saved video to %s", output_path)
+
+        result = GenerationResult(
+            output_path=output_path,
+            prompt=prompt,
+            size=(target_height, target_width, batch.num_frames),
+            generation_time=gen_time,
+            logging_info=logging_info,
+        )
+        if batch.return_frames or batch.return_frames_in_dict:
+            if frames is None:
+                raise RuntimeError(
+                    "Frames requested but frames were not produced")
+            result.frames = frames
+        if batch.return_samples:
+            result.samples = samples
+        if batch.return_trajectory_latents:
+            result.trajectory_latents = output_batch.trajectory_latents
+            result.trajectory_timesteps = output_batch.trajectory_timesteps
+        if batch.return_trajectory_decoded:
+            result.trajectory_decoded = output_batch.trajectory_decoded
+
+        if return_format == "dataclass":
+            return result
 
         if batch.return_frames:
-            return frames
-        else:
-            return {
-                "samples": samples,
-                "frames": frames,
-                "prompts": prompt,
-                "size": (target_height, target_width, batch.num_frames),
-                "generation_time": gen_time,
-                "logging_info": logging_info,
-                "trajectory": output_batch.trajectory_latents,
-                "trajectory_timesteps": output_batch.trajectory_timesteps,
-                "trajectory_decoded": output_batch.trajectory_decoded,
-            }
+            assert result.frames is not None
+            return result.frames
+
+        out_dict = result.to_legacy_dict()
+        if not batch.return_frames_in_dict:
+            out_dict.pop("frames", None)
+        return out_dict
 
     def set_lora_adapter(self,
                          lora_nickname: str,
