@@ -9,7 +9,7 @@ import torch
 # Ensure backend selection happens during import-time initialization
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
 # Force VSA to use Triton implementation even on H100 / when CUDA extension is available
-os.environ["FASTVIDEO_KERNEL_VSA_FORCE_TRITON"] = "1"
+# os.environ["FASTVIDEO_KERNEL_VSA_FORCE_TRITON"] = "1"
 
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
