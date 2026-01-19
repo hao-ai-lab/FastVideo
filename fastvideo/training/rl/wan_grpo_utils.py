@@ -30,7 +30,280 @@ from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
 from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
 from fastvideo.utils import get_compute_dtype
 
+# for test_wan_transformer2
+import os
+from diffusers import WanTransformer3DModel
+from fastvideo.utils import maybe_download_model
+from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.configs.pipelines import PipelineConfig
+from fastvideo.configs.models.dits import WanVideoConfig
+from fastvideo.models.loader.component_loader import TransformerLoader
+
 logger = init_logger(__name__)
+
+def test_wan_transformer():
+    BASE_MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+    MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
+                                    local_dir=os.path.join(
+                                        'data', BASE_MODEL_PATH))
+    TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    precision = torch.bfloat16
+    precision_str = "bf16"
+    args = FastVideoArgs(model_path=TRANSFORMER_PATH,
+                         dit_cpu_offload=True,
+                         pipeline_config=PipelineConfig(dit_config=WanVideoConfig(), dit_precision=precision_str))
+    args.device = device
+
+    loader = TransformerLoader()
+    model2 = loader.load(TRANSFORMER_PATH, args).to(dtype=precision)
+
+    model1 = WanTransformer3DModel.from_pretrained(
+        TRANSFORMER_PATH, device=device,
+        torch_dtype=precision).to(device, dtype=precision).requires_grad_(False)
+
+    total_params = sum(p.numel() for p in model1.parameters())
+    # Calculate weight sum for model1 (converting to float64 to avoid overflow)
+    weight_sum_model1 = sum(
+        p.to(torch.float64).sum().item() for p in model1.parameters())
+    # Also calculate mean for more stable comparison
+    weight_mean_model1 = weight_sum_model1 / total_params
+    logger.info("Model 1 weight sum: %s", weight_sum_model1)
+    logger.info("Model 1 weight mean: %s", weight_mean_model1)
+
+    # Calculate weight sum for model2 (converting to float64 to avoid overflow)
+    total_params_model2 = sum(p.numel() for p in model2.parameters())
+    weight_sum_model2 = sum(
+        p.to(torch.float64).sum().item() for p in model2.parameters())
+    # Also calculate mean for more stable comparison
+    weight_mean_model2 = weight_sum_model2 / total_params_model2
+    logger.info("Model 2 weight sum: %s", weight_sum_model2)
+    logger.info("Model 2 weight mean: %s", weight_mean_model2)
+
+    weight_sum_diff = abs(weight_sum_model1 - weight_sum_model2)
+    logger.info("Weight sum difference: %s", weight_sum_diff)
+    weight_mean_diff = abs(weight_mean_model1 - weight_mean_model2)
+    logger.info("Weight mean difference: %s", weight_mean_diff)
+
+    # Set both models to eval mode
+    model1 = model1.eval()
+    model2 = model2.eval()
+
+    # Create identical inputs for both models
+    batch_size = 1
+    seq_len = 30
+
+    # Video latents [B, C, T, H, W]
+    hidden_states = torch.randn(batch_size,
+                                16,
+                                21,
+                                160,
+                                90,
+                                device=device,
+                                dtype=precision)
+
+    # Text embeddings [B, L, D] (including global token)
+    encoder_hidden_states = torch.randn(batch_size,
+                                        seq_len + 1,
+                                        4096,
+                                        device=device,
+                                        dtype=precision)
+
+    # Timestep
+    timestep = torch.tensor([500], device=device, dtype=precision)
+
+    forward_batch = ForwardBatch(
+        data_type="dummy",
+    )
+
+    with torch.amp.autocast('cuda', dtype=precision):
+        output1 = model1(
+            hidden_states=hidden_states,
+            encoder_hidden_states=encoder_hidden_states,
+            timestep=timestep,
+            return_dict=False,
+        )[0]
+        with set_forward_context(
+                current_timestep=0,
+                attn_metadata=None,
+                forward_batch=forward_batch,
+        ):
+            output2 = model2(hidden_states=hidden_states,
+                             encoder_hidden_states=encoder_hidden_states,
+                             timestep=timestep)
+
+    # Check if outputs have the same shape
+    assert output1.shape == output2.shape, f"Output shapes don't match: {output1.shape} vs {output2.shape}"
+    assert output1.dtype == output2.dtype, f"Output dtype don't match: {output1.dtype} vs {output2.dtype}"
+
+    # Check if outputs are similar (allowing for small numerical differences)
+    max_diff = torch.max(torch.abs(output1 - output2))
+    mean_diff = torch.mean(torch.abs(output1 - output2))
+    logger.info("Max Diff: %s", max_diff.item())
+    logger.info("Mean Diff: %s", mean_diff.item())
+    assert max_diff < 1e-1, f"Maximum difference between outputs: {max_diff.item()}"
+    # mean diff
+    assert mean_diff < 1e-2, f"Mean difference between outputs: {mean_diff.item()}"
+    '''
+    INFO 01-19 22:53:46 [wan_grpo_utils.py:74] Model 1 weight sum: 395834.3506456231████                                                    | 1/2 [00:00<00:00,  7.84it/s]
+    INFO 01-19 22:53:46 [wan_grpo_utils.py:75] Model 1 weight mean: 0.0002789536598289884
+    INFO 01-19 22:53:47 [wan_grpo_utils.py:83] Model 2 weight sum: 395834.3506456231
+    INFO 01-19 22:53:47 [wan_grpo_utils.py:84] Model 2 weight mean: 0.0002789536598289884
+    INFO 01-19 22:53:47 [wan_grpo_utils.py:87] Weight sum difference: 0.0
+    INFO 01-19 22:53:47 [wan_grpo_utils.py:89] Weight mean difference: 0.0
+    INFO 01-19 22:53:54 [wan_grpo_utils.py:145] Max Diff: 0.08203125
+    INFO 01-19 22:53:54 [wan_grpo_utils.py:146] Mean Diff: 0.01129150390625
+    '''
+
+
+def test_wan_transformer2(model2):
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    precision = torch.bfloat16
+
+    logger.info("loading model1 transformer weight")
+    BASE_MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+    MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
+                                    local_dir=os.path.join(
+                                        'data', BASE_MODEL_PATH))
+    TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
+    model1 = WanTransformer3DModel.from_pretrained(
+        TRANSFORMER_PATH,
+        device=device,
+        torch_dtype=precision,
+    ).to(device, dtype=precision).requires_grad_(False)
+
+    total_params = sum(p.numel() for p in model1.parameters())
+    # Calculate weight sum for model1 (converting to float64 to avoid overflow)
+    weight_sum_model1 = sum(
+        p.to(torch.float64).sum().item() for p in model1.parameters()
+    )
+    # Also calculate mean for more stable comparison
+    weight_mean_model1 = weight_sum_model1 / total_params
+    logger.info("Model 1 weight sum: %s", weight_sum_model1)
+    logger.info("Model 1 weight mean: %s", weight_mean_model1)
+
+    # Calculate weight sum for model2 (converting to float64 to avoid overflow)
+    total_params_model2 = sum(p.numel() for p in model2.parameters())
+    weight_sum_model2 = sum(
+        p.to(torch.float64).sum().item() for p in model2.parameters()
+    )
+    # Also calculate mean for more stable comparison
+    weight_mean_model2 = weight_sum_model2 / total_params_model2
+    logger.info("Model 2 weight sum: %s", weight_sum_model2)
+    logger.info("Model 2 weight mean: %s", weight_mean_model2)
+
+    weight_sum_diff = abs(weight_sum_model1 - weight_sum_model2)
+    logger.info("Weight sum difference: %s", weight_sum_diff)
+    weight_mean_diff = abs(weight_mean_model1 - weight_mean_model2)
+    logger.info("Weight mean difference: %s", weight_mean_diff)
+
+    # Set both models to eval mode
+    model1 = model1.eval()
+    model2 = model2.eval()
+
+    # Create identical inputs for both models
+    batch_size = 1
+    seq_len = 30
+
+    # Video latents [B, C, T, H, W]
+    hidden_states = torch.randn(
+        batch_size,
+        16,
+        21,
+        160,
+        90,
+        device=device,
+        dtype=precision,
+    )
+
+    # Text embeddings [B, L, D] (including global token)
+    encoder_hidden_states = torch.randn(
+        batch_size,
+        seq_len + 1,
+        4096,
+        device=device,
+        dtype=precision,
+    )
+
+    # Timestep
+    timestep = torch.tensor([500], device=device, dtype=precision)
+
+    forward_batch = ForwardBatch(
+        data_type="dummy",
+    )
+
+    with torch.amp.autocast("cuda", dtype=precision):
+        output1 = model1(
+            hidden_states=hidden_states,
+            encoder_hidden_states=encoder_hidden_states,
+            timestep=timestep,
+            return_dict=False,
+        )[0]
+        with set_forward_context(
+            current_timestep=0,
+            attn_metadata=None,
+            forward_batch=forward_batch,
+        ):
+            output2 = model2(
+                hidden_states=hidden_states,
+                encoder_hidden_states=encoder_hidden_states,
+                timestep=timestep,
+            )
+
+    # Print basic stats for debugging (cast to float32 for stability)
+    out1 = output1.detach().float()
+    out2 = output2.detach().float()
+    logger.info(
+        "output1 stats: min=%s max=%s mean=%s std=%s",
+        out1.min().item(),
+        out1.max().item(),
+        out1.mean().item(),
+        out1.std(unbiased=False).item(),
+    )
+    logger.info(
+        "output2 stats: min=%s max=%s mean=%s std=%s",
+        out2.min().item(),
+        out2.max().item(),
+        out2.mean().item(),
+        out2.std(unbiased=False).item(),
+    )
+
+    # Check if outputs have the same shape
+    assert (
+        output1.shape == output2.shape
+    ), f"Output shapes don't match: {output1.shape} vs {output2.shape}"
+    assert (
+        output1.dtype == output2.dtype
+    ), f"Output dtype don't match: {output1.dtype} vs {output2.dtype}"
+
+    # Check if outputs are similar (allowing for small numerical differences)
+    max_diff = torch.max(torch.abs(output1 - output2))
+    mean_diff = torch.mean(torch.abs(output1 - output2))
+    logger.info("Max Diff: %s", max_diff.item())
+    logger.info("Mean Diff: %s", mean_diff.item())
+    assert max_diff < 1e-1, f"Maximum difference between outputs: {max_diff.item()}"
+    # mean diff
+    assert mean_diff < 1e-2, f"Mean difference between outputs: {mean_diff.item()}"
+
+    '''
+    when --dit_precision "bf16", use_fsdp hardcoded to False:
+    INFO 01-19 22:01:24 [wan_grpo_utils.py:65] Model 1 weight sum: 395834.3506456231████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  3.25it/s]
+    INFO 01-19 22:01:24 [wan_grpo_utils.py:66] Model 1 weight mean: 0.0002789536598289884
+    INFO 01-19 22:01:24 [wan_grpo_utils.py:75] Model 2 weight sum: 395125.463677882
+    INFO 01-19 22:01:24 [wan_grpo_utils.py:76] Model 2 weight mean: 0.0002739000890162162
+    INFO 01-19 22:01:24 [wan_grpo_utils.py:79] Weight sum difference: 708.8869677411276
+    INFO 01-19 22:01:24 [wan_grpo_utils.py:81] Weight mean difference: 5.053570812772192e-06
+    INFO 01-19 22:01:32 [wan_grpo_utils.py:139] output1 stats: min=-2.28125 max=1.921875 mean=-0.16638492047786713 std=0.458170622587204
+    INFO 01-19 22:01:32 [wan_grpo_utils.py:146] output2 stats: min=-2.296875 max=1.90625 mean=-0.166452556848526 std=0.4579130709171295
+    INFO 01-19 22:01:32 [wan_grpo_utils.py:165] Max Diff: 0.08984375
+    INFO 01-19 22:01:32 [wan_grpo_utils.py:166] Mean Diff: 0.0120849609375
+
+    when --dit_precision "fp32", use_fsdp not changed:
+
+    '''
 
 
 def sde_step_with_logprob(
@@ -69,13 +342,14 @@ def sde_step_with_logprob(
         Otherwise:
             (prev_sample, log_prob, prev_sample_mean, std_dev_t * sqrt_dt)
     """
+    
 
-    # Convert all variables to fp32 for numerical stability
-    model_output = model_output.float()
-    sample = sample.float()
-    if prev_sample is not None:
-        prev_sample = prev_sample.float()
-
+    # # Convert all variables to fp32 for numerical stability
+    # model_output = model_output.float()
+    # sample = sample.float()
+    # if prev_sample is not None:
+    #     prev_sample = prev_sample.float()
+    
     # Get step indices for current and previous timesteps
     # Handle both single timestep and batch of timesteps
     if isinstance(timestep, torch.Tensor):
@@ -91,6 +365,11 @@ def sde_step_with_logprob(
 
     # Move sigmas to sample device
     sigmas = scheduler.sigmas.to(sample.device)
+# myregion debug: hardcode sigmas to flow_grpo's
+    sigmas = torch.Tensor([0.9997, 0.9824, 0.9639, 0.9441, 0.9227, 0.8996, 0.8746, 0.8475, 0.8178,
+        0.7853, 0.7496, 0.7102, 0.6663, 0.6173, 0.5621, 0.4997, 0.4283, 0.3459,
+        0.2498, 0.1362, 0.0000]).to(sample.device, sample.dtype)
+# end region
 
     # Get sigma values for current and previous steps
     sigma = sigmas[step_indices].view(-1, 1, 1, 1, 1)
@@ -99,6 +378,36 @@ def sde_step_with_logprob(
     sigma_min = sigmas[-1].item()  # Last sigma (lowest)
 
     dt = sigma_prev - sigma
+
+# myregion debug
+    print(f"[DEBUG]: sigma_max: {sigma_max}, sigma_min: {sigma_min}, dt: {dt}")
+    print(f"[DEBUG]: in sde_step_with_logprob(), timestep: {timestep}")
+    print(f"[DEBUG]: in sde_step_with_logprob(), sigmas: {sigmas}")
+    print(f"[DEBUG]: in sde_step_with_logprob(), step_indices: {step_indices}")
+    print(f"[DEBUG]: in sde_step_with_logprob(), prev_step_indices: {prev_step_indices}")
+    '''
+    [DEBUG]: in sde_step_with_logprob(), timestep: tensor([428, 428, 428, 428], device='cuda:0')
+    [DEBUG]: in sde_step_with_logprob(), sigmas: tensor([0.9999, 0.9826, 0.9642, 0.9443, 0.9230, 0.8999, 0.8749, 0.8477, 0.8181,
+            0.7856, 0.7499, 0.7104, 0.6665, 0.6175, 0.5624, 0.4999, 0.4285, 0.3461,
+            0.2499, 0.1363, 0.0000], device='cuda:0')
+    [DEBUG]: in sde_step_with_logprob(), step_indices: [16, 16, 16, 16]
+    [DEBUG]: in sde_step_with_logprob(), prev_step_indices: [17, 17, 17, 17]
+
+    DEBUG]: in sde_step_with_logprob(), timestep: tensor([249], device='cuda:0')███████████████▎       | 18/20 [00:04<00:00,  3.87step/s, step_time=0.26s, timestep=346.0]
+    [DEBUG]: in sde_step_with_logprob(), sigmas: tensor([0.9999, 0.9826, 0.9642, 0.9443, 0.9230, 0.8999, 0.8749, 0.8477, 0.8181,
+            0.7856, 0.7499, 0.7104, 0.6665, 0.6175, 0.5624, 0.4999, 0.4285, 0.3461,
+            0.2499, 0.1363, 0.0000], device='cuda:0')
+    [DEBUG]: in sde_step_with_logprob(), step_indices: [18]
+    [DEBUG]: in sde_step_with_logprob(), prev_step_indices: [19]
+
+    [DEBUG]: in sde_step_with_logprob(), timestep: tensor([617, 617, 617, 617], device='cuda:0')
+    [DEBUG]: in sde_step_with_logprob(), sigmas: tensor([0.9999, 0.9826, 0.9642, 0.9443, 0.9230, 0.8999, 0.8749, 0.8477, 0.8181,
+            0.7856, 0.7499, 0.7104, 0.6665, 0.6175, 0.5624, 0.4999, 0.4285, 0.3461,
+            0.2499, 0.1363, 0.0000], device='cuda:0')
+    [DEBUG]: in sde_step_with_logprob(), step_indices: [13, 13, 13, 13]
+    [DEBUG]: in sde_step_with_logprob(), prev_step_indices: [14, 14, 14, 14]
+    '''
+# endregion
 
     # Compute std_dev_t and prev_sample_mean using SDE formulation
     std_dev_t = sigma_min + (sigma_max - sigma_min) * sigma
@@ -148,7 +457,7 @@ def sde_step_with_logprob(
 
 
 def wan_pipeline_with_logprob(
-    pipeline: WanPipeline,
+    pipeline,
     prompt: str | list[str] = None,
     negative_prompt: str | list[str] = None,
     height: int = 480,
@@ -209,11 +518,17 @@ def wan_pipeline_with_logprob(
     # Get device from transformer
     transformer = pipeline.get_module("transformer")
 
-    # transformer_dtype = next(transformer.parameters()).dtype
-    # transformer_dtype = torch.bfloat16
+# myregion debug: test transformer output
+    logger.info(f"testing transformer, running test_wan_transformer2")
+    test_wan_transformer()
+    # test_wan_transformer2(transformer)
+# endregion
+
+    # hardcode dtype for debug
+    # transformer_dtype = torch.float32
     # use get_compute_dtype() to get dtype based on mixed precision
     transformer_dtype = get_compute_dtype()
-    logger.info("Transformer compute dtype: %s", transformer_dtype)
+    logger.info(f"[DEBUG]: transformer_dtype: {transformer_dtype}")
 
     # Get scheduler and other modules
     scheduler = pipeline.get_module("scheduler")
@@ -286,11 +601,24 @@ def wan_pipeline_with_logprob(
         else:
             negative_prompt_embeds = None
 
+# myregion Debug: Print shapes of prompt embeddings
+        logger.info(f"After encoding - prompt_embeds shape: {prompt_embeds.shape if prompt_embeds is not None else None}")
+        logger.info(f"After encoding - negative_prompt_embeds shape: {negative_prompt_embeds.shape if negative_prompt_embeds is not None else None}")
+        logger.info(f"After encoding - prompt_embeds dtype: {prompt_embeds.dtype if prompt_embeds is not None else None}")
+        logger.info(f"After encoding - negative_prompt_embeds dtype: {negative_prompt_embeds.dtype if negative_prompt_embeds is not None else None}")
+        '''
+        INFO 01-17 05:31:13 [wan_grpo_utils.py:290] After encoding - prompt_embeds shape: torch.Size([4, 512, 4096])
+        INFO 01-17 05:31:13 [wan_grpo_utils.py:291] After encoding - negative_prompt_embeds shape: None
+        INFO 01-17 05:31:13 [wan_grpo_utils.py:292] After encoding - prompt_embeds dtype: torch.float32
+        INFO 01-17 05:31:13 [wan_grpo_utils.py:293] After encoding - negative_prompt_embeds dtype: None
+        '''
+# endregion
     # logger.info("wan_pipeline_with_logprob's transformer class type: %s", type(transformer))
     # logger.info("Variables in transformer: %s", str(dir(transformer)))
     prompt_embeds = prompt_embeds.to(transformer_dtype)
     if negative_prompt_embeds is not None:
         negative_prompt_embeds = negative_prompt_embeds.to(transformer_dtype)
+
 
     # Prepare timesteps
     scheduler.set_timesteps(num_inference_steps, device=pipeline.device)
@@ -339,20 +667,44 @@ def wan_pipeline_with_logprob(
     else:
         latents = latents.to(device=pipeline.device, dtype=transformer_dtype)
 
-    # conver latents to DTensor for compatibility with fsdp model
-    # latents = DTensor.from_local(latents)
+# myregion Debug: Print latents shape, dtype, and value range
+    logger.info("=" * 80)
+    logger.info("Latents Debug Information:")
+    logger.info(f"  Shape: {latents.shape}")
+    logger.info(f"  Dtype: {latents.dtype}")
+    logger.info(f"  Min value: {latents.min().item():.6f}")
+    logger.info(f"  Max value: {latents.max().item():.6f}")
+    logger.info(f"  Mean value: {latents.mean().item():.6f}")
+    logger.info(f"  Std value: {latents.std().item():.6f}")
+    logger.info(f"  Device: {latents.device}")
+    logger.info("=" * 80)
+    '''
+    INFO 01-17 07:41:33 [wan_grpo_utils.py:355] ================================================================================
+    INFO 01-17 07:41:33 [wan_grpo_utils.py:356] Latents Debug Information:
+    INFO 01-17 07:41:33 [wan_grpo_utils.py:357]   Shape: torch.Size([4, 16, 9, 30, 52])
+    INFO 01-17 07:41:33 [wan_grpo_utils.py:358]   Dtype: torch.bfloat16
+    INFO 01-17 07:41:33 [wan_grpo_utils.py:359]   Min value: -4.500000
+    INFO 01-17 07:41:33 [wan_grpo_utils.py:360]   Max value: 4.656250
+    INFO 01-17 07:41:33 [wan_grpo_utils.py:361]   Mean value: 0.000111
+    INFO 01-17 07:41:33 [wan_grpo_utils.py:362]   Std value: 1.000000
+    INFO 01-17 07:41:33 [wan_grpo_utils.py:363]   Device: cuda:0
+    INFO 01-17 07:41:33 [wan_grpo_utils.py:364] ================================================================================
+    '''
+# endregion
+    
 
     all_latents = [latents]
     all_log_probs = []
     all_kl = []
 
-    # Denoising loop
-    do_classifier_free_guidance = guidance_scale > 1.0
 
-    # Debug
+# myregion Debug
     logger.info("Tensor type issue debugging:")
     logger.info(f"latents: {type(latents)}")
     logger.info(f"prompt_embeds: {type(prompt_embeds)}")
+    logger.info(f"[DEBUG]: before denoising loop: type(timesteps): {type(timesteps)}")
+    logger.info(f"[DEBUG]: before denoising loop: timesteps.shape: {timesteps.shape}")
+# endregion
 
     # Progress bar for denoising loop
     progress_bar = tqdm(enumerate(timesteps),
@@ -363,20 +715,20 @@ def wan_pipeline_with_logprob(
     for i, t in progress_bar:
         step_start_time = time.time()
         latents_ori = latents.clone()
-        # latent_model_input = latents.to(transformer_dtype)
-        latent_model_input = latents
         timestep = t.expand(latents.shape[0]) if isinstance(
             t, torch.Tensor) else torch.tensor([t] * latents.shape[0],
                                                device=pipeline.device)
-
+        
+        
+        logger.info(f"[DEBUG]: before set_forward_context: current_timestep=i:{i}")
         # Predict noise with transformer
         with set_forward_context(
-                current_timestep=i,
+                current_timestep=t.item(),
                 attn_metadata=None,
                 forward_batch=None,
         ):
             noise_pred = transformer(
-                hidden_states=latent_model_input,
+                hidden_states=latents,
                 timestep=timestep,
                 encoder_hidden_states=prompt_embeds,
                 attention_kwargs=attention_kwargs,
@@ -385,14 +737,14 @@ def wan_pipeline_with_logprob(
         noise_pred = noise_pred.to(prompt_embeds.dtype)
 
         # Classifier-free guidance
-        if do_classifier_free_guidance:
+        if guidance_scale > 1.0:
             with set_forward_context(
                     current_timestep=i,
                     attn_metadata=None,
                     forward_batch=None,
             ):
                 noise_uncond = transformer(
-                    hidden_states=latent_model_input,
+                    hidden_states=latents,
                     timestep=timestep,
                     encoder_hidden_states=negative_prompt_embeds,
                     attention_kwargs=attention_kwargs,
@@ -404,13 +756,13 @@ def wan_pipeline_with_logprob(
         # SDE step with log probability
         latents, log_prob, prev_latents_mean, std_dev_t = sde_step_with_logprob(
             scheduler,
-            noise_pred.float(),
+            noise_pred,#.float(),
             t.unsqueeze(0) if isinstance(t, torch.Tensor) else t,
-            latents.float(),
+            latents,#.float(),
             determistic=determistic,
             return_pixel_log_prob=return_pixel_log_prob)
         # sde_step_with_logprob returns fp32
-        latents = latents.to(transformer_dtype)
+        # latents = latents.to(transformer_dtype)
         prev_latents = latents.clone()
 
         all_latents.append(latents)
@@ -421,7 +773,7 @@ def wan_pipeline_with_logprob(
             # Use reference model (disable adapter if using LoRA)
             latent_model_input_ref = torch.cat(
                 [latents_ori] *
-                2) if do_classifier_free_guidance else latents_ori
+                2) if guidance_scale > 1.0 else latents_ori
             with set_forward_context(
                     current_timestep=i,
                     attn_metadata=None,
@@ -439,7 +791,7 @@ def wan_pipeline_with_logprob(
             noise_pred_ref = noise_pred_ref.to(prompt_embeds.dtype)
 
             # Perform guidance for reference model
-            if do_classifier_free_guidance:
+            if guidance_scale > 1.0:
                 noise_pred_uncond_ref, noise_pred_text_ref = noise_pred_ref.chunk(
                     2)
                 noise_pred_ref = noise_pred_uncond_ref + guidance_scale * (
@@ -510,7 +862,7 @@ def wan_pipeline_with_logprob(
 
         # Decode using VAE
         with torch.no_grad():
-            video = vae.decode(latents.float())
+            video = vae.decode(latents.float(), return_dict=False)[0]
             # VAE.decode returns tensor directly (not tuple)
 
             # Postprocess video: convert from [-1, 1] to [0, 1]
