@@ -238,7 +238,8 @@ class InputValidationStage(PipelineStage):
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify input validation stage inputs."""
         result = VerificationResult()
-        result.add_check("seed", batch.seed, [V.not_none, V.positive_int])
+        # Cosmos-Predict2.5 default seed is 0; allow non-negative seeds here.
+        result.add_check("seed", batch.seed, [V.not_none, V.non_negative_int])
         result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt,
                          V.positive_int)
         result.add_check(

@@ -193,3 +193,46 @@ class ImageProcessor:
         tensor = 2.0 * tensor - 1.0
 
         return tensor
+
+    def _preprocess_cosmos25(
+        self,
+        image: PIL.Image.Image | np.ndarray | torch.Tensor,
+        height: int,
+        width: int,
+    ) -> torch.Tensor:
+        """
+        Cosmos-Predict2.5-style preprocessing for image2world:
+        - aspect-preserving resize (scale so both dims >= target)
+        - center crop to (height, width)
+        - normalize to [-1, 1]
+
+        Returns:
+            torch.Tensor: (1, 3, height, width) in [-1, 1]
+        """
+        if not isinstance(image, PIL.Image.Image):
+            # Reuse the generic preprocess for non-PIL inputs.
+            return self.preprocess(image, height=height, width=width)
+
+        # Ensure RGB (official uses torchvision.to_tensor on PIL, which yields C=3 for RGB inputs)
+        image = image.convert("RGB")
+
+        # Make sure target dims are multiples of VAE scale factor (FastVideo convention)
+        height = height - (height % self.vae_scale_factor)
+        width = width - (width % self.vae_scale_factor)
+
+        orig_w, orig_h = image.size
+        # Scale so that resized image fully covers the target box (like official resize_input()).
+        scale = max(width / float(orig_w), height / float(orig_h))
+        resized_w = int(np.ceil(scale * orig_w))
+        resized_h = int(np.ceil(scale * orig_h))
+
+        image = image.resize((resized_w, resized_h),
+                             resample=PIL.Image.Resampling.BILINEAR)
+
+        # Center crop
+        left = max(0, (resized_w - width) // 2)
+        top = max(0, (resized_h - height) // 2)
+        image = image.crop((left, top, left + width, top + height))
+
+        image_np = np.array(image, dtype=np.float32) / 255.0  # [0,1]
+        return self._normalize_to_tensor(image_np)  # -> [-1,1], (1,3,H,W)

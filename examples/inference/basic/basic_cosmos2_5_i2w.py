@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from fastvideo import VideoGenerator
 
 
@@ -15,19 +16,18 @@ def main():
         pin_cpu_memory=True,
     )
 
+    # image2world example from official repo
+    image_path = "cosmos-predict2.5/assets/base/bus_terminal.jpg"
+
     prompt = (
-        "A high-definition video captures the precision of robotic welding in an industrial setting. "
-        "The first frame showcases a robotic arm, equipped with a welding torch, positioned over a large metal structure. "
-        "The welding process is in full swing, with bright sparks and intense light illuminating the scene, "
-        "creating a vivid display of blue and white hues. "
-        "A significant amount of smoke billows around the welding area, partially obscuring the view but emphasizing the heat and activity. "
-        "The background reveals parts of the workshop environment, including a ventilation system and various pieces of machinery, "
-        "indicating a busy and functional industrial workspace. "
-        "As the video progresses, the robotic arm maintains its steady position, continuing the welding process and moving to its left. "
-        "The welding torch consistently emits sparks and light, and the smoke continues to rise, diffusing slightly as it moves upward. "
-        "The metal surface beneath the torch shows ongoing signs of heating and melting. "
-        "The scene retains its industrial ambiance, with the welding sparks and smoke dominating the visual field, "
-        "underscoring the ongoing nature of the welding operation."
+        "A nighttime city bus terminal gradually shifts from stillness to subtle movement. "
+        "At first, multiple double-decker buses are parked under the glow of overhead lights, "
+        "with a central bus labeled '87D' facing forward and stationary. "
+        "As the video progresses, the bus in the middle moves ahead slowly, its headlights brightening the surrounding area "
+        "and casting reflections onto adjacent vehicles. "
+        "The motion creates space in the lineup, signaling activity within the otherwise quiet station. "
+        "It then comes to a smooth stop, resuming its position in line. "
+        "Overhead signage in Chinese characters remains illuminated, enhancing the vibrant, urban night scene."
     )
 
     negative_prompt = (
@@ -39,16 +39,18 @@ def main():
         "Overall, the video is of poor quality."
     )
 
-    video = generator.generate_video(
+    generator.generate_video(
         prompt,
         negative_prompt=negative_prompt,
+        image_path=str(image_path),
         height=704,
         width=1280,
-        num_frames=77,
+        num_frames=93,
         num_inference_steps=35,
         guidance_scale=7.0,
         fps=24,
-        output_path="outputs_video/cosmos2_5_t2w.mp4",
+        seed=0,
+        output_path="outputs_video/cosmos2_5_i2w.mp4",
         save_video=True,
     )
 
@@ -57,6 +59,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 

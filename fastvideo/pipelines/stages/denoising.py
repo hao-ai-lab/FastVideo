@@ -1021,6 +1021,8 @@ class CosmosDenoisingStage(DenoisingStage):
 class Cosmos25DenoisingStage(CosmosDenoisingStage):
     """Denoising stage for Cosmos 2.5 DiT (expects 1D/2D timestep, not 5D)."""
 
+    _MODE_ATTR = "cosmos25_denoise_mode"
+
     def forward(
         self,
         batch: ForwardBatch,
@@ -1057,7 +1059,6 @@ class Cosmos25DenoisingStage(CosmosDenoisingStage):
                 "latents must be provided for Cosmos25DenoisingStage")
         guidance_scale = batch.guidance_scale
 
-        # Use timesteps prepared by Cosmos25TimestepPreparationStage when available.
         if batch.timesteps is None:
             self.scheduler.set_timesteps(batch.num_inference_steps,
                                          device=latents.device)
@@ -1065,20 +1066,47 @@ class Cosmos25DenoisingStage(CosmosDenoisingStage):
         else:
             timesteps = batch.timesteps.to(latents.device)
 
-        # Match official behavior: pass fps as a tensor.
-        fps_val = batch.fps if isinstance(batch.fps, int | float) else 24
-        fps_tensor = torch.tensor([fps_val],
-                                  device=latents.device,
-                                  dtype=target_dtype)
+        cfg = fastvideo_args.pipeline_config
 
-        # Cosmos2.5 denoises a 4D latent (C,T,H,W) and the scheduler.step expects (B,C,T,H,W).
+        if batch.fps is None:
+            gen = batch.generator
+            if isinstance(gen, list) and len(gen) > 0:
+                gen = gen[0]
+            fps_tensor = torch.randint(
+                16,
+                32,
+                (1, ),
+                generator=gen if isinstance(gen, torch.Generator) else None,
+                device=latents.device,
+            ).float().to(dtype=target_dtype)
+        else:
+            fps_val = batch.fps
+            fps_tensor = torch.tensor(
+                [fps_val],
+                device=latents.device,
+                dtype=target_dtype,
+            )
+
         latents_4d = latents[0]
 
-        # Masks from latent prep stage
-        condition_mask = batch.cond_mask.to(target_dtype) if hasattr(
-            batch, 'cond_mask') else None
-        padding_mask = batch.padding_mask.to(target_dtype) if hasattr(
-            batch, 'padding_mask') else None
+        # Masks are optional for T2W.
+        cond_mask = getattr(batch, "cond_mask", None)
+        condition_mask = cond_mask.to(target_dtype) if isinstance(
+            cond_mask, torch.Tensor) else None
+        pad_mask = getattr(batch, "padding_mask", None)
+        padding_mask = pad_mask.to(target_dtype) if isinstance(
+            pad_mask, torch.Tensor) else None
+
+        mode = getattr(batch, self._MODE_ATTR, None)
+
+        # Conditioning fields are attached by latent preparation stage.
+        conditioning_latents = getattr(batch, "conditioning_latents", None)
+        cond_indicator = getattr(batch, "cond_indicator", None)
+        if mode is None:
+            mode = "v2w" if conditioning_latents is not None else "t2w"
+        is_conditioned = (mode != "t2w")
+
+        init_noise_4d = latents_4d.clone()
         if condition_mask is None:
             _, t, h, w = latents_4d.shape
             condition_mask = torch.zeros(1,
@@ -1090,23 +1118,59 @@ class Cosmos25DenoisingStage(CosmosDenoisingStage):
                                          dtype=target_dtype)
         if padding_mask is None:
             _, _, h, w = latents_4d.shape
-            padding_mask = torch.ones(1,
-                                      1,
-                                      h,
-                                      w,
-                                      device=latents.device,
-                                      dtype=target_dtype)
+            padding_default = 0.0 if is_conditioned else 1.0
+            padding_mask = torch.full(
+                (1, 1, h, w),
+                float(padding_default),
+                device=latents.device,
+                dtype=target_dtype,
+            )
 
-        # Cosmos2.5 timestep scaling (see compare_pipelines.py): t * 0.001
         timestep_scale = 0.001
+
+        state_dtype = torch.float32
+
+        conditional_frame_timestep = 0.1
+        latents_4d = latents_4d.to(state_dtype)
+        init_noise_4d = init_noise_4d.to(state_dtype)
+
+        clamp_every_step = bool(getattr(cfg, "cosmos25_clamp_every_step",
+                                        True)) if is_conditioned else False
 
         with self.progress_bar(total=len(timesteps)) as progress_bar:
             for i, t in enumerate(timesteps):
                 t_val = float(t)
-                timestep_val = t_val * timestep_scale
-                timestep = torch.tensor([[timestep_val]],
-                                        device=latents.device,
-                                        dtype=target_dtype)
+                if is_conditioned:
+                    t_frames = int(latents_4d.shape[1])
+                    timestep = torch.full(
+                        (1, t_frames),
+                        float(t_val * timestep_scale),
+                        device=latents.device,
+                        dtype=torch.float32,
+                    )
+                    if (mode == "v2w" and cond_indicator is not None
+                            and t_frames > 0):
+                        cond_t = cond_indicator[0, 0, :t_frames, 0, 0]
+                        cond_mask_t = (cond_t > 0.5)
+                        if bool(cond_mask_t.any().item()):
+                            timestep[0, cond_mask_t] = float(
+                                conditional_frame_timestep)
+                else:
+                    timestep_val = t_val * timestep_scale
+                    timestep = torch.tensor(
+                        [[float(timestep_val)]],
+                        device=latents.device,
+                        dtype=target_dtype,
+                    )
+
+                # Conditioned runs: replace x_t with GT x0 on the conditioned frames.
+                if (is_conditioned and cond_indicator is not None
+                        and conditioning_latents is not None
+                        and (clamp_every_step or i == 0)):
+                    cond_ind_4d = cond_indicator[0].to(state_dtype)
+                    gt_x0 = conditioning_latents[0].to(state_dtype)
+                    latents_4d = gt_x0 * cond_ind_4d + latents_4d * (
+                        1 - cond_ind_4d)
 
                 model_hidden_states = latents_4d.unsqueeze(0)
 
@@ -1140,9 +1204,21 @@ class Cosmos25DenoisingStage(CosmosDenoisingStage):
                             padding_mask=padding_mask,
                             return_dict=False,
                         )[0]
-                        v = uncond_v + guidance_scale * (cond_v - uncond_v)
+                        if is_conditioned:
+                            v = cond_v + guidance_scale * (cond_v - uncond_v)
+                        else:
+                            v = uncond_v + guidance_scale * (cond_v - uncond_v)
                     else:
                         v = cond_v
+
+                # Conditioned runs: replace velocity on conditioned frames with GT velocity.
+                if (is_conditioned and cond_indicator is not None
+                        and conditioning_latents is not None):
+                    cond_ind_4d = cond_indicator[0].to(state_dtype)
+                    gt_x0 = conditioning_latents[0].to(state_dtype)
+                    gt_v = init_noise_4d.to(state_dtype) - gt_x0
+                    v = cond_ind_4d * gt_v + (1 -
+                                              cond_ind_4d) * v.to(state_dtype)
 
                 prev = self.scheduler.step(v.unsqueeze(0),
                                            t,
@@ -1153,8 +1229,81 @@ class Cosmos25DenoisingStage(CosmosDenoisingStage):
 
                 progress_bar.update()
 
-        batch.latents = latents_4d.unsqueeze(0)
+        batch.latents = latents_4d.to(target_dtype).unsqueeze(0)
         return batch
+
+
+class Cosmos25T2WDenoisingStage(Cosmos25DenoisingStage):
+    """Cosmos 2.5 Text2World denoising stage."""
+
+    _CONDITIONING_FIELDS = (
+        "conditioning_latents",
+        "cond_indicator",
+        "uncond_indicator",
+    )
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        setattr(batch, self._MODE_ATTR, "t2w")
+        for name in self._CONDITIONING_FIELDS:
+            if hasattr(batch, name):
+                setattr(batch, name, None)
+        return super().forward(batch, fastvideo_args)
+
+
+class Cosmos25V2WDenoisingStage(Cosmos25DenoisingStage):
+    """Cosmos 2.5 Video2World denoising stage."""
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        setattr(batch, self._MODE_ATTR, "v2w")
+        return super().forward(batch, fastvideo_args)
+
+
+class Cosmos25AutoDenoisingStage(PipelineStage):
+    """Route Cosmos 2.5 denoising to T2W vs V2W/I2W."""
+
+    def __init__(self, transformer, scheduler) -> None:
+        super().__init__()
+        self._t2w = Cosmos25T2WDenoisingStage(transformer=transformer,
+                                              scheduler=scheduler)
+        self._v2w = Cosmos25V2WDenoisingStage(transformer=transformer,
+                                              scheduler=scheduler)
+
+    def pipeline(self):
+        return self._v2w.pipeline() if self._v2w.pipeline else None
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        conditioning_latents = getattr(batch, "conditioning_latents", None)
+        if conditioning_latents is not None:
+            setattr(batch, Cosmos25DenoisingStage._MODE_ATTR, "v2w")
+            return self._v2w.forward(batch, fastvideo_args)
+        setattr(batch, Cosmos25DenoisingStage._MODE_ATTR, "t2w")
+        return self._t2w.forward(batch, fastvideo_args)
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+        conditioning_latents = getattr(batch, "conditioning_latents", None)
+        if conditioning_latents is not None:
+            return self._v2w.verify_input(batch, fastvideo_args)
+        return self._t2w.verify_input(batch, fastvideo_args)
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+        conditioning_latents = getattr(batch, "conditioning_latents", None)
+        if conditioning_latents is not None:
+            return self._v2w.verify_output(batch, fastvideo_args)
+        return self._t2w.verify_output(batch, fastvideo_args)
 
 
 class DmdDenoisingStage(DenoisingStage):

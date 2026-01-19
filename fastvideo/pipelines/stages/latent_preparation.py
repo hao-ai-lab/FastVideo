@@ -3,6 +3,7 @@
 Latent preparation stage for diffusion pipelines.
 """
 
+import os
 from typing import Any
 
 import numpy as np
@@ -450,10 +451,6 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
         batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
-        # Differences vs `CosmosLatentPreparationStage`: channel convention, seed usage,
-        # and `padding_mask` for concat_padding_mask=True.
-
-        # Determine batch size
         if isinstance(batch.prompt, list):
             batch_size = len(batch.prompt)
         elif batch.prompt is not None:
@@ -463,8 +460,6 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
 
         batch_size *= batch.num_videos_per_prompt
 
-        # Match `compare_pipelines.py`: initialize noise in fp32, then run the
-        # denoising computation in bf16.
         dtype = torch.float32
         device = get_local_torch_device()
         generator = batch.generator
@@ -483,7 +478,6 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
         latent_width = width // vae_scale_factor_spatial
         num_latent_frames = (num_frames - 1) // vae_scale_factor_temporal + 1
 
-        # Cosmos 2.5 convention: transformer in_channels == latent channels
         num_channels_latents = self.transformer.config.in_channels
 
         shape = (batch_size, num_channels_latents, num_latent_frames,
@@ -492,16 +486,16 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
         init_latents = None
         conditioning_latents = None
         video = None
+        image_conditioning = False
 
-        if hasattr(batch, 'video') and batch.video is not None:
-            video = batch.video
-        elif hasattr(batch, 'pil_image') and batch.pil_image is not None:
+        if hasattr(batch, 'pil_image') and batch.pil_image is not None:
             vae_scale_factor_spatial = 8
             image_processor = ImageProcessor(
                 vae_scale_factor=vae_scale_factor_spatial)
-            processed_image = image_processor.preprocess(
+            processed_image = image_processor._preprocess_cosmos25(
                 batch.pil_image, height, width)
             video = processed_image.unsqueeze(2)
+            image_conditioning = True
             video = video.to(device=device, dtype=torch.bfloat16)
         elif hasattr(
                 batch,
@@ -509,35 +503,79 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
             if isinstance(batch.preprocessed_image, torch.Tensor):
                 if batch.preprocessed_image.dim() == 4:
                     video = batch.preprocessed_image.unsqueeze(2)
+                    image_conditioning = True
                 elif batch.preprocessed_image.dim() == 5:
                     video = batch.preprocessed_image
+        elif hasattr(batch, "video_latent") and isinstance(
+                batch.video_latent, torch.Tensor):
+            if batch.video_latent.dim() == 5:
+                video = batch.video_latent
         else:
             logger.info(
                 "CosmosLatentPreparationStage - No video input sources found")
 
         if video is not None:
-            num_cond_frames = video.size(2)
-            if num_cond_frames >= num_frames:
+            # Avoid missing CUDA fallback kernels in some builds by using fp16 contiguous input.
+            if isinstance(video, torch.Tensor):
+                video = video.to(device=device,
+                                 dtype=torch.float16).contiguous()
+            num_video_frames = int(video.size(2))
+
+            num_cond_frames_eff: int | None = None
+            try:
+                ncf = getattr(batch, "num_cond_frames", None)
+                if isinstance(ncf, int) and ncf > 0:
+                    num_cond_frames_eff = min(int(ncf), num_video_frames)
+            except Exception:
+                num_cond_frames_eff = None
+            if num_cond_frames_eff is None:
+                num_cond_frames_eff = 1 if (
+                    not image_conditioning) else num_video_frames
+
+            if num_video_frames >= num_cond_frames_eff:
+                cond_video = video[:, :, -num_cond_frames_eff:]
+            else:
+                pad = video[:, :,
+                            -1:].repeat(1, 1,
+                                        num_cond_frames_eff - num_video_frames,
+                                        1, 1)
+                cond_video = torch.cat([video, pad], dim=2)
+
+            if num_cond_frames_eff >= num_frames:
+                cond_video = cond_video[:, :, -num_frames:]
                 num_cond_latent_frames = (num_frames -
                                           1) // vae_scale_factor_temporal + 1
-                video = video[:, :, -num_frames:]
+                video = cond_video
             else:
-                num_cond_latent_frames = (num_cond_frames -
+                num_cond_latent_frames = (num_cond_frames_eff -
                                           1) // vae_scale_factor_temporal + 1
-                num_padding_frames = num_frames - num_cond_frames
-                last_frame = video[:, :, -1:]
+                num_padding_frames = num_frames - num_cond_frames_eff
+                last_frame = cond_video[:, :, -1:]
                 padding = last_frame.repeat(1, 1, num_padding_frames, 1, 1)
-                video = torch.cat([video, padding], dim=2)
+                if image_conditioning:
+                    padding = cond_video.new_full(
+                        (cond_video.size(0), cond_video.size(1),
+                         num_padding_frames, cond_video.size(3),
+                         cond_video.size(4)),
+                        -1.0,
+                    )
+                video = torch.cat([cond_video, padding], dim=2)
+
+            if os.environ.get("FASTVIDEO_COSMOS25_LOG_KNOBS",
+                              "0") in ("1", "true", "True"):
+                logger.info(
+                    "[Cosmos2.5 latent_prep] using conditioning input: image=%s video_latent=%s video_path=%s | "
+                    "num_video_frames=%s num_cond_frames=%s num_frames=%s",
+                    bool(image_conditioning),
+                    isinstance(getattr(batch, "video_latent", None),
+                               torch.Tensor),
+                    getattr(batch, "video_path", None),
+                    num_video_frames,
+                    num_cond_frames_eff,
+                    num_frames,
+                )
 
             if self.vae is not None:
-                # Cosmos25WanVAE.encode() chunks time with `temporal_window` and
-                # can fail when the final chunk has length 1 (cache+1 => 2 < kernel 3).
-                # Pad one extra frame in that specific case to keep chunking stable.
-                tw = int(getattr(self.vae, "temporal_window", 0) or 0)
-                if tw > 0 and ((int(video.size(2)) - 1) % tw) == 1:
-                    last = video[:, :, -1:]
-                    video = torch.cat([video, last], dim=2)
-
                 self.vae = self.vae.to(device)
                 self.vae = self.vae.to(dtype=video.dtype)
 
@@ -596,17 +634,13 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
 
         if latents is None:
             seed = int(batch.seed if batch.seed is not None else 0)
-            # Use arch-invariant RNG to match Cosmos2.5 reference sampling.
             latents_fp32 = self._arch_invariant_randn(shape,
                                                       seed=seed,
                                                       device=device,
                                                       dtype=torch.float32)
             latents = latents_fp32.to(torch.bfloat16)
         else:
-            # If latents are supplied, keep compute dtype consistent with Cosmos sampling.
             latents = latents.to(device=device, dtype=torch.bfloat16)
-
-        # Cosmos2.5 starts from unit Gaussian noise (no extra sigma_max scaling).
 
         padding_shape = (batch_size, 1, num_latent_frames, latent_height,
                          latent_width)
@@ -626,9 +660,7 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
             uncond_mask = uncond_indicator * ones_padding + (
                 1 - uncond_indicator) * zeros_padding
 
-        # Cosmos 2.5 requires a spatial padding mask when concat_padding_mask=True
-        padding_mask = latents.new_ones(batch_size, 1, latent_height,
-                                        latent_width)
+        padding_mask = latents.new_zeros(batch_size, 1, height, width)
 
         batch.latents = latents
         batch.raw_latent_shape = latents.shape
@@ -689,3 +721,127 @@ class Cosmos25LatentPreparationStage(CosmosLatentPreparationStage):
                          [V.is_tensor, V.with_dims(5)])
         result.add_check("raw_latent_shape", batch.raw_latent_shape, V.is_tuple)
         return result
+
+
+class Cosmos25T2WLatentPreparationStage(PipelineStage):
+    """Cosmos 2.5 Text2World latent preparation."""
+
+    def __init__(self, scheduler, transformer) -> None:
+        super().__init__()
+        self.scheduler = scheduler
+        self.transformer = transformer
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        if isinstance(batch.prompt, list):
+            batch_size = len(batch.prompt)
+        elif batch.prompt is not None:
+            batch_size = 1
+        else:
+            batch_size = batch.prompt_embeds[0].shape[0]
+        batch_size *= batch.num_videos_per_prompt
+
+        device = get_local_torch_device()
+        latents = batch.latents
+        num_frames = batch.num_frames
+        height = batch.height
+        width = batch.width
+        if height is None or width is None:
+            raise ValueError("Height and width must be provided")
+
+        vae_scale_factor_spatial = 8
+        vae_scale_factor_temporal = 4
+        latent_height = height // vae_scale_factor_spatial
+        latent_width = width // vae_scale_factor_spatial
+        num_latent_frames = (num_frames - 1) // vae_scale_factor_temporal + 1
+
+        # Cosmos 2.5 convention: transformer in_channels == latent channels
+        num_channels_latents = self.transformer.config.in_channels
+        shape = (batch_size, num_channels_latents, num_latent_frames,
+                 latent_height, latent_width)
+
+        if latents is None:
+            seed = int(batch.seed if batch.seed is not None else 0)
+            latents_fp32 = Cosmos25LatentPreparationStage._arch_invariant_randn(
+                shape,
+                seed=seed,
+                device=device,
+                dtype=torch.float32,
+            )
+            latents = latents_fp32.to(torch.bfloat16)
+        else:
+            latents = latents.to(device=device, dtype=torch.bfloat16)
+
+        batch.latents = latents
+        batch.raw_latent_shape = latents.shape
+
+        batch.conditioning_latents = None
+        batch.cond_indicator = None
+        batch.uncond_indicator = None
+        batch.cond_mask = None
+        batch.uncond_mask = None
+        if hasattr(batch, "padding_mask"):
+            batch.padding_mask = None
+
+        return batch
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+        return Cosmos25LatentPreparationStage.verify_input(
+            self, batch, fastvideo_args)  # type: ignore[misc]
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+        return Cosmos25LatentPreparationStage.verify_output(
+            self, batch, fastvideo_args)  # type: ignore[misc]
+
+
+class Cosmos25V2WLatentPreparationStage(Cosmos25LatentPreparationStage):
+    """Cosmos 2.5 V2W/I2W latent preparation stage (conditioning-aware)."""
+
+
+class Cosmos25AutoLatentPreparationStage(PipelineStage):
+    """Route Cosmos 2.5 latent prep to T2W vs V2W/I2W."""
+
+    def __init__(self, scheduler, transformer, vae=None) -> None:
+        super().__init__()
+        self._t2w = Cosmos25T2WLatentPreparationStage(
+            scheduler=scheduler,
+            transformer=transformer,
+        )
+        self._v2w = Cosmos25V2WLatentPreparationStage(
+            scheduler=scheduler,
+            transformer=transformer,
+            vae=vae,
+        )
+
+    @staticmethod
+    def _has_conditioning_input(batch: ForwardBatch) -> bool:
+        return (getattr(batch, "pil_image", None) is not None
+                or getattr(batch, "preprocessed_image", None) is not None
+                or bool(getattr(batch, "video_path", None)) or isinstance(
+                    getattr(batch, "video_latent", None), torch.Tensor))
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        if self._has_conditioning_input(batch):
+            return self._v2w.forward(batch, fastvideo_args)
+        return self._t2w.forward(batch, fastvideo_args)
+
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
+        if self._has_conditioning_input(batch):
+            return self._v2w.verify_input(batch, fastvideo_args)
+        return self._t2w.verify_input(batch, fastvideo_args)
+
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
+        if self._has_conditioning_input(batch):
+            return self._v2w.verify_output(batch, fastvideo_args)
+        return self._t2w.verify_output(batch, fastvideo_args)
