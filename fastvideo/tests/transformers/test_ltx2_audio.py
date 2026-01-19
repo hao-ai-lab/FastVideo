@@ -9,6 +9,9 @@ from torch.testing import assert_close
 
 os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29513")
+# Force TORCH_SDPA backend for parity testing - both FastVideo and LTX-2 reference
+# will use PyTorch's scaled_dot_product_attention for consistent results
+os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
 repo_root = Path(__file__).resolve().parents[3]
 ltx_core_path = repo_root / "LTX-2" / "packages" / "ltx-core" / "src"
@@ -24,11 +27,8 @@ from fastvideo.models.loader.component_loader import TransformerLoader
 from fastvideo.tests.transformers.test_ltx2 import (
     _attach_block_detail_logging,
     _attach_block_sum_logging,
-    _infer_arch,
-    _load_into_model,
-    _load_safetensors,
-    _normalize_keys,
-    _select_transformer_weights,
+    _infer_patch_params,
+    _read_transformer_config,
 )
 
 
@@ -57,35 +57,70 @@ def test_ltx2_transformer_audio_parity():
     try:
         from ltx_core.components.patchifiers import AudioPatchifier, VideoLatentPatchifier
         from ltx_core.guidance.perturbations import BatchedPerturbationConfig
-        from ltx_core.model.transformer import LTXModel
-        from ltx_core.model.transformer.attention import AttentionFunction
-        from ltx_core.model.transformer.model import LTXModelType
+        from ltx_core.loader.sft_loader import SafetensorsModelStateDictLoader
+        from ltx_core.loader.single_gpu_model_builder import SingleGPUModelBuilder
+        from ltx_core.model.transformer import (LTXModelConfigurator,
+                                                LTXV_MODEL_COMFY_RENAMING_MAP)
         from ltx_core.model.transformer.modality import Modality
-        from ltx_core.model.transformer.rope import LTXRopeType
         from ltx_core.types import AudioLatentShape, VideoLatentShape
     except ImportError as exc:
         pytest.skip(f"LTX-2 import failed: {exc}")
 
-    ref_raw_weights = _load_safetensors(official_path)
-    ref_weights = _normalize_keys(ref_raw_weights)
-    ref_weights = _select_transformer_weights(ref_weights)
-    if not ref_weights:
-        pytest.skip("No transformer weights found in safetensors file.")
-    arch = _infer_arch(ref_weights)
-    if arch["num_layers"] == 0:
-        pytest.skip("Could not infer transformer block count from LTX-2 weights.")
+    # Load config from metadata using same approach as test_ltx2.py
+    config_loader = SafetensorsModelStateDictLoader()
+    metadata = config_loader.metadata(str(official_path))
+    transformer_config = _read_transformer_config(metadata)
 
     config = LTX2VideoConfig()
     cfg = config.arch_config
-    cfg.in_channels = arch["in_channels"]
-    cfg.out_channels = arch["out_channels"]
-    cfg.num_layers = arch["num_layers"]
-    cfg.num_attention_heads = arch["num_attention_heads"]
-    cfg.attention_head_dim = arch["attention_head_dim"]
-    cfg.cross_attention_dim = arch["inner_dim"]
-    cfg.caption_channels = arch["caption_channels"]
-    cfg.num_channels_latents = arch["num_channels_latents"]
-    cfg.patch_size = (1, arch["patch_size"], arch["patch_size"])
+    cfg.num_attention_heads = transformer_config.get("num_attention_heads",
+                                                     cfg.num_attention_heads)
+    cfg.attention_head_dim = transformer_config.get("attention_head_dim",
+                                                    cfg.attention_head_dim)
+    cfg.num_layers = transformer_config.get("num_layers", cfg.num_layers)
+    cfg.cross_attention_dim = transformer_config.get(
+        "cross_attention_dim", cfg.cross_attention_dim)
+    cfg.caption_channels = transformer_config.get("caption_channels",
+                                                  cfg.caption_channels)
+    cfg.norm_eps = transformer_config.get("norm_eps", cfg.norm_eps)
+    cfg.attention_type = transformer_config.get("attention_type",
+                                                cfg.attention_type)
+    cfg.positional_embedding_theta = transformer_config.get(
+        "positional_embedding_theta", cfg.positional_embedding_theta)
+    cfg.positional_embedding_max_pos = transformer_config.get(
+        "positional_embedding_max_pos", cfg.positional_embedding_max_pos)
+    cfg.timestep_scale_multiplier = transformer_config.get(
+        "timestep_scale_multiplier", cfg.timestep_scale_multiplier)
+    cfg.use_middle_indices_grid = transformer_config.get(
+        "use_middle_indices_grid", cfg.use_middle_indices_grid)
+    cfg.rope_type = transformer_config.get("rope_type", cfg.rope_type)
+    cfg.double_precision_rope = transformer_config.get(
+        "double_precision_rope",
+        transformer_config.get("frequencies_precision", "")
+        == "float64",
+    )
+    cfg.audio_num_attention_heads = transformer_config.get(
+        "audio_num_attention_heads", cfg.audio_num_attention_heads)
+    cfg.audio_attention_head_dim = transformer_config.get(
+        "audio_attention_head_dim", cfg.audio_attention_head_dim)
+    cfg.audio_in_channels = transformer_config.get("audio_in_channels",
+                                                   cfg.audio_in_channels)
+    cfg.audio_out_channels = transformer_config.get("audio_out_channels",
+                                                    cfg.audio_out_channels)
+    cfg.audio_cross_attention_dim = transformer_config.get(
+        "audio_cross_attention_dim", cfg.audio_cross_attention_dim)
+    cfg.audio_positional_embedding_max_pos = transformer_config.get(
+        "audio_positional_embedding_max_pos",
+        cfg.audio_positional_embedding_max_pos,
+    )
+    cfg.av_ca_timestep_scale_multiplier = transformer_config.get(
+        "av_ca_timestep_scale_multiplier", cfg.av_ca_timestep_scale_multiplier)
+    cfg.in_channels = transformer_config.get("in_channels", cfg.in_channels)
+    cfg.out_channels = transformer_config.get("out_channels", cfg.out_channels)
+
+    patch_size, num_channels_latents = _infer_patch_params(cfg.in_channels)
+    cfg.patch_size = (1, patch_size, patch_size)
+    cfg.num_channels_latents = num_channels_latents
 
     if not torch.cuda.is_available():
         pytest.skip("LTX-2 transformer parity test requires CUDA for attention backends.")
@@ -105,44 +140,15 @@ def test_ltx2_transformer_audio_parity():
     loader = TransformerLoader()
     fastvideo_model = loader.load(str(fastvideo_path), args).to(device=device, dtype=precision)
 
-    reference_attention = AttentionFunction.PYTORCH
-    reference_attn_env = os.getenv("LTX2_REFERENCE_ATTN")
-    if reference_attn_env:
-        reference_attention = AttentionFunction(reference_attn_env)
-    else:
-        fastvideo_attn_backend = os.getenv("FASTVIDEO_ATTENTION_BACKEND")
-        if fastvideo_attn_backend == "FLASH_ATTN":
-            reference_attention = AttentionFunction.FLASH_ATTENTION_3
-
-    reference_model = LTXModel(
-        model_type=LTXModelType.AudioVideo,
-        num_attention_heads=cfg.num_attention_heads,
-        attention_head_dim=cfg.attention_head_dim,
-        in_channels=cfg.in_channels,
-        out_channels=cfg.out_channels,
-        num_layers=cfg.num_layers,
-        cross_attention_dim=cfg.cross_attention_dim,
-        norm_eps=cfg.norm_eps,
-        caption_channels=cfg.caption_channels,
-        positional_embedding_theta=cfg.positional_embedding_theta,
-        positional_embedding_max_pos=cfg.positional_embedding_max_pos,
-        timestep_scale_multiplier=cfg.timestep_scale_multiplier,
-        use_middle_indices_grid=cfg.use_middle_indices_grid,
-        attention_type=reference_attention,
-        rope_type=LTXRopeType(cfg.rope_type),
-        double_precision_rope=cfg.double_precision_rope,
-        audio_num_attention_heads=cfg.audio_num_attention_heads,
-        audio_attention_head_dim=cfg.audio_attention_head_dim,
-        audio_in_channels=cfg.audio_in_channels,
-        audio_out_channels=cfg.audio_out_channels,
-        audio_cross_attention_dim=cfg.audio_cross_attention_dim,
-        audio_positional_embedding_max_pos=cfg.audio_positional_embedding_max_pos,
-        av_ca_timestep_scale_multiplier=cfg.av_ca_timestep_scale_multiplier,
-    ).to(device=device, dtype=precision)
-
-    loaded_reference = _load_into_model(reference_model, ref_weights)
-    if loaded_reference == 0:
-        pytest.skip("No matching keys loaded into LTX-2 transformer models.")
+    # Use SingleGPUModelBuilder to load the reference model (same as test_ltx2.py)
+    reference_builder = SingleGPUModelBuilder(
+        model_class_configurator=LTXModelConfigurator,
+        model_path=str(official_path),
+        model_sd_ops=LTXV_MODEL_COMFY_RENAMING_MAP,
+    )
+    reference_model = reference_builder.build(
+        device=device, dtype=precision).to(device=device, dtype=precision)
+    reference_model.set_gradient_checkpointing(False)
 
     fastvideo_model.eval()
     reference_model.eval()
@@ -270,4 +276,5 @@ def test_ltx2_transformer_audio_parity():
 
     assert ref_audio_out.shape == fastvideo_audio_out.shape
     assert ref_audio_out.dtype == fastvideo_audio_out.dtype
-    assert_close(ref_audio_out, fastvideo_audio_out, atol=1e-2, rtol=1e-2)
+    # With TORCH_SDPA backend for both, use same tolerance as video parity test
+    assert_close(ref_audio_out, fastvideo_audio_out, atol=1e-4, rtol=1e-4)
