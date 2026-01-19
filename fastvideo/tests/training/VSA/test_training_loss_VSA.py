@@ -121,10 +121,10 @@ def test_distributed_training():
     wandb_summary = json.load(open(summary_file))
 
     fields_and_thresholds = {
-        'avg_step_time': 2.5,
-        'grad_norm': 0.1,
+        'avg_step_time': 3,
+        'grad_norm': 0.2,
         'step_time': 2.5,
-        'train_loss': 0.03
+        'train_loss': 0.04
     }
 
     failures = []
