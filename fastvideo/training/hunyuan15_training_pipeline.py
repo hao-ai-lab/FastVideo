@@ -4,8 +4,6 @@ from copy import deepcopy
 
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler, )
 from fastvideo.training.training_pipeline import TrainingPipeline
 
 from fastvideo.pipelines.basic.hunyuan15.hunyuan15_pipeline import HunyuanVideo15Pipeline
@@ -25,8 +23,9 @@ class Hunyuan15TrainingPipeline(TrainingPipeline):
         super().initialize_training_pipeline(training_args)
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
-            shift=fastvideo_args.pipeline_config.flow_shift)
+        pass
+        # self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
+        #     shift=fastvideo_args.pipeline_config.flow_shift)
 
     def create_training_stages(self, training_args: TrainingArgs):
         # reserved for future refactors
