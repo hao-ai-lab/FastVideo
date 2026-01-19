@@ -849,7 +849,11 @@ def load_distillation_checkpoint(
 
 def normalize_dit_input(model_type, latents, vae) -> torch.Tensor:
     if model_type == "hunyuan_hf" or model_type == "hunyuan":
-        return latents * 0.476986
+        scaling_factor = getattr(vae, "scaling_factor", 0.476986)
+        if isinstance(scaling_factor, torch.Tensor):
+            scaling_factor = scaling_factor.to(device=latents.device,
+                                               dtype=latents.dtype)
+        return latents * scaling_factor
     elif model_type == "wan":
         latents_mean = torch.tensor(vae.latents_mean)
         latents_std = 1.0 / torch.tensor(vae.latents_std)

@@ -75,7 +75,7 @@ def run_preprocessing():
         "--preprocess.max_height", "480",
         "--preprocess.max_width", "832",
         "--preprocess.num_frames", "61",
-        "--preprocess.train_fps", "16",
+        "--preprocess.train_fps", "24",
         "--preprocess.samples_per_file", "1",
         "--preprocess.flush_frequency", "1",
         "--preprocess.video_length_tolerance_range", "5",
