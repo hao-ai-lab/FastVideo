@@ -19,9 +19,7 @@ import torch
 import torchvision
 from einops import rearrange
 import shutil
-import subprocess
 import tempfile
-import wave
 
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -421,9 +419,12 @@ class VideoGenerator:
         audio: torch.Tensor | np.ndarray,
         sample_rate: int,
     ) -> bool:
-        ffmpeg = shutil.which("ffmpeg")
-        if not ffmpeg:
-            logger.warning("ffmpeg not found; cannot mux audio.")
+        """Mux audio into video using PyAV."""
+        try:
+            import av
+        except ImportError:
+            logger.warning("PyAV not installed; cannot mux audio. "
+                           "Install with: pip install av")
             return False
 
         if torch.is_tensor(audio):
@@ -444,40 +445,65 @@ class VideoGenerator:
         audio_np = np.clip(audio_np, -1.0, 1.0)
         audio_int16 = (audio_np * 32767.0).astype(np.int16)
         num_channels = audio_int16.shape[1]
+        layout = "stereo" if num_channels == 2 else "mono"
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            wav_path = os.path.join(tmpdir, "audio.wav")
-            out_path = os.path.join(tmpdir, "muxed.mp4")
-            with wave.open(wav_path, "wb") as wav_file:
-                wav_file.setnchannels(num_channels)
-                wav_file.setsampwidth(2)
-                wav_file.setframerate(sample_rate)
-                wav_file.writeframes(audio_int16.tobytes())
+        try:
+            import wave
+            with tempfile.TemporaryDirectory() as tmpdir:
+                out_path = os.path.join(tmpdir, "muxed.mp4")
+                wav_path = os.path.join(tmpdir, "audio.wav")
 
-            cmd = [
-                ffmpeg,
-                "-y",
-                "-i",
-                video_path,
-                "-i",
-                wav_path,
-                "-c:v",
-                "copy",
-                "-c:a",
-                "aac",
-                "-shortest",
-                out_path,
-            ]
-            try:
-                subprocess.run(cmd,
-                               check=True,
-                               stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL)
-            except subprocess.CalledProcessError:
-                return False
+                # Write audio to WAV file
+                with wave.open(wav_path, "wb") as wav_file:
+                    wav_file.setnchannels(num_channels)
+                    wav_file.setsampwidth(2)
+                    wav_file.setframerate(sample_rate)
+                    wav_file.writeframes(audio_int16.tobytes())
 
-            shutil.move(out_path, video_path)
-        return True
+                # Open input video and audio
+                input_video = av.open(video_path)
+                input_audio = av.open(wav_path)
+
+                # Create output with both streams
+                output = av.open(out_path, mode="w")
+
+                # Add video stream (copy codec from input)
+                in_video_stream = input_video.streams.video[0]
+                out_video_stream = output.add_stream(
+                    codec_name=in_video_stream.codec_context.name,
+                    rate=in_video_stream.average_rate,
+                )
+                out_video_stream.width = in_video_stream.width
+                out_video_stream.height = in_video_stream.height
+                out_video_stream.pix_fmt = in_video_stream.pix_fmt
+
+                # Add audio stream (AAC)
+                out_audio_stream = output.add_stream("aac", rate=sample_rate)
+                out_audio_stream.layout = layout
+
+                # Remux video (decode and re-encode to be safe)
+                for frame in input_video.decode(video=0):
+                    for packet in out_video_stream.encode(frame):
+                        output.mux(packet)
+                for packet in out_video_stream.encode():
+                    output.mux(packet)
+
+                # Encode audio
+                for frame in input_audio.decode(audio=0):
+                    frame.pts = None  # Let encoder assign PTS
+                    for packet in out_audio_stream.encode(frame):
+                        output.mux(packet)
+                for packet in out_audio_stream.encode():
+                    output.mux(packet)
+
+                input_video.close()
+                input_audio.close()
+                output.close()
+                shutil.move(out_path, video_path)
+            return True
+        except Exception as e:
+            logger.warning("Audio mux failed: %s", e)
+            return False
 
     def set_lora_adapter(self,
                          lora_nickname: str,
