@@ -5,6 +5,9 @@ from typing import Any
 
 import torch
 
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
 
 # TODO(PY): move it elsewhere
 def auto_attributes(init_func):

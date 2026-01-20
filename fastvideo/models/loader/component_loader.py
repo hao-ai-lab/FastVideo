@@ -391,6 +391,8 @@ class TextEncoderLoader(ComponentLoader):
 
             from fastvideo.platforms import current_platform
 
+            logger.info("Loading text encoder with cpu_offload: %s", use_cpu_offload)
+
             if use_cpu_offload:
                 pin_cpu_memory = fastvideo_args.pin_cpu_memory and is_pin_memory_available()
                 # Disable FSDP for MPS as it's not compatible
@@ -558,10 +560,9 @@ class VAELoader(ComponentLoader):
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the VAE based on the model path, and inference args."""
         config = get_diffusers_config(model=model_path)
-        class_name = config.get("_class_name")
-        assert class_name is not None, (
-            "Model config does not contain a _class_name attribute. Only diffusers format is supported."
-        )
+        config.pop("_name_or_path", None)
+        class_name = config.pop("_class_name")
+        assert class_name is not None, "Model config does not contain a _class_name attribute. Only diffusers format is supported."
         fastvideo_args.model_paths["vae"] = model_path
 
         from fastvideo.platforms import current_platform
@@ -729,6 +730,7 @@ class TransformerLoader(ComponentLoader):
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the transformer based on the model path, and inference args."""
         config = get_diffusers_config(model=model_path)
+        config.pop("_name_or_path", None)
         hf_config = deepcopy(config)
         cls_name = config.pop("_class_name")
         if cls_name is None:
@@ -829,7 +831,7 @@ class TransformerLoader(ComponentLoader):
         )
 
         total_params = sum(p.numel() for p in model.parameters())
-        logger.info("Loaded model with %.2fB parameters", total_params / 1e9)
+        logger.info("Loaded model with %.2fB parameters, with cpu_offload: %s", total_params / 1e9, fastvideo_args.dit_cpu_offload)
 
         assert next(model.parameters()).dtype == default_dtype, (
             "Model dtype does not match default dtype"

@@ -232,6 +232,7 @@ class TrainingBatch:
     image_latents: torch.Tensor | None = None
     infos: list[dict[str, Any]] | None = None
     mask_lat_size: torch.Tensor | None = None
+    video_latent: torch.Tensor | None = None
 
     # ODE trajectory supervision
     trajectory_latents: torch.Tensor | None = None
@@ -240,6 +241,9 @@ class TrainingBatch:
     # Transformer inputs
     noisy_model_input: torch.Tensor | None = None
     timesteps: torch.Tensor | None = None
+    use_gt_trajectory: bool = False
+    trajectory_timesteps: torch.Tensor | None = None
+    start_timestep_index: int | None = None
     sigmas: torch.Tensor | None = None
     noise: torch.Tensor | None = None
 

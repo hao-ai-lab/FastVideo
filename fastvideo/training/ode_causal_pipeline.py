@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import gc
 import sys
 from copy import deepcopy
 from typing import Any, cast
@@ -17,7 +18,7 @@ from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
     SelfForcingFlowMatchScheduler)
 # from fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline import (
 #     WanCausalDMDPipeline)
-from fastvideo.pipelines.basic.hunyuan15.hunyuan15_pipeline import HunyuanVideo15Pipeline
+from fastvideo.pipelines.basic.hunyuan15.hunyuan15_causal_dmd_pipeline import Hy15CausalDMDPipeline
 from fastvideo.pipelines.pipeline_batch_info import TrainingBatch
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
@@ -75,11 +76,9 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         assert self.timestep_shift == 5.0, "flow_shift must be 5.0"
         # self.noise_scheduler = SelfForcingFlowMatchScheduler(
         #     shift=self.timestep_shift, sigma_min=0.0, extra_one_step=True)
-        self.noise_scheduler.set_timesteps(sigmas=list(np.linspace(1.0, 0.0, 50 + 1)[:-1]), device=get_local_torch_device())
+        self.noise_scheduler.set_timesteps(num_inference_steps=1000, extra_one_step=True, device=get_local_torch_device())
 
-        logger.info("dmd_denoising_steps: %s",
-                    self.training_args.pipeline_config.dmd_denoising_steps)
-        self.dmd_denoising_steps = torch.tensor([0, 12, 24, 36, 50],
+        self.dmd_denoising_steps = torch.tensor(self.training_args.pipeline_config.dmd_denoising_steps,
                                                 dtype=torch.long,
                                                 device=get_local_torch_device())
         if training_args.warp_denoising_step:  # Warp the denoising step according to the scheduler time shift
@@ -115,7 +114,7 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         args_copy = deepcopy(training_args)
         args_copy.inference_mode = True
         # Warm start validation with current transformer
-        self.validation_pipeline = HunyuanVideo15Pipeline.from_pretrained(
+        self.validation_pipeline = Hy15CausalDMDPipeline.from_pretrained(
             training_args.model_path,
             args=args_copy,  # type: ignore
             inference_mode=True,
@@ -126,7 +125,7 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             sp_size=training_args.sp_size,
             num_gpus=training_args.num_gpus,
             pin_cpu_memory=training_args.pin_cpu_memory,
-            dit_cpu_offload=True)
+            dit_cpu_offload=False)
 
     def _get_next_batch(
             self,
@@ -263,7 +262,7 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         # Lazily cache nearest trajectory index per DMD step based on the (fixed) S timesteps
         if self._cached_closest_idx_per_dmd is None:
             self._cached_closest_idx_per_dmd = torch.tensor(
-                [0, 12, 24, 36, 49], dtype=torch.long).cpu()
+                [0, 12, 24, 36, 50], dtype=torch.long).cpu()
             # [0, 1, 2, 3], dtype=torch.long).cpu()
             logger.info("self._cached_closest_idx_per_dmd: %s",
                         self._cached_closest_idx_per_dmd)
@@ -279,6 +278,7 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             traj_latents,
             dim=1,
             index=self._cached_closest_idx_per_dmd.to(traj_latents.device))
+        # relevant_traj_latents = traj_latents
         logger.info("relevant_traj_latents: %s", relevant_traj_latents.shape)
         # assert relevant_traj_latents.shape[0] == 1
 
@@ -306,30 +306,117 @@ class ODEInitTrainingPipeline(TrainingPipeline):
                                                       4).detach().clone().cpu()
 
         logger.info("timestep: %s", timestep)
-        input_kwargs = {
-            "hidden_states": noisy_input.permute(0, 2, 1, 3, 4),
+        txt_input_kwargs = {
+            "txt_inference": True,
+            "vision_inference": False,
             "encoder_hidden_states": encoder_hidden_states,
             "encoder_hidden_states_image": encoder_hidden_states_image,
             "encoder_attention_mask": encoder_attention_mask,
+            "timestep": torch.zeros([latents.shape[0]], device=latents.device, dtype=torch.bfloat16),
+            "cache_txt": True,
+        }
+        with set_forward_context(current_timestep=timestep,
+                                 attn_metadata=None,
+                                 forward_batch=None):
+            txt_kv_cache = self.transformer(**txt_input_kwargs)
+
+        vision_input_kwargs = {
+            "txt_inference": False,
+            "vision_inference": True,
+            "hidden_states": noisy_input.permute(0, 2, 1, 3, 4),
             "timestep": timestep.to(device, dtype=torch.bfloat16),
+            "txt_kv_cache": txt_kv_cache,
         }
         # Predict noise and step the scheduler to obtain next latent
         with set_forward_context(current_timestep=timestep,
                                  attn_metadata=None,
                                  forward_batch=None):
-            noise_pred = self.transformer(**input_kwargs).permute(0, 2, 1, 3, 4)
+            noise_pred = self.transformer(**vision_input_kwargs).permute(0, 2, 1, 3, 4)
 
         from fastvideo.models.utils import pred_noise_to_pred_video
         pred_video = pred_noise_to_pred_video(
             pred_noise=noise_pred.flatten(0, 1),
             noise_input_latent=latents.flatten(0, 1),
             timestep=timestep.to(dtype=torch.bfloat16).flatten(0, 1),
-            scheduler=self.modules["scheduler"]).unflatten(
+            scheduler=self.noise_scheduler).unflatten(
                 0, noise_pred.shape[:2])
         latent_vis_dict["pred_video"] = pred_video.permute(
             0, 2, 1, 3, 4).detach().clone().cpu()
 
         return pred_video, target_latent, timestep, latent_vis_dict
+
+    # def _step_predict_next_latent(
+    #     self, traj_latents: torch.Tensor, traj_timesteps: torch.Tensor,
+    #     encoder_hidden_states: torch.Tensor,
+    #     encoder_attention_mask: torch.Tensor,
+    #     encoder_hidden_states_image: torch.Tensor
+    # ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str,
+    #                                                           torch.Tensor]]:
+    #     latent_vis_dict: dict[str, torch.Tensor] = {}
+    #     device = get_local_torch_device()
+    #     target_latent = traj_latents[:, -1]
+    #     del traj_latents
+
+    #     # Shapes: traj_latents [B, S, C, T, H, W], traj_timesteps [B, S]
+    #     B, num_frames, num_channels, height, width = target_latent.shape
+
+    #     indexes = self._get_timestep(  # [B, num_frames]
+    #         0,
+    #         1000,
+    #         B,
+    #         num_frames,
+    #         3,
+    #         uniform_timestep=False)
+    #     timestep = self.noise_scheduler.timesteps[indexes.cpu()].to(device)
+
+    #     latents = self.noise_scheduler.add_noise(target_latent.flatten(0, 1), torch.randn_like(target_latent.flatten(0, 1)), timestep.flatten(0, 1)).unflatten(0, (B, num_frames))
+    #     noisy_input = torch.cat([latents, torch.zeros_like(latents), torch.zeros_like(latents[:, :, 0:1])], dim=2)
+
+    #     # Prepare inputs for transformer
+    #     latent_vis_dict["noisy_input"] = latents.permute(
+    #         0, 2, 1, 3, 4).detach().clone().cpu()
+    #     latent_vis_dict["x0"] = target_latent.permute(0, 2, 1, 3,
+    #                                                   4).detach().clone().cpu()
+
+    #     logger.info("timestep: %s", timestep)
+    #     txt_input_kwargs = {
+    #         "txt_inference": True,
+    #         "vision_inference": False,
+    #         "encoder_hidden_states": encoder_hidden_states,
+    #         "encoder_hidden_states_image": encoder_hidden_states_image,
+    #         "encoder_attention_mask": encoder_attention_mask,
+    #         "timestep": torch.zeros([latents.shape[0]], device=latents.device, dtype=torch.bfloat16),
+    #         "cache_txt": True,
+    #     }
+    #     with set_forward_context(current_timestep=timestep,
+    #                              attn_metadata=None,
+    #                              forward_batch=None):
+    #         txt_kv_cache = self.transformer(**txt_input_kwargs)
+
+    #     vision_input_kwargs = {
+    #         "txt_inference": False,
+    #         "vision_inference": True,
+    #         "hidden_states": noisy_input.permute(0, 2, 1, 3, 4),
+    #         "timestep": timestep.to(device, dtype=torch.bfloat16),
+    #         "txt_kv_cache": txt_kv_cache,
+    #     }
+    #     # Predict noise and step the scheduler to obtain next latent
+    #     with set_forward_context(current_timestep=timestep,
+    #                              attn_metadata=None,
+    #                              forward_batch=None):
+    #         noise_pred = self.transformer(**vision_input_kwargs).permute(0, 2, 1, 3, 4)
+
+    #     from fastvideo.models.utils import pred_noise_to_pred_video
+    #     pred_video = pred_noise_to_pred_video(
+    #         pred_noise=noise_pred.flatten(0, 1),
+    #         noise_input_latent=latents.flatten(0, 1),
+    #         timestep=timestep.to(dtype=torch.bfloat16).flatten(0, 1),
+    #         scheduler=self.noise_scheduler).unflatten(
+    #             0, noise_pred.shape[:2])
+    #     latent_vis_dict["pred_video"] = pred_video.permute(
+    #         0, 2, 1, 3, 4).detach().clone().cpu()
+
+    #     return pred_video, target_latent, timestep, latent_vis_dict
 
     def train_one_step(self, training_batch):  # type: ignore[override]
         self.transformer.train()
@@ -342,6 +429,7 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         for _ in range(args.gradient_accumulation_steps):
             training_batch, traj_latents, traj_timesteps = self._get_next_batch(
                 training_batch)
+            # traj_latents = traj_latents[:, :, :21]
             text_embeds = training_batch.encoder_hidden_states
             text_attention_mask = training_batch.encoder_attention_mask
             image_embeds = training_batch.encoder_hidden_states_image
@@ -392,6 +480,10 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             except Exception:
                 grad_value = 0.0
         training_batch.grad_norm = grad_value
+
+        if training_batch.current_timestep % 10 == 0:
+            gc.collect()
+            torch.cuda.empty_cache()
         return training_batch
 
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,
@@ -418,6 +510,9 @@ class ODEInitTrainingPipeline(TrainingPipeline):
 
         if self.global_rank == 0 and tracker_loss_dict:
             self.tracker.log_artifacts(tracker_loss_dict, step)
+
+        gc.collect()
+        torch.cuda.empty_cache()
 
 
 def main(args) -> None:

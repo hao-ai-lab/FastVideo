@@ -28,6 +28,8 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     ("dits", "hunyuanvideo15", "HunyuanVideo15Transformer3DModel"),
     "HYWorldTransformer3DModel":
     ("dits", "hyworld", "HYWorldTransformer3DModel"),
+    "CausalHunyuanVideo15Transformer3DModel":
+    ("dits", "causal_hunyuanvideo15", "CausalHunyuanVideo15Transformer3DModel"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
     "StepVideoModel": ("dits", "stepvideo", "StepVideoModel"),

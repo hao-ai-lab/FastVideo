@@ -115,10 +115,10 @@ class Hy15ImageEncodingStage(ImageEncodingStage):
         """
         Encode the prompt into image encoder hidden states.
         """
-        if batch.pil_image is None:
-            batch.image_embeds = [
-                torch.zeros(1, 729, 1152, device=get_local_torch_device())
-            ]
+        # if batch.pil_image is None:
+        batch.image_embeds = [
+            torch.zeros(1, 729, 1152, device=get_local_torch_device())
+        ]
 
         raw_latent_shape = list(batch.raw_latent_shape)
         raw_latent_shape[1] = 1

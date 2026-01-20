@@ -247,8 +247,9 @@ class DenoisingStage(PipelineStage):
 
         # Initialize lists for ODE trajectory
         trajectory_timesteps: list[torch.Tensor] = []
-        trajectory_latents: list[torch.Tensor] = []
+        trajectory_latents: list[torch.Tensor] = [latents]
 
+        logger.info("timesteps: %s", timesteps)
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -413,6 +414,7 @@ class DenoisingStage(PipelineStage):
                             **action_kwargs,
                         )
 
+                    assert batch.do_classifier_free_guidance, "do_classifier_free_guidance is not supported"
                     if batch.do_classifier_free_guidance:
                         batch.is_cfg_negative = True
                         with set_forward_context(
@@ -467,6 +469,7 @@ class DenoisingStage(PipelineStage):
 
         trajectory_tensor: torch.Tensor | None = None
         if trajectory_latents:
+            trajectory_timesteps.append(torch.zeros_like(t))
             trajectory_tensor = torch.stack(trajectory_latents, dim=1)
             trajectory_timesteps_tensor = torch.stack(trajectory_timesteps,
                                                       dim=0)

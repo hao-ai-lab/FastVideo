@@ -474,6 +474,7 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
         guidance: Optional[torch.Tensor] = None,
         timestep_r: Optional[torch.LongTensor] = None,
         attention_kwargs: Optional[Dict[str, Any]] = None,
+        **kwargs
     ):
         encoder_hidden_states_image = encoder_hidden_states_image[0]
         encoder_hidden_states, encoder_hidden_states_2 = encoder_hidden_states
