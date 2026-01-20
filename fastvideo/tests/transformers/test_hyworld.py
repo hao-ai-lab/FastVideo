@@ -153,19 +153,6 @@ def test_hyworld_transformer():
         "byt5_text_mask": encoder_attention_mask_2
     }
 
-    # print all shapes
-    # print(f"hidden_states.shape: {hidden_states.shape}")
-    # print(f"encoder_hidden_states.shape: {encoder_hidden_states.shape}")
-    # print(f"encoder_attention_mask.shape: {encoder_attention_mask.shape}")
-    # print(f"encoder_hidden_states_2.shape: {encoder_hidden_states_2.shape}")
-    # print(f"encoder_attention_mask_2.shape: {encoder_attention_mask_2.shape}")
-    # print(f"image_embeds.shape: {image_embeds.shape}")
-    # print(f"action.shape: {action.shape}")
-    # print(f"viewmats.shape: {viewmats.shape}")
-    # print(f"Ks.shape: {Ks.shape}")
-    # print(f"timestep.shape: {timestep.shape}")
-    # print(f"timestep_txt.shape: {timestep_txt.shape}")
-
     with torch.no_grad():
         with torch.amp.autocast(device_type="cuda", dtype=precision):
             output1 = model1(
@@ -199,23 +186,7 @@ def test_hyworld_transformer():
                                 action=action,
                                 viewmats=viewmats,
                                 Ks=Ks)
-            
-            # # Compare outputs (both are dicts now)
-            # print("\n=== Output Comparison ===")
-            # for key in output1.keys():
-            #     if key in output2:
-            #         o1 = output1[key]
-            #         o2 = output2[key]
-            #         if o1.shape == o2.shape:
-            #             match = torch.allclose(o1.float(), o2.float(), atol=1e-4, rtol=1e-4)
-            #             max_diff = (o1.float() - o2.float()).abs().max().item()
-            #             print(f"{key}: match={match}, max_diff={max_diff}")
-            #         else:
-            #             print(f"{key}: shape mismatch - {o1.shape} vs {o2.shape}")
-    
-    # Check final hidden_states (the main output)
-    # hs1 = output1["hidden_states"]
-    # hs2 = output2["hidden_states"]
+
     hs1 = output1
     hs2 = output2
     assert hs1.shape == hs2.shape, f"Output shapes don't match: {hs1.shape} vs {hs2.shape}"

@@ -327,38 +327,17 @@ class HyWorldDenoisingStage(DenoisingStage):
                         pos_transformer_kwargs = {**transformer_kwargs, "encoder_attention_mask": batch.prompt_attention_mask}
                         neg_transformer_kwargs = {**transformer_kwargs, "encoder_attention_mask": batch.negative_attention_mask}
 
-                        # ref_image_tensor.shape: torch.Size([1, 3, 1, 480, 832])
-                        # cond_latents.shape: torch.Size([1, 32, 1, 30, 52])
-                        # encoder_hidden_states_image: torch.Size([1, 729, 1152])
-                        # encoder_attention_mask: torch.Size([1, 1000])
-                        # for key, value in transformer_kwargs.items():
-                        #     if key != "encoder_hidden_states_image" and key != "encoder_attention_mask":
-                        #         print(f"{key}: {value.shape if isinstance(value, torch.Tensor) else value}")
-                        #     else:
-                        #         print(f"{key}: {value[0].shape}")
-
-
                         with set_forward_context(
                             current_timestep=i,
                             attn_metadata=None,
                             forward_batch=batch,
                         ):
-                            # save_kwargs = pos_transformer_kwargs.copy()
-                            # save_kwargs["latents_concat"] = latents_concat
-                            # save_kwargs["prompt_embeds"] = prompt_embeds
-                            # torch.save(save_kwargs, "save_kwargs.pth")
-                            # exit()
                             noise_pred = current_model(
                                 latents_concat,
                                 prompt_embeds,
                                 **pos_transformer_kwargs,
                             )
                             
-                        # print(f"noise_pred.shape: {noise_pred.shape}") torch.Size([1, 32, 16, 30, 52])
-                        # print("batch.guidance_scale", batch.guidance_scale) 6.0
-                        # print("batch.do_classifier_free_guidance", batch.do_classifier_free_guidance) True
-                        # print("batch.guidance_rescale", batch.guidance_rescale) 0.0
-
                         if batch.do_classifier_free_guidance:
                             batch.is_cfg_negative = True
                             with set_forward_context(

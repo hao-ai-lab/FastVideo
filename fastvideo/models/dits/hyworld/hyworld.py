@@ -39,10 +39,6 @@ from fastvideo.distributed.utils import create_attention_mask_for_padding
 
 from .camera_rope import prope_qkv
 
-import sys
-sys.path.append("/mnt/weka/home/hao.zhang/mhuo/HY-WorldPlay")
-from hyvideo.models.transformers.modules.modulate_layers import modulate
-
 logger = init_logger(__name__)
 
 
@@ -113,26 +109,8 @@ class HyWorldDoubleStreamBlock(MMDoubleStreamBlock):
         Returns:
             Tuple of (img, txt) output tokens
         """
-        # DEBUG: Save input parameters
-        if debug_mode:
-            debug_dict = {
-                "input_img": img.clone(),
-                "input_txt": txt.clone(),
-                "input_encoder_attention_mask": encoder_attention_mask.clone() if encoder_attention_mask is not None else None,
-                "input_vec": vec.clone(),
-                "input_vec_txt": vec_txt.clone(),
-                "input_freqs_cis_cos": freqs_cis[0].clone() if freqs_cis is not None else None,
-                "input_freqs_cis_sin": freqs_cis[1].clone() if freqs_cis is not None else None,
-                "input_seq_attention_mask": seq_attention_mask.clone() if seq_attention_mask is not None else None,
-                "input_viewmats": viewmats.clone(),
-                "input_Ks": Ks.clone(),
-            }
-            
         # Process modulation vectors (inherited from parent)
         img_mod_outputs = self.img_mod(vec)
-        if debug_mode:
-            debug_dict["img_mod_outputs"] = img_mod_outputs.clone()
-        
         (
             img_attn_shift,
             img_attn_scale,
@@ -141,10 +119,6 @@ class HyWorldDoubleStreamBlock(MMDoubleStreamBlock):
             img_mlp_scale,
             img_mlp_gate,
         ) = torch.chunk(img_mod_outputs, 6, dim=-1)
-        if debug_mode:
-            debug_dict["img_attn_shift"] = img_attn_shift.clone()
-            debug_dict["img_attn_scale"] = img_attn_scale.clone()
-            debug_dict["img_attn_gate"] = img_attn_gate.clone()
 
         txt_mod_outputs = self.txt_mod(vec_txt)
         (
@@ -156,26 +130,10 @@ class HyWorldDoubleStreamBlock(MMDoubleStreamBlock):
             txt_mlp_gate,
         ) = torch.chunk(txt_mod_outputs, 6, dim=-1)
 
-        if debug_mode:
-            img_after_norm1_only = self.img_attn_norm.norm(img)
-            debug_dict["img_after_norm1"] = img_after_norm1_only.clone()
-            debug_dict["shapes"] = {
-                "img_shape": list(img.shape),
-                "img_attn_shift_shape": list(img_attn_shift.shape),
-                "img_attn_scale_shape": list(img_attn_scale.shape),
-            }
-
         # Prepare image for attention using fused operation
         img_attn_input = self.img_attn_norm(img, img_attn_shift, img_attn_scale)
-
-        if debug_mode:
-            debug_dict["img_attn_input_after_norm"] = img_attn_input.clone()
-        
         # Get QKV for image
         img_qkv, _ = self.img_attn_qkv(img_attn_input)
-        if debug_mode:
-            debug_dict["img_qkv_raw"] = img_qkv.clone()
-        
         batch_size, image_seq_len = img_qkv.shape[0], img_qkv.shape[1]
 
         # Split QKV
@@ -183,20 +141,10 @@ class HyWorldDoubleStreamBlock(MMDoubleStreamBlock):
                                self.num_attention_heads, -1)
         img_q, img_k, img_v = img_qkv[:, :, 0], img_qkv[:, :, 1], img_qkv[:, :,
                                                                           2]
-        if debug_mode:
-            debug_dict["img_q_before_norm"] = img_q.clone()
-            debug_dict["img_k_before_norm"] = img_k.clone()
-            debug_dict["img_v_before_norm"] = img_v.clone()
 
         # Apply QK-Norm if needed
         img_q = self.img_attn_q_norm(img_q).to(img_v)
         img_k = self.img_attn_k_norm(img_k).to(img_v)
-
-        if debug_mode:
-            debug_dict["img_q_after_norm"] = img_q.clone()
-            debug_dict["img_k_after_norm"] = img_k.clone()
-
-            torch.save(debug_dict, "fv_debug_until_img_q.pt")
 
         # Prepare text for attention using fused operation
         txt_attn_input = self.txt_attn_norm(txt, txt_attn_shift, txt_attn_scale)
@@ -222,29 +170,10 @@ class HyWorldDoubleStreamBlock(MMDoubleStreamBlock):
             viewmats=viewmats,
             Ks=Ks,
         )  # [batch, num_heads, seqlen, head_dim]
-        img_q_prope = img_q_prope.permute(
-            0, 2, 1, 3
-        )  # [batch, seqlen, num_heads, head_dim]
-        img_k_prope = img_k_prope.permute(
-            0, 2, 1, 3
-        )  # [batch, seqlen, num_heads, head_dim]
-        img_v_prope = img_v_prope.permute(
-            0, 2, 1, 3
-        )  # [batch, seqlen, num_heads, head_dim]
+        img_q_prope = img_q_prope.permute(0, 2, 1, 3)  # [batch, seqlen, num_heads, head_dim]
+        img_k_prope = img_k_prope.permute(0, 2, 1, 3)  # [batch, seqlen, num_heads, head_dim]
+        img_v_prope = img_v_prope.permute(0, 2, 1, 3)  # [batch, seqlen, num_heads, head_dim]
         # end hyworld
-        if debug_mode:
-            qkv_dict = {
-                "img_q": img_q,
-                "img_k": img_k,
-                "img_v": img_v,
-                "txt_q": txt_q,
-                "txt_k": txt_k,
-                "txt_v": txt_v,
-                "img_q_prope": img_q_prope,
-                "img_k_prope": img_k_prope,
-                "img_v_prope": img_v_prope,
-            }
-
 
         from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
         attn_metadata = FlashAttnMetadataBuilder().build(
@@ -255,13 +184,14 @@ class HyWorldDoubleStreamBlock(MMDoubleStreamBlock):
         with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
             img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v, freqs_cis=freqs_cis, attention_mask=seq_attention_mask)
         
-        # begin hyworld: attention with prope
-        # NOTE: Do NOT pass freqs_cis to prope attention - HY-WorldPlay does not apply RoPE to prope
+        # begin hyworld
+        # attention with prope
         from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
         attn_metadata_prope = FlashAttnMetadataBuilder().build(
             current_timestep=0,
             attn_mask=encoder_attention_mask,
-        )
+        )       
+        # NOTE: Do NOT pass freqs_cis to prope attention - HY-WorldPlay does not apply RoPE to prope
         with set_forward_context(current_timestep=0, attn_metadata=attn_metadata_prope):
             img_attn_prope, _ = self.attn(
                 img_q_prope, img_k_prope, img_v_prope, txt_q, txt_k, txt_v, 
@@ -271,23 +201,18 @@ class HyWorldDoubleStreamBlock(MMDoubleStreamBlock):
             img_attn_prope = rearrange(
                 img_attn_prope, "B L (H D) -> B H L D", H=self.num_attention_heads
             )
-            img_attn_prope = apply_fn_o(
-                img_attn_prope
-            )  # [batch, num_heads, seqlen, head_dim]
+            img_attn_prope = apply_fn_o(img_attn_prope) # [batch, num_heads, seqlen, head_dim]
             img_attn_prope = rearrange(img_attn_prope, "B H L D -> B L (H D)")
-        # end hyworld: attention with prope
 
-
-        # begin hyworld: add prope to img_attn
+        # add prope to img_attn
         img_attn_out, _ = self.img_attn_proj(img_attn.view(batch_size, image_seq_len, -1))
         img_attn_prope_out, _ = self.img_attn_prope_proj(img_attn_prope)
         img_attn_out = img_attn_out + img_attn_prope_out
-        # end hyworld: add prope to img_attn
+        # end hyworld
 
         # Use fused operation for residual connection, normalization, and modulation
         img_mlp_input, img_residual = self.img_attn_residual_mlp_norm(
-            img, img_attn_out, img_attn_gate, img_mlp_shift, img_mlp_scale
-        )
+            img, img_attn_out, img_attn_gate, img_mlp_shift, img_mlp_scale)
 
         # Process image MLP
         img_mlp_out = self.img_mlp(img_mlp_input)
@@ -304,17 +229,6 @@ class HyWorldDoubleStreamBlock(MMDoubleStreamBlock):
         # Process text MLP
         txt_mlp_out = self.txt_mlp(txt_mlp_input)
         txt = self.txt_mlp_residual(txt_residual, txt_mlp_out, txt_mlp_gate)
-        
-        if debug_mode:
-            qkv_dict.update({
-                # Reshape to [batch, seq_len, hidden_dim] to match HY-WorldPlay format
-                "img_attn": img_attn.view(batch_size, image_seq_len, -1),
-                "txt_attn": txt_attn.reshape(batch_size, -1, txt_attn.shape[-2] * txt_attn.shape[-1]) if txt_attn is not None else None,
-                "img_attn_prope": img_attn_prope,
-                "img": img,
-                "txt": txt,
-            })
-            torch.save(qkv_dict, "fv_qkv.pt")
 
         return img, txt
 
@@ -334,12 +248,15 @@ class HyWorldFinalLayer(nn.Module):
         super().__init__()
         from fastvideo.layers.linear import ReplicatedLinear
         from fastvideo.layers.visual_embedding import ModulateProjection
+        from fastvideo.layers.layernorm import LayerNormScaleShift
 
-        # Normalization
-        self.norm_final = nn.LayerNorm(hidden_size,
-                                       eps=1e-6,
-                                       elementwise_affine=False,
-                                       dtype=dtype)
+        self.norm_final = LayerNormScaleShift(
+            hidden_size,
+            norm_type="layer",
+            eps=1e-6,
+            elementwise_affine=False,
+            dtype=dtype,
+            prefix=f"{prefix}.norm_final")
 
         output_dim = patch_size[0] * patch_size[1] * patch_size[2] * out_channels
 
@@ -349,7 +266,7 @@ class HyWorldFinalLayer(nn.Module):
                                        params_dtype=dtype,
                                        prefix=f"{prefix}.linear")
 
-        # Modulation
+        # Modulation projection to get shift/scale
         self.adaLN_modulation = ModulateProjection(
             hidden_size,
             factor=2,
@@ -358,9 +275,8 @@ class HyWorldFinalLayer(nn.Module):
             prefix=f"{prefix}.adaLN_modulation")
 
     def forward(self, x, c):
-        # Use modulate() to handle per-token conditioning (matching HY-WorldPlay)
         shift, scale = self.adaLN_modulation(c).chunk(2, dim=-1)
-        x = modulate(self.norm_final(x), shift=shift, scale=scale)
+        x = self.norm_final(x, shift, scale)
         x, _ = self.linear(x)
         return x
 
@@ -383,19 +299,7 @@ class HyWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
         config: HyWorldConfig,
         hf_config: dict[str, Any],
     ) -> None:
-        # Initialize parent class first
-        # Note: We need to temporarily use HunyuanVideo15Config structure
-        # The config should be compatible or we need to adapt it
-        from fastvideo.configs.models.dits.hunyuanvideo15 import HunyuanVideo15Config
-        
-        # Create a compatible config for parent initialization
-        # This assumes HyWorldConfig has similar structure to HunyuanVideo15Config
-        super().__init__(
-            config=HunyuanVideo15Config(
-                arch_config=config.arch_config  # Share arch config
-            ),
-            hf_config=hf_config,
-        )
+        super().__init__(config=config, hf_config=hf_config)
 
         # Replace double_blocks with HY-World version that supports ProPE
         self.double_blocks = nn.ModuleList([
@@ -422,7 +326,7 @@ class HyWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
         if self.action_in.mlp.fc_out.bias is not None:
             nn.init.zeros_(self.action_in.mlp.fc_out.bias)
 
-        # Override final_layer with HyWorld version that uses modulate()
+        # Override final_layer with HyWorld version that uses per-token modulate()
         self.final_layer = HyWorldFinalLayer(
             hidden_size=self.hidden_size,
             patch_size=self.patch_size,
@@ -487,10 +391,6 @@ class HyWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
         # Add action conditioning if provided
         # temb shape: [B*T, C] where T = num_frames
         temb = temb + self.action_in(action.reshape(-1))
-        
-        # Keep a per-batch version for FinalLayer (average over frames)
-        # [B*T, C] -> [B, T, C] -> [B, C]
-        # temb_final = temb.view(batch_size, -1, temb.shape[-1]).mean(dim=1)
         
         # Broadcast timestep embedding for transformer blocks (one per spatial token)
         # [B*T, C] -> [B, T*H*W, C] -> [B*T*H*W, C]
@@ -614,19 +514,6 @@ class HyWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
         encoder_hidden_states = torch.stack(new_encoder_hidden_states)
         encoder_attention_mask = torch.stack(new_encoder_attention_mask)
 
-        kwargs = {
-            "hidden_states": hidden_states,
-            "encoder_hidden_states": encoder_hidden_states,
-            "encoder_attention_mask": encoder_attention_mask,
-            "temb": temb,
-            "temb_txt": temb_txt,
-            "freqs_cis": freqs_cis,
-            "seq_attention_mask": seq_attention_mask,
-            "viewmats": viewmats_seq,
-            "Ks": Ks_seq,
-        }
-        torch.save(kwargs, "fv_kwargs.pt")
-
         # 4. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for block in self.double_blocks:
@@ -656,7 +543,7 @@ class HyWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
                     Ks=Ks_seq, # hyworld
                 )
 
-        # Final layer processing
+        # Final layer processing (per-token conditioning via HyWorldFinalLayer)
         hidden_states = sequence_model_parallel_all_gather_with_unpad(hidden_states, original_seq_len, dim=1)
         hidden_states = self.final_layer(hidden_states, temb)
         # Unpatchify to get original shape

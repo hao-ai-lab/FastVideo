@@ -17,7 +17,7 @@ class SiglipVisionArchConfig(ImageEncoderArchConfig):
     # From config.json
     architectures: list[str] = field(default_factory=lambda: ["SiglipVisionModel"])
     attention_dropout: float = 0.0
-    dtype: str = "bfloat16"
+    dtype: str | None = None
     hidden_act: str = "gelu_pytorch_tanh"
     hidden_size: int = 1152
     image_size: int = 384

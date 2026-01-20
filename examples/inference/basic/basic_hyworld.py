@@ -236,70 +236,69 @@ class HyWorldVideoGenerator(VideoGenerator):
             }
 
 
-OUTPUT_PATH = "video_samples_hyworld"
-
+# Default prompt from HY-WorldPlay run.sh
+DEFAULT_PROMPT = 'A paved pathway leads towards a stone arch bridge spanning a calm body of water.  Lush green trees and foliage line the path and the far bank of the water. A traditional-style pavilion with a tiered, reddish-brown roof sits on the far shore. The water reflects the surrounding greenery and the sky.  The scene is bathed in soft, natural light, creating a tranquil and serene atmosphere. The pathway is composed of large, rectangular stones, and the bridge is constructed of light gray stone.  The overall composition emphasizes the peaceful and harmonious nature of the landscape.'
 
 def main():
-    # Parameters matching run.sh from HY-WorldPlay
-    PROMPT='A paved pathway leads towards a stone arch bridge spanning a calm body of water.  Lush green trees and foliage line the path and the far bank of the water. A traditional-style pavilion with a tiered, reddish-brown roof sits on the far shore. The water reflects the surrounding greenery and the sky.  The scene is bathed in soft, natural light, creating a tranquil and serene atmosphere. The pathway is composed of large, rectangular stones, and the bridge is constructed of light gray stone.  The overall composition emphasizes the peaceful and harmonious nature of the landscape.'
-
-
-    # Update these paths to match your setup (from run.sh)
-    IMAGE_PATH = os.getenv("IMAGE_PATH", "/mnt/weka/home/hao.zhang/mhuo/HY-WorldPlay/assets/img/test.png")
-    # MODEL_PATH = os.getenv(
-    #     "MODEL_PATH",
-    #     "/mnt/weka/home/hao.zhang/.cache/huggingface/hub/models--tencent--HunyuanVideo-1.5/snapshots/9b49404b3f5df2a8f0b31df27a0c7ab872e7b038"
-    # )
-    # # For bidirectional model (as used in run.sh)
-    # ACTION_MODEL_PATH = os.getenv(
-    #     "BI_ACTION_MODEL_PATH",
-    #     "/mnt/weka/home/hao.zhang/.cache/huggingface/hub/models--tencent--HY-WorldPlay/snapshots/969249711ab41203e8d8d9f784a82372e9070ac5/bidirectional_model/diffusion_pytorch_model.safetensors"
-    # )
-
-    SEED = 1
-    NUM_FRAMES = 61
-    TARGET_RESOLUTION = "480p"  # Options: "360p", "480p", "720p", "1080p"
-    POSE = 'a-15'  # Forward movement for 31 latents
+    import argparse
+    parser = argparse.ArgumentParser(description="HyWorld video generation with FastVideo")
+    parser.add_argument("--prompt", type=str, default=DEFAULT_PROMPT, help="Text prompt for video generation")
+    parser.add_argument("--image", type=str, default='assets/hyworld.png', help="Path to input image")
+    parser.add_argument("--pose", type=str, default='w-31', help="Pose string (e.g., 'a-31', 'w-31', 's-31', 'd-31')")
+    parser.add_argument("--output_path", type=str, default='video_samples_hyworld', help="Output video path")
+    parser.add_argument("--num-frames", type=int, default=125, help="Number of frames")
+    parser.add_argument("--seed", type=int, default=1, help="Random seed")
+    parser.add_argument("--resolution", type=str, default="480p", help="Only support 480p for now")
+    parser.add_argument("--model-path", type=str, default="/mnt/weka/home/hao.zhang/mhuo/data/hyworld",
+                        help="Path to HyWorld model")
+    args = parser.parse_args()
 
     # Check if image exists
-    if not os.path.exists(IMAGE_PATH):
-        print(f"Warning: Image path {IMAGE_PATH} does not exist. Image-to-video requires an image.")
-        print("Please set IMAGE_PATH environment variable or update the IMAGE_PATH in the script.")
+    if not os.path.exists(args.image):
+        print(f"Error: Image path {args.image} does not exist.")
         return
 
-    # Automatically determine resolution from input image (matching HY-WorldPlay)
-    HEIGHT, WIDTH = get_resolution_from_image(IMAGE_PATH, TARGET_RESOLUTION)
-    print(f"Auto-selected resolution: {HEIGHT}x{WIDTH} (from {TARGET_RESOLUTION} buckets)")
+    # Automatically determine resolution from input image
+    HEIGHT, WIDTH = get_resolution_from_image(args.image, args.resolution)
+    print(f"Image: {args.image}")
+    print(f"Pose: {args.pose}")
+    print(f"Resolution: {HEIGHT}x{WIDTH} (from {args.resolution} buckets)")
+    print(f"Num frames: {args.num_frames}")
+    print(f"Output path: {args.output_path}")
 
-    # FastVideo will automatically use the optimal default arguments for the model
+    # Initialize generator
+    print("\nInitializing HyWorldVideoGenerator...")
     generator = HyWorldVideoGenerator.from_pretrained(
-        "/mnt/weka/home/hao.zhang/mhuo/data/hyworld",  # Base HunyuanVideo-1.5 model path
+        args.model_path,
         num_gpus=1,
         use_fsdp_inference=True,
         dit_cpu_offload=True,
         vae_cpu_offload=True,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True,
-        # Load action model weights if available
-        # init_weights_from_safetensors=ACTION_MODEL_PATH if os.path.exists(ACTION_MODEL_PATH) else None,
     )
 
-    # Generate video with the same parameters as run.sh
+    # Generate video
+    print("\nGenerating video...")
+    start_time = time.time()
     video = generator.generate_video(
-        prompt=PROMPT,
-        image_path=IMAGE_PATH,
-        output_path=OUTPUT_PATH,
+        prompt=args.prompt,
+        image_path=args.image,
+        output_path=args.output_path,
         save_video=True,
         negative_prompt="",
-        num_frames=NUM_FRAMES,
+        num_frames=args.num_frames,
         fps=24,
         height=HEIGHT,
         width=WIDTH,
-        seed=SEED,
-        pose=POSE,  # HyWorld-specific: camera trajectory
+        seed=args.seed,
+        pose=args.pose,
     )
+    elapsed = time.time() - start_time
 
-    print(f"Video generated successfully and saved to {OUTPUT_PATH}")
+    print(f"\nVideo generated successfully!")
+    print(f"Saved to: {args.output}")
+    print(f"Time: {elapsed:.2f}s")
 
 
 if __name__ == "__main__":

@@ -113,10 +113,6 @@ class HyWorldImageEncodingStage(ImageEncodingStage):
     Also encodes reference image with VAE for conditional latent.
     """
     
-    # SigLIP normalization constants
-    SIGLIP_MEAN = [0.5, 0.5, 0.5]
-    SIGLIP_STD = [0.5, 0.5, 0.5]
-    
     def __init__(self, image_encoder=None, image_processor=None, vae=None):
         super().__init__(image_encoder=image_encoder, image_processor=image_processor)
         self.vae = vae
@@ -183,6 +179,8 @@ class HyWorldImageEncodingStage(ImageEncodingStage):
                 
                 # Get model dtype for proper precision matching (HY-WorldPlay uses fp16)
                 model_dtype = next(self.image_encoder.parameters()).dtype
+
+                print(f"SigLIP dtype: {model_dtype}")
                 
                 # Preprocess image for SigLIP
                 # Convert to numpy and resize to target resolution (matching HY-WorldPlay)
@@ -197,21 +195,15 @@ class HyWorldImageEncodingStage(ImageEncodingStage):
                 image_np = resize_and_center_crop(
                     image_np, target_width=batch.width, target_height=batch.height
                 )
-                # torch.save(image_np, "image_np.pth")
 
                 image_inputs = self.image_processor.preprocess(
                     images=image_np, return_tensors="pt"
                 ).to(device=device, dtype=model_dtype)  # Match model dtype!
                 pixel_values = image_inputs['pixel_values']
                 
-                # print(pixel_values.shape)
-                # torch.save(pixel_values, "pixel_values.pth")
                 with set_forward_context(current_timestep=0, attn_metadata=None):
                     outputs = self.image_encoder(pixel_values=pixel_values)
                     image_embeds = outputs.last_hidden_state
-                # print(image_embeds.shape)
-                # torch.save(image_embeds, "image_embeds.pth")
-                # exit()
                 batch.image_embeds = [image_embeds]
                 
                 if fastvideo_args.image_encoder_cpu_offload:
