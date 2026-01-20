@@ -67,6 +67,21 @@ class ForwardBatch:
     execution, allowing methods to update specific components without needing
     to manage numerous individual parameters.
     """
+
+    @dataclass
+    class RLData:
+        """RL-specific data collection options and outputs."""
+        enabled: bool = False
+        collect_log_probs: bool = True
+        collect_kl: bool = False
+        kl_reward: float = 0.0
+        store_trajectory: bool = True
+        keep_trajectory_on_cpu: bool = False
+        log_probs: torch.Tensor | None = None
+        kl: torch.Tensor | None = None
+        trajectory_latents: torch.Tensor | None = None
+        trajectory_timesteps: torch.Tensor | None = None
+
     # TODO(will): double check that args are separate from fastvideo_args
     # properly. Also maybe think about providing an abstraction for pipeline
     # specific arguments.
@@ -197,6 +212,9 @@ class ForwardBatch:
     logging_info: PipelineLoggingInfo = field(
         default_factory=PipelineLoggingInfo)
 
+    # RL data collection
+    rl_data: "ForwardBatch.RLData" = field(default_factory=RLData)
+
     def __post_init__(self):
         """Initialize dependent fields after dataclass initialization."""
 
@@ -275,7 +293,7 @@ class TrainingBatch:
     returns: torch.Tensor | None = None  # TD returns (advantages + values) [B, num_steps] or [B]
     values: torch.Tensor | None = None  # Value function predictions [B]
     old_values: torch.Tensor | None = None  # Old value predictions (for clipping) [B]
-    
+
     # GRPO sampling-specific attributes
     kl: torch.Tensor | None = None  # KL divergences from sampling [B, num_steps] (if kl_reward > 0)
     prompt_ids: torch.Tensor | None = None  # Prompt token IDs for stat tracking [B, seq_len]

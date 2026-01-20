@@ -4,11 +4,14 @@ Denoising stage for diffusion pipelines.
 """
 
 import inspect
+import math
 import weakref
 from collections.abc import Iterable
+from contextlib import nullcontext
 from typing import Any
 
 import torch
+from diffusers.utils.torch_utils import randn_tensor
 from tqdm.auto import tqdm
 
 from fastvideo.attention import get_attn_backend
@@ -50,6 +53,84 @@ except ImportError:
     vsa_available = False
 
 logger = init_logger(__name__)
+
+
+def sde_step_with_logprob(
+    scheduler,
+    model_output: torch.FloatTensor,
+    timestep: float | torch.FloatTensor,
+    sample: torch.FloatTensor,
+    prev_sample: torch.FloatTensor | None = None,
+    generator: torch.Generator | None = None,
+    deterministic: bool = False,
+    return_pixel_log_prob: bool = False,
+    return_dt_and_std_dev_t: bool = False
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, ...]:
+    """
+    Predict the sample from the previous timestep by reversing the SDE and
+    compute log probabilities for the transition.
+    """
+    if isinstance(timestep, torch.Tensor):
+        if timestep.ndim == 0:
+            timestep = timestep.unsqueeze(0)
+        step_indices = [
+            scheduler.index_for_timestep(t.item()) for t in timestep
+        ]
+    else:
+        step_indices = [scheduler.index_for_timestep(timestep)]
+
+    prev_step_indices = [step + 1 for step in step_indices]
+
+    sigmas = scheduler.sigmas.to(sample.device, sample.dtype)
+    sigma = sigmas[step_indices].view(-1, 1, 1, 1, 1)
+    sigma_prev = sigmas[prev_step_indices].view(-1, 1, 1, 1, 1)
+    sigma_max = sigmas[0].item()
+    sigma_min = sigmas[-1].item()
+
+    dt = sigma_prev - sigma
+
+    std_dev_t = sigma_min + (sigma_max - sigma_min) * sigma
+    prev_sample_mean = (sample * (1 + std_dev_t**2 / (2 * sigma) * dt) +
+                        model_output * (1 + std_dev_t**2 * (1 - sigma) /
+                                        (2 * sigma)) * dt)
+
+    if prev_sample is not None and generator is not None:
+        raise ValueError(
+            "Cannot pass both generator and prev_sample. Please make sure that either `generator` or"
+            " `prev_sample` stays `None`.")
+
+    if prev_sample is None:
+        variance_noise = randn_tensor(
+            model_output.shape,
+            generator=generator,
+            device=model_output.device,
+            dtype=model_output.dtype,
+        )
+        sqrt_dt = torch.sqrt(-1 * dt)
+        prev_sample = prev_sample_mean + std_dev_t * sqrt_dt * variance_noise
+    else:
+        sqrt_dt = torch.sqrt(-1 * dt)
+
+    if deterministic:
+        prev_sample = sample + dt * model_output
+        sqrt_dt = torch.sqrt(-1 * dt)
+
+    if return_pixel_log_prob:
+        raise NotImplementedError(
+            "Pixel-level log prob is not supported in this helper.")
+
+    std_dev_sqrt_dt = std_dev_t * sqrt_dt
+    log_prob = (
+        -((prev_sample.detach() - prev_sample_mean)**2) /
+        (2 *
+         (std_dev_sqrt_dt**2)) - torch.log(std_dev_sqrt_dt + 1e-8) - torch.log(
+             torch.sqrt(2 * torch.as_tensor(math.pi, device=sample.device))))
+
+    log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
+
+    if return_dt_and_std_dev_t:
+        return prev_sample, log_prob, prev_sample_mean, std_dev_t, sqrt_dt
+    return prev_sample, log_prob, prev_sample_mean, std_dev_t * sqrt_dt
 
 
 class DenoisingStage(PipelineStage):
@@ -203,9 +284,11 @@ class DenoisingStage(PipelineStage):
         else:
             boundary_timestep = None
         latent_model_input = latents.to(target_dtype)
-        assert latent_model_input.shape[0] == 1, "only support batch size 1"
+        rl_data = batch.rl_data if batch.rl_data and batch.rl_data.enabled else None
 
         if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
+            assert latent_model_input.shape[
+                0] == 1, "TI2V task only supports batch size 1"
             # TI2V directly replaces the first frame of the latent with
             # the image latent instead of appending along the channel dim
             assert batch.image_latent is None, "TI2V task should not have image latents"
@@ -243,6 +326,12 @@ class DenoisingStage(PipelineStage):
         # Initialize lists for ODE trajectory
         trajectory_timesteps: list[torch.Tensor] = []
         trajectory_latents: list[torch.Tensor] = []
+        rl_timesteps: list[torch.Tensor] = []
+        rl_latents: list[torch.Tensor] = []
+        rl_log_probs: list[torch.Tensor] = []
+        rl_kl: list[torch.Tensor] = []
+        if rl_data is not None and rl_data.store_trajectory:
+            rl_latents.append(latents)
 
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
@@ -329,6 +418,24 @@ class DenoisingStage(PipelineStage):
                     1000.0 if fastvideo_args.pipeline_config.embedded_cfg_scale
                     is not None else None)
 
+                def run_transformer(model, encoder_hidden_states, cond_kwargs,
+                                    is_cfg_negative: bool):
+                    batch.is_cfg_negative = is_cfg_negative
+                    with set_forward_context(
+                            current_timestep=i,
+                            attn_metadata=attn_metadata,
+                            forward_batch=batch,
+                    ):
+                        return model(
+                            latent_model_input,
+                            encoder_hidden_states,
+                            t_expand,
+                            guidance=guidance_expand,
+                            **image_kwargs,
+                            **cond_kwargs,
+                            **action_kwargs,
+                        )
+
                 # Predict noise residual
                 with torch.autocast(device_type="cuda",
                                     dtype=target_dtype,
@@ -390,40 +497,13 @@ class DenoisingStage(PipelineStage):
                     # support torch dynamo compilation. They pass in
                     # attn_metadata, vllm_config, and num_tokens. We can pass in
                     # fastvideo_args or training_args, and attn_metadata.
-                    batch.is_cfg_negative = False
-                    with set_forward_context(
-                            current_timestep=i,
-                            attn_metadata=attn_metadata,
-                            forward_batch=batch,
-                            # fastvideo_args=fastvideo_args
-                    ):
-                        # Run transformer
-                        noise_pred = current_model(
-                            latent_model_input,
-                            prompt_embeds,
-                            t_expand,
-                            guidance=guidance_expand,
-                            **image_kwargs,
-                            **pos_cond_kwargs,
-                            **action_kwargs,
-                        )
+                    noise_pred = run_transformer(current_model, prompt_embeds,
+                                                 pos_cond_kwargs, False)
 
                     if batch.do_classifier_free_guidance:
-                        batch.is_cfg_negative = True
-                        with set_forward_context(
-                                current_timestep=i,
-                                attn_metadata=attn_metadata,
-                                forward_batch=batch,
-                        ):
-                            noise_pred_uncond = current_model(
-                                latent_model_input,
-                                neg_prompt_embeds,
-                                t_expand,
-                                guidance=guidance_expand,
-                                **image_kwargs,
-                                **neg_cond_kwargs,
-                                **action_kwargs,
-                            )
+                        noise_pred_uncond = run_transformer(
+                            current_model, neg_prompt_embeds, neg_cond_kwargs,
+                            True)
 
                         noise_pred_text = noise_pred
                         noise_pred = noise_pred_uncond + current_guidance_scale * (
@@ -438,11 +518,58 @@ class DenoisingStage(PipelineStage):
                                 guidance_rescale=batch.guidance_rescale,
                             )
                     # Compute the previous noisy sample
+                    prev_latents = latents
                     latents = self.scheduler.step(noise_pred,
                                                   t,
                                                   latents,
                                                   **extra_step_kwargs,
                                                   return_dict=False)[0]
+                    if rl_data is not None:
+                        if rl_data.collect_log_probs:
+                            _, log_prob, prev_latents_mean, std_dev_t, _ = sde_step_with_logprob(
+                                self.scheduler,
+                                noise_pred.float(),
+                                t,
+                                prev_latents.float(),
+                                prev_sample=latents.float(),
+                                deterministic=False,
+                                return_dt_and_std_dev_t=True,
+                            )
+                            rl_log_probs.append(log_prob)
+
+                        if rl_data.collect_kl and rl_data.kl_reward > 0:
+                            adapter_ctx = nullcontext()
+                            if hasattr(current_model, "disable_adapter"):
+                                adapter_ctx = current_model.disable_adapter()
+                            with adapter_ctx:
+                                noise_pred_ref = run_transformer(
+                                    current_model, prompt_embeds,
+                                    pos_cond_kwargs, False)
+                                if batch.do_classifier_free_guidance:
+                                    noise_pred_uncond_ref = run_transformer(
+                                        current_model, neg_prompt_embeds,
+                                        neg_cond_kwargs, True)
+                                    noise_pred_text_ref = noise_pred_ref
+                                    noise_pred_ref = noise_pred_uncond_ref + current_guidance_scale * (
+                                        noise_pred_text_ref -
+                                        noise_pred_uncond_ref)
+                            _, _, prev_latents_mean_ref, std_dev_t_ref, _ = sde_step_with_logprob(
+                                self.scheduler,
+                                noise_pred_ref.float(),
+                                t,
+                                prev_latents.float(),
+                                prev_sample=latents.float(),
+                                deterministic=False,
+                                return_dt_and_std_dev_t=True,
+                            )
+                            if not torch.allclose(std_dev_t, std_dev_t_ref):
+                                logger.warning(
+                                    "std_dev_t mismatch in RL KL computation at step %s",
+                                    i)
+                            kl = (prev_latents_mean -
+                                  prev_latents_mean_ref)**2 / (2 * std_dev_t**2)
+                            kl = kl.mean(dim=tuple(range(1, kl.ndim)))
+                            rl_kl.append(kl)
                     if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
                         latents = latents.squeeze(0)
                         latents = (1. - mask2[0]) * z + mask2[0] * latents
@@ -452,6 +579,15 @@ class DenoisingStage(PipelineStage):
                 if batch.return_trajectory_latents:
                     trajectory_timesteps.append(t)
                     trajectory_latents.append(latents)
+                if rl_data is not None:
+                    rl_timesteps.append(t)
+                    if rl_data.store_trajectory:
+                        rl_latents.append(latents)
+                    if rl_data.collect_kl and rl_data.kl_reward <= 0:
+                        rl_kl.append(
+                            torch.zeros(latents.shape[0],
+                                        device=latents.device,
+                                        dtype=latents.dtype))
 
                 # Update progress bar
                 if i == len(timesteps) - 1 or (
@@ -472,6 +608,25 @@ class DenoisingStage(PipelineStage):
         if trajectory_tensor is not None and trajectory_timesteps_tensor is not None:
             batch.trajectory_timesteps = trajectory_timesteps_tensor.cpu()
             batch.trajectory_latents = trajectory_tensor.cpu()
+        if rl_data is not None:
+            if rl_timesteps:
+                rl_data.trajectory_timesteps = torch.stack(rl_timesteps, dim=0)
+                if rl_data.keep_trajectory_on_cpu:
+                    rl_data.trajectory_timesteps = rl_data.trajectory_timesteps.cpu(
+                    )
+            if rl_data.store_trajectory and rl_latents:
+                rl_data.trajectory_latents = torch.stack(rl_latents, dim=1)
+                if rl_data.keep_trajectory_on_cpu:
+                    rl_data.trajectory_latents = rl_data.trajectory_latents.cpu(
+                    )
+            if rl_log_probs:
+                rl_data.log_probs = torch.stack(rl_log_probs, dim=1)
+                if rl_data.keep_trajectory_on_cpu:
+                    rl_data.log_probs = rl_data.log_probs.cpu()
+            if rl_kl:
+                rl_data.kl = torch.stack(rl_kl, dim=1)
+                if rl_data.keep_trajectory_on_cpu:
+                    rl_data.kl = rl_data.kl.cpu()
 
         # Update batch with final latents
         batch.latents = latents

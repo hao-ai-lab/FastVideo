@@ -27,7 +27,6 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler)
-from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
 from fastvideo.utils import get_compute_dtype
 
 # for test_wan_transformer2
@@ -43,11 +42,12 @@ from fastvideo.models.loader.component_loader import TransformerLoader
 
 logger = init_logger(__name__)
 
+
 def test_wan_transformer():
     BASE_MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
     MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-                                    local_dir=os.path.join(
-                                        'data', BASE_MODEL_PATH))
+                                      local_dir=os.path.join(
+                                          'data', BASE_MODEL_PATH))
     TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -55,7 +55,9 @@ def test_wan_transformer():
     precision_str = "bf16"
     args = FastVideoArgs(model_path=TRANSFORMER_PATH,
                          dit_cpu_offload=True,
-                         pipeline_config=PipelineConfig(dit_config=WanVideoConfig(), dit_precision=precision_str))
+                         pipeline_config=PipelineConfig(
+                             dit_config=WanVideoConfig(),
+                             dit_precision=precision_str))
     args.device = device
 
     loader = TransformerLoader()
@@ -115,9 +117,7 @@ def test_wan_transformer():
     # Timestep
     timestep = torch.tensor([500], device=device, dtype=precision)
 
-    forward_batch = ForwardBatch(
-        data_type="dummy",
-    )
+    forward_batch = ForwardBatch(data_type="dummy", )
 
     with torch.amp.autocast('cuda', dtype=precision):
         output1 = model1(
@@ -166,8 +166,8 @@ def test_wan_transformer2(model2):
     logger.info("loading model1 transformer weight")
     BASE_MODEL_PATH = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
     MODEL_PATH = maybe_download_model(BASE_MODEL_PATH,
-                                    local_dir=os.path.join(
-                                        'data', BASE_MODEL_PATH))
+                                      local_dir=os.path.join(
+                                          'data', BASE_MODEL_PATH))
     TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
     model1 = WanTransformer3DModel.from_pretrained(
         TRANSFORMER_PATH,
@@ -178,8 +178,7 @@ def test_wan_transformer2(model2):
     total_params = sum(p.numel() for p in model1.parameters())
     # Calculate weight sum for model1 (converting to float64 to avoid overflow)
     weight_sum_model1 = sum(
-        p.to(torch.float64).sum().item() for p in model1.parameters()
-    )
+        p.to(torch.float64).sum().item() for p in model1.parameters())
     # Also calculate mean for more stable comparison
     weight_mean_model1 = weight_sum_model1 / total_params
     logger.info("Model 1 weight sum: %s", weight_sum_model1)
@@ -188,8 +187,7 @@ def test_wan_transformer2(model2):
     # Calculate weight sum for model2 (converting to float64 to avoid overflow)
     total_params_model2 = sum(p.numel() for p in model2.parameters())
     weight_sum_model2 = sum(
-        p.to(torch.float64).sum().item() for p in model2.parameters()
-    )
+        p.to(torch.float64).sum().item() for p in model2.parameters())
     # Also calculate mean for more stable comparison
     weight_mean_model2 = weight_sum_model2 / total_params_model2
     logger.info("Model 2 weight sum: %s", weight_sum_model2)
@@ -231,9 +229,7 @@ def test_wan_transformer2(model2):
     # Timestep
     timestep = torch.tensor([500], device=device, dtype=precision)
 
-    forward_batch = ForwardBatch(
-        data_type="dummy",
-    )
+    forward_batch = ForwardBatch(data_type="dummy", )
 
     with torch.amp.autocast("cuda", dtype=precision):
         output1 = model1(
@@ -243,9 +239,9 @@ def test_wan_transformer2(model2):
             return_dict=False,
         )[0]
         with set_forward_context(
-            current_timestep=0,
-            attn_metadata=None,
-            forward_batch=forward_batch,
+                current_timestep=0,
+                attn_metadata=None,
+                forward_batch=forward_batch,
         ):
             output2 = model2(
                 hidden_states=hidden_states,
@@ -272,12 +268,10 @@ def test_wan_transformer2(model2):
     )
 
     # Check if outputs have the same shape
-    assert (
-        output1.shape == output2.shape
-    ), f"Output shapes don't match: {output1.shape} vs {output2.shape}"
-    assert (
-        output1.dtype == output2.dtype
-    ), f"Output dtype don't match: {output1.dtype} vs {output2.dtype}"
+    assert (output1.shape == output2.shape
+            ), f"Output shapes don't match: {output1.shape} vs {output2.shape}"
+    assert (output1.dtype == output2.dtype
+            ), f"Output dtype don't match: {output1.dtype} vs {output2.dtype}"
 
     # Check if outputs are similar (allowing for small numerical differences)
     max_diff = torch.max(torch.abs(output1 - output2))
@@ -287,7 +281,6 @@ def test_wan_transformer2(model2):
     assert max_diff < 1e-1, f"Maximum difference between outputs: {max_diff.item()}"
     # mean diff
     assert mean_diff < 1e-2, f"Mean difference between outputs: {mean_diff.item()}"
-
     '''
     when --dit_precision "bf16", use_fsdp hardcoded to False:
     INFO 01-19 22:01:24 [wan_grpo_utils.py:65] Model 1 weight sum: 395834.3506456231████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  3.25it/s]
@@ -313,7 +306,7 @@ def sde_step_with_logprob(
     sample: torch.FloatTensor,
     prev_sample: torch.FloatTensor | None = None,
     generator: torch.Generator | None = None,
-    determistic: bool = False,
+    deterministic: bool = False,
     return_pixel_log_prob: bool = False,
     return_dt_and_std_dev_t: bool = False
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, ...]:
@@ -332,7 +325,7 @@ def sde_step_with_logprob(
         sample: A current instance of a sample created by the diffusion process
         prev_sample: Optional previous sample (if provided, used instead of sampling)
         generator: Optional random number generator
-        determistic: If True, no noise is added (deterministic sampling)
+        deterministic: If True, no noise is added (deterministic sampling)
         return_pixel_log_prob: If True, return pixel-level log probabilities (not used)
         return_dt_and_std_dev_t: If True, return dt and std_dev_t separately
 
@@ -342,14 +335,13 @@ def sde_step_with_logprob(
         Otherwise:
             (prev_sample, log_prob, prev_sample_mean, std_dev_t * sqrt_dt)
     """
-    
 
     # # Convert all variables to fp32 for numerical stability
     # model_output = model_output.float()
     # sample = sample.float()
     # if prev_sample is not None:
     #     prev_sample = prev_sample.float()
-    
+
     # Get step indices for current and previous timesteps
     # Handle both single timestep and batch of timesteps
     if isinstance(timestep, torch.Tensor):
@@ -365,11 +357,13 @@ def sde_step_with_logprob(
 
     # Move sigmas to sample device
     sigmas = scheduler.sigmas.to(sample.device)
-# myregion debug: hardcode sigmas to flow_grpo's
-    sigmas = torch.Tensor([0.9997, 0.9824, 0.9639, 0.9441, 0.9227, 0.8996, 0.8746, 0.8475, 0.8178,
+    # myregion debug: hardcode sigmas to flow_grpo's
+    sigmas = torch.Tensor([
+        0.9997, 0.9824, 0.9639, 0.9441, 0.9227, 0.8996, 0.8746, 0.8475, 0.8178,
         0.7853, 0.7496, 0.7102, 0.6663, 0.6173, 0.5621, 0.4997, 0.4283, 0.3459,
-        0.2498, 0.1362, 0.0000]).to(sample.device, sample.dtype)
-# end region
+        0.2498, 0.1362, 0.0000
+    ]).to(sample.device, sample.dtype)
+    # end region
 
     # Get sigma values for current and previous steps
     sigma = sigmas[step_indices].view(-1, 1, 1, 1, 1)
@@ -379,12 +373,14 @@ def sde_step_with_logprob(
 
     dt = sigma_prev - sigma
 
-# myregion debug
+    # myregion debug
     print(f"[DEBUG]: sigma_max: {sigma_max}, sigma_min: {sigma_min}, dt: {dt}")
     print(f"[DEBUG]: in sde_step_with_logprob(), timestep: {timestep}")
     print(f"[DEBUG]: in sde_step_with_logprob(), sigmas: {sigmas}")
     print(f"[DEBUG]: in sde_step_with_logprob(), step_indices: {step_indices}")
-    print(f"[DEBUG]: in sde_step_with_logprob(), prev_step_indices: {prev_step_indices}")
+    print(
+        f"[DEBUG]: in sde_step_with_logprob(), prev_step_indices: {prev_step_indices}"
+    )
     '''
     [DEBUG]: in sde_step_with_logprob(), timestep: tensor([428, 428, 428, 428], device='cuda:0')
     [DEBUG]: in sde_step_with_logprob(), sigmas: tensor([0.9999, 0.9826, 0.9642, 0.9443, 0.9230, 0.8999, 0.8749, 0.8477, 0.8181,
@@ -407,7 +403,7 @@ def sde_step_with_logprob(
     [DEBUG]: in sde_step_with_logprob(), step_indices: [13, 13, 13, 13]
     [DEBUG]: in sde_step_with_logprob(), prev_step_indices: [14, 14, 14, 14]
     '''
-# endregion
+    # endregion
 
     # Compute std_dev_t and prev_sample_mean using SDE formulation
     std_dev_t = sigma_min + (sigma_max - sigma_min) * sigma
@@ -434,7 +430,7 @@ def sde_step_with_logprob(
         sqrt_dt = torch.sqrt(-1 * dt)
 
     # No noise is added during evaluation (deterministic)
-    if determistic:
+    if deterministic:
         prev_sample = sample + dt * model_output
         sqrt_dt = torch.sqrt(-1 * dt)
 
@@ -474,7 +470,7 @@ def wan_pipeline_with_logprob(
     return_dict: bool = False,
     attention_kwargs: dict[str, Any] | None = None,
     max_sequence_length: int = 512,
-    determistic: bool = False,
+    deterministic: bool = False,
     kl_reward: float = 0.0,
     return_pixel_log_prob: bool = False,
 ) -> tuple[torch.Tensor, list[torch.Tensor], list[torch.Tensor],
@@ -503,7 +499,7 @@ def wan_pipeline_with_logprob(
         return_dict: Whether to return dict (not used, always returns tuple)
         attention_kwargs: Optional attention kwargs
         max_sequence_length: Maximum sequence length for text encoding
-        determistic: If True, use deterministic sampling (no noise)
+        deterministic: If True, use deterministic sampling (no noise)
         kl_reward: KL reward coefficient (if > 0, computes KL divergence)
         return_pixel_log_prob: If True, return pixel-level log probabilities (not used)
 
@@ -518,11 +514,11 @@ def wan_pipeline_with_logprob(
     # Get device from transformer
     transformer = pipeline.get_module("transformer")
 
-# myregion debug: test transformer output
-    logger.info(f"testing transformer, running test_wan_transformer2")
+    # myregion debug: test transformer output
+    logger.info("testing transformer, running test_wan_transformer2")
     test_wan_transformer()
     # test_wan_transformer2(transformer)
-# endregion
+    # endregion
 
     # hardcode dtype for debug
     # transformer_dtype = torch.float32
@@ -602,10 +598,18 @@ def wan_pipeline_with_logprob(
             negative_prompt_embeds = None
 
 # myregion Debug: Print shapes of prompt embeddings
-        logger.info(f"After encoding - prompt_embeds shape: {prompt_embeds.shape if prompt_embeds is not None else None}")
-        logger.info(f"After encoding - negative_prompt_embeds shape: {negative_prompt_embeds.shape if negative_prompt_embeds is not None else None}")
-        logger.info(f"After encoding - prompt_embeds dtype: {prompt_embeds.dtype if prompt_embeds is not None else None}")
-        logger.info(f"After encoding - negative_prompt_embeds dtype: {negative_prompt_embeds.dtype if negative_prompt_embeds is not None else None}")
+        logger.info(
+            f"After encoding - prompt_embeds shape: {prompt_embeds.shape if prompt_embeds is not None else None}"
+        )
+        logger.info(
+            f"After encoding - negative_prompt_embeds shape: {negative_prompt_embeds.shape if negative_prompt_embeds is not None else None}"
+        )
+        logger.info(
+            f"After encoding - prompt_embeds dtype: {prompt_embeds.dtype if prompt_embeds is not None else None}"
+        )
+        logger.info(
+            f"After encoding - negative_prompt_embeds dtype: {negative_prompt_embeds.dtype if negative_prompt_embeds is not None else None}"
+        )
         '''
         INFO 01-17 05:31:13 [wan_grpo_utils.py:290] After encoding - prompt_embeds shape: torch.Size([4, 512, 4096])
         INFO 01-17 05:31:13 [wan_grpo_utils.py:291] After encoding - negative_prompt_embeds shape: None
@@ -613,12 +617,11 @@ def wan_pipeline_with_logprob(
         INFO 01-17 05:31:13 [wan_grpo_utils.py:293] After encoding - negative_prompt_embeds dtype: None
         '''
 # endregion
-    # logger.info("wan_pipeline_with_logprob's transformer class type: %s", type(transformer))
-    # logger.info("Variables in transformer: %s", str(dir(transformer)))
+# logger.info("wan_pipeline_with_logprob's transformer class type: %s", type(transformer))
+# logger.info("Variables in transformer: %s", str(dir(transformer)))
     prompt_embeds = prompt_embeds.to(transformer_dtype)
     if negative_prompt_embeds is not None:
         negative_prompt_embeds = negative_prompt_embeds.to(transformer_dtype)
-
 
     # Prepare timesteps
     scheduler.set_timesteps(num_inference_steps, device=pipeline.device)
@@ -667,6 +670,7 @@ def wan_pipeline_with_logprob(
     else:
         latents = latents.to(device=pipeline.device, dtype=transformer_dtype)
 
+
 # myregion Debug: Print latents shape, dtype, and value range
     logger.info("=" * 80)
     logger.info("Latents Debug Information:")
@@ -690,21 +694,21 @@ def wan_pipeline_with_logprob(
     INFO 01-17 07:41:33 [wan_grpo_utils.py:363]   Device: cuda:0
     INFO 01-17 07:41:33 [wan_grpo_utils.py:364] ================================================================================
     '''
-# endregion
-    
+    # endregion
 
     all_latents = [latents]
     all_log_probs = []
     all_kl = []
 
-
-# myregion Debug
+    # myregion Debug
     logger.info("Tensor type issue debugging:")
     logger.info(f"latents: {type(latents)}")
     logger.info(f"prompt_embeds: {type(prompt_embeds)}")
-    logger.info(f"[DEBUG]: before denoising loop: type(timesteps): {type(timesteps)}")
-    logger.info(f"[DEBUG]: before denoising loop: timesteps.shape: {timesteps.shape}")
-# endregion
+    logger.info(
+        f"[DEBUG]: before denoising loop: type(timesteps): {type(timesteps)}")
+    logger.info(
+        f"[DEBUG]: before denoising loop: timesteps.shape: {timesteps.shape}")
+    # endregion
 
     # Progress bar for denoising loop
     progress_bar = tqdm(enumerate(timesteps),
@@ -718,9 +722,9 @@ def wan_pipeline_with_logprob(
         timestep = t.expand(latents.shape[0]) if isinstance(
             t, torch.Tensor) else torch.tensor([t] * latents.shape[0],
                                                device=pipeline.device)
-        
-        
-        logger.info(f"[DEBUG]: before set_forward_context: current_timestep=i:{i}")
+
+        logger.info(
+            f"[DEBUG]: before set_forward_context: current_timestep=i:{i}")
         # Predict noise with transformer
         with set_forward_context(
                 current_timestep=t.item(),
@@ -756,10 +760,10 @@ def wan_pipeline_with_logprob(
         # SDE step with log probability
         latents, log_prob, prev_latents_mean, std_dev_t = sde_step_with_logprob(
             scheduler,
-            noise_pred,#.float(),
+            noise_pred,  #.float(),
             t.unsqueeze(0) if isinstance(t, torch.Tensor) else t,
-            latents,#.float(),
-            determistic=determistic,
+            latents,  #.float(),
+            deterministic=deterministic,
             return_pixel_log_prob=return_pixel_log_prob)
         # sde_step_with_logprob returns fp32
         # latents = latents.to(transformer_dtype)
@@ -769,11 +773,10 @@ def wan_pipeline_with_logprob(
         all_log_probs.append(log_prob)
 
         # Compute KL divergence if kl_reward > 0 (for KL reward in sampling)
-        if kl_reward > 0 and not determistic:
+        if kl_reward > 0 and not deterministic:
             # Use reference model (disable adapter if using LoRA)
             latent_model_input_ref = torch.cat(
-                [latents_ori] *
-                2) if guidance_scale > 1.0 else latents_ori
+                [latents_ori] * 2) if guidance_scale > 1.0 else latents_ori
             with set_forward_context(
                     current_timestep=i,
                     attn_metadata=None,
@@ -804,7 +807,7 @@ def wan_pipeline_with_logprob(
                 t.unsqueeze(0) if isinstance(t, torch.Tensor) else t,
                 latents_ori.float(),
                 prev_sample=prev_latents.float(),
-                determistic=determistic,
+                deterministic=deterministic,
             )
 
             # Compute KL divergence: KL = (mean_diff)^2 / (2 * std^2)
