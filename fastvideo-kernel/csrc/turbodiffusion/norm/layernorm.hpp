@@ -68,9 +68,22 @@ public:
     // mean reduction
     float u = _reduce_sum(x, shared_data) / params.n;
 
+    // IMPORTANT:
+    // Loader pads out-of-range lanes with 0. That is OK for the sum, but after
+    // subtracting mean, those padded lanes become -u and would incorrectly
+    // contribute to the variance. Mask them back to 0 before variance reduction.
+    // We launch exactly NumThrPerCta threads for a 1xMaxHiddenSize tile,
+    // so each thread is responsible for a contiguous chunk in N.
+    int thr_n_offset = tidx * NumElementPerThread;
     CUTLASS_PRAGMA_UNROLL
-    for (int i = 0; i < NumElementPerThread; ++i)
-      x[i] -= u;
+    for (int i = 0; i < NumElementPerThread; ++i) {
+      int idx = thr_n_offset + i;
+      if (idx < params.n) {
+        x[i] -= u;
+      } else {
+        x[i] = 0.f;
+      }
+    }
 
     __syncthreads();
     // var reduction
