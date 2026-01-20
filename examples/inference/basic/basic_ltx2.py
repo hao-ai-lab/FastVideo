@@ -1,4 +1,3 @@
-import os
 from fastvideo import VideoGenerator
 
 PROMPT = (
@@ -16,38 +15,17 @@ PROMPT = (
 )
 
 
-NUM_FRAMES = 121
-FPS = 24
-HEIGHT = 512 
-WIDTH = 768
-SEED = 10
-
-
 def main() -> None:
-    diffusers_path = os.getenv("LTX2_DIFFUSERS_PATH",
-                               "FastVideo/LTX2-Distilled-Diffusers")
-
     generator = VideoGenerator.from_pretrained(
-        diffusers_path,
+        "FastVideo/LTX2-Distilled-Diffusers",
         num_gpus=1,
-        use_fsdp_inference=True,
-        dit_cpu_offload=True,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=False,
     )
 
-    output_path = "outputs_video/ltx2_basic/backyard_drama.mp4"
+    output_path = "outputs_video/ltx2_basic/output_ltx2_distilled_t2v.mp4"
     generator.generate_video(
         prompt=PROMPT,
-        # No negative_prompt for distilled model (guidance_scale=1.0 by default)
         output_path=output_path,
         save_video=True,
-        height=HEIGHT,
-        width=WIDTH,
-        num_frames=NUM_FRAMES,
-        fps=FPS,
-        seed=SEED,
     )
     generator.shutdown()
 

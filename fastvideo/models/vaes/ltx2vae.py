@@ -5,9 +5,11 @@ LTX-2 Video VAE implementation for FastVideo.
 
 from __future__ import annotations
 
+import itertools
 import math
+from dataclasses import dataclass, replace
 from enum import Enum
-from typing import Any, Tuple
+from typing import Any, Callable, Iterator, List, NamedTuple, Tuple
 
 import torch
 import torch.nn as nn
@@ -39,6 +41,317 @@ class PaddingModeType(Enum):
     REFLECT = "reflect"
     REPLICATE = "replicate"
     CIRCULAR = "circular"
+
+
+# =============================================================================
+# Tiling Data Structures
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class SpatialTilingConfig:
+    """Configuration for dividing each frame into spatial tiles with optional overlap."""
+    tile_size_in_pixels: int
+    tile_overlap_in_pixels: int = 0
+
+    def __post_init__(self) -> None:
+        if self.tile_size_in_pixels < 64:
+            raise ValueError(f"tile_size_in_pixels must be at least 64, got {self.tile_size_in_pixels}")
+        if self.tile_size_in_pixels % 32 != 0:
+            raise ValueError(f"tile_size_in_pixels must be divisible by 32, got {self.tile_size_in_pixels}")
+        if self.tile_overlap_in_pixels % 32 != 0:
+            raise ValueError(f"tile_overlap_in_pixels must be divisible by 32, got {self.tile_overlap_in_pixels}")
+        if self.tile_overlap_in_pixels >= self.tile_size_in_pixels:
+            raise ValueError(
+                f"Overlap must be less than tile size, got {self.tile_overlap_in_pixels} and {self.tile_size_in_pixels}"
+            )
+
+
+@dataclass(frozen=True)
+class TemporalTilingConfig:
+    """Configuration for dividing a video into temporal tiles (chunks of frames) with optional overlap."""
+    tile_size_in_frames: int
+    tile_overlap_in_frames: int = 0
+
+    def __post_init__(self) -> None:
+        if self.tile_size_in_frames < 16:
+            raise ValueError(f"tile_size_in_frames must be at least 16, got {self.tile_size_in_frames}")
+        if self.tile_size_in_frames % 8 != 0:
+            raise ValueError(f"tile_size_in_frames must be divisible by 8, got {self.tile_size_in_frames}")
+        if self.tile_overlap_in_frames % 8 != 0:
+            raise ValueError(f"tile_overlap_in_frames must be divisible by 8, got {self.tile_overlap_in_frames}")
+        if self.tile_overlap_in_frames >= self.tile_size_in_frames:
+            raise ValueError(
+                f"Overlap must be less than tile size, got {self.tile_overlap_in_frames} and {self.tile_size_in_frames}"
+            )
+
+
+@dataclass(frozen=True)
+class TilingConfig:
+    """Configuration for splitting video into tiles with optional overlap."""
+    spatial_config: SpatialTilingConfig | None = None
+    temporal_config: TemporalTilingConfig | None = None
+
+    @classmethod
+    def default(cls) -> "TilingConfig":
+        return cls(
+            spatial_config=SpatialTilingConfig(tile_size_in_pixels=512, tile_overlap_in_pixels=64),
+            temporal_config=TemporalTilingConfig(tile_size_in_frames=64, tile_overlap_in_frames=24),
+        )
+
+
+@dataclass(frozen=True)
+class DimensionIntervals:
+    """Intervals which a single dimension of the latent space is split into."""
+    starts: List[int]
+    ends: List[int]
+    left_ramps: List[int]
+    right_ramps: List[int]
+
+
+@dataclass(frozen=True)
+class LatentIntervals:
+    """Intervals which the latent tensor of given shape is split into."""
+    original_shape: torch.Size
+    dimension_intervals: Tuple[DimensionIntervals, ...]
+
+
+class VideoLatentShape(NamedTuple):
+    """Shape of the tensor representing video in VAE latent space."""
+    batch: int
+    channels: int
+    frames: int
+    height: int
+    width: int
+
+    def to_torch_shape(self) -> torch.Size:
+        return torch.Size([self.batch, self.channels, self.frames, self.height, self.width])
+
+    @staticmethod
+    def from_torch_shape(shape: torch.Size) -> "VideoLatentShape":
+        return VideoLatentShape(
+            batch=shape[0],
+            channels=shape[1],
+            frames=shape[2],
+            height=shape[3],
+            width=shape[4],
+        )
+
+    def upscale(self, time_scale: int, spatial_scale: int) -> "VideoLatentShape":
+        return self._replace(
+            channels=3,
+            frames=(self.frames - 1) * time_scale + 1,
+            height=self.height * spatial_scale,
+            width=self.width * spatial_scale,
+        )
+
+
+# Operation to split a single dimension of the tensor into intervals based on the length along the dimension.
+SplitOperation = Callable[[int], DimensionIntervals]
+# Operation to map the intervals in input dimension to slices and masks along a corresponding output dimension.
+MappingOperation = Callable[[DimensionIntervals], Tuple[List[slice], List[torch.Tensor | None]]]
+
+
+class Tile(NamedTuple):
+    """Represents a single tile."""
+    in_coords: Tuple[slice, ...]
+    out_coords: Tuple[slice, ...]
+    masks_1d: Tuple[torch.Tensor | None, ...]
+
+    @property
+    def blend_mask(self) -> torch.Tensor:
+        num_dims = len(self.out_coords)
+        per_dimension_masks: List[torch.Tensor] = []
+
+        for dim_idx in range(num_dims):
+            mask_1d = self.masks_1d[dim_idx]
+            view_shape = [1] * num_dims
+            if mask_1d is None:
+                one = torch.ones(1)
+                view_shape[dim_idx] = 1
+                per_dimension_masks.append(one.view(*view_shape))
+                continue
+
+            view_shape[dim_idx] = mask_1d.shape[0]
+            per_dimension_masks.append(mask_1d.view(*view_shape))
+
+        combined_mask = per_dimension_masks[0]
+        for mask in per_dimension_masks[1:]:
+            combined_mask = combined_mask * mask
+
+        return combined_mask
+
+
+# =============================================================================
+# Tiling Helper Functions
+# =============================================================================
+
+
+def compute_trapezoidal_mask_1d(
+    length: int,
+    ramp_left: int,
+    ramp_right: int,
+    left_starts_from_0: bool = False,
+) -> torch.Tensor:
+    """Generate a 1D trapezoidal blending mask with linear ramps."""
+    if length <= 0:
+        raise ValueError("Mask length must be positive.")
+
+    ramp_left = max(0, min(ramp_left, length))
+    ramp_right = max(0, min(ramp_right, length))
+
+    mask = torch.ones(length)
+
+    if ramp_left > 0:
+        interval_length = ramp_left + 1 if left_starts_from_0 else ramp_left + 2
+        fade_in = torch.linspace(0.0, 1.0, interval_length)[:-1]
+        if not left_starts_from_0:
+            fade_in = fade_in[1:]
+        mask[:ramp_left] *= fade_in
+
+    if ramp_right > 0:
+        fade_out = torch.linspace(1.0, 0.0, steps=ramp_right + 2)[1:-1]
+        mask[-ramp_right:] *= fade_out
+
+    return mask.clamp_(0, 1)
+
+
+def default_split_operation(length: int) -> DimensionIntervals:
+    return DimensionIntervals(starts=[0], ends=[length], left_ramps=[0], right_ramps=[0])
+
+
+DEFAULT_SPLIT_OPERATION: SplitOperation = default_split_operation
+
+
+def default_mapping_operation(
+    _intervals: DimensionIntervals,
+) -> Tuple[List[slice], List[torch.Tensor | None]]:
+    return [slice(0, None)], [None]
+
+
+DEFAULT_MAPPING_OPERATION: MappingOperation = default_mapping_operation
+
+
+def split_in_spatial(size: int, overlap: int) -> SplitOperation:
+    def split(dimension_size: int) -> DimensionIntervals:
+        if dimension_size <= size:
+            return DEFAULT_SPLIT_OPERATION(dimension_size)
+        amount = (dimension_size + size - 2 * overlap - 1) // (size - overlap)
+        starts = [i * (size - overlap) for i in range(amount)]
+        ends = [start + size for start in starts]
+        ends[-1] = dimension_size
+        left_ramps = [0] + [overlap] * (amount - 1)
+        right_ramps = [overlap] * (amount - 1) + [0]
+        return DimensionIntervals(starts=starts, ends=ends, left_ramps=left_ramps, right_ramps=right_ramps)
+
+    return split
+
+
+def split_in_temporal(size: int, overlap: int) -> SplitOperation:
+    non_causal_split = split_in_spatial(size, overlap)
+
+    def split(dimension_size: int) -> DimensionIntervals:
+        if dimension_size <= size:
+            return DEFAULT_SPLIT_OPERATION(dimension_size)
+        intervals = non_causal_split(dimension_size)
+        starts = list(intervals.starts)
+        starts[1:] = [s - 1 for s in starts[1:]]
+        left_ramps = list(intervals.left_ramps)
+        left_ramps[1:] = [r + 1 for r in left_ramps[1:]]
+        return replace(intervals, starts=starts, left_ramps=left_ramps)
+
+    return split
+
+
+def map_temporal_slice(begin: int, end: int, left_ramp: int, right_ramp: int, scale: int) -> Tuple[slice, torch.Tensor]:
+    start = begin * scale
+    stop = 1 + (end - 1) * scale
+    left_ramp_scaled = 1 + (left_ramp - 1) * scale
+    right_ramp_scaled = right_ramp * scale
+
+    return slice(start, stop), compute_trapezoidal_mask_1d(stop - start, left_ramp_scaled, right_ramp_scaled, True)
+
+
+def map_spatial_slice(begin: int, end: int, left_ramp: int, right_ramp: int, scale: int) -> Tuple[slice, torch.Tensor]:
+    start = begin * scale
+    stop = end * scale
+    left_ramp_scaled = left_ramp * scale
+    right_ramp_scaled = right_ramp * scale
+
+    return slice(start, stop), compute_trapezoidal_mask_1d(stop - start, left_ramp_scaled, right_ramp_scaled, False)
+
+
+def to_mapping_operation(
+    map_func: Callable[[int, int, int, int, int], Tuple[slice, torch.Tensor]],
+    scale: int,
+) -> MappingOperation:
+    def map_op(intervals: DimensionIntervals) -> Tuple[List[slice], List[torch.Tensor | None]]:
+        output_slices: List[slice] = []
+        masks_1d: List[torch.Tensor | None] = []
+        number_of_slices = len(intervals.starts)
+        for i in range(number_of_slices):
+            start = intervals.starts[i]
+            end = intervals.ends[i]
+            left_ramp = intervals.left_ramps[i]
+            right_ramp = intervals.right_ramps[i]
+            output_slice, mask_1d = map_func(start, end, left_ramp, right_ramp, scale)
+            output_slices.append(output_slice)
+            masks_1d.append(mask_1d)
+        return output_slices, masks_1d
+
+    return map_op
+
+
+def create_tiles_from_intervals_and_mappers(
+    intervals: LatentIntervals,
+    mappers: List[MappingOperation],
+) -> List[Tile]:
+    full_dim_input_slices = []
+    full_dim_output_slices = []
+    full_dim_masks_1d = []
+    for axis_index in range(len(intervals.original_shape)):
+        dimension_intervals = intervals.dimension_intervals[axis_index]
+        starts = dimension_intervals.starts
+        ends = dimension_intervals.ends
+        input_slices = [slice(s, e) for s, e in zip(starts, ends, strict=True)]
+        output_slices, masks_1d = mappers[axis_index](dimension_intervals)
+        full_dim_input_slices.append(input_slices)
+        full_dim_output_slices.append(output_slices)
+        full_dim_masks_1d.append(masks_1d)
+
+    tiles = []
+    tile_in_coords = list(itertools.product(*full_dim_input_slices))
+    tile_out_coords = list(itertools.product(*full_dim_output_slices))
+    tile_mask_1ds = list(itertools.product(*full_dim_masks_1d))
+    for in_coord, out_coord, mask_1d in zip(tile_in_coords, tile_out_coords, tile_mask_1ds, strict=True):
+        tiles.append(
+            Tile(
+                in_coords=in_coord,
+                out_coords=out_coord,
+                masks_1d=mask_1d,
+            )
+        )
+    return tiles
+
+
+def create_tiles(
+    latent_shape: torch.Size,
+    splitters: List[SplitOperation],
+    mappers: List[MappingOperation],
+) -> List[Tile]:
+    if len(splitters) != len(latent_shape):
+        raise ValueError(
+            f"Number of splitters must be equal to number of dimensions in latent shape, "
+            f"got {len(splitters)} and {len(latent_shape)}"
+        )
+    if len(mappers) != len(latent_shape):
+        raise ValueError(
+            f"Number of mappers must be equal to number of dimensions in latent shape, "
+            f"got {len(mappers)} and {len(latent_shape)}"
+        )
+    intervals = [splitter(length) for splitter, length in zip(splitters, latent_shape, strict=True)]
+    latent_intervals = LatentIntervals(original_shape=latent_shape, dimension_intervals=tuple(intervals))
+    return create_tiles_from_intervals_and_mappers(latent_intervals, mappers)
 
 
 # =============================================================================
@@ -1280,7 +1593,12 @@ class LTX2VideoDecoder(nn.Module):
 class LTX2CausalVideoAutoencoder(nn.Module):
     """
     LTX-2 VAE that exposes FastVideo's VAE encode/decode interface.
+    Supports tiled decoding to reduce memory usage for high-resolution videos.
     """
+
+    # LTX-2 VAE scale factors
+    TIME_SCALE: int = 8
+    SPATIAL_SCALE: int = 32
 
     def __init__(self, config: dict[str, Any]):
         super().__init__()
@@ -1300,10 +1618,187 @@ class LTX2CausalVideoAutoencoder(nn.Module):
         timestep: torch.Tensor | None = None,
         generator: torch.Generator | None = None,
     ) -> torch.Tensor:
+        """Decode latents to video, using tiling if enabled."""
+        if self._use_tiling:
+            # Collect all chunks from tiled decode and concatenate
+            chunks = list(self.tiled_decode(z, TilingConfig.default(), timestep, generator))
+            return torch.cat(chunks, dim=2)  # Concatenate along temporal dimension
         return self.decoder(z, timestep=timestep, generator=generator)
 
     def enable_tiling(self) -> None:
+        """Enable tiled decoding with default configuration."""
         self._use_tiling = True
 
     def disable_tiling(self) -> None:
+        """Disable tiled decoding."""
         self._use_tiling = False
+
+    def _prepare_tiles(
+        self,
+        latent: torch.Tensor,
+        tiling_config: TilingConfig | None,
+    ) -> List[Tile]:
+        """Prepare tiles for tiled decoding based on tiling configuration."""
+        splitters: List[SplitOperation] = [DEFAULT_SPLIT_OPERATION] * 5
+        mappers: List[MappingOperation] = [DEFAULT_MAPPING_OPERATION] * 5
+
+        if tiling_config is not None and tiling_config.spatial_config is not None:
+            cfg = tiling_config.spatial_config
+            tile_size = cfg.tile_size_in_pixels // self.SPATIAL_SCALE
+            overlap = cfg.tile_overlap_in_pixels // self.SPATIAL_SCALE
+            splitters[3] = split_in_spatial(tile_size, overlap)
+            splitters[4] = split_in_spatial(tile_size, overlap)
+            mappers[3] = to_mapping_operation(map_spatial_slice, self.SPATIAL_SCALE)
+            mappers[4] = to_mapping_operation(map_spatial_slice, self.SPATIAL_SCALE)
+
+        if tiling_config is not None and tiling_config.temporal_config is not None:
+            cfg = tiling_config.temporal_config
+            tile_size = cfg.tile_size_in_frames // self.TIME_SCALE
+            overlap = cfg.tile_overlap_in_frames // self.TIME_SCALE
+            splitters[2] = split_in_temporal(tile_size, overlap)
+            mappers[2] = to_mapping_operation(map_temporal_slice, self.TIME_SCALE)
+
+        return create_tiles(latent.shape, splitters, mappers)
+
+    def _group_tiles_by_temporal_slice(self, tiles: List[Tile]) -> List[List[Tile]]:
+        """Group tiles by their temporal output slice."""
+        if not tiles:
+            return []
+
+        groups = []
+        current_slice = tiles[0].out_coords[2]
+        current_group = []
+
+        for tile in tiles:
+            tile_slice = tile.out_coords[2]
+            if tile_slice == current_slice:
+                current_group.append(tile)
+            else:
+                groups.append(current_group)
+                current_slice = tile_slice
+                current_group = [tile]
+
+        if current_group:
+            groups.append(current_group)
+
+        return groups
+
+    def _accumulate_temporal_group_into_buffer(
+        self,
+        group_tiles: List[Tile],
+        buffer: torch.Tensor,
+        latent: torch.Tensor,
+        timestep: torch.Tensor | None,
+        generator: torch.Generator | None,
+    ) -> torch.Tensor:
+        """Decode and accumulate all tiles of a temporal group into a local buffer."""
+        temporal_slice = group_tiles[0].out_coords[2]
+        weights = torch.zeros_like(buffer)
+
+        for tile in group_tiles:
+            decoded_tile = self.decoder(latent[tile.in_coords], timestep, generator)
+            mask = tile.blend_mask.to(device=buffer.device, dtype=buffer.dtype)
+            temporal_offset = tile.out_coords[2].start - temporal_slice.start
+            expected_temporal_len = tile.out_coords[2].stop - tile.out_coords[2].start
+            decoded_temporal_len = decoded_tile.shape[2]
+
+            actual_temporal_len = min(expected_temporal_len, decoded_temporal_len, buffer.shape[2] - temporal_offset)
+
+            chunk_coords = (
+                slice(None),  # batch
+                slice(None),  # channels
+                slice(temporal_offset, temporal_offset + actual_temporal_len),
+                tile.out_coords[3],  # height
+                tile.out_coords[4],  # width
+            )
+
+            decoded_slice = decoded_tile[:, :, :actual_temporal_len, :, :]
+            mask_slice = mask[:, :, :actual_temporal_len, :, :] if mask.shape[2] > 1 else mask
+
+            buffer[chunk_coords] += decoded_slice * mask_slice
+            weights[chunk_coords] += mask_slice
+
+        return weights
+
+    def tiled_decode(
+        self,
+        latent: torch.Tensor,
+        tiling_config: TilingConfig | None = None,
+        timestep: torch.Tensor | None = None,
+        generator: torch.Generator | None = None,
+    ) -> Iterator[torch.Tensor]:
+        """
+        Decode a latent tensor into video frames using tiled processing.
+        Splits the latent tensor into tiles, decodes each tile individually,
+        and yields video chunks as they become available.
+        
+        Args:
+            latent: Input latent tensor (B, C, F', H', W').
+            tiling_config: Tiling configuration for the latent tensor.
+            timestep: Optional timestep for decoder conditioning.
+            generator: Optional random generator for deterministic decoding.
+            
+        Yields:
+            Video chunks (B, C, T, H, W) by temporal slices.
+        """
+        full_video_shape = VideoLatentShape.from_torch_shape(latent.shape).upscale(
+            self.TIME_SCALE, self.SPATIAL_SCALE
+        )
+        tiles = self._prepare_tiles(latent, tiling_config)
+        temporal_groups = self._group_tiles_by_temporal_slice(tiles)
+
+        previous_chunk = None
+        previous_weights = None
+        previous_temporal_slice = None
+
+        for temporal_group_tiles in temporal_groups:
+            curr_temporal_slice = temporal_group_tiles[0].out_coords[2]
+
+            temporal_tile_buffer_shape = full_video_shape._replace(
+                frames=curr_temporal_slice.stop - curr_temporal_slice.start,
+            )
+
+            buffer = torch.zeros(
+                temporal_tile_buffer_shape.to_torch_shape(),
+                device=latent.device,
+                dtype=latent.dtype,
+            )
+
+            curr_weights = self._accumulate_temporal_group_into_buffer(
+                group_tiles=temporal_group_tiles,
+                buffer=buffer,
+                latent=latent,
+                timestep=timestep,
+                generator=generator,
+            )
+
+            # Blend with previous temporal chunk if it exists
+            if previous_chunk is not None:
+                if previous_temporal_slice.stop > curr_temporal_slice.start:
+                    overlap_len = previous_temporal_slice.stop - curr_temporal_slice.start
+                    temporal_overlap_slice = slice(curr_temporal_slice.start - previous_temporal_slice.start, None)
+
+                    previous_chunk[:, :, temporal_overlap_slice, :, :] += buffer[:, :, slice(0, overlap_len), :, :]
+                    previous_weights[:, :, temporal_overlap_slice, :, :] += curr_weights[
+                        :, :, slice(0, overlap_len), :, :
+                    ]
+
+                    buffer[:, :, slice(0, overlap_len), :, :] = previous_chunk[:, :, temporal_overlap_slice, :, :]
+                    curr_weights[:, :, slice(0, overlap_len), :, :] = previous_weights[
+                        :, :, temporal_overlap_slice, :, :
+                    ]
+
+                # Yield the non-overlapping part of the previous chunk
+                previous_weights = previous_weights.clamp(min=1e-8)
+                yield_len = curr_temporal_slice.start - previous_temporal_slice.start
+                yield (previous_chunk / previous_weights)[:, :, :yield_len, :, :]
+
+            # Update state for next iteration
+            previous_chunk = buffer
+            previous_weights = curr_weights
+            previous_temporal_slice = curr_temporal_slice
+
+        # Yield any remaining chunk
+        if previous_chunk is not None:
+            previous_weights = previous_weights.clamp(min=1e-8)
+            yield previous_chunk / previous_weights
