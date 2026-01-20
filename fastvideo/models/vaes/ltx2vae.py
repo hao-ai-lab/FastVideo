@@ -1,9 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-LTX-2 video VAE - native FastVideo implementation.
-
-This module implements the LTX-2 Causal Video Autoencoder natively in FastVideo,
-without depending on the ltx-core package.
+LTX-2 Video VAE implementation for FastVideo.
 """
 
 from __future__ import annotations
