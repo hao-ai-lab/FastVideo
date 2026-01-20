@@ -12,12 +12,13 @@ import torch.nn as nn
 
 
 def _require_ltx2():
-    repo_root = Path(__file__).resolve().parents[3]
-    local_core = repo_root / "LTX-2" / "packages" / "ltx-core" / "src"
-    if local_core.exists() and str(local_core) not in sys.path:
-        sys.path.insert(0, str(local_core))
+    """Import LTX-2 audio VAE components from ltx_core.
 
+    Attempts to import from an installed ltx_core package first.
+    Falls back to local LTX-2 submodule if the package is not installed.
+    """
     try:
+        # Try importing from installed package first
         from ltx_core.model.audio_vae import (  # type: ignore
             AudioDecoder,
             AudioDecoderConfigurator,
@@ -26,10 +27,27 @@ def _require_ltx2():
             Vocoder,
             VocoderConfigurator,
         )
-    except ImportError as exc:
-        raise ImportError(
-            "LTX-2 sources are required. Ensure FastVideo/LTX-2 is present."
-        ) from exc
+    except ImportError:
+        # Fall back to local LTX-2 submodule
+        repo_root = Path(__file__).resolve().parents[3]
+        local_core = repo_root / "LTX-2" / "packages" / "ltx-core" / "src"
+        if local_core.exists() and str(local_core) not in sys.path:
+            sys.path.insert(0, str(local_core))
+
+        try:
+            from ltx_core.model.audio_vae import (  # type: ignore
+                AudioDecoder,
+                AudioDecoderConfigurator,
+                AudioEncoder,
+                AudioEncoderConfigurator,
+                Vocoder,
+                VocoderConfigurator,
+            )
+        except ImportError as exc:
+            raise ImportError(
+                "ltx_core is required for LTX-2 audio components. "
+                "Install it via pip or ensure FastVideo/LTX-2 submodule is present."
+            ) from exc
 
     return (
         AudioDecoder,

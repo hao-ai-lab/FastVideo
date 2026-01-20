@@ -35,11 +35,6 @@ def main() -> None:
         vae_cpu_offload=True,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=False,
-        ltx2_vae_tiling=True,
-        ltx2_vae_spatial_tile_size_in_pixels=512,
-        ltx2_vae_spatial_tile_overlap_in_pixels=64,
-        ltx2_vae_temporal_tile_size_in_frames=64,
-        ltx2_vae_temporal_tile_overlap_in_frames=24,
     )
 
     output_path = "outputs_video/ltx2_basic/backyard_drama.mp4"

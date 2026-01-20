@@ -105,7 +105,7 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
 
     # LTX-2 models
     "Lightricks/LTX-2": LTX2SamplingParam,
-    "converted/ltx2_diffusers": LTX2SamplingParam,
+    "FastVideo/LTX2-Distilled-Diffusers": LTX2SamplingParam,
 
     # Add other specific weight variants
 }
@@ -163,13 +163,6 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
 
 def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
     """Get the appropriate sampling param for specific pretrained weights."""
-
-    # Temporary local mapping for LTX-2 diffusers-style exports.
-    if os.path.exists(pipeline_name_or_path):
-        norm_path = os.path.normpath(pipeline_name_or_path)
-        path_parts = norm_path.split(os.sep)
-        if "ltx2_diffusers" in path_parts:
-            return LTX2SamplingParam
 
     # First try exact match for specific weights
     if pipeline_name_or_path in SAMPLING_PARAM_REGISTRY:
