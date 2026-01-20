@@ -2,6 +2,7 @@
 from dataclasses import asdict
 import math
 import os
+import gc
 import time
 from abc import ABC, abstractmethod
 from collections import deque
@@ -25,7 +26,7 @@ from fastvideo.attention.backends.video_sparse_attn import (
 from fastvideo.attention.backends.vmoba import VideoMobaAttentionMetadataBuilder
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset import build_parquet_map_style_dataloader
-from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
+from fastvideo.dataset.dataloader.schema import pyarrow_schema_ode_trajectory_text_only, pyarrow_schema_t2v
 from fastvideo.dataset.validation_dataset import ValidationDataset
 from fastvideo.distributed import (cleanup_dist_env_and_memory,
                                    get_local_torch_device, get_sp_group,
@@ -90,6 +91,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
     def set_schemas(self) -> None:
         self.train_dataset_schema = pyarrow_schema_t2v
+        self.train_dataset_schema_2 = pyarrow_schema_ode_trajectory_text_only
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing training pipeline...")
@@ -193,6 +195,20 @@ class TrainingPipeline(LoRAPipeline, ABC):
             text_len,  # type: ignore[attr-defined]
             seed=self.seed)
 
+        if getattr(training_args, 'data_path_2', None) is not None:
+            self.train_dataset_2, self.train_dataloader_2 = build_parquet_map_style_dataloader(
+                training_args.data_path_2,
+                training_args.train_batch_size,
+                parquet_schema=self.train_dataset_schema_2,
+                num_data_workers=training_args.dataloader_num_workers,
+                cfg_rate=training_args.training_cfg_rate,
+                drop_last=True,
+                text_padding_length=training_args.pipeline_config.
+                text_encoder_configs[0].arch_config.
+                text_len,  # type: ignore[attr-defined]
+                seed=self.seed
+            )
+
         self.noise_scheduler = noise_scheduler
         if self.training_args.boundary_ratio is not None:
             self.boundary_timestep = self.training_args.boundary_ratio * self.noise_scheduler.num_train_timesteps
@@ -281,7 +297,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         # TODO(will): support other models
         with self.tracker.timed("timing/normalize_input"):
             training_batch.latents = normalize_dit_input(
-                'wan',
+                'hunyuan',
                 training_batch.latents,
                 self.get_module("vae"),
             )
@@ -590,7 +606,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
             device="cpu").manual_seed(self.seed)
         logger.info("Initialized random seeds with seed: %s", self.seed)
 
-        self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
+        # self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
@@ -692,6 +708,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         "profiler_region_training_validation"):
                     self._log_validation(self.transformer, self.training_args,
                                          step)
+                    for module in self.transformer.modules():
+                        for name, buf in module._buffers.items():
+                            if "k_cache" in name or "v_cache" in name:
+                                module._buffers[name] = None
+                    gc.collect()
+                    torch.cuda.empty_cache()
                     gpu_memory_usage = current_platform.get_torch_device(
                     ).memory_allocated() / 1024**2
                     trainable_params = round(

@@ -830,6 +830,7 @@ class TrainingArgs(FastVideoArgs):
     precedence.
     """
     data_path: str = ""
+    data_path_2: str | None = None
     dataloader_num_workers: int = 0
     num_height: int = 0
     num_width: int = 0
@@ -998,6 +999,10 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--data-path",
                             type=str,
                             required=True,
+                            help="Path to parquet files")
+        parser.add_argument("--data-path-2",
+                            type=str,
+                            required=False,
                             help="Path to parquet files")
         parser.add_argument("--dataloader-num-workers",
                             type=int,

@@ -78,9 +78,10 @@ def hf_to_custom_state_dict(
     for source_param_name, full_tensor in hf_param_sd:  # type: ignore
         target_param_name, merge_index, num_params_to_merge = param_names_mapping(
             source_param_name)
-        reverse_param_names_mapping[target_param_name] = (source_param_name,
-                                                          merge_index,
-                                                          num_params_to_merge)
+        if merge_index is None:
+            reverse_param_names_mapping[target_param_name] = (source_param_name,
+                                                            merge_index,
+                                                            num_params_to_merge)
         if merge_index is not None:
             to_merge_params[target_param_name][merge_index] = full_tensor
             if len(to_merge_params[target_param_name]) == num_params_to_merge:

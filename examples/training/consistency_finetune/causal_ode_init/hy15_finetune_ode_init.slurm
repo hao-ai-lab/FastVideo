@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=hy15_ode_1333
+#SBATCH --job-name=hy15_ode_3333
 #SBATCH --partition=main
 #SBATCH --nodes=8
 #SBATCH --ntasks=8
@@ -7,8 +7,8 @@
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
-#SBATCH --output=hy15_ode_1333_output/hy15_ode_1333_%j.out
-#SBATCH --error=hy15_ode_1333_output/hy15_ode_1333_%j.err
+#SBATCH --output=hy15_ode_3333_output/hy15_ode_3333_%j.out
+#SBATCH --error=hy15_ode_3333_output/hy15_ode_3333_%j.err
 #SBATCH --exclusive
 
 # Basic Info
@@ -37,20 +37,21 @@ export HOME="/mnt/weka/home/hao.zhang/wei"
 NUM_GPUS=8
 NUM_TOTAL_GPUS=64
 
-MODEL_PATH="hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
+MODEL_PATH="weizhou03/SFHunyuanVideo-1.5-Diffusers-480p_t2v"
 DATA_DIR="/mnt/weka/home/hao.zhang/wl/sharefs/wl/release/fv-ode-preprocessing-16k-hy15-121"
+VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/wl/FastVideo/examples/distill/Wan2.2-TI2V-5B-Diffusers/Data-free/validation_64.json"
 # IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
   --tracker_project_name "hy15_ode_init"
-  --output_dir "/mnt/weka/home/hao.zhang/wei/hy15_ode_init_1333"
-  --wandb_run_name "hy15_ode_init_1333"
-  # --resume_from_checkpoint "ode_init_diffusers/"
-  # --warp_denoising_step
+  --output_dir "/mnt/weka/home/hao.zhang/wei/hy15_ode_init_1333_new"
+  --wandb_run_name "hy15_ode_init_1333_new"
+  --warp_denoising_step
+  --dmd_denoising_steps '1000,760,520,280,0'
   --log_visualization
   --visualization_steps 100
-  --max_train_steps 6001
+  --max_train_steps 4000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 2
@@ -58,7 +59,6 @@ training_args=(
   --num_height 480
   --num_width 848
   --num_frames 121
-  --dmd_denoising_steps "1000,750,500,250"
   --enable_gradient_checkpointing_type "full"
 )
 
@@ -75,6 +75,7 @@ parallel_args=(
 model_args=(
   --model_path $MODEL_PATH
   --pretrained_model_name_or_path $MODEL_PATH
+  --text-encoder-cpu-offload
 )
 
 # Dataset arguments
@@ -88,9 +89,17 @@ optimizer_args=(
   --learning_rate 1e-5
   --mixed_precision "bf16"
   --training_state_checkpointing_steps 400
-  --weight_only_checkpointing_steps 200
   --weight_decay 0.01
   --max_grad_norm 1.0
+)
+
+validation_args=(
+  # --log_validation
+  --validation_dataset_file "$VALIDATION_DATASET_FILE"
+  --validation_steps 10
+  --validation_sampling_steps "4"
+  --validation_guidance_scale "1.0" # not used for dmd inference
+  # --vae_cpu_offload True
 )
 
 # Miscellaneous arguments
