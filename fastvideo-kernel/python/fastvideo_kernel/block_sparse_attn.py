@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Tuple
 
 import torch
@@ -21,6 +22,12 @@ def _is_sm90() -> bool:
         return False
     major, minor = torch.cuda.get_device_capability(0)
     return major == 9 and minor == 0
+
+
+def _force_triton() -> bool:
+    # Force Triton even on SM90 and even if the compiled extension is available.
+    # Useful for CI / debugging / parity testing.
+    return os.environ.get("FASTVIDEO_KERNEL_VSA_FORCE_TRITON", "0") == "1"
 
 
 def _map_to_index_torch(block_map: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -281,7 +288,7 @@ def block_sparse_attn(
     - Otherwise: uses Triton implementation (requires q/k/v to have same padded length today).
     """
     block_sparse_fwd, block_sparse_bwd = _get_sm90_ops()
-    if _is_sm90() and (block_sparse_fwd is not None) and (block_sparse_bwd is not None):
+    if (not _force_triton()) and _is_sm90() and (block_sparse_fwd is not None) and (block_sparse_bwd is not None):
         return block_sparse_attn_sm90(q, k, v, block_map, variable_block_sizes)
     # Triton path: generally assumes q/k/v share the same padded length
     if q.shape[2] != k.shape[2] or q.shape[2] != v.shape[2]:
