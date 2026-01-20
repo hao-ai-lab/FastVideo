@@ -46,14 +46,22 @@ def sliding_tile_attention(
     flag = shape_map[seq_shape]
 
     for head_idx, (t, h, w) in enumerate(window_size):
+        # Per-head slices are not contiguous in the batch dimension when batch>1
+        # (they keep the original head-stride). The TK kernel assumes contiguous
+        # [B, H, S, D] layout, so we materialize a contiguous [B,1,S,D] view.
+        q_h = q[:, head_idx:head_idx + 1].contiguous()
+        k_h = k[:, head_idx:head_idx + 1].contiguous()
+        v_h = v[:, head_idx:head_idx + 1].contiguous()
+        o_h = torch.empty_like(q_h)
         sta_fwd(
-            q[:, head_idx:head_idx + 1], k[:, head_idx:head_idx + 1],
-            v[:, head_idx:head_idx + 1], output[:, head_idx:head_idx + 1],
+            q_h, k_h,
+            v_h, o_h,
             t, h, w, text_length, False, has_text, flag
         )
+        output[:, head_idx:head_idx + 1] = o_h
 
     if has_text:
-        sta_fwd(q, k, v, output, 3, 3, 3, text_length, True, True, flag)
+        sta_fwd(q.contiguous(), k.contiguous(), v.contiguous(), output, 3, 3, 3, text_length, True, True, flag)
 
     return output[:, :, :seq_length]
 
