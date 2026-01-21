@@ -626,6 +626,8 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
                 )
 
         # Final layer processing
+        if get_sp_world_size() > 1:
+            hidden_states = hidden_states.contiguous()
         hidden_states = sequence_model_parallel_all_gather_with_unpad(hidden_states, original_seq_len, dim=1)
         hidden_states = self.final_layer(hidden_states, temb)
         # Unpatchify to get original shape
