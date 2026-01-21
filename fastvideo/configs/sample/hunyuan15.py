@@ -32,3 +32,17 @@ class Hunyuan15_480P_SamplingParam(SamplingParam):
 class Hunyuan15_720P_SamplingParam(Hunyuan15_480P_SamplingParam):
     height: int = 720
     width: int = 1280
+
+@dataclass
+class Hunyuan15_720P_Distilled_I2V_SamplingParam(Hunyuan15_720P_SamplingParam):
+    guidance_scale: float = 1.0
+
+@dataclass
+class Hunyuan15_SR_1080P_SamplingParam(Hunyuan15_720P_SamplingParam):
+    height_sr: int = 1072
+    width_sr: int = 1920
+
+    num_inference_steps: int = 50
+    num_inference_steps_sr: int = 8
+
+    guidance_scale: float = 1.0

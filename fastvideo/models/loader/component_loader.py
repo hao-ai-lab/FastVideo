@@ -90,6 +90,7 @@ class ComponentLoader(ABC):
             "image_processor": (ImageProcessorLoader, "transformers"),
             "feature_extractor": (ImageProcessorLoader, "transformers"),
             "image_encoder": (ImageEncoderLoader, "transformers"),
+            "upsampler": (UpsamplerLoader, "diffusers"),
         }
 
         if module_type in module_loaders:
@@ -876,6 +877,46 @@ class SchedulerLoader(ComponentLoader):
             )
         return scheduler
 
+
+class UpsamplerLoader(ComponentLoader):
+    """Loader for upsamplers."""
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        """Load the upsampler based on the model path, and inference args."""
+        config_dict = get_diffusers_config(model=model_path)
+        class_name = config_dict.pop("_class_name", None)
+
+        if class_name is None:
+            raise ValueError(
+                "Model config does not contain a _class_name attribute. "
+                "Only diffusers format is supported."
+            )
+
+        upsampler_cfg = fastvideo_args.pipeline_config.upsampler_config
+        upsampler_cfg.update_model_config(config_dict)
+
+        model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+        model = model_cls(upsampler_cfg)
+
+        target_device = get_local_torch_device()
+        model = model.to(target_device, dtype=PRECISION_TO_TYPE[fastvideo_args.pipeline_config.upsampler_precision])
+
+        # Find all safetensors files
+        safetensors_list = glob.glob(
+            os.path.join(str(model_path), "*.safetensors"))
+        if not safetensors_list:
+            raise ValueError(f"No safetensors files found in {model_path}")
+        
+        if len(safetensors_list) == 1:
+            loaded = safetensors_load_file(safetensors_list[0])
+        else:
+            loaded = {}
+            for sf_file in safetensors_list:
+                loaded.update(safetensors_load_file(sf_file))
+        
+        model.load_state_dict(loaded, strict=True)
+
+        return model.eval()
 
 class GenericComponentLoader(ComponentLoader):
     """Generic loader for components that don't have a specific loader."""

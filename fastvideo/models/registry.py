@@ -99,7 +99,12 @@ _SCHEDULERS = {
     ("schedulers", "scheduling_rcm", "RCMScheduler"),
 }
 
-_LEGACY_FAST_VIDEO_MODELS = {
+_UPSAMPLERS = {
+    "SRTo720pUpsampler": ("upsamplers", "hunyuan15", "SRTo720pUpsampler"),
+    "SRTo1080pUpsampler": ("upsamplers", "hunyuan15", "SRTo1080pUpsampler"),
+}
+
+_FAST_VIDEO_MODELS = {
     **_TEXT_TO_VIDEO_DIT_MODELS,
     **_IMAGE_TO_VIDEO_DIT_MODELS,
     **_TEXT_ENCODER_MODELS,
@@ -107,6 +112,7 @@ _LEGACY_FAST_VIDEO_MODELS = {
     **_VAE_MODELS,
     **_AUDIO_MODELS,
     **_SCHEDULERS,
+    **_UPSAMPLERS,
 }
 
 MODELS_PATH = os.path.dirname(__file__)
