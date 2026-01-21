@@ -132,9 +132,13 @@ class MultiprocExecutor(Executor):
         else:
             logging_info = None
 
+        # Get extra dict (contains audio, etc.)
+        extra = responses[0].get("extra", {})
+
         result_batch = ForwardBatch(data_type=forward_batch.data_type,
                                     output=output,
-                                    logging_info=logging_info)
+                                    logging_info=logging_info,
+                                    extra=extra)
 
         return result_batch
 
@@ -648,7 +652,8 @@ class WorkerMultiprocProc:
                             logging_info = output_batch.logging_info
                         self.pipe.send({
                             "output_batch": output_batch.output.cpu(),
-                            "logging_info": logging_info
+                            "logging_info": logging_info,
+                            "extra": output_batch.extra,
                         })
                     else:
                         result = self.worker.execute_method(
