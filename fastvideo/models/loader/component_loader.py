@@ -80,6 +80,9 @@ class ComponentLoader(ABC):
             "transformer": (TransformerLoader, "diffusers"),
             "transformer_2": (TransformerLoader, "diffusers"),
             "vae": (VAELoader, "diffusers"),
+            "audio_vae": (AudioDecoderLoader, "diffusers"),
+            "audio_decoder": (AudioDecoderLoader, "diffusers"),
+            "vocoder": (VocoderLoader, "diffusers"),
             "text_encoder": (TextEncoderLoader, "transformers"),
             "text_encoder_2": (TextEncoderLoader, "transformers"),
             "tokenizer": (TokenizerLoader, "transformers"),
@@ -242,6 +245,47 @@ class TextEncoderLoader(ComponentLoader):
         model_config.pop("model_type", None)
         model_config.pop("tokenizer_class", None)
         model_config.pop("torch_dtype", None)
+        repo_root = os.path.dirname(model_path)
+        index_path = os.path.join(repo_root, "model_index.json")
+        gemma_path = ""
+        gemma_path_from_candidate = False
+        if os.path.isfile(index_path):
+            try:
+                with open(index_path, encoding="utf-8") as f:
+                    model_index = json.load(f)
+                gemma_path = model_index.get("gemma_model_path", "")
+            except json.JSONDecodeError:
+                gemma_path = ""
+        if not gemma_path:
+            candidate = os.path.normpath(os.path.join(model_path, "gemma"))
+            if os.path.isdir(candidate):
+                gemma_path = candidate
+                gemma_path_from_candidate = True
+                model_config["gemma_model_path"] = gemma_path
+        if gemma_path and not gemma_path_from_candidate:
+            if not os.path.isabs(gemma_path):
+                model_config["gemma_model_path"] = os.path.normpath(
+                    os.path.join(repo_root, gemma_path)
+                )
+        transformer_config_path = os.path.join(
+            repo_root, "transformer", "config.json"
+        )
+        if os.path.isfile(transformer_config_path):
+            try:
+                with open(transformer_config_path, encoding="utf-8") as f:
+                    transformer_config = json.load(f)
+                if (
+                    "connector_double_precision_rope" not in model_config
+                    or not model_config["connector_double_precision_rope"]
+                ):
+                    if transformer_config.get("double_precision_rope") is True:
+                        model_config["connector_double_precision_rope"] = True
+                if "connector_rope_type" not in model_config:
+                    rope_type = transformer_config.get("rope_type")
+                    if rope_type is not None:
+                        model_config["connector_rope_type"] = rope_type
+            except json.JSONDecodeError:
+                pass
         logger.info("HF Model config: %s", model_config)
 
         # @TODO(Wei): Better way to handle this?
@@ -489,8 +533,20 @@ class TokenizerLoader(ComponentLoader):
             # in v0, this was same string as encoder_name "ClipTextModel"
             # TODO(will): pass these tokenizer kwargs from inference args? Maybe
             # other method of config?
-            padding_size="right",
         )
+        padding_side = None
+        if hasattr(fastvideo_args.pipeline_config, "text_encoder_configs"):
+            try:
+                arch_config = fastvideo_args.pipeline_config.text_encoder_configs[
+                    0
+                ].arch_config
+                padding_side = getattr(arch_config, "padding_side", None)
+            except Exception:
+                padding_side = None
+        if padding_side:
+            tokenizer.padding_side = padding_side
+        if tokenizer.pad_token is None and tokenizer.eos_token is not None:
+            tokenizer.pad_token = tokenizer.eos_token
         logger.info("Loaded tokenizer: %s", tokenizer.__class__.__name__)
         return tokenizer
 
@@ -501,14 +557,11 @@ class VAELoader(ComponentLoader):
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the VAE based on the model path, and inference args."""
         config = get_diffusers_config(model=model_path)
-        class_name = config.pop("_class_name")
+        class_name = config.get("_class_name")
         assert class_name is not None, (
             "Model config does not contain a _class_name attribute. Only diffusers format is supported."
         )
         fastvideo_args.model_paths["vae"] = model_path
-
-        vae_config = fastvideo_args.pipeline_config.vae_config
-        vae_config.update_model_arch(config)
 
         from fastvideo.platforms import current_platform
 
@@ -543,8 +596,29 @@ class VAELoader(ComponentLoader):
                 vae.load_state_dict(sd, strict=False)
                 return vae.eval()
 
-            vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
-            vae = vae_cls(vae_config).to(target_device)
+            # LTX-2 uses CausalVideoAutoencoder with nested "vae" config
+            if class_name == "CausalVideoAutoencoder" and "vae" in config:
+                vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+                vae = vae_cls(config).to(target_device)
+                if hasattr(vae, "set_tiling_config"):
+                    vae_config = fastvideo_args.pipeline_config.vae_config
+                    vae.set_tiling_config(
+                        spatial_tile_size_in_pixels=getattr(
+                            vae_config, "ltx2_spatial_tile_size_in_pixels", 512),
+                        spatial_tile_overlap_in_pixels=getattr(
+                            vae_config, "ltx2_spatial_tile_overlap_in_pixels", 64),
+                        temporal_tile_size_in_frames=getattr(
+                            vae_config, "ltx2_temporal_tile_size_in_frames", 64),
+                        temporal_tile_overlap_in_frames=getattr(
+                            vae_config,
+                            "ltx2_temporal_tile_overlap_in_frames", 24),
+                    )
+            else:
+                config.pop("_class_name", None)
+                vae_config = fastvideo_args.pipeline_config.vae_config
+                vae_config.update_model_arch(config)
+                vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+                vae = vae_cls(vae_config).to(target_device)
 
         # Find all safetensors files
         safetensors_list = glob.glob(
@@ -553,15 +627,99 @@ class VAELoader(ComponentLoader):
             raise ValueError(f"No safetensors files found in {model_path}")
         # Common case: a single `.safetensors` checkpoint file.
         # Some models may be sharded into multiple files; in that case we merge.
-        if len(safetensors_list) == 1:
-            loaded = safetensors_load_file(safetensors_list[0])
-        else:
-            loaded = {}
-            for sf_file in safetensors_list:
-                loaded.update(safetensors_load_file(sf_file))
+        loaded = {}
+        for sf_file in safetensors_list:
+            loaded.update(safetensors_load_file(sf_file))
+
+        # LTX-2 CausalVideoAutoencoder needs per_channel_statistics remapping
+        if class_name == "CausalVideoAutoencoder" and "vae" in config:
+            per_channel_prefixes = (
+                "per_channel_statistics.",
+                "vae.per_channel_statistics.",
+            )
+            remapped = {}
+            for key, tensor in loaded.items():
+                remapped[key] = tensor
+                for prefix in per_channel_prefixes:
+                    if key.startswith(prefix):
+                        suffix = key[len(prefix):]
+                        remapped.setdefault(
+                            f"encoder.per_channel_statistics.{suffix}",
+                            tensor,
+                        )
+                        remapped.setdefault(
+                            f"decoder.per_channel_statistics.{suffix}",
+                            tensor,
+                        )
+                        break
+            loaded = remapped
+
         vae.load_state_dict(loaded, strict=False)
 
         return vae.eval()
+
+
+class AudioDecoderLoader(ComponentLoader):
+    """Loader for LTX-2 audio decoder (audio_vae component)."""
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        config = get_diffusers_config(model=model_path)
+        class_name = config.pop("_class_name", None) or "LTX2AudioDecoder"
+
+        model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+        target_device = get_local_torch_device()
+
+        precision = getattr(
+            fastvideo_args.pipeline_config, "audio_decoder_precision", "bf16"
+        )
+        with set_default_torch_dtype(PRECISION_TO_TYPE[precision]):
+            audio_decoder = model_cls(config).to(target_device)
+
+        safetensors_list = glob.glob(
+            os.path.join(str(model_path), "*.safetensors")
+        )
+        loaded: dict[str, torch.Tensor] = {}
+        for sf_file in safetensors_list:
+            loaded.update(safetensors_load_file(sf_file))
+
+        decoder_state = {}
+        for name, tensor in loaded.items():
+            if name.startswith("decoder."):
+                decoder_state[name.replace("decoder.", "")] = tensor
+            elif name.startswith("per_channel_statistics."):
+                decoder_state[name] = tensor
+
+        target_module = getattr(audio_decoder, "model", audio_decoder)
+        target_module.load_state_dict(decoder_state, strict=False)
+        return audio_decoder.eval()
+
+
+class VocoderLoader(ComponentLoader):
+    """Loader for LTX-2 vocoder."""
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        config = get_diffusers_config(model=model_path)
+        class_name = config.pop("_class_name", None) or "LTX2Vocoder"
+
+        model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+        target_device = get_local_torch_device()
+
+        precision = getattr(
+            fastvideo_args.pipeline_config, "vocoder_precision", "bf16"
+        )
+        with set_default_torch_dtype(PRECISION_TO_TYPE[precision]):
+            vocoder = model_cls(config).to(target_device)
+
+        safetensors_list = glob.glob(
+            os.path.join(str(model_path), "*.safetensors")
+        )
+        loaded: dict[str, torch.Tensor] = {}
+        for sf_file in safetensors_list:
+            loaded.update(safetensors_load_file(sf_file))
+
+        target_module = getattr(vocoder, "model", vocoder)
+        target_module.load_state_dict(loaded, strict=False)
+        return vocoder.eval()
 
 
 class TransformerLoader(ComponentLoader):
@@ -679,7 +837,18 @@ class TransformerLoader(ComponentLoader):
         model = model.eval()
 
         if fastvideo_args.inference_mode and fastvideo_args.dit_layerwise_offload:
-            enable_layerwise_offload(model)
+            # Check if model has nn.ModuleList for layerwise offload compatibility
+            has_module_list = any(
+                isinstance(m, nn.ModuleList) for m in model.children()
+            )
+            if has_module_list:
+                enable_layerwise_offload(model)
+            else:
+                logger.warning(
+                    "Layerwise offload requested but model %s does not have "
+                    "nn.ModuleList structure. Skipping layerwise offload.",
+                    cls_name
+                )
         return model
 
 

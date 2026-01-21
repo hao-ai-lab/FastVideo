@@ -29,6 +29,7 @@ dependencies = [
     "diffusers>=0.33.1",
     "torch>=2.9.1",
     "torchvision",
+    "torchaudio",
 
     # Acceleration & Optimization
     "accelerate==1.0.1",

@@ -11,13 +11,10 @@ from typing import Any
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
-from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
-
-logger = init_logger(__name__)
 
 
 class TextEncodingStage(PipelineStage):
@@ -39,6 +36,7 @@ class TextEncodingStage(PipelineStage):
         super().__init__()
         self.tokenizers = tokenizers
         self.text_encoders = text_encoders
+        self._last_audio_embeds: list[torch.Tensor] | None = None
 
     @torch.no_grad()
     def forward(
@@ -70,6 +68,8 @@ class TextEncodingStage(PipelineStage):
             encoder_index=all_indices,
             return_attention_mask=True,
         )
+        if self._last_audio_embeds is not None:
+            batch.extra["ltx2_audio_prompt_embeds"] = self._last_audio_embeds
 
         for pe in prompt_embeds_list:
             batch.prompt_embeds.append(pe)
@@ -86,6 +86,9 @@ class TextEncodingStage(PipelineStage):
                 encoder_index=all_indices,
                 return_attention_mask=True,
             )
+            if self._last_audio_embeds is not None:
+                batch.extra[
+                    "ltx2_audio_negative_embeds"] = self._last_audio_embeds
 
             assert batch.negative_prompt_embeds is not None
             for ne in neg_embeds_list:
@@ -184,10 +187,13 @@ class TextEncodingStage(PipelineStage):
 
         embeds_list: list[torch.Tensor] = []
         attn_masks_list: list[torch.Tensor] = []
+        audio_embeds_list: list[torch.Tensor] = []
 
         preprocess_funcs = fastvideo_args.pipeline_config.preprocess_text_funcs
         postprocess_funcs = fastvideo_args.pipeline_config.postprocess_text_funcs
         encoder_cfgs = fastvideo_args.pipeline_config.text_encoder_configs
+        is_ltx2 = getattr(fastvideo_args.pipeline_config.dit_config, "prefix",
+                          "") == "ltx2"
 
         if return_type not in ("list", "dict", "stack"):
             raise ValueError(
@@ -259,6 +265,11 @@ class TextEncodingStage(PipelineStage):
             except Exception:
                 prompt_embeds, attention_mask = postprocess_func(
                     outputs, attention_mask)
+            if is_ltx2 and getattr(outputs, "hidden_states", None):
+                audio_embed = outputs.hidden_states[0]
+                if dtype is not None:
+                    audio_embed = audio_embed.to(dtype=dtype)
+                audio_embeds_list.append(audio_embed)
 
             if dtype is not None:
                 prompt_embeds = prompt_embeds.to(dtype=dtype)
@@ -266,6 +277,7 @@ class TextEncodingStage(PipelineStage):
             if return_attention_mask:
                 attn_masks_list.append(attention_mask)
 
+        self._last_audio_embeds = audio_embeds_list if is_ltx2 else None
         return self.return_embeds(embeds_list, attn_masks_list, return_type,
                                   return_attention_mask, indices)
 
