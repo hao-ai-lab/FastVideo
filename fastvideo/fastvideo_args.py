@@ -177,6 +177,7 @@ class FastVideoArgs:
     override_text_encoder_quant: QuantizationMethods = None
 
     override_transformer_cls_name: str | None = None
+    override_vae_cls_name: str | None = None
     init_weights_from_safetensors: str = ""  # path to safetensors file for initial weight loading
     init_weights_from_safetensors_2: str = ""  # path to safetensors file for initial weight loading for transformer_2
 
@@ -505,6 +506,12 @@ class FastVideoArgs:
             type=str,
             default=FastVideoArgs.override_transformer_cls_name,
             help="Override transformer cls name",
+        )
+        parser.add_argument(
+            "--override-vae-cls-name",
+            type=str,
+            default=FastVideoArgs.override_vae_cls_name,
+            help="Override VAE cls name",
         )
         parser.add_argument(
             "--override-pipeline-cls-name",

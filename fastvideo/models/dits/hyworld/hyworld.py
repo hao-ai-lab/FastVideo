@@ -131,7 +131,7 @@ class HyWorldDoubleStreamBlock(MMDoubleStreamBlock):
         ) = torch.chunk(txt_mod_outputs, 6, dim=-1)
 
         # Prepare image for attention using fused operation
-        img_attn_input = self.img_attn_norm(img, img_attn_shift, img_attn_scale)
+        img_attn_input = self.img_attn_norm(img, img_attn_shift, img_attn_scale, convert_modulation_dtype=True)
         # Get QKV for image
         img_qkv, _ = self.img_attn_qkv(img_attn_input)
         batch_size, image_seq_len = img_qkv.shape[0], img_qkv.shape[1]
@@ -147,7 +147,7 @@ class HyWorldDoubleStreamBlock(MMDoubleStreamBlock):
         img_k = self.img_attn_k_norm(img_k).to(img_v)
 
         # Prepare text for attention using fused operation
-        txt_attn_input = self.txt_attn_norm(txt, txt_attn_shift, txt_attn_scale)
+        txt_attn_input = self.txt_attn_norm(txt, txt_attn_shift, txt_attn_scale, convert_modulation_dtype=True)
 
         # Get QKV for text
         txt_qkv, _ = self.txt_attn_qkv(txt_attn_input)
@@ -212,7 +212,7 @@ class HyWorldDoubleStreamBlock(MMDoubleStreamBlock):
 
         # Use fused operation for residual connection, normalization, and modulation
         img_mlp_input, img_residual = self.img_attn_residual_mlp_norm(
-            img, img_attn_out, img_attn_gate, img_mlp_shift, img_mlp_scale)
+            img, img_attn_out, img_attn_gate, img_mlp_shift, img_mlp_scale, convert_modulation_dtype=True)
 
         # Process image MLP
         img_mlp_out = self.img_mlp(img_mlp_input)
@@ -224,7 +224,7 @@ class HyWorldDoubleStreamBlock(MMDoubleStreamBlock):
 
         # Use fused operation for residual connection, normalization, and modulation
         txt_mlp_input, txt_residual = self.txt_attn_residual_mlp_norm(
-            txt, txt_attn_out, txt_attn_gate, txt_mlp_shift, txt_mlp_scale)
+            txt, txt_attn_out, txt_attn_gate, txt_mlp_shift, txt_mlp_scale, convert_modulation_dtype=True)
 
         # Process text MLP
         txt_mlp_out = self.txt_mlp(txt_mlp_input)
@@ -276,7 +276,7 @@ class HyWorldFinalLayer(nn.Module):
 
     def forward(self, x, c):
         shift, scale = self.adaLN_modulation(c).chunk(2, dim=-1)
-        x = self.norm_final(x, shift, scale)
+        x = self.norm_final(x, shift, scale, convert_modulation_dtype=True)
         x, _ = self.linear(x)
         return x
 

@@ -276,6 +276,11 @@ def main():
         vae_cpu_offload=True,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True,
+        # Important: override the class name loaded from HY-WorldPlay, which use HunyuanVideo-1.5 class names
+        # Rename to our own class names
+        override_vae_cls_name="AutoencoderKLHyWorld",
+        override_transformer_cls_name="HyWorldTransformer3DModel",
+        override_pipeline_cls_name="HyWorldPipeline"
     )
 
     # Generate video
@@ -297,7 +302,7 @@ def main():
     elapsed = time.time() - start_time
 
     print(f"\nVideo generated successfully!")
-    print(f"Saved to: {args.output}")
+    print(f"Saved to: {args.output_path}")
     print(f"Time: {elapsed:.2f}s")
 
 
