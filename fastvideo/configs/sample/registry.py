@@ -177,10 +177,8 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
 
 def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
     """Get the appropriate sampling param for specific pretrained weights."""
-    print(f"pipeline_name_or_path: {pipeline_name_or_path}")
     # First try exact match for specific weights
     if pipeline_name_or_path in SAMPLING_PARAM_REGISTRY:
-        print(f"pipeline_name_or_path: {pipeline_name_or_path}")
         return SAMPLING_PARAM_REGISTRY[pipeline_name_or_path]
 
     # Try partial matches (for local paths that might include the weight ID)
