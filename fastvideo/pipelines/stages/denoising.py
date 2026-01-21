@@ -532,7 +532,7 @@ class DenoisingStage(PipelineStage):
                                 t,
                                 prev_latents.float(),
                                 prev_sample=latents.float(),
-                                deterministic=False,
+                                deterministic=True,
                                 return_dt_and_std_dev_t=True,
                             )
                             rl_log_probs.append(log_prob)
@@ -559,7 +559,7 @@ class DenoisingStage(PipelineStage):
                                 t,
                                 prev_latents.float(),
                                 prev_sample=latents.float(),
-                                deterministic=False,
+                                deterministic=True,
                                 return_dt_and_std_dev_t=True,
                             )
                             if not torch.allclose(std_dev_t, std_dev_t_ref):

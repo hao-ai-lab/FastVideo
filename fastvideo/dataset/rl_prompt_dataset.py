@@ -5,6 +5,13 @@ import json
 import os
 
 
+FIXED_DEBUG_PROMPT = (
+    'A realistic photograph of a fast food drive-thru menu board at dusk, '
+    'featuring a bold and colorful advertisement that reads "Try Our New Burger" '
+    'with an appetizing image of the burger below.'
+)
+
+
 class TextPromptDataset(Dataset):
     """Dataset for loading text prompts from a simple text file (one prompt per line)."""
     
@@ -17,7 +24,10 @@ class TextPromptDataset(Dataset):
         return len(self.prompts)
     
     def __getitem__(self, idx):
-        return {"prompt": self.prompts[idx], "metadata": {}}
+        # Debug mode: always return the same prompt for evaluation.
+        # Keep dataset length/sampling behavior unchanged.
+        # return {"prompt": self.prompts[idx], "metadata": {}}
+        return {"prompt": FIXED_DEBUG_PROMPT, "metadata": {}}
 
     @staticmethod
     def collate_fn(examples):
@@ -39,7 +49,10 @@ class GenevalPromptDataset(Dataset):
         return len(self.prompts)
     
     def __getitem__(self, idx):
-        return {"prompt": self.prompts[idx], "metadata": self.metadatas[idx]}
+        # Debug mode: always return the same prompt for evaluation.
+        # Keep metadata passthrough unchanged.
+        # return {"prompt": self.prompts[idx], "metadata": self.metadatas[idx]}
+        return {"prompt": FIXED_DEBUG_PROMPT, "metadata": self.metadatas[idx]}
 
     @staticmethod
     def collate_fn(examples):

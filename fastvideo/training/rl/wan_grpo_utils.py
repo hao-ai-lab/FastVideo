@@ -306,7 +306,7 @@ def sde_step_with_logprob(
     sample: torch.FloatTensor,
     prev_sample: torch.FloatTensor | None = None,
     generator: torch.Generator | None = None,
-    deterministic: bool = False,
+    deterministic: bool = True,
     return_pixel_log_prob: bool = False,
     return_dt_and_std_dev_t: bool = False
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, ...]:
@@ -336,6 +336,10 @@ def sde_step_with_logprob(
             (prev_sample, log_prob, prev_sample_mean, std_dev_t * sqrt_dt)
     """
 
+    # Hardcode deterministic sampling for alignment/debugging.
+    # (Requested: ensure `deterministic` is always True.)
+    deterministic = True
+
     # # Convert all variables to fp32 for numerical stability
     # model_output = model_output.float()
     # sample = sample.float()
@@ -357,12 +361,7 @@ def sde_step_with_logprob(
 
     # Move sigmas to sample device
     sigmas = scheduler.sigmas.to(sample.device)
-    # myregion debug: hardcode sigmas to flow_grpo's
-    sigmas = torch.Tensor([
-        0.9997, 0.9824, 0.9639, 0.9441, 0.9227, 0.8996, 0.8746, 0.8475, 0.8178,
-        0.7853, 0.7496, 0.7102, 0.6663, 0.6173, 0.5621, 0.4997, 0.4283, 0.3459,
-        0.2498, 0.1362, 0.0000
-    ]).to(sample.device, sample.dtype)
+    sigmas = scheduler.sigmas.to(sample.device, sample.dtype)
     # end region
 
     # Get sigma values for current and previous steps

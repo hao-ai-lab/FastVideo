@@ -37,7 +37,31 @@ class InputValidationStage(PipelineStage):
         num_videos_per_prompt = batch.num_videos_per_prompt
 
         assert seed is not None
-        seeds = [seed + i for i in range(num_videos_per_prompt)]
+        # Determine effective batch size. This needs to match downstream stages
+        # (e.g. `LatentPreparationStage`) which treat the "effective batch" as
+        # `batch_size * num_videos_per_prompt`.
+        if batch.batch_size is not None:
+            batch_size = int(batch.batch_size)
+        # Prefer deriving batch size from raw (pre-encoding) inputs.
+        # `InputValidationStage` runs before `prompt_encoding_stage`, so
+        # `prompt_embeds` will typically still be empty.
+        elif batch.prompt is not None:
+            batch_size = len(batch.prompt) if isinstance(batch.prompt,
+                                                         list) else 1
+        elif batch.prompt_embeds:
+            batch_size = int(batch.prompt_embeds[0].shape[0])
+        # Fall back to non-text conditioning inputs (e.g. Matrix-Game / I2V)
+        elif batch.keyboard_cond is not None:
+            batch_size = int(batch.keyboard_cond.shape[0])
+        elif batch.mouse_cond is not None:
+            batch_size = int(batch.mouse_cond.shape[0])
+        elif batch.image_embeds:
+            batch_size = int(batch.image_embeds[0].shape[0])
+        else:
+            batch_size = 1
+
+        effective_batch = batch_size * int(num_videos_per_prompt)
+        seeds = [seed + i for i in range(effective_batch)]
         batch.seeds = seeds
 
         # Peiyuan: using GPU seed will cause A100 and H100 to generate different results...

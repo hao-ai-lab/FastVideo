@@ -1,19 +1,12 @@
 #!/bin/bash
 
-# Change to FastVideo root directory (3 levels up from this script)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FASTVIDEO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-cd "$FASTVIDEO_ROOT"
-
-# Add FastVideo root to PYTHONPATH so Python can find the fastvideo package
-export PYTHONPATH="$FASTVIDEO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
-
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 # export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 RL_DATASET_DIR="data/ocr/"  # Path to RL prompt dataset directory (should contain train.txt and test.txt)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VALIDATION_DATASET_FILE="$SCRIPT_DIR/validation.json"
 NUM_GPUS=1
 
@@ -30,7 +23,7 @@ training_args=(
   # --train_sp_batch_size 4
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 5
+  --num_latent_t 50
   --num_height 240
   --num_width 416
   --num_frames 33
@@ -117,8 +110,8 @@ miscellaneous_args=(
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
-  --master_port 29501 \
-    "$FASTVIDEO_ROOT/fastvideo/training/wan_rl_training_pipeline.py" \
+  --master_port 29601 \
+    "fastvideo/training/wan_rl_training_pipeline.py" \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

@@ -14,17 +14,9 @@ import math
 import os
 from typing import Any
 
-import imageio
-import numpy as np
 import torch
 import torch.nn as nn
-import torchvision
-from torch.utils.data import DataLoader
-from einops import rearrange
 
-from fastvideo.dataset.validation_dataset import ValidationDataset
-from fastvideo.configs.sample import SamplingParam
-from fastvideo.distributed import (get_world_group)
 from fastvideo.fastvideo_args import TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch, TrainingBatch
@@ -228,146 +220,146 @@ class RLPipeline(TrainingPipeline):
     #     training_args.inference_mode = False
     #     self.transformer.train()
 
-    @torch.no_grad()
-    def _log_validation(self, transformer, training_args, global_step) -> None:
-        """
-        Generate a validation video and log it to the configured tracker to check the quality during training.
-        """
-        training_args.inference_mode = True
-        training_args.dit_cpu_offload = False
-        if not training_args.log_validation:
-            return
-        if self.validation_pipeline is None:
-            raise ValueError("Validation pipeline is not set")
+    # @torch.no_grad()
+    # def _log_validation(self, transformer, training_args, global_step) -> None:
+    #     """
+    #     Generate a validation video and log it to the configured tracker to check the quality during training.
+    #     """
+    #     training_args.inference_mode = True
+    #     training_args.dit_cpu_offload = False
+    #     if not training_args.log_validation:
+    #         return
+    #     if self.validation_pipeline is None:
+    #         raise ValueError("Validation pipeline is not set")
 
-        logger.info("Starting validation")
+    #     logger.info("Starting validation")
 
-        # Create sampling parameters if not provided
-        sampling_param = SamplingParam.from_pretrained(training_args.model_path)
+    #     # Create sampling parameters if not provided
+    #     sampling_param = SamplingParam.from_pretrained(training_args.model_path)
 
-        # Prepare validation prompts
-        logger.info('rank: %s: fastvideo_args.validation_dataset_file: %s',
-                    self.global_rank,
-                    training_args.validation_dataset_file,
-                    local_main_process_only=False)
-        validation_dataset = ValidationDataset(
-            training_args.validation_dataset_file)
-        validation_dataloader = DataLoader(validation_dataset,
-                                           batch_size=None,
-                                           num_workers=0)
+    #     # Prepare validation prompts
+    #     logger.info('rank: %s: fastvideo_args.validation_dataset_file: %s',
+    #                 self.global_rank,
+    #                 training_args.validation_dataset_file,
+    #                 local_main_process_only=False)
+    #     validation_dataset = ValidationDataset(
+    #         training_args.validation_dataset_file)
+    #     validation_dataloader = DataLoader(validation_dataset,
+    #                                        batch_size=None,
+    #                                        num_workers=0)
 
-        self.transformer.eval()
-        if getattr(self, "transformer_2", None) is not None:
-            self.transformer_2.eval()
+    #     self.transformer.eval()
+    #     if getattr(self, "transformer_2", None) is not None:
+    #         self.transformer_2.eval()
 
-        validation_steps = training_args.validation_sampling_steps.split(",")
-        validation_steps = [int(step) for step in validation_steps]
-        validation_steps = [step for step in validation_steps if step > 0]
-        # Log validation results for this step
-        world_group = get_world_group()
-        num_sp_groups = world_group.world_size // self.sp_group.world_size
+    #     validation_steps = training_args.validation_sampling_steps.split(",")
+    #     validation_steps = [int(step) for step in validation_steps]
+    #     validation_steps = [step for step in validation_steps if step > 0]
+    #     # Log validation results for this step
+    #     world_group = get_world_group()
+    #     num_sp_groups = world_group.world_size // self.sp_group.world_size
 
-        # Process each validation prompt for each validation step
-        for num_inference_steps in validation_steps:
-            logger.info("rank: %s: num_inference_steps: %s",
-                        self.global_rank,
-                        num_inference_steps,
-                        local_main_process_only=False)
-            step_videos: list[np.ndarray] = []
-            step_captions: list[str] = []
+    #     # Process each validation prompt for each validation step
+    #     for num_inference_steps in validation_steps:
+    #         logger.info("rank: %s: num_inference_steps: %s",
+    #                     self.global_rank,
+    #                     num_inference_steps,
+    #                     local_main_process_only=False)
+    #         step_videos: list[np.ndarray] = []
+    #         step_captions: list[str] = []
 
-            for validation_batch in validation_dataloader:
-                batch = self._prepare_validation_batch(sampling_param,
-                                                       training_args,
-                                                       validation_batch,
-                                                       num_inference_steps)
-                logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
-                            self.global_rank,
-                            self.rank_in_sp_group,
-                            batch.prompt,
-                            local_main_process_only=False)
+    #         for validation_batch in validation_dataloader:
+    #             batch = self._prepare_validation_batch(sampling_param,
+    #                                                    training_args,
+    #                                                    validation_batch,
+    #                                                    num_inference_steps)
+    #             logger.info("rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
+    #                         self.global_rank,
+    #                         self.rank_in_sp_group,
+    #                         batch.prompt,
+    #                         local_main_process_only=False)
 
-                assert batch.prompt is not None and isinstance(
-                    batch.prompt, str)
-                step_captions.append(batch.prompt)
+    #             assert batch.prompt is not None and isinstance(
+    #                 batch.prompt, str)
+    #             step_captions.append(batch.prompt)
 
-                # Run validation inference
-                output_batch = self.validation_pipeline.forward(
-                    batch, training_args)
-                samples = output_batch.output
+    #             # Run validation inference
+    #             output_batch = self.validation_pipeline.forward(
+    #                 batch, training_args)
+    #             samples = output_batch.output
 
-                if self.rank_in_sp_group != 0:
-                    continue
+    #             if self.rank_in_sp_group != 0:
+    #                 continue
 
-                # Compute rewards using reward models
-                # Note: reward_models.compute_reward expects samples [B, C, T, H, W] and prompts [B]
-                reward_scores = self.reward_models.compute_reward(
-                    samples, [batch.prompt])
-                logger.info(f"samples.shape: {samples.shape}")
-                logger.info(f"Validation prompts: {batch.prompt}")
-                logger.info(f"Validation prompts: {batch.prompt}")
-                logger.info(f"Validation reward scores: {reward_scores}")
+    #             # Compute rewards using reward models
+    #             # Note: reward_models.compute_reward expects samples [B, C, T, H, W] and prompts [B]
+    #             reward_scores = self.reward_models.compute_reward(
+    #                 samples, [batch.prompt])
+    #             logger.info(f"samples.shape: {samples.shape}")
+    #             logger.info(f"Validation prompts: {batch.prompt}")
+    #             logger.info(f"Validation prompts: {batch.prompt}")
+    #             logger.info(f"Validation reward scores: {reward_scores}")
 
-                # Process outputs
-                video = rearrange(samples, "b c t h w -> t b c h w")
-                frames = []
-                for x in video:
-                    x = torchvision.utils.make_grid(x, nrow=6)
-                    x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
-                    frames.append((x * 255).numpy().astype(np.uint8))
-                step_videos.append(frames)
+    #             # Process outputs
+    #             video = rearrange(samples, "b c t h w -> t b c h w")
+    #             frames = []
+    #             for x in video:
+    #                 x = torchvision.utils.make_grid(x, nrow=6)
+    #                 x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+    #                 frames.append((x * 255).numpy().astype(np.uint8))
+    #             step_videos.append(frames)
 
-            # Only sp_group leaders (rank_in_sp_group == 0) need to send their
-            # results to global rank 0
-            if self.rank_in_sp_group == 0:
-                if self.global_rank == 0:
-                    # Global rank 0 collects results from all sp_group leaders
-                    all_videos = step_videos  # Start with own results
-                    all_captions = step_captions
+    #         # Only sp_group leaders (rank_in_sp_group == 0) need to send their
+    #         # results to global rank 0
+    #         if self.rank_in_sp_group == 0:
+    #             if self.global_rank == 0:
+    #                 # Global rank 0 collects results from all sp_group leaders
+    #                 all_videos = step_videos  # Start with own results
+    #                 all_captions = step_captions
 
-                    # Receive from other sp_group leaders
-                    for sp_group_idx in range(1, num_sp_groups):
-                        src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
-                        recv_videos = world_group.recv_object(src=src_rank)
-                        recv_captions = world_group.recv_object(src=src_rank)
-                        all_videos.extend(recv_videos)
-                        all_captions.extend(recv_captions)
+    #                 # Receive from other sp_group leaders
+    #                 for sp_group_idx in range(1, num_sp_groups):
+    #                     src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
+    #                     recv_videos = world_group.recv_object(src=src_rank)
+    #                     recv_captions = world_group.recv_object(src=src_rank)
+    #                     all_videos.extend(recv_videos)
+    #                     all_captions.extend(recv_captions)
 
-                    video_filenames = []
-                    for i, (video, caption) in enumerate(
-                            zip(all_videos, all_captions, strict=True)):
-                        os.makedirs(training_args.output_dir, exist_ok=True)
-                        filename = os.path.join(
-                            training_args.output_dir,
-                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
-                        )
-                        imageio.mimsave(filename, video, fps=sampling_param.fps)
-                        video_filenames.append(filename)
+    #                 video_filenames = []
+    #                 for i, (video, caption) in enumerate(
+    #                         zip(all_videos, all_captions, strict=True)):
+    #                     os.makedirs(training_args.output_dir, exist_ok=True)
+    #                     filename = os.path.join(
+    #                         training_args.output_dir,
+    #                         f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
+    #                     )
+    #                     imageio.mimsave(filename, video, fps=sampling_param.fps)
+    #                     video_filenames.append(filename)
 
-                    artifacts = []
-                    for filename, caption in zip(video_filenames,
-                                                 all_captions,
-                                                 strict=True):
-                        video_artifact = self.tracker.video(filename,
-                                                            caption=caption)
-                        if video_artifact is not None:
-                            artifacts.append(video_artifact)
-                    if artifacts:
-                        logs = {
-                            f"validation_videos_{num_inference_steps}_steps":
-                            artifacts
-                        }
-                        self.tracker.log_artifacts(logs, global_step)
-                else:
-                    # Other sp_group leaders send their results to global rank 0
-                    world_group.send_object(step_videos, dst=0)
-                    world_group.send_object(step_captions, dst=0)
+    #                 artifacts = []
+    #                 for filename, caption in zip(video_filenames,
+    #                                              all_captions,
+    #                                              strict=True):
+    #                     video_artifact = self.tracker.video(filename,
+    #                                                         caption=caption)
+    #                     if video_artifact is not None:
+    #                         artifacts.append(video_artifact)
+    #                 if artifacts:
+    #                     logs = {
+    #                         f"validation_videos_{num_inference_steps}_steps":
+    #                         artifacts
+    #                     }
+    #                     self.tracker.log_artifacts(logs, global_step)
+    #             else:
+    #                 # Other sp_group leaders send their results to global rank 0
+    #                 world_group.send_object(step_videos, dst=0)
+    #                 world_group.send_object(step_captions, dst=0)
 
-        # Re-enable gradients for training
-        training_args.inference_mode = False
-        self.transformer.train()
-        if getattr(self, "transformer_2", None) is not None:
-            self.transformer_2.train()
+    #     # Re-enable gradients for training
+    #     training_args.inference_mode = False
+    #     self.transformer.train()
+    #     if getattr(self, "transformer_2", None) is not None:
+    #         self.transformer_2.train()
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         """Initialize the RL training pipeline with algorithm, reward and value models."""
@@ -598,7 +590,12 @@ class RLPipeline(TrainingPipeline):
         # Get sampling configuration (hardcoded for now, as per plan)
         # These should come from config later
         num_inference_steps = self.training_args.num_latent_t  # config.sample.num_steps - hardcoded
-        guidance_scale = self.training_args.rl_args.guidance_scale
+        # Align sampling settings with the (good) validation pipeline defaults.
+        # If `validation_guidance_scale` is set, prefer it for RL sampling too.
+        guidance_scale = float(
+            self.training_args.validation_guidance_scale
+        ) if self.training_args.validation_guidance_scale else float(
+            self.training_args.rl_args.guidance_scale)
         num_frames = self.training_args.num_frames
         height = self.training_args.num_height
         width = self.training_args.num_width
@@ -615,6 +612,9 @@ class RLPipeline(TrainingPipeline):
         all_log_probs_list = []
         all_kl_list = []
         all_timesteps_list = []
+        # Placeholder for compatibility with older trajectory collection logic.
+        # Kept to avoid NameError if referenced; currently prompt_ids are stored as None.
+        all_prompt_ids_list = []
 
         # Set transformer to eval mode for sampling
         self.transformer.eval()
@@ -622,6 +622,23 @@ class RLPipeline(TrainingPipeline):
         with torch.no_grad():
             # Sample multiple times per prompt if needed
             for _ in range(sample_time_per_prompt):
+                # NOTE: Inference pipelines require a positive integer `seed` for
+                # `InputValidationStage` (it derives `seeds` and CPU generators from it).
+                # We keep stochasticity by drawing a fresh seed from the existing
+                # `noise_random_generator` each sampling call.
+                # Align seed with validation when available; fall back to random.
+                seed = getattr(self, "seed", None)
+                if seed is None:
+                    seed = int(
+                        torch.randint(
+                            low=1,
+                            high=2**31 - 1,
+                            size=(1, ),
+                            generator=self.noise_random_generator,
+                            device=self.device,
+                        ).item())
+                else:
+                    seed = int(seed)
                 rl_data = ForwardBatch.RLData(
                     enabled=True,
                     collect_log_probs=True,
@@ -640,20 +657,33 @@ class RLPipeline(TrainingPipeline):
                     num_inference_steps=num_inference_steps,
                     guidance_scale=guidance_scale,
                     num_videos_per_prompt=num_videos_per_prompt,
-                    generator=self.noise_random_generator,
+                    seed=seed,
                     rl_data=rl_data,
                 )
 
                 orig_output_type = getattr(self.training_args, "output_type",
                                            None)
+                orig_inference_mode = getattr(self.training_args,
+                                              "inference_mode", None)
+                orig_dit_cpu_offload = getattr(self.training_args,
+                                               "dit_cpu_offload", None)
                 if orig_output_type is not None:
                     self.training_args.output_type = "latent"
+                if orig_inference_mode is not None:
+                    self.training_args.inference_mode = True
+                if orig_dit_cpu_offload is not None:
+                    # Mirror validation: we run sampling fully on GPU.
+                    self.training_args.dit_cpu_offload = False
                 try:
                     output_batch = self.sampling_pipeline.forward(
                         forward_batch, self.training_args)
                 finally:
                     if orig_output_type is not None:
                         self.training_args.output_type = orig_output_type
+                    if orig_inference_mode is not None:
+                        self.training_args.inference_mode = orig_inference_mode
+                    if orig_dit_cpu_offload is not None:
+                        self.training_args.dit_cpu_offload = orig_dit_cpu_offload
                 if output_batch.rl_data.trajectory_latents is None:
                     raise RuntimeError(
                         "RL trajectory latents were not collected")
@@ -775,7 +805,49 @@ class RLPipeline(TrainingPipeline):
         with torch.no_grad():
             videos = decoding_stage.decode(final_latents, self.training_args)
 
-        # Get prompts for reward computation
+# myregion debug decoded video
+        from contextlib import nullcontext
+        controller = getattr(self, "profiler_controller", None)
+        region_cm = (controller.region("my region") if controller is not None
+                     and getattr(controller, "has_profiler", False) else
+                     nullcontext())
+        with region_cm:
+            import os
+            import numpy as np
+            import imageio
+            from fastvideo.distributed import get_world_group
+
+            # Only save once in distributed runs
+            if get_world_group().rank == 0:
+                out_dir = "/mnt/fast-disks/hao_lab/shijie/mylogs"
+                os.makedirs(out_dir, exist_ok=True)
+                out_path = os.path.join(out_dir, "debug_step0.mp4")
+
+                # videos expected shape: [B, C, T, H, W]
+                vid0 = videos[0].detach().to(torch.float32).cpu()
+                # Convert to [T, H, W, C]
+                vid0 = vid0.permute(1, 2, 3, 0).contiguous()
+                vid_np = vid0.numpy()
+
+                # Bring into [0, 255] uint8
+                if vid_np.min() < 0.0:
+                    vid_np = (vid_np + 1.0) / 2.0
+                vid_np = np.clip(vid_np, 0.0, 1.0)
+                vid_np = (vid_np * 255.0).round().astype(np.uint8)
+
+                # imageio expects list of frames [H, W, C]
+                frames = [vid_np[t] for t in range(vid_np.shape[0])]
+                imageio.mimsave(out_path, frames, fps=8)
+
+                logger.info("Saved debug video to %s", out_path)
+
+            raise KeyboardInterrupt(
+                "Debug stop after saving decoded video (my region).")
+
+
+# endregion
+
+# Get prompts for reward computation
         prompts = training_batch.input_kwargs.get(
             "prompts") if training_batch.input_kwargs else None
         if prompts is None:
