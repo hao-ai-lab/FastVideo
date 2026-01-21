@@ -23,7 +23,6 @@ from fastvideo.logger import init_logger
 from fastvideo.models.vaes.common import ParallelTiledVAE
 from fastvideo.models.vision_utils import (get_default_height_width, normalize,
                                            numpy_to_pt, pil_to_numpy, resize,
-                                           resize_and_center_crop,
                                            create_default_image,
                                            preprocess_reference_image_for_clip)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -192,6 +191,7 @@ class HyWorldImageEncodingStage(ImageEncodingStage):
                     image_np = image
                 
                 # Resize to target resolution BEFORE SigLIP preprocessing
+                from fastvideo.models.dits.hyworld.data_utils import resize_and_center_crop
                 image_np = resize_and_center_crop(
                     image_np, target_width=batch.width, target_height=batch.height
                 )
