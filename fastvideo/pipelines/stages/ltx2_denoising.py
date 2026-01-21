@@ -37,58 +37,6 @@ DISTILLED_SIGMA_VALUES = [
 logger = init_logger(__name__)
 
 
-def _log_non_finite(
-    name: str,
-    tensor: torch.Tensor | None,
-    step_index: int | None = None,
-) -> bool:
-    if tensor is None:
-        return False
-    if torch.isfinite(tensor).all():
-        return False
-    non_finite = ~torch.isfinite(tensor)
-    count = int(non_finite.sum().item())
-    step_info = f" step={step_index}" if step_index is not None else ""
-    logger.error(
-        "[LTX2] Non-finite detected in %s%s: count=%d shape=%s dtype=%s",
-        name,
-        step_info,
-        count,
-        tuple(tensor.shape),
-        tensor.dtype,
-    )
-    finite_vals = tensor[~non_finite]
-    if finite_vals.numel() > 0:
-        logger.error(
-            "[LTX2] %s%s finite range: min=%s max=%s",
-            name,
-            step_info,
-            finite_vals.min().item(),
-            finite_vals.max().item(),
-        )
-    return True
-
-
-def _log_tensor_stats(
-    name: str,
-    tensor: torch.Tensor | None,
-    step_index: int | None = None,
-) -> None:
-    if tensor is None:
-        return
-    step_info = f" step={step_index}" if step_index is not None else ""
-    logger.info(
-        "[LTX2] %s%s stats: shape=%s dtype=%s min=%s max=%s mean=%s",
-        name,
-        step_info,
-        tuple(tensor.shape),
-        tensor.dtype,
-        tensor.min().item(),
-        tensor.max().item(),
-        tensor.mean().item(),
-    )
-
-
 def _ltx2_sigmas(
     steps: int,
     latent: torch.Tensor | None,
@@ -141,11 +89,6 @@ class LTX2DenoisingStage(PipelineStage):
         batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
-        debug_nans = os.getenv("LTX2_DEBUG_NANS", "0") == "1"
-        abort_on_nans = os.getenv("LTX2_DEBUG_NANS_ABORT", "0") == "1"
-        verbose_logs = os.getenv("LTX2_DEBUG_DENOISE_LOG", "0") == "1"
-        step_log_interval = int(
-            os.getenv("LTX2_DEBUG_DENOISE_LOG_INTERVAL", "1"))
         if batch.latents is None:
             raise ValueError("Latents must be provided before denoising.")
 
@@ -278,34 +221,9 @@ class LTX2DenoisingStage(PipelineStage):
             tuple(latents.shape),
         )
 
-        if debug_nans:
-            if _log_non_finite("latents_start", latents) and abort_on_nans:
-                raise RuntimeError("Non-finite latents before denoising.")
-            if _log_non_finite("prompt_embeds",
-                               prompt_embeds) and abort_on_nans:
-                raise RuntimeError("Non-finite prompt embeddings.")
-            if (neg_prompt_embeds is not None and _log_non_finite(
-                    "negative_prompt_embeds", neg_prompt_embeds)
-                    and abort_on_nans):
-                raise RuntimeError("Non-finite negative prompt embeddings.")
-        if verbose_logs:
-            _log_tensor_stats("latents_start", latents)
-            _log_tensor_stats("prompt_embeds", prompt_embeds)
-            if neg_prompt_embeds is not None:
-                _log_tensor_stats("negative_prompt_embeds", neg_prompt_embeds)
-
         for step_index in tqdm(range(len(sigmas) - 1)):
             sigma = sigmas[step_index]
             sigma_next = sigmas[step_index + 1]
-            if verbose_logs and step_log_interval > 0 and (
-                    step_index % step_log_interval == 0):
-                logger.info(
-                    "[LTX2] Step %d/%d sigma=%s sigma_next=%s",
-                    step_index + 1,
-                    len(sigmas) - 1,
-                    sigma.item(),
-                    sigma_next.item(),
-                )
             timestep = timestep_template * sigma
             audio_timestep = (audio_timestep_template * sigma
                               if audio_timestep_template is not None else None)
@@ -356,22 +274,6 @@ class LTX2DenoisingStage(PipelineStage):
                         pos_audio = pos_audio + (batch.guidance_scale -
                                                  1) * (pos_audio - neg_audio)
 
-            if debug_nans:
-                if (_log_non_finite("pos_denoised", pos_denoised, step_index)
-                        and abort_on_nans):
-                    raise RuntimeError(
-                        f"Non-finite pos_denoised at step {step_index}.")
-                if (neg_prompt_embeds is not None and _log_non_finite(
-                        "neg_denoised", neg_denoised, step_index)
-                        and abort_on_nans):
-                    raise RuntimeError(
-                        f"Non-finite neg_denoised at step {step_index}.")
-            if verbose_logs and step_log_interval > 0 and (
-                    step_index % step_log_interval == 0):
-                _log_tensor_stats("pos_denoised", pos_denoised, step_index)
-                if neg_prompt_embeds is not None:
-                    _log_tensor_stats("neg_denoised", neg_denoised, step_index)
-
             sigma_value = sigma.to(torch.float32) if isinstance(
                 sigma, torch.Tensor) else torch.tensor(
                     float(sigma),
@@ -389,12 +291,6 @@ class LTX2DenoisingStage(PipelineStage):
                 audio_latents = (audio_latents.float() +
                                  audio_velocity.float() * dt).to(
                                      audio_latents.dtype)
-            if (debug_nans and _log_non_finite("latents", latents, step_index)
-                    and abort_on_nans):
-                raise RuntimeError(f"Non-finite latents at step {step_index}.")
-            if verbose_logs and step_log_interval > 0 and (
-                    step_index % step_log_interval == 0):
-                _log_tensor_stats("latents", latents, step_index)
 
         batch.latents = latents
         batch.extra["ltx2_audio_latents"] = audio_latents

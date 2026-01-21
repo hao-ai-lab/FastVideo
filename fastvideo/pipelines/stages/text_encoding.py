@@ -5,33 +5,16 @@ Prompt encoding stages for diffusion pipelines.
 This module contains implementations of prompt encoding stages for diffusion pipelines.
 """
 
-import os
 import torch
 from typing import Any
 
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
-from fastvideo.logger import init_logger
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
-
-logger = init_logger(__name__)
-
-
-def _debug_log_line(message: str) -> None:
-    if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") != "1":
-        return
-    log_path = os.getenv("LTX2_PIPELINE_DEBUG_PATH", "")
-    if not log_path:
-        return
-    log_dir = os.path.dirname(log_path)
-    if log_dir:
-        os.makedirs(log_dir, exist_ok=True)
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(message + "\n")
 
 
 class TextEncodingStage(PipelineStage):
@@ -113,15 +96,6 @@ class TextEncodingStage(PipelineStage):
             if batch.negative_attention_mask is not None:
                 for nm in neg_masks_list:
                     batch.negative_attention_mask.append(nm)
-
-        if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
-            prompt_sum = prompt_embeds_list[0].float().sum().item()
-            neg_sum = 0.0
-            if batch.do_classifier_free_guidance and neg_embeds_list:
-                neg_sum = neg_embeds_list[0].float().sum().item()
-            _debug_log_line(
-                f"fastvideo:text_encode:prompt_sum={prompt_sum:.6f} "
-                f"neg_sum={neg_sum:.6f}")
 
         return batch
 
@@ -278,17 +252,6 @@ class TextEncodingStage(PipelineStage):
 
             input_ids = text_inputs["input_ids"]
             attention_mask = text_inputs["attention_mask"]
-            if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
-                input_sum = input_ids.sum().item()
-                mask_sum = attention_mask.sum().item()
-                input_head = input_ids[0, :16].tolist()
-                mask_head = attention_mask[0, :16].tolist()
-                _debug_log_line(
-                    "fastvideo:text_inputs"
-                    f":encoder_index={i} input_sum={input_sum:.6f} "
-                    f"mask_sum={mask_sum:.6f} input_shape={tuple(input_ids.shape)} "
-                    f"mask_shape={tuple(attention_mask.shape)} "
-                    f"input_head={input_head} mask_head={mask_head}")
 
             with set_forward_context(current_timestep=0, attn_metadata=None):
                 outputs = text_encoder(

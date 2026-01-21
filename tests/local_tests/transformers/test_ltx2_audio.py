@@ -24,7 +24,7 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.models.dits.ltx2 import Modality as FastVideoModality
 from fastvideo.models.loader.component_loader import TransformerLoader
-from fastvideo.tests.transformers.test_ltx2 import (
+from .test_ltx2 import (
     _attach_block_detail_logging,
     _attach_block_sum_logging,
     _infer_patch_params,

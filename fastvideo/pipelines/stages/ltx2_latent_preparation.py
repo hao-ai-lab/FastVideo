@@ -3,7 +3,6 @@
 Latent preparation stage for LTX-2 pipelines.
 """
 
-import os
 from pathlib import Path
 
 import torch
@@ -18,19 +17,6 @@ from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 
 logger = init_logger(__name__)
-
-
-def _debug_log_line(message: str) -> None:
-    if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") != "1":
-        return
-    log_path = os.getenv("LTX2_PIPELINE_DEBUG_PATH", "")
-    if not log_path:
-        return
-    log_dir = os.path.dirname(log_path)
-    if log_dir:
-        os.makedirs(log_dir, exist_ok=True)
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(message + "\n")
 
 
 class LTX2LatentPreparationStage(PipelineStage):
@@ -102,14 +88,12 @@ class LTX2LatentPreparationStage(PipelineStage):
                 f"You have passed a list of generators of length {len(generator)}, "
                 f"but requested an effective batch size of {batch_size}.")
 
-        latents_source = "provided"
         if latents is None:
             if latent_path:
                 loaded_latents = self._load_initial_latent(
                     latent_path, device, dtype)
                 if loaded_latents is not None:
                     latents = loaded_latents
-                    latents_source = "loaded"
                 else:
                     latents = randn_tensor(
                         shape,
@@ -118,7 +102,6 @@ class LTX2LatentPreparationStage(PipelineStage):
                         dtype=dtype,
                     )
                     self._save_initial_latent(latent_path, latents)
-                    latents_source = "generated"
             else:
                 latents = randn_tensor(
                     shape,
@@ -126,14 +109,9 @@ class LTX2LatentPreparationStage(PipelineStage):
                     device=device,
                     dtype=dtype,
                 )
-                latents_source = "generated"
         else:
             latents = latents.to(device)
 
-        if os.getenv("LTX2_PIPELINE_DEBUG_LOG", "0") == "1":
-            _debug_log_line(
-                f"fastvideo:initial_latent:source={latents_source} sum={latents.float().sum().item():.6f}"
-            )
         batch.latents = latents
         batch.raw_latent_shape = shape
         return batch
