@@ -10,7 +10,6 @@ import os
 import time
 import math
 import numpy as np
-import torch
 import imageio
 import torchvision
 from einops import rearrange
@@ -19,88 +18,11 @@ from fastvideo import VideoGenerator
 from fastvideo.pipelines import ForwardBatch
 from fastvideo.utils import shallow_asdict, align_to
 from fastvideo.logger import init_logger
-from PIL import Image
 
-# Import HyWorld utilities from FastVideo
-from fastvideo.models.dits.hyworld import (
-    pose_to_input,
-    compute_latent_num,
-)
+from fastvideo.models.dits.hyworld.pose import pose_to_input, compute_latent_num
+from fastvideo.models.dits.hyworld.resolution_utils import get_resolution_from_image
 
 logger = init_logger(__name__)
-
-
-# ============================================================================
-# Resolution bucket utilities (from HY-WorldPlay)
-# ============================================================================
-
-# Target resolution configs (matching HY-WorldPlay)
-TARGET_SIZE_CONFIG = {
-    "360p": {"bucket_hw_base_size": 480, "bucket_hw_bucket_stride": 16},
-    "480p": {"bucket_hw_base_size": 640, "bucket_hw_bucket_stride": 16},
-    "720p": {"bucket_hw_base_size": 960, "bucket_hw_bucket_stride": 16},
-    "1080p": {"bucket_hw_base_size": 1440, "bucket_hw_bucket_stride": 16},
-}
-
-
-def generate_crop_size_list(base_size=256, patch_size=16, max_ratio=4.0):
-    """Generate valid (width, height) bucket sizes."""
-    num_patches = round((base_size / patch_size) ** 2)
-    assert max_ratio >= 1.0
-    crop_size_list = []
-    wp, hp = num_patches, 1
-    while wp > 0:
-        if max(wp, hp) / min(wp, hp) <= max_ratio:
-            crop_size_list.append((hp * patch_size, wp * patch_size))  # (height, width)
-        if (hp + 1) * wp <= num_patches:
-            hp += 1
-        else:
-            wp -= 1
-    return crop_size_list
-
-
-def get_closest_resolution(image_height, image_width, target_resolution="480p"):
-    """
-    Get closest supported resolution for given image dimensions.
-    
-    Args:
-        image_height: Height of input image
-        image_width: Width of input image  
-        target_resolution: Target resolution string (e.g., "480p", "720p")
-        
-    Returns:
-        tuple[int, int]: (height, width) of closest supported resolution
-    """
-    config = TARGET_SIZE_CONFIG[target_resolution]
-    bucket_hw_base_size = config["bucket_hw_base_size"]
-    bucket_hw_bucket_stride = config["bucket_hw_bucket_stride"]
-    
-    crop_size_list = generate_crop_size_list(bucket_hw_base_size, bucket_hw_bucket_stride)
-    aspect_ratios = np.array([round(float(h) / float(w), 5) for h, w in crop_size_list])
-    
-    # Find closest aspect ratio
-    image_ratio = float(image_height) / float(image_width)
-    closest_idx = np.abs(aspect_ratios - image_ratio).argmin()
-    closest_size = crop_size_list[closest_idx]
-    
-    return closest_size[0], closest_size[1]  # (height, width)
-
-
-def get_resolution_from_image(image_path, target_resolution="480p"):
-    """
-    Automatically determine resolution from input image.
-    
-    Args:
-        image_path: Path to input image
-        target_resolution: Target resolution tier ("480p", "720p", etc.)
-        
-    Returns:
-        tuple[int, int]: (height, width) matching HY-WorldPlay's bucket selection
-    """
-    img = Image.open(image_path)
-    img_width, img_height = img.size
-    return get_closest_resolution(img_height, img_width, target_resolution)
-
 
 class HyWorldVideoGenerator(VideoGenerator):
     """Extended VideoGenerator that adds HyWorld-specific parameters to batch.extra."""
@@ -235,7 +157,6 @@ class HyWorldVideoGenerator(VideoGenerator):
                 "trajectory_decoded": output_batch.trajectory_decoded,
             }
 
-
 # Default prompt from HY-WorldPlay run.sh
 DEFAULT_PROMPT = 'A paved pathway leads towards a stone arch bridge spanning a calm body of water.  Lush green trees and foliage line the path and the far bank of the water. A traditional-style pavilion with a tiered, reddish-brown roof sits on the far shore. The water reflects the surrounding greenery and the sky.  The scene is bathed in soft, natural light, creating a tranquil and serene atmosphere. The pathway is composed of large, rectangular stones, and the bridge is constructed of light gray stone.  The overall composition emphasizes the peaceful and harmonious nature of the landscape.'
 
@@ -244,13 +165,13 @@ def main():
     parser = argparse.ArgumentParser(description="HyWorld video generation with FastVideo")
     parser.add_argument("--prompt", type=str, default=DEFAULT_PROMPT, help="Text prompt for video generation")
     parser.add_argument("--image", type=str, default='assets/hyworld.png', help="Path to input image")
-    parser.add_argument("--pose", type=str, default='w-31', help="Pose string (e.g., 'a-31', 'w-31', 's-31', 'd-31')")
+    parser.add_argument("--pose", type=str, default='d-15', help="Pose string (e.g., 'a-31', 'w-31', 's-31', 'd-31')")
     parser.add_argument("--output_path", type=str, default='video_samples_hyworld', help="Output video path")
-    parser.add_argument("--num-frames", type=int, default=125, help="Number of frames")
+    parser.add_argument("--num-frames", type=int, default=61, help="Number of frames")
     parser.add_argument("--seed", type=int, default=1, help="Random seed")
     parser.add_argument("--resolution", type=str, default="480p", help="Only support 480p for now")
-    parser.add_argument("--model-path", type=str, default="/mnt/weka/home/hao.zhang/mhuo/data/hyworld",
-                        help="Path to HyWorld model")
+    parser.add_argument("--model-path", type=str, default="mignonjia/hyworld",
+                        help="Path to base HunyuanVideo model (HuggingFace repo or local path)")
     args = parser.parse_args()
 
     # Check if image exists
@@ -260,6 +181,7 @@ def main():
 
     # Automatically determine resolution from input image
     HEIGHT, WIDTH = get_resolution_from_image(args.image, args.resolution)
+    print(f"Model path: {args.model_path}")
     print(f"Image: {args.image}")
     print(f"Pose: {args.pose}")
     print(f"Resolution: {HEIGHT}x{WIDTH} (from {args.resolution} buckets)")
@@ -268,19 +190,17 @@ def main():
 
     # Initialize generator
     print("\nInitializing HyWorldVideoGenerator...")
+    
     generator = HyWorldVideoGenerator.from_pretrained(
         args.model_path,
+        revision="9019db1e98ac65fdfcfece32a67d6e63955fa00e",    
         num_gpus=1,
         use_fsdp_inference=True,
         dit_cpu_offload=True,
         vae_cpu_offload=True,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True,
-        # Important: override the class name loaded from HY-WorldPlay, which use HunyuanVideo-1.5 class names
-        # Rename to our own class names
-        override_vae_cls_name="AutoencoderKLHyWorld",
-        override_transformer_cls_name="HyWorldTransformer3DModel",
-        override_pipeline_cls_name="HyWorldPipeline"
+        image_encoder_cpu_offload=True
     )
 
     # Generate video
