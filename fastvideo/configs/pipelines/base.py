@@ -275,7 +275,6 @@ class PipelineConfig:
 
         # 1. Get the pipeline config class from the registry
         pipeline_config_cls = get_pipeline_config_cls_from_name(model_path)
-        print(f"pipeline_config_cls: {pipeline_config_cls}")
 
         # 2. Instantiate PipelineConfig
         if pipeline_config_cls is None:

@@ -95,7 +95,6 @@ class SamplingParam:
         from fastvideo.configs.sample.registry import (
             get_sampling_param_cls_for_name)
         sampling_cls = get_sampling_param_cls_for_name(model_path)
-        print(f"sampling_cls: {sampling_cls}")
         if sampling_cls is not None:
             sampling_param: SamplingParam = sampling_cls()
         else:

@@ -471,11 +471,6 @@ class VAELoader(ComponentLoader):
         assert class_name is not None, (
             "Model config does not contain a _class_name attribute. Only diffusers format is supported."
         )
-
-        if fastvideo_args.override_vae_cls_name is not None:
-            class_name = fastvideo_args.override_vae_cls_name
-            logger.info("Overriding VAE cls_name to %s", class_name)
-
         fastvideo_args.model_paths["vae"] = model_path
 
         vae_config = fastvideo_args.pipeline_config.vae_config
@@ -522,9 +517,6 @@ class TransformerLoader(ComponentLoader):
         config = get_diffusers_config(model=model_path)
         hf_config = deepcopy(config)
         cls_name = config.pop("_class_name")
-
-        # HY-WorldPlay uses _name_or_path to store the model path metadata, which is not used
-        config.pop("_name_or_path", None)
         if cls_name is None:
             raise ValueError(
                 "Model config does not contain a _class_name attribute. "

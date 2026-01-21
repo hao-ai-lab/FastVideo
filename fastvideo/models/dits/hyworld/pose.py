@@ -1,4 +1,5 @@
-# SPDX-License-Identifier: Apache-2.0
+# Some functions from HY-WorldPlay/hyvideo/generate.py
+
 """
 Pose processing utilities for HyWorld video generation.
 
@@ -12,13 +13,13 @@ import json
 import numpy as np
 import torch
 from scipy.spatial.transform import Rotation as R
-from typing import Union
+from typing import Union, Optional
 
-from .trajectory import pose_string_to_json
+from .trajectory import generate_camera_trajectory_local
 
 
 # Mapping from one-hot action encoding to single label
-ACTION_MAPPING = {
+mapping = {
     (0, 0, 0, 0): 0,
     (1, 0, 0, 0): 1,
     (0, 1, 0, 0): 2,
@@ -30,19 +31,140 @@ ACTION_MAPPING = {
     (0, 1, 0, 1): 8,
 }
 
+# Default camera intrinsic matrix (for 1920x1080 resolution)
+DEFAULT_INTRINSIC = [
+    [969.6969696969696, 0.0, 960.0],
+    [0.0, 969.6969696969696, 540.0],
+    [0.0, 0.0, 1.0],
+]
+
+# Default movement speeds
+DEFAULT_FORWARD_SPEED = 0.08  # units per frame
+DEFAULT_YAW_SPEED = np.deg2rad(3)  # radians per frame
+DEFAULT_PITCH_SPEED = np.deg2rad(3)  # radians per frame
+
 
 def one_hot_to_one_dimension(one_hot: torch.Tensor) -> torch.Tensor:
     """Convert one-hot action encoding to single dimension labels."""
-    return torch.tensor([ACTION_MAPPING[tuple(row.tolist())] for row in one_hot])
+    return torch.tensor([mapping[tuple(row.tolist())] for row in one_hot])
 
 
-def camera_center_normalization(w2c: np.ndarray) -> np.ndarray:
-    """Normalize camera centers relative to the first camera."""
-    c2w = np.linalg.inv(w2c)
-    C0_inv = np.linalg.inv(c2w[0])
-    c2w_aligned = np.array([C0_inv @ C for C in c2w])
-    return np.linalg.inv(c2w_aligned)
+def parse_pose_string(
+    pose_string: str,
+    forward_speed: float = DEFAULT_FORWARD_SPEED,
+    yaw_speed: float = DEFAULT_YAW_SPEED,
+    pitch_speed: float = DEFAULT_PITCH_SPEED,
+) -> list[dict]:
+    """
+    Parse pose string to motions list.
+    
+    Format: "w-3, right-0.5, d-4"
+    - w: forward movement
+    - s: backward movement
+    - a: left movement
+    - d: right movement
+    - up: pitch up rotation
+    - down: pitch down rotation
+    - left: yaw left rotation
+    - right: yaw right rotation
+    - number after dash: duration in frames/latents
+    
+    Args:
+        pose_string: Comma-separated pose commands
+        forward_speed: Movement amount per frame
+        yaw_speed: Yaw rotation amount per frame (radians)
+        pitch_speed: Pitch rotation amount per frame (radians)
+        
+    Returns:
+        List of motion dictionaries for generate_camera_trajectory_local
+    """
+    motions = []
+    commands = [cmd.strip() for cmd in pose_string.split(",")]
 
+    for cmd in commands:
+        if not cmd:
+            continue
+
+        parts = cmd.split("-")
+        if len(parts) != 2:
+            raise ValueError(
+                f"Invalid pose command: {cmd}. Expected format: 'action-duration'"
+            )
+
+        action = parts[0].strip()
+        try:
+            duration = float(parts[1].strip())
+        except ValueError:
+            raise ValueError(f"Invalid duration in command: {cmd}")
+
+        num_frames = int(duration)
+
+        # Parse action and create motion dicts
+        if action == "w":
+            # Forward
+            for _ in range(num_frames):
+                motions.append({"forward": forward_speed})
+        elif action == "s":
+            # Backward
+            for _ in range(num_frames):
+                motions.append({"forward": -forward_speed})
+        elif action == "a":
+            # Left
+            for _ in range(num_frames):
+                motions.append({"right": -forward_speed})
+        elif action == "d":
+            # Right
+            for _ in range(num_frames):
+                motions.append({"right": forward_speed})
+        elif action == "up":
+            # Pitch up
+            for _ in range(num_frames):
+                motions.append({"pitch": pitch_speed})
+        elif action == "down":
+            # Pitch down
+            for _ in range(num_frames):
+                motions.append({"pitch": -pitch_speed})
+        elif action == "left":
+            # Yaw left
+            for _ in range(num_frames):
+                motions.append({"yaw": -yaw_speed})
+        elif action == "right":
+            # Yaw right
+            for _ in range(num_frames):
+                motions.append({"yaw": yaw_speed})
+        else:
+            raise ValueError(
+                f"Unknown action: {action}. "
+                f"Supported actions: w, s, a, d, up, down, left, right"
+            )
+
+    return motions
+
+def pose_string_to_json(
+    pose_string: str,
+    intrinsic: Optional[list[list[float]]] = None,
+) -> dict:
+    """
+    Convert pose string to pose JSON format.
+    
+    Args:
+        pose_string: Comma-separated pose commands
+        intrinsic: Camera intrinsic matrix (default: DEFAULT_INTRINSIC from trajectory)
+        
+    Returns:
+        Dict with frame indices as keys, containing extrinsic and K (intrinsic) matrices
+    """
+    if intrinsic is None:
+        intrinsic = DEFAULT_INTRINSIC
+    
+    motions = parse_pose_string(pose_string)
+    poses = generate_camera_trajectory_local(motions)
+
+    pose_json = {}
+    for i, p in enumerate(poses):
+        pose_json[str(i)] = {"extrinsic": p.tolist(), "K": intrinsic}
+
+    return pose_json
 
 def pose_to_input(
     pose_data: Union[str, dict],
@@ -173,6 +295,15 @@ def pose_to_input(
         torch.as_tensor(intrinsic_list),
         action_one_label,
     )
+
+
+def camera_center_normalization(w2c: np.ndarray) -> np.ndarray:
+    """Normalize camera centers relative to the first camera."""
+    c2w = np.linalg.inv(w2c)
+    C0_inv = np.linalg.inv(c2w[0])
+    c2w_aligned = np.array([C0_inv @ C for C in c2w])
+    return np.linalg.inv(c2w_aligned)
+
 
 
 def parse_pose_string_to_actions(pose_string: str, fps: int = 24) -> list[dict]:

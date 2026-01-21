@@ -369,37 +369,6 @@ def resize(
     return image
 
 
-def resize_and_center_crop(image: np.ndarray, target_width: int, target_height: int) -> np.ndarray:
-    """
-    Resize image to cover target dimensions and center crop.
-    
-    This matches HY-WorldPlay's preprocessing for SigLIP encoder input.
-    
-    Args:
-        image: Input image as numpy array (H, W, C)
-        target_width: Target width after cropping
-        target_height: Target height after cropping
-        
-    Returns:
-        Cropped image as numpy array (target_height, target_width, C)
-    """
-    if target_height == image.shape[0] and target_width == image.shape[1]:
-        return image
-    
-    pil_image = PIL.Image.fromarray(image)
-    original_width, original_height = pil_image.size
-    scale_factor = max(target_width / original_width, target_height / original_height)
-    resized_width = int(round(original_width * scale_factor))
-    resized_height = int(round(original_height * scale_factor))
-    resized_image = pil_image.resize((resized_width, resized_height), PIL.Image.LANCZOS)
-    left = (resized_width - target_width) / 2
-    top = (resized_height - target_height) / 2
-    right = (resized_width + target_width) / 2
-    bottom = (resized_height + target_height) / 2
-    cropped_image = resized_image.crop((left, top, right, bottom))
-    return np.array(cropped_image)
-
-
 def create_default_image(width: int = 512, height: int = 512, color: tuple[int, int, int] = (0, 0, 0)) -> PIL.Image.Image:
     """
     Create a default black PIL image.
@@ -444,4 +413,3 @@ def preprocess_reference_image_for_clip(image: PIL.Image.Image, device: torch.de
     denormalized_tensor = resized_tensor.mul_(0.5).add_(0.5)
 
     return TF.to_pil_image(denormalized_tensor)
-

@@ -14,7 +14,7 @@ from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
                                         LatentPreparationStage,
                                         TextEncodingStage,
                                         TimestepPreparationStage,
-                                        HyWorldImageEncodingStage)
+                                        Hy15ImageEncodingStage)
 
 # TODO(will): move PRECISION_TO_TYPE to better place
 
@@ -59,10 +59,8 @@ class HunyuanVideo15Pipeline(ComposedPipelineBase):
                            transformer=self.get_module("transformer")))
 
         self.add_stage(stage_name="image_encoding_stage",
-                       stage=HyWorldImageEncodingStage(
-                           image_encoder=self.get_module("image_encoder", None),
-                           image_processor=self.get_module("feature_extractor", None),
-                           vae=self.get_module("vae")))
+                       stage=Hy15ImageEncodingStage(image_encoder=None,
+                                                    image_processor=None))
 
         self.add_stage(stage_name="denoising_stage",
                        stage=DenoisingStage(
@@ -73,10 +71,4 @@ class HunyuanVideo15Pipeline(ComposedPipelineBase):
                        stage=DecodingStage(vae=self.get_module("vae")))
 
 
-# Alias for I2V pipeline - same implementation, different class name for registry
-class HunyuanVideo15ImageToVideoPipeline(HunyuanVideo15Pipeline):
-    """I2V pipeline alias - uses the same implementation as T2V."""
-    pass
-
-
-EntryClass = [HunyuanVideo15Pipeline, HunyuanVideo15ImageToVideoPipeline]
+EntryClass = HunyuanVideo15Pipeline

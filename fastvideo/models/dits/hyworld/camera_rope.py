@@ -1,3 +1,5 @@
+# HY-WorldPlay/hyvideo/prope/camera_rope.py
+
 # MIT License
 #
 # Copyright (c) Authors of

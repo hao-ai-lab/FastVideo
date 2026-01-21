@@ -8,8 +8,7 @@ from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuan15 import (
-    Hunyuan15T2V480PConfig, Hunyuan15T2V720PConfig,
-    Hunyuan15I2V480PConfig, Hunyuan15I2V720PConfig)
+    Hunyuan15T2V480PConfig, Hunyuan15T2V720PConfig)
 from fastvideo.configs.pipelines.hyworld import HyWorldConfig
 from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
@@ -39,10 +38,6 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     Hunyuan15T2V480PConfig,
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v":
     Hunyuan15T2V720PConfig,
-    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v":
-    Hunyuan15I2V480PConfig,
-    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_i2v":
-    Hunyuan15I2V720PConfig,
     "/mnt/weka/home/hao.zhang/mhuo/data/hyworld": HyWorldConfig,
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V480PConfig,
     "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers": WanI2V480PConfig,
@@ -85,8 +80,6 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "longcatvideocontinuation" in id.lower(),
     "longcat":
     lambda id: "longcat" in id.lower(),
-    "hunyuan15imagetovideo":
-    lambda id: "hunyuan15imagetovideo" in id.lower() or "hunyuanvideo15imagetovideo" in id.lower(),
     "hunyuan":
     lambda id: "hunyuan" in id.lower(),
     "hunyuan15":
@@ -117,8 +110,6 @@ PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "longcatimagetovideo": LongCatT2V480PConfig,
     "longcatvideocontinuation": LongCatT2V480PConfig,
     "longcat": LongCatT2V480PConfig,
-    "hunyuan15imagetovideo":
-    Hunyuan15I2V480PConfig,  # HunyuanVideo 1.5 I2V fallback config
     "hunyuan":
     HunyuanConfig,  # Base Hunyuan config as fallback for any Hunyuan variant
     "matrixgame": MatrixGameI2V480PConfig,

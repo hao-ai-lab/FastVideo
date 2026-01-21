@@ -48,10 +48,6 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     Hunyuan15_480P_SamplingParam,
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v":
     Hunyuan15_720P_SamplingParam,
-    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v":
-    Hunyuan15_480P_SamplingParam,
-    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_i2v":
-    Hunyuan15_720P_SamplingParam,
     "/mnt/weka/home/hao.zhang/mhuo/data/hyworld":
     HyWorld_SamplingParam,
     "FastVideo/stepvideo-t2v-diffusers":
@@ -197,6 +193,8 @@ def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
         )
     else:
         config = maybe_download_model_index(pipeline_name_or_path)
+
+    pipeline_name = config["_class_name"]
 
     # If no match, try to use the fallback config
     fallback_config = None
