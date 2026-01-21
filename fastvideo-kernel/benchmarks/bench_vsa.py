@@ -155,7 +155,7 @@ def main() -> None:
         bwd_tflops = (2.5 * flops) / bwd_ms * 1e-12 * 1e3
 
         print(f"fwd(wrapper): {fwd_ms:.3f} ms  | {fwd_tflops:.2f} TFLOPs (approx)")
-        print(f"bwd(wrapper): {bwd_ms:.3f} ms  | {bwd_tflops:.2f} TFLOPs (approx, 2.5x fwd flops)")
+        print(f"bwd(wrapper): {bwd_ms:.3f} ms  | {bwd_tflops:.2f} TFLOPs (approx)")
 
 
 if __name__ == "__main__":
