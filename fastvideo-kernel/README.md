@@ -40,6 +40,17 @@ out = video_sparse_attn(q, k, v, block_sizes, block_sizes, topk=5)
 out = moba_attn_varlen(q, k, v, cu_seqlens_q, cu_seqlens_k, ...)
 ```
 
+## Benchmark
+
+### VSA (block-sparse) TFLOPs
+
+After building/installing `fastvideo-kernel`, run:
+
+```bash
+cd fastvideo-kernel
+python benchmarks/bench_vsa.py --batch_size 1 --num_heads 16 --head_dim 128 --q_seq_lens 49152 --topk 64
+```
+
 ### TurboDiffusion Kernels
 
 This package also includes kernels from [TurboDiffusion](https://github.com/thu-ml/TurboDiffusion), including INT8 GEMM, Quantization, RMSNorm and LayerNorm.
