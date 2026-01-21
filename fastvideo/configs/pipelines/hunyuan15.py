@@ -139,12 +139,14 @@ class Hunyuan15T2V720PConfig(Hunyuan15T2V480PConfig):
     # HunyuanConfig-specific parameters with defaults
     flow_shift: int = 9
 
+
 @dataclass
 class Hunyuan15I2V720PConfig(Hunyuan15T2V720PConfig):
     """Base configuration for HunYuan pipeline architecture."""
 
     # HunyuanConfig-specific parameters with defaults
     flow_shift: int = 7
+
 
 @dataclass
 class Hunyuan15SR1080PConfig(Hunyuan15T2V720PConfig):
@@ -153,5 +155,6 @@ class Hunyuan15SR1080PConfig(Hunyuan15T2V720PConfig):
     # HunyuanConfig-specific parameters with defaults
     flow_shift: int = 9
     flow_shift_sr: int = 2
-    upsampler_config: UpsamplerConfig = field(default_factory=SRTo1080pUpsamplerConfig)
+    upsampler_config: UpsamplerConfig = field(
+        default_factory=SRTo1080pUpsamplerConfig)
     upsampler_precision: str = "fp32"

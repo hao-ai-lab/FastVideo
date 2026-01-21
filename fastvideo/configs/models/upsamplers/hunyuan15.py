@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from fastvideo.configs.models.upsamplers.base import UpsamplerConfig
 
+
 @dataclass
 class SRTo720pUpsamplerConfig(UpsamplerConfig):
     in_channels: int = 0
@@ -8,6 +9,7 @@ class SRTo720pUpsamplerConfig(UpsamplerConfig):
     hidden_channels: int = 64
     num_blocks: int = 6
     global_residual: bool = False
+
 
 @dataclass
 class SRTo1080pUpsamplerConfig(UpsamplerConfig):

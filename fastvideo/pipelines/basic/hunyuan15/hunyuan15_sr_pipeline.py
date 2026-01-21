@@ -11,13 +11,10 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
-                                        DenoisingStage, InputValidationStage,
-                                        LatentPreparationStage,
-                                        TextEncodingStage,
-                                        TimestepPreparationStage,
-                                        Hy15ImageEncodingStage,
-                                        SRDenoisingStage)
+from fastvideo.pipelines.stages import (
+    ConditioningStage, DecodingStage, DenoisingStage, InputValidationStage,
+    LatentPreparationStage, TextEncodingStage, TimestepPreparationStage,
+    Hy15ImageEncodingStage, SRDenoisingStage)
 
 # TODO(will): move PRECISION_TO_TYPE to better place
 
@@ -71,9 +68,9 @@ class HunyuanVideo15SRPipeline(ComposedPipelineBase):
                            scheduler=self.get_module("scheduler")))
 
         self.add_stage(stage_name="sr_latent_preparation_stage",
-                        stage=LatentPreparationStage(
-                            scheduler=self.get_module("scheduler"),
-                            transformer=self.get_module("transformer_2")))
+                       stage=LatentPreparationStage(
+                           scheduler=self.get_module("scheduler"),
+                           transformer=self.get_module("transformer_2")))
 
         self.add_stage(stage_name="sr_denoising_stage",
                        stage=SRDenoisingStage(
@@ -126,9 +123,10 @@ class HunyuanVideo15SRPipeline(ComposedPipelineBase):
         start_time = time.time()
         batch = self.decoding_stage(batch, fastvideo_args)
         end_time = time.time()
-        logger.info(f"Decoding time: {end_time - start_time} seconds")
+        logger.info("Decoding time: %s seconds", end_time - start_time)
 
         # Return the output
         return batch
+
 
 EntryClass = HunyuanVideo15SRPipeline

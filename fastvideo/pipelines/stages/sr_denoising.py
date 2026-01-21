@@ -21,15 +21,11 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TransformerLoader, UpsamplerLoader
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler)
-from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.utils import dict_to_3d_list, masks_like
 
 try:
     from fastvideo.attention.backends.sliding_tile_attn import (
@@ -89,11 +85,14 @@ class SRDenoisingStage(PipelineStage):
         )
 
     def add_noise_to_lq(self, lq_latents, strength=0.7):
+
         def expand_dims(tensor: torch.Tensor, ndim: int):
-            shape = tensor.shape + (1,) * (ndim - tensor.ndim)
+            shape = tensor.shape + (1, ) * (ndim - tensor.ndim)
             return tensor.reshape(shape)
+
         noise = torch.randn_like(lq_latents)
-        timestep = torch.tensor([1000.0], device=get_local_torch_device()) * strength
+        timestep = torch.tensor([1000.0],
+                                device=get_local_torch_device()) * strength
         t = expand_dims(timestep, lq_latents.ndim)
         return (1 - t / 1000.0) * lq_latents + (t / 1000.0) * noise
 
@@ -139,9 +138,9 @@ class SRDenoisingStage(PipelineStage):
         self.scheduler.set_shift(fastvideo_args.pipeline_config.flow_shift_sr)
         sigmas = np.linspace(1.0, 0.0, batch.num_inference_steps_sr + 1)[:-1]
         self.scheduler.set_timesteps(sigmas=sigmas,
-                                    device=get_local_torch_device())
+                                     device=get_local_torch_device())
         timesteps = self.scheduler.timesteps
-        logger.info(f"timesteps: {timesteps}")
+        logger.info("timesteps: %s", timesteps)
         num_inference_steps = len(timesteps)
         num_warmup_steps = len(
             timesteps) - num_inference_steps * self.scheduler.order
@@ -181,25 +180,32 @@ class SRDenoisingStage(PipelineStage):
 
         latents = batch.latents
         lq_latents = batch.lq_latents
-        logger.info(f"lq_latents: {lq_latents.shape}")
-        logger.info(f"latents: {latents.shape}")
+        logger.info("lq_latents: %s", lq_latents.shape)
+        logger.info("latents: %s", latents.shape)
         tgt_shape = latents.shape[-2:]  # (h w)
         bsz = lq_latents.shape[0]
         lq_latents = rearrange(lq_latents, "b c f h w -> (b f) c h w")
-        lq_latents = F.interpolate(lq_latents, size=tgt_shape, mode="bilinear", align_corners=False)
+        lq_latents = F.interpolate(lq_latents,
+                                   size=tgt_shape,
+                                   mode="bilinear",
+                                   align_corners=False)
         lq_latents = rearrange(lq_latents, "(b f) c h w -> b c f h w", b=bsz)
-        lq_latents = self.upsampler(lq_latents.to(dtype=torch.float32, device=get_local_torch_device()))
+        lq_latents = self.upsampler(
+            lq_latents.to(dtype=torch.float32, device=get_local_torch_device()))
         lq_latents = lq_latents.to(dtype=latents.dtype)
         lq_latents = self.add_noise_to_lq(lq_latents, 0.7)
         b, c, f, h, w = lq_latents.shape
         mask_ones = torch.ones(b, 1, f, h, w).to(lq_latents.device)
-        lq_cond_latents = torch.concat([lq_latents, mask_ones], dim=1).to(target_dtype)
-        cond_latents = torch.cat([batch.video_latent, torch.zeros_like(latents)], dim=1).to(target_dtype)
+        lq_cond_latents = torch.concat([lq_latents, mask_ones],
+                                       dim=1).to(target_dtype)
+        cond_latents = torch.cat(
+            [batch.video_latent, torch.zeros_like(latents)],
+            dim=1).to(target_dtype)
         condition = torch.concat([cond_latents, lq_cond_latents], dim=1)
         zero_lq_condition = condition.clone()
-        zero_lq_condition[:, c + 1 : 2 * c + 1] = torch.zeros_like(lq_latents)
+        zero_lq_condition[:, c + 1:2 * c + 1] = torch.zeros_like(lq_latents)
         zero_lq_condition[:, 2 * c + 1] = 0
-        
+
         latent_model_input = latents.to(target_dtype)
         assert latent_model_input.shape[0] == 1, "only support batch size 1"
 
@@ -221,7 +227,8 @@ class SRDenoisingStage(PipelineStage):
                 t_expand = t.repeat(latent_model_input.shape[0])
 
                 if i == len(timesteps) - 1:
-                    timesteps_r = torch.tensor([0.0], device=get_local_torch_device())
+                    timesteps_r = torch.tensor([0.0],
+                                               device=get_local_torch_device())
                 else:
                     timesteps_r = timesteps[i + 1]
                 timesteps_r = timesteps_r.repeat(latent_model_input.shape[0])
@@ -309,15 +316,13 @@ class SRDenoisingStage(PipelineStage):
                             # fastvideo_args=fastvideo_args
                     ):
                         # Run transformer
-                        noise_pred = self.transformer(
-                            latent_model_input,
-                            prompt_embeds,
-                            t_expand,
-                            guidance=guidance_expand,
-                            timestep_r=timesteps_r,
-                            **pos_cond_kwargs,
-                            **image_kwargs
-                        )
+                        noise_pred = self.transformer(latent_model_input,
+                                                      prompt_embeds,
+                                                      t_expand,
+                                                      guidance=guidance_expand,
+                                                      timestep_r=timesteps_r,
+                                                      **pos_cond_kwargs,
+                                                      **image_kwargs)
 
                     # Compute the previous noisy sample
                     latents = self.scheduler.step(noise_pred,
