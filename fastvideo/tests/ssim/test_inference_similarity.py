@@ -121,7 +121,7 @@ LTX2_T2V_PARAMS = {
 MODEL_TO_PARAMS = {
     "FastHunyuan-diffusers": HUNYUAN_PARAMS,
     "Wan2.1-T2V-1.3B-Diffusers": WAN_T2V_PARAMS,
-    "ltx2_diffusers": LTX2_T2V_PARAMS,
+    # "ltx2_diffusers": LTX2_T2V_PARAMS,
 }
 
 I2V_MODEL_TO_PARAMS = {
