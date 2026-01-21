@@ -120,8 +120,6 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
 
 # For determining pipeline type from model ID
 SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
-    "hunyuan15imagetovideo":
-    lambda id: "hunyuan15imagetovideo" in id.lower() or "hunyuanvideo15imagetovideo" in id.lower(),
     "hunyuan":
     lambda id: "hunyuan" in id.lower(),
     "hunyuan15":
@@ -147,8 +145,6 @@ SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
 
 # Fallback configs when exact match isn't found but architecture is detected
 SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
-    "hunyuan15imagetovideo":
-    Hunyuan15_480P_SamplingParam,  # HunyuanVideo 1.5 I2V fallback (same as T2V)
     "hunyuan":
     HunyuanSamplingParam,  # Base Hunyuan config as fallback for any Hunyuan variant
     "hunyuan15":
