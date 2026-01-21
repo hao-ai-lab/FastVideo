@@ -1121,28 +1121,23 @@ class AutoencoderKLHyWorld(nn.Module, ParallelTiledVAE):
                 Whether to use temporal caching for chunk-based processing.
         """
         x = sample
-        
+
+        from fastvideo.models.vaes.common import DiagonalGaussianDistribution
+
         if use_cache:
             posterior_params = self.encode_with_cache(x)
-        else:
-            posterior = self.encode(x)
-            posterior_params = posterior.parameters if hasattr(posterior, 'parameters') else None
-            
-        from fastvideo.models.vaes.common import DiagonalGaussianDistribution
-        
-        if use_cache:
             posterior = DiagonalGaussianDistribution(posterior_params)
         else:
             posterior = self.encode(x)
-            
+
         if sample_posterior:
             z = posterior.sample(generator=generator)
         else:
             z = posterior.mode()
-            
+
         if use_cache:
             dec = self.decode_with_cache(z)
         else:
             dec = self.decode(z)
-            
+
         return dec

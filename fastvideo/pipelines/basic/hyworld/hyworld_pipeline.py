@@ -34,7 +34,6 @@ class HyWorldPipeline(ComposedPipelineBase):
 
     # Include image_encoder and feature_extractor for I2V support with SigLIP
     # Note: guider (ClassifierFreeGuidance) is not needed - FastVideo handles CFG differently
-    # Note: text_encoder_2/tokenizer_2 are not used - HyWorld only uses a single LLM-based text encoder
     _required_config_modules = [
         "text_encoder", "tokenizer", "vae", "transformer", "scheduler", "text_encoder_2", "tokenizer_2",
         "image_encoder", "feature_extractor"

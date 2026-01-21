@@ -20,7 +20,7 @@ os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29505"
 
 # HyWorld model path - SigLIP image encoder
-MODEL_PATH = "/mnt/weka/home/hao.zhang/mhuo/data/hyworld"
+MODEL_PATH = "FastVideo/HY-WorldPlay-Bidirectional-Diffusers"
 IMAGE_ENCODER_PATH = os.path.join(MODEL_PATH, "image_encoder")
 
 
