@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
 """
-Benchmark VSA block-sparse attention kernels (forward + backward) and report TFLOPs.
+Benchmark VSA *wrapper* performance (forward + backward) and report TFLOPs.
 
-This script benchmarks the *raw CUDA kernels* exposed by the extension:
-  - fastvideo_kernel_ops.block_sparse_fwd
-  - fastvideo_kernel_ops.block_sparse_bwd
+This script benchmarks the autograd-enabled wrapper:
+  - fastvideo_kernel.block_sparse_attn.block_sparse_attn
 
-It generates a random block-sparse pattern and converts it to index format on GPU.
+So measured time includes wrapper overhead (map->index conversion, dispatch) plus kernel time.
 """
 
 from __future__ import annotations
 
 import argparse
-import math
+import os
 import random
-from typing import Tuple
+from typing import Tuple, Callable
 
 import numpy as np
 import torch
@@ -49,6 +48,7 @@ def parse_arguments() -> argparse.Namespace:
     p.add_argument("--rep", type=int, default=20)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--dtype", type=str, default="bf16", choices=["bf16", "fp16"])
+    p.add_argument("--force_triton", action="store_true", help="Force wrapper to use Triton path (if supported by shapes).")
     return p.parse_args()
 
 
@@ -69,15 +69,13 @@ def make_block_map(bs: int, h: int, num_q_blocks: int, num_kv_blocks: int, topk:
     return block_map
 
 
-def map_to_index(block_map: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-    # GPU conversion (Triton) – avoids Python loops / nonzero
-    from fastvideo_kernel.triton_kernels.index import map_to_index as _map_to_index
-    return _map_to_index(block_map)
-
-
 def flops_sparse_attention(bs: int, h: int, d: int, q_len: int, topk_blocks: int, block_n: int) -> float:
     # Approx: QK^T + PV, each is ~2*bs*h*q_len*(topk_blocks*block_n)*d
     return 4.0 * bs * h * d * q_len * (topk_blocks * block_n)
+
+
+def bench_ms(fn: Callable[[], object], warmup: int, rep: int) -> float:
+    return do_bench(fn, warmup=warmup, rep=rep, quantiles=None)
 
 
 def main() -> None:
@@ -86,17 +84,10 @@ def main() -> None:
 
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float16
 
-    try:
-        from fastvideo_kernel._C import fastvideo_kernel_ops
-    except Exception as e:
-        raise RuntimeError(
-            "fastvideo-kernel extension not available. Build/install fastvideo-kernel first."
-        ) from e
+    if args.force_triton:
+        os.environ["FASTVIDEO_KERNEL_VSA_FORCE_TRITON"] = "1"
 
-    block_sparse_fwd = getattr(fastvideo_kernel_ops, "block_sparse_fwd", None)
-    block_sparse_bwd = getattr(fastvideo_kernel_ops, "block_sparse_bwd", None)
-    if block_sparse_fwd is None or block_sparse_bwd is None:
-        raise RuntimeError("block_sparse_fwd/bwd not found in fastvideo_kernel_ops.")
+    from fastvideo_kernel.block_sparse_attn import block_sparse_attn
 
     bs, h, d = args.batch_size, args.num_heads, args.head_dim
     kv_seq_lens = args.kv_seq_lens
@@ -105,10 +96,15 @@ def main() -> None:
     if len(kv_seq_lens) != len(args.q_seq_lens):
         raise ValueError("kv_seq_lens must have the same number of entries as q_seq_lens (or be omitted).")
 
-    print("VSA Block-Sparse Attention Benchmark")
+    print("VSA Block-Sparse Attention Benchmark (WRAPPER)")
     print(f"device: {torch.cuda.get_device_name(0)}")
     print(f"batch={bs}, heads={h}, head_dim={d}, dtype={args.dtype}")
     print(f"BLOCK_M={BLOCK_M}, BLOCK_N={BLOCK_N}")
+    print("NOTE: timings include wrapper overhead (map->index + dispatch).")
+    if args.force_triton:
+        print("dispatch: forced Triton (FASTVIDEO_KERNEL_VSA_FORCE_TRITON=1)")
+    else:
+        print("dispatch: SM90 if available, else Triton")
 
     for q_len, kv_len in zip(args.q_seq_lens, kv_seq_lens):
         if q_len % BLOCK_M != 0 or kv_len % BLOCK_N != 0:
@@ -126,34 +122,31 @@ def main() -> None:
         q, k, v = create_qkv(bs, h, q_len, kv_len, d, dtype)
         block_map = make_block_map(bs, h, num_q_blocks, num_kv_blocks, topk)
 
-        q2k_index, q2k_num = map_to_index(block_map)
-        k2q_index, k2q_num = map_to_index(block_map.transpose(-1, -2).contiguous())
-
         # Variable block sizes: default full blocks (64 tokens per KV block)
         variable_block_sizes = torch.full((num_kv_blocks,), BLOCK_N, dtype=torch.int32, device="cuda")
 
-        # Warmup + capture outputs needed for bwd
-        o, lse = block_sparse_fwd(q, k, v, q2k_index, q2k_num, variable_block_sizes)
-        og = torch.randn_like(o)
+        def _fwd():
+            return block_sparse_attn(q, k, v, block_map, variable_block_sizes)
+
+        fwd_ms = bench_ms(_fwd, warmup=args.warmup, rep=args.rep)
+
+        # Backward benchmark (wrapper autograd). We build the graph once, then repeatedly run backward
+        # on the retained graph so bwd timing excludes the forward compute.
+        q_ = q.detach().requires_grad_(True)
+        k_ = k.detach().requires_grad_(True)
+        v_ = v.detach().requires_grad_(True)
+        o_, _aux_ = block_sparse_attn(q_, k_, v_, block_map, variable_block_sizes)
+        og = torch.randn_like(o_)
+        loss = (o_ * og).sum()
+
+        for _ in range(max(1, args.warmup // 2)):
+            torch.autograd.grad(loss, (q_, k_, v_), retain_graph=True)
         torch.cuda.synchronize()
 
-        fwd_ms = do_bench(
-            lambda: block_sparse_fwd(q, k, v, q2k_index, q2k_num, variable_block_sizes),
-            warmup=args.warmup,
-            rep=args.rep,
-            quantiles=None,
-        )
-
-        # Backward warmup
-        for _ in range(args.warmup):
-            block_sparse_bwd(q, k, v, o, lse, og, k2q_index, k2q_num, variable_block_sizes)
-        torch.cuda.synchronize()
-
-        bwd_ms = do_bench(
-            lambda: block_sparse_bwd(q, k, v, o, lse, og, k2q_index, k2q_num, variable_block_sizes),
+        bwd_ms = bench_ms(
+            lambda: torch.autograd.grad(loss, (q_, k_, v_), retain_graph=True),
             warmup=0,
-            rep=args.rep,
-            quantiles=None,
+            rep=max(5, args.rep // 2),
         )
 
         flops = flops_sparse_attention(bs, h, d, q_len, topk, BLOCK_N)
@@ -161,8 +154,8 @@ def main() -> None:
         # Rough backward multiplier (attention backward typically ~2-3x forward)
         bwd_tflops = (2.5 * flops) / bwd_ms * 1e-12 * 1e3
 
-        print(f"fwd: {fwd_ms:.3f} ms  | {fwd_tflops:.2f} TFLOPs (approx)")
-        print(f"bwd: {bwd_ms:.3f} ms  | {bwd_tflops:.2f} TFLOPs (approx, 2.5x fwd flops)")
+        print(f"fwd(wrapper): {fwd_ms:.3f} ms  | {fwd_tflops:.2f} TFLOPs (approx)")
+        print(f"bwd(wrapper): {bwd_ms:.3f} ms  | {bwd_tflops:.2f} TFLOPs (approx, 2.5x fwd flops)")
 
 
 if __name__ == "__main__":
