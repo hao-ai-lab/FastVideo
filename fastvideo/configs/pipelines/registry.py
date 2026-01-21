@@ -166,13 +166,6 @@ def get_pipeline_config_cls_from_name(
 
     pipeline_config_cls: type[PipelineConfig] | None = None
 
-    # Temporary local mapping for LTX-2 diffusers-style exports.
-    if os.path.exists(pipeline_name_or_path):
-        norm_path = os.path.normpath(pipeline_name_or_path)
-        path_parts = norm_path.split(os.sep)
-        if "ltx2_diffusers" in path_parts:
-            return LTX2T2VConfig
-
     # First try exact match for specific weights
     if pipeline_name_or_path in PIPE_NAME_TO_CONFIG:
         pipeline_config_cls = PIPE_NAME_TO_CONFIG[pipeline_name_or_path]

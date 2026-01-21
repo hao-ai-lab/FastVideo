@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 Native LTX-2 Audio VAE and Vocoder implementation for FastVideo.
-This is a standalone implementation that does not depend on ltx_core.
 """
 
 from __future__ import annotations

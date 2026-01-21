@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-LTX-2 Video VAE implementation for FastVideo.
+LTX-2 Video VAE implementation
 """
 
 from __future__ import annotations

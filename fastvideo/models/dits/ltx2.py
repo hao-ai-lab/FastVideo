@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Native LTX-2 transformer implementation (video-only).
+LTX-2 transformer implementation
 """
 
 from dataclasses import dataclass, replace
