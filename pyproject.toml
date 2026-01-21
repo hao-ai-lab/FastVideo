@@ -56,6 +56,7 @@ dependencies = [
     "aiohttp",
     "huggingface_hub",
     "cloudpickle",
+    "omegaconf",
 
     # System & Monitoring Tools
     "gpustat",
