@@ -63,7 +63,7 @@ dependencies = [
     "remote-pdb",
 
     # Kernel & Packaging
-    "fastvideo-kernel==0.2.2",
+    "fastvideo-kernel==0.2.4",
     "wheel",
 
     # Training Dependencies
@@ -90,7 +90,7 @@ lint = [
 ]
 
 test = [
-    "av==14.3.0",
+    "av",
     "pytorch-msssim==1.0.0",
     "pytest",
 ]

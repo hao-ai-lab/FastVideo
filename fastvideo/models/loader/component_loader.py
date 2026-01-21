@@ -15,8 +15,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from safetensors.torch import load_file as safetensors_load_file
 from torch.distributed import init_device_mesh
-from transformers import AutoImageProcessor, AutoTokenizer
-from transformers import UMT5EncoderModel
+from transformers import AutoImageProcessor, AutoProcessor, AutoTokenizer
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
 from fastvideo.configs.models import EncoderConfig
@@ -35,8 +34,8 @@ from fastvideo.models.loader.weight_utils import (
     safetensors_weights_iterator,
 )
 from fastvideo.models.registry import ModelRegistry
-from fastvideo.utils import PRECISION_TO_TYPE
-from fastvideo.models.layerwise_offload import LayerwiseOffloadManager
+from fastvideo.utils import PRECISION_TO_TYPE, is_pin_memory_available
+from fastvideo.hooks.layerwise_offload import enable_layerwise_offload
 
 logger = init_logger(__name__)
 
@@ -92,10 +91,12 @@ class ComponentLoader(ABC):
 
         if module_type in module_loaders:
             loader_cls, expected_library = module_loaders[module_type]
-            # Assert that the library matches what's expected for this module type
-            assert transformers_or_diffusers == expected_library, (
-                f"{module_type} must be loaded from {expected_library}, got {transformers_or_diffusers}"
-            )
+            # Allow fastvideo.* libraries for custom implementations (e.g. Cosmos2_5Pipeline)
+            # that aren't available in diffusers/transformers yet
+            is_fastvideo_module = transformers_or_diffusers.startswith("fastvideo.")
+            if not is_fastvideo_module:
+                # Assert that the library matches what's expected for this module type
+                assert transformers_or_diffusers == expected_library, f"{module_type} must be loaded from {expected_library}, got {transformers_or_diffusers}"
             return loader_cls()
 
         # For unknown module types, use a generic loader
@@ -280,7 +281,7 @@ class TextEncoderLoader(ComponentLoader):
         target_device: torch.device,
         fastvideo_args: FastVideoArgs,
         dtype: str = "fp16",
-        use_text_encoder_override: bool = False, # prevent subclasses from misusing
+        use_text_encoder_override: bool = False,  # prevent subclasses from misusing
     ):
         use_cpu_offload = (
             fastvideo_args.text_encoder_cpu_offload
@@ -297,7 +298,10 @@ class TextEncoderLoader(ComponentLoader):
             )
 
         # Set quantization config if specified
-        if use_text_encoder_override and fastvideo_args.override_text_encoder_quant is not None:
+        if (
+            use_text_encoder_override
+            and fastvideo_args.override_text_encoder_quant is not None
+        ):
             if fastvideo_args.override_text_encoder_safetensors is None:
                 raise ValueError(
                     "override_text_encoder_quant is set but override_text_encoder_safetensors is None"
@@ -314,7 +318,10 @@ class TextEncoderLoader(ComponentLoader):
                 model: TextEncoder = model_cls(model_config)  # type: ignore
 
             weights_to_load = {name for name, _ in model.named_parameters()}
-            if use_text_encoder_override and fastvideo_args.override_text_encoder_safetensors is not None:
+            if (
+                use_text_encoder_override
+                and fastvideo_args.override_text_encoder_safetensors is not None
+            ):
                 loaded_weights: set[str] = model.load_weights(
                     safetensors_weights_iterator(
                         [fastvideo_args.override_text_encoder_safetensors],
@@ -341,6 +348,7 @@ class TextEncoderLoader(ComponentLoader):
             from fastvideo.platforms import current_platform
 
             if use_cpu_offload:
+                pin_cpu_memory = fastvideo_args.pin_cpu_memory and is_pin_memory_available()
                 # Disable FSDP for MPS as it's not compatible
                 if current_platform.is_mps():
                     logger.info(
@@ -358,7 +366,7 @@ class TextEncoderLoader(ComponentLoader):
                         reshard_after_forward=True,
                         mesh=mesh["offload"],
                         fsdp_shard_conditions=model._fsdp_shard_conditions,
-                        pin_cpu_memory=fastvideo_args.pin_cpu_memory,
+                        pin_cpu_memory=pin_cpu_memory,
                     )
                 else:
                     mesh = init_device_mesh(
@@ -372,7 +380,7 @@ class TextEncoderLoader(ComponentLoader):
                         reshard_after_forward=True,
                         mesh=mesh["offload"],
                         fsdp_shard_conditions=model._fsdp_shard_conditions,
-                        pin_cpu_memory=fastvideo_args.pin_cpu_memory,
+                        pin_cpu_memory=pin_cpu_memory,
                     )
             # We only enable strict check for non-quantized models
             # that have loaded weights tracking currently.
@@ -450,6 +458,33 @@ class TokenizerLoader(ComponentLoader):
         """Load the tokenizer based on the model path, and inference args."""
         logger.info("Loading tokenizer from %s", model_path)
 
+        # Cosmos2.5 stores an AutoProcessor config in `tokenizer/config.json` (not a tokenizer
+        # config). Use its `_name_or_path` (e.g. Qwen/Qwen2.5-VL-7B-Instruct) as the source.
+        tokenizer_cfg_path = os.path.join(model_path, "config.json")
+        if os.path.exists(tokenizer_cfg_path):
+            try:
+                with open(tokenizer_cfg_path, "r") as f:
+                    tokenizer_cfg = json.load(f)
+                if isinstance(tokenizer_cfg, dict) and (
+                    tokenizer_cfg.get("_class_name") == "AutoProcessor"
+                    or "processor_type" in tokenizer_cfg
+                ):
+                    src = tokenizer_cfg.get("_name_or_path", "")
+                    if isinstance(src, str) and src.strip():
+                        processor = AutoProcessor.from_pretrained(
+                            src.strip(),
+                            trust_remote_code=True,
+                        )
+                        logger.info(
+                            "Loaded tokenizer/processor from %s: %s",
+                            src,
+                            processor.__class__.__name__,
+                        )
+                        return processor
+            except Exception:
+                # If parsing fails, fall through to AutoTokenizer below.
+                pass
+
         tokenizer = AutoTokenizer.from_pretrained(
             model_path,  # "<path to model>/tokenizer"
             # in v0, this was same string as encoder_name "ClipTextModel"
@@ -492,19 +527,40 @@ class VAELoader(ComponentLoader):
             if fastvideo_args.pipeline_config.vae_precision
             else torch.bfloat16
         ):
+            # Cosmos2.5 uses a Wan2.1 VAE stored as `tokenizer.safetensors` under the VAE folder.
+            is_cosmos25 = fastvideo_args.pipeline_config.__class__.__name__ == "Cosmos25Config"
+            if class_name == "AutoencoderKLWan" and is_cosmos25:
+                from fastvideo.models.vaes.cosmos25wanvae import Cosmos25WanVAE
+
+                dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+                vae = Cosmos25WanVAE(device=target_device, dtype=dtype)
+
+                weight_path = os.path.join(model_path, "tokenizer.safetensors")
+                if not os.path.exists(weight_path):
+                    raise FileNotFoundError(
+                        f"Missing Cosmos2.5 VAE weights: {weight_path}"
+                    )
+                sd = safetensors_load_file(weight_path)
+                vae.load_state_dict(sd, strict=False)
+                return vae.eval()
+
             vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
             vae = vae_cls(vae_config).to(target_device)
 
         # Find all safetensors files
         safetensors_list = glob.glob(
-            os.path.join(str(model_path), "*.safetensors")
-        )
-        loaded = {}
-        for sf_file in safetensors_list:
-            loaded.update(safetensors_load_file(sf_file))
-        vae.load_state_dict(
-            loaded, strict=False
-        )  # We might only load encoder or decoder
+            os.path.join(str(model_path), "*.safetensors"))
+        if not safetensors_list:
+            raise ValueError(f"No safetensors files found in {model_path}")
+        # Common case: a single `.safetensors` checkpoint file.
+        # Some models may be sharded into multiple files; in that case we merge.
+        if len(safetensors_list) == 1:
+            loaded = safetensors_load_file(safetensors_list[0])
+        else:
+            loaded = {}
+            for sf_file in safetensors_list:
+                loaded.update(safetensors_load_file(sf_file))
+        vae.load_state_dict(loaded, strict=False)
 
         return vae.eval()
 
@@ -582,7 +638,17 @@ class TransformerLoader(ComponentLoader):
         ]
 
         # Load the model using FSDP loader
+        logger.info("Loading model from %s, default_dtype: %s", cls_name,
+                    default_dtype)
         assert fastvideo_args.hsdp_shard_dim is not None
+        # Cosmos2.5 checkpoints can include extra entries not present in the
+        # instantiated model (e.g. pos_embedder ranges / *_extra_state). Load
+        # non-strictly for Cosmos2.5 only; keep upstream strict behavior for others.
+        strict_load = not (
+            cls_name.startswith("Cosmos25")
+            or cls_name == "Cosmos25Transformer3DModel"
+            or getattr(fastvideo_args.pipeline_config, "prefix", "") == "Cosmos25"
+        )
         model = maybe_load_fsdp_model(
             model_cls=model_cls,
             init_params={"config": dit_config, "hf_config": hf_config},
@@ -590,6 +656,7 @@ class TransformerLoader(ComponentLoader):
             device=get_local_torch_device(),
             hsdp_replicate_dim=fastvideo_args.hsdp_replicate_dim,
             hsdp_shard_dim=fastvideo_args.hsdp_shard_dim,
+            strict=strict_load,
             cpu_offload=fastvideo_args.dit_cpu_offload,
             pin_cpu_memory=fastvideo_args.pin_cpu_memory,
             fsdp_inference=fastvideo_args.use_fsdp_inference,
@@ -612,35 +679,8 @@ class TransformerLoader(ComponentLoader):
 
         model = model.eval()
 
-        if fastvideo_args.dit_layerwise_offload and hasattr(model, "blocks"):
-            # Check if this is a Wan model (only Wan models support layerwise offload)
-            is_wan_model = "Wan" in cls_name
-            if not is_wan_model:
-                logger.warning(
-                    "Layerwise offload is currently only supported for Wan models. "
-                    "Model class '%s' does not support layerwise offload. "
-                    "Disabling layerwise offload for this model.",
-                    cls_name
-                )
-            else:
-                try:
-                    num_layers = len(getattr(model, "blocks"))
-                except TypeError:
-                    num_layers = None
-                if isinstance(num_layers, int) and num_layers > 0:
-                    # Ensure model is on the correct device (CUDA) before initializing manager
-                    # This ensures non-managed parameters (embeddings, final norms) are on GPU
-                    model = model.to(get_local_torch_device())
-                    mgr = LayerwiseOffloadManager(
-                        model,
-                        module_list_attr="blocks",
-                        num_layers=num_layers,
-                        enabled=True,
-                        pin_cpu_memory=fastvideo_args.pin_cpu_memory,
-                        auto_initialize=True,
-                    )
-                    setattr(model, "_layerwise_offload_manager", mgr)
-
+        if fastvideo_args.inference_mode and fastvideo_args.dit_layerwise_offload:
+            enable_layerwise_offload(model)
         return model
 
 
