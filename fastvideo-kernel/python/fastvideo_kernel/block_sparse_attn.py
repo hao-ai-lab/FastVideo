@@ -30,13 +30,12 @@ def _force_triton() -> bool:
     return os.environ.get("FASTVIDEO_KERNEL_VSA_FORCE_TRITON", "0") == "1"
 
 
-def _map_to_index_torch(block_map: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+def _map_to_index(block_map: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Pure-torch (no triton) conversion:
-      block_map: [B, H, Q, KV] bool  (or [H, Q, KV] which will be treated as B=1)
-      returns:
-        index: [B, H, Q, KV] int32 (packed KV indices, -1 padding)
-        num:   [B, H, Q] int32 (#kv blocks per q block)
+    Preferred map->index conversion used by the wrapper.
+
+    This wrapper **requires** the Triton implementation.
+    If Triton (or the Triton map_to_index module) is not available, it raises.
     """
     if block_map.dim() == 3:
         block_map = block_map.unsqueeze(0)
@@ -45,20 +44,17 @@ def _map_to_index_torch(block_map: torch.Tensor) -> Tuple[torch.Tensor, torch.Te
     if block_map.dtype != torch.bool:
         block_map = block_map.to(torch.bool)
 
-    B, H, Q, KV = block_map.shape
-    index = torch.full((B, H, Q, KV), -1, dtype=torch.int32, device=block_map.device)
-    num = torch.zeros((B, H, Q), dtype=torch.int32, device=block_map.device)
+    if not block_map.is_cuda:
+        raise RuntimeError("block_map must be a CUDA tensor (Triton map_to_index required).")
 
-    # Small sizes in practice (B=1, H<=16, Q/KV<=64), so a Python loop is fine.
-    for b in range(B):
-        for h in range(H):
-            for q in range(Q):
-                kv_idx = torch.nonzero(block_map[b, h, q], as_tuple=False).flatten().to(torch.int32)
-                n = int(kv_idx.numel())
-                if n:
-                    index[b, h, q, :n] = kv_idx
-                num[b, h, q] = n
-    return index, num
+    try:
+        from fastvideo_kernel.triton_kernels.index import map_to_index as triton_map_to_index  # local import
+    except Exception as e:
+        raise ImportError(
+            "Triton map_to_index is required but not available. "
+            "Ensure Triton is installed and fastvideo_kernel.triton_kernels.index is importable."
+        ) from e
+    return triton_map_to_index(block_map)
 
 
 @torch.library.custom_op(
@@ -77,7 +73,7 @@ def block_sparse_attn_triton(
     k = k.contiguous()
     v = v.contiguous()
     block_map = block_map.to(torch.bool)
-    q2k_idx, q2k_num = _map_to_index_torch(block_map)
+    q2k_idx, q2k_num = _map_to_index(block_map)
 
     from fastvideo_kernel.triton_kernels.block_sparse_attn_triton import (  # local import
         triton_block_sparse_attn_forward,
@@ -85,6 +81,7 @@ def block_sparse_attn_triton(
 
     o, M = triton_block_sparse_attn_forward(q, k, v, q2k_idx, q2k_num, variable_block_sizes)
     return o, M
+
 
 
 @torch.library.register_fake("fastvideo_kernel::block_sparse_attn_triton")
@@ -117,8 +114,8 @@ def block_sparse_attn_backward_triton(
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     grad_output = grad_output.contiguous()
     block_map = block_map.to(torch.bool)
-    q2k_idx, q2k_num = _map_to_index_torch(block_map)
-    k2q_idx, k2q_num = _map_to_index_torch(block_map.transpose(-1, -2).contiguous())
+    q2k_idx, q2k_num = _map_to_index(block_map)
+    k2q_idx, k2q_num = _map_to_index(block_map.transpose(-1, -2).contiguous())
 
     from fastvideo_kernel.triton_kernels.block_sparse_attn_triton import (  # local import
         triton_block_sparse_attn_backward,
@@ -182,7 +179,7 @@ def block_sparse_attn_sm90(
     k_padded = k_padded.contiguous()
     v_padded = v_padded.contiguous()
     block_map = block_map.to(torch.bool)
-    q2k_idx, q2k_num = _map_to_index_torch(block_map)
+    q2k_idx, q2k_num = _map_to_index(block_map)
 
     o_padded, lse_padded = block_sparse_fwd(
         q_padded, k_padded, v_padded, q2k_idx, q2k_num, variable_block_sizes.int()
@@ -224,7 +221,7 @@ def block_sparse_attn_backward_sm90(
 
     grad_output_padded = grad_output_padded.contiguous()
     block_map = block_map.to(torch.bool)
-    k2q_idx, k2q_num = _map_to_index_torch(block_map.transpose(-1, -2).contiguous())
+    k2q_idx, k2q_num = _map_to_index(block_map.transpose(-1, -2).contiguous())
 
     dq, dk, dv = block_sparse_bwd(
         q_padded,
