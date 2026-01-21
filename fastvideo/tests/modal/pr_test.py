@@ -82,12 +82,12 @@ def run_transformer_tests():
 @app.function(
     gpu="L40S:4", 
     image=image, 
-    timeout=3600,
+    timeout=6000, 
     secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})],
     volumes={"/root/data": model_vol} 
 )
 def run_ssim_tests():
-    run_test("export MODEL_PATH='/root/data/weights' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/ssim -vs")
+    run_test("export HF_HOME='/root/data/.cache' && export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/ssim -vs")
 
 @app.function(gpu="L40S:4", image=image, timeout=900, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
 def run_training_tests():

@@ -26,17 +26,17 @@ else:
 
 # Base parameters from the shell script
 HUNYUAN_PARAMS = {
-    "num_gpus": 2,
+    "num_gpus": 4,
     "model_path": "FastVideo/FastHunyuan-diffusers",
     "height": 720,
     "width": 1280,
     "num_frames": 45,
-    "num_inference_steps": 6,
+    "num_inference_steps": 2,
     "guidance_scale": 1,
     "embedded_cfg_scale": 6,
     "flow_shift": 17,
     "seed": 1024,
-    "sp_size": 2,
+    "sp_size": 4,
     "tp_size": 1,
     "vae_sp": True,
     "fps": 24,
@@ -48,7 +48,7 @@ WAN_T2V_PARAMS = {
     "height": 480,
     "width": 832,
     "num_frames": 45,
-    "num_inference_steps": 20,
+    "num_inference_steps": 4,
     "guidance_scale": 3,
     "embedded_cfg_scale": 6,
     "flow_shift": 7.0,
@@ -67,7 +67,7 @@ WAN_I2V_PARAMS = {
     "height": 480,
     "width": 832,
     "num_frames": 45,
-    "num_inference_steps": 6,
+    "num_inference_steps": 2,
     "guidance_scale": 5.0,
     "embedded_cfg_scale": 6,
     "flow_shift": 7.0,
@@ -232,7 +232,9 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
         "flow_shift": BASE_PARAMS["flow_shift"],
         "sp_size": BASE_PARAMS["sp_size"],
         "tp_size": BASE_PARAMS["tp_size"],
-        "dit_cpu_offload": True,
+        "use_fsdp_inference": True,
+        "dit_cpu_offload": False,
+        "dit_layerwise_offload": False,
     }
     if BASE_PARAMS.get("vae_sp"):
         init_kwargs["vae_sp"] = True
