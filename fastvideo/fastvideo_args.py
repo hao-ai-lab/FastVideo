@@ -139,6 +139,9 @@ class FastVideoArgs:
     vae_cpu_offload: bool = True
     pin_cpu_memory: bool = True
 
+    # VAE cache option (for HyWorld pipeline)
+    enable_hyworld_vae_cache: bool = False
+
     # STA (Sliding Tile Attention) parameters
     mask_strategy_file_path: str | None = None
     STA_mode: STA_Mode = STA_Mode.STA_INFERENCE
@@ -451,6 +454,13 @@ class FastVideoArgs:
             "--vae-cpu-offload",
             action=StoreBoolean,
             help="Use CPU offload for VAE. Enable if run out of memory.",
+        )
+        parser.add_argument(
+            "--enable-hyworld-vae-cache",
+            action=StoreBoolean,
+            help="Enable HyWorld VAE temporal caching. "
+            "True: use cached HyWorld VAE for long videos with lower memory. "
+            "False (default): use HY1.5 VAE (non-cached) for better quality on short videos.",
         )
         parser.add_argument(
             "--pin-cpu-memory",

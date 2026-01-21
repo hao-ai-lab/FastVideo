@@ -26,6 +26,10 @@ import torch.utils.checkpoint
 from fastvideo.layers.activation import get_act_fn
 from fastvideo.configs.models.vaes import HyWorldVAEConfig
 from fastvideo.models.vaes.common import ParallelTiledVAE
+from fastvideo.models.vaes.hunyuan15vae import (
+    HunyuanVideo15RMS_norm,
+    HunyuanVideo15AttnBlock,
+)
 
 # Cache size for temporal feature caching (number of frames to cache)
 CACHE_T = 2
@@ -81,96 +85,6 @@ class HunyuanVideo15CausalConv3d(nn.Module):
         
         hidden_states = F.pad(hidden_states, padding, mode=self.pad_mode)
         return self.conv(hidden_states)
-
-
-class HunyuanVideo15RMS_norm(nn.Module):
-    r"""
-    A custom RMS normalization layer.
-
-    Args:
-        dim (int): The number of dimensions to normalize over.
-        channel_first (bool, optional): Whether the input tensor has channels as the first dimension.
-            Default is True.
-        images (bool, optional): Whether the input represents image data. Default is True.
-        bias (bool, optional): Whether to include a learnable bias term. Default is False.
-    """
-
-    def __init__(self, dim: int, channel_first: bool = True, images: bool = True, bias: bool = False) -> None:
-        super().__init__()
-        broadcastable_dims = (1, 1, 1) if not images else (1, 1)
-        shape = (dim, *broadcastable_dims) if channel_first else (dim,)
-
-        self.channel_first = channel_first
-        self.scale = dim**0.5
-        self.gamma = nn.Parameter(torch.ones(shape))
-        self.bias = nn.Parameter(torch.zeros(shape)) if bias else 0.0
-
-    def forward(self, x):
-        return F.normalize(x, dim=(1 if self.channel_first else -1)) * self.scale * self.gamma + self.bias
-
-
-class HunyuanVideo15AttnBlock(nn.Module):
-    def __init__(self, in_channels: int):
-        super().__init__()
-        self.in_channels = in_channels
-
-        self.norm = HunyuanVideo15RMS_norm(in_channels, images=False)
-
-        self.to_q = nn.Conv3d(in_channels, in_channels, kernel_size=1)
-        self.to_k = nn.Conv3d(in_channels, in_channels, kernel_size=1)
-        self.to_v = nn.Conv3d(in_channels, in_channels, kernel_size=1)
-        self.proj_out = nn.Conv3d(in_channels, in_channels, kernel_size=1)
-
-    @staticmethod
-    def prepare_causal_attention_mask(n_frame: int, n_hw: int, dtype, device, batch_size: int = None):
-        """Prepare a causal attention mask for 3D videos.
-
-        Args:
-            n_frame (int): Number of frames (temporal length).
-            n_hw (int): Product of height and width.
-            dtype: Desired mask dtype.
-            device: Device for the mask.
-            batch_size (int, optional): If set, expands for batch.
-
-        Returns:
-            torch.Tensor: Causal attention mask.
-        """
-        seq_len = n_frame * n_hw
-        mask = torch.full((seq_len, seq_len), float("-inf"), dtype=dtype, device=device)
-        for i in range(seq_len):
-            i_frame = i // n_hw
-            mask[i, : (i_frame + 1) * n_hw] = 0
-        if batch_size is not None:
-            mask = mask.unsqueeze(0).expand(batch_size, -1, -1)
-        return mask
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        identity = x
-
-        x = self.norm(x)
-
-        query = self.to_q(x)
-        key = self.to_k(x)
-        value = self.to_v(x)
-
-        batch_size, channels, frames, height, width = query.shape
-
-        query = query.reshape(batch_size, channels, frames * height * width).permute(0, 2, 1).unsqueeze(1).contiguous()
-        key = key.reshape(batch_size, channels, frames * height * width).permute(0, 2, 1).unsqueeze(1).contiguous()
-        value = value.reshape(batch_size, channels, frames * height * width).permute(0, 2, 1).unsqueeze(1).contiguous()
-
-        attention_mask = self.prepare_causal_attention_mask(
-            frames, height * width, query.dtype, query.device, batch_size=batch_size
-        )
-
-        x = nn.functional.scaled_dot_product_attention(query, key, value, attn_mask=attention_mask)
-
-        # batch_size, 1, frames * height * width, channels
-
-        x = x.squeeze(1).reshape(batch_size, frames, height, width, channels).permute(0, 4, 1, 2, 3)
-        x = self.proj_out(x)
-
-        return x + identity
 
 
 class HunyuanVideo15Upsample(nn.Module):

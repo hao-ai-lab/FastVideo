@@ -544,6 +544,19 @@ class VAELoader(ComponentLoader):
                 vae.load_state_dict(sd, strict=False)
                 return vae.eval()
 
+            # HyWorld VAE cache option: swap to non-cached VAE if disabled
+            # This provides better quality for short videos (4-8 latent frames)
+            # at the cost of higher memory usage
+            if class_name == "AutoencoderKLHyWorld" and not fastvideo_args.enable_hyworld_vae_cache:
+                logger.info(
+                    "HyWorld VAE cache disabled: using HY1.5 VAE instead of HyWorld VAE"
+                )
+                class_name = "AutoencoderKLHunyuanVideo15"
+                # Update vae_config to use the non-cached VAE config
+                from fastvideo.configs.models.vaes import Hunyuan15VAEConfig
+                vae_config = Hunyuan15VAEConfig()
+                vae_config.update_model_arch(config)
+
             vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
             vae = vae_cls(vae_config).to(target_device)
 

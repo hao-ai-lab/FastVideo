@@ -162,16 +162,21 @@ DEFAULT_PROMPT = 'A paved pathway leads towards a stone arch bridge spanning a c
 
 def main():
     import argparse
+
+    # pose: (a, w, s, d) - (15, 31)
+    # num_frames: (61, 125)
     parser = argparse.ArgumentParser(description="HyWorld video generation with FastVideo")
     parser.add_argument("--prompt", type=str, default=DEFAULT_PROMPT, help="Text prompt for video generation")
     parser.add_argument("--image", type=str, default='assets/hyworld.png', help="Path to input image")
-    parser.add_argument("--pose", type=str, default='d-15', help="Pose string (e.g., 'a-31', 'w-31', 's-31', 'd-31')")
+    parser.add_argument("--pose", type=str, default='d-31', help="Pose string (e.g., 'a-31', 'w-31', 's-31', 'd-31')")
     parser.add_argument("--output_path", type=str, default='video_samples_hyworld', help="Output video path")
-    parser.add_argument("--num-frames", type=int, default=61, help="Number of frames")
+    parser.add_argument("--num-frames", type=int, default=125, help="Number of frames")
     parser.add_argument("--seed", type=int, default=1, help="Random seed")
     parser.add_argument("--resolution", type=str, default="480p", help="Only support 480p for now")
     parser.add_argument("--model-path", type=str, default="mignonjia/hyworld",
                         help="Path to base HunyuanVideo model (HuggingFace repo or local path)")
+    parser.add_argument("--enable-hyworld-vae-cache", type=bool, default=False,
+                        help="Set to False to load HY1.5 VAE instead of HyWorld VAE if generating short videos.")
     args = parser.parse_args()
 
     # Check if image exists
@@ -187,6 +192,7 @@ def main():
     print(f"Resolution: {HEIGHT}x{WIDTH} (from {args.resolution} buckets)")
     print(f"Num frames: {args.num_frames}")
     print(f"Output path: {args.output_path}")
+    print(f"VAE cache enabled: {args.enable_hyworld_vae_cache}")
 
     # Initialize generator
     print("\nInitializing HyWorldVideoGenerator...")
@@ -200,7 +206,8 @@ def main():
         vae_cpu_offload=True,
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True,
-        image_encoder_cpu_offload=True
+        image_encoder_cpu_offload=True,
+        enable_hyworld_vae_cache=args.enable_hyworld_vae_cache, 
     )
 
     # Generate video
