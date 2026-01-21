@@ -80,9 +80,48 @@ WAN_I2V_PARAMS = {
     "text-encoder-precision": ("fp32",)
 }
 
+# LTX-2 distilled one-stage params (no refine/upscale)
+# Official defaults: height=512, width=768, num_frames=121, fps=24, seed=10
+# Using num_frames=41 for faster CI (still valid: 41 = 8×5 + 1)
+LTX2_T2V_PARAMS = {
+    "num_gpus": 2,
+    "model_path": "FastVideo/LTX2-Distilled-Diffusers",
+    "height": 512,
+    "width": 768,
+    "num_frames": 41,  # Shorter for CI; official default is 121
+    "num_inference_steps": 8,  # Distilled uses 8 steps
+    "guidance_scale": 1.0,  # No CFG for distilled
+    "embedded_cfg_scale": 6,
+    "seed": 1024,
+    "sp_size": 2,
+    "tp_size": 1,
+    "fps": 24,
+    "neg_prompt": (
+        "blurry, out of focus, overexposed, underexposed, low contrast, washed out colors, "
+        "excessive noise, grainy texture, poor lighting, flickering, motion blur, distorted "
+        "proportions, unnatural skin tones, deformed facial features, asymmetrical face, "
+        "missing facial features, extra limbs, disfigured hands, wrong hand count, artifacts "
+        "around text, inconsistent perspective, camera shake, incorrect depth of field, "
+        "background too sharp, background clutter, distracting reflections, harsh shadows, "
+        "inconsistent lighting direction, color banding, cartoonish rendering, 3D CGI look, "
+        "unrealistic materials, uncanny valley effect, incorrect ethnicity, wrong gender, "
+        "exaggerated expressions, wrong gaze direction, mismatched lip sync, silent or muted "
+        "audio, distorted voice, robotic voice, echo, background noise, off-sync audio, "
+        "incorrect dialogue, added dialogue, repetitive speech, jittery movement, awkward "
+        "pauses, incorrect timing, unnatural transitions, inconsistent framing, tilted camera, "
+        "flat lighting, inconsistent tone, cinematic oversaturation, stylized filters, or AI artifacts."
+    ),
+    "ltx2_vae_tiling": True,
+    "ltx2_vae_spatial_tile_size_in_pixels": 512,
+    "ltx2_vae_spatial_tile_overlap_in_pixels": 64,
+    "ltx2_vae_temporal_tile_size_in_frames": 64,
+    "ltx2_vae_temporal_tile_overlap_in_frames": 24,
+}
+
 MODEL_TO_PARAMS = {
     "FastHunyuan-diffusers": HUNYUAN_PARAMS,
     "Wan2.1-T2V-1.3B-Diffusers": WAN_T2V_PARAMS,
+    # "ltx2_diffusers": LTX2_T2V_PARAMS,
 }
 
 I2V_MODEL_TO_PARAMS = {
@@ -229,18 +268,26 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     init_kwargs = {
         "num_gpus": BASE_PARAMS["num_gpus"],
-        "flow_shift": BASE_PARAMS["flow_shift"],
         "sp_size": BASE_PARAMS["sp_size"],
         "tp_size": BASE_PARAMS["tp_size"],
         "use_fsdp_inference": True,
         "dit_cpu_offload": False,
         "dit_layerwise_offload": False,
     }
+    if "flow_shift" in BASE_PARAMS:
+        init_kwargs["flow_shift"] = BASE_PARAMS["flow_shift"]
     if BASE_PARAMS.get("vae_sp"):
         init_kwargs["vae_sp"] = True
         init_kwargs["vae_tiling"] = True
     if "text-encoder-precision" in BASE_PARAMS:
         init_kwargs["text_encoder_precisions"] = BASE_PARAMS["text-encoder-precision"]
+    # LTX2-specific VAE tiling parameters
+    if BASE_PARAMS.get("ltx2_vae_tiling"):
+        init_kwargs["ltx2_vae_tiling"] = True
+        init_kwargs["ltx2_vae_spatial_tile_size_in_pixels"] = BASE_PARAMS.get("ltx2_vae_spatial_tile_size_in_pixels", 512)
+        init_kwargs["ltx2_vae_spatial_tile_overlap_in_pixels"] = BASE_PARAMS.get("ltx2_vae_spatial_tile_overlap_in_pixels", 64)
+        init_kwargs["ltx2_vae_temporal_tile_size_in_frames"] = BASE_PARAMS.get("ltx2_vae_temporal_tile_size_in_frames", 64)
+        init_kwargs["ltx2_vae_temporal_tile_overlap_in_frames"] = BASE_PARAMS.get("ltx2_vae_temporal_tile_overlap_in_frames", 24)
 
     generation_kwargs = {
         "num_inference_steps": num_inference_steps,
