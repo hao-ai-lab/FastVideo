@@ -22,6 +22,7 @@ logger = init_logger(__name__)
 
 # huggingface class name: (component_name, fastvideo module name, fastvideo class name)
 _TEXT_TO_VIDEO_DIT_MODELS = {
+    "FluxTransformer2DModel": ("dits", "flux", "FluxTransformer2DModel"),
     "HunyuanVideoTransformer3DModel":
     ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
     "HunyuanVideo15Transformer3DModel":
