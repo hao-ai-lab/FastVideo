@@ -326,7 +326,8 @@ def _attn_bwd_dkdv(dk, dv,
                    two_level_quant_P: tl.constexpr = False,
                    fake_quant_P: tl.constexpr = True,
                    SMOOTH_Q: tl.constexpr = False,
-                   use_global_sf: tl.constexpr = True):
+                   use_global_sf: tl.constexpr = True,
+                   warp_specialize: tl.constexpr = False):
     offs_m = start_m + tl.arange(0, BLOCK_M1)
     offs_n = start_n + tl.arange(0, BLOCK_N1)
     offs_k = tl.arange(0, HEAD_DIM)
@@ -338,8 +339,7 @@ def _attn_bwd_dkdv(dk, dv,
     tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
     curr_m = start_m
     step_m = BLOCK_M1
-    kv_valid = offs_n < N_CTX
-    for blk_idx in range(num_steps):
+    for blk_idx in tl.range(0, num_steps, warp_specialize=warp_specialize):
         offs_m = curr_m + tl.arange(0, BLOCK_M1)
         q_valid = offs_m < N_CTX
         q = tl.load(q_ptrs, mask=q_valid[:, None])
@@ -400,7 +400,8 @@ def _attn_bwd_dq(dq, q, K, V,
                  # Filled in by the wrapper.
                  start_m, start_n, num_steps,
                  MASK: tl.constexpr,
-                 SMOOTH_K: tl.constexpr):
+                 SMOOTH_K: tl.constexpr,
+                 warp_specialize: tl.constexpr = False):
     offs_m = start_m + tl.arange(0, BLOCK_M2)
     offs_n = start_n + tl.arange(0, BLOCK_N2)
     offs_k = tl.arange(0, HEAD_DIM)
@@ -417,7 +418,7 @@ def _attn_bwd_dq(dq, q, K, V,
     if SMOOTH_K:
         k_m = tl.load(K_MEAN + offs_k)
 
-    for blk_idx in range(num_steps):
+    for blk_idx in tl.range(0, num_steps, warp_specialize=warp_specialize):
         # bounds checking for kv block (dynamic)
         offs_n = curr_n + tl.arange(0, BLOCK_N2)
         kv_valid = offs_n < N_CTX
@@ -467,7 +468,8 @@ def _attn_bwd_dq_cross(Q, K, V, sm_scale,
                        BLOCK_M2: tl.constexpr,
                        BLOCK_N2: tl.constexpr,
                        HEAD_DIM: tl.constexpr,
-                       SMOOTH_K: tl.constexpr):
+                       SMOOTH_K: tl.constexpr,
+                       warp_specialize: tl.constexpr = False):
     # Apply scale AFTER dot product for better precision
     RCP_LN2: tl.constexpr = 1.4426950408889634  # = 1.0 / ln(2)
     qk_scale = sm_scale * RCP_LN2
@@ -498,7 +500,7 @@ def _attn_bwd_dq_cross(Q, K, V, sm_scale,
     num_steps = (N_CTX_KV + BLOCK_N2 - 1) // BLOCK_N2
     if SMOOTH_K:
         k_m = tl.load(K_MEAN + offs_k)
-    for step in range(num_steps):
+    for step in tl.range(0, num_steps, warp_specialize=warp_specialize):
         start_n = step * BLOCK_N2
         offs_n = start_n + tl.arange(0, BLOCK_N2)
         kv_valid = offs_n < N_CTX_KV
@@ -538,7 +540,8 @@ def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
                          two_level_quant_P: tl.constexpr = False,
                          fake_quant_P: tl.constexpr = True,
                          SMOOTH_Q: tl.constexpr = False,
-                         use_global_sf: tl.constexpr = True
+                         use_global_sf: tl.constexpr = True,
+                         warp_specialize: tl.constexpr = False
                          ):
     # Apply scale AFTER dot product for better precision
     RCP_LN2: tl.constexpr = 1.4426950408889634  # = 1.0 / ln(2)
@@ -572,7 +575,7 @@ def _attn_bwd_dkdv_cross(Q, K, V, sm_scale,
     v_block = tl.load(V + offs_n[:, None] * stride_tok_kv + offs_k[None, :] * stride_d_kv, mask=kv_valid[:, None])
 
     num_q_steps = (N_CTX_Q + BLOCK_M1 - 1) // BLOCK_M1
-    for step in range(num_q_steps):
+    for step in tl.range(0, num_q_steps, warp_specialize=warp_specialize):
         start_m = step * BLOCK_M1
         offs_m = start_m + tl.arange(0, BLOCK_M1)
         q_valid = offs_m < N_CTX_Q
@@ -637,7 +640,8 @@ def _attn_bwd(Q, K, V, sm_scale,
               two_level_quant_P: tl.constexpr = False,
               fake_quant_P: tl.constexpr = True,
               SMOOTH_Q: tl.constexpr = False,
-              use_global_sf: tl.constexpr = True):
+              use_global_sf: tl.constexpr = True,
+              warp_specialize: tl.constexpr = False):
 
     bhid = tl.program_id(2)
     off_chz = (bhid * N_CTX).to(tl.int64)
@@ -701,7 +705,8 @@ def _attn_bwd(Q, K, V, sm_scale,
             two_level_quant_P=two_level_quant_P,
             fake_quant_P=fake_quant_P,
             SMOOTH_Q=SMOOTH_Q,
-            use_global_sf=use_global_sf
+            use_global_sf=use_global_sf,
+            warp_specialize=warp_specialize
         )
 
         start_m += num_steps * MASK_BLOCK_M1
@@ -726,7 +731,8 @@ def _attn_bwd(Q, K, V, sm_scale,
         two_level_quant_P=two_level_quant_P,
         fake_quant_P=fake_quant_P,
         SMOOTH_Q=SMOOTH_Q,
-        use_global_sf=use_global_sf
+        use_global_sf=use_global_sf,
+        warp_specialize=warp_specialize
     )
 
     dv_ptrs = DV + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
@@ -769,6 +775,7 @@ def _attn_bwd(Q, K, V, sm_scale,
             start_m, end_n - num_steps * MASK_BLOCK_N2, num_steps,
             MASK=True,
             SMOOTH_K=SMOOTH_K,
+            warp_specialize=warp_specialize,
         )
         end_n -= num_steps * MASK_BLOCK_N2
         # stage 2: process KV blocks from 0 to end_n (before diagonal), ceiling division to include remainder
@@ -789,6 +796,7 @@ def _attn_bwd(Q, K, V, sm_scale,
         start_m, start_n, num_steps,
         MASK=False,
         SMOOTH_K=SMOOTH_K,
+        warp_specialize=warp_specialize,
     )
     # Write back dQ.
     # NOTE: dq is scaled by sm_scale since K is not pre-scaled (unlike original which used LN2)
@@ -941,7 +949,8 @@ class _attention(torch.autograd.Function):
                 fake_q.stride(0), fake_q.stride(1),
                 fake_q.stride(2), fake_q.stride(3),
                 H, N_CTX_Q,
-                BLOCK_M=BLOCK_M, HEAD_DIM=HEAD_DIM_K
+                BLOCK_M=BLOCK_M, HEAD_DIM=HEAD_DIM_K,
+                use_global_sf=True,
             )
             fake_quantize_kv[grid_2](
                 k, v, fake_k, fake_v,
@@ -950,7 +959,8 @@ class _attention(torch.autograd.Function):
                 fake_k.stride(0), fake_k.stride(1),
                 fake_k.stride(2), fake_k.stride(3),
                 H, N_CTX_KV,
-                BLOCK_N=BLOCK_N, HEAD_DIM=HEAD_DIM_K
+                BLOCK_N=BLOCK_N, HEAD_DIM=HEAD_DIM_K, 
+                use_global_sf=True,
             )
 
         # Apply pre-hook to set block shapes on tensor descriptors
@@ -1003,6 +1013,7 @@ class _attention(torch.autograd.Function):
         ctx.fake_quant_P = fake_quant_P
         ctx.smooth_q = smooth_q
         ctx.use_global_sf = use_global_sf
+        ctx.warp_specialize = warp_specialize
         return o
 
     @staticmethod
@@ -1062,6 +1073,7 @@ class _attention(torch.autograd.Function):
                 fake_quant_P=ctx.fake_quant_P,
                 SMOOTH_Q=ctx.smooth_q,
                 use_global_sf=ctx.use_global_sf,
+                warp_specialize=ctx.warp_specialize,
                 num_warps=NUM_WARPS,
                 num_stages=NUM_STAGES
             )
@@ -1075,13 +1087,14 @@ class _attention(torch.autograd.Function):
                 ctx.k_mean,
                 BLOCK_M2=BLOCK_M2, BLOCK_N2=BLOCK_N2,
                 HEAD_DIM=ctx.HEAD_DIM,
+                SMOOTH_K=ctx.smooth_k,
+                warp_specialize=ctx.warp_specialize,
                 num_warps=NUM_WARPS,
                 num_stages=NUM_STAGES,
-                SMOOTH_K=ctx.smooth_k,
             )
             grid_dkdv = ((N_CTX_KV + BLOCK_N1 - 1) // BLOCK_N1, 1, BATCH * N_HEAD)
             _attn_bwd_dkdv_cross[grid_dkdv](
-                q, arg_k, v, ctx.sm_scale, do, dk, dv, M, delta,
+                q, arg_k, v, ctx.sm_scale, do, dk, dv, M, delta, q_m,
                 q.stride(0), k.stride(0), q.stride(1), k.stride(1), q.stride(2), k.stride(2), q.stride(3), k.stride(3),
                 N_HEAD, N_CTX_Q, N_CTX_KV,
                 BLOCK_M1=BLOCK_M1, BLOCK_N1=BLOCK_N1,
@@ -1091,11 +1104,12 @@ class _attention(torch.autograd.Function):
                 fake_quant_P=ctx.fake_quant_P,
                 SMOOTH_Q=ctx.smooth_q,
                 use_global_sf=ctx.use_global_sf,
+                warp_specialize=ctx.warp_specialize,
                 num_warps=NUM_WARPS,
                 num_stages=NUM_STAGES,
             )
 
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None
 
 
 attention = _attention.apply
