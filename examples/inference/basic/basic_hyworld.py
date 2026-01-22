@@ -175,8 +175,6 @@ def main():
     parser.add_argument("--resolution", type=str, default="480p", help="Only support 480p for now")
     parser.add_argument("--model-path", type=str, default="mignonjia/hyworld",
                         help="Path to base HunyuanVideo model (HuggingFace repo or local path)")
-    parser.add_argument("--enable-hyworld-vae-cache", type=bool, default=False,
-                        help="Set to False to load HY1.5 VAE instead of HyWorld VAE if generating short videos.")
     args = parser.parse_args()
 
     # Check if image exists
@@ -192,14 +190,13 @@ def main():
     print(f"Resolution: {HEIGHT}x{WIDTH} (from {args.resolution} buckets)")
     print(f"Num frames: {args.num_frames}")
     print(f"Output path: {args.output_path}")
-    print(f"VAE cache enabled: {args.enable_hyworld_vae_cache}")
 
     # Initialize generator
     print("\nInitializing HyWorldVideoGenerator...")
     
     generator = HyWorldVideoGenerator.from_pretrained(
         args.model_path,
-        revision="9019db1e98ac65fdfcfece32a67d6e63955fa00e",    
+        revision="dec12cda59d20985e4f366eb272327749a38d297",    
         num_gpus=1,
         use_fsdp_inference=True,
         dit_cpu_offload=True,
@@ -207,7 +204,6 @@ def main():
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True,
         image_encoder_cpu_offload=True,
-        enable_hyworld_vae_cache=args.enable_hyworld_vae_cache, 
     )
 
     # Generate video
