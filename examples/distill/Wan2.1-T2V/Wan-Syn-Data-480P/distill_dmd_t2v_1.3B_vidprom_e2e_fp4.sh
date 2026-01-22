@@ -21,9 +21,9 @@ echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 # Configs
 ############################################
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-DATA_DIR=data/Wan-Syn_77x448x832_600k
+DATA_DIR=data/vidprom_16k_umt5_text_embed
 VALIDATION_DATASET_FILE="examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json"
-OUTPUT_DIR="checkpoints/wan_1.3B_t2v_distill_dmd_qat"
+OUTPUT_DIR="checkpoints/wan_1.3B_t2v_distill_dmd_e2e_fp4_vidprom"
 REAL_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 FAKE_SCORE_MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 
@@ -32,7 +32,7 @@ training_args=(
   --tracker_project_name wan_t2v_distill_dmd_qat
   --output_dir $OUTPUT_DIR
   --max_train_steps 4000
-  --train_batch_size 64
+  --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
   --num_latent_t 21
@@ -40,6 +40,7 @@ training_args=(
   --num_width 832
   --num_frames 81
   --enable_gradient_checkpointing_type "full"
+  --generator_4bit_linear True
   --generator_4bit_attn True
 )
 
@@ -102,7 +103,8 @@ dmd_args=(
   --min_timestep_ratio 0.02
   --max_timestep_ratio 0.98
   --generator_update_interval 5
-  --real_score_guidance_scale 3.5
+  --real_score_guidance_scale 3.5  
+  --simulate_generator_forward
 )
 
 ############################################
