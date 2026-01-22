@@ -23,8 +23,7 @@ def is_txt_in(n: str, m) -> bool:
 @dataclass
 class HyWorldArchConfig(DiTArchConfig):
     _fsdp_shard_conditions: list = field(
-        default_factory=lambda:
-        [is_double_block, is_single_block])
+        default_factory=lambda: [is_double_block, is_single_block])
 
     _compile_conditions: list = field(
         default_factory=lambda: [is_double_block, is_single_block, is_txt_in])
@@ -55,7 +54,7 @@ class HyWorldArchConfig(DiTArchConfig):
             r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.adaLN_modulation\.1\.(.*)$":
             r"txt_in.refiner_blocks.\1.adaLN_modulation.linear.\2",
 
-            # 2. time_in mappings (HyWorld uses TimestepEmbedder directly, 
+            # 2. time_in mappings (HyWorld uses TimestepEmbedder directly,
             #    but FastVideo model inherits HunyuanVideo15TimeEmbedding with timestep_embedder):
             r"^time_in\.mlp\.0\.(.*)$":
             r"time_in.timestep_embedder.mlp.fc_in.\1",
@@ -185,12 +184,12 @@ class HyWorldArchConfig(DiTArchConfig):
                 self.in_channels = self.in_channels * 2 + 1  # 32 * 2 + 1 = 65
 
         # Handle patch_size (can be list/tuple or int)
-        if isinstance(self.patch_size, (list, tuple)):
+        if isinstance(self.patch_size, list | tuple):
             self.patch_size_t: int = self.patch_size[0]
             patch_size_hw: int = self.patch_size[1]
             object.__setattr__(self, 'patch_size', patch_size_hw)
         else:
-            self.patch_size_t: int = 1
+            self.patch_size_t = 1
 
         # Convert qk_norm to string format
         if isinstance(self.qk_norm, bool):

@@ -15,7 +15,8 @@ class HyWorldConfig(Hunyuan15T2V480PConfig):
     dit_config: DiTConfig = field(default_factory=HyWorldDiTConfig)
 
     # SigLIP image encoder for I2V
-    image_encoder_config: EncoderConfig = field(default_factory=SiglipVisionConfig)
+    image_encoder_config: EncoderConfig = field(
+        default_factory=SiglipVisionConfig)
     image_encoder_precision: str = "fp16"
     # vae_precision: str = "fp32"
 

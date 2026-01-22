@@ -29,8 +29,7 @@ from fastvideo.pipelines.stages.ltx2_latent_preparation import (
     LTX2LatentPreparationStage)
 from fastvideo.pipelines.stages.matrixgame_denoising import (
     MatrixGameCausalDenoisingStage)
-from fastvideo.pipelines.stages.hyworld_denoising import (
-    HyWorldDenoisingStage)
+from fastvideo.pipelines.stages.hyworld_denoising import HyWorldDenoisingStage
 from fastvideo.pipelines.stages.stepvideo_encoding import (
     StepvideoPromptEncodingStage)
 from fastvideo.pipelines.stages.text_encoding import (Cosmos25TextEncodingStage,

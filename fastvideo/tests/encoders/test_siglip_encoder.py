@@ -20,8 +20,8 @@ os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29505"
 
 # HyWorld model path - SigLIP image encoder
-MODEL_PATH = "FastVideo/HY-WorldPlay-Bidirectional-Diffusers"
-IMAGE_ENCODER_PATH = os.path.join(MODEL_PATH, "image_encoder")
+MODEL_ID = "mignonjia/hyworld"
+IMAGE_ENCODER_SUBFOLDER = "image_encoder"
 
 
 def create_dummy_pixel_values(batch_size: int = 2, image_size: int = 384, num_channels: int = 3):
@@ -92,18 +92,24 @@ def test_siglip_encoder_vs_huggingface():
     - Produce nearly identical outputs for the same input
     """
     import json
-    import os
+    from huggingface_hub import hf_hub_download
     from safetensors.torch import load_file
     
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     
-    logger.info("Loading SigLIP models from %s", IMAGE_ENCODER_PATH)
+    logger.info("Loading SigLIP models from %s/%s", MODEL_ID, IMAGE_ENCODER_SUBFOLDER)
     
     # Load HuggingFace implementation
-    hf_model = HFSiglipVisionModel.from_pretrained(IMAGE_ENCODER_PATH).to(torch.float16).to(device).eval()
+    hf_model = HFSiglipVisionModel.from_pretrained(
+        MODEL_ID, subfolder=IMAGE_ENCODER_SUBFOLDER
+    ).to(torch.float16).to(device).eval()
     
-    # Load the config and extract vision_config
-    with open(os.path.join(IMAGE_ENCODER_PATH, "config.json")) as f:
+    # Load the config from Hugging Face and extract vision_config
+    config_path = hf_hub_download(
+        repo_id=MODEL_ID,
+        filename=f"{IMAGE_ENCODER_SUBFOLDER}/config.json"
+    )
+    with open(config_path) as f:
         full_config = json.load(f)
     
     # Get vision config from the full config
@@ -126,17 +132,19 @@ def test_siglip_encoder_vs_huggingface():
     from fastvideo.models.encoders.siglip import SiglipVisionModel
     fv_model = SiglipVisionModel(config).to(torch.float16).to(device)
     
-    # Load weights from safetensors
-    weights_path = os.path.join(IMAGE_ENCODER_PATH, "model.safetensors")
-    if os.path.exists(weights_path):
-        state_dict = load_file(weights_path)
-        # Filter to only vision_model weights (keep the vision_model. prefix)
-        vision_weights = [
-            (name, weight)
-            for name, weight in state_dict.items()
-            if name.startswith("vision_model.")
-        ]
-        fv_model.load_weights(vision_weights)
+    # Load weights from safetensors via Hugging Face
+    weights_path = hf_hub_download(
+        repo_id=MODEL_ID,
+        filename=f"{IMAGE_ENCODER_SUBFOLDER}/model.safetensors"
+    )
+    state_dict = load_file(weights_path)
+    # Filter to only vision_model weights (keep the vision_model. prefix)
+    vision_weights = [
+        (name, weight)
+        for name, weight in state_dict.items()
+        if name.startswith("vision_model.")
+    ]
+    fv_model.load_weights(vision_weights)
     
     fv_model.eval()
     

@@ -10,13 +10,10 @@ for chunk-based video generation with context frame selection.
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
-from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
-                                        HyWorldDenoisingStage,
-                                        InputValidationStage,
-                                        LatentPreparationStage,
-                                        TextEncodingStage,
-                                        TimestepPreparationStage,
-                                        HyWorldImageEncodingStage)
+from fastvideo.pipelines.stages import (
+    ConditioningStage, DecodingStage, HyWorldDenoisingStage,
+    InputValidationStage, LatentPreparationStage, TextEncodingStage,
+    TimestepPreparationStage, HyWorldImageEncodingStage)
 
 logger = init_logger(__name__)
 
@@ -35,8 +32,8 @@ class HyWorldPipeline(ComposedPipelineBase):
     # Include image_encoder and feature_extractor for I2V support with SigLIP
     # Note: guider (ClassifierFreeGuidance) is not needed - FastVideo handles CFG differently
     _required_config_modules = [
-        "text_encoder", "tokenizer", "vae", "transformer", "scheduler", "text_encoder_2", "tokenizer_2",
-        "image_encoder", "feature_extractor"
+        "text_encoder", "tokenizer", "vae", "transformer", "scheduler",
+        "text_encoder_2", "tokenizer_2", "image_encoder", "feature_extractor"
     ]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
@@ -47,9 +44,14 @@ class HyWorldPipeline(ComposedPipelineBase):
 
         self.add_stage(stage_name="prompt_encoding_stage_primary",
                        stage=TextEncodingStage(
-                           text_encoders=[self.get_module("text_encoder"), self.get_module("text_encoder_2")],
-                           tokenizers=[self.get_module("tokenizer"), self.get_module("tokenizer_2")]
-                       ))
+                           text_encoders=[
+                               self.get_module("text_encoder"),
+                               self.get_module("text_encoder_2")
+                           ],
+                           tokenizers=[
+                               self.get_module("tokenizer"),
+                               self.get_module("tokenizer_2")
+                           ]))
 
         self.add_stage(stage_name="conditioning_stage",
                        stage=ConditioningStage())

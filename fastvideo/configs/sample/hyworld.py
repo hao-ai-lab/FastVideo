@@ -13,7 +13,7 @@ class HyWorld_SamplingParam(SamplingParam):
     height: int = 480
     width: int = 832
     fps: int = 24
-    
+
     # Camera trajectory: pose string (e.g., 'w-31' means generating [1 + 31] latents) or JSON file path
     pose: str = 'w-31'
 

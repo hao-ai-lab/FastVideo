@@ -13,9 +13,10 @@ class SiglipVisionArchConfig(ImageEncoderArchConfig):
     
     Fields match the config.json from HuggingFace SigLIP checkpoints.
     """
-    
+
     # From config.json
-    architectures: list[str] = field(default_factory=lambda: ["SiglipVisionModel"])
+    architectures: list[str] = field(
+        default_factory=lambda: ["SiglipVisionModel"])
     attention_dropout: float = 0.0
     dtype: str | None = None
     hidden_act: str = "gelu_pytorch_tanh"
@@ -28,7 +29,7 @@ class SiglipVisionArchConfig(ImageEncoderArchConfig):
     num_channels: int = 3
     num_hidden_layers: int = 27
     patch_size: int = 14
-    
+
     # FastVideo specific - QKV fusion mapping
     stacked_params_mapping: list = field(default_factory=lambda: [
         ("qkv_proj", "q_proj", "q"),
@@ -40,10 +41,10 @@ class SiglipVisionArchConfig(ImageEncoderArchConfig):
 @dataclass
 class SiglipVisionConfig(ImageEncoderConfig):
     """Configuration for SigLIP vision encoder."""
-    
+
     arch_config: ImageEncoderArchConfig = field(
         default_factory=SiglipVisionArchConfig)
-    
+
     # FastVideo specific
     num_hidden_layers_override: int | None = None
     require_post_norm: bool | None = None

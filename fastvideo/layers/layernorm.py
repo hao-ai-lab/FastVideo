@@ -168,9 +168,15 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
-    def forward(self, residual: torch.Tensor, x: torch.Tensor,
-                gate: torch.Tensor | int, shift: torch.Tensor,
-                scale: torch.Tensor, convert_modulation_dtype: bool = False) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self,
+        residual: torch.Tensor,
+        x: torch.Tensor,
+        gate: torch.Tensor | int,
+        shift: torch.Tensor,
+        scale: torch.Tensor,
+        convert_modulation_dtype: bool = False
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Apply gated residual connection, followed by layernorm and 
         scale/shift in a single fused operation.
@@ -259,8 +265,11 @@ class LayerNormScaleShift(nn.Module):
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
-    def forward(self, x: torch.Tensor, shift: torch.Tensor,
-                scale: torch.Tensor, convert_modulation_dtype: bool = False) -> torch.Tensor:
+    def forward(self,
+                x: torch.Tensor,
+                shift: torch.Tensor,
+                scale: torch.Tensor,
+                convert_modulation_dtype: bool = False) -> torch.Tensor:
         """Apply ln followed by scale and shift in a single fused operation."""
         # x.shape: [batch_size, seq_len, inner_dim]
         normalized = self.norm(x)
