@@ -1,12 +1,9 @@
 from fastvideo import VideoGenerator
 import os
-from pathlib import Path
 # from fastvideo.configs.sample import SamplingParam
 
 OUTPUT_PATH = "video_samples"
 os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "SAGE_ATTN_THREE"
-
-CHECKPOINT_PATH = Path(__file__).parent.parent.parent 
 
 def main():
     # FastVideo will automatically use the optimal default arguments for the
@@ -23,8 +20,6 @@ def main():
         text_encoder_cpu_offload=True,
         pin_cpu_memory=False, # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
         # image_encoder_cpu_offload=False,
-        # Load custom weights from checkpoint-5000
-        init_weights_from_safetensors=str(CHECKPOINT_PATH),
     )
 
     # sampling_param = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")

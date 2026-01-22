@@ -4,8 +4,8 @@
 #SBATCH --nodes=2
 #SBATCH --gres=gpu:4
 #SBATCH --ntasks-per-node=4
-#SBATCH --output=logs/wan_t2v_14B_finetune_qat_%j.out
-#SBATCH --error=logs/wan_t2v_14B_finetune_qat_%j.err
+#SBATCH --output=logs/wan_t2v_14B_finetune_sage3_%j.out
+#SBATCH --error=logs/wan_t2v_14B_finetune_sage3_%j.err
 
 source .venv/bin/activate
 
@@ -18,7 +18,7 @@ export TOKENIZERS_PARALLELISM=false
 # export TRITON_PRINT_AUTOTUNING=1  # to print the best config
 export WANDB_API_KEY=2f25ad37933894dbf0966c838c0b8494987f9f2f
 MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"
-DATA_DIR=FastVideo/Wan2.2-Syn-121x704x1280_32k/train
+DATA_DIR=data/Wan-Syn_77x448x832_600k
 VALIDATION_DATASET_FILE="examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json"
 NUM_GPUS=8
 # export CUDA_VISIBLE_DEVICES=4,5
@@ -35,17 +35,16 @@ export MASTER_ADDR MASTER_PORT
 # Training arguments
 training_args=(
   --tracker_project_name "wan_t2v_finetune_qat"
-  --output_dir "checkpoints/wan_t2v_finetune_qat_14B"
+  --output_dir "checkpoints/wan_t2v_finetune_14B"
   --max_train_steps 4000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 21
-  --num_height 720
-  --num_width 1280
-  --num_frames 81
+  --num_latent_t 16
+  --num_height 448
+  --num_width 832
+  --num_frames 61
   --enable_gradient_checkpointing_type "full"
-  --generator_4bit_attn True
 )
 
 # Parallel arguments

@@ -37,10 +37,10 @@ training_args=(
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 20
+  --num_latent_t 32
   --num_height 720
   --num_width 1280
-  --num_frames 77
+  --num_frames 125
   --enable_gradient_checkpointing_type "full"
   --generator_4bit_attn True
 )

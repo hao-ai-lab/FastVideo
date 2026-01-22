@@ -5,8 +5,7 @@ from fastvideo.layers.quantization.fp4_config import FP4Config
 # from fastvideo.layers.quantization.fp8_config import FP8Config
 from fastvideo.layers.linear import ReplicatedLinear
 
-OUTPUT_PATH = "fp4_video_samples"
-# OUTPUT_PATH = "video_samples"
+OUTPUT_PATH = "video_samples"
 
 
 def main():
@@ -66,23 +65,23 @@ def main():
         print("✓ First video generated successfully with FP4 quantization!")
         
         # # Generate a second video to show the model can be reused
-        # prompt2 = (
-        #     "A majestic lion strides across the golden savanna, its powerful frame "
-        #     "glistening under the warm afternoon sun. The tall grass ripples gently in "
-        #     "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
-        #     "embodying the raw energy of the wild. Low angle, steady tracking shot, "
-        #     "cinematic."
-        # )
+        prompt2 = (
+            "A majestic lion strides across the golden savanna, its powerful frame "
+            "glistening under the warm afternoon sun. The tall grass ripples gently in "
+            "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
+            "embodying the raw energy of the wild. Low angle, steady tracking shot, "
+            "cinematic."
+        )
         
-        # print(f"\nGenerating second video...")
-        # print(f"Prompt: {prompt2}")
+        print(f"\nGenerating second video...")
+        print(f"Prompt: {prompt2}")
         
-        # video2 = generator.generate_video(
-        #     prompt2,
-        #     output_path=OUTPUT_PATH,
-        #     save_video=True,
-        # )
-        # print("✓ Second video generated successfully with FP4 quantization!")
+        video2 = generator.generate_video(
+            prompt2,
+            output_path=OUTPUT_PATH,
+            save_video=True,
+        )
+        print("✓ Second video generated successfully with FP4 quantization!")
         
     except Exception as e:
         print(f"Error during video generation: {e}")

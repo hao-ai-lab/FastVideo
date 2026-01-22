@@ -59,7 +59,7 @@ def set_default_dtype(dtype: torch.dtype) -> Generator[None, None, None]:
 
 
 USE_FP8 = False
-USE_FP4 = False
+USE_FP4 = False  # TODO: move to FastVideoArgs
 # TODO(PY): add compile option
 def maybe_load_fsdp_model(
     model_cls: type[nn.Module],

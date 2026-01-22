@@ -77,7 +77,7 @@ def triton_group_mean(q: torch.Tensor):
     return q_out, qm
 
 
-def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_mean: bool = True, disable_delta_s: bool = False):
+def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_mean: bool = True, disable_smoothing_q: bool = True):
 
     def pad_to_block_size(x):
         L = x.size(2)
@@ -88,14 +88,17 @@ def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_
     
     k -= k.mean(dim=-2, keepdim=True)  
     q, k, v = map(lambda x: pad_to_block_size(x), [q, k, v])
-    if per_block_mean:
+    if per_block_mean and not disable_smoothing_q:
         q, qm = triton_group_mean(q)
-    else:
+    elif not disable_smoothing_q:
         qm = q.mean(dim=-2, keepdim=True)
         q = q - qm
-    delta_s = torch.matmul(qm, k.transpose(-2, -1)).to(torch.float32).contiguous()
-    if disable_delta_s:  # used to disable q smoothing
-        delta_s = torch.zeros_like(delta_s)
+    if disable_smoothing_q:  # used to disable q smoothing
+        B, H, L, D = q.shape
+        delta_s = torch.zeros((B, H, L // BLOCK_M, k.shape[2]), device=q.device, dtype=torch.float32)
+    else:
+        _, qm = triton_group_mean(q)
+        delta_s = torch.matmul(qm, k.transpose(-2, -1)).to(torch.float32).contiguous()
         
     return q, k, v, delta_s
 

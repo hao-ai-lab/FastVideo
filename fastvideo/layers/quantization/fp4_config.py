@@ -44,7 +44,7 @@ class FP4QuantizeMethod(QuantizeMethodBase):
         x_fp4, x_scale = nvfp4_quantize(x, x_global_sf, sfLayout=SfLayout.layout_128x4, do_shuffle=False)
         weight_fp4 = layer._fp4_weight
         weight_scale = layer._fp4_weight_scale
-        weight_global_sf = layer._weight_global_sf.item()
+        weight_global_sf = layer._weight_global_sf
         
         out = mm_fp4(x_fp4, weight_fp4.T, x_scale, weight_scale.T, 1.0/(x_global_sf * weight_global_sf), torch.bfloat16, None, backend='cutlass')
             
