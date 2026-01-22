@@ -166,6 +166,14 @@ class FastVideoArgs:
     # Prompt text file for batch processing
     prompt_txt: str | None = None
 
+    # LTX-2 VAE tiling overrides
+    ltx2_vae_tiling: bool | None = None
+    ltx2_vae_spatial_tile_size_in_pixels: int | None = None
+    ltx2_vae_spatial_tile_overlap_in_pixels: int | None = None
+    ltx2_vae_temporal_tile_size_in_frames: int | None = None
+    ltx2_vae_temporal_tile_overlap_in_frames: int | None = None
+    ltx2_initial_latent_path: str | None = None
+
     # model paths for correct deallocation
     model_paths: dict[str, str] = field(default_factory=dict)
     model_loaded: dict[str, bool] = field(default_factory=lambda: {
@@ -203,7 +211,43 @@ class FastVideoArgs:
                 logger.error("Failed to load V-MoBA config from %s: %s",
                              self.moba_config_path, e)
                 raise
+        self._apply_ltx2_vae_overrides()
         self.check_fastvideo_args()
+
+    def _apply_ltx2_vae_overrides(self) -> None:
+        if self.pipeline_config is None:
+            return
+        vae_config = self.pipeline_config.vae_config
+        has_any = any(value is not None for value in (
+            self.ltx2_vae_spatial_tile_size_in_pixels,
+            self.ltx2_vae_spatial_tile_overlap_in_pixels,
+            self.ltx2_vae_temporal_tile_size_in_frames,
+            self.ltx2_vae_temporal_tile_overlap_in_frames,
+        ))
+        if self.ltx2_vae_tiling is not None and hasattr(self.pipeline_config,
+                                                        "vae_tiling"):
+            self.pipeline_config.vae_tiling = self.ltx2_vae_tiling
+        elif has_any and hasattr(self.pipeline_config, "vae_tiling"):
+            self.pipeline_config.vae_tiling = True
+
+        if hasattr(vae_config, "ltx2_spatial_tile_size_in_pixels"
+                   ) and self.ltx2_vae_spatial_tile_size_in_pixels is not None:
+            vae_config.ltx2_spatial_tile_size_in_pixels = (
+                self.ltx2_vae_spatial_tile_size_in_pixels)
+        if hasattr(
+                vae_config, "ltx2_spatial_tile_overlap_in_pixels"
+        ) and self.ltx2_vae_spatial_tile_overlap_in_pixels is not None:
+            vae_config.ltx2_spatial_tile_overlap_in_pixels = (
+                self.ltx2_vae_spatial_tile_overlap_in_pixels)
+        if hasattr(vae_config, "ltx2_temporal_tile_size_in_frames"
+                   ) and self.ltx2_vae_temporal_tile_size_in_frames is not None:
+            vae_config.ltx2_temporal_tile_size_in_frames = (
+                self.ltx2_vae_temporal_tile_size_in_frames)
+        if hasattr(
+                vae_config, "ltx2_temporal_tile_overlap_in_frames"
+        ) and self.ltx2_vae_temporal_tile_overlap_in_frames is not None:
+            vae_config.ltx2_temporal_tile_overlap_in_frames = (
+                self.ltx2_vae_temporal_tile_overlap_in_frames)
 
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
@@ -323,6 +367,44 @@ class FastVideoArgs:
             default=FastVideoArgs.prompt_txt,
             help=
             "Path to a text file containing prompts (one per line) for batch processing",
+        )
+
+        # LTX-2 VAE tiling overrides
+        parser.add_argument(
+            "--ltx2-vae-tiling",
+            action=StoreBoolean,
+            default=FastVideoArgs.ltx2_vae_tiling,
+            help="Enable LTX-2 VAE tiling overrides.",
+        )
+        parser.add_argument(
+            "--ltx2-vae-spatial-tile-size-in-pixels",
+            type=int,
+            default=FastVideoArgs.ltx2_vae_spatial_tile_size_in_pixels,
+            help="LTX-2 VAE spatial tile size in pixels.",
+        )
+        parser.add_argument(
+            "--ltx2-vae-spatial-tile-overlap-in-pixels",
+            type=int,
+            default=FastVideoArgs.ltx2_vae_spatial_tile_overlap_in_pixels,
+            help="LTX-2 VAE spatial tile overlap in pixels.",
+        )
+        parser.add_argument(
+            "--ltx2-vae-temporal-tile-size-in-frames",
+            type=int,
+            default=FastVideoArgs.ltx2_vae_temporal_tile_size_in_frames,
+            help="LTX-2 VAE temporal tile size in frames.",
+        )
+        parser.add_argument(
+            "--ltx2-vae-temporal-tile-overlap-in-frames",
+            type=int,
+            default=FastVideoArgs.ltx2_vae_temporal_tile_overlap_in_frames,
+            help="LTX-2 VAE temporal tile overlap in frames.",
+        )
+        parser.add_argument(
+            "--ltx2-initial-latent-path",
+            type=str,
+            default=FastVideoArgs.ltx2_initial_latent_path,
+            help="Path to load/save a precomputed LTX-2 initial latent.",
         )
 
         # LoRA parameters (inference-time adapter loading)
