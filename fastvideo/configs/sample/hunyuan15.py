@@ -47,7 +47,7 @@ class Hunyuan15_720P_Distilled_I2V_SamplingParam(Hunyuan15_720P_SamplingParam):
 
 
 @dataclass
-class Hunyuan15_SR_1080P_SamplingParam(Hunyuan15_720P_SamplingParam):
+class Hunyuan15_SR_1080P_SamplingParam(Hunyuan15_480P_SamplingParam):
     height_sr: int = 1072
     width_sr: int = 1920
 

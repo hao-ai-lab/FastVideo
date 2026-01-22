@@ -2,14 +2,14 @@ from fastvideo import VideoGenerator
 import json
 # from fastvideo.configs.sample import SamplingParam
 
-OUTPUT_PATH = "video_samples_hy15_sr"
+OUTPUT_PATH = "video_samples_hy15_2sr"
 def main():
     # FastVideo will automatically use the optimal default arguments for the
     # model.
     # If a local path is provided, FastVideo will make a best effort
     # attempt to identify the optimal arguments.
     generator = VideoGenerator.from_pretrained(
-        "/mnt/weka/home/hao.zhang/wei/HunyuanVideo-1.5-Diffusers-1080p",
+        "weizhou03/HunyuanVideo-1.5-Diffusers-1080p-2SR",
         # FastVideo will automatically handle distributed setup
         num_gpus=1,
         use_fsdp_inference=False, # set to True if GPU is out of memory
