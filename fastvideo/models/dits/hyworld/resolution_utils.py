@@ -1,5 +1,7 @@
 import numpy as np
 from PIL import Image
+import requests
+from io import BytesIO
 
 from fastvideo.models.dits.hyworld.data_utils import generate_crop_size_list
 
@@ -44,13 +46,19 @@ def get_resolution_from_image(image_path, target_resolution="480p"):
     Automatically determine resolution from input image.
     
     Args:
-        image_path: Path to input image
+        image_path: Path or URL to input image
         target_resolution: Target resolution tier ("480p", "720p", etc.)
         
     Returns:
         tuple[int, int]: (height, width) matching HY-WorldPlay's bucket selection
     """
-    img = Image.open(image_path)
+    # Handle URL inputs
+    if isinstance(image_path, str) and image_path.startswith(('http://', 'https://')):
+        response = requests.get(image_path)
+        response.raise_for_status()
+        img = Image.open(BytesIO(response.content))
+    else:
+        img = Image.open(image_path)
     img_width, img_height = img.size
     return get_closest_resolution(img_height, img_width, target_resolution)
 

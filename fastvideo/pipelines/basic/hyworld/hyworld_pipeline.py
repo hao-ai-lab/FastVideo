@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-HyWorld video diffusion pipeline implementation.
+HYWorld video diffusion pipeline implementation.
 
-This module contains an implementation of the HyWorld video diffusion pipeline
-using the modular pipeline architecture with HyWorld-specific denoising stage
+This module contains an implementation of the HYWorld video diffusion pipeline
+using the modular pipeline architecture with HYWorld-specific denoising stage
 for chunk-based video generation with context frame selection.
 """
 
@@ -11,21 +11,21 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages import (
-    ConditioningStage, DecodingStage, HyWorldDenoisingStage,
+    ConditioningStage, DecodingStage, HYWorldDenoisingStage,
     InputValidationStage, LatentPreparationStage, TextEncodingStage,
-    TimestepPreparationStage, HyWorldImageEncodingStage)
+    TimestepPreparationStage, HYWorldImageEncodingStage)
 
 logger = init_logger(__name__)
 
 
-class HyWorldPipeline(ComposedPipelineBase):
+class HYWorldPipeline(ComposedPipelineBase):
     """
-    HyWorld video diffusion pipeline.
+    HYWorld video diffusion pipeline.
 
     This pipeline implements chunk-based video generation with context frame
-    selection for 3D-aware generation using HyWorldDenoisingStage.
+    selection for 3D-aware generation using HYWorldDenoisingStage.
 
-    Note: HyWorld only uses a single LLM-based text encoder, unlike SDXL-style
+    Note: HYWorld only uses a single LLM-based text encoder, unlike SDXL-style
     dual encoder setups. The text_encoder_2/tokenizer_2 are not used.
     """
 
@@ -37,7 +37,7 @@ class HyWorldPipeline(ComposedPipelineBase):
     ]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
-        """Set up pipeline stages with HyWorld-specific denoising stage."""
+        """Set up pipeline stages with HYWorld-specific denoising stage."""
 
         self.add_stage(stage_name="input_validation_stage",
                        stage=InputValidationStage())
@@ -66,13 +66,13 @@ class HyWorldPipeline(ComposedPipelineBase):
                            transformer=self.get_module("transformer")))
 
         self.add_stage(stage_name="image_encoding_stage",
-                       stage=HyWorldImageEncodingStage(
+                       stage=HYWorldImageEncodingStage(
                            image_encoder=self.get_module("image_encoder"),
                            image_processor=self.get_module("feature_extractor"),
                            vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",
-                       stage=HyWorldDenoisingStage(
+                       stage=HYWorldDenoisingStage(
                            transformer=self.get_module("transformer"),
                            scheduler=self.get_module("scheduler"),
                            pipeline=self))
@@ -81,4 +81,4 @@ class HyWorldPipeline(ComposedPipelineBase):
                        stage=DecodingStage(vae=self.get_module("vae")))
 
 
-EntryClass = HyWorldPipeline
+EntryClass = HYWorldPipeline

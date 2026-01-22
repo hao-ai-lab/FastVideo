@@ -18,7 +18,7 @@ from fastvideo.pipelines.stages.encoding import EncodingStage
 from fastvideo.pipelines.stages.image_encoding import (
     ImageEncodingStage, MatrixGameImageEncodingStage, RefImageEncodingStage,
     ImageVAEEncodingStage, VideoVAEEncodingStage, Hy15ImageEncodingStage,
-    HyWorldImageEncodingStage)
+    HYWorldImageEncodingStage)
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.latent_preparation import (
     Cosmos25LatentPreparationStage, CosmosLatentPreparationStage,
@@ -29,7 +29,7 @@ from fastvideo.pipelines.stages.ltx2_latent_preparation import (
     LTX2LatentPreparationStage)
 from fastvideo.pipelines.stages.matrixgame_denoising import (
     MatrixGameCausalDenoisingStage)
-from fastvideo.pipelines.stages.hyworld_denoising import HyWorldDenoisingStage
+from fastvideo.pipelines.stages.hyworld_denoising import HYWorldDenoisingStage
 from fastvideo.pipelines.stages.stepvideo_encoding import (
     StepvideoPromptEncodingStage)
 from fastvideo.pipelines.stages.text_encoding import (Cosmos25TextEncodingStage,
@@ -57,7 +57,7 @@ __all__ = [
     "DmdDenoisingStage",
     "CausalDMDDenosingStage",
     "MatrixGameCausalDenoisingStage",
-    "HyWorldDenoisingStage",
+    "HYWorldDenoisingStage",
     "CosmosDenoisingStage",
     "Cosmos25DenoisingStage",
     "LTX2DenoisingStage",
@@ -66,7 +66,7 @@ __all__ = [
     "ImageEncodingStage",
     "MatrixGameImageEncodingStage",
     "Hy15ImageEncodingStage",
-    "HyWorldImageEncodingStage",
+    "HYWorldImageEncodingStage",
     "RefImageEncodingStage",
     "ImageVAEEncodingStage",
     "VideoVAEEncodingStage",

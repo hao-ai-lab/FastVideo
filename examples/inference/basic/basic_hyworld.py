@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Basic example for HyWorld (HY-WorldPlay) video generation using FastVideo.
+Basic example for HYWorld (HY-WorldPlay) video generation using FastVideo.
 
 This example replicates the same functionality as HY-WorldPlay/run.sh,
 demonstrating image-to-video generation with camera trajectory control.
 """
 
-import os
 import time
 import math
 import numpy as np
@@ -24,8 +23,8 @@ from fastvideo.models.dits.hyworld.resolution_utils import get_resolution_from_i
 
 logger = init_logger(__name__)
 
-class HyWorldVideoGenerator(VideoGenerator):
-    """Extended VideoGenerator that adds HyWorld-specific parameters to batch.extra."""
+class HYWorldVideoGenerator(VideoGenerator):
+    """Extended VideoGenerator that adds HYWorld-specific parameters to batch.extra."""
 
     def _generate_single_video(self, prompt: str, sampling_param=None, **kwargs):
         """Override to add viewmats, Ks, and action to batch.extra."""
@@ -114,7 +113,7 @@ class HyWorldVideoGenerator(VideoGenerator):
             VSA_sparsity=fastvideo_args.VSA_sparsity,
         )
 
-        # Add HyWorld-specific parameters to batch.extra
+        # Add HYWorld-specific parameters to batch.extra
         batch.extra['viewmats'] = viewmats
         batch.extra['Ks'] = Ks
         batch.extra['action'] = action
@@ -159,28 +158,22 @@ class HyWorldVideoGenerator(VideoGenerator):
 
 # Default prompt from HY-WorldPlay run.sh
 DEFAULT_PROMPT = 'A paved pathway leads towards a stone arch bridge spanning a calm body of water.  Lush green trees and foliage line the path and the far bank of the water. A traditional-style pavilion with a tiered, reddish-brown roof sits on the far shore. The water reflects the surrounding greenery and the sky.  The scene is bathed in soft, natural light, creating a tranquil and serene atmosphere. The pathway is composed of large, rectangular stones, and the bridge is constructed of light gray stone.  The overall composition emphasizes the peaceful and harmonious nature of the landscape.'
+DEFAULT_IMAGE = 'https://raw.githubusercontent.com/Tencent-Hunyuan/HY-WorldPlay/main/assets/img/test.png'
 
 def main():
     import argparse
 
     # pose: (a, w, s, d) - (15, 31)
     # num_frames: (61, 125)
-    parser = argparse.ArgumentParser(description="HyWorld video generation with FastVideo")
+    parser = argparse.ArgumentParser(description="HYWorld video generation with FastVideo")
     parser.add_argument("--prompt", type=str, default=DEFAULT_PROMPT, help="Text prompt for video generation")
-    parser.add_argument("--image", type=str, default='assets/hyworld.png', help="Path to input image")
-    parser.add_argument("--pose", type=str, default='d-31', help="Pose string (e.g., 'a-31', 'w-31', 's-31', 'd-31')")
+    parser.add_argument("--image", type=str, default=DEFAULT_IMAGE, help="Path or URL to input image")
+    parser.add_argument("--pose", type=str, default='a-15', help="Pose string (e.g., 'a-31', 'w-31', 's-31', 'd-31')")
     parser.add_argument("--output_path", type=str, default='video_samples_hyworld', help="Output video path")
-    parser.add_argument("--num-frames", type=int, default=125, help="Number of frames")
+    parser.add_argument("--num-frames", type=int, default=61, help="Number of frames")
     parser.add_argument("--seed", type=int, default=1, help="Random seed")
     parser.add_argument("--resolution", type=str, default="480p", help="Only support 480p for now")
-    parser.add_argument("--model-path", type=str, default="mignonjia/hyworld",
-                        help="Path to base HunyuanVideo model (HuggingFace repo or local path)")
     args = parser.parse_args()
-
-    # Check if image exists
-    if not os.path.exists(args.image):
-        print(f"Error: Image path {args.image} does not exist.")
-        return
 
     # Automatically determine resolution from input image
     HEIGHT, WIDTH = get_resolution_from_image(args.image, args.resolution)
@@ -192,11 +185,10 @@ def main():
     print(f"Output path: {args.output_path}")
 
     # Initialize generator
-    print("\nInitializing HyWorldVideoGenerator...")
+    print("\nInitializing VideoGenerator for HYWorld...")
     
-    generator = HyWorldVideoGenerator.from_pretrained(
-        args.model_path,
-        revision="dec12cda59d20985e4f366eb272327749a38d297",    
+    generator = HYWorldVideoGenerator.from_pretrained(
+        "FastVideo/HY-WorldPlay-Bidirectional-Diffusers",
         num_gpus=1,
         use_fsdp_inference=True,
         dit_cpu_offload=True,

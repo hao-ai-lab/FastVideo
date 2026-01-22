@@ -2,17 +2,17 @@
 from dataclasses import dataclass, field
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig
-from fastvideo.configs.models.dits import HyWorldConfig as HyWorldDiTConfig
+from fastvideo.configs.models.dits import HYWorldConfig as HYWorldDiTConfig
 from fastvideo.configs.models.encoders import SiglipVisionConfig
 from fastvideo.configs.pipelines.hunyuan15 import Hunyuan15T2V480PConfig
 
 
 @dataclass
-class HyWorldConfig(Hunyuan15T2V480PConfig):
-    """Base configuration for HyWorld pipeline architecture."""
+class HYWorldConfig(Hunyuan15T2V480PConfig):
+    """Base configuration for HYWorld pipeline architecture."""
 
-    # HyWorldConfig-specific parameters with defaults
-    dit_config: DiTConfig = field(default_factory=HyWorldDiTConfig)
+    # HYWorldConfig-specific parameters with defaults
+    dit_config: DiTConfig = field(default_factory=HYWorldDiTConfig)
 
     # SigLIP image encoder for I2V
     image_encoder_config: EncoderConfig = field(

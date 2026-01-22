@@ -127,9 +127,9 @@ class Hy15ImageEncodingStage(ImageEncodingStage):
         return batch
 
 
-class HyWorldImageEncodingStage(ImageEncodingStage):
+class HYWorldImageEncodingStage(ImageEncodingStage):
     """
-    Stage for encoding image prompts into embeddings for HyWorld models.
+    Stage for encoding image prompts into embeddings for HYWorld models.
     
     Uses SigLIP (or other vision encoder) to encode reference images for I2V tasks.
     Also encodes reference image with VAE for conditional latent.
@@ -164,7 +164,7 @@ class HyWorldImageEncodingStage(ImageEncodingStage):
         """
         device = get_local_torch_device()
 
-        # Default vision embed dimensions for HunyuanVideo1.5/HyWorld
+        # Default vision embed dimensions for HunyuanVideo1.5/HYWorld
         num_vision_tokens = 729  # (384/14)^2 for SigLIP
         vision_dim = 1152  # SigLIP hidden size
 
@@ -201,8 +201,6 @@ class HyWorldImageEncodingStage(ImageEncodingStage):
 
                 # Get model dtype for proper precision matching (HY-WorldPlay uses fp16)
                 model_dtype = next(self.image_encoder.parameters()).dtype
-
-                print(f"SigLIP dtype: {model_dtype}")
 
                 # Preprocess image for SigLIP
                 # Convert to numpy and resize to target resolution (matching HY-WorldPlay)

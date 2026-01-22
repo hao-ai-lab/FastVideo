@@ -9,7 +9,7 @@ from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.cosmos2_5 import Cosmos25Config
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuan15 import Hunyuan15T2V480PConfig, Hunyuan15T2V720PConfig
-from fastvideo.configs.pipelines.hyworld import HyWorldConfig
+from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.ltx2 import LTX2T2VConfig
 from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
@@ -39,7 +39,7 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     Hunyuan15T2V480PConfig,
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v":
     Hunyuan15T2V720PConfig,
-    "FastVideo/HY-WorldPlay-Bidirectional-Diffusers": HyWorldConfig,
+    "FastVideo/HY-WorldPlay-Bidirectional-Diffusers": HYWorldConfig,
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V480PConfig,
     "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers": WanI2V480PConfig,
     "IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers": WANV2VConfig,
@@ -127,7 +127,7 @@ PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "hunyuan15":
     Hunyuan15T2V480PConfig,  # Base Hunyuan15 config as fallback for any Hunyuan15 variant
     "hyworld":
-    HyWorldConfig,  # HyWorld-specific config as fallback for any HyWorld variant
+    HYWorldConfig,  # HYWorld-specific config as fallback for any HYWorld variant
     "wanpipeline":
     WanT2V480PConfig,  # Base Wan config as fallback for any Wan variant
     "wanimagetovideo": WanI2V480PConfig,

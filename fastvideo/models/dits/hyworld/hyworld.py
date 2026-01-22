@@ -23,7 +23,7 @@ from einops import rearrange, repeat
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather_with_unpad,
     sequence_model_parallel_shard)
-from fastvideo.configs.models.dits import HyWorldConfig
+from fastvideo.configs.models.dits import HYWorldConfig
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
 from fastvideo.layers.visual_embedding import TimestepEmbedder, unpatchify
@@ -42,7 +42,7 @@ from .camera_rope import prope_qkv
 logger = init_logger(__name__)
 
 
-class HyWorldDoubleStreamBlock(MMDoubleStreamBlock):
+class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
     """
     Extended MMDoubleStreamBlock with ProPE (Projective Positional Encoding) support
     for camera-aware attention in HY-World/WorldPlay models.
@@ -233,9 +233,9 @@ class HyWorldDoubleStreamBlock(MMDoubleStreamBlock):
         return img, txt
 
 
-class HyWorldFinalLayer(nn.Module):
+class HYWorldFinalLayer(nn.Module):
     """
-    Final layer for HyWorld that uses modulate() to handle per-token conditioning.
+    Final layer for HYWorld that uses modulate() to handle per-token conditioning.
     This matches HY-WorldPlay's FinalLayer behavior.
     """
 
@@ -281,29 +281,29 @@ class HyWorldFinalLayer(nn.Module):
         return x
 
 
-class HyWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
+class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
     r"""
     HY-World Transformer extending HunyuanVideo15 with:
     - ProPE (Projective Positional Encoding) for camera-aware attention
     - Action conditioning for interactive video generation
     """
     
-    # Class attributes for weight loading - use HyWorld-specific mapping
-    _fsdp_shard_conditions = HyWorldConfig().arch_config._fsdp_shard_conditions
-    _compile_conditions = HyWorldConfig().arch_config._compile_conditions
-    param_names_mapping = HyWorldConfig().arch_config.param_names_mapping
-    reverse_param_names_mapping = HyWorldConfig().arch_config.reverse_param_names_mapping
+    # Class attributes for weight loading - use HYWorld-specific mapping
+    _fsdp_shard_conditions = HYWorldConfig().arch_config._fsdp_shard_conditions
+    _compile_conditions = HYWorldConfig().arch_config._compile_conditions
+    param_names_mapping = HYWorldConfig().arch_config.param_names_mapping
+    reverse_param_names_mapping = HYWorldConfig().arch_config.reverse_param_names_mapping
 
     def __init__(
         self,
-        config: HyWorldConfig,
+        config: HYWorldConfig,
         hf_config: dict[str, Any],
     ) -> None:
         super().__init__(config=config, hf_config=hf_config)
 
         # Replace double_blocks with HY-World version that supports ProPE
         self.double_blocks = nn.ModuleList([
-            HyWorldDoubleStreamBlock(
+            HYWorldDoubleStreamBlock(
                 hidden_size=self.hidden_size,
                 num_attention_heads=self.num_attention_heads,
                 mlp_ratio=config.arch_config.mlp_ratio,
@@ -326,8 +326,8 @@ class HyWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
         if self.action_in.mlp.fc_out.bias is not None:
             nn.init.zeros_(self.action_in.mlp.fc_out.bias)
 
-        # Override final_layer with HyWorld version that uses per-token modulate()
-        self.final_layer = HyWorldFinalLayer(
+        # Override final_layer with HYWorld version that uses per-token modulate()
+        self.final_layer = HYWorldFinalLayer(
             hidden_size=self.hidden_size,
             patch_size=self.patch_size,
             out_channels=self.out_channels,
@@ -543,7 +543,7 @@ class HyWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
                     Ks=Ks_seq, # hyworld
                 )
 
-        # Final layer processing (per-token conditioning via HyWorldFinalLayer)
+        # Final layer processing (per-token conditioning via HYWorldFinalLayer)
         hidden_states = sequence_model_parallel_all_gather_with_unpad(hidden_states, original_seq_len, dim=1)
         hidden_states = self.final_layer(hidden_states, temb)
         # Unpatchify to get original shape

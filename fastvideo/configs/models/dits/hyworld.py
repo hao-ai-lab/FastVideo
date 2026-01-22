@@ -21,7 +21,7 @@ def is_txt_in(n: str, m) -> bool:
 
 
 @dataclass
-class HyWorldArchConfig(DiTArchConfig):
+class HYWorldArchConfig(DiTArchConfig):
     _fsdp_shard_conditions: list = field(
         default_factory=lambda: [is_double_block, is_single_block])
 
@@ -54,7 +54,7 @@ class HyWorldArchConfig(DiTArchConfig):
             r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.adaLN_modulation\.1\.(.*)$":
             r"txt_in.refiner_blocks.\1.adaLN_modulation.linear.\2",
 
-            # 2. time_in mappings (HyWorld uses TimestepEmbedder directly,
+            # 2. time_in mappings (HYWorld uses TimestepEmbedder directly,
             #    but FastVideo model inherits HunyuanVideo15TimeEmbedding with timestep_embedder):
             r"^time_in\.mlp\.0\.(.*)$":
             r"time_in.timestep_embedder.mlp.fc_in.\1",
@@ -165,7 +165,7 @@ class HyWorldArchConfig(DiTArchConfig):
         self.attention_head_dim: int = self.hidden_size // self.heads_num
         self.num_layers: int = self.mm_double_blocks_depth
         self.num_single_layers: int = self.mm_single_blocks_depth
-        self.num_refiner_layers: int = 2  # Default for HyWorld
+        self.num_refiner_layers: int = 2  # Default for HYWorld
         self.mlp_ratio: float = float(self.mlp_width_ratio)
         self.text_embed_dim: int = self.text_states_dim
         self.text_embed_2_dim: int = self.text_states_dim_2 if self.text_states_dim_2 else 1472
@@ -200,7 +200,7 @@ class HyWorldArchConfig(DiTArchConfig):
 
 
 @dataclass
-class HyWorldConfig(DiTConfig):
-    arch_config: DiTArchConfig = field(default_factory=HyWorldArchConfig)
+class HYWorldConfig(DiTConfig):
+    arch_config: DiTArchConfig = field(default_factory=HYWorldArchConfig)
 
-    prefix: str = "HyWorld"
+    prefix: str = "HYWorld"

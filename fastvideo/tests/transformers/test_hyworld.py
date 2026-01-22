@@ -4,7 +4,7 @@ import os
 import pytest
 import torch
 
-from fastvideo.configs.models.dits import HyWorldConfig
+from fastvideo.configs.models.dits import HYWorldConfig
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.distributed.parallel_state import (
     get_sp_parallel_rank,
@@ -21,7 +21,6 @@ logger = init_logger(__name__)
 
 os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
-os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
 MODEL_PATH = maybe_download_model("mignonjia/hyworld")
 TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
@@ -44,7 +43,7 @@ def test_hyworld_transformer():
         dit_cpu_offload=False,
         use_fsdp_inference=False,
         pipeline_config=PipelineConfig(
-            dit_config=HyWorldConfig(), dit_precision=precision_str
+            dit_config=HYWorldConfig(), dit_precision=precision_str
         ),
     )
     args.device = device

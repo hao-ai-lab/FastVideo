@@ -26,8 +26,8 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
     "HunyuanVideo15Transformer3DModel":
     ("dits", "hunyuanvideo15", "HunyuanVideo15Transformer3DModel"),
-    "HyWorldTransformer3DModel":
-    ("dits", "hyworld", "HyWorldTransformer3DModel"),
+    "HYWorldTransformer3DModel":
+    ("dits", "hyworld", "HYWorldTransformer3DModel"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
     "StepVideoModel": ("dits", "stepvideo", "StepVideoModel"),
@@ -70,6 +70,7 @@ _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
 _VAE_MODELS = {
     "AutoencoderKLHunyuanVideo":
     ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
+    "AutoencoderKLHYWorld": ("vaes", "hyworldvae", "AutoencoderKLHYWorld"),
     "AutoencoderKLHunyuanVideo15": ("vaes", "hunyuan15vae", "AutoencoderKLHunyuanVideo15"),
     "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
     "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo"),

@@ -1,7 +1,7 @@
 # Some functions from HY-WorldPlay/hyvideo/generate.py
 
 """
-Pose processing utilities for HyWorld video generation.
+Pose processing utilities for HYWorld video generation.
 
 This module provides functions to convert camera poses to model input tensors,
 including viewmats, intrinsics, and action labels.

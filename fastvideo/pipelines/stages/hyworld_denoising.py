@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-HyWorld denoising stage for chunk-based video generation with context frame selection.
+HYWorld denoising stage for chunk-based video generation with context frame selection.
 
-This stage implements the bi_rollout denoising logic from HyWorld, which processes
+This stage implements the bi_rollout denoising logic from HYWorld, which processes
 video generation in chunks with camera-aware context frame selection for temporal consistency.
 """
 
@@ -24,9 +24,9 @@ from fastvideo.models.dits.hyworld.retrieval_context import (
 logger = init_logger(__name__)
 
 
-class HyWorldDenoisingStage(DenoisingStage):
+class HYWorldDenoisingStage(DenoisingStage):
     """
-    Denoising stage for HyWorld-style chunk-based video generation.
+    Denoising stage for HYWorld-style chunk-based video generation.
     
     This stage implements bi_rollout denoising with:
     - Chunk-based processing (generates video in chunks, e.g., 4 frames at a time)    - Context frame selection based on camera view alignment
@@ -75,7 +75,7 @@ class HyWorldDenoisingStage(DenoisingStage):
                 pipeline.add_module("transformer", self.transformer)
             fastvideo_args.model_loaded["transformer"] = True
 
-        # Extract HyWorld-specific parameters from batch.extra or batch attributes
+        # Extract HYWorld-specific parameters from batch.extra or batch attributes
         viewmats = getattr(batch, "viewmats", None) or batch.extra.get(
             "viewmats", None)
         Ks = getattr(batch, "Ks", None) or batch.extra.get("Ks", None)
@@ -89,7 +89,7 @@ class HyWorldDenoisingStage(DenoisingStage):
 
         if viewmats is None or Ks is None:
             raise ValueError(
-                "viewmats and Ks are required for HyWorld denoising. "
+                "viewmats and Ks are required for HYWorld denoising. "
                 "Please provide them in batch.extra['viewmats'] and batch.extra['Ks']"
             )
 
@@ -163,7 +163,7 @@ class HyWorldDenoisingStage(DenoisingStage):
         else:
             points_local = points_local.to(device)
 
-        # Use conditional latents directly (prepared by HyWorldImageEncodingStage)
+        # Use conditional latents directly (prepared by HYWorldImageEncodingStage)
         # batch.image_latent is already [1, 33, T, H, W] with first frame encoded, rest zeros
         cond_latents = batch.image_latent
 
@@ -275,7 +275,7 @@ class HyWorldDenoisingStage(DenoisingStage):
                     latents_concat = torch.concat(
                         [latent_model_input, cond_latents_input], dim=1)
 
-                    # Note: Unlike some other pipelines, HyWorld runs CFG sequentially (two passes)
+                    # Note: Unlike some other pipelines, HYWorld runs CFG sequentially (two passes)
                     # rather than batching pos/neg together, following the original implementation
                     latents_concat = self.scheduler.scale_model_input(
                         latents_concat, t)
@@ -295,7 +295,7 @@ class HyWorldDenoisingStage(DenoisingStage):
                         current_model = self.transformer
                         batch.is_cfg_negative = False
 
-                        # Prepare transformer kwargs with HyWorld-specific inputs
+                        # Prepare transformer kwargs with HYWorld-specific inputs
                         # Note: batch size 1 for sequential CFG (matching original HY-WorldPlay)
                         transformer_kwargs = {
                             **image_kwargs,
@@ -402,7 +402,7 @@ class HyWorldDenoisingStage(DenoisingStage):
 
     def verify_input(self, batch: ForwardBatch,
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
-        """Verify HyWorld denoising stage inputs."""
+        """Verify HYWorld denoising stage inputs."""
         result = VerificationResult()
         result.add_check("timesteps", batch.timesteps,
                          [V.is_tensor, V.min_dims(1)])
@@ -410,7 +410,7 @@ class HyWorldDenoisingStage(DenoisingStage):
                          [V.is_tensor, V.with_dims(5)])
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
 
-        # Check for HyWorld-specific inputs
+        # Check for HYWorld-specific inputs
         viewmats = getattr(batch, "viewmats", None) or batch.extra.get(
             "viewmats", None)
         Ks = getattr(batch, "Ks", None) or batch.extra.get("Ks", None)
@@ -445,7 +445,7 @@ class HyWorldDenoisingStage(DenoisingStage):
 
     def verify_output(self, batch: ForwardBatch,
                       fastvideo_args: FastVideoArgs) -> VerificationResult:
-        """Verify HyWorld denoising stage outputs."""
+        """Verify HYWorld denoising stage outputs."""
         result = VerificationResult()
         result.add_check("latents", batch.latents,
                          [V.is_tensor, V.with_dims(5)])

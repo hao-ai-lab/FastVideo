@@ -6,7 +6,7 @@ import numpy as np
 
 
 @dataclass
-class HyWorld_SamplingParam(SamplingParam):
+class HYWorld_SamplingParam(SamplingParam):
     num_inference_steps: int = 50
 
     num_frames: int = 125

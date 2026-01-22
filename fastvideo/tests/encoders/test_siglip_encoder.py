@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for SigLIP vision encoder using HyWorld model."""
+"""Tests for SigLIP vision encoder using HYWorld model."""
 
 import gc
 import json
@@ -23,7 +23,7 @@ logger = init_logger(__name__)
 os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29505"
 
-# HyWorld model path - SigLIP image encoder
+# HYWorld model path - SigLIP image encoder
 MODEL_ID = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v"
 IMAGE_ENCODER_SUBFOLDER = "image_encoder"
 
