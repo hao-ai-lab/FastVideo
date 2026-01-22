@@ -178,8 +178,6 @@ class HyWorldImageEncodingStage(ImageEncodingStage):
             fastvideo_args.pipeline_config.vae_precision]
         vae_autocast_enabled = (
             vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
-        print(f"vae_dtype: {vae_dtype}")
-        print(f"vae_autocast_enabled: {vae_autocast_enabled}")
 
         if batch.pil_image is None:
             # T2V case: create zero embeddings for image_embeds
