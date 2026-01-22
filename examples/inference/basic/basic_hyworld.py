@@ -177,7 +177,6 @@ def main():
 
     # Automatically determine resolution from input image
     HEIGHT, WIDTH = get_resolution_from_image(args.image, args.resolution)
-    print(f"Model path: {args.model_path}")
     print(f"Image: {args.image}")
     print(f"Pose: {args.pose}")
     print(f"Resolution: {HEIGHT}x{WIDTH} (from {args.resolution} buckets)")
