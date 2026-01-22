@@ -153,19 +153,19 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
     def _prepare_gt_inputs(self, training_batch: TrainingBatch) -> TrainingBatch:
         trajectory_latents = training_batch.trajectory_latents
 
-        # assert trajectory_latents.shape[1] == len(self.denoising_step_list) + 1
+        assert trajectory_latents.shape[1] == len(self.denoising_step_list) + 1
         
         # start_timestep_index = torch.randint(0, len(self.denoising_step_list), (1, ), device=self.device)
         # if dist.is_initialized():
         #     dist.broadcast(start_timestep_index, src=0)
         # start_timestep_index = start_timestep_index.cpu().item()
-        # training_batch.trajectory_latents = trajectory_latents[:, :, :21]
-        _cached_closest_idx_per_dmd = torch.tensor(
-            [0, 12, 24, 36, 50], dtype=torch.long).cpu()
-        training_batch.trajectory_latents = torch.index_select(
-            trajectory_latents,
-            dim=1,
-            index=_cached_closest_idx_per_dmd.to(trajectory_latents.device))
+        training_batch.trajectory_latents = trajectory_latents[:, :, :21]
+        # _cached_closest_idx_per_dmd = torch.tensor(
+        #     [0, 12, 24, 36, 50], dtype=torch.long).cpu()
+        # training_batch.trajectory_latents = torch.index_select(
+        #     trajectory_latents,
+        #     dim=1,
+        #     index=_cached_closest_idx_per_dmd.to(trajectory_latents.device))
         del trajectory_latents
         # training_batch.start_timestep_index = start_timestep_index
         return training_batch
@@ -603,7 +603,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         # assert self.crossattn_cache is not None
         self._cleanup_simulation_caches(kv_cache1, crossattn_cache)
 
-        assert pred_image_or_video.shape[1] == 31, "pred_image_or_video must have 31 frames"
+        assert pred_image_or_video.shape[1] == 21, "pred_image_or_video must have 21 frames"
 
         return final_output if gradient_mask is not None else pred_image_or_video
 

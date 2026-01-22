@@ -47,7 +47,7 @@ FAKE_SCORE_MODEL_PATH="hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2
 # DATA_DIR="data/test-text-preprocessing/Node_0_GPU_1_File_1/combined_parquet_dataset/"
 # DATA_DIR="/mnt/weka/home/hao.zhang/matthew/FastVideo/data/test-text-preprocessing"
 DATA_DIR="/mnt/weka/home/hao.zhang/wl/sharefs/wl/release/vidprom_16k_text_embed"
-DATA_DIR_2="/mnt/weka/home/hao.zhang/wl/sharefs/wl/release/fv-ode-preprocessing-16k-hy15-121"
+DATA_DIR_2="/mnt/weka/home/hao.zhang/wl/sharefs/wl/release/fv-ode-preprocessing-16k-hy15-distilled-121"
 # DATA_DIR=data/crush-smol_processed_t2v/combined_parquet_dataset
 # DATA_DIR="/mnt/sharefs/users/hao.zhang/Vchitect-2M/Wan-Syn-upload/latents_i2v/train/"
 # VALIDATION_DATASET_FILE="data/crush-smol-single_processed_t2v/validation.json"
@@ -64,16 +64,16 @@ training_args=(
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 31
+  --num_latent_t 21
   --num_height 480
   --num_width 848
   --enable_gradient_checkpointing_type "full"
   --simulate_generator_forward
   --log_visualization
-  --num_frames 121
+  --num_frames 81
   --num_frame_per_block 3  # Frame generation block size for self-forcing
   # --resume-from-checkpoint "/mnt/weka/home/hao.zhang/wei/SFhy1.5_distill_1333/checkpoint-300"
-  --init_weights_from_safetensors /mnt/weka/home/hao.zhang/wei/hy15_ode_init_1333_new/checkpoint-2400/transformer/diffusion_pytorch_model.safetensors
+  --init_weights_from_safetensors /mnt/weka/home/hao.zhang/wei/hy15_distilled_ode_init_3333/checkpoint-2400/transformer/diffusion_pytorch_model.safetensors
 )
 
 parallel_args=(
@@ -101,14 +101,14 @@ validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
   --validation_steps 50
-  --validation_sampling_steps "4"
+  --validation_sampling_steps "8"
   --validation_guidance_scale "1.0" # not used for dmd inference
   --text-encoder-cpu-offload
   # --vae_cpu_offload True
 )
 
 optimizer_args=(
-  --learning_rate 1e-5
+  --learning_rate 1e-6
   --mixed_precision "bf16"
   --training_state_checkpointing_steps 100
   --weight_only_checkpointing_steps 500
@@ -122,7 +122,7 @@ miscellaneous_args=(
   --checkpoints_total_limit 3
   --training_cfg_rate 0.0
   --dit_precision "fp32"
-  --flow_shift 5
+  --flow_shift 7
   --seed 1000
   --use_ema True
   --ema_decay 0.99
@@ -131,13 +131,13 @@ miscellaneous_args=(
 
 dmd_args=(
   --warp_denoising_step
-  # --dmd_denoising_steps '1000,875,750,625,500,375,250,125'
-  --dmd_denoising_steps '1000,760,520,280'
+  --dmd_denoising_steps '1000,875,750,625,500,375,250,125'
+  # --dmd_denoising_steps '1000,760,520,280'
   --min_timestep_ratio 0.02
   --max_timestep_ratio 0.98
   --dfake_gen_update_ratio 5
   --real_score_guidance_scale 3.5
-  --fake_score_learning_rate 5e-6
+  --fake_score_learning_rate 2e-7
   --fake_score_betas '0.0,0.999'
 )
 

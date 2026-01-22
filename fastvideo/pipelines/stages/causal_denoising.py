@@ -178,7 +178,7 @@ class CausalDMDDenosingStage(DenoisingStage):
 
         # For now hardcode the first block to be 1 frame assuming the model is Wan2.2-MoE
         # if boundary_timestep is not None:
-        block_sizes[0] = 1
+        # block_sizes[0] = 1
 
         # Initialize txt kv cache
         with torch.autocast(device_type="cuda",

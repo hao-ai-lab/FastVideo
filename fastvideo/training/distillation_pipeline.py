@@ -147,7 +147,7 @@ class DistillationPipeline(TrainingPipeline):
         self.vae.requires_grad_(False)
 
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
-        assert self.timestep_shift == 5.0, "flow_shift must be 5.0"
+        assert self.timestep_shift == 7.0, "flow_shift must be 7.0"
         # self.noise_scheduler.set_timesteps(sigmas=list(np.linspace(1.0, 0.0, 50 + 1)[:-1]), device=get_local_torch_device())
         self.noise_scheduler.set_timesteps(num_inference_steps=1000, extra_one_step=True, device=get_local_torch_device())
 
