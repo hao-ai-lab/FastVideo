@@ -27,6 +27,13 @@ class Hunyuan15_480P_SamplingParam(SamplingParam):
         self.sigmas = list(
             np.linspace(1.0, 0.0, self.num_inference_steps + 1)[:-1])
 
+@dataclass
+class Hunyuan15_480P_StepDistilled_I2V_SamplingParam(Hunyuan15_480P_SamplingParam):
+    num_inference_steps: int = 12
+
+    height: int = 720
+    width: int = 1280
+    guidance_scale: float = 1.0
 
 @dataclass
 class Hunyuan15_720P_SamplingParam(Hunyuan15_480P_SamplingParam):
@@ -44,7 +51,7 @@ class Hunyuan15_SR_1080P_SamplingParam(Hunyuan15_720P_SamplingParam):
     height_sr: int = 1072
     width_sr: int = 1920
 
-    num_inference_steps: int = 50
+    num_inference_steps: int = 12
     num_inference_steps_sr: int = 8
 
     guidance_scale: float = 1.0

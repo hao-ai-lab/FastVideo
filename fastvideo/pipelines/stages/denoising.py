@@ -102,6 +102,7 @@ class DenoisingStage(PipelineStage):
         """
         pipeline = self.pipeline() if self.pipeline else None
         if not fastvideo_args.model_loaded["transformer"]:
+            raise RuntimeError("Transformer is not loaded")
             loader = TransformerLoader()
             self.transformer = loader.load(
                 fastvideo_args.model_paths["transformer"], fastvideo_args)
@@ -315,6 +316,23 @@ class DenoisingStage(PipelineStage):
                 else:
                     t_expand = t.repeat(latent_model_input.shape[0])
 
+                use_meanflow = getattr(self.transformer.config, "use_meanflow", False)
+                if use_meanflow:
+                    if i == len(timesteps) - 1:
+                        timesteps_r = torch.tensor([0.0], device=get_local_torch_device())
+                    else:
+                        timesteps_r = timesteps[i + 1]
+                    timesteps_r = timesteps_r.repeat(latent_model_input.shape[0])
+                else:
+                    timesteps_r = None
+
+                timesteps_r_kwarg = self.prepare_extra_func_kwargs(
+                    self.transformer.forward,
+                    {
+                        "timestep_r": timesteps_r,
+                    },
+                )
+
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)
 
@@ -406,6 +424,7 @@ class DenoisingStage(PipelineStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                             **action_kwargs,
+                            **timesteps_r_kwarg,
                         )
 
                     if batch.do_classifier_free_guidance:
@@ -423,6 +442,7 @@ class DenoisingStage(PipelineStage):
                                 **image_kwargs,
                                 **neg_cond_kwargs,
                                 **action_kwargs,
+                                **timesteps_r_kwarg,
                             )
 
                         noise_pred_text = noise_pred
