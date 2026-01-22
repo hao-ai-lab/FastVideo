@@ -133,7 +133,7 @@ class ForwardBatch:
     grid_sizes: torch.Tensor | None = None  # Shape: (3,) [F,H,W]
 
     # Camera control inputs (HYWorld)
-    pose: str | None = None # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
+    pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
 
     # Latent dimensions
     height_latents: list[int] | int | None = None
