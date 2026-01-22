@@ -22,7 +22,7 @@ logger = init_logger(__name__)
 os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29503"
 
-MODEL_PATH = maybe_download_model("mignonjia/hyworld")
+MODEL_PATH = maybe_download_model("FastVideo/HY-WorldPlay-Bidirectional-Diffusers")
 TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
 REFERENCE_LATENT = -197132.85557549074  # Pre-computed reference value
 
