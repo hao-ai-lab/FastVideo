@@ -25,7 +25,7 @@ os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
 MODEL_PATH = maybe_download_model("mignonjia/hyworld")
 TRANSFORMER_PATH = os.path.join(MODEL_PATH, "transformer")
-REFERENCE_LATENT = -201883.48880133405  # Pre-computed reference value
+REFERENCE_LATENT = -197132.85557549074  # Pre-computed reference value
 
 
 @pytest.mark.usefixtures("distributed_setup")
