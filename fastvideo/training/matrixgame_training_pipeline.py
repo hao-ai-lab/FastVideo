@@ -120,7 +120,7 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
         image_latents = training_batch.image_latents.to(
             get_local_torch_device(), dtype=torch.bfloat16)
 
-        temporal_compression_ratio = 4
+        temporal_compression_ratio = self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
         num_frames = (self.training_args.num_latent_t -
                       1) * temporal_compression_ratio + 1
         batch_size, num_channels, _, latent_height, latent_width = image_latents.shape
