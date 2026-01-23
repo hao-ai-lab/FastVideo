@@ -21,12 +21,12 @@ class Hunyuan15_480P_SamplingParam(SamplingParam):
         default_factory=lambda: list(np.linspace(1.0, 0.0, 50 + 1)[:-1]))
 
     negative_prompt: str = ""
-    
+
     def __post_init__(self):
         super().__post_init__()
         self.sigmas = list(
-            np.linspace(1.0, 0.0, self.num_inference_steps + 1)[:-1]
-        )
+            np.linspace(1.0, 0.0, self.num_inference_steps + 1)[:-1])
+
 
 @dataclass
 class Hunyuan15_720P_SamplingParam(Hunyuan15_480P_SamplingParam):
