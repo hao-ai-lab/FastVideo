@@ -88,6 +88,7 @@ class ComponentLoader(ABC):
             "tokenizer": (TokenizerLoader, "transformers"),
             "tokenizer_2": (TokenizerLoader, "transformers"),
             "image_processor": (ImageProcessorLoader, "transformers"),
+            "feature_extractor": (ImageProcessorLoader, "transformers"),
             "image_encoder": (ImageEncoderLoader, "transformers"),
         }
 

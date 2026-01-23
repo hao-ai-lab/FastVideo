@@ -6,6 +6,7 @@ from typing import Any
 from fastvideo.configs.sample.hunyuan import (FastHunyuanSamplingParam,
                                               HunyuanSamplingParam)
 from fastvideo.configs.sample.hunyuan15 import Hunyuan15_480P_SamplingParam, Hunyuan15_720P_SamplingParam
+from fastvideo.configs.sample.hyworld import HYWorld_SamplingParam
 from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
 
 from fastvideo.configs.sample.cosmos import Cosmos_Predict2_2B_Video2World_SamplingParam
@@ -47,6 +48,7 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     Hunyuan15_480P_SamplingParam,
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v":
     Hunyuan15_720P_SamplingParam,
+    "FastVideo/HY-WorldPlay-Bidirectional-Diffusers": HYWorld_SamplingParam,
     "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VSamplingParam,
 
     # Wan2.1
@@ -116,6 +118,8 @@ SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "hunyuan" in id.lower(),
     "hunyuan15":
     lambda id: "hunyuan15" in id.lower(),
+    "hyworld":
+    lambda id: "hyworld" in id.lower(),
     "wanpipeline":
     lambda id: "wanpipeline" in id.lower(),
     "wanimagetovideo":
@@ -145,6 +149,8 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
     HunyuanSamplingParam,  # Base Hunyuan config as fallback for any Hunyuan variant
     "hunyuan15":
     Hunyuan15_480P_SamplingParam,  # Base Hunyuan15 config as fallback for any Hunyuan15 variant
+    "hyworld":
+    HYWorld_SamplingParam,  # HYWorld-specific config as fallback for any HYWorld variant
     "wanpipeline":
     WanT2V_1_3B_SamplingParam,  # Base Wan config as fallback for any Wan variant
     "wanimagetovideo": WanI2V_14B_480P_SamplingParam,
@@ -163,7 +169,6 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
 
 def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
     """Get the appropriate sampling param for specific pretrained weights."""
-
     # First try exact match for specific weights
     if pipeline_name_or_path in SAMPLING_PARAM_REGISTRY:
         return SAMPLING_PARAM_REGISTRY[pipeline_name_or_path]
