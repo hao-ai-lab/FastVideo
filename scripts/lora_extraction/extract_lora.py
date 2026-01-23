@@ -4,8 +4,8 @@ Usage:
     python scripts/lora_extraction/extract_lora.py \\
         --base <base_model> --ft <fine_tuned_model> --out adapter.safetensors --rank 16
         
-Example with --direct flag for models with architectural differences:
-    python extract_lora.py --direct \\
+Example for models with architectural differences (fallback is automatic):
+    python extract_lora.py \\
         --base Wan-AI/Wan2.1-T2V-1.3B-Diffusers \\
         --ft FastVideo/FastWan2.1-T2V-1.3B-Diffusers \\
         --out fastvideo_adapter.safetensors \\
