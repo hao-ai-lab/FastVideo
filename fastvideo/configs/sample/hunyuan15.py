@@ -23,6 +23,7 @@ class Hunyuan15_480P_SamplingParam(SamplingParam):
     negative_prompt: str = ""
     
     def __post_init__(self):
+        super().__post_init__()
         self.sigmas = list(
             np.linspace(1.0, 0.0, self.num_inference_steps + 1)[:-1]
         )
