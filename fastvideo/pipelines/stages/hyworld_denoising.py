@@ -87,11 +87,11 @@ class HYWorldDenoisingStage(DenoisingStage):
         points_local = (getattr(batch, "points_local", None)
                         or batch.extra.get("points_local", None))
 
-        if viewmats is None or Ks is None:
+        if viewmats is None or Ks is None or action is None:
             raise ValueError(
-                "viewmats and Ks are required for HYWorld denoising. "
-                "Please provide them in batch.extra['viewmats'] and batch.extra['Ks']"
-            )
+                "viewmats, Ks, and action are required for HYWorld denoising. "
+                "Please provide them in batch.extra['viewmats'], batch.extra['Ks'], "
+                "and batch.extra['action']")
 
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
@@ -131,14 +131,6 @@ class HYWorldDenoisingStage(DenoisingStage):
                 image_embeds,
                 "mask_strategy":
                 dict_to_3d_list(None, t_max=50, l_max=60, h_max=24),
-            },
-        )
-
-        action_kwargs = self.prepare_extra_func_kwargs(
-            self.transformer.forward,
-            {
-                "mouse_cond": batch.mouse_cond,
-                "keyboard_cond": batch.keyboard_cond,
             },
         )
 
@@ -261,8 +253,7 @@ class HYWorldDenoisingStage(DenoisingStage):
                     # Prepare viewmats, Ks, action for current chunk
                     viewmats_input = viewmats[:, start_idx:end_idx]
                     Ks_input = Ks[:, start_idx:end_idx]
-                    action_input = (action[:, start_idx:end_idx]
-                                    if action is not None else None)
+                    action_input = action[:, start_idx:end_idx]
 
                     if chunk_i > 0:
                         viewmats_input = torch.cat(
@@ -299,16 +290,12 @@ class HYWorldDenoisingStage(DenoisingStage):
                         # Note: batch size 1 for sequential CFG (matching original HY-WorldPlay)
                         transformer_kwargs = {
                             **image_kwargs,
-                            **action_kwargs,
                             "timestep": t_expand,
                             "timestep_txt": t_expand_txt,
                             "viewmats": viewmats_input.to(target_dtype),
                             "Ks": Ks_input.to(target_dtype),
+                            "action": action_input.to(target_dtype),
                         }
-
-                        if action_input is not None:
-                            transformer_kwargs["action"] = action_input.to(
-                                target_dtype)
 
                         # Set encoder_attention_mask for positive/negative conditioning
                         pos_transformer_kwargs = {
@@ -414,6 +401,8 @@ class HYWorldDenoisingStage(DenoisingStage):
         viewmats = getattr(batch, "viewmats", None) or batch.extra.get(
             "viewmats", None)
         Ks = getattr(batch, "Ks", None) or batch.extra.get("Ks", None)
+        action = getattr(batch, "action", None) or batch.extra.get(
+            "action", None)
 
         if viewmats is None:
             result.add_failure(
@@ -428,6 +417,14 @@ class HYWorldDenoisingStage(DenoisingStage):
                 "Ks", "Ks must be provided in batch.extra['Ks'] or as batch.Ks")
         else:
             result.add_check("Ks", Ks, V.is_tensor)
+
+        if action is None:
+            result.add_failure(
+                "action",
+                "action must be provided in batch.extra['action'] or as batch.action",
+            )
+        else:
+            result.add_check("action", action, V.is_tensor)
 
         result.add_check("num_inference_steps", batch.num_inference_steps,
                          V.positive_int)

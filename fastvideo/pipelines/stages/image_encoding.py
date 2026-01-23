@@ -170,7 +170,8 @@ class HYWorldImageEncodingStage(ImageEncodingStage):
 
         # Get temporal dimension from raw_latent_shape (set by LatentPreparationStage)
         raw_latent_shape = list(batch.raw_latent_shape)
-        target_temporal = raw_latent_shape[2]  # T dimension
+        latent_channels = raw_latent_shape[1]
+        latent_temporal = raw_latent_shape[2]  # T dimension
         latent_height = raw_latent_shape[3]
         latent_width = raw_latent_shape[4]
 
@@ -185,10 +186,10 @@ class HYWorldImageEncodingStage(ImageEncodingStage):
                 torch.zeros(1, num_vision_tokens, vision_dim, device=device)
             ]
             # T2V: create zero latents for image_latent with full temporal dimension
-            # Shape: [B, 33, T, H, W] where 33 = 32 latent channels + 1 mask
+            # Shape: [B, latent_channels + 1 (mask channel), T, H, W]
             batch.image_latent = torch.zeros(1,
-                                             33,
-                                             target_temporal,
+                                             latent_channels + 1,
+                                             latent_temporal,
                                              latent_height,
                                              latent_width,
                                              device=device)
@@ -265,12 +266,8 @@ class HYWorldImageEncodingStage(ImageEncodingStage):
                     transforms.Normalize([0.5], [0.5])
                 ])
                 ref_images_pixel_values = ref_image_transform(image)
-                ref_images_pixel_values = (
-                    ref_images_pixel_values.unsqueeze(0).unsqueeze(2).to(
-                        self.device))
-
-                # torch.save(ref_images_pixel_values, "fastvideo_hyworld_pixel.pt")
-                # exit()
+                ref_images_pixel_values = (ref_images_pixel_values.unsqueeze(
+                    0).unsqueeze(2).to(device))
 
                 # Encode with VAE
                 self.vae = self.vae.to(device)
@@ -284,7 +281,7 @@ class HYWorldImageEncodingStage(ImageEncodingStage):
                 # cond_latents shape: [1, 32, 1, H//compression, W//compression]
                 # Expand to full temporal dimension: [1, 32, T, H, W]
                 # First frame contains the encoded image, rest are zeros
-                expanded_latent = cond_latents.repeat(1, 1, target_temporal, 1,
+                expanded_latent = cond_latents.repeat(1, 1, latent_temporal, 1,
                                                       1)
                 expanded_latent[:, :,
                                 1:, :, :] = 0.0  # Zero out all frames except first
@@ -293,7 +290,7 @@ class HYWorldImageEncodingStage(ImageEncodingStage):
                 # First frame mask = 1 (conditional), rest = 0
                 mask = torch.zeros(1,
                                    1,
-                                   target_temporal,
+                                   latent_temporal,
                                    latent_height,
                                    latent_width,
                                    device=device,
@@ -308,8 +305,8 @@ class HYWorldImageEncodingStage(ImageEncodingStage):
             else:
                 # No VAE available, create zero latents with full temporal dimension
                 batch.image_latent = torch.zeros(1,
-                                                 33,
-                                                 target_temporal,
+                                                 latent_channels + 1,
+                                                 latent_temporal,
                                                  latent_height,
                                                  latent_width,
                                                  device=device)

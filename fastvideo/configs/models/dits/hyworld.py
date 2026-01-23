@@ -186,6 +186,7 @@ class HYWorldArchConfig(DiTArchConfig):
         # Handle patch_size (can be list/tuple or int)
         if isinstance(self.patch_size, list | tuple):
             self.patch_size_t: int = self.patch_size[0]
+            # assume square patch size for height and width
             patch_size_hw: int = self.patch_size[1]
             object.__setattr__(self, 'patch_size', patch_size_hw)
         else:

@@ -14,7 +14,7 @@
 # of rights and permissions under this agreement.
 # See the License for the specific language governing permissions and limitations under the License.
 
-from typing import Any, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -91,10 +91,9 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
         seq_attention_mask: torch.Tensor,
         viewmats: torch.Tensor,
         Ks: torch.Tensor,
-        debug_mode: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Forward pass with optional ProPE camera conditioning.
+        Forward pass with ProPE camera conditioning.
 
         Args:
             img: Image/video tokens
@@ -103,8 +102,8 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
             vec: Modulation vector
             freqs_cis: Rotary embedding frequencies
             seq_attention_mask: Sequence attention mask
-            viewmats: Optional camera view matrices for ProPE [B, T, 4, 4]
-            Ks: Optional camera intrinsics for ProPE [B, T, 3, 3]
+            viewmats: Camera view matrices for ProPE [B, T, 4, 4]
+            Ks: Camera intrinsics for ProPE [B, T, 3, 3]
 
         Returns:
             Tuple of (img, txt) output tokens
@@ -347,18 +346,18 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
         action: torch.Tensor,
         viewmats: torch.Tensor,
         Ks: torch.Tensor,
+        timestep_txt: torch.LongTensor,
         guidance: Optional[torch.Tensor] = None,
         timestep_r: Optional[torch.LongTensor] = None,
         attention_kwargs: Optional[dict[str, Any]] = None,
-        timestep_txt: Optional[torch.LongTensor] = None,
     ):
         """
-        Forward pass with optional action and camera conditioning.
+        Forward pass with action and camera conditioning.
 
         Args:
-            action: Optional action tensor for action conditioning [B, T] or [B*T]
-            viewmats: Optional camera view matrices [B, T, 4, 4]
-            Ks: Optional camera intrinsics [B, T, 3, 3]
+            action: Action tensor for action conditioning [B, T] or [B*T]
+            viewmats: Camera view matrices [B, T, 4, 4]
+            Ks: Camera intrinsics [B, T, 3, 3]
             ... (other args same as parent)
         """
         encoder_hidden_states_image = encoder_hidden_states_image[0]
@@ -382,6 +381,8 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
         )
         freqs_cos = freqs_cos.to(hidden_states.device)
         freqs_sin = freqs_sin.to(hidden_states.device)
+        # NOTE: freqs_cis does NOT need sharding because FastVideo's DistributedAttention
+        # uses all-to-all to gather the full sequence before applying RoPE
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
 
         # 2. Conditional embeddings
@@ -395,7 +396,6 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
         # Broadcast timestep embedding for transformer blocks (one per spatial token)
         # [B*T, C] -> [B, T*H*W, C] -> [B*T*H*W, C]
         temb = repeat(temb, "(B T) C -> B (T H W) C", B=batch_size, H=post_patch_height, W=post_patch_width)
-        temb = rearrange(temb, "B S C -> (B S) C")
 
         hidden_states = self.img_in(hidden_states)
         hidden_states, original_seq_len = sequence_model_parallel_shard(hidden_states, dim=1)
@@ -414,7 +414,6 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
         else:
             seq_attention_mask = None
 
-        # Prepare camera parameters for ProPE if provided
         viewmats_seq = repeat(
             viewmats, "B T M N->B (T H W) M N",
             H=post_patch_height,
@@ -425,6 +424,17 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
             H=post_patch_height,
             W=post_patch_width
         )
+        
+        # Shard viewmats, Ks, and temb for sequence parallelism (shard along sequence dim=1)
+        # Note that temb in HY1.5 does not need sharding because it is per-sample modulation
+        # In HYWorld, temb is per-token modulation.
+        if sp_world_size > 1:
+            viewmats_seq, _ = sequence_model_parallel_shard(viewmats_seq, dim=1)
+            Ks_seq, _ = sequence_model_parallel_shard(Ks_seq, dim=1)
+            temb, _ = sequence_model_parallel_shard(temb, dim=1)
+        
+        # Rearrange temb after sharding to match expected shape
+        temb = rearrange(temb, "B S C -> (B S) C")
 
         # qwen text embedding
         encoder_hidden_states = self.txt_in(encoder_hidden_states, timestep_txt, encoder_attention_mask)
@@ -543,9 +553,16 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
                     Ks=Ks_seq, # hyworld
                 )
 
+
         # Final layer processing (per-token conditioning via HYWorldFinalLayer)
-        hidden_states = sequence_model_parallel_all_gather_with_unpad(hidden_states, original_seq_len, dim=1)
+        # Apply final_layer on sharded data first, then gather
         hidden_states = self.final_layer(hidden_states, temb)
+        
+        # Gather the output from all ranks
+        if get_sp_world_size() > 1:
+            hidden_states = hidden_states.contiguous()
+        hidden_states = sequence_model_parallel_all_gather_with_unpad(hidden_states, original_seq_len, dim=1)
+        
         # Unpatchify to get original shape
         hidden_states = unpatchify(hidden_states, post_patch_num_frames, post_patch_height, post_patch_width, self.patch_size, self.out_channels)
 
