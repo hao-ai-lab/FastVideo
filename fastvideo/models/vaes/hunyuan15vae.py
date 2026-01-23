@@ -660,7 +660,15 @@ class AutoencoderKLHunyuanVideo15(nn.Module, ParallelTiledVAE):
                 upsample_match_channel=config.upsample_match_channel,
             )
 
-        # NOTE: Don't override tiling here; rely on VAE config. Disabling tiling can OOM on large decodes.
+        # When decoding spatially large video latents, the memory requirement is very high. By breaking the video latent
+        # frames spatially into smaller tiles and performing multiple forward passes for decoding, and then blending the
+        # intermediate tiles together, the memory requirement can be lowered.
+        self.use_tiling = False
+
+        # The minimal tile height and width for spatial tiling to be used
+        self.tile_sample_min_height = 256
+        self.tile_sample_min_width = 256
+        self.tile_sample_min_num_frames = 2000 # Fill in a random large number, as hy1.5 vae does not use temporal tiling
 
     def _encode(self, x: torch.Tensor) -> torch.Tensor:
         x = self.encoder(x)
