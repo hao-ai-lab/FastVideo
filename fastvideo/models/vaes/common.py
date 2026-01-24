@@ -79,7 +79,7 @@ class ParallelTiledVAE(ABC):
     def decode(self, z: torch.Tensor) -> torch.Tensor:
         batch_size, num_channels, num_frames, height, width = z.shape
         tile_latent_min_height = self.tile_sample_min_height // self.spatial_compression_ratio
-        tile_latent_min_width = self.tile_sample_stride_width // self.spatial_compression_ratio
+        tile_latent_min_width = self.tile_sample_min_width // self.spatial_compression_ratio
         tile_latent_min_num_frames = self.tile_sample_min_num_frames // self.temporal_compression_ratio
         num_sample_frames = (num_frames -
                              1) * self.temporal_compression_ratio + 1
