@@ -33,6 +33,7 @@ dependencies = [
 
     # Acceleration & Optimization
     "accelerate==1.0.1",
+    "yunchang",
 
     # Computer Vision & Image Processing
     "opencv-python==4.10.0.84",
