@@ -10,8 +10,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VALIDATION_DATASET_FILE="$SCRIPT_DIR/validation.json"
 NUM_GPUS=1
 
-# use GPU 3
-export CUDA_VISIBLE_DEVICES=3
+# use GPU 6
+export CUDA_VISIBLE_DEVICES=6
 
 
 # Training arguments
@@ -23,7 +23,7 @@ training_args=(
   # --train_sp_batch_size 4
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 50
+  --num_latent_t 20
   --num_height 240
   --num_width 416
   --num_frames 33

@@ -6,9 +6,7 @@ import os
 
 
 FIXED_DEBUG_PROMPT = (
-    'A realistic photograph of a fast food drive-thru menu board at dusk, '
-    'featuring a bold and colorful advertisement that reads "Try Our New Burger" '
-    'with an appetizing image of the burger below.'
+    "A detailed, vintage-style alien abduction pamphlet titled Probing FAQs, featuring illustrations of extraterrestrial beings and spacecraft, alongside text explaining common questions and procedures."
 )
 
 

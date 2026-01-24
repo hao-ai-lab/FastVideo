@@ -4,8 +4,8 @@ from copy import deepcopy
 
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
-    FlowUniPCMultistepScheduler)
+from fastvideo.models.schedulers.scheduling_unipc_multistep import (
+    UniPCMultistepScheduler)
 from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
 from fastvideo.training.rl.rl_pipeline import RLPipeline
 from fastvideo.utils import is_vsa_available
@@ -26,8 +26,10 @@ class WanRLTrainingPipeline(RLPipeline):
     ]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        self.modules["scheduler"] = FlowUniPCMultistepScheduler(
-            shift=fastvideo_args.pipeline_config.flow_shift)
+        # self.modules["scheduler"] = UniPCMultistepScheduler.from_pretrained(
+        #     fastvideo_args.model_path, subfolder="scheduler"
+        # )
+        pass
 
     def create_training_stages(self, training_args: TrainingArgs):
         """
@@ -54,8 +56,12 @@ class WanRLTrainingPipeline(RLPipeline):
         vae = self.get_module("vae", None)
         if vae is not None:
             loaded_modules["vae"] = vae
+        # Use UniPCMultistepScheduler for RL sampling to match flow_grpo
+        scheduler = self.get_module("scheduler", None)
+        if scheduler is not None:
+            loaded_modules["scheduler"] = scheduler
 
-        return WanPipeline.from_pretrained(
+        pipeline = WanPipeline.from_pretrained(
             training_args.model_path,
             args=args_copy,  # type: ignore
             inference_mode=True,
@@ -65,6 +71,10 @@ class WanRLTrainingPipeline(RLPipeline):
             num_gpus=training_args.num_gpus,
             pin_cpu_memory=training_args.pin_cpu_memory,
             dit_cpu_offload=dit_cpu_offload)
+        # Override scheduler to use UniPCMultistepScheduler
+        if scheduler is not None:
+            pipeline.modules["scheduler"] = scheduler
+        return pipeline
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing validation pipeline...")

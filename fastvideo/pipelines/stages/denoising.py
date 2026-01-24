@@ -519,57 +519,72 @@ class DenoisingStage(PipelineStage):
                             )
                     # Compute the previous noisy sample
                     prev_latents = latents
-                    latents = self.scheduler.step(noise_pred,
-                                                  t,
-                                                  latents,
-                                                  **extra_step_kwargs,
-                                                  return_dict=False)[0]
-                    if rl_data is not None:
-                        if rl_data.collect_log_probs:
-                            _, log_prob, prev_latents_mean, std_dev_t, _ = sde_step_with_logprob(
-                                self.scheduler,
-                                noise_pred.float(),
-                                t,
-                                prev_latents.float(),
-                                prev_sample=latents.float(),
-                                deterministic=True,
-                                return_dt_and_std_dev_t=True,
+                    prev_latents_mean = None
+                    std_dev_t = None
+                    if rl_data is not None and rl_data.collect_log_probs:
+                        # For RL training, use sde_step_with_logprob to generate latents with random noise
+                        # This matches flow_grpo's implementation where latents come from sde_step_with_logprob
+                        latents, log_prob, prev_latents_mean, std_dev_t, _ = sde_step_with_logprob(
+                            self.scheduler,
+                            noise_pred.float(),
+                            t,
+                            prev_latents.float(),
+                            prev_sample=None,  # None means generate random noise
+                            generator=batch.generator,
+                            deterministic=False,  # Add random noise for RL training
+                            return_dt_and_std_dev_t=True,
+                        )
+                        rl_log_probs.append(log_prob)
+                    else:
+                        # For non-RL inference, use scheduler.step() as before
+                        latents = self.scheduler.step(noise_pred,
+                                                      t,
+                                                      latents,
+                                                      **extra_step_kwargs,
+                                                      return_dict=False)[0]
+                    
+                    # KL computation (runs when RL is enabled and collect_kl is True)
+                    # Note: KL computation requires prev_latents_mean and std_dev_t from log_prob computation
+                    if rl_data is not None and rl_data.collect_kl and rl_data.kl_reward > 0:
+                        if prev_latents_mean is None or std_dev_t is None:
+                            raise ValueError(
+                                "KL computation requires collect_log_probs to be True. "
+                                "prev_latents_mean and std_dev_t must be computed first."
                             )
-                            rl_log_probs.append(log_prob)
-
-                        if rl_data.collect_kl and rl_data.kl_reward > 0:
-                            adapter_ctx = nullcontext()
-                            if hasattr(current_model, "disable_adapter"):
-                                adapter_ctx = current_model.disable_adapter()
-                            with adapter_ctx:
-                                noise_pred_ref = run_transformer(
-                                    current_model, prompt_embeds,
-                                    pos_cond_kwargs, False)
-                                if batch.do_classifier_free_guidance:
-                                    noise_pred_uncond_ref = run_transformer(
-                                        current_model, neg_prompt_embeds,
-                                        neg_cond_kwargs, True)
-                                    noise_pred_text_ref = noise_pred_ref
-                                    noise_pred_ref = noise_pred_uncond_ref + current_guidance_scale * (
-                                        noise_pred_text_ref -
-                                        noise_pred_uncond_ref)
-                            _, _, prev_latents_mean_ref, std_dev_t_ref, _ = sde_step_with_logprob(
-                                self.scheduler,
-                                noise_pred_ref.float(),
-                                t,
-                                prev_latents.float(),
-                                prev_sample=latents.float(),
-                                deterministic=True,
-                                return_dt_and_std_dev_t=True,
-                            )
-                            if not torch.allclose(std_dev_t, std_dev_t_ref):
-                                logger.warning(
-                                    "std_dev_t mismatch in RL KL computation at step %s",
-                                    i)
-                            kl = (prev_latents_mean -
-                                  prev_latents_mean_ref)**2 / (2 * std_dev_t**2)
-                            kl = kl.mean(dim=tuple(range(1, kl.ndim)))
-                            rl_kl.append(kl)
+                        adapter_ctx = nullcontext()
+                        if hasattr(current_model, "disable_adapter"):
+                            adapter_ctx = current_model.disable_adapter()
+                        with adapter_ctx:
+                            noise_pred_ref = run_transformer(
+                                current_model, prompt_embeds,
+                                pos_cond_kwargs, False)
+                            if batch.do_classifier_free_guidance:
+                                noise_pred_uncond_ref = run_transformer(
+                                    current_model, neg_prompt_embeds,
+                                    neg_cond_kwargs, True)
+                                noise_pred_text_ref = noise_pred_ref
+                                noise_pred_ref = noise_pred_uncond_ref + current_guidance_scale * (
+                                    noise_pred_text_ref -
+                                    noise_pred_uncond_ref)
+                        # For KL computation, use the same latents that were generated above
+                        # prev_sample should be the latents from the current policy (with noise)
+                        _, _, prev_latents_mean_ref, std_dev_t_ref, _ = sde_step_with_logprob(
+                            self.scheduler,
+                            noise_pred_ref.float(),
+                            t,
+                            prev_latents.float(),
+                            prev_sample=latents.float(),  # Use latents from current policy
+                            deterministic=False,  # Match the deterministic setting used above
+                            return_dt_and_std_dev_t=True,
+                        )
+                        if not torch.allclose(std_dev_t, std_dev_t_ref):
+                            logger.warning(
+                                "std_dev_t mismatch in RL KL computation at step %s",
+                                i)
+                        kl = (prev_latents_mean -
+                              prev_latents_mean_ref)**2 / (2 * std_dev_t**2)
+                        kl = kl.mean(dim=tuple(range(1, kl.ndim)))
+                        rl_kl.append(kl)
                     if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
                         latents = latents.squeeze(0)
                         latents = (1. - mask2[0]) * z + mask2[0] * latents

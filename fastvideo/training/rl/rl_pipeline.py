@@ -587,22 +587,42 @@ class RLPipeline(TrainingPipeline):
         # Normalize to list
         if isinstance(prompts, str):
             prompts = [prompts]
-        # Get sampling configuration (hardcoded for now, as per plan)
-        # These should come from config later
-        num_inference_steps = self.training_args.num_latent_t  # config.sample.num_steps - hardcoded
-        # Align sampling settings with the (good) validation pipeline defaults.
-        # If `validation_guidance_scale` is set, prefer it for RL sampling too.
-        guidance_scale = float(
-            self.training_args.validation_guidance_scale
-        ) if self.training_args.validation_guidance_scale else float(
-            self.training_args.rl_args.guidance_scale)
-        num_frames = self.training_args.num_frames
+        # Get sampling configuration - align with validation pipeline
+        # Use validation_sampling_steps if available, otherwise fall back to num_latent_t
+        if hasattr(self.training_args, 'validation_sampling_steps') and self.training_args.validation_sampling_steps:
+            validation_steps = self.training_args.validation_sampling_steps.split(",")
+            validation_steps = [int(step) for step in validation_steps if step.strip()]
+            num_inference_steps = validation_steps[0] if validation_steps else self.training_args.num_latent_t
+        else:
+            num_inference_steps = self.training_args.num_latent_t
+        
+        # Use validation_guidance_scale if available (aligns with validation pipeline)
+        if hasattr(self.training_args, 'validation_guidance_scale') and self.training_args.validation_guidance_scale:
+            guidance_scale = float(self.training_args.validation_guidance_scale)
+        else:
+            # Fall back to flow_grpo default for training
+            guidance_scale = 4.5
+        
+        # Compute num_frames using same formula as validation pipeline
+        # This ensures correct video duration (matches validation)
+        temporal_compression_factor = self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        num_frames = (self.training_args.num_latent_t - 1) * temporal_compression_factor + 1
+        
         height = self.training_args.num_height
         width = self.training_args.num_width
         num_videos_per_prompt = 1  # Each prompt in batch generates one video (batch already has repeated prompts if needed)
         sample_time_per_prompt = 1  # config.sample.sample_time_per_prompt - hardcoded
         kl_reward = getattr(self.training_args.rl_args, 'kl_reward', 0.0)
         collect_kl = kl_reward > 0
+        
+        # Debug: Log scheduler configuration
+        scheduler = self.sampling_pipeline.get_module("scheduler")
+        # logger.info(f"RL sampling config (aligned with validation) - num_inference_steps: {num_inference_steps}, guidance_scale: {guidance_scale}, num_frames: {num_frames} (computed from num_latent_t={self.training_args.num_latent_t}, temporal_compression={temporal_compression_factor}), fps: {fps}")
+        if hasattr(scheduler, 'sigmas') and scheduler.sigmas is not None:
+            logger.info(f"Scheduler sigmas (first 5, last 5): {scheduler.sigmas[:5].tolist()} ... {scheduler.sigmas[-5:].tolist()}")
+        
+        # Store fps for use in debug code
+        self._debug_fps = 24
 
         if self.sampling_pipeline is None:
             raise RuntimeError("Sampling pipeline is not initialized")
@@ -612,6 +632,7 @@ class RLPipeline(TrainingPipeline):
         all_log_probs_list = []
         all_kl_list = []
         all_timesteps_list = []
+        all_decoded_videos_list = []  # Store decoded videos from pipeline output (like validation)
         # Placeholder for compatibility with older trajectory collection logic.
         # Kept to avoid NameError if referenced; currently prompt_ids are stored as None.
         all_prompt_ids_list = []
@@ -627,6 +648,7 @@ class RLPipeline(TrainingPipeline):
                 # We keep stochasticity by drawing a fresh seed from the existing
                 # `noise_random_generator` each sampling call.
                 # Align seed with validation when available; fall back to random.
+                # Validation uses self.seed (asserted to be not None), so we should use it too
                 seed = getattr(self, "seed", None)
                 if seed is None:
                     seed = int(
@@ -639,6 +661,13 @@ class RLPipeline(TrainingPipeline):
                         ).item())
                 else:
                     seed = int(seed)
+                
+                # Use validation_random_generator if available (aligns with validation)
+                generator = getattr(self, "validation_random_generator", None)
+                if generator is None:
+                    # Fall back to creating generator from seed (like validation does)
+                    generator = torch.Generator(device="cpu").manual_seed(seed)
+                
                 rl_data = ForwardBatch.RLData(
                     enabled=True,
                     collect_log_probs=True,
@@ -647,8 +676,18 @@ class RLPipeline(TrainingPipeline):
                     store_trajectory=True,
                     keep_trajectory_on_cpu=False,
                 )
+                
+                # Compute n_tokens like validation does
+                # ** Problem is that n_tokens is not used 
+                latents_size = [(num_frames - 1) // 4 + 1,
+                               height // 8, width // 8]
+                n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
+
+                temporal_compression_factor = self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+                num_frames = (self.training_args.num_latent_t - 1) * temporal_compression_factor + 1
+                
                 forward_batch = ForwardBatch(
-                    data_type="rl",
+                    data_type="video",  # Use "video" like validation (not "rl")
                     prompt=prompts,
                     negative_prompt="" if guidance_scale > 1.0 else None,
                     num_frames=num_frames,
@@ -658,6 +697,10 @@ class RLPipeline(TrainingPipeline):
                     guidance_scale=guidance_scale,
                     num_videos_per_prompt=num_videos_per_prompt,
                     seed=seed,
+                    generator=generator,  # Use generator like validation
+                    n_tokens=n_tokens,  # Add n_tokens like validation
+                    eta=0.0,  # Add eta like validation
+                    VSA_sparsity=self.training_args.VSA_sparsity,  # Add VSA_sparsity like validation
                     rl_data=rl_data,
                 )
 
@@ -667,13 +710,22 @@ class RLPipeline(TrainingPipeline):
                                               "inference_mode", None)
                 orig_dit_cpu_offload = getattr(self.training_args,
                                                "dit_cpu_offload", None)
-                if orig_output_type is not None:
-                    self.training_args.output_type = "latent"
+                # Use full pipeline with decoding (like validation) instead of "latent"
+                # This ensures we use the same decoding path as validation
+                if orig_output_type == "latent":
+                    # Set to "pt" to enable decoding (same as validation pipeline)
+                    self.training_args.output_type = "pt"
+                elif orig_output_type is None:
+                    # If not set, explicitly set to "pt" to ensure decoding
+                    self.training_args.output_type = "pt"
+                # If orig_output_type is already "pt" or something else, keep it
                 if orig_inference_mode is not None:
                     self.training_args.inference_mode = True
                 if orig_dit_cpu_offload is not None:
                     # Mirror validation: we run sampling fully on GPU.
                     self.training_args.dit_cpu_offload = False
+                
+                # Run sampling pipeline with full decoding
                 try:
                     output_batch = self.sampling_pipeline.forward(
                         forward_batch, self.training_args)
@@ -699,7 +751,16 @@ class RLPipeline(TrainingPipeline):
                     raise RuntimeError("RL timesteps were not collected")
                 timesteps = timesteps.repeat(latents.shape[0], 1)
 
+                # Extract decoded videos from pipeline output (same as validation pipeline)
+                # output_batch.output contains decoded videos [B, C, T, H, W] if output_type != "latent"
+                decoded_videos = output_batch.output
+                if decoded_videos is None:
+                    raise RuntimeError(
+                        "Decoded videos not found in pipeline output. "
+                        "Make sure output_type is not set to 'latent'.")
+
                 logger.info("latents.shape: %s", latents.shape)
+                logger.info("decoded_videos.shape: %s", decoded_videos.shape)
                 if log_probs is not None:
                     logger.info("log_probs.shape: %s", log_probs.shape)
                 if kl is not None:
@@ -711,6 +772,7 @@ class RLPipeline(TrainingPipeline):
                 if kl is not None:
                     all_kl_list.append(kl)
                 all_timesteps_list.append(timesteps)
+                all_decoded_videos_list.append(decoded_videos)
                 all_prompt_ids_list.append(None)
 
         # Concatenate across sample_time_per_prompt dimension (if sample_time_per_prompt > 1)
@@ -724,6 +786,8 @@ class RLPipeline(TrainingPipeline):
             # Store KL if computed
             training_batch.kl = torch.cat(all_kl_list,
                                           dim=0) if all_kl_list else None
+            # Store decoded videos [B * sample_time_per_prompt, C, T, H, W]
+            decoded_videos = torch.cat(all_decoded_videos_list, dim=0)
             # Store prompt_ids (repeat for each sample)
             training_batch.prompt_ids = None
         else:
@@ -734,6 +798,7 @@ class RLPipeline(TrainingPipeline):
             training_batch.timesteps = all_timesteps_list[0]  # [B, num_steps]
             training_batch.kl = all_kl_list[0] if len(
                 all_kl_list) > 0 and all_kl_list[0] is not None else None
+            decoded_videos = all_decoded_videos_list[0]  # [B, C, T, H, W]
             training_batch.prompt_ids = None
 
         # Store old log probs for importance ratio computation
@@ -743,7 +808,7 @@ class RLPipeline(TrainingPipeline):
         training_batch.prompt_embeds = None
         training_batch.negative_prompt_embeds = None
 
-        # Store prompts in input_kwargs for reward computation
+        # Store prompts and decoded videos in input_kwargs (like validation pipeline pattern)
         if training_batch.input_kwargs is None:
             training_batch.input_kwargs = {}
         # Repeat prompts for each sample if sample_time_per_prompt > 1
@@ -755,57 +820,10 @@ class RLPipeline(TrainingPipeline):
             training_batch.input_kwargs["prompts"] = repeated_prompts
         else:
             training_batch.input_kwargs["prompts"] = prompts
+        # Store decoded videos in input_kwargs (same pattern as validation)
+        training_batch.input_kwargs["decoded_videos"] = decoded_videos
 
-        logger.info(
-            "Trajectory collection complete: batch_size=%d, latents_shape=%s, log_probs_shape=%s",
-            training_batch.latents.shape[0], training_batch.latents.shape,
-            training_batch.log_probs.shape)
-
-        return training_batch
-
-    def compute_rewards(self, training_batch: TrainingBatch) -> TrainingBatch:
-        """
-        Compute rewards by decoding latents to videos and calling reward models.
-        
-        This method implements Step 5 of GRPO training:
-        1. Extracts final latents from the denoising trajectory
-        2. Decodes latents to videos using VAE
-        3. Calls reward models with decoded videos
-        4. Applies KL reward penalty if configured
-        5. Stores reward scores and statistics in TrainingBatch
-        
-        Ported from FlowGRPO's reward computation to work with FastVideo's TrainingBatch.
-        
-        Args:
-            training_batch: Training batch with latents [B, num_steps+1, C, T, H, W]
-        
-        Returns:
-            Updated training_batch with:
-            - reward_scores: Computed rewards [B]
-            - reward_mean: Mean reward
-            - reward_std: Std of rewards
-        """
-        if self.reward_models is None:
-            raise RuntimeError(
-                "Reward models not initialized. Call initialize_training_pipeline first."
-            )
-
-        # Get final latents (after all denoising steps)
-        # training_batch.latents is [B, num_steps+1, C, T, H, W]
-        # We want the final latents at index -1: [B, C, T, H, W]
-        logger.info(
-            f"training_batch.latents.shape: {training_batch.latents.shape}")
-        final_latents = training_batch.latents[:, -1]  # [B, C, T, H, W]
-
-        # Decode latents to videos using the same decoding logic as inference.
-        from fastvideo.pipelines.stages.decoding import DecodingStage
-
-        vae = self.get_module("vae")
-        decoding_stage = DecodingStage(vae=vae)
-        with torch.no_grad():
-            videos = decoding_stage.decode(final_latents, self.training_args)
-
-# myregion debug decoded video
+        # Debug: Save decoded video for visual verification
         from contextlib import nullcontext
         controller = getattr(self, "profiler_controller", None)
         region_cm = (controller.region("my region") if controller is not None
@@ -824,7 +842,7 @@ class RLPipeline(TrainingPipeline):
                 out_path = os.path.join(out_dir, "debug_step0.mp4")
 
                 # videos expected shape: [B, C, T, H, W]
-                vid0 = videos[0].detach().to(torch.float32).cpu()
+                vid0 = decoded_videos[0].detach().to(torch.float32).cpu()
                 # Convert to [T, H, W, C]
                 vid0 = vid0.permute(1, 2, 3, 0).contiguous()
                 vid_np = vid0.numpy()
@@ -836,18 +854,59 @@ class RLPipeline(TrainingPipeline):
                 vid_np = (vid_np * 255.0).round().astype(np.uint8)
 
                 # imageio expects list of frames [H, W, C]
+                # Use fps from SamplingParam like validation does (default 24, same as validation)
+                fps = getattr(self, '_debug_fps', 24)  # Fallback to 24 if not set
                 frames = [vid_np[t] for t in range(vid_np.shape[0])]
-                imageio.mimsave(out_path, frames, fps=8)
-
-                logger.info("Saved debug video to %s", out_path)
+                imageio.mimsave(out_path, frames, fps=fps)
+                logger.info(f"Saved debug video with {vid_np.shape[0]} frames at {fps} fps (duration: {vid_np.shape[0]/fps:.2f}s) to {out_path}")
 
             raise KeyboardInterrupt(
                 "Debug stop after saving decoded video (my region).")
 
+        logger.info(
+            "Trajectory collection complete: batch_size=%d, latents_shape=%s, log_probs_shape=%s, decoded_videos_shape=%s",
+            training_batch.latents.shape[0], training_batch.latents.shape,
+            training_batch.log_probs.shape, decoded_videos.shape)
 
-# endregion
+        return training_batch
 
-# Get prompts for reward computation
+    def compute_rewards(self, training_batch: TrainingBatch) -> TrainingBatch:
+        """
+        Compute rewards using decoded videos from collect_trajectories and calling reward models.
+        
+        This method implements Step 5 of GRPO training:
+        1. Uses decoded videos from collect_trajectories (decoded using full pipeline, same as validation)
+        2. Calls reward models with decoded videos
+        3. Applies KL reward penalty if configured
+        4. Stores reward scores and statistics in TrainingBatch
+        
+        Ported from FlowGRPO's reward computation to work with FastVideo's TrainingBatch.
+        
+        Args:
+            training_batch: Training batch with decoded_videos in input_kwargs from collect_trajectories
+        
+        Returns:
+            Updated training_batch with:
+            - reward_scores: Computed rewards [B]
+            - reward_mean: Mean reward
+            - reward_std: Std of rewards
+        """
+        if self.reward_models is None:
+            raise RuntimeError(
+                "Reward models not initialized. Call initialize_training_pipeline first."
+            )
+
+        # Get decoded videos from input_kwargs (same pattern as validation pipeline)
+        if training_batch.input_kwargs is None or "decoded_videos" not in training_batch.input_kwargs:
+            raise RuntimeError(
+                "Decoded videos not found in training_batch.input_kwargs. "
+                "Make sure collect_trajectories stores decoded videos in input_kwargs."
+            )
+        
+        videos = training_batch.input_kwargs["decoded_videos"]  # [B, C, T, H, W]
+        logger.info(f"Using decoded videos from collect_trajectories: shape={videos.shape}")
+
+        # Get prompts for reward computation
         prompts = training_batch.input_kwargs.get(
             "prompts") if training_batch.input_kwargs else None
         if prompts is None:
