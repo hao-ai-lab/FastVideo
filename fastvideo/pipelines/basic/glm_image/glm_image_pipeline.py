@@ -30,7 +30,7 @@ class GlmImagePipeline(LoRAPipeline, ComposedPipelineBase):
         "processor",  # Processor for AR model
     ]
 
-    _optional_config_modules = []
+    _optional_config_modules: list[str] = []
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs) -> None:
         # Initial shift, will be updated dynamically in BeforeDenoisingStage
