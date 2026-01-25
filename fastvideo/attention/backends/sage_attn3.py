@@ -489,7 +489,7 @@ def sageattn_blackwell_with_triton_bwd(q_BLHD, k_BLHD, v_BLHD, is_causal=False, 
     out_BHLD = _SageAttnBlackwellWithTritonBwd.apply(q_BHLD, k_BHLD, v_BHLD, softmax_scale, softmax_lse, is_causal, per_block_mean, use_global_sf)
     return out_BHLD.permute(0, 2, 1, 3).contiguous()
 
-def qat_attn(q_BLHD, k_BLHD, v_BLHD, is_causal=False, use_global_sf=True):
+def qat_attn(q_BLHD, k_BLHD, v_BLHD, is_causal=False):
     q_BHLD = q_BLHD.permute(0, 2, 1, 3).contiguous()
     k_BHLD = k_BLHD.permute(0, 2, 1, 3).contiguous()
     v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
@@ -503,9 +503,11 @@ def qat_attn(q_BLHD, k_BLHD, v_BLHD, is_causal=False, use_global_sf=True):
     use_high_prec_o = True
     smooth_q = False
     sm_scale = 1.0 / sqrt(q_BHLD.shape[-1])
+    use_global_sf_qkv = False
+    use_global_sf_p = False
     o_BHLD = attention(q_BHLD, k_BHLD, v_BHLD, is_causal, sm_scale,
                        use_qat_qkv_backward, smooth_k, warp_specialize, IS_QAT,
-                       two_level_quant_P, fake_quant_P, use_high_prec_o, smooth_q, use_global_sf)
+                       two_level_quant_P, fake_quant_P, use_high_prec_o, smooth_q, use_global_sf_p, use_global_sf_qkv)
     return o_BHLD.permute(0, 2, 1, 3).contiguous()
 
 
@@ -561,8 +563,8 @@ class SageAttention3Impl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        # output = sageattn_blackwell_with_16bit_bwd(query, key, value, is_causal=self.causal)
+        output = sageattn_blackwell_with_16bit_bwd(query, key, value, is_causal=self.causal)
         # output = sageattn_blackwell_with_triton_bwd(query, key, value, is_causal=self.causal)
         # output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
-        output = qat_attn(query, key, value, is_causal=self.causal)
+        # output = qat_attn(query, key, value, is_causal=self.causal)
         return output

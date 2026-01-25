@@ -64,6 +64,7 @@ void set_params_fprop(Flash_fwd_params &params,
                       int window_size_right,
                       bool per_block_mean,
                       bool is_bf16,
+                      bool single_level_p_quant=false,
                       bool seqlenq_ngroups_swapped=false) {
 
     // Reset the parameters
@@ -180,6 +181,7 @@ void set_params_fprop(Flash_fwd_params &params,
 
     params.is_seqlens_k_cumulative = true;
     params.is_bf16 = is_bf16;
+    params.single_level_p_quant = single_level_p_quant;
     #ifdef FLASHATTENTION_DISABLE_UNEVEN_K
         TORCH_CHECK(d == d_rounded, "This flash attention build does not support headdim not being a multiple of 32.");
     #endif
@@ -214,7 +216,8 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x (head_size
         const float softmax_scale,
         bool is_causal, 
         bool per_block_mean,
-        bool is_bf16
+        bool is_bf16,
+        bool single_level_p_quant=false  // If true, use only per-row scale s_P2 (no per-block s_P1)
     ) {
 
     auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -305,7 +308,8 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x (head_size
                      /*window_size_left=*/-1,
                      /*window_size_right=*/is_causal ? 0 : -1,
                      per_block_mean,
-                     is_bf16
+                     is_bf16,
+                     single_level_p_quant
                     );
     // TODO: 132 sm count?
     auto tile_count_semaphore = is_causal ? torch::full({1}, 132, opts.dtype(torch::kInt32)) : torch::empty({1}, opts.dtype(torch::kInt32));

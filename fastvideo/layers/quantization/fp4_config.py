@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class FP4QuantizeMethod(QuantizeMethodBase):
     def __init__(self):
         super().__init__()
-        self.weight_fp8 = None
+        self.weight_fp4 = None
         self.weight_scale = None
 
     def create_weights(self, layer: torch.nn.Module,
@@ -83,8 +83,8 @@ class FP4Config(QuantizationConfig):
     
     def get_quant_method(self, layer: torch.nn.Module, prefix: str):
         from fastvideo.layers.linear import LinearBase
-        fp8_layers = ["ffn.fc_in", "ffn.fc_out", "to_q", "to_k", "to_v", "to_out"]
-        if isinstance(layer, LinearBase) and any(layer_name in prefix for layer_name in fp8_layers):
+        fp4_layers = ["ffn.fc_in", "ffn.fc_out", "to_q", "to_k", "to_v", "to_out"]
+        if isinstance(layer, LinearBase) and any(layer_name in prefix for layer_name in fp4_layers):
             return FP4QuantizeMethod()
         return None
 

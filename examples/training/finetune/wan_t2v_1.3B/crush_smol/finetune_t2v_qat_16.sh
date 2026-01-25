@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=wan_t2v_14B_finetune_B200
+#SBATCH --job-name=wan_t2v_1.3B_finetune_qat_16
 #SBATCH --partition=all
-#SBATCH --nodes=16
+#SBATCH --nodes=4
 #SBATCH --gres=gpu:4
 #SBATCH --ntasks-per-node=1
-#SBATCH --output=logs/wan_t2v_14B_finetune_B200.out
-#SBATCH --error=logs/wan_t2v_14B_finetune_B200.err
+#SBATCH --output=logs/wan_t2v_1.3B_finetune_qat_16.out
+#SBATCH --error=logs/wan_t2v_1.3B_finetune_qat_16.err
 
 source .venv/bin/activate
 
@@ -17,10 +17,10 @@ export TOKENIZERS_PARALLELISM=false
 
 # export TRITON_PRINT_AUTOTUNING=1  # to print the best config
 export WANDB_API_KEY=2f25ad37933894dbf0966c838c0b8494987f9f2f
-MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"
-DATA_DIR=data/Wan-Syn_77x768x1280_250k
-VALIDATION_DATASET_FILE="examples/training/finetune/wan_t2v_14B/validation.json"
-NUM_GPUS=64
+MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+DATA_DIR=data/Wan-Syn_77x448x832_600k
+VALIDATION_DATASET_FILE="examples/training/finetune/wan_t2v_1.3B/crush_smol/validation.json"
+NUM_GPUS=16
 # export CUDA_VISIBLE_DEVICES=4,5
 
 set -euo pipefail
@@ -35,16 +35,17 @@ export MASTER_ADDR MASTER_PORT
 # Training arguments
 training_args=(
   --tracker_project_name "wan_t2v_finetune_qat"
-  --output_dir "checkpoints/wan_t2v_finetune_14B"
+  --output_dir "checkpoints/wan_t2v_finetune_qat_16"
   --max_train_steps 4000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
   --num_latent_t 20
-  --num_height 768
-  --num_width 1280
+  --num_height 448  
+  --num_width 832
   --num_frames 77
-  --enable_gradient_checkpointing_type "full"
+  --enable_gradient_checkpointing_type "full" # if OOM enable this
+  --generator_4bit_attn True
 )
 
 # Parallel arguments
@@ -52,8 +53,8 @@ parallel_args=(
   --num_gpus $NUM_GPUS 
   --sp_size 1
   --tp_size 1
-  --hsdp_replicate_dim 1
-  --hsdp_shard_dim $NUM_GPUS
+  --hsdp_replicate_dim $NUM_GPUS
+  --hsdp_shard_dim 1
 )
 
 # Model arguments
@@ -64,13 +65,13 @@ model_args=(
 
 # Dataset arguments
 dataset_args=(
-  --data_path $DATA_DIR
+  --data_path "$DATA_DIR"
   --dataloader_num_workers 4
 )
 
 # Validation arguments
 validation_args=(
-  # --log_validation 
+  --log_validation 
   --validation_dataset_file $VALIDATION_DATASET_FILE
   --validation_steps 200
   --validation_sampling_steps "50" 
@@ -81,8 +82,8 @@ validation_args=(
 optimizer_args=(
   --learning_rate 1e-6
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 1000
-  --training_state_checkpointing_steps 1000
+  --weight_only_checkpointing_steps 200
+  --training_state_checkpointing_steps 200
   --weight_decay 0.01
   --max_grad_norm 1.0
 )
@@ -94,7 +95,7 @@ miscellaneous_args=(
   --training_cfg_rate 0.1
   --dit_precision "fp32"
   --ema_start_step 0
-  --flow_shift 5
+  --flow_shift 1
   --seed 1000
 )
 

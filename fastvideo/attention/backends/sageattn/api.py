@@ -86,7 +86,7 @@ def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_
             return x.contiguous()
         return F.pad(x, (0, 0, 0, pad_len), value=0).contiguous()
     
-    k -= k.mean(dim=-2, keepdim=True)  
+    # k -= k.mean(dim=-2, keepdim=True)  
     q, k, v = map(lambda x: pad_to_block_size(x), [q, k, v])
     if per_block_mean and not disable_smoothing_q:
         q, qm = triton_group_mean(q)
@@ -133,13 +133,33 @@ def blockscaled_fp4_attn(qlist: Tuple,
                          KL: int,
                          is_causal: bool = False, 
                          per_block_mean: bool = True,
-                         is_bf16: bool = True
+                         is_bf16: bool = True,
+                         single_level_p_quant: bool = False
                         ):
     softmax_scale = (qlist[0].shape[-1] * 2) ** (-0.5)
-    return fp4attn_cuda.fwd(qlist[0], klist[0], vlist[0], qlist[1], klist[1], vlist[1], delta_s, KL, None, softmax_scale, is_causal, per_block_mean, is_bf16)
+    return fp4attn_cuda.fwd(qlist[0], klist[0], vlist[0], qlist[1], klist[1], vlist[1], delta_s, KL, None, softmax_scale, is_causal, per_block_mean, is_bf16, single_level_p_quant)
 
 
-def sageattn_blackwell(q, k, v, attn_mask = None, is_causal = False, per_block_mean = True, **kwargs):
+def sageattn_blackwell(q, k, v, attn_mask = None, is_causal = False, per_block_mean = True, single_level_p_quant = True, **kwargs):
+    """
+    SageAttention3 Blackwell kernel for FP4 attention.
+    
+    Args:
+        q: Query tensor [B, H, L, D]
+        k: Key tensor [B, H, L, D]
+        v: Value tensor [B, H, L, D]
+        attn_mask: Attention mask (not used)
+        is_causal: Whether to use causal masking
+        per_block_mean: Whether to use per-block mean for Q smoothing
+        single_level_p_quant: If True, use single-level quantization: s_P2, P̂_2 = φ(P̃) directly
+                              (standard per-block FP4 quantization like V, no s_P1).
+                              If False (default), use two-level quantization:
+                              s_P1 = rowmax(P̃)/(448×6), then s_P2, P̂_2 = φ(P̃/s_P1).
+        **kwargs: Additional arguments (ignored)
+    
+    Returns:
+        Output tensor [B, H, L, D]
+    """
     if q.size(-1) >= 256:
         print(f"Unsupported Headdim {q.size(-1)}")
         return sdpa(q, k, v, is_causal = is_causal)
@@ -158,6 +178,7 @@ def sageattn_blackwell(q, k, v, attn_mask = None, is_causal = False, per_block_m
     KL,
     is_causal,
     per_block_mean,
-    is_bf16
+    is_bf16,
+    single_level_p_quant
     )[0][:, :, :QL, :].contiguous()
     return o_fp4

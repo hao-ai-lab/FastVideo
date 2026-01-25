@@ -179,7 +179,8 @@ __global__ void __launch_bounds__(Ktraits::kNWarps * cutlass::NumThreadsPerWarp,
             // Attention output (GEMM-II) accumulator.
             Tensor tOrO = partition_fragment_C(tiled_mma_pv, select<0, 2>(TileShape_MNK{}));
             // flash::Softmax<2 * (2 * kBlockM / NumMmaThreads)> softmax;
-            flash::SoftmaxFused<2 * (2 * kBlockM / NumMmaThreads)> softmax_fused;
+            // Pass single_level_p_quant flag to control P quantization mode
+            flash::SoftmaxFused<2 * (2 * kBlockM / NumMmaThreads)> softmax_fused(params.single_level_p_quant);
             auto block_coord = work_tile_info.get_block_coord(scheduler_params);
             auto [m_block, bidh, bidb] = block_coord;
 

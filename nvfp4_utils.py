@@ -41,9 +41,6 @@ def _compute_quant_and_scale(src_tensor, valid_src_mask, use_global_sf=True, two
     s_dec_b = max_val / 6  # (BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, 1)
     s_dec_b_e4m3 = (s_dec_b * s_enc).to(tl.float8e4nv)  # (BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, 1)
     s_enc_b = 1 / (s_dec_b_e4m3.to(tl.float32) * s_dec)  # (BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, 1)
-    # # Handle 0 case to avoid Inf/NaN.
-    # s_dec_b_f32 = s_dec_b_e4m3.to(tl.float32)
-    # s_enc_b = tl.where(s_dec_b_f32 != 0, s_enc / s_dec_b_f32, 0.0)
 
     f32_tensor = tl.reshape(f32_tensor, [BLOCK_SIZE_OUT_DIM, BLOCK_SIZE_QUANT_MX_SCALE, MXFP_BLOCK_SIZE])
     quant_tensor = f32_tensor * s_enc_b

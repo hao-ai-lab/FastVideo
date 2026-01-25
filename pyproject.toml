@@ -64,7 +64,7 @@ dependencies = [
     "remote-pdb",
 
     # Kernel & Packaging
-    "fastvideo-kernel==0.2.4",
+    "fastvideo-kernel",
     "wheel",
 
     # Training Dependencies
@@ -74,7 +74,6 @@ dependencies = [
     "av",
 
     # Preprocessing Dependencies
-    "torchcodec==0.5.0",
     "ray>=2.49.1",
     "ftfy==6.3.1",
 ]
@@ -91,6 +90,7 @@ torchvision = [
   { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
   { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
 ]
+fastvideo-kernel = { path = "fastvideo-kernel", editable = true }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

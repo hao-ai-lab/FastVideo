@@ -72,3 +72,6 @@ docs/distillation/examples/
 
 dmd_t2v_output/
 preprocess_output_text/
+data2/
+logs/
+FastVideo/

@@ -161,6 +161,7 @@ struct Flash_fwd_params : public Qkv_params {
     bool is_e4m3;
     bool is_causal;
     bool per_block_mean;
+    bool single_level_p_quant;  // If true, use single-level 1x16 block scale quantization for P (like V), instead of two-level quantization
     // If is_seqlens_k_cumulative, then seqlen_k is cu_seqlens_k[bidb + 1] - cu_seqlens_k[bidb].
     // Otherwise it's cu_seqlens_k[bidb], i.e., we use cu_seqlens_k to store the sequence lengths of K.
     bool is_seqlens_k_cumulative;

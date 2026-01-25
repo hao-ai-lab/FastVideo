@@ -17,15 +17,15 @@ NUM_GPUS=1
 # Training arguments
 training_args=(
   --tracker_project_name "wan_t2v_finetune_qat"
-  --output_dir "checkpoints/wan_t2v_finetune_fp4_linear"
+  --output_dir "checkpoints/wan_t2v_finetune_fp4_linear_77"
   --max_train_steps 5000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 12
-  --num_height 480
+  --num_latent_t 20
+  --num_height 448
   --num_width 832
-  --num_frames 45
+  --num_frames 77
   --enable_gradient_checkpointing_type "full"
   --generator_4bit_linear True
 )
