@@ -31,7 +31,7 @@ import filelock
 import imageio
 import numpy as np
 import torch
-import torchvision.utils as make_grid
+from torchvision.utils import make_grid
 import yaml
 from diffusers.loaders.lora_base import (
     _best_guess_weight_name)  # watch out for potetential removal from diffusers
