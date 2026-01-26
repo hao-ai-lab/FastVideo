@@ -50,8 +50,7 @@ class HYWorldArchConfig(DiTArchConfig):
             r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.adaLN_modulation\.1\.(.*)$":
             r"txt_in.refiner_blocks.\1.adaLN_modulation.linear.\2",
 
-            # 2. time_in mappings (HYWorld uses TimestepEmbedder directly,
-            #    but FastVideo model inherits HunyuanVideo15TimeEmbedding with timestep_embedder):
+            # 2. time_in mappings:
             r"^time_in\.mlp\.0\.(.*)$":
             r"time_in.timestep_embedder.mlp.fc_in.\1",
             r"^time_in\.mlp\.2\.(.*)$":

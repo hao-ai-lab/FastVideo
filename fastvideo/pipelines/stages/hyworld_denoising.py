@@ -287,12 +287,9 @@ class HYWorldDenoisingStage(DenoisingStage):
                     latents_concat = torch.concat(
                         [latent_model_input, cond_latents_input], dim=1)
 
-                    # Note: Unlike some other pipelines, HYWorld runs CFG sequentially (two passes)
-                    # rather than batching pos/neg together, following the original implementation
                     latents_concat = self.scheduler.scale_model_input(
                         latents_concat, t)
 
-                    # Keep batch size 1 for sequential CFG
                     t_expand_txt = t.unsqueeze(0)
                     t_expand = timestep_input
                     viewmats_input = viewmats_input.to(device)
@@ -308,7 +305,6 @@ class HYWorldDenoisingStage(DenoisingStage):
                         batch.is_cfg_negative = False
 
                         # Prepare transformer kwargs with HYWorld-specific inputs
-                        # Note: batch size 1 for sequential CFG (matching original HY-WorldPlay)
                         transformer_kwargs = {
                             **image_kwargs,
                             "timestep": t_expand,
