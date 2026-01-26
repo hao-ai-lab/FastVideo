@@ -430,7 +430,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             noisy_input_latent, timestep,
                             training_batch.conditional_dict, training_batch)
 
-                        pred_flow, kv_cache1 = current_model(
+                        model_output = current_model(
                             txt_inference=False,
                             vision_inference=True,
                             hidden_states=training_batch_temp.
@@ -449,6 +449,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             current_start=current_start_frame *
                             self.frame_seq_length,
                             rope_start_idx=current_start_frame)
+                        if isinstance(model_output, tuple):
+                            pred_flow, kv_cache1 = model_output
+                        else:
+                            pred_flow = model_output
                         pred_flow = pred_flow.permute(0, 2, 1, 3, 4)
 
                         denoised_pred = pred_noise_to_pred_video(
@@ -482,7 +486,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                 noisy_input_latent, timestep,
                                 training_batch.conditional_dict, training_batch)
 
-                            pred_flow, kv_cache1 = current_model(
+                            model_output = current_model(
                                 txt_inference=False,
                                 vision_inference=True,
                                 hidden_states=training_batch_temp.
@@ -501,13 +505,17 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                 current_start=current_start_frame *
                                 self.frame_seq_length,
                                 rope_start_idx=current_start_frame)
+                            if isinstance(model_output, tuple):
+                                pred_flow, kv_cache1 = model_output
+                            else:
+                                pred_flow = model_output
                             pred_flow = pred_flow.permute(0, 2, 1, 3, 4)
                     else:
                         training_batch_temp = self._build_distill_input_kwargs(
                             noisy_input_latent, timestep,
                             training_batch.conditional_dict, training_batch)
 
-                        pred_flow, kv_cache1 = current_model(
+                        model_output = current_model(
                             txt_inference=False,
                             vision_inference=True,
                             hidden_states=training_batch_temp.
@@ -526,6 +534,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             current_start=current_start_frame *
                             self.frame_seq_length,
                             rope_start_idx=current_start_frame)
+                        if isinstance(model_output, tuple):
+                            pred_flow, kv_cache1 = model_output
+                        else:
+                            pred_flow = model_output
                         pred_flow = pred_flow.permute(0, 2, 1, 3, 4)
 
                     denoised_pred = pred_noise_to_pred_video(
@@ -564,7 +576,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
                 # context_timestep is 0 so we use transformer_2
                 current_model = self.transformer_2 if self.transformer_2 is not None else self.transformer
-                _, kv_cache1 = current_model(
+                model_output = current_model(
                     txt_inference=False,
                     vision_inference=True,
                     hidden_states=training_batch_temp.
@@ -581,6 +593,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     # crossattn_cache=crossattn_cache,
                     current_start=current_start_frame * self.frame_seq_length,
                     rope_start_idx=current_start_frame)
+                if isinstance(model_output, tuple):
+                    _, kv_cache1 = model_output
 
             # Step 3.4: update the start and end frame indices
             current_start_frame += current_num_frames
