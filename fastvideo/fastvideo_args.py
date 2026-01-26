@@ -1376,14 +1376,12 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             default=TrainingArgs.context_noise,
                             help="Context noise level for cache updates")
-        parser.add_argument(
-            "--use-context-forcing",
-            action=StoreBoolean,
-            help="Whether to use context forcing")
-        parser.add_argument(
-            "--use-ode-init",
-            action=StoreBoolean,
-            help="Whether to use ODE init")
+        parser.add_argument("--use-context-forcing",
+                            action=StoreBoolean,
+                            help="Whether to use context forcing")
+        parser.add_argument("--use-ode-init",
+                            action=StoreBoolean,
+                            help="Whether to use ODE init")
 
         return parser
 

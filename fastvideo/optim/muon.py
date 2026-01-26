@@ -2,19 +2,14 @@ import math
 import torch
 try:
     from torch.distributed.tensor import DTensor
-    from torch.distributed.tensor.placement_types import (
-        Partial,
-        Placement,
-        Replicate,
-        Shard,
-    )
 except ImportError:
     # handle old pytorch versions
     Dtensor = None
 
+
 # This code is modified from the GitHub repository of KellerJordan:
 # https://github.com/KellerJordan/Muon/blob/master/muon.py
-def zeropower_via_newtonschulz5(G, steps = 5):
+def zeropower_via_newtonschulz5(G, steps=5):
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
     quintic iteration whose coefficients are selected to maximize the slope at zero. For the purpose
@@ -29,7 +24,7 @@ def zeropower_via_newtonschulz5(G, steps = 5):
         G = G.full_tensor()
     else:
         device_mesh = None
-        
+
     assert len(G.shape) >= 2
     a, b, c = (3.4445, -4.7750, 2.0315)
     X = G
@@ -45,11 +40,12 @@ def zeropower_via_newtonschulz5(G, steps = 5):
 
     if G.size(-2) > G.size(-1):
         X = X.mT
-    
-    if device_mesh != None:
-        return DTensor.from_local(X, device_mesh) 
+
+    if device_mesh is not None:
+        return DTensor.from_local(X, device_mesh)
     else:
         return X
+
 
 class Muon(torch.optim.Optimizer):
     """
@@ -70,16 +66,16 @@ class Muon(torch.optim.Optimizer):
     """
 
     def __init__(
-        self,
-        lr=1e-3,
-        wd=0.1,
-        muon_params=None,
-        momentum=0.95,
-        nesterov=True,
-        ns_steps=5,
-        adamw_params=None,
-        adamw_betas=(0.95, 0.95),
-        adamw_eps=1e-8,
+            self,
+            lr=1e-3,
+            wd=0.1,
+            muon_params=None,
+            momentum=0.95,
+            nesterov=True,
+            ns_steps=5,
+            adamw_params=None,
+            adamw_betas=(0.95, 0.95),
+            adamw_eps=1e-8,
     ):
 
         defaults = dict(
@@ -153,10 +149,7 @@ class Muon(torch.optim.Optimizer):
                     state["momentum_buffer"] = torch.zeros_like(g)
                 buf = state["momentum_buffer"]
                 buf.mul_(momentum).add_(g)
-                if group["nesterov"]:
-                    g = g.add(buf, alpha=momentum)
-                else:
-                    g = buf
+                g = g.add(buf, alpha=momentum) if group["nesterov"] else buf
                 g = g.bfloat16()
                 u = zeropower_via_newtonschulz5(g, steps=group["ns_steps"])
 
@@ -173,7 +166,9 @@ class Muon(torch.optim.Optimizer):
             #       AdamW backup       #
             ############################
 
-            params = [p for p in group["params"] if not self.state[p]["use_muon"]]
+            params = [
+                p for p in group["params"] if not self.state[p]["use_muon"]
+            ]
             lr = group['lr']
             beta1, beta2 = group["adamw_betas"]
             eps = group["adamw_eps"]
@@ -205,16 +200,20 @@ class Muon(torch.optim.Optimizer):
 
         return loss
 
+
 # help function to create the Muon optimizer
-def get_muon_optimizer(model, lr=1e-3,  weight_decay=0.1, momentum=0.95, adamw_betas=(0.95, 0.95), adamw_eps=1e-8):
+def get_muon_optimizer(model,
+                       lr=1e-3,
+                       weight_decay=0.1,
+                       momentum=0.95,
+                       adamw_betas=(0.95, 0.95),
+                       adamw_eps=1e-8):
     muon_params = [
-        p
-        for name, p in model.named_parameters()
-        if p.requires_grad and p.ndim >= 2 
+        p for name, p in model.named_parameters()
+        if p.requires_grad and p.ndim >= 2
     ]
     adamw_params = [
-        p
-        for name, p in model.named_parameters()
+        p for name, p in model.named_parameters()
         if p.requires_grad and not (p.ndim >= 2)
     ]
 

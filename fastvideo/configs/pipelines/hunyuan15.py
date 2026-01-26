@@ -130,9 +130,11 @@ class Hunyuan15T2V480PConfig(PipelineConfig):
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
 
+
 @dataclass
 class Hunyuan15DistilledI2V480PConfig(Hunyuan15T2V480PConfig):
     flow_shift: int = 7
+
 
 @dataclass
 class Hunyuan15T2V720PConfig(Hunyuan15T2V480PConfig):
@@ -140,6 +142,7 @@ class Hunyuan15T2V720PConfig(Hunyuan15T2V480PConfig):
 
     # HunyuanConfig-specific parameters with defaults
     flow_shift: int = 9
+
 
 @dataclass
 class SelfForcingHunyuan15T2V480PConfig(Hunyuan15T2V480PConfig):

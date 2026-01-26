@@ -14,7 +14,6 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torchvision
-from diffusers import FlowMatchEulerDiscreteScheduler
 from einops import rearrange
 from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -130,8 +129,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
         params_to_optimize = list(
             filter(lambda p: p.requires_grad, params_to_optimize))
         # Parse betas from string format "beta1,beta2"
-        betas_str = training_args.betas
-        betas = tuple(float(x.strip()) for x in betas_str.split(","))
+        # betas_str = training_args.betas
+        # betas = tuple(float(x.strip()) for x in betas_str.split(","))
 
         # self.optimizer = torch.optim.AdamW(
         #     params_to_optimize,
@@ -206,8 +205,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 text_padding_length=training_args.pipeline_config.
                 text_encoder_configs[0].arch_config.
                 text_len,  # type: ignore[attr-defined]
-                seed=self.seed
-            )
+                seed=self.seed)
 
         self.noise_scheduler = noise_scheduler
         if self.training_args.boundary_ratio is not None:
@@ -598,13 +596,15 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 round(num_trainable_params / 1e9, 3))
 
         # Set random seeds for deterministic training
-        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
-            self.seed)
+        self.noise_random_generator = torch.Generator(
+            device="cpu").manual_seed(self.seed + self.global_rank)
         self.noise_gen_cuda = torch.Generator(
-            device=current_platform.device_name).manual_seed(self.seed)
+            device=current_platform.device_name).manual_seed(self.seed +
+                                                             self.global_rank)
         self.validation_random_generator = torch.Generator(
-            device="cpu").manual_seed(self.seed)
-        logger.info("Initialized random seeds with seed: %s", self.seed)
+            device="cpu").manual_seed(self.seed + self.global_rank)
+        logger.info("Initialized random seeds with seed: %s",
+                    self.seed + self.global_rank)
 
         # self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
@@ -701,8 +701,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 self.sp_group.barrier()
 
             if self.training_args.log_visualization and step % self.training_args.visualization_steps == 0:
-                self.visualize_intermediate_latents(training_batch, self.training_args, step)
-                
+                self.visualize_intermediate_latents(training_batch,
+                                                    self.training_args, step)
+
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 with self.profiler_controller.region(
                         "profiler_region_training_validation"):

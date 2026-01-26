@@ -28,8 +28,6 @@ from fastvideo.distributed import (cleanup_dist_env_and_memory,
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
-    FlowMatchEulerDiscreteScheduler)
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines import (ComposedPipelineBase, ForwardBatch,
                                  TrainingBatch)
@@ -148,7 +146,9 @@ class DistillationPipeline(TrainingPipeline):
 
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
         # self.noise_scheduler.set_timesteps(sigmas=list(np.linspace(1.0, 0.0, 50 + 1)[:-1]), device=get_local_torch_device())
-        self.noise_scheduler.set_timesteps(num_inference_steps=1000, extra_one_step=True, device=get_local_torch_device())
+        self.noise_scheduler.set_timesteps(num_inference_steps=1000,
+                                           extra_one_step=True,
+                                           device=get_local_torch_device())
 
         if self.training_args.boundary_ratio is not None:
             self.boundary_timestep = self.training_args.boundary_ratio * self.noise_scheduler.num_train_timesteps
@@ -731,7 +731,8 @@ class DistillationPipeline(TrainingPipeline):
                     noisy_latent_copy,
                     training_batch.video_latent,
                     torch.zeros_like(noisy_latent_copy),
-                ], dim=2)
+                ],
+                                              dim=2)
             # fake_score_transformer forward
             training_batch = self._build_distill_input_kwargs(
                 noisy_latent_copy, timestep, training_batch.conditional_dict,
@@ -792,7 +793,8 @@ class DistillationPipeline(TrainingPipeline):
             context_forcing_length = training_batch.trajectory_latents.shape[1]
             dmd_loss = 0.5 * F.mse_loss(
                 original_latent.float()[:, context_forcing_length:],
-                (original_latent.float()[:, context_forcing_length:] - grad.float()[:, context_forcing_length:]).detach())
+                (original_latent.float()[:, context_forcing_length:] -
+                 grad.float()[:, context_forcing_length:]).detach())
         else:
             dmd_loss = 0.5 * F.mse_loss(
                 original_latent.float(),
@@ -856,7 +858,8 @@ class DistillationPipeline(TrainingPipeline):
                 noisy_generator_pred_video,
                 training_batch.video_latent,
                 torch.zeros_like(noisy_generator_pred_video),
-            ], dim=2)
+            ],
+                                                   dim=2)
 
         with set_forward_context(current_timestep=training_batch.timesteps,
                                  attn_metadata=training_batch.attn_metadata):
@@ -926,11 +929,18 @@ class DistillationPipeline(TrainingPipeline):
 
         self.video_latent_shape_sp = training_batch.latents.shape
         training_batch.image_embeds = [
-            torch.zeros(1, 729, 1152, device=get_local_torch_device(), dtype=torch.bfloat16)
+            torch.zeros(1,
+                        729,
+                        1152,
+                        device=get_local_torch_device(),
+                        dtype=torch.bfloat16)
         ]
         raw_latent_shape = list(self.video_latent_shape)
         raw_latent_shape[2] = 1
-        training_batch.video_latent = torch.zeros(tuple(raw_latent_shape), device=get_local_torch_device(), dtype=torch.bfloat16)
+        training_batch.video_latent = torch.zeros(
+            tuple(raw_latent_shape),
+            device=get_local_torch_device(),
+            dtype=torch.bfloat16)
         return training_batch
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:

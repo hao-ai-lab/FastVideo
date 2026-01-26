@@ -21,7 +21,11 @@ class Hy15SelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
     with DMD for video generation.
     """
     _required_config_modules = [
-        "text_encoder", "text_encoder_2", "tokenizer", "tokenizer_2", "vae",
+        "text_encoder",
+        "text_encoder_2",
+        "tokenizer",
+        "tokenizer_2",
+        "vae",
         "scheduler",
         "transformer",
         "vae",
