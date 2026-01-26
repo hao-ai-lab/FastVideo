@@ -143,10 +143,10 @@ class Hunyuan15T2V720PConfig(Hunyuan15T2V480PConfig):
 
 @dataclass
 class SelfForcingHunyuan15T2V480PConfig(Hunyuan15T2V480PConfig):
-    flow_shift: int = 7
+    flow_shift: int = 5
     is_causal: bool = True
     # dmd_denoising_steps: list[int] | None = field(
-    #     default_factory=lambda: [1000, 760, 520, 280])
+    #     default_factory=lambda: [1000, 750, 500, 250])
     dmd_denoising_steps: list[int] | None = field(
         default_factory=lambda: [1000, 875, 750, 625, 500, 375, 250, 125])
     warp_denoising_step: bool = True

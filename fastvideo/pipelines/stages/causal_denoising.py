@@ -52,7 +52,7 @@ class CausalDMDDenosingStage(DenoisingStage):
         self.sliding_window_num_frames = self.transformer.config.sliding_window_num_frames
 
         try:
-            self.local_attn_size = getattr(self.transformer.model,
+            self.local_attn_size = getattr(self.transformer.config,
                                            "local_attn_size",
                                            -1)  # type: ignore
         except Exception:
@@ -364,7 +364,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                             (latent_model_input.shape[0], current_num_frames),
                             device=latent_model_input.device,
                             dtype=torch.long)
-                        pred_noise_btchw = current_model(
+                        pred_noise_btchw, kv_cache1 = current_model(
                             hidden_states=latent_model_input,
                             timestep=t_expanded_noise,
                             kv_cache=_get_kv_cache(t_cur),
@@ -374,7 +374,8 @@ class CausalDMDDenosingStage(DenoisingStage):
                             self.frame_seq_length,
                             rope_start_idx=start_index,
                             **vision_input_kwargs,
-                        ).permute(0, 2, 1, 3, 4)
+                        )
+                        pred_noise_btchw = pred_noise_btchw.permute(0, 2, 1, 3, 4)
 
                     # Convert pred noise to pred video with FM Euler scheduler utilities
                     # if i < len(timesteps) - 1:
@@ -489,7 +490,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                             **vision_input_kwargs,
                         )
 
-                    self.transformer(
+                    _, kv_cache1 = self.transformer(
                         hidden_states=context_bcthw,
                         timestep=t_context,
                         kv_cache=kv_cache1,
