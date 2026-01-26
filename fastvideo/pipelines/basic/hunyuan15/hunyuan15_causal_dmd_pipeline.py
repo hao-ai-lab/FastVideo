@@ -11,7 +11,7 @@ from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 
 # isort: off
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
-                                        CausalDMDDenosingStage,
+                                        Hy15CausalDMDDenosingStage,
                                         InputValidationStage,
                                         Hy15ImageEncodingStage,
                                         LatentPreparationStage,
@@ -49,10 +49,6 @@ class Hy15CausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         self.add_stage(stage_name="conditioning_stage",
                        stage=ConditioningStage())
 
-        # self.add_stage(stage_name="timestep_preparation_stage",
-        #                stage=TimestepPreparationStage(
-        #                    scheduler=self.get_module("scheduler")))
-
         self.add_stage(stage_name="latent_preparation_stage",
                        stage=LatentPreparationStage(
                            scheduler=self.get_module("scheduler"),
@@ -63,7 +59,7 @@ class Hy15CausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
                                                     image_processor=None))
 
         self.add_stage(stage_name="denoising_stage",
-                       stage=CausalDMDDenosingStage(
+                       stage=Hy15CausalDMDDenosingStage(
                            transformer=self.get_module("transformer"),
                            scheduler=self.get_module("scheduler"),
                            vae=self.get_module("vae")))
