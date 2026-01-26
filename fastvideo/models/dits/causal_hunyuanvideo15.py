@@ -56,25 +56,6 @@ from fastvideo.models.dits.hunyuanvideo15 import (
 
 logger = init_logger(__name__)
 
-class CacheAppend(torch.autograd.Function):
-    """
-    KV cache with shape [batch, seq_len, heads, head_dim].
-    """
-    @staticmethod
-    def forward(ctx, storage, active_cache, x, start, end):
-        # Ensure storage has the same dtype as x
-        storage.data[:, start:end] = x
-        ctx.save_for_backward(storage.to(x.dtype))
-        ctx.start = start
-        ctx.end = end
-        return storage[:, :end].to(x.dtype) # Ensure returned value has same dtype as input
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        start = ctx.start
-        end = ctx.end
-        return None, grad_output[:, :start], grad_output[:, start:end], None, None
-
 class MMDoubleStreamBlock(nn.Module):
     """
     A multimodal DiT block with separate modulation for text and image/video,
@@ -86,6 +67,8 @@ class MMDoubleStreamBlock(nn.Module):
         hidden_size: int,
         num_attention_heads: int,
         mlp_ratio: float,
+        local_attn_size: int = -1,
+        sink_size: int = 0,
         dtype: torch.dtype | None = None,
         supported_attention_backends: tuple[AttentionBackendEnum, ...]
         | None = None,
@@ -96,6 +79,8 @@ class MMDoubleStreamBlock(nn.Module):
         self.deterministic = False
         self.num_attention_heads = num_attention_heads
         self.head_dim = hidden_size // num_attention_heads
+        self.local_attn_size = local_attn_size
+        self.sink_size = sink_size
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
 
         # Image modulation components
@@ -179,9 +164,7 @@ class MMDoubleStreamBlock(nn.Module):
 
         self.txt_mlp = MLP(hidden_size, mlp_hidden_dim, bias=True, dtype=dtype)
 
-        self.max_attention_size = 31 * 1590
-        self.k_cache = None
-        self.v_cache = None
+        self.max_attention_size = 21 * 1590 if local_attn_size == -1 else local_attn_size * 1590
 
         self.attn = LocalAttention(
             num_heads=self.num_attention_heads,
@@ -252,17 +235,6 @@ class MMDoubleStreamBlock(nn.Module):
         txt_kv_cache: list | None = None,
         current_start: int = 0,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        if kv_cache is not None:
-            # Then we are in autoregressive mode without block-wise attention mask
-            if self.k_cache is None:
-                del self.k_cache
-                self.register_buffer("k_cache", torch.empty(1, self.max_attention_size, self.num_attention_heads, self.head_dim, device=img.device, dtype=img.dtype), persistent=False)
-                self.k_cache.requires_grad_(True)
-            if self.v_cache is None:
-                del self.v_cache
-                self.register_buffer("v_cache", torch.empty(1, self.max_attention_size, self.num_attention_heads, self.head_dim, device=img.device, dtype=img.dtype), persistent=False)
-                self.v_cache.requires_grad_(True)
-
         # Process modulation vectors
         if vec.dim() == 3:
             img_mod_outputs = self.img_mod(vec).unflatten(dim=-1, sizes=(6, -1))
@@ -342,25 +314,54 @@ class MMDoubleStreamBlock(nn.Module):
             )[:, :, :-padded_length].transpose(2, 1)
 
             assert img_attn.shape[1] == image_seq_len
+            updated_kv_cache = None
         else:
             current_end = current_start + img_q.shape[1]
             num_new_tokens = img_q.shape[1]
-            assert kv_cache["local_end_index"].item() == kv_cache["global_end_index"].item(), "local_end_index and global_end_index must be the same"
-            # Assign new keys/values directly up to current_end
-            local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
-            local_start_index = local_end_index - num_new_tokens
-            img_local_k = CacheAppend.apply(self.k_cache, kv_cache["k"], img_k, local_start_index, local_end_index)
-            img_local_v = CacheAppend.apply(self.v_cache, kv_cache["v"], img_v, local_start_index, local_end_index)
+            sink_tokens = self.sink_size * 1590
+            # If we are using local attention and the current KV cache size is larger than the local attention size, we need to truncate the KV cache
+            kv_cache_size = self.max_attention_size
+            
+            # Clone cache to avoid in-place modification during gradient checkpointing
+            k_cache = kv_cache["k"].clone()
+            v_cache = kv_cache["v"].clone()
+            
+            if self.local_attn_size != -1 and (current_end > kv_cache["global_end_index"].item()) and (
+                    num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size):
+                # Calculate the number of new tokens added in this step
+                # Shift existing cache content left to discard oldest tokens
+                # Clone the source slice to avoid overlapping memory error
+                num_evicted_tokens = num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
+                num_rolled_tokens = kv_cache_size - num_new_tokens - sink_tokens
+                k_cache[:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+                    k_cache[:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+                v_cache[:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+                    v_cache[:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+                # Insert the new keys/values at the end
+                local_end_index = kv_cache["local_end_index"].item() + current_end - \
+                    kv_cache["global_end_index"].item() - num_evicted_tokens
+                local_start_index = local_end_index - num_new_tokens
+                assert local_end_index == self.max_attention_size
+            else:
+                # Assign new keys/values directly up to current_end
+                local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
+                local_start_index = local_end_index - num_new_tokens
 
+            assert local_start_index >= 0
             q = img_q
-            k = torch.cat([img_local_k, txt_kv_cache["k_txt"]], dim=1)
-            v = torch.cat([img_local_v, txt_kv_cache["v_txt"]], dim=1)
+            k = torch.cat([k_cache[:, :local_start_index], img_k, txt_kv_cache["k_txt"]], dim=1)
+            v = torch.cat([v_cache[:, :local_start_index], img_v, txt_kv_cache["v_txt"]], dim=1)
             img_attn = self.attn(q, k, v)
 
-            kv_cache["k"] = img_local_k
-            kv_cache["v"] = img_local_v
-            kv_cache["global_end_index"].fill_(current_end)
-            kv_cache["local_end_index"].fill_(local_end_index)
+            k_cache[:, local_start_index:local_end_index] = img_k
+            v_cache[:, local_start_index:local_end_index] = img_v
+            
+            updated_kv_cache = {
+                "k": k_cache,
+                "v": v_cache,
+                "global_end_index": torch.tensor([current_end], dtype=torch.long, device=k_cache.device),
+                "local_end_index": torch.tensor([local_end_index], dtype=torch.long, device=k_cache.device)
+            }
         
         img_attn_out, _ = self.img_attn_proj(
             img_attn.view(batch_size, image_seq_len, -1))
@@ -372,7 +373,7 @@ class MMDoubleStreamBlock(nn.Module):
         img_mlp_out = self.img_mlp(img_mlp_input)
         img = self.img_mlp_residual(img_residual, img_mlp_out, img_mlp_gate)
 
-        return img
+        return img, updated_kv_cache
 
     def forward(
         self,
@@ -444,6 +445,8 @@ class CausalHunyuanVideo15Transformer3DModel(CachableDiT):
                     hidden_size=self.hidden_size,
                     num_attention_heads=config.num_attention_heads,
                     mlp_ratio=config.mlp_ratio,
+                    local_attn_size=config.local_attn_size,
+                    sink_size=config.sink_size,
                     dtype=None,
                     supported_attention_backends=self._supported_attention_backends,
                     prefix=f"{config.prefix}.double_blocks.{i}"
@@ -751,7 +754,7 @@ class CausalHunyuanVideo15Transformer3DModel(CachableDiT):
         # 4. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for block_index, block in enumerate(self.double_blocks):
-                hidden_states = self._gradient_checkpointing_func(
+                hidden_states, new_cache = self._gradient_checkpointing_func(
                     block,
                     txt_inference=False,
                     vision_inference=True,
@@ -763,10 +766,13 @@ class CausalHunyuanVideo15Transformer3DModel(CachableDiT):
                     txt_kv_cache=txt_kv_cache[block_index],
                     current_start=current_start
                 )
+                if new_cache is not None and kv_cache is not None:
+                    for k in new_cache.keys():
+                        kv_cache[block_index][k] = new_cache[k].clone()
 
         else:
             for block_index, block in enumerate(self.double_blocks):
-                hidden_states = block(
+                hidden_states, new_cache = block(
                     txt_inference=False,
                     vision_inference=True,
                     img=hidden_states,
@@ -777,13 +783,16 @@ class CausalHunyuanVideo15Transformer3DModel(CachableDiT):
                     txt_kv_cache=txt_kv_cache[block_index],
                     current_start=current_start
                 )
+                if new_cache is not None and kv_cache is not None:
+                    for k in new_cache.keys():
+                        kv_cache[block_index][k] = new_cache[k].clone()
 
         # Final layer processing
         hidden_states = self.final_layer(hidden_states, temb)
         # Unpatchify to get original shape
         hidden_states = unpatchify(hidden_states, post_patch_num_frames, post_patch_height, post_patch_width, self.patch_size, self.out_channels)
 
-        return hidden_states
+        return hidden_states, kv_cache
 
     def forward(
         self,

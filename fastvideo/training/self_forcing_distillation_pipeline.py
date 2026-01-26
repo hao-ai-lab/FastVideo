@@ -150,24 +150,54 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         return flow_matching_loss, log_dict
 
-    def _prepare_gt_inputs(self, training_batch: TrainingBatch) -> TrainingBatch:
+    def _prepare_context_forcing_inputs(self, training_batch: TrainingBatch) -> TrainingBatch:
         trajectory_latents = training_batch.trajectory_latents
 
-        assert trajectory_latents.shape[1] == len(self.denoising_step_list) + 1
-        
-        # start_timestep_index = torch.randint(0, len(self.denoising_step_list), (1, ), device=self.device)
-        # if dist.is_initialized():
-        #     dist.broadcast(start_timestep_index, src=0)
-        # start_timestep_index = start_timestep_index.cpu().item()
-        training_batch.trajectory_latents = trajectory_latents[:, :, :21]
-        # _cached_closest_idx_per_dmd = torch.tensor(
-        #     [0, 12, 24, 36, 50], dtype=torch.long).cpu()
-        # training_batch.trajectory_latents = torch.index_select(
-        #     trajectory_latents,
-        #     dim=1,
-        #     index=_cached_closest_idx_per_dmd.to(trajectory_latents.device))
+        total_num_chunks = self.training_args.num_latent_t // self.num_frame_per_block
+        # Gradually increase maximum number of chunks
+        # Increase max_num_chunks by 1 every 100 training steps until it reaches total_num_chunks
+        max_num_chunks = min(total_num_chunks, self.current_trainstep // 100 + 2)
+        context_forcing_length = torch.randint(0, max_num_chunks, (1, ), device=get_local_torch_device()) * self.num_frame_per_block
+        # broadcast context_forcing_length to all ranks
+        if dist.is_initialized():
+            dist.broadcast(context_forcing_length, src=0)
+        context_forcing_length = context_forcing_length.cpu().item()
+        assert context_forcing_length < self.training_args.num_latent_t, "Context forcing length is greater than the number of latent frames"
+        if context_forcing_length > 0:
+            training_batch.trajectory_latents = trajectory_latents[:, -1, :context_forcing_length]
+        else:
+            training_batch.trajectory_latents = None
         del trajectory_latents
-        # training_batch.start_timestep_index = start_timestep_index
+        return training_batch
+
+    def _prepare_ode_init_inputs(self, training_batch: TrainingBatch) -> TrainingBatch:
+        trajectory_latents = training_batch.trajectory_latents
+
+        trajectory_latents = trajectory_latents[:, :, :21]
+        _cached_closest_idx_per_dmd = torch.tensor(
+            [0, 12, 24, 36, 50], dtype=torch.long).cpu()
+        training_batch.trajectory_latents = torch.index_select(
+            trajectory_latents,
+            dim=1,
+            index=_cached_closest_idx_per_dmd.to(trajectory_latents.device))
+        del trajectory_latents
+        return training_batch
+
+    def _prepare_gt_inputs(self, training_batch: TrainingBatch) -> TrainingBatch:
+        trajectory_latents = training_batch.trajectory_latents
+        
+        start_timestep_index = torch.randint(1, len(self.denoising_step_list), (1, ), device=self.device)
+        if dist.is_initialized():
+            dist.broadcast(start_timestep_index, src=0)
+        start_timestep_index = start_timestep_index.cpu().item()
+
+        trajectory_latents = trajectory_latents[:, -1, :21]
+        training_batch.trajectory_latents = self.noise_scheduler.add_noise(
+            trajectory_latents.flatten(0, 1), 
+            torch.randn_like(trajectory_latents.flatten(0, 1)), 
+            self.denoising_step_list[start_timestep_index] * torch.ones([trajectory_latents.shape[0] * trajectory_latents.shape[1]], device=self.device, dtype=torch.long)).unflatten(0, (trajectory_latents.shape[0], trajectory_latents.shape[1]))
+        del trajectory_latents
+        training_batch.start_timestep_index = start_timestep_index
         return training_batch
 
     def _generator_multi_step_simulation_forward(
@@ -219,10 +249,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 batch_size, num_generated_frames, *self.video_latent_shape[2:]
             ]
 
-        # if training_batch.use_gt_trajectory:
-        #     noise = training_batch.trajectory_latents.to(self.device, dtype=dtype)
-        # else:
-        noise = torch.randn(noise_shape, device=self.device, dtype=dtype)
+        if training_batch.use_gt_trajectory:
+            noise = training_batch.trajectory_latents.to(self.device, dtype=dtype)
+        else:
+            noise = torch.randn(noise_shape, device=self.device, dtype=dtype)
         if self.sp_world_size > 1:
             noise = rearrange(noise,
                               "b (n t) c h w -> b n t c h w",
@@ -292,16 +322,16 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         # Step 3: Temporal denoising loop
         all_num_frames = [self.num_frame_per_block] * num_blocks
-        all_num_frames[0] = 1
+        # all_num_frames[0] = 1
         if self.independent_first_frame and initial_latent is None:
             all_num_frames = [1] + all_num_frames
 
-        # if training_batch.use_gt_trajectory:
-        #     start_timestep_index = training_batch.start_timestep_index
-        #     end_timestep_index = len(self.denoising_step_list)
-        # else:
-        start_timestep_index = 0
-        end_timestep_index = len(self.denoising_step_list)
+        if training_batch.use_gt_trajectory:
+            start_timestep_index = training_batch.start_timestep_index
+            end_timestep_index = len(self.denoising_step_list)
+        else:
+            start_timestep_index = 0
+            end_timestep_index = len(self.denoising_step_list)
         exit_flags = self.generate_and_sync_list(len(all_num_frames),
                                                  start_timestep_index,
                                                  end_timestep_index,
@@ -321,6 +351,45 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             cache_txt=True,
         )
 
+        # Context forcing logic
+        if self.training_args.use_context_forcing and training_batch.trajectory_latents is not None:
+            gt_latents = training_batch.trajectory_latents
+            context_forcing_length = gt_latents.shape[1]
+            output[:, :context_forcing_length] = gt_latents.detach()
+            num_residual_blocks = (self.training_args.num_latent_t - context_forcing_length) // self.num_frame_per_block
+            assert num_residual_blocks > 0, "Number of residual blocks is less than 0"
+            all_num_frames = [self.num_frame_per_block] * num_residual_blocks
+
+            if training_batch.video_latent is not None:
+                gt_latents = torch.cat([
+                    gt_latents,
+                    training_batch.video_latent[:, current_start_frame:current_start_frame + context_forcing_length],
+                    torch.zeros_like(gt_latents),
+                ], dim=2)
+
+            with torch.no_grad():
+                training_batch_temp = self._build_distill_input_kwargs(
+                    gt_latents, torch.zeros([batch_size, context_forcing_length],
+                                      device=noise.device,
+                                      dtype=torch.int64),
+                    training_batch.conditional_dict, training_batch)
+
+                self.transformer(
+                    txt_inference=False,
+                    vision_inference=True,
+                    hidden_states=training_batch_temp.
+                    input_kwargs['hidden_states'],
+                    timestep=training_batch_temp.
+                    input_kwargs['timestep'],
+                    kv_cache=kv_cache1,
+                    txt_kv_cache=txt_kv_cache,
+                    current_start=current_start_frame *
+                    self.frame_seq_length,
+                    rope_start_idx=current_start_frame
+                )
+                
+            current_start_frame += context_forcing_length
+
         for block_index, current_num_frames in enumerate(all_num_frames):
             noisy_input = noise[:, current_start_frame -
                                 num_input_frames:current_start_frame +
@@ -328,6 +397,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
             index = start_timestep_index
             current_timestep = self.denoising_step_list[index]
+
+            assert index < len(self.denoising_step_list), "Index is greater than the number of denoising steps"
             # Step 3.1: Spatial denoising loop
             while index < len(self.denoising_step_list):
                 noisy_input_latent = noisy_input.clone()
@@ -359,7 +430,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             noisy_input_latent, timestep,
                             training_batch.conditional_dict, training_batch)
 
-                        pred_flow = current_model(
+                        pred_flow, kv_cache1 = current_model(
                             txt_inference=False,
                             vision_inference=True,
                             hidden_states=training_batch_temp.
@@ -377,8 +448,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             # crossattn_cache=crossattn_cache,
                             current_start=current_start_frame *
                             self.frame_seq_length,
-                            rope_start_idx=current_start_frame).permute(
-                                0, 2, 1, 3, 4)
+                            rope_start_idx=current_start_frame)
+                        pred_flow = pred_flow.permute(0, 2, 1, 3, 4)
 
                         denoised_pred = pred_noise_to_pred_video(
                             pred_noise=pred_flow.flatten(0, 1),
@@ -411,7 +482,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                 noisy_input_latent, timestep,
                                 training_batch.conditional_dict, training_batch)
 
-                            pred_flow = current_model(
+                            pred_flow, kv_cache1 = current_model(
                                 txt_inference=False,
                                 vision_inference=True,
                                 hidden_states=training_batch_temp.
@@ -429,14 +500,14 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                 # crossattn_cache=crossattn_cache,
                                 current_start=current_start_frame *
                                 self.frame_seq_length,
-                                rope_start_idx=current_start_frame).permute(
-                                    0, 2, 1, 3, 4)
+                                rope_start_idx=current_start_frame)
+                            pred_flow = pred_flow.permute(0, 2, 1, 3, 4)
                     else:
                         training_batch_temp = self._build_distill_input_kwargs(
                             noisy_input_latent, timestep,
                             training_batch.conditional_dict, training_batch)
 
-                        pred_flow = current_model(
+                        pred_flow, kv_cache1 = current_model(
                             txt_inference=False,
                             vision_inference=True,
                             hidden_states=training_batch_temp.
@@ -454,8 +525,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             # crossattn_cache=crossattn_cache,
                             current_start=current_start_frame *
                             self.frame_seq_length,
-                            rope_start_idx=current_start_frame).permute(
-                                0, 2, 1, 3, 4)
+                            rope_start_idx=current_start_frame)
+                        pred_flow = pred_flow.permute(0, 2, 1, 3, 4)
 
                     denoised_pred = pred_noise_to_pred_video(
                         pred_noise=pred_flow.flatten(0, 1),
@@ -493,7 +564,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
                 # context_timestep is 0 so we use transformer_2
                 current_model = self.transformer_2 if self.transformer_2 is not None else self.transformer
-                current_model(
+                _, kv_cache1 = current_model(
                     txt_inference=False,
                     vision_inference=True,
                     hidden_states=training_batch_temp.
@@ -640,7 +711,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         if max_num_frames is None:
             max_num_frames = num_frames
         num_max_frames = max(max_num_frames, num_frames)
-        kv_cache_size = num_max_frames * frame_seq_length
+        local_attn_size = getattr(self.transformer.config, 'local_attn_size', -1)
+        kv_cache_size = num_max_frames * frame_seq_length if local_attn_size == -1 else local_attn_size * frame_seq_length
 
         kv_cache = []
         for _ in range(num_transformer_blocks):
@@ -959,25 +1031,30 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         train_generator = (self.current_trainstep %
                            self.dfake_gen_update_ratio == 0)
 
-        if getattr(self, "train_dataloader_2", None) is not None and train_generator:
-            # use_gt_trajectory = torch.rand(1, device=get_local_torch_device())
-            # if dist.is_initialized():
-            #     dist.broadcast(use_gt_trajectory, src=0)
-            # training_batch.use_gt_trajectory = (use_gt_trajectory < 0.8).item()
-            training_batch.use_gt_trajectory = True
+        if getattr(self, "train_dataloader_2", None) is not None and not self.training_args.use_ode_init and not self.training_args.use_context_forcing:
+            use_gt_trajectory = torch.rand(1, device=get_local_torch_device())
+            if dist.is_initialized():
+                dist.broadcast(use_gt_trajectory, src=0)
+            training_batch.use_gt_trajectory = (use_gt_trajectory < 0.5).item()
+            # training_batch.use_gt_trajectory = True
         else:
             training_batch.use_gt_trajectory = False
 
         batches = []
         for _ in range(gradient_accumulation_steps):
-            # if training_batch.use_gt_trajectory:
-            #     batch = self._get_next_batch_2(training_batch)
-            # else:
-            batch = self._get_next_batch(training_batch)
+            if training_batch.use_gt_trajectory:
+                batch = self._get_next_batch_2(training_batch)
+            else:
+                if self.training_args.use_context_forcing:
+                    batch = self._get_next_batch_2(training_batch)
+                else:
+                    batch = self._get_next_batch(training_batch)
             batch = self._normalize_dit_input(batch)
             batch = self._prepare_dit_inputs(batch)
-            # if training_batch.use_gt_trajectory:
-            #     batch = self._prepare_gt_inputs(batch)
+            if self.training_args.use_context_forcing:
+                batch = self._prepare_context_forcing_inputs(batch)
+            if training_batch.use_gt_trajectory:
+                batch = self._prepare_gt_inputs(batch)
             batch = self._build_attention_metadata(batch)
             batch.attn_metadata_vsa = copy.deepcopy(batch.attn_metadata)
             if batch.attn_metadata is not None:
@@ -1014,10 +1091,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                         setattr(batch_gen, key, copy.deepcopy(value))
 
                 generator_loss, gen_log_dict = self.generator_loss(batch_gen)
-                if training_batch.use_gt_trajectory:
+                if self.training_args.use_ode_init:
                     batch_gt = self._get_next_batch_2(training_batch)
                     batch_gt = self._prepare_dit_inputs(batch_gt)
-                    batch_gt = self._prepare_gt_inputs(batch_gt)
+                    batch_gt = self._prepare_ode_init_inputs(batch_gt)
                     batch_gt = self._build_attention_metadata(batch_gt)
                     batch_gt.attn_metadata_vsa = copy.deepcopy(batch_gt.attn_metadata)
                     batch_gt_gen = TrainingBatch()
