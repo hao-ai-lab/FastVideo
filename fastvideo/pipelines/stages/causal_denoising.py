@@ -364,7 +364,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                             (latent_model_input.shape[0], current_num_frames),
                             device=latent_model_input.device,
                             dtype=torch.long)
-                        pred_noise_btchw, kv_cache1 = current_model(
+                        model_output = current_model(
                             hidden_states=latent_model_input,
                             timestep=t_expanded_noise,
                             kv_cache=_get_kv_cache(t_cur),
@@ -375,6 +375,10 @@ class CausalDMDDenosingStage(DenoisingStage):
                             rope_start_idx=start_index,
                             **vision_input_kwargs,
                         )
+                        if isinstance(model_output, tuple):
+                            pred_noise_btchw, kv_cache1 = model_output
+                        else:
+                            pred_noise_btchw = model_output
                         pred_noise_btchw = pred_noise_btchw.permute(0, 2, 1, 3, 4)
 
                     # Convert pred noise to pred video with FM Euler scheduler utilities
@@ -490,7 +494,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                             **vision_input_kwargs,
                         )
 
-                    _, kv_cache1 = self.transformer(
+                    model_output = self.transformer(
                         hidden_states=context_bcthw,
                         timestep=t_context,
                         kv_cache=kv_cache1,
@@ -500,6 +504,10 @@ class CausalDMDDenosingStage(DenoisingStage):
                         rope_start_idx=start_index,
                         **vision_input_kwargs,
                     )
+                    if isinstance(model_output, tuple):
+                        _, kv_cache1 = model_output
+                    else:
+                        _, kv_cache1 = model_output
 
                 start_index += current_num_frames
 
