@@ -8,12 +8,8 @@ def is_double_block(n: str, m) -> bool:
     return "double" in n and str.isdigit(n.split(".")[-1])
 
 
-def is_single_block(n: str, m) -> bool:
-    return "single" in n and str.isdigit(n.split(".")[-1])
-
-
-# def is_refiner_block(n: str, m) -> bool:
-#     return "refiner" in n and str.isdigit(n.split(".")[-1])
+def is_refiner_block(n: str, m) -> bool:
+    return "refiner" in n and str.isdigit(n.split(".")[-1])
 
 
 def is_txt_in(n: str, m) -> bool:
@@ -23,10 +19,10 @@ def is_txt_in(n: str, m) -> bool:
 @dataclass
 class HYWorldArchConfig(DiTArchConfig):
     _fsdp_shard_conditions: list = field(
-        default_factory=lambda: [is_double_block, is_single_block])
+        default_factory=lambda: [is_double_block, is_refiner_block])
 
     _compile_conditions: list = field(
-        default_factory=lambda: [is_double_block, is_single_block, is_txt_in])
+        default_factory=lambda: [is_double_block, is_refiner_block, is_txt_in])
 
     param_names_mapping: dict = field(
         default_factory=lambda: {
