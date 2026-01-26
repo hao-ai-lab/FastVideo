@@ -60,7 +60,6 @@ class HunyuanVideo15ArchConfig(DiTArchConfig):
             r"txt_in.refiner_blocks.\1.adaLN_modulation.linear.\2",
             r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.self_attn_qkv\.(.*)$":
             r"txt_in.refiner_blocks.\1.self_attn_qkv.\2",
-
             r"^image_embedder\.linear_1\.(.*)$":
             r"image_embedder.linear_1.\1",
             r"^image_embedder\.linear_2\.(.*)$":

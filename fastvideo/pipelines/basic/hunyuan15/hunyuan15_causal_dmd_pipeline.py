@@ -13,7 +13,6 @@ from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
                                         CausalDMDDenosingStage,
                                         InputValidationStage,
-                                        TimestepPreparationStage,
                                         Hy15ImageEncodingStage,
                                         LatentPreparationStage,
                                         TextEncodingStage)
@@ -60,7 +59,7 @@ class Hy15CausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
                            transformer=self.get_module("transformer", None)))
 
         self.add_stage(stage_name="image_encoding_stage",
-                        stage=Hy15ImageEncodingStage(image_encoder=None,
+                       stage=Hy15ImageEncodingStage(image_encoder=None,
                                                     image_processor=None))
 
         self.add_stage(stage_name="denoising_stage",

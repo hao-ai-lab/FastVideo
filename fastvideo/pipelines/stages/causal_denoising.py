@@ -69,11 +69,14 @@ class CausalDMDDenosingStage(DenoisingStage):
 
         latent_seq_length = batch.latents.shape[-1] * batch.latents.shape[-2]
         if isinstance(self.transformer.config.patch_size, tuple):
-            patch_ratio = self.transformer.config.patch_size[1] * self.transformer.config.patch_size[2]
+            patch_ratio = self.transformer.config.patch_size[
+                1] * self.transformer.config.patch_size[2]
         elif isinstance(self.transformer.config.patch_size, int):
             patch_ratio = self.transformer.config.patch_size**2
         else:
-            raise ValueError(f"Unsupported patch size type: {type(self.transformer.config.patch_size)}")
+            raise ValueError(
+                f"Unsupported patch size type: {type(self.transformer.config.patch_size)}"
+            )
 
         self.frame_seq_length = latent_seq_length // patch_ratio
         # TODO(will): make this a parameter once we add i2v support
@@ -83,7 +86,9 @@ class CausalDMDDenosingStage(DenoisingStage):
         timesteps = torch.tensor(
             fastvideo_args.pipeline_config.dmd_denoising_steps,
             dtype=torch.long).cpu()
-        self.scheduler.set_timesteps(num_inference_steps=1000, extra_one_step=True, device=get_local_torch_device())
+        self.scheduler.set_timesteps(num_inference_steps=1000,
+                                     extra_one_step=True,
+                                     device=get_local_torch_device())
         if fastvideo_args.pipeline_config.warp_denoising_step:
             scheduler_timesteps = torch.cat((self.scheduler.timesteps.cpu(),
                                              torch.tensor([0],
@@ -124,8 +129,12 @@ class CausalDMDDenosingStage(DenoisingStage):
         )
 
         if len(batch.prompt_attention_mask) < 2:
-            logger.error("prompt embeds length: %s", len(batch.prompt_embeds), local_main_process_only=False)
-            logger.error("prompt: %s", batch.prompt, local_main_process_only=False)
+            logger.error("prompt embeds length: %s",
+                         len(batch.prompt_embeds),
+                         local_main_process_only=False)
+            logger.error("prompt: %s",
+                         batch.prompt,
+                         local_main_process_only=False)
 
         # STA
         if st_attn_available and self.attn_backend == SlidingTileAttentionBackend:
@@ -203,8 +212,10 @@ class CausalDMDDenosingStage(DenoisingStage):
             # the image latent instead of appending along the channel dim
             assert self.vae is not None, "VAE is not provided for causal video gen task"
             self.vae = self.vae.to(get_local_torch_device())
-            vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
-            first_frame_latent = self.vae.encode(batch.pil_image.to(vae_dtype)).mean.float()
+            vae_dtype = PRECISION_TO_TYPE[
+                fastvideo_args.pipeline_config.vae_precision]
+            first_frame_latent = self.vae.encode(
+                batch.pil_image.to(vae_dtype)).mean.float()
             if (hasattr(self.vae, "shift_factor")
                     and self.vae.shift_factor is not None):
                 if isinstance(self.vae.shift_factor, torch.Tensor):
@@ -227,13 +238,14 @@ class CausalDMDDenosingStage(DenoisingStage):
                                  device=latents.device,
                                  dtype=torch.long)
             if batch.video_latent is not None:
-                video_latent_chunk = batch.video_latent[:, :, start_index:start_index + 1, :, :]
+                video_latent_chunk = batch.video_latent[:, :, start_index:
+                                                        start_index + 1, :, :]
                 first_frame_input = torch.cat([
                     first_frame_latent,
                     video_latent_chunk,
                     torch.zeros_like(first_frame_latent),
                 ],
-                                                dim=1)
+                                              dim=1)
             else:
                 first_frame_input = first_frame_latent.clone()
             with torch.autocast(device_type="cuda",
@@ -311,7 +323,10 @@ class CausalDMDDenosingStage(DenoisingStage):
                     latent_model_input = current_latents.to(target_dtype)
 
                     if batch.video_latent is not None:
-                        video_latent_chunk = batch.video_latent[:, :, start_index:start_index + current_num_frames, :, :]
+                        video_latent_chunk = batch.video_latent[:, :,
+                                                                start_index:
+                                                                start_index +
+                                                                current_num_frames, :, :]
                         latent_model_input = torch.cat([
                             latent_model_input,
                             video_latent_chunk,
@@ -379,7 +394,8 @@ class CausalDMDDenosingStage(DenoisingStage):
                             pred_noise_btchw, kv_cache1 = model_output
                         else:
                             pred_noise_btchw = model_output
-                        pred_noise_btchw = pred_noise_btchw.permute(0, 2, 1, 3, 4)
+                        pred_noise_btchw = pred_noise_btchw.permute(
+                            0, 2, 1, 3, 4)
 
                     # Convert pred noise to pred video with FM Euler scheduler utilities
                     # if i < len(timesteps) - 1:
@@ -398,9 +414,9 @@ class CausalDMDDenosingStage(DenoisingStage):
                     #         timestep=t_expand,
                     #         scheduler=self.scheduler).unflatten(
                     #             0, pred_noise_btchw.shape[:2])
-                    
+
                     # current_latents = pred_video_btchw.permute(0, 2, 1, 3, 4)
-                    
+
                     if boundary_timestep is not None and t_cur >= boundary_timestep:
                         pred_video_btchw = pred_noise_to_x_bound(
                             pred_noise=pred_noise_btchw.flatten(0, 1),
@@ -468,12 +484,15 @@ class CausalDMDDenosingStage(DenoisingStage):
                                        dtype=torch.long) * int(context_noise)
                 context_bcthw = current_latents.to(target_dtype)
                 if batch.video_latent is not None:
-                    video_latent_chunk = batch.video_latent[:, :, start_index:start_index + current_num_frames, :, :]
+                    video_latent_chunk = batch.video_latent[:, :, start_index:
+                                                            start_index +
+                                                            current_num_frames, :, :]
                     context_bcthw = torch.cat([
                         context_bcthw,
                         video_latent_chunk,
                         torch.zeros_like(current_latents),
-                    ], dim=1)
+                    ],
+                                              dim=1)
                 with torch.autocast(device_type="cuda",
                                     dtype=target_dtype,
                                     enabled=autocast_enabled), \

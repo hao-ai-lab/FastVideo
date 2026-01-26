@@ -192,6 +192,7 @@ def save_checkpoint(transformer,
             json.dump(config_dict, f, indent=4)
         logger.info("--> checkpoint saved at step %s to %s", step, weight_path)
 
+
 def save_distillation_checkpoint(
         generator_transformer,
         fake_score_transformer,
@@ -427,7 +428,8 @@ def save_distillation_checkpoint(
             # Save per-rank shard
             ema_dir_shard = os.path.join(save_dir, "ema_local_shard")
             os.makedirs(ema_dir_shard, exist_ok=True)
-            ema_shard_path = os.path.join(ema_dir_shard, f"generator_ema_rank{rank}.pt")
+            ema_shard_path = os.path.join(ema_dir_shard,
+                                          f"generator_ema_rank{rank}.pt")
             torch.save(generator_ema.state_dict(), ema_shard_path)
             logger.info(
                 "rank: %s, saved generator EMA shard (local_shard) to %s",
@@ -441,8 +443,7 @@ def save_distillation_checkpoint(
                 "generator_ema")
 
     except Exception as e:
-        logger.warning("rank: %s, failed saving EMA separately: %s",
-                       rank,
+        logger.warning("rank: %s, failed saving EMA separately: %s", rank,
                        str(e))
 
     try:
@@ -456,7 +457,8 @@ def save_distillation_checkpoint(
             # Save per-rank shard for EMA_2
             ema_dir_shard_2 = os.path.join(save_dir, "ema_local_shard")
             os.makedirs(ema_dir_shard_2, exist_ok=True)
-            ema2_shard_path = os.path.join(ema_dir_shard_2, f"generator_ema_2_rank{rank}.pt")
+            ema2_shard_path = os.path.join(ema_dir_shard_2,
+                                           f"generator_ema_2_rank{rank}.pt")
             torch.save(generator_ema_2.state_dict(), ema2_shard_path)
             logger.info(
                 "rank: %s, saved generator_2 EMA shard (local_shard) to %s",
@@ -469,8 +471,7 @@ def save_distillation_checkpoint(
                 generator_ema_2, generator_transformer_2, rank, save_dir,
                 "generator_ema_2")
     except Exception as e:
-        logger.warning("rank: %s, failed saving EMA_2 separately: %s",
-                       rank,
+        logger.warning("rank: %s, failed saving EMA_2 separately: %s", rank,
                        str(e))
 
     # Save generator model weights (consolidated) for inference
@@ -514,13 +515,13 @@ def save_distillation_checkpoint(
     if generator_transformer_2 is not None:
         inference_save_dir_2 = os.path.join(
             save_dir, "generator_2_inference_transformer")
-        cpu_state_2 = gather_state_dict_on_cpu_rank0(
-            generator_transformer_2, device=None)
+        cpu_state_2 = gather_state_dict_on_cpu_rank0(generator_transformer_2,
+                                                     device=None)
 
         if rank == 0:
             os.makedirs(inference_save_dir_2, exist_ok=True)
-            weight_path_2 = os.path.join(
-                inference_save_dir_2, "diffusion_pytorch_model.safetensors")
+            weight_path_2 = os.path.join(inference_save_dir_2,
+                                         "diffusion_pytorch_model.safetensors")
             logger.info(
                 "rank: %s, saving consolidated generator_2 inference checkpoint to %s",
                 rank,
@@ -543,13 +544,13 @@ def save_distillation_checkpoint(
             config_dict_2 = generator_transformer_2.hf_config
             if "dtype" in config_dict_2:
                 del config_dict_2["dtype"]  # TODO
-            config_path_2 = os.path.join(inference_save_dir_2,
-                                            "config.json")
+            config_path_2 = os.path.join(inference_save_dir_2, "config.json")
             with open(config_path_2, "w") as f:
                 json.dump(config_dict_2, f, indent=4)
             logger.info(
                 "--> generator_2 distillation checkpoint saved at step %s to %s",
                 step, weight_path_2)
+
 
 def load_checkpoint(transformer,
                     rank,
@@ -1243,6 +1244,7 @@ def custom_to_hf_state_dict(
 
     return new_state_dict
 
+
 def _save_full_ema_safetensors_from_state(
     state_dict: dict[str, Any],
     reverse_param_names_mapping: dict[str, tuple[str, int, int]],
@@ -1254,7 +1256,8 @@ def _save_full_ema_safetensors_from_state(
     diffusers_state_dict = custom_to_hf_state_dict(state_dict,
                                                    reverse_param_names_mapping)
     save_file(diffusers_state_dict, output_path)
-    
+
+
 def _save_rank0_full_ema_safetensors(
     ema: "EMA_FSDP",
     module,
@@ -1271,12 +1274,11 @@ def _save_rank0_full_ema_safetensors(
     _save_full_ema_safetensors_from_state(ema_state,
                                           module.reverse_param_names_mapping,
                                           output_path)
-    logger.info(
-        "rank: %s, saved %s as consolidated EMA safetensors to %s",
-        rank,
-        base_name,
-        output_path,
-        local_main_process_only=False)
+    logger.info("rank: %s, saved %s as consolidated EMA safetensors to %s",
+                rank,
+                base_name,
+                output_path,
+                local_main_process_only=False)
 
 
 def _consolidate_local_shard_ema_and_save_safetensors(
@@ -1304,10 +1306,8 @@ def _consolidate_local_shard_ema_and_save_safetensors(
                 local_main_process_only=False)
     except Exception as ce:
         logger.warning(
-            "rank: %s, failed consolidating %s EMA (local_shard): %s",
-            rank,
-            base_name,
-            str(ce))
+            "rank: %s, failed consolidating %s EMA (local_shard): %s", rank,
+            base_name, str(ce))
 
 
 def shift_timestep(timestep: torch.Tensor, shift: float,

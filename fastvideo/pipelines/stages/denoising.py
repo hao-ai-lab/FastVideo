@@ -210,7 +210,8 @@ class DenoisingStage(PipelineStage):
             # the image latent instead of appending along the channel dim
             assert batch.image_latent is None, "TI2V task should not have image latents"
             assert self.vae is not None, "VAE is not provided for TI2V task"
-            vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+            vae_dtype = PRECISION_TO_TYPE[
+                fastvideo_args.pipeline_config.vae_precision]
             self.vae = self.vae.to(get_local_torch_device())
             z = self.vae.encode(batch.pil_image.to(vae_dtype)).mean.float()
             if (hasattr(self.vae, "shift_factor")
@@ -240,10 +241,9 @@ class DenoisingStage(PipelineStage):
             temporal_scale = fastvideo_args.pipeline_config.vae_config.temporal_compression_ratio
             spatial_scale = fastvideo_args.pipeline_config.vae_config.spatial_compression_ratio
             patch_size = fastvideo_args.pipeline_config.dit_config.patch_size
-            seq_len = ((F - 1) // temporal_scale +
-                       1) * (batch.height // spatial_scale) * (
-                           batch.width // spatial_scale) // (patch_size *
-                                                             patch_size)
+            seq_len = ((F - 1) // temporal_scale + 1) * (
+                batch.height // spatial_scale) * (
+                    batch.width // spatial_scale) // (patch_size * patch_size)
 
         # Initialize lists for ODE trajectory
         trajectory_timesteps: list[torch.Tensor] = []

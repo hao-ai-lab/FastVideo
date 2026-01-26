@@ -1,9 +1,7 @@
 import argparse
 import os
-from typing import Any
 
 from fastvideo import PipelineConfig
-from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.distributed import (
     get_world_size, maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.fastvideo_args import FastVideoArgs
