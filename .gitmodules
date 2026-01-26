@@ -4,7 +4,3 @@
 [submodule "fastvideo-kernel/include/cutlass"]
 	path = fastvideo-kernel/include/cutlass
 	url = https://github.com/NVIDIA/cutlass.git
-
-[submodule "csrc/attn/sliding_tile_attn/tk"]
-	path = csrc/attn/sliding_tile_attn/tk
-	url = https://github.com/HazyResearch/ThunderKittens.git
