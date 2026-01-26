@@ -22,6 +22,7 @@ from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 
 from fastvideo.models.utils import pred_noise_to_pred_video
+from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import SelfForcingFlowMatchScheduler
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.training.distillation_pipeline import DistillationPipeline
 from fastvideo.training.training_utils import (EMA_FSDP,
@@ -67,12 +68,12 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         except Exception:
             logger.info("Entered initialize_training_pipeline (rank unknown)")
 
-        # self.noise_scheduler = SelfForcingFlowMatchScheduler(
-        #     num_inference_steps=1000,
-        #     shift=5.0,
-        #     sigma_min=0.0,
-        #     extra_one_step=True,
-        #     training=True)
+        self.noise_scheduler = SelfForcingFlowMatchScheduler(
+            num_inference_steps=1000,
+            shift=5.0,
+            sigma_min=0.0,
+            extra_one_step=True,
+            training=True)
         self.dfake_gen_update_ratio = getattr(training_args,
                                               'dfake_gen_update_ratio', 5)
 
@@ -150,71 +151,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         return flow_matching_loss, log_dict
 
-    def _prepare_context_forcing_inputs(
-            self, training_batch: TrainingBatch) -> TrainingBatch:
-        trajectory_latents = training_batch.trajectory_latents
-
-        total_num_chunks = self.training_args.num_latent_t // self.num_frame_per_block
-        # Gradually increase maximum number of chunks
-        # Increase max_num_chunks by 1 every 100 training steps until it reaches total_num_chunks
-        max_num_chunks = min(total_num_chunks,
-                             self.current_trainstep // 100 + 2)
-        context_forcing_length = torch.randint(
-            0, max_num_chunks,
-            (1, ), device=get_local_torch_device()) * self.num_frame_per_block
-        # broadcast context_forcing_length to all ranks
-        if dist.is_initialized():
-            dist.broadcast(context_forcing_length, src=0)
-        context_forcing_length = context_forcing_length.cpu().item()
-        assert context_forcing_length < self.training_args.num_latent_t, "Context forcing length is greater than the number of latent frames"
-        if context_forcing_length > 0:
-            training_batch.trajectory_latents = trajectory_latents[:, -1, :
-                                                                   context_forcing_length]
-        else:
-            training_batch.trajectory_latents = None
-        del trajectory_latents
-        return training_batch
-
-    def _prepare_ode_init_inputs(
-            self, training_batch: TrainingBatch) -> TrainingBatch:
-        trajectory_latents = training_batch.trajectory_latents
-
-        trajectory_latents = trajectory_latents[:, :, :21]
-        _cached_closest_idx_per_dmd = torch.tensor([0, 12, 24, 36, 50],
-                                                   dtype=torch.long).cpu()
-        training_batch.trajectory_latents = torch.index_select(
-            trajectory_latents,
-            dim=1,
-            index=_cached_closest_idx_per_dmd.to(trajectory_latents.device))
-        del trajectory_latents
-        return training_batch
-
-    def _prepare_gt_inputs(self,
-                           training_batch: TrainingBatch) -> TrainingBatch:
-        trajectory_latents = training_batch.trajectory_latents
-
-        start_timestep_index = torch.randint(1,
-                                             len(self.denoising_step_list),
-                                             (1, ),
-                                             device=self.device)
-        if dist.is_initialized():
-            dist.broadcast(start_timestep_index, src=0)
-        start_timestep_index = start_timestep_index.cpu().item()
-
-        trajectory_latents = trajectory_latents[:, -1, :21]
-        training_batch.trajectory_latents = self.noise_scheduler.add_noise(
-            trajectory_latents.flatten(0, 1),
-            torch.randn_like(trajectory_latents.flatten(0, 1)),
-            self.denoising_step_list[start_timestep_index] * torch.ones(
-                [trajectory_latents.shape[0] * trajectory_latents.shape[1]],
-                device=self.device,
-                dtype=torch.long)).unflatten(
-                    0,
-                    (trajectory_latents.shape[0], trajectory_latents.shape[1]))
-        del trajectory_latents
-        training_batch.start_timestep_index = start_timestep_index
-        return training_batch
-
     def _generator_multi_step_simulation_forward(
             self,
             training_batch: TrainingBatch,
@@ -235,20 +171,20 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         # During training, the number of generated frames should be uniformly sampled from
         # [21, self.num_training_frames], but still being a multiple of self.num_frame_per_block
         min_num_frames = 20 if self.independent_first_frame else 21
-        # max_num_frames = num_training_frames - 1 if self.independent_first_frame else num_training_frames
-        # assert max_num_frames % self.num_frame_per_block == 0
-        # assert min_num_frames % self.num_frame_per_block == 0
-        # max_num_blocks = max_num_frames // self.num_frame_per_block
-        # min_num_blocks = min_num_frames // self.num_frame_per_block
+        max_num_frames = num_training_frames - 1 if self.independent_first_frame else num_training_frames
+        assert max_num_frames % self.num_frame_per_block == 0
+        assert min_num_frames % self.num_frame_per_block == 0
+        max_num_blocks = max_num_frames // self.num_frame_per_block
+        min_num_blocks = min_num_frames // self.num_frame_per_block
 
         # Sample number of blocks and sync across processes
-        # num_generated_blocks = torch.randint(min_num_blocks,
-        #                                      max_num_blocks + 1, (1, ),
-        #                                      device=self.device)
-        # if dist.is_initialized():
-        #     dist.broadcast(num_generated_blocks, src=0)
-        # num_generated_blocks = num_generated_blocks.item()
-        num_generated_frames = num_training_frames
+        num_generated_blocks = torch.randint(min_num_blocks,
+                                             max_num_blocks + 1, (1, ),
+                                             device=self.device)
+        if dist.is_initialized():
+            dist.broadcast(num_generated_blocks, src=0)
+        num_generated_blocks = num_generated_blocks.item()
+        num_generated_frames = num_generated_blocks * self.num_frame_per_block
         if self.independent_first_frame and initial_latent is None:
             num_generated_frames += 1
             min_num_frames += 1
@@ -264,7 +200,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 batch_size, num_generated_frames, *self.video_latent_shape[2:]
             ]
 
-        if training_batch.use_gt_trajectory:
+        if training_batch.use_gt_trajectory and training_batch.trajectory_latents is not None:
             noise = training_batch.trajectory_latents.to(self.device,
                                                          dtype=dtype)
         else:
@@ -278,15 +214,13 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         batch_size, num_frames, num_channels, height, width = noise.shape
 
         # Block size calculation
-        # if not self.independent_first_frame or (self.independent_first_frame
-        #                                         and initial_latent is not None):
-        #     assert num_frames % self.num_frame_per_block == 0
-        #     num_blocks = num_frames // self.num_frame_per_block
-        # else:
-        #     assert (num_frames - 1) % self.num_frame_per_block == 0
-        #     num_blocks = (num_frames - 1) // self.num_frame_per_block
-        import math
-        num_blocks = math.ceil(num_frames / self.num_frame_per_block)
+        if not self.independent_first_frame or (self.independent_first_frame
+                                                and initial_latent is not None):
+            assert num_frames % self.num_frame_per_block == 0
+            num_blocks = num_frames // self.num_frame_per_block
+        else:
+            assert (num_frames - 1) % self.num_frame_per_block == 0
+            num_blocks = (num_frames - 1) // self.num_frame_per_block
 
         num_input_frames = initial_latent.shape[
             1] if initial_latent is not None else 0
@@ -338,11 +272,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         # Step 3: Temporal denoising loop
         all_num_frames = [self.num_frame_per_block] * num_blocks
-        # all_num_frames[0] = 1
         if self.independent_first_frame and initial_latent is None:
             all_num_frames = [1] + all_num_frames
 
-        if training_batch.use_gt_trajectory:
+        if training_batch.use_gt_trajectory and training_batch.trajectory_latents is not None:
             start_timestep_index = training_batch.start_timestep_index
             end_timestep_index = len(self.denoising_step_list)
         else:
@@ -352,64 +285,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                                  start_timestep_index,
                                                  end_timestep_index,
                                                  device=noise.device)
-        start_gradient_frame_index = max(0, num_output_frames - 31)
-
-        logger.info("distillation step list: %s", self.denoising_step_list)
-
-        # Initialize txt kv cache
-        txt_kv_cache = self.transformer(
-            txt_inference=True,
-            vision_inference=False,
-            encoder_hidden_states=training_batch.
-            conditional_dict["encoder_hidden_states"],
-            encoder_hidden_states_image=training_batch.image_embeds,
-            encoder_attention_mask=training_batch.
-            conditional_dict["encoder_attention_mask"],
-            timestep=torch.zeros([batch_size], device=noise.device),
-            cache_txt=True,
-        )
-
-        # Context forcing logic
-        if self.training_args.use_context_forcing and training_batch.trajectory_latents is not None:
-            gt_latents = training_batch.trajectory_latents
-            context_forcing_length = gt_latents.shape[1]
-            output[:, :context_forcing_length] = gt_latents.detach()
-            num_residual_blocks = (
-                self.training_args.num_latent_t -
-                context_forcing_length) // self.num_frame_per_block
-            assert num_residual_blocks > 0, "Number of residual blocks is less than 0"
-            all_num_frames = [self.num_frame_per_block] * num_residual_blocks
-
-            if training_batch.video_latent is not None:
-                gt_latents = torch.cat([
-                    gt_latents,
-                    training_batch.
-                    video_latent[:, current_start_frame:current_start_frame +
-                                 context_forcing_length],
-                    torch.zeros_like(gt_latents),
-                ],
-                                       dim=2)
-
-            with torch.no_grad():
-                training_batch_temp = self._build_distill_input_kwargs(
-                    gt_latents,
-                    torch.zeros([batch_size, context_forcing_length],
-                                device=noise.device,
-                                dtype=torch.int64),
-                    training_batch.conditional_dict, training_batch)
-
-                self.transformer(
-                    txt_inference=False,
-                    vision_inference=True,
-                    hidden_states=training_batch_temp.
-                    input_kwargs['hidden_states'],
-                    timestep=training_batch_temp.input_kwargs['timestep'],
-                    kv_cache=kv_cache1,
-                    txt_kv_cache=txt_kv_cache,
-                    current_start=current_start_frame * self.frame_seq_length,
-                    rope_start_idx=current_start_frame)
-
-            current_start_frame += context_forcing_length
+        start_gradient_frame_index = max(0, num_output_frames - 21)
 
         for block_index, current_num_frames in enumerate(all_num_frames):
             noisy_input = noise[:, current_start_frame -
@@ -424,18 +300,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             ), "Index is greater than the number of denoising steps"
             # Step 3.1: Spatial denoising loop
             while index < len(self.denoising_step_list):
-                noisy_input_latent = noisy_input.clone()
-                if training_batch.video_latent is not None:
-                    noisy_input_latent = torch.cat([
-                        noisy_input_latent,
-                        training_batch.
-                        video_latent[:,
-                                     current_start_frame:current_start_frame +
-                                     current_num_frames],
-                        torch.zeros_like(noisy_input_latent),
-                    ],
-                                                   dim=2)
-
                 if self.same_step_across_blocks:
                     exit_flag = (index == exit_flags[0])
                 else:
@@ -454,33 +318,24 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     with torch.no_grad():
                         # Build input kwargs
                         training_batch_temp = self._build_distill_input_kwargs(
-                            noisy_input_latent, timestep,
+                            noisy_input, timestep,
                             training_batch.conditional_dict, training_batch)
 
-                        model_output = current_model(
-                            txt_inference=False,
-                            vision_inference=True,
+                        pred_flow = current_model(
                             hidden_states=training_batch_temp.
                             input_kwargs['hidden_states'],
-                            # encoder_hidden_states=training_batch_temp.
-                            # input_kwargs['encoder_hidden_states'],
-                            # encoder_attention_mask=training_batch_temp.
-                            # input_kwargs['encoder_attention_mask'],
+                            encoder_hidden_states=training_batch_temp.
+                            input_kwargs['encoder_hidden_states'],
                             timestep=training_batch_temp.
                             input_kwargs['timestep'],
-                            # encoder_hidden_states_image=training_batch_temp.
-                            # input_kwargs.get('encoder_hidden_states_image'),
+                            encoder_hidden_states_image=training_batch_temp.
+                            input_kwargs.get('encoder_hidden_states_image'),
                             kv_cache=kv_cache1,
-                            txt_kv_cache=txt_kv_cache,
-                            # crossattn_cache=crossattn_cache,
+                            crossattn_cache=crossattn_cache,
                             current_start=current_start_frame *
                             self.frame_seq_length,
-                            rope_start_idx=current_start_frame)
-                        if isinstance(model_output, tuple):
-                            pred_flow, kv_cache1 = model_output
-                        else:
-                            pred_flow = model_output
-                        pred_flow = pred_flow.permute(0, 2, 1, 3, 4)
+                            start_frame=current_start_frame).permute(
+                                0, 2, 1, 3, 4)
 
                         denoised_pred = pred_noise_to_pred_video(
                             pred_noise=pred_flow.flatten(0, 1),
@@ -490,13 +345,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                 0, pred_flow.shape[:2])
 
                         next_timestep = self.denoising_step_list[index + 1]
-                        # noisy_input = pred_noise_to_x_bound(
-                        #     pred_noise=pred_flow.flatten(0, 1),
-                        #     noise_input_latent=noisy_input.flatten(0, 1),
-                        #     timestep=timestep,
-                        #     boundary_timestep=next_timestep * torch.ones_like(timestep).flatten(0, 1),
-                        #     scheduler=self.noise_scheduler).unflatten(
-                        #         0, pred_flow.shape[:2])
                         noisy_input = self.noise_scheduler.add_noise(
                             denoised_pred.flatten(0, 1),
                             torch.randn_like(denoised_pred.flatten(0, 1)),
@@ -510,62 +358,44 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     if current_start_frame < start_gradient_frame_index:
                         with torch.no_grad():
                             training_batch_temp = self._build_distill_input_kwargs(
-                                noisy_input_latent, timestep,
+                                noisy_input, timestep,
                                 training_batch.conditional_dict, training_batch)
 
-                            model_output = current_model(
-                                txt_inference=False,
-                                vision_inference=True,
+                            pred_flow = current_model(
                                 hidden_states=training_batch_temp.
                                 input_kwargs['hidden_states'],
-                                # encoder_hidden_states=training_batch_temp.
-                                # input_kwargs['encoder_hidden_states'],
-                                # encoder_attention_mask=training_batch_temp.
-                                # input_kwargs['encoder_attention_mask'],
+                                encoder_hidden_states=training_batch_temp.
+                                input_kwargs['encoder_hidden_states'],
                                 timestep=training_batch_temp.
                                 input_kwargs['timestep'],
-                                # encoder_hidden_states_image=training_batch_temp.
-                                # input_kwargs.get('encoder_hidden_states_image'),
+                                encoder_hidden_states_image=training_batch_temp.
+                                input_kwargs.get('encoder_hidden_states_image'),
                                 kv_cache=kv_cache1,
-                                txt_kv_cache=txt_kv_cache,
-                                # crossattn_cache=crossattn_cache,
+                                crossattn_cache=crossattn_cache,
                                 current_start=current_start_frame *
                                 self.frame_seq_length,
-                                rope_start_idx=current_start_frame)
-                            if isinstance(model_output, tuple):
-                                pred_flow, kv_cache1 = model_output
-                            else:
-                                pred_flow = model_output
-                            pred_flow = pred_flow.permute(0, 2, 1, 3, 4)
+                                start_frame=current_start_frame).permute(
+                                    0, 2, 1, 3, 4)
                     else:
                         training_batch_temp = self._build_distill_input_kwargs(
-                            noisy_input_latent, timestep,
+                            noisy_input, timestep,
                             training_batch.conditional_dict, training_batch)
 
-                        model_output = current_model(
-                            txt_inference=False,
-                            vision_inference=True,
+                        pred_flow = current_model(
                             hidden_states=training_batch_temp.
                             input_kwargs['hidden_states'],
-                            # encoder_hidden_states=training_batch_temp.
-                            # input_kwargs['encoder_hidden_states'],
-                            # encoder_attention_mask=training_batch_temp.
-                            # input_kwargs['encoder_attention_mask'],
+                            encoder_hidden_states=training_batch_temp.
+                            input_kwargs['encoder_hidden_states'],
                             timestep=training_batch_temp.
                             input_kwargs['timestep'],
-                            # encoder_hidden_states_image=training_batch_temp.
-                            # input_kwargs.get('encoder_hidden_states_image'),
+                            encoder_hidden_states_image=training_batch_temp.
+                            input_kwargs.get('encoder_hidden_states_image'),
                             kv_cache=kv_cache1,
-                            txt_kv_cache=txt_kv_cache,
-                            # crossattn_cache=crossattn_cache,
+                            crossattn_cache=crossattn_cache,
                             current_start=current_start_frame *
                             self.frame_seq_length,
-                            rope_start_idx=current_start_frame)
-                        if isinstance(model_output, tuple):
-                            pred_flow, kv_cache1 = model_output
-                        else:
-                            pred_flow = model_output
-                        pred_flow = pred_flow.permute(0, 2, 1, 3, 4)
+                            start_frame=current_start_frame).permute(
+                                0, 2, 1, 3, 4)
 
                     denoised_pred = pred_noise_to_pred_video(
                         pred_noise=pred_flow.flatten(0, 1),
@@ -607,25 +437,18 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
                 # context_timestep is 0 so we use transformer_2
                 current_model = self.transformer_2 if self.transformer_2 is not None else self.transformer
-                model_output = current_model(
-                    txt_inference=False,
-                    vision_inference=True,
+                current_model(
                     hidden_states=training_batch_temp.
                     input_kwargs['hidden_states'],
-                    # encoder_hidden_states=training_batch_temp.
-                    # input_kwargs['encoder_hidden_states'],
-                    # encoder_attention_mask=training_batch_temp.
-                    # input_kwargs['encoder_attention_mask'],
+                    encoder_hidden_states=training_batch_temp.
+                    input_kwargs['encoder_hidden_states'],
                     timestep=training_batch_temp.input_kwargs['timestep'],
-                    # encoder_hidden_states_image=training_batch_temp.
-                    # input_kwargs.get('encoder_hidden_states_image'),
+                    encoder_hidden_states_image=training_batch_temp.
+                    input_kwargs.get('encoder_hidden_states_image'),
                     kv_cache=kv_cache1,
-                    txt_kv_cache=txt_kv_cache,
-                    # crossattn_cache=crossattn_cache,
+                    crossattn_cache=crossattn_cache,
                     current_start=current_start_frame * self.frame_seq_length,
-                    rope_start_idx=current_start_frame)
-                if isinstance(model_output, tuple):
-                    _, kv_cache1 = model_output
+                    start_frame=current_start_frame)
 
             # Step 3.4: update the start and end frame indices
             current_start_frame += current_num_frames
@@ -637,7 +460,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         # Slice last 21 frames if we generated more
         gradient_mask = None
-        if pred_image_or_video.shape[1] > 31:
+        if pred_image_or_video.shape[1] > 21:
             with torch.no_grad():
                 # Re-encode to get image latent
                 latent_to_decode = pred_image_or_video[:, :-20, ...]
@@ -677,14 +500,14 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             pred_image_or_video_last_21 = pred_image_or_video
 
         # Set up gradient mask if we generated more than minimum frames
-        # if num_generated_frames != min_num_frames:
-        #     # Currently, we do not use gradient for the first chunk, since it contains image latents
-        #     gradient_mask = torch.ones_like(pred_image_or_video_last_21,
-        #                                     dtype=torch.bool)
-        #     if self.independent_first_frame:
-        #         gradient_mask[:, :1] = False
-        #     else:
-        #         gradient_mask[:, :self.num_frame_per_block] = False
+        if num_generated_frames != min_num_frames:
+            # Currently, we do not use gradient for the first chunk, since it contains image latents
+            gradient_mask = torch.ones_like(pred_image_or_video_last_21,
+                                            dtype=torch.bool)
+            if self.independent_first_frame:
+                gradient_mask[:, :1] = False
+            else:
+                gradient_mask[:, :self.num_frame_per_block] = False
 
         # Apply gradient masking if needed
         final_output = pred_image_or_video_last_21.to(dtype)
@@ -716,11 +539,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         # Clean up caches
         assert kv_cache1 is not None
-        # assert self.crossattn_cache is not None
-        self._cleanup_simulation_caches(kv_cache1, crossattn_cache)
-
-        assert pred_image_or_video.shape[
-            1] == 21, "pred_image_or_video must have 21 frames"
+        assert crossattn_cache is not None
+        self._reset_simulation_caches(kv_cache1, crossattn_cache)
 
         return final_output if gradient_mask is not None else pred_image_or_video
 
@@ -755,7 +575,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         # Get model configuration parameters - handle FSDP wrapping
         num_attention_heads = self.transformer.config.num_attention_heads
         attention_head_dim = self.transformer.config.attention_head_dim
-        # text_len = getattr(self.transformer, 'text_len', None)
+        text_len = getattr(self.transformer.config, 'text_len', None)
 
         if max_num_frames is None:
             max_num_frames = num_frames
@@ -788,56 +608,28 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             })
 
         # Initialize cross-attention cache
-        crossattn_cache = None
-        # crossattn_cache = []
-        # for _ in range(num_transformer_blocks):
-        #     crossattn_cache.append({
-        #         "k":
-        #         torch.zeros([
-        #             batch_size, text_len, num_attention_heads,
-        #             attention_head_dim
-        #         ],
-        #                     dtype=dtype,
-        #                     device=device),
-        #         "v":
-        #         torch.zeros([
-        #             batch_size, text_len, num_attention_heads,
-        #             attention_head_dim
-        #         ],
-        #                     dtype=dtype,
-        #                     device=device),
-        #         "is_init":
-        #         False
-        #     })
+        crossattn_cache = []
+        for _ in range(num_transformer_blocks):
+            crossattn_cache.append({
+                "k":
+                torch.zeros([
+                    batch_size, text_len, num_attention_heads,
+                    attention_head_dim
+                ],
+                            dtype=dtype,
+                            device=device),
+                "v":
+                torch.zeros([
+                    batch_size, text_len, num_attention_heads,
+                    attention_head_dim
+                ],
+                            dtype=dtype,
+                            device=device),
+                "is_init":
+                False
+            })
 
         return kv_cache, crossattn_cache
-
-    def _cleanup_simulation_caches(
-            self, kv_cache: list[dict[str, Any]],
-            crossattn_cache: list[dict[str, Any]]) -> None:
-        """Properly clean up KV cache and cross-attention cache GPU memory."""
-        if kv_cache is not None:
-            for cache_dict in kv_cache:
-                # Clear tensor references to free GPU memory
-                if "k" in cache_dict and cache_dict["k"] is not None:
-                    cache_dict["k"] = None
-                if "v" in cache_dict and cache_dict["v"] is not None:
-                    cache_dict["v"] = None
-                if "global_end_index" in cache_dict and cache_dict[
-                        "global_end_index"] is not None:
-                    cache_dict["global_end_index"] = None
-                if "local_end_index" in cache_dict and cache_dict[
-                        "local_end_index"] is not None:
-                    cache_dict["local_end_index"] = None
-
-        if crossattn_cache is not None:
-            for cache_dict in crossattn_cache:
-                # Clear tensor references to free GPU memory
-                if "k" in cache_dict and cache_dict["k"] is not None:
-                    cache_dict["k"] = None
-                if "v" in cache_dict and cache_dict["v"] is not None:
-                    cache_dict["v"] = None
-                cache_dict["is_init"] = False
 
     def _reset_simulation_caches(self, kv_cache: list[dict[str, Any]],
                                  crossattn_cache: list[dict[str, Any]]) -> None:
@@ -855,207 +647,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 cache_dict["k"].zero_()
                 cache_dict["v"].zero_()
 
-    def _step_predict_next_latent(
-        self, training_batch: TrainingBatch
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str,
-                                                              torch.Tensor]]:
-        latent_vis_dict: dict[str, torch.Tensor] = {}
-        device = get_local_torch_device()
-        target_latent = training_batch.trajectory_latents[:, -1]
-
-        # Shapes: traj_latents [B, S, C, T, H, W], traj_timesteps [B, S]
-        B, S, num_frames, num_channels, height, width = training_batch.trajectory_latents.shape
-
-        dmd_denoising_steps = torch.cat([
-            self.denoising_step_list,
-            torch.tensor([0], device=self.device, dtype=torch.long)
-        ])
-        indexes = self._get_timestep(  # [B, num_frames]
-            0,
-            len(dmd_denoising_steps),
-            B,
-            num_frames,
-            3,
-            uniform_timestep=False)
-        # noisy_input = relevant_traj_latents[indexes]
-        latents = torch.gather(
-            training_batch.trajectory_latents,
-            dim=1,
-            index=indexes.reshape(B, 1, num_frames, 1, 1,
-                                  1).expand(-1, -1, -1, num_channels, height,
-                                            width).to(self.device)).squeeze(1)
-        noisy_input = torch.cat([
-            latents,
-            torch.zeros_like(latents),
-            torch.zeros_like(latents[:, :, 0:1])
-        ],
-                                dim=2)
-        timestep = dmd_denoising_steps[indexes]
-
-        logger.info("timestep: %s", timestep)
-        txt_input_kwargs = {
-            "txt_inference":
-            True,
-            "vision_inference":
-            False,
-            "encoder_hidden_states":
-            training_batch.encoder_hidden_states,
-            "encoder_hidden_states_image":
-            training_batch.image_embeds,
-            "encoder_attention_mask":
-            training_batch.encoder_attention_mask,
-            "timestep":
-            torch.zeros([latents.shape[0]],
-                        device=latents.device,
-                        dtype=torch.bfloat16),
-            "cache_txt":
-            True,
-        }
-        with set_forward_context(current_timestep=timestep,
-                                 attn_metadata=None,
-                                 forward_batch=None):
-            txt_kv_cache = self.transformer(**txt_input_kwargs)
-
-        vision_input_kwargs = {
-            "txt_inference": False,
-            "vision_inference": True,
-            "hidden_states": noisy_input.permute(0, 2, 1, 3, 4),
-            "timestep": timestep.to(device, dtype=torch.bfloat16),
-            "txt_kv_cache": txt_kv_cache,
-        }
-        # Predict noise and step the scheduler to obtain next latent
-        with set_forward_context(current_timestep=timestep,
-                                 attn_metadata=None,
-                                 forward_batch=None):
-            noise_pred = self.transformer(**vision_input_kwargs).permute(
-                0, 2, 1, 3, 4)
-
-        from fastvideo.models.utils import pred_noise_to_pred_video
-        pred_video = pred_noise_to_pred_video(
-            pred_noise=noise_pred.flatten(0, 1),
-            noise_input_latent=latents.flatten(0, 1),
-            timestep=timestep.to(dtype=torch.bfloat16).flatten(0, 1),
-            scheduler=self.noise_scheduler).unflatten(0, noise_pred.shape[:2])
-        latent_vis_dict["pred_video"] = pred_video.permute(
-            0, 2, 1, 3, 4).detach().clone().cpu()
-
-        return pred_video, target_latent, timestep
-
-    def _get_timestep(self,
-                      min_timestep: int,
-                      max_timestep: int,
-                      batch_size: int,
-                      num_frame: int,
-                      num_frame_per_block: int,
-                      uniform_timestep: bool = False) -> torch.Tensor:
-        if uniform_timestep:
-            timestep = torch.randint(min_timestep,
-                                     max_timestep, [batch_size, 1],
-                                     device=self.device,
-                                     dtype=torch.long).repeat(1, num_frame)
-            return timestep
-        else:
-            num_pad_frames = 0
-            if num_frame % num_frame_per_block != 0:
-                # Pad num_frame to be divisible by num_frame_per_block
-                num_pad_frames = num_frame_per_block - (num_frame %
-                                                        num_frame_per_block)
-                num_frame += num_pad_frames
-            timestep = torch.randint(min_timestep,
-                                     max_timestep, [batch_size, num_frame],
-                                     device=self.device,
-                                     dtype=torch.long)
-            # logger.info(f"individual timestep: {timestep}")
-            # make the noise level the same within every block
-            timestep = timestep.reshape(timestep.shape[0], -1,
-                                        num_frame_per_block)
-            timestep[:, :, 1:] = timestep[:, :, 0:1]
-            timestep = timestep.reshape(timestep.shape[0], -1)
-            if num_pad_frames > 0:
-                timestep = timestep[:, num_pad_frames:]
-            return timestep
-
-    def _get_next_batch_2(self, training_batch: TrainingBatch) -> TrainingBatch:
-        batch = next(self.train_loader_iter_2, None)  # type: ignore
-        if batch is None:
-            self.current_epoch += 1
-            self.train_loader_iter_2 = iter(self.train_dataloader_2)
-            batch = next(self.train_loader_iter_2)
-
-        # Required fields from parquet (ODE trajectory schema)
-        device = get_local_torch_device()
-        encoder_hidden_states = batch['text_embedding'].to(
-            device, dtype=torch.bfloat16).squeeze(0)
-        encoder_hidden_states_2 = batch['text_embedding_2'].to(
-            device, dtype=torch.bfloat16).squeeze(0)
-        encoder_attention_mask = batch['text_mask'].to(
-            device, dtype=torch.bfloat16).squeeze(0)
-        encoder_attention_mask_2 = batch['text_mask_2'].to(
-            device, dtype=torch.bfloat16).squeeze(0)
-        infos = batch['info_list']
-
-        if encoder_hidden_states.dim() < 3:
-            prompt_embeds_list, prompt_masks_list = self.prompt_encoding_stage.encode_text(
-                infos[0]["caption"],
-                self.training_args,
-                encoder_index=[0],
-                return_attention_mask=True,
-            )
-            encoder_hidden_states = prompt_embeds_list[0].to(
-                device, dtype=torch.bfloat16)
-            encoder_attention_mask = prompt_masks_list[0].to(
-                device, dtype=torch.bfloat16)
-
-        # Trajectory tensors may include a leading singleton batch dim per row
-        trajectory_latents = batch['trajectory_latents']
-        if trajectory_latents.dim() == 7:
-            # [B, 1, S, C, T, H, W] -> [B, S, C, T, H, W]
-            trajectory_latents = trajectory_latents[:, 0]
-        elif trajectory_latents.dim() == 6:
-            # already [B, S, C, T, H, W]
-            pass
-        else:
-            raise ValueError(
-                f"Unexpected trajectory_latents dim: {trajectory_latents.dim()}"
-            )
-
-        trajectory_timesteps = batch['trajectory_timesteps']
-        if trajectory_timesteps.dim() == 3:
-            # [B, 1, S] -> [B, S]
-            trajectory_timesteps = trajectory_timesteps[:, 0]
-        elif trajectory_timesteps.dim() == 2:
-            # [B, S]
-            pass
-        else:
-            raise ValueError(
-                f"Unexpected trajectory_timesteps dim: {trajectory_timesteps.dim()}"
-            )
-        # [B, S, C, T, H, W] -> [B, S, T, C, H, W] to match self-forcing
-        trajectory_latents = trajectory_latents.permute(0, 1, 3, 2, 4, 5)
-
-        batch_size = trajectory_latents.shape[0]
-        vae_config = self.training_args.pipeline_config.vae_config.arch_config
-        num_channels = vae_config.latent_channels
-        spatial_compression_ratio = vae_config.spatial_compression_ratio
-
-        latent_height = self.training_args.num_height // spatial_compression_ratio
-        latent_width = self.training_args.num_width // spatial_compression_ratio
-        training_batch.latents = torch.randn(
-            batch_size, num_channels, self.training_args.num_latent_t,
-            latent_height, latent_width).to(get_local_torch_device(),
-                                            dtype=torch.bfloat16)
-        training_batch.trajectory_latents = trajectory_latents.to(
-            device, dtype=torch.bfloat16)
-        training_batch.trajectory_timesteps = trajectory_timesteps.to(device)
-        training_batch.encoder_hidden_states = [
-            encoder_hidden_states, encoder_hidden_states_2
-        ]
-        training_batch.encoder_attention_mask = [
-            encoder_attention_mask, encoder_attention_mask_2
-        ]
-        training_batch.infos = infos
-        return training_batch
-
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         batch = next(self.train_loader_iter, None)  # type: ignore
         if batch is None:
@@ -1066,28 +657,13 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             batch = next(self.train_loader_iter)
 
         # latents, encoder_hidden_states, encoder_attention_mask, infos = batch
-        # encoder_hidden_states = batch['text_embedding']
-        # encoder_attention_mask = batch['text_attention_mask']
-        from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+        encoder_hidden_states = batch['text_embedding']
+        encoder_attention_mask = batch['text_attention_mask']
         infos = batch['info_list']
-        batch_prompt = ForwardBatch(
-            data_type="video",
-            prompt=infos[0]["caption"],
-            prompt_embeds=[],
-            prompt_attention_mask=[],
-        )
-        result_batch = self.validation_pipeline.prompt_encoding_stage(  # type: ignore
-            batch_prompt, self.training_args)
-        encoder_hidden_states, encoder_attention_mask = result_batch.prompt_embeds, result_batch.prompt_attention_mask
-        for i in range(len(encoder_hidden_states)):
-            encoder_hidden_states[i] = encoder_hidden_states[i].to(
-                get_local_torch_device(), dtype=torch.bfloat16)
-            encoder_attention_mask[i] = encoder_attention_mask[i].to(
-                get_local_torch_device(), dtype=torch.bfloat16)
 
-        batch_size = encoder_hidden_states[0].shape[0]
+        batch_size = encoder_hidden_states.shape[0]
         vae_config = self.training_args.pipeline_config.vae_config.arch_config
-        num_channels = vae_config.latent_channels
+        num_channels = vae_config.z_dim
         spatial_compression_ratio = vae_config.spatial_compression_ratio
 
         latent_height = self.training_args.num_height // spatial_compression_ratio
@@ -1100,8 +676,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         training_batch.latents = latents.to(get_local_torch_device(),
                                             dtype=torch.bfloat16)
-        training_batch.encoder_hidden_states = encoder_hidden_states
-        training_batch.encoder_attention_mask = encoder_attention_mask
+        training_batch.encoder_hidden_states = encoder_hidden_states.to(
+            get_local_torch_device(), dtype=torch.bfloat16)
+        training_batch.encoder_attention_mask = encoder_attention_mask.to(
+            get_local_torch_device(), dtype=torch.bfloat16)
         training_batch.infos = infos
         return training_batch
 
@@ -1114,32 +692,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         train_generator = (self.current_trainstep %
                            self.dfake_gen_update_ratio == 0)
 
-        if getattr(
-                self, "train_dataloader_2", None
-        ) is not None and not self.training_args.use_ode_init and not self.training_args.use_context_forcing:
-            use_gt_trajectory = torch.rand(1, device=get_local_torch_device())
-            if dist.is_initialized():
-                dist.broadcast(use_gt_trajectory, src=0)
-            training_batch.use_gt_trajectory = (use_gt_trajectory < 0.5).item()
-            # training_batch.use_gt_trajectory = True
-        else:
-            training_batch.use_gt_trajectory = False
-
         batches = []
         for _ in range(gradient_accumulation_steps):
-            if training_batch.use_gt_trajectory:
-                batch = self._get_next_batch_2(training_batch)
-            else:
-                if self.training_args.use_context_forcing:
-                    batch = self._get_next_batch_2(training_batch)
-                else:
-                    batch = self._get_next_batch(training_batch)
+            batch = self._get_next_batch(training_batch)
             batch = self._normalize_dit_input(batch)
             batch = self._prepare_dit_inputs(batch)
-            if self.training_args.use_context_forcing:
-                batch = self._prepare_context_forcing_inputs(batch)
-            if training_batch.use_gt_trajectory:
-                batch = self._prepare_gt_inputs(batch)
             batch = self._build_attention_metadata(batch)
             batch.attn_metadata_vsa = copy.deepcopy(batch.attn_metadata)
             if batch.attn_metadata is not None:
@@ -1176,38 +733,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                         setattr(batch_gen, key, copy.deepcopy(value))
 
                 generator_loss, gen_log_dict = self.generator_loss(batch_gen)
-                if self.training_args.use_ode_init:
-                    batch_gt = self._get_next_batch_2(training_batch)
-                    batch_gt = self._prepare_dit_inputs(batch_gt)
-                    batch_gt = self._prepare_ode_init_inputs(batch_gt)
-                    batch_gt = self._build_attention_metadata(batch_gt)
-                    batch_gt.attn_metadata_vsa = copy.deepcopy(
-                        batch_gt.attn_metadata)
-                    batch_gt_gen = TrainingBatch()
-                    for key, value in batch_gt.__dict__.items():
-                        if isinstance(value, torch.Tensor):
-                            setattr(batch_gt_gen, key, value.detach().clone())
-                        elif isinstance(value, dict):
-                            setattr(
-                                batch_gt_gen, key, {
-                                    k:
-                                    v.detach().clone() if isinstance(
-                                        v, torch.Tensor) else copy.deepcopy(v)
-                                    for k, v in value.items()
-                                })
-                        else:
-                            setattr(batch_gt_gen, key, copy.deepcopy(value))
-
-                    gt_pred_video, gt_target_latent, gt_timestep = self._step_predict_next_latent(
-                        batch_gt_gen)
-                    mask = gt_timestep != 0
-                    # Compute loss
-                    gt_loss = F.mse_loss(gt_pred_video[mask],
-                                         gt_target_latent[mask],
-                                         reduction="mean")
-                    generator_loss += 0.5 * gt_loss
-
-                    # Store visualization data from generator training
                 with set_forward_context(current_timestep=batch_gen.timesteps,
                                          attn_metadata=batch_gen.attn_metadata):
                     (generator_loss / gradient_accumulation_steps).backward()
@@ -1303,10 +828,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         training_batch.fake_score_loss = avg_critic_loss.item()
 
         training_batch.total_loss = training_batch.generator_loss + training_batch.fake_score_loss
-
-        if training_batch.current_timestep % 10 == 0:
-            gc.collect()
-            torch.cuda.empty_cache()
         return training_batch
 
     def _log_training_info(self) -> None:

@@ -84,7 +84,6 @@ class DistillationPipeline(TrainingPipeline):
         if training_args.real_score_model_path:
             logger.info("Loading real score transformer from: %s",
                         training_args.real_score_model_path)
-            # training_args.override_transformer_cls_name = "WanTransformer3DModel"
             # TODO(will): can use deepcopy instead if the model is the same
             self.real_score_transformer = self.load_module_from_path(
                 training_args.real_score_model_path, "transformer",
@@ -110,7 +109,6 @@ class DistillationPipeline(TrainingPipeline):
         if training_args.fake_score_model_path:
             logger.info("Loading fake score transformer from: %s",
                         training_args.fake_score_model_path)
-            # training_args.override_transformer_cls_name = "WanTransformer3DModel"
             self.fake_score_transformer = self.load_module_from_path(
                 training_args.fake_score_model_path, "transformer",
                 training_args)
@@ -145,10 +143,8 @@ class DistillationPipeline(TrainingPipeline):
         self.vae.requires_grad_(False)
 
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
-        # self.noise_scheduler.set_timesteps(sigmas=list(np.linspace(1.0, 0.0, 50 + 1)[:-1]), device=get_local_torch_device())
-        self.noise_scheduler.set_timesteps(num_inference_steps=1000,
-                                           extra_one_step=True,
-                                           device=get_local_torch_device())
+        # self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
+        #     shift=self.timestep_shift)
 
         if self.training_args.boundary_ratio is not None:
             self.boundary_timestep = self.training_args.boundary_ratio * self.noise_scheduler.num_train_timesteps
@@ -183,19 +179,34 @@ class DistillationPipeline(TrainingPipeline):
                     checkpointing_type=training_args.
                     enable_gradient_checkpointing_type)
 
+        # Initialize optimizers
+        fake_score_params = list(
+            filter(lambda p: p.requires_grad,
+                   self.fake_score_transformer.parameters()))
+
         # Use separate learning rate for fake_score_transformer if specified
         fake_score_lr = training_args.fake_score_learning_rate
         if fake_score_lr == 0.0:
             fake_score_lr = training_args.learning_rate
 
-        betas_str = training_args.fake_score_betas
-        betas = tuple(float(x.strip()) for x in betas_str.split(","))
-
-        self.fake_score_optimizer = get_muon_optimizer(
-            self.fake_score_transformer,
-            lr=fake_score_lr,
-            weight_decay=training_args.weight_decay,
-        )
+        if training_args.optimizer_type == "adamw":
+            betas_str = training_args.fake_score_betas
+            betas = tuple(float(x.strip()) for x in betas_str.split(","))
+            self.fake_score_optimizer = torch.optim.AdamW(
+                fake_score_params,
+                lr=fake_score_lr,
+                betas=betas,
+                weight_decay=training_args.weight_decay,
+                eps=1e-8,
+            )
+        elif training_args.optimizer_type == "muon":
+            self.fake_score_optimizer = get_muon_optimizer(
+                self.fake_score_transformer,
+                lr=fake_score_lr,
+                weight_decay=training_args.weight_decay,
+            )
+        else:
+            raise ValueError(f"Unsupported optimizer type: {training_args.optimizer_type}")
 
         self.fake_score_lr_scheduler = get_scheduler(
             training_args.fake_score_lr_scheduler,
@@ -212,13 +223,23 @@ class DistillationPipeline(TrainingPipeline):
             fake_score_params_2 = list(
                 filter(lambda p: p.requires_grad,
                        self.fake_score_transformer_2.parameters()))
-            self.fake_score_optimizer_2 = torch.optim.AdamW(
-                fake_score_params_2,
-                lr=fake_score_lr,
-                betas=betas,
-                weight_decay=training_args.weight_decay,
-                eps=1e-8,
-            )
+            if training_args.optimizer_type == "adamw":
+                self.fake_score_optimizer_2 = torch.optim.AdamW(
+                        fake_score_params_2,
+                        lr=fake_score_lr,
+                        betas=betas,
+                        weight_decay=training_args.weight_decay,
+                        eps=1e-8,
+                    )
+            elif training_args.optimizer_type == "muon":
+                self.fake_score_optimizer_2 = get_muon_optimizer(
+                    self.fake_score_transformer_2,
+                    lr=fake_score_lr,
+                    weight_decay=training_args.weight_decay,
+                )
+            else:
+                raise ValueError(f"Unsupported optimizer type: {training_args.optimizer_type}")
+
             self.fake_score_lr_scheduler_2 = get_scheduler(
                 training_args.fake_score_lr_scheduler,
                 optimizer=self.fake_score_optimizer_2,
@@ -263,25 +284,9 @@ class DistillationPipeline(TrainingPipeline):
                                 self.num_train_timestep)
 
         self.real_score_guidance_scale = self.training_args.real_score_guidance_scale
-        # assert self.real_score_guidance_scale == 3.5, "Real score guidance scale must be 3.5"
 
         self.generator_ema: EMA_FSDP | None = None
         self.generator_ema_2: EMA_FSDP | None = None
-        # if (self.training_args.ema_decay
-        #         is not None) and (self.training_args.ema_decay > 0.0):
-        #     self.generator_ema = EMA_FSDP(self.transformer,
-        #                                   decay=self.training_args.ema_decay)
-        #     logger.info("Initialized generator EMA with decay=%s",
-        #                 self.training_args.ema_decay)
-
-        #     # Initialize EMA for transformer_2 if it exists
-        #     if self.transformer_2 is not None:
-        #         self.generator_ema_2 = EMA_FSDP(
-        #             self.transformer_2, decay=self.training_args.ema_decay)
-        #         logger.info("Initialized generator EMA_2 with decay=%s",
-        #                     self.training_args.ema_decay)
-        # else:
-        #     logger.info("Generator EMA disabled (ema_decay <= 0.0)")
 
     def load_module_from_path(self, model_path: str, module_type: str,
                               training_args: "TrainingArgs"):
@@ -708,11 +713,6 @@ class DistillationPipeline(TrainingPipeline):
                 timestep,
                 self.timestep_shift,  # type: ignore
                 self.num_train_timestep)
-            # timestep_idx = torch.randint(1,
-            #                          len(self.denoising_step_list), [1],
-            #                          device=self.device,
-            #                          dtype=torch.long)
-            # timestep = self.denoising_step_list[timestep_idx]
 
             timestep = timestep.clamp(self.min_timestep, self.max_timestep)
 
@@ -783,7 +783,6 @@ class DistillationPipeline(TrainingPipeline):
             real_score_pred_video = pred_real_video_cond + (
                 pred_real_video_cond -
                 pred_real_video_uncond) * self.real_score_guidance_scale
-            # real_score_pred_video = pred_real_video_cond
 
             grad = (faker_score_pred_video - real_score_pred_video) / torch.abs(
                 original_latent - real_score_pred_video).mean()
@@ -836,11 +835,6 @@ class DistillationPipeline(TrainingPipeline):
             fake_score_timestep,
             self.timestep_shift,  # type: ignore
             self.num_train_timestep)
-        # fake_score_timestep_idx = torch.randint(1,
-        #                                         len(self.denoising_step_list), [1],
-        #                                         device=self.device,
-        #                                         dtype=torch.long)
-        # fake_score_timestep = self.denoising_step_list[fake_score_timestep_idx]
 
         fake_score_timestep = fake_score_timestep.clamp(self.min_timestep,
                                                         self.max_timestep)
@@ -921,26 +915,13 @@ class DistillationPipeline(TrainingPipeline):
         training_batch.dmd_latent_vis_dict = {}
         training_batch.fake_score_latent_vis_dict = {}
 
-        training_batch.timesteps = 0
         training_batch.conditional_dict = conditional_dict
         training_batch.raw_latent_shape = training_batch.latents.shape
         training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
         self.video_latent_shape = training_batch.latents.shape
 
         self.video_latent_shape_sp = training_batch.latents.shape
-        training_batch.image_embeds = [
-            torch.zeros(1,
-                        729,
-                        1152,
-                        device=get_local_torch_device(),
-                        dtype=torch.bfloat16)
-        ]
-        raw_latent_shape = list(self.video_latent_shape)
-        raw_latent_shape[2] = 1
-        training_batch.video_latent = torch.zeros(
-            tuple(raw_latent_shape),
-            device=get_local_torch_device(),
-            dtype=torch.bfloat16)
+        
         return training_batch
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
@@ -1284,7 +1265,6 @@ class DistillationPipeline(TrainingPipeline):
                     batch.prompt_attention_mask = []
 
                     negative_prompt = batch.negative_prompt
-                    assert negative_prompt == ""
                     batch_negative = ForwardBatch(
                         data_type="video",
                         prompt=negative_prompt,
@@ -1293,9 +1273,11 @@ class DistillationPipeline(TrainingPipeline):
                     )
                     result_batch = self.validation_pipeline.prompt_encoding_stage(  # type: ignore
                         batch_negative, training_args)
-                    # self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds[
-                    #     0], result_batch.prompt_attention_mask[0]
-                    self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds, result_batch.prompt_attention_mask
+                    if len(result_batch.prompt_embeds) == 1:
+                        self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds[
+                            0], result_batch.prompt_attention_mask[0]
+                    else:
+                        self.negative_prompt_embeds, self.negative_prompt_attention_mask = result_batch.prompt_embeds, result_batch.prompt_attention_mask
 
                     logger.info(
                         "rank: %s: rank_in_sp_group: %s, batch.prompt: %s",

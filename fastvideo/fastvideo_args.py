@@ -876,6 +876,7 @@ class TrainingArgs(FastVideoArgs):
     num_train_epochs: int = 0
     max_train_steps: int = 0
     gradient_accumulation_steps: int = 0
+    optimizer_type: str = "adamw"
     learning_rate: float = 0.0
     scale_lr: bool = False
     lr_scheduler: str = "constant"
@@ -1150,6 +1151,10 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--gradient-accumulation-steps",
                             type=int,
                             help="Number of steps to accumulate gradients")
+        parser.add_argument("--optimizer-type",
+                            type=str,
+                            choices=["adamw", "muon"],
+                            help="Optimizer type")
         parser.add_argument("--learning-rate",
                             type=float,
                             required=True,
