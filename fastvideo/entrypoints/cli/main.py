@@ -3,6 +3,7 @@
 
 from fastvideo.entrypoints.cli.cli_types import CLISubcommand
 from fastvideo.entrypoints.cli.generate import cmd_init as generate_cmd_init
+from fastvideo.entrypoints.cli.upsample import cmd_init as upsample_cmd_init
 from fastvideo.utils import FlexibleArgumentParser
 
 
@@ -10,6 +11,7 @@ def cmd_init() -> list[CLISubcommand]:
     """Initialize all commands from separate modules"""
     commands = []
     commands.extend(generate_cmd_init())
+    commands.extend(upsample_cmd_init())
     return commands
 
 

@@ -84,6 +84,8 @@ class ComponentLoader(ABC):
             "audio_vae": (AudioDecoderLoader, "diffusers"),
             "audio_decoder": (AudioDecoderLoader, "diffusers"),
             "vocoder": (VocoderLoader, "diffusers"),
+            "upsampler": (UpsamplerLoader, "diffusers"),
+            "spatial_upsampler": (UpsamplerLoader, "diffusers"),
             "text_encoder": (TextEncoderLoader, "transformers"),
             "text_encoder_2": (TextEncoderLoader, "transformers"),
             "tokenizer": (TokenizerLoader, "transformers"),
@@ -725,6 +727,34 @@ class VocoderLoader(ComponentLoader):
         target_module = getattr(vocoder, "model", vocoder)
         target_module.load_state_dict(loaded, strict=False)
         return vocoder.eval()
+
+
+class UpsamplerLoader(ComponentLoader):
+    """Loader for LTX-2 spatial/temporal upsampler."""
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        config = get_diffusers_config(model=model_path)
+        class_name = config.pop("_class_name", None) or "LTX2LatentUpsampler"
+
+        model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+        target_device = get_local_torch_device()
+
+        precision = getattr(
+            fastvideo_args.pipeline_config, "vae_precision", "bf16"
+        )
+        with set_default_torch_dtype(PRECISION_TO_TYPE[precision]):
+            upsampler = model_cls(config).to(target_device)
+
+        safetensors_list = glob.glob(
+            os.path.join(str(model_path), "*.safetensors")
+        )
+        loaded: dict[str, torch.Tensor] = {}
+        for sf_file in safetensors_list:
+            loaded.update(safetensors_load_file(sf_file))
+
+        target_module = getattr(upsampler, "model", upsampler)
+        target_module.load_state_dict(loaded, strict=False)
+        return upsampler.eval()
 
 
 class TransformerLoader(ComponentLoader):
