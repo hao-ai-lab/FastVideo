@@ -545,6 +545,44 @@ def apply_ltx_rotary_emb(
     raise ValueError(f"Invalid rope type: {rope_type}")
 
 
+def apply_ltx_rotary_emb_4d(
+    input_tensor: torch.Tensor,
+    freqs_cis: tuple[torch.Tensor, torch.Tensor],
+    rope_type: LTXRopeType = LTXRopeType.INTERLEAVED,
+) -> torch.Tensor:
+    """Apply LTX-2 rotary embeddings to a 4D tensor [B, H, T, D].
+    
+    This is used for applying RoPE after all-to-all in distributed attention,
+    where the tensor is already in [B, H, T, D] format.
+    """
+    cos_freqs, sin_freqs = freqs_cis
+    if rope_type == LTXRopeType.INTERLEAVED:
+        # For interleaved, cos/sin have shape [B, T, inner_dim]
+        # Need to reshape to [B, H, T, D] format
+        # Actually interleaved doesn't have per-head rotations, so we broadcast
+        t_dup = rearrange(input_tensor, "... (d r) -> ... d r", r=2)
+        t1, t2 = t_dup.unbind(dim=-1)
+        t_dup = torch.stack((-t2, t1), dim=-1)
+        input_tensor_rot = rearrange(t_dup, "... d r -> ... (d r)")
+        return input_tensor * cos_freqs + input_tensor_rot * sin_freqs
+    if rope_type == LTXRopeType.SPLIT:
+        # For split, cos/sin already have shape [B, H, T, D/2]
+        # input_tensor is [B, H, T, D]
+        split_input = rearrange(input_tensor, "... (d r) -> ... d r", d=2)
+        first_half_input = split_input[..., :1, :]
+        second_half_input = split_input[..., 1:, :]
+
+        output = split_input * cos_freqs.unsqueeze(-2)
+        first_half_output = output[..., :1, :]
+        second_half_output = output[..., 1:, :]
+
+        first_half_output.addcmul_(-sin_freqs.unsqueeze(-2), second_half_input)
+        second_half_output.addcmul_(sin_freqs.unsqueeze(-2), first_half_input)
+
+        return rearrange(output, "... d r -> ... (d r)")
+    raise ValueError(f"Invalid rope type: {rope_type}")
+
+
 def _apply_ltx_interleaved_rotary_emb(
     input_tensor: torch.Tensor, cos_freqs: torch.Tensor, sin_freqs: torch.Tensor
 ) -> torch.Tensor:
@@ -1082,6 +1120,13 @@ class LTXDistributedSelfAttention(nn.Module):
             prefix=f"{prefix}.attn",
         )
 
+    def _make_rope_apply_fn(self):
+        """Create a RoPE apply function that captures the rope_type."""
+        rope_type = self.rope_type
+        def apply_fn(tensor, freqs_cis):
+            return apply_ltx_rotary_emb_4d(tensor, freqs_cis, rope_type)
+        return apply_fn
+
     def forward(
         self,
         x: torch.Tensor,
@@ -1095,7 +1140,8 @@ class LTXDistributedSelfAttention(nn.Module):
         Args:
             x: Query tensor [B, L, C]
             context: Key/Value tensor [B, L, C], or None for self-attention
-            pe: Rotary position embeddings for Q (cos, sin)
+            pe: Rotary position embeddings for Q (cos, sin) with shape [B, H, T_full, D]
+                NOTE: For SP, this must be the FULL sequence RoPE, not sharded!
             k_pe: Rotary position embeddings for K (cos, sin), or None to use pe
             attention_mask: Attention mask for padding [B, padded_seq_len]
         """
@@ -1107,10 +1153,10 @@ class LTXDistributedSelfAttention(nn.Module):
         q = self.q_norm(q)
         k = self.k_norm(k)
 
-        # Apply RoPE before reshaping for distributed attention
-        if pe is not None:
-            q = apply_ltx_rotary_emb(q, pe, self.rope_type)
-            k = apply_ltx_rotary_emb(k, pe if k_pe is None else k_pe, self.rope_type)
+        # NOTE: For distributed attention with SP, we do NOT apply RoPE here.
+        # RoPE is applied inside DistributedAttention AFTER the all-to-all,
+        # when each rank has the full sequence (but subset of heads).
+        # This is necessary because sharding may not align to frame boundaries.
 
         b, q_len, _ = q.shape
         k_len = k.shape[1]
@@ -1118,9 +1164,15 @@ class LTXDistributedSelfAttention(nn.Module):
         k = k.view(b, k_len, self.heads, self.dim_head)
         v = v.view(b, k_len, self.heads, self.dim_head)
 
-        # Call distributed attention (handles all-to-all internally)
-        # Note: freqs_cis is None because we already applied RoPE above
-        out, _ = self.attn(q, k, v, freqs_cis=None, attention_mask=attention_mask)
+        # Pass full RoPE to distributed attention - it will apply after all-to-all
+        # and slice to this rank's heads
+        out, _ = self.attn(
+            q, k, v,
+            freqs_cis=None,  # Not using Wan-style RoPE
+            attention_mask=attention_mask,
+            ltx_freqs_cis=pe,  # LTX-2 style RoPE with per-head rotations
+            ltx_rope_apply_fn=self._make_rope_apply_fn() if pe is not None else None,
+        )
 
         out = out.reshape(b, q_len, -1)
         return self.to_out(out)
@@ -1366,57 +1418,88 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 # Audio-to-video cross-attention: Q from video (sharded), K/V from audio
                 # For SP, gather audio context from all ranks before cross-attention
                 if self.use_distributed_attention:
-                    # Gather audio context from all SP ranks (context shape: [B, seq, hidden])
+                    # Gather audio context from all SP ranks
                     ax_context = sequence_model_parallel_all_gather(ax_scaled, dim=1)
-                    # RoPE embeddings are tuples of (cos, sin) with shape [B, H, seq, D]
-                    # Need to gather on dim=2 (the sequence dimension)
-                    audio_k_pe = None
-                    if audio.cross_positional_embeddings is not None:
-                        pe_tuple = audio.cross_positional_embeddings
-                        audio_k_pe = tuple(
-                            sequence_model_parallel_all_gather(pe, dim=2) for pe in pe_tuple
+                    # Video Q: video tokens divide evenly (adjusted upstream), so simple slicing works
+                    video_q_pe = None
+                    if video.cross_positional_embeddings is not None:
+                        sp_rank = get_sp_parallel_rank()
+                        local_seq_len = vx_scaled.shape[1]
+                        pe_tuple = video.cross_positional_embeddings
+                        start_idx = sp_rank * local_seq_len
+                        end_idx = start_idx + local_seq_len
+                        video_q_pe = tuple(pe[:, :, start_idx:end_idx, :] for pe in pe_tuple)
+                    # Audio K: gathered context may have padding, trim to original length
+                    audio_k_pe = audio.cross_positional_embeddings
+                    if audio_k_pe is not None:
+                        original_audio_len = audio_k_pe[0].shape[2]
+                        ax_context = ax_context[:, :original_audio_len, :]
+                    vx = vx + (
+                        self.audio_to_video_attn(
+                            vx_scaled,
+                            context=ax_context,
+                            pe=video_q_pe,
+                            k_pe=audio_k_pe,
                         )
+                        * gate_out_a2v
+                    )
                 else:
                     ax_context = ax_scaled
+                    video_q_pe = video.cross_positional_embeddings
                     audio_k_pe = audio.cross_positional_embeddings
-                vx = vx + (
-                    self.audio_to_video_attn(
-                        vx_scaled,
-                        context=ax_context,
-                        pe=video.cross_positional_embeddings,
-                        k_pe=audio_k_pe,
+                    vx = vx + (
+                        self.audio_to_video_attn(
+                            vx_scaled,
+                            context=ax_context,
+                            pe=video_q_pe,
+                            k_pe=audio_k_pe,
+                        )
+                        * gate_out_a2v
                     )
-                    * gate_out_a2v
-                )
 
             if run_v2a:
                 ax_scaled = ax_norm3 * (1 + scale_ca_audio_hidden_states_v2a) + shift_ca_audio_hidden_states_v2a
                 vx_scaled = vx_norm3 * (1 + scale_ca_video_hidden_states_v2a) + shift_ca_video_hidden_states_v2a
-                # Video-to-audio cross-attention: Q from audio (sharded), K/V from video
-                # For SP, gather video context from all ranks before cross-attention
+                # Video-to-audio cross-attention: Q from audio, K/V from video
+                # For SP, gather both modalities and run cross-attention on full sequences
+                # (audio is short, so no need to keep it sharded for cross-attention)
                 if self.use_distributed_attention:
-                    # Gather video context from all SP ranks (context shape: [B, seq, hidden])
+                    # Gather both modalities to full sequences
+                    ax_full = sequence_model_parallel_all_gather(ax_scaled, dim=1)
                     vx_context = sequence_model_parallel_all_gather(vx_scaled, dim=1)
-                    # RoPE embeddings are tuples of (cos, sin) with shape [B, H, seq, D]
-                    # Need to gather on dim=2 (the sequence dimension)
-                    video_k_pe = None
-                    if video.cross_positional_embeddings is not None:
-                        pe_tuple = video.cross_positional_embeddings
-                        video_k_pe = tuple(
-                            sequence_model_parallel_all_gather(pe, dim=2) for pe in pe_tuple
-                        )
-                else:
-                    vx_context = vx_scaled
+                    # Use full positional embeddings directly
+                    audio_q_pe = audio.cross_positional_embeddings
                     video_k_pe = video.cross_positional_embeddings
-                ax = ax + (
-                    self.video_to_audio_attn(
-                        ax_scaled,
+                    # Trim gathered tensors to original lengths (may have padding from sharding)
+                    if audio_q_pe is not None:
+                        original_audio_len = audio_q_pe[0].shape[2]
+                        ax_full = ax_full[:, :original_audio_len, :]
+                    if video_k_pe is not None:
+                        original_video_len = video_k_pe[0].shape[2]
+                        vx_context = vx_context[:, :original_video_len, :]
+                    # Run cross-attention on full audio
+                    v2a_out_full = self.video_to_audio_attn(
+                        ax_full,
                         context=vx_context,
-                        pe=audio.cross_positional_embeddings,
+                        pe=audio_q_pe,
                         k_pe=video_k_pe,
                     )
-                    * gate_out_v2a
-                )
+                    # Shard the output back to match ax's sharding
+                    v2a_out, _ = sequence_model_parallel_shard(v2a_out_full, dim=1)
+                    ax = ax + v2a_out * gate_out_v2a
+                else:
+                    vx_context = vx_scaled
+                    audio_q_pe = audio.cross_positional_embeddings
+                    video_k_pe = video.cross_positional_embeddings
+                    ax = ax + (
+                        self.video_to_audio_attn(
+                            ax_scaled,
+                            context=vx_context,
+                            pe=audio_q_pe,
+                            k_pe=video_k_pe,
+                        )
+                        * gate_out_v2a
+                    )
 
         if run_vx:
             vshift_mlp, vscale_mlp, vgate_mlp = self.get_ada_values(
@@ -1999,28 +2082,12 @@ class LTX2Transformer3DModel(CachableDiT):
                     device=hidden_states.device,
                 )
 
-        # Compute RoPE positions with SP offset
-        # Each rank computes positions for its local frames with global offset
-        if sp_world_size > 1:
-            # Use actual sharded sequence length to compute local frames
-            # The sharded latents.shape[1] = local_frames * height * width
-            local_seq_len = latents.shape[1]
-            local_num_frames = local_seq_len // (video_shape.height * video_shape.width)
-            video_start_frame = sp_rank * local_num_frames
-            # Create local video shape for position computation
-            local_video_shape = VideoLatentShape((
-                video_shape.batch,
-                video_shape.channels,
-                local_num_frames,
-                video_shape.height,
-                video_shape.width,
-            ))
-        else:
-            video_start_frame = 0
-            local_video_shape = video_shape
-
+        # Compute RoPE positions for the FULL sequence (before sharding)
+        # This is necessary because sequence sharding may not align to frame boundaries.
+        # The full RoPE will be passed to DistributedAttention which applies it after
+        # the all-to-all (when each rank has the full sequence but subset of heads).
         positions = self.patchifier.get_patch_grid_bounds(
-            local_video_shape, device=hidden_states.device, start_frame=video_start_frame
+            video_shape, device=hidden_states.device, start_frame=0
         )
         positions = _get_pixel_coords(
             positions,
@@ -2079,23 +2146,10 @@ class LTX2Transformer3DModel(CachableDiT):
                         device=audio_hidden_states.device,
                     )
 
-            # Compute audio RoPE positions with SP offset
-            if sp_world_size > 1:
-                # Use actual sharded sequence length (includes padding if any)
-                local_audio_num_frames = audio_latents.shape[1]
-                audio_start_frame = sp_rank * local_audio_num_frames
-                local_audio_shape = AudioLatentShape((
-                    audio_shape.batch,
-                    audio_shape.channels,
-                    local_audio_num_frames,
-                    audio_shape.mel_bins,
-                ))
-            else:
-                audio_start_frame = 0
-                local_audio_shape = audio_shape
-
+            # Compute audio RoPE positions for the FULL sequence (before sharding)
+            # Same as video: full RoPE is applied after all-to-all in DistributedAttention
             audio_positions = self.audio_patchifier.get_patch_grid_bounds(
-                local_audio_shape, device=audio_hidden_states.device, start_frame=audio_start_frame
+                audio_shape, device=audio_hidden_states.device, start_frame=0
             )
 
             audio_modality = Modality(

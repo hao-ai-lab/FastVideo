@@ -13,6 +13,8 @@ from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
 from fastvideo.layers.rotary_embedding import _apply_rotary_emb
 
+from collections.abc import Callable
+
 
 class DistributedAttention(nn.Module):
     """Distributed attention layer.
@@ -71,6 +73,8 @@ class DistributedAttention(nn.Module):
         replicated_v: torch.Tensor | None = None,
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
         attention_mask: torch.Tensor | None = None,
+        ltx_freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
+        ltx_rope_apply_fn: Callable | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Forward pass for distributed attention.
         
@@ -81,7 +85,10 @@ class DistributedAttention(nn.Module):
             replicated_q (Optional[torch.Tensor]): Replicated query tensor, typically for text tokens
             replicated_k (Optional[torch.Tensor]): Replicated key tensor
             replicated_v (Optional[torch.Tensor]): Replicated value tensor
+            freqs_cis (Optional[Tuple]): Wan-style RoPE (cos, sin) with shape [T, D] - same for all heads
             attention_mask (Optional[torch.Tensor]): Attention mask [batch_size, seq_len]
+            ltx_freqs_cis (Optional[Tuple]): LTX-2 style RoPE (cos, sin) with shape [B, H, T, D] - per-head different
+            ltx_rope_apply_fn (Optional[Callable]): LTX-2 RoPE apply function: (tensor, (cos, sin)) -> tensor
             
         Returns:
             Tuple[torch.Tensor, Optional[torch.Tensor]]: A tuple containing:
@@ -117,12 +124,38 @@ class DistributedAttention(nn.Module):
             valid_seq_len = (attention_mask[0] == 1).sum().item()
             qkv = qkv[:, :valid_seq_len, :, :]
 
+        # Apply RoPE after all-to-all (when we have full sequence)
         if freqs_cis is not None:
+            # Wan-style RoPE: [T, D] - broadcast to all heads
             cos, sin = freqs_cis
             qkv[:batch_size * 2] = _apply_rotary_emb(qkv[:batch_size * 2],
                                                      cos,
                                                      sin,
                                                      is_neox_style=False)
+        elif ltx_freqs_cis is not None and ltx_rope_apply_fn is not None:
+            cos, sin = ltx_freqs_cis
+            heads_per_rank = num_heads // world_size
+            head_start = local_rank * heads_per_rank
+            head_end = head_start + heads_per_rank
+            # Slice to this rank's heads: [B, H/SP, T, D]
+            cos_local = cos[:, head_start:head_end, :, :]
+            sin_local = sin[:, head_start:head_end, :, :]
+            # Trim to valid sequence length if needed
+            if valid_seq_len is not None:
+                cos_local = cos_local[:, :, :valid_seq_len, :]
+                sin_local = sin_local[:, :, :valid_seq_len, :]
+
+            q_part = qkv[:batch_size]
+            k_part = qkv[batch_size:batch_size * 2]
+            # Transpose to [B, H/SP, T, D] for LTX RoPE application
+            q_part = q_part.transpose(1, 2)
+            k_part = k_part.transpose(1, 2)
+            q_part = ltx_rope_apply_fn(q_part, (cos_local, sin_local))
+            k_part = ltx_rope_apply_fn(k_part, (cos_local, sin_local))
+
+            # Transpose back to [B, T, H/SP, D]
+            qkv[:batch_size] = q_part.transpose(1, 2)
+            qkv[batch_size:batch_size * 2] = k_part.transpose(1, 2)
         # Apply backend-specific preprocess_qkv
         qkv = self.attn_impl.preprocess_qkv(qkv, ctx_attn_metadata)
 
