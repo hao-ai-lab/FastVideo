@@ -13,12 +13,12 @@ NUM_NODES = "1"
 MODEL_PATH = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
 
 DATA_DIR = "data"
-LOCAL_RAW_DATA_DIR = Path(DATA_DIR) / "cats15"
-LOCAL_PREPROCESSED_DATA_DIR = Path(DATA_DIR) / "cats_processed_t2v_hunyuan15"
-LOCAL_OUTPUT_DIR = Path(DATA_DIR) / "outputs_hunyuan15"
+LOCAL_RAW_DATA_DIR = Path(DATA_DIR) / "cats"
+LOCAL_PREPROCESSED_DATA_DIR = Path(DATA_DIR) / "crush-smol_processed_t2v_hunyuan15"
+LOCAL_OUTPUT_DIR = Path(DATA_DIR) / "outputs_hunyuan15_new"
 
 NUM_GPUS_PER_NODE_PREPROCESSING = "1"
-NUM_GPUS_PER_NODE_TRAINING = "8"
+NUM_GPUS_PER_NODE_TRAINING = "4"
 
 # entrypoints (adjust to what hunyuan15 scripts use)
 PREPROCESS_ENTRY = ["-m", "fastvideo.pipelines.preprocess.v1_preprocessing_new"]
@@ -74,8 +74,8 @@ def run_preprocessing():
         "--preprocess.dataloader_num_workers", "0",
         "--preprocess.max_height", "480",
         "--preprocess.max_width", "832",
-        "--preprocess.num_frames", "61",
-        "--preprocess.train_fps", "24",
+        "--preprocess.num_frames", "77",
+        "--preprocess.train_fps", "16",
         "--preprocess.samples_per_file", "1",
         "--preprocess.flush_frequency", "1",
         "--preprocess.video_length_tolerance_range", "5",
@@ -106,7 +106,7 @@ def run_training():
         "--validation_dataset_file", LOCAL_VALIDATION_DATASET_FILE,
 
         "--train_batch_size", "1",
-        "--num_latent_t", "16",  # (61-1)//4 + 1 = 16 for 61 frames with temporal_compression=4
+        "--num_latent_t", "8", #"16",  # (61-1)//4 + 1 = 16 for 61 frames with temporal_compression=4
         "--max_train_steps", "901",
         "--learning_rate", "1e-5",
         "--gradient_accumulation_steps", "1",  # Required: default 0 causes empty training loop
@@ -152,7 +152,7 @@ def run_training():
         "--tracker_project_name", "hunyuan15_finetune_overfit_ci",
         "--num_height", "480",
         "--num_width", "832",
-        "--num_frames", "61",
+        "--num_frames", "29", #"61",
         "--embedded_cfg_scale", "6.0",
         "--num_euler_timesteps", "50",
     ]
@@ -165,10 +165,10 @@ def test_e2e_hunyuan15_overfit_single_sample():
     os.environ["WANDB_API_KEY"] = "8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde"
 
     # download_data()
-    # run_preprocessing()
+    #run_preprocessing()
     run_training()
 
-    reference_video_file = os.path.join(os.path.dirname(__file__), "reference_video_1_sample_hy15.mp4")
+    reference_video_file = os.path.join(os.path.dirname(__file__), "reference_video_1_sample_v0.mp4")
     final_validation_video_file = os.path.join(LOCAL_OUTPUT_DIR, "validation_step_900_inference_steps_50_video_0.mp4")
 
     assert os.path.exists(reference_video_file)
