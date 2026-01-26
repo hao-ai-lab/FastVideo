@@ -100,9 +100,13 @@ def sde_step_with_logprob(
             " `prev_sample` stays `None`.")
 
     if prev_sample is None:
+        # For GRPO training, each timestep should have different random noise.
+        # Do NOT use generator here - this ensures truly stochastic noise at each step.
+        # Using a fixed generator would make noise deterministic across timesteps, which
+        # is incorrect for GRPO training where we need independent randomness at each step.
         variance_noise = randn_tensor(
             model_output.shape,
-            generator=generator,
+            generator=None,  # Always None for GRPO - each timestep gets independent random noise
             device=model_output.device,
             dtype=model_output.dtype,
         )
@@ -524,13 +528,14 @@ class DenoisingStage(PipelineStage):
                     if rl_data is not None and rl_data.collect_log_probs:
                         # For RL training, use sde_step_with_logprob to generate latents with random noise
                         # This matches flow_grpo's implementation where latents come from sde_step_with_logprob
+                        # Note: generator=None ensures each timestep gets independent random noise (required for GRPO)
                         latents, log_prob, prev_latents_mean, std_dev_t, _ = sde_step_with_logprob(
                             self.scheduler,
                             noise_pred.float(),
                             t,
                             prev_latents.float(),
                             prev_sample=None,  # None means generate random noise
-                            generator=batch.generator,
+                            generator=None,  # Always None for GRPO - each timestep needs independent randomness
                             deterministic=False,  # Add random noise for RL training
                             return_dt_and_std_dev_t=True,
                         )

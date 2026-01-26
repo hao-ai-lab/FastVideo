@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import asdict
+import json
 import math
 import os
 import time
@@ -763,12 +764,15 @@ class TrainingPipeline(LoRAPipeline, ABC):
         assert self.seed is not None
         sampling_param.seed = self.seed
 
-        latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
-                        sampling_param.height // 8, sampling_param.width // 8]
-        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
         temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
         num_frames = (training_args.num_latent_t - 1) * temporal_compression_factor + 1
         sampling_param.num_frames = num_frames
+        
+        # Calculate n_tokens AFTER updating num_frames (aligns with sampling pipeline)
+        latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
+                        sampling_param.height // 8, sampling_param.width // 8]
+        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
+        
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
             latents=None,

@@ -79,9 +79,31 @@ class TextEncodingStage(PipelineStage):
 
         # Encode negative prompt if CFG is enabled
         if batch.do_classifier_free_guidance:
-            assert isinstance(batch.negative_prompt, str)
+            # Handle batch dimension: if prompt is a list, repeat negative_prompt to match
+            if isinstance(prompt_text, list):
+                # Repeat negative_prompt string to match the number of prompts
+                if isinstance(batch.negative_prompt, str):
+                    negative_prompt_text = [batch.negative_prompt] * len(prompt_text)
+                elif isinstance(batch.negative_prompt, list):
+                    # If already a list, ensure it matches the prompt list length
+                    if len(batch.negative_prompt) != len(prompt_text):
+                        # Repeat the first negative prompt if lengths don't match
+                        negative_prompt_text = [batch.negative_prompt[0] if batch.negative_prompt else ""] * len(prompt_text)
+                    else:
+                        negative_prompt_text = batch.negative_prompt
+                else:
+                    negative_prompt_text = [""] * len(prompt_text)
+            else:
+                # Single prompt case
+                if isinstance(batch.negative_prompt, str):
+                    negative_prompt_text = batch.negative_prompt
+                elif isinstance(batch.negative_prompt, list) and len(batch.negative_prompt) > 0:
+                    negative_prompt_text = batch.negative_prompt[0]
+                else:
+                    negative_prompt_text = ""
+            
             neg_embeds_list, neg_masks_list = self.encode_text(
-                batch.negative_prompt,
+                negative_prompt_text,
                 fastvideo_args,
                 encoder_index=all_indices,
                 return_attention_mask=True,

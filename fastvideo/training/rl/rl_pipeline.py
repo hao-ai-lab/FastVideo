@@ -10,6 +10,7 @@ Reference:
     Flow-GRPO: https://github.com/yifan123/flow_grpo
 """
 
+import json
 import math
 import os
 from typing import Any
@@ -17,6 +18,7 @@ from typing import Any
 import torch
 import torch.nn as nn
 
+from fastvideo.configs.sample import SamplingParam
 from fastvideo.fastvideo_args import TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch, TrainingBatch
@@ -28,7 +30,7 @@ from .rl_utils import (
     compute_reward_statistics, )
 from fastvideo.training.rl.stat_tracking import PerPromptStatTracker
 from fastvideo.training.training_utils import (get_scheduler, count_trainable)
-from fastvideo.utils import get_compute_dtype
+from fastvideo.utils import get_compute_dtype, shallow_asdict
 from fastvideo.dataset.rl_prompt_dataset import build_rl_prompt_dataloader
 
 from fastvideo.forward_context import set_forward_context
@@ -589,32 +591,60 @@ class RLPipeline(TrainingPipeline):
             prompts = [prompts]
         # Get sampling configuration - align with validation pipeline
         # Use validation_sampling_steps if available, otherwise fall back to num_latent_t
-        if hasattr(self.training_args, 'validation_sampling_steps') and self.training_args.validation_sampling_steps:
-            validation_steps = self.training_args.validation_sampling_steps.split(",")
-            validation_steps = [int(step) for step in validation_steps if step.strip()]
-            num_inference_steps = validation_steps[0] if validation_steps else self.training_args.num_latent_t
-        else:
-            num_inference_steps = self.training_args.num_latent_t
+        # if hasattr(self.training_args, 'validation_sampling_steps') and self.training_args.validation_sampling_steps:
+        #     validation_steps = self.training_args.validation_sampling_steps.split(",")
+        #     validation_steps = [int(step) for step in validation_steps if step.strip()]
+        #     num_inference_steps = validation_steps[0] if validation_steps else self.training_args.num_latent_t
+        # else:
+        #     num_inference_steps = self.training_args.num_latent_t
         
-        # Use validation_guidance_scale if available (aligns with validation pipeline)
-        if hasattr(self.training_args, 'validation_guidance_scale') and self.training_args.validation_guidance_scale:
-            guidance_scale = float(self.training_args.validation_guidance_scale)
-        else:
-            # Fall back to flow_grpo default for training
-            guidance_scale = 4.5
-        
-        # Compute num_frames using same formula as validation pipeline
-        # This ensures correct video duration (matches validation)
-        temporal_compression_factor = self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-        num_frames = (self.training_args.num_latent_t - 1) * temporal_compression_factor + 1
+        # # Use validation_guidance_scale if available (aligns with validation pipeline)
+        # if hasattr(self.training_args, 'validation_guidance_scale') and self.training_args.validation_guidance_scale:
+        #     guidance_scale = float(self.training_args.validation_guidance_scale)
+        # else:
+        #     # Fall back to flow_grpo default for training
+        #     guidance_scale = 4.5
+                
+        # Create SamplingParam like validation pipeline does
+        # This ensures all fields from SamplingParam are included in ForwardBatch
+        sampling_param = SamplingParam.from_pretrained(self.training_args.model_path)
         
         height = self.training_args.num_height
         width = self.training_args.num_width
+        num_frames = self.training_args.num_frames
         num_videos_per_prompt = 1  # Each prompt in batch generates one video (batch already has repeated prompts if needed)
         sample_time_per_prompt = 1  # config.sample.sample_time_per_prompt - hardcoded
         kl_reward = getattr(self.training_args.rl_args, 'kl_reward', 0.0)
         collect_kl = kl_reward > 0
         
+
+        num_inference_steps = self.training_args.num_latent_t
+        # Use validation_guidance_scale if available (aligns with validation pipeline)
+        if hasattr(self.training_args, 'validation_guidance_scale') and self.training_args.validation_guidance_scale:
+            guidance_scale = float(self.training_args.validation_guidance_scale)
+        else:
+            # Fall back to hardcoded value (was 6.0, matching validation default)
+            guidance_scale = 6.0
+
+        latents_size = [(num_frames - 1) // 4 + 1,
+                        height // 8, width // 8]
+        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
+
+        # Compute num_frames using same formula as validation pipeline
+        # This ensures correct video duration (matches validation)
+        temporal_compression_factor = self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        num_frames = (num_inference_steps - 1) * temporal_compression_factor + 1
+        
+        # Set sampling_param fields to match validation pipeline pattern
+        sampling_param.prompt = prompts  # Will be set per-batch in loop
+        sampling_param.height = height
+        sampling_param.width = width
+        sampling_param.num_inference_steps = num_inference_steps
+        sampling_param.data_type = "video"
+        sampling_param.guidance_scale = guidance_scale
+        sampling_param.num_frames = num_frames
+        sampling_param.num_videos_per_prompt = num_videos_per_prompt
+
         # Debug: Log scheduler configuration
         scheduler = self.sampling_pipeline.get_module("scheduler")
         # logger.info(f"RL sampling config (aligned with validation) - num_inference_steps: {num_inference_steps}, guidance_scale: {guidance_scale}, num_frames: {num_frames} (computed from num_latent_t={self.training_args.num_latent_t}, temporal_compression={temporal_compression_factor}), fps: {fps}")
@@ -643,30 +673,28 @@ class RLPipeline(TrainingPipeline):
         with torch.no_grad():
             # Sample multiple times per prompt if needed
             for _ in range(sample_time_per_prompt):
-                # NOTE: Inference pipelines require a positive integer `seed` for
-                # `InputValidationStage` (it derives `seeds` and CPU generators from it).
-                # We keep stochasticity by drawing a fresh seed from the existing
-                # `noise_random_generator` each sampling call.
-                # Align seed with validation when available; fall back to random.
-                # Validation uses self.seed (asserted to be not None), so we should use it too
-                seed = getattr(self, "seed", None)
-                if seed is None:
-                    seed = int(
-                        torch.randint(
-                            low=1,
-                            high=2**31 - 1,
-                            size=(1, ),
-                            generator=self.noise_random_generator,
-                            device=self.device,
-                        ).item())
-                else:
-                    seed = int(seed)
+                # NOTE: For batch processing, we need different seeds for each item in the batch.
+                # InputValidationStage will create a list of generators from the base seed.
+                # We use noise_random_generator (NOT validation_random_generator) to ensure
+                # proper stochasticity for RL training.
+                # Generate a base seed for this sampling call
+                base_seed = int(
+                    torch.randint(
+                        low=1,
+                        high=2**31 - 1,
+                        size=(1, ),
+                        generator=self.noise_random_generator,
+                        device=self.device,
+                    ).item())
                 
-                # Use validation_random_generator if available (aligns with validation)
-                generator = getattr(self, "validation_random_generator", None)
-                if generator is None:
-                    # Fall back to creating generator from seed (like validation does)
-                    generator = torch.Generator(device="cpu").manual_seed(seed)
+                # Set seed in sampling_param - InputValidationStage will use this to create
+                # a list of generators (one per batch item)
+                sampling_param.seed = self.seed
+                
+                # Don't pass a generator - let InputValidationStage create the proper list
+                # of generators from the seed. This ensures each batch item gets its own
+                # generator with a unique seed (seed, seed+1, seed+2, ...)
+                generator = None
                 
                 rl_data = ForwardBatch.RLData(
                     enabled=True,
@@ -677,31 +705,46 @@ class RLPipeline(TrainingPipeline):
                     keep_trajectory_on_cpu=False,
                 )
                 
-                # Compute n_tokens like validation does
-                # ** Problem is that n_tokens is not used 
-                latents_size = [(num_frames - 1) // 4 + 1,
-                               height // 8, width // 8]
-                n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
-
-                temporal_compression_factor = self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-                num_frames = (self.training_args.num_latent_t - 1) * temporal_compression_factor + 1
+                # Prepare ForwardBatch initialization parameters for logging
+                # Use shallow_asdict to get all fields from sampling_param (like validation)
+                sampling_param_dict = shallow_asdict(sampling_param)
+                batch_init_params = {
+                    **sampling_param_dict,
+                    "latents": None,
+                    "generator": "None (InputValidationStage will create list)",
+                    "n_tokens": n_tokens,
+                    "eta": 0.0,
+                    "VSA_sparsity": self.training_args.VSA_sparsity,
+                    "rl_data": {
+                        "enabled": rl_data.enabled,
+                        "collect_log_probs": rl_data.collect_log_probs,
+                        "collect_kl": rl_data.collect_kl,
+                        "kl_reward": rl_data.kl_reward,
+                        "store_trajectory": rl_data.store_trajectory,
+                        "keep_trajectory_on_cpu": rl_data.keep_trajectory_on_cpu,
+                    },
+                }
                 
+                # Log ForwardBatch initialization parameters
+                import os as os_module
+                os_module.makedirs("/mnt/fast-disks/hao_lab/shijie/mylogs", exist_ok=True)
+                log_file = "/mnt/fast-disks/hao_lab/shijie/mylogs/sampling_forward_batch_params.json"
+                with open(log_file, "w") as f:
+                    json.dump(batch_init_params, f, indent=2, default=str)
+                logger.info(f"Sampling ForwardBatch initialization parameters logged to {log_file}")
+                
+                # Create ForwardBatch using same pattern as validation: **shallow_asdict(sampling_param)
+                # This ensures all fields from SamplingParam are included
+                # Note: generator=None lets InputValidationStage create proper list of generators
+                # (one per batch item) from the seed, ensuring each video gets unique randomness
                 forward_batch = ForwardBatch(
-                    data_type="video",  # Use "video" like validation (not "rl")
-                    prompt=prompts,
-                    negative_prompt="" if guidance_scale > 1.0 else None,
-                    num_frames=num_frames,
-                    height=height,
-                    width=width,
-                    num_inference_steps=num_inference_steps,
-                    guidance_scale=guidance_scale,
-                    num_videos_per_prompt=num_videos_per_prompt,
-                    seed=seed,
-                    generator=generator,  # Use generator like validation
+                    **shallow_asdict(sampling_param),
+                    latents=None,
+                    generator=None,  # Let InputValidationStage create generators from seed
                     n_tokens=n_tokens,  # Add n_tokens like validation
                     eta=0.0,  # Add eta like validation
                     VSA_sparsity=self.training_args.VSA_sparsity,  # Add VSA_sparsity like validation
-                    rl_data=rl_data,
+                    rl_data=rl_data,  # RL-specific field (not in validation)
                 )
 
                 orig_output_type = getattr(self.training_args, "output_type",
@@ -823,7 +866,7 @@ class RLPipeline(TrainingPipeline):
         # Store decoded videos in input_kwargs (same pattern as validation)
         training_batch.input_kwargs["decoded_videos"] = decoded_videos
 
-        # Debug: Save decoded video for visual verification
+# myregion: Debug: Save decoded video for visual verification
         from contextlib import nullcontext
         controller = getattr(self, "profiler_controller", None)
         region_cm = (controller.region("my region") if controller is not None
@@ -839,29 +882,75 @@ class RLPipeline(TrainingPipeline):
             if get_world_group().rank == 0:
                 out_dir = "/mnt/fast-disks/hao_lab/shijie/mylogs"
                 os.makedirs(out_dir, exist_ok=True)
-                out_path = os.path.join(out_dir, "debug_step0.mp4")
-
+                
+                # Get batch size
+                batch_size = decoded_videos.shape[0]
+                logger.info(f"Debug region: Saving {batch_size} videos from batch")
+                
+                # Convert all videos to numpy and save them
                 # videos expected shape: [B, C, T, H, W]
-                vid0 = decoded_videos[0].detach().to(torch.float32).cpu()
-                # Convert to [T, H, W, C]
-                vid0 = vid0.permute(1, 2, 3, 0).contiguous()
-                vid_np = vid0.numpy()
-
-                # Bring into [0, 255] uint8
-                if vid_np.min() < 0.0:
-                    vid_np = (vid_np + 1.0) / 2.0
-                vid_np = np.clip(vid_np, 0.0, 1.0)
-                vid_np = (vid_np * 255.0).round().astype(np.uint8)
-
-                # imageio expects list of frames [H, W, C]
-                # Use fps from SamplingParam like validation does (default 24, same as validation)
                 fps = getattr(self, '_debug_fps', 24)  # Fallback to 24 if not set
-                frames = [vid_np[t] for t in range(vid_np.shape[0])]
-                imageio.mimsave(out_path, frames, fps=fps)
-                logger.info(f"Saved debug video with {vid_np.shape[0]} frames at {fps} fps (duration: {vid_np.shape[0]/fps:.2f}s) to {out_path}")
+                videos_np_list = []
+                
+                for batch_idx in range(batch_size):
+                    vid = decoded_videos[batch_idx].detach().to(torch.float32).cpu()
+                    # Convert to [T, H, W, C]
+                    vid = vid.permute(1, 2, 3, 0).contiguous()
+                    vid_np = vid.numpy()
+
+                    # Bring into [0, 255] uint8
+                    if vid_np.min() < 0.0:
+                        vid_np = (vid_np + 1.0) / 2.0
+                    vid_np = np.clip(vid_np, 0.0, 1.0)
+                    vid_np = (vid_np * 255.0).round().astype(np.uint8)
+                    
+                    # Store for difference calculation (keep in float64 for precision)
+                    vid_fp64 = vid.detach().to(torch.float64).cpu().numpy()
+                    if vid_fp64.min() < 0.0:
+                        vid_fp64 = (vid_fp64 + 1.0) / 2.0
+                    vid_fp64 = np.clip(vid_fp64, 0.0, 1.0)
+                    videos_np_list.append(vid_fp64)
+
+                    # Save video
+                    out_path = os.path.join(out_dir, f"debug_step0_batch_{batch_idx}.mp4")
+                    frames = [vid_np[t] for t in range(vid_np.shape[0])]
+                    imageio.mimsave(out_path, frames, fps=fps)
+                    logger.info(f"Saved debug video batch_{batch_idx} with {vid_np.shape[0]} frames at {fps} fps (duration: {vid_np.shape[0]/fps:.2f}s) to {out_path}")
+
+                # Calculate and print differences between consecutive videos
+                if batch_size >= 2:
+                    logger.info("=" * 80)
+                    logger.info("Video Difference Statistics (calculated in float64 for precision):")
+                    logger.info("=" * 80)
+                    
+                    for i in range(batch_size - 1):
+                        vid_i = videos_np_list[i]
+                        vid_j = videos_np_list[i + 1]
+                        
+                        # Calculate element-wise absolute difference in float64
+                        diff = np.abs(vid_i.astype(np.float64) - vid_j.astype(np.float64))
+                        
+                        # Calculate statistics
+                        avg_diff = np.mean(diff)
+                        max_diff = np.max(diff)
+                        min_diff = np.min(diff)
+                        sum_diff = np.sum(diff)
+                        total_elements = diff.size
+                        
+                        logger.info(f"Difference between video {i} and {i+1}:")
+                        logger.info(f"  Total elements: {total_elements:,}")
+                        logger.info(f"  Average difference: {avg_diff:.10f}")
+                        logger.info(f"  Max difference: {max_diff:.10f}")
+                        logger.info(f"  Min difference: {min_diff:.10f}")
+                        logger.info(f"  Sum difference: {sum_diff:.10f}")
+                        logger.info(f"  Relative difference (avg/max_value): {avg_diff:.10f} ({avg_diff * 100:.6f}%)")
+                        logger.info("-" * 80)
+                    
+                    logger.info("=" * 80)
 
             raise KeyboardInterrupt(
                 "Debug stop after saving decoded video (my region).")
+# endregion
 
         logger.info(
             "Trajectory collection complete: batch_size=%d, latents_shape=%s, log_probs_shape=%s, decoded_videos_shape=%s",
@@ -913,11 +1002,17 @@ class RLPipeline(TrainingPipeline):
             raise ValueError(
                 "Prompts not found in training_batch.input_kwargs. Required for reward computation."
             )
-
-        logger.info(f"videos.shape: {videos.shape}")
+        
         # Compute rewards using reward models
         # Note: reward_models.compute_reward expects videos [B, C, T, H, W] and prompts [B]
         reward_scores = self.reward_models.compute_reward(videos, prompts)
+
+# myregion: Debug: print rewards
+        logger.info(f"videos.shape: {videos.shape}")
+        logger.info(f"reward_scores: {reward_scores}")
+        # raise KeyboardInterrupt(
+        #         "Debug stop after saving decoded video (my region).")
+# endregion
 
         # Apply KL reward penalty if configured
         # In FlowGRPO: rewards["avg"] = rewards["avg"] - kl_reward * kl

@@ -61,7 +61,7 @@ validation_args=(
   --log_validation True
   --validation_dataset_file $VALIDATION_DATASET_FILE
   --validation_steps 5
-  --validation_sampling_steps "50" 
+  --validation_sampling_steps "20" 
   --validation_guidance_scale "6.0"
 )
 
@@ -69,8 +69,8 @@ validation_args=(
 optimizer_args=(
   --learning_rate 5e-5
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 10
-  --training_state_checkpointing_steps 10
+  --weight_only_checkpointing_steps 100
+  --training_state_checkpointing_steps 100
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )
@@ -91,13 +91,13 @@ rl_args=(
 
 # CFG arguments
 cfg_args=(
-  --guidance_scale 1.0 # use guidance_scale > 1.0 to enable CFG
+  --guidance_scale 4.5 # use guidance_scale > 1.0 to enable CFG
 )
 
 # Miscellaneous arguments
 miscellaneous_args=(
   --inference_mode False
-  --checkpoints_total_limit 3
+  --checkpoints_total_limit 1
   --training_cfg_rate 0.0  # No CFG during training (CFG used in sampling)
   --dit_precision "fp32"
   # --dit_precision "bf16"
