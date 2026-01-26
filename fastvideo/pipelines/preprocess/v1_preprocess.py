@@ -1,7 +1,9 @@
 import argparse
 import os
+from typing import Any
 
 from fastvideo import PipelineConfig
+from fastvideo.configs.models.vaes import WanVAEConfig
 from fastvideo.distributed import (
     get_world_size, maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -22,33 +24,32 @@ logger = init_logger(__name__)
 
 
 def main(args) -> None:
-    # args.model_path = maybe_download_model(args.model_path)
+    args.model_path = maybe_download_model(args.model_path)
     maybe_init_distributed_environment_and_model_parallel(1, 1)
     num_gpus = int(os.environ["WORLD_SIZE"])
     assert num_gpus == 1, "Only support 1 GPU"
 
     pipeline_config = PipelineConfig.from_pretrained(args.model_path)
-    print(pipeline_config.__class__.__name__)
 
-    # kwargs: dict[str, Any] = {}
-    # if args.preprocess_task == "text_only":
-    #     kwargs = {
-    #         "text_encoder_cpu_offload": False,
-    #     }
-    # else:
-    #     # Full config for video/image processing
-    #     kwargs = {
-    #         "vae_precision": "fp32",
-    #         "vae_config": WanVAEConfig(load_encoder=True, load_decoder=True),
-    #     }
-    # pipeline_config.update_config_from_dict(kwargs)
+    kwargs: dict[str, Any] = {}
+    if args.preprocess_task == "text_only":
+        kwargs = {
+            "text_encoder_cpu_offload": False,
+        }
+    else:
+        # Full config for video/image processing
+        kwargs = {
+            "vae_precision": "fp32",
+            "vae_config": WanVAEConfig(load_encoder=True, load_decoder=True),
+        }
+    pipeline_config.update_config_from_dict(kwargs)
 
     fastvideo_args = FastVideoArgs(
         model_path=args.model_path,
         num_gpus=get_world_size(),
-        dit_cpu_offload=True,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
+        dit_cpu_offload=False,
+        vae_cpu_offload=False,
+        text_encoder_cpu_offload=False,
         pipeline_config=pipeline_config,
     )
     if args.preprocess_task == "t2v":

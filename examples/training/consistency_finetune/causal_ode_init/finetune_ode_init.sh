@@ -1,38 +1,36 @@
 #!/bin/bash
 
 export WANDB_BASE_URL="https://api.wandb.ai"
-export WANDB_MODE=offline
+export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 
-MODEL_PATH="hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
-DATA_DIR="data/ode-preprocessing-hy15-test/"
-VALIDATION_DATASET_FILE="data/validation_64.json"
+MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+DATA_DIR="data/crush-smol_processed_t2v_1_3b_ode_init/"
+VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
 NUM_GPUS=1
 # IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
   --tracker_project_name "wan_ode_init"
-  --output_dir "ode_init_hy15_test"
-  --wandb_run_name "vidprom_bz128_1e-5"
-  # --resume_from_checkpoint "ode_init_diffusers/"
-  # --warp_denoising_step
-  # --log_visualization
-  --max_train_steps 6001
+  --output_dir "wan_ode_init_crush_smol"
+  --override_transformer_cls_name "CausalWanTransformer3DModel"
+  --wandb_run_name "wan_ode_init_crush_smol"
+  --max_train_steps 6000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 19
+  --num_latent_t 21
   --num_height 480
   --num_width 832
-  --num_frames 73
-  --dmd_denoising_steps "1000,750,500,250"
+  --num_frames 77
+  --warp_denoising_step
   --enable_gradient_checkpointing_type "full"
 )
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 1
+  --num_gpus $NUM_GPUS
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
@@ -53,17 +51,18 @@ dataset_args=(
 
 # Validation arguments
 validation_args=(
-  # --log_validation
+  --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 200
+  --validation_steps 50
   --validation_sampling_steps "50"
   --validation_guidance_scale "6.0"
 )
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 1e-5
+  --learning_rate 6e-6
   --mixed_precision "bf16"
+  --weight_only_checkpointing_steps 1000
   --training_state_checkpointing_steps 1000
   --weight_decay 1e-4
   --max_grad_norm 1.0
@@ -79,7 +78,6 @@ miscellaneous_args=(
   --dit_precision "fp32"
   --num_euler_timesteps 50
   --ema_start_step 0
-  # --enable_gradient_checkpointing_type "full"
 )
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t

@@ -58,7 +58,7 @@ class PreprocessPipeline_Text(BasePreprocessPipeline):
             if data is None:
                 continue
 
-            with torch.no_grad():
+            with torch.inference_mode():
                 # For text-only processing, we only need text data
                 # Filter out samples without text
                 valid_indices = []
