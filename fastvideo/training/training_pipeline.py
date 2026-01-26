@@ -14,6 +14,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torchvision
+from diffusers import FlowMatchEulerDiscreteScheduler
 from einops import rearrange
 from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -110,7 +111,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         # Set random seeds for deterministic training
         assert self.seed is not None, "seed must be set"
-        set_random_seed(self.seed)
+        set_random_seed(self.seed + self.global_rank)
         self.transformer.train()
         if training_args.enable_gradient_checkpointing_type is not None:
             self.transformer = apply_activation_checkpointing(
@@ -129,22 +130,24 @@ class TrainingPipeline(LoRAPipeline, ABC):
         params_to_optimize = list(
             filter(lambda p: p.requires_grad, params_to_optimize))
         # Parse betas from string format "beta1,beta2"
-        # betas_str = training_args.betas
-        # betas = tuple(float(x.strip()) for x in betas_str.split(","))
-
-        # self.optimizer = torch.optim.AdamW(
-        #     params_to_optimize,
-        #     lr=training_args.learning_rate,
-        #     betas=betas,
-        #     weight_decay=training_args.weight_decay,
-        #     eps=1e-8,
-        # )
-
-        self.optimizer = get_muon_optimizer(
-            self.transformer,
-            lr=training_args.learning_rate,
-            weight_decay=training_args.weight_decay,
-        )
+        if training_args.optimizer_type == "adamw":
+            betas_str = training_args.betas
+            betas = tuple(float(x.strip()) for x in betas_str.split(","))
+            self.optimizer = torch.optim.AdamW(
+                params_to_optimize,
+                lr=training_args.learning_rate,
+                betas=betas,
+                weight_decay=training_args.weight_decay,
+                eps=1e-8,
+            )
+        elif training_args.optimizer_type == "muon":
+            self.optimizer = get_muon_optimizer(
+                    self.transformer,
+                    lr=training_args.learning_rate,
+                    weight_decay=training_args.weight_decay,
+                )
+        else:
+            raise ValueError(f"Unsupported optimizer type: {training_args.optimizer_type}")
 
         self.init_steps = 0
         logger.info("optimizer: %s", self.optimizer)
@@ -164,13 +167,23 @@ class TrainingPipeline(LoRAPipeline, ABC):
             params_to_optimize_2 = self.transformer_2.parameters()
             params_to_optimize_2 = list(
                 filter(lambda p: p.requires_grad, params_to_optimize_2))
-            self.optimizer_2 = torch.optim.AdamW(
-                params_to_optimize_2,
-                lr=training_args.learning_rate,
-                betas=(0.9, 0.999),
-                weight_decay=training_args.weight_decay,
-                eps=1e-8,
-            )
+            if training_args.optimizer_type == "adamw":
+                self.optimizer_2 = torch.optim.AdamW(
+                        params_to_optimize_2,
+                        lr=training_args.learning_rate,
+                        betas=(0.9, 0.999),
+                        weight_decay=training_args.weight_decay,
+                        eps=1e-8,
+                    )
+            elif training_args.optimizer_type == "muon":
+                self.optimizer_2 = get_muon_optimizer(
+                    self.transformer_2,
+                    lr=training_args.learning_rate,
+                    weight_decay=training_args.weight_decay,
+                )
+            else:
+                raise ValueError(f"Unsupported optimizer type: {training_args.optimizer_type}")
+
             self.lr_scheduler_2 = get_scheduler(
                 training_args.lr_scheduler,
                 optimizer=self.optimizer_2,
@@ -295,7 +308,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         # TODO(will): support other models
         with self.tracker.timed("timing/normalize_input"):
             training_batch.latents = normalize_dit_input(
-                'hunyuan',
+                'wan',
                 training_batch.latents,
                 self.get_module("vae"),
             )
@@ -606,7 +619,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         logger.info("Initialized random seeds with seed: %s",
                     self.seed + self.global_rank)
 
-        # self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
+        self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
@@ -671,22 +684,25 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     "grad_norm": grad_norm,
                     "vsa_sparsity": current_vsa_sparsity,
                 }
-                # metrics["batch_size"] = int(training_batch.raw_latent_shape[0])
+                try:
+                    metrics["batch_size"] = int(training_batch.raw_latent_shape[0])
 
-                # patch_t, patch_h, patch_w = self.training_args.pipeline_config.dit_config.patch_size
-                # seq_len = (training_batch.raw_latent_shape[2] // patch_t) * (
-                #     training_batch.raw_latent_shape[3] //
-                #     patch_h) * (training_batch.raw_latent_shape[4] // patch_w)
-                # context_len = int(training_batch.encoder_hidden_states.shape[1])
+                    patch_t, patch_h, patch_w = self.training_args.pipeline_config.dit_config.patch_size
+                    seq_len = (training_batch.raw_latent_shape[2] // patch_t) * (
+                        training_batch.raw_latent_shape[3] //
+                        patch_h) * (training_batch.raw_latent_shape[4] // patch_w)
+                    context_len = int(training_batch.encoder_hidden_states.shape[1])
 
-                # metrics["dit_seq_len"] = int(seq_len)
-                # metrics["context_len"] = context_len
+                    metrics["dit_seq_len"] = int(seq_len)
+                    metrics["context_len"] = context_len
 
-                # arch_config = self.training_args.pipeline_config.dit_config.arch_config
+                    arch_config = self.training_args.pipeline_config.dit_config.arch_config
 
-                # metrics["hidden_dim"] = arch_config.hidden_size
-                # metrics["num_layers"] = arch_config.num_layers
-                # metrics["ffn_dim"] = arch_config.ffn_dim
+                    metrics["hidden_dim"] = arch_config.hidden_size
+                    metrics["num_layers"] = arch_config.num_layers
+                    metrics["ffn_dim"] = arch_config.ffn_dim
+                except:
+                    pass
 
                 self.tracker.log(metrics, step)
             if step % self.training_args.training_state_checkpointing_steps == 0:
@@ -709,12 +725,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         "profiler_region_training_validation"):
                     self._log_validation(self.transformer, self.training_args,
                                          step)
-                    for module in self.transformer.modules():
-                        for name, buf in module._buffers.items():
-                            if "k_cache" in name or "v_cache" in name:
-                                module._buffers[name] = None
-                    gc.collect()
-                    torch.cuda.empty_cache()
                     gpu_memory_usage = current_platform.get_torch_device(
                     ).memory_allocated() / 1024**2
                     trainable_params = round(
