@@ -36,6 +36,8 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"),  # Wrapper (Phase 1)
     "LongCatTransformer3DModel": ("dits", "longcat", "LongCatTransformer3DModel"),  # Native (Phase 2)
     "LTX2Transformer3DModel": ("dits", "ltx2", "LTX2Transformer3DModel"),
+    "FluxTransformer2DModel": ("dits", "flux_2", "Flux2Transformer2DModel"),
+    "Flux2Transformer2DModel": ("dits", "flux_2", "Flux2Transformer2DModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
@@ -75,6 +77,7 @@ _VAE_MODELS = {
     "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
     "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo"),
     "CausalVideoAutoencoder": ("vaes", "ltx2vae", "LTX2CausalVideoAutoencoder"),
+    "AutoencoderKLFlux2": ("vaes", "flux2vae", "AutoencoderKLFlux2"),
 }
 
 _AUDIO_MODELS = {

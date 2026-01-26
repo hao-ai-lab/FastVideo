@@ -7,6 +7,7 @@ from collections.abc import Callable
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.cosmos2_5 import Cosmos25Config
+from fastvideo.configs.pipelines.flux_2 import Flux2PipelineConfig
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuan15 import Hunyuan15T2V480PConfig, Hunyuan15T2V720PConfig
 from fastvideo.configs.pipelines.hyworld import HYWorldConfig
@@ -112,6 +113,8 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "turbodiffusion" in id.lower() or "turbowan" in id.lower(),
     "ltx2":
     lambda id: "ltx2" in id.lower() or "ltx-2" in id.lower(),
+    "flux2":
+    lambda id: "flux2" in id.lower() or "flux_2" in id.lower() or "flux-2" in id.lower(),
     # Add other pipeline architecture detectors
 }
 
@@ -136,6 +139,7 @@ PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "stepvideo": StepVideoT2VConfig,
     "turbodiffusion": TurboDiffusionT2V_1_3B_Config,
     "ltx2": LTX2T2VConfig,
+    "flux2": Flux2PipelineConfig,
     # Other fallbacks by architecture
 }
 
