@@ -10,6 +10,7 @@ This document outlines FastVideo's architecture for developers interested in fra
   - [`vaes/`](#vae-variational-auto-encoder) - Variational autoencoders
   - [`encoders/`](#text-and-image-encoders) - Text and image encoders
   - [`schedulers/`](#schedulers) - Diffusion schedulers
+- [`fastvideo/configs/`](#configuration-system) - Pipeline, model, and sampling configs
 - [`fastvideo/attention/`](#optimized-attention) - Optimized attention implementations
 - [`fastvideo/distributed/`](#distributed-processing) - Distributed computing utilities
 - [`fastvideo/layers/`](#tensor-parallelism) - Custom neural network layers
@@ -29,6 +30,52 @@ FastVideo separates model components from execution logic with these principles:
 - **Distributed Execution**: Supports various parallelism strategies (Tensor, Sequence)
 - **Custom Attention Backends**: Components can support and use different Attention implementations
 - **Pipeline Abstraction**: Consistent interface across diffusion models
+
+## FastVideo structure at a glance
+
+This section summarizes how FastVideo maps to a diffusion pipeline and where
+to look when adding or extending a model.
+
+Key pieces and how they fit:
+
+- **Model definitions** (`fastvideo/models/…`): the actual PyTorch modules for
+  transformers (DiT), VAEs, encoders, upsamplers, etc.
+- **Arch config** (`fastvideo/configs/models/**/`): describes layer shapes and
+  naming; where key‑rename maps live so checkpoints align with FastVideo.
+- **Sampling params** (`fastvideo/configs/sample/`): runtime defaults like
+  steps, guidance scale, and resolution.
+- **Pipeline config** (`fastvideo/configs/pipelines/`): wiring that tells
+  FastVideo which components to load and how stages are assembled.
+- **Component loading** (`fastvideo/models/loader/`): reads HuggingFace /
+  Diffusers‑style folders and instantiates modules based on config.
+- **Diffusers structure** (`model_index.json`): the root index that maps
+  component names (`transformer`, `vae`, `text_encoder`, etc.) to their classes.
+
+Think of the flow as:
+`model_index.json` → component loaders → model modules → pipeline stages →
+sampling params.
+
+Example mapping (based on `examples/inference/basic/basic.py`):
+
+- `VideoGenerator.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")`
+  resolves a pipeline config and sampling defaults via the registries.
+- The HuggingFace repo’s `model_index.json` tells FastVideo which components to
+  load (transformer, VAE, text encoder, tokenizer, etc.).
+- The component loaders read those folders and instantiate the modules.
+- `SamplingParam` (or defaults from `fastvideo/configs/sample/`) defines
+  steps, frames, resolution, and guidance scale used during generation.
+
+```python
+from fastvideo import VideoGenerator
+
+generator = VideoGenerator.from_pretrained(
+    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    num_gpus=1,
+)
+
+prompt = "A curious raccoon peers through a vibrant field of yellow sunflowers..."
+generator.generate_video(prompt, output_path="video_samples", save_video=True)
+```
 
 ## FastVideoArgs
 
@@ -62,6 +109,118 @@ with set_current_fastvideo_args(fastvideo_args):
     # Code that requires access to these arguments
     result = generate_video()
 ```
+
+## Configuration System
+
+FastVideo’s configuration layer lives under `fastvideo/configs/` and provides
+typed defaults and registries for models, pipelines, and runtime parameters.
+
+- `fastvideo/configs/models/`: architecture definitions (model shapes, layer
+  naming, and checkpoint key‑mapping rules).
+  - `dits/`, `vaes/`, `encoders/`, `audio/`: component‑specific configs.
+  - ArchConfig and its subfields are a superset of the model's config.json file.
+- `fastvideo/configs/pipelines/`: pipeline wiring and which components are
+  required for a given model family. Initialization parameters are passed to the pipeline via `fastvideo_args`.
+- `fastvideo/configs/sample/`: generation defaults, can be overridden by the user and different across generations (frames, steps, guidance scale,
+  resolution, fps).
+- `fastvideo/configs/registry.py`: pipeline registry and routing rules.
+- `fastvideo/configs/sample/registry.py`: sampling param registry.
+
+## Weights and Diffusers format
+
+FastVideo follows the standard HuggingFace Diffusers layout for model weights.
+This keeps our loaders compatible with HF repos and makes it easy to add new
+components.
+
+Typical Diffusers repo structure:
+
+```
+<model-repo>/
+  model_index.json
+  scheduler/
+    scheduler_config.json
+  transformer/               # or unet/ for image models
+    config.json
+    diffusion_pytorch_model.safetensors
+  vae/
+    config.json
+    diffusion_pytorch_model.safetensors
+  text_encoder/
+    config.json
+    model.safetensors
+  tokenizer/
+    tokenizer_config.json
+    tokenizer.json
+```
+
+Key points:
+
+- `model_index.json` is the root map that tells FastVideo which components to
+  load and which classes implement them.
+- Each component lives in its own folder with a `config.json` and weights.
+- Weights are usually in `diffusion_pytorch_model.safetensors`, but FastVideo
+  also accepts `model.safetensors` for custom components (e.g., upsamplers).
+- Some pipelines include extra components (audio VAE, vocoder, image encoder).
+
+Note on tensor names:
+
+Official checkpoints often use different `state_dict` naming than FastVideo’s
+module layout. We translate tensor names via the DiT arch config mapping
+(under `fastvideo/configs/models/dits/`) so weights load cleanly into FastVideo
+modules. This is the same kind of name‑translation layer used in systems like
+vLLM and SGLang when their internal module structure differs from upstream
+checkpoints.
+
+Let’s go through a concrete example.
+
+Example HF repo (Wan 2.1 T2V 1.3B Diffusers):
+
+```
+https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/tree/main
+```
+
+Example `model_index.json` from that repo:
+
+```json
+{
+  "_class_name": "WanPipeline",
+  "_diffusers_version": "0.33.0.dev0",
+  "scheduler": [
+    "diffusers",
+    "UniPCMultistepScheduler"
+  ],
+  "text_encoder": [
+    "transformers",
+    "UMT5EncoderModel"
+  ],
+  "tokenizer": [
+    "transformers",
+    "T5TokenizerFast"
+  ],
+  "transformer": [
+    "diffusers",
+    "WanTransformer3DModel"
+  ],
+  "vae": [
+    "diffusers",
+    "AutoencoderKLWan"
+  ]
+}
+```
+
+How this maps to FastVideo:
+
+- `WanPipeline` → `fastvideo/pipelines/basic/wan/wan_pipeline.py`
+- `WanTransformer3DModel` → `fastvideo/models/dits/wanvideo.py`
+- `AutoencoderKLWan` → `fastvideo/models/vaes/wanvae.py`
+- `UMT5EncoderModel` → `fastvideo/models/encoders/t5.py`
+- `T5TokenizerFast` → loaded via HuggingFace in `fastvideo/models/loader/`
+- `UniPCMultistepScheduler` → loaded via diffusers scheduler utilities
+- Pipeline defaults → `fastvideo/configs/pipelines/wan.py`
+- Sampling defaults → `fastvideo/configs/sample/wan.py`
+
+!!! note
+    The model loader logic is implemented in `fastvideo/models/loader/component_loader.py` and will parse the `model_index.json` file and load the appropriate components.
 
 ## Pipeline System
 
@@ -185,11 +344,7 @@ Encoders process conditioning inputs into embeddings:
 - **Image Encoders**:
   - `CLIPVisionModel`
 
-FastVideo implements optimizations such as:
-
-- Vocab parallelism for distributed processing
-- Caching for common prompts
-- Precision-tuned computation
+Encoders are used to encode text and image conditioning inputs into embeddings. They are used in the text encoding and image encoding stages of the pipeline and are added as conditionings to the DiT model.
 
 ### Schedulers
 
