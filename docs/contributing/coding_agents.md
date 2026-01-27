@@ -287,10 +287,12 @@ External examples of the same pattern:
 ### 2) Test numerical alignment with the official implementation
 
 Purpose:
+
 - Verify that the FastVideo component is numerically aligned with the official
   implementation.
 
 Action:
+
 - Add or reuse a numerical parity test that loads the official model and the
   FastVideo model and compares outputs.
 - See examples in `tests/local_tests/` (e.g., `tests/local_tests/upsamplers/`)
@@ -313,11 +315,13 @@ For example, implement the VAE in `fastvideo/models/vaes/` and its config in
 ### 4) Add a pipeline config + sample defaults
 
 Purpose:
+
 - `fastvideo/configs/pipelines/` describes pipeline wiring and model module
   names.
 - `fastvideo/configs/sample/` defines default runtime parameters.
 
 Action:
+
 - Add a new pipeline config + sampling params.
 - Register them in `fastvideo/configs/pipelines/registry.py` and
   `fastvideo/configs/sample/registry.py`.
@@ -325,28 +329,34 @@ Action:
 ### 5) Wire pipeline stages
 
 Purpose:
+
 - `fastvideo/pipelines/basic/<pipeline>/` contains the actual pipeline logic.
 - `fastvideo/pipelines/stages/` holds reusable, testable stages.
 
 Action:
+
 - Build the pipeline using stages; keep new stages isolated and documented.
 - Prefer opt‑in flags for expensive or optional steps.
 
 ### 6) Add pipeline‑level tests
 
 Purpose:
+
 - Ensure the end‑to‑end pipeline works and stays aligned as pieces evolve.
 
 Action:
+
 - Add a pipeline parity test under `tests/local_tests/pipelines/`.
 - See the [Testing Guide](testing.md) for test conventions.
 
 ### 7) Add user‑facing examples
 
 Purpose:
+
 - `examples/inference/basic/` is the entry point for simple, runnable scripts.
 
 Action:
+
 - Provide a minimal “hello world” example plus advanced variations.
 - Use fixed seeds and stable prompts.
 - Run the example locally to confirm end‑to‑end behavior.
@@ -354,10 +364,12 @@ Action:
 ### 8) Add SSIM tests for CI checks
 
 Purpose:
+
 - Ensure visual similarity stays within expected bounds for regression testing.
 - SSIM tests act as a higher‑level guardrail beyond unit/parity tests.
 
 Action:
+
 - Add SSIM tests under `fastvideo/tests/ssim/` and include reference videos
   (see the structure in the Testing Guide).
 - Use stable prompts/seeds and document any GPU‑specific requirements.
@@ -367,9 +379,11 @@ Action:
 ### 9) Document it
 
 Purpose:
+
 - `docs/` is where users find the new pipeline usage and limitations.
 
 Action:
+
 - Add a short doc page or update an existing one.
 - Mention any caveats (memory, speed, constraints).
 
@@ -438,6 +452,7 @@ actually unfolds:
 - Aligned sigma schedule and masking behavior to match the official pipeline.
 
 Recommendation:
+
 - Keep raw step‑by‑step logs in your own local `PLAN.md` for large ports.
 
 ## Worked example: Wan2.1 T2V 1.3B pipeline
