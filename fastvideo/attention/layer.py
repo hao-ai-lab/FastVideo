@@ -9,7 +9,7 @@ from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather, sequence_model_parallel_all_to_all_4D)
 from fastvideo.distributed.parallel_state import (get_sp_parallel_rank,
                                                   get_sp_world_size)
-from fastvideo.forward_context import ForwardContext, get_forward_context
+from fastvideo.forward_context import ForwardContext, get_forward_context, set_forward_context
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
 from fastvideo.layers.rotary_embedding import _apply_rotary_emb
@@ -327,12 +327,26 @@ class LocalAttention(nn.Module):
             q = _apply_rotary_emb(q, cos, sin, is_neox_style=False)
             k = _apply_rotary_emb(k, cos, sin, is_neox_style=False)
 
+        # Handle attention_mask through forward context
         if attention_mask is not None:
+            current_timestep = forward_context.current_timestep
+            forward_batch = forward_context.forward_batch
             if ctx_attn_metadata is None:
-                ctx_attn_metadata = SDPAMetadata(current_timestep=0,
-                                                 attn_mask=attention_mask)
+                # Create new metadata and update forward context
+                new_attn_metadata = SDPAMetadata(
+                    current_timestep=current_timestep,
+                    attn_mask=attention_mask
+                )
+                with set_forward_context(
+                    current_timestep=current_timestep,
+                    attn_metadata=new_attn_metadata,
+                    forward_batch=forward_batch,
+                ):
+                    output = self.attn_impl.forward(q, k, v, new_attn_metadata)
             else:
+                # Update existing metadata's mask
                 ctx_attn_metadata.attn_mask = attention_mask
-
-        output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+                output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+        else:
+            output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
         return output
