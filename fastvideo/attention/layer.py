@@ -102,8 +102,7 @@ class DistributedAttention(nn.Module):
         fastvideo_args = get_current_fastvideo_args()
         # Ring attention requires sequence-sharded QKV.
         use_ring_attention = (
-            fastvideo_args is not None
-            and fastvideo_args.ring_degree > 1
+            fastvideo_args.ring_degree > 1
             and replicated_q is None  
         )
         
