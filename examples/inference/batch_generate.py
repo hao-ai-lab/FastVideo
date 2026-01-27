@@ -74,6 +74,9 @@ Examples:
 
   # Use CPU offloading for low VRAM
   python batch_generate.py --prompts prompts.txt --dit_cpu_offload --vae_cpu_offload
+
+  # Use custom fine-tuned weights
+  python batch_generate.py --prompts prompts.txt --init_weights_from_safetensors checkpoints/my_model/transformer
         """
     )
     
@@ -195,6 +198,12 @@ Examples:
         action="store_true",
         help="Disable CPU memory pinning"
     )
+    parser.add_argument(
+        "--init_weights_from_safetensors",
+        type=str,
+        default=None,
+        help="Path to custom safetensors weights to load (e.g., checkpoint/transformer directory)"
+    )
     
     # Processing arguments
     parser.add_argument(
@@ -245,6 +254,8 @@ Examples:
     
     # Initialize generator
     print(f"\nInitializing VideoGenerator with model: {args.model}")
+    if args.init_weights_from_safetensors:
+        print(f"Loading custom weights from: {args.init_weights_from_safetensors}")
     generator = VideoGenerator.from_pretrained(
         args.model,
         num_gpus=args.num_gpus,
@@ -253,6 +264,7 @@ Examples:
         vae_cpu_offload=args.vae_cpu_offload,
         text_encoder_cpu_offload=text_encoder_cpu_offload,
         pin_cpu_memory=pin_cpu_memory,
+        init_weights_from_safetensors=args.init_weights_from_safetensors,
     )
     print("Generator initialized successfully!\n")
     
