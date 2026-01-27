@@ -8,8 +8,8 @@ class MatrixGameWanVideoArchConfig(WanVideoArchConfig):
     # because MatrixGame checkpoints already have patch_embedding.proj format
     param_names_mapping: dict = field(
         default_factory=lambda: {
-            # Removed: r"^patch_embedding\.(.*)$": r"patch_embedding.proj.\1"
-            # because checkpoint already has correct format
+            r"^patch_embedding\.(?!proj\.)(.*)$":
+            r"patch_embedding.proj.\1",
             r"^condition_embedder\.text_embedder\.linear_1\.(.*)$":
             r"condition_embedder.text_embedder.fc_in.\1",
             r"^condition_embedder\.text_embedder\.linear_2\.(.*)$":
