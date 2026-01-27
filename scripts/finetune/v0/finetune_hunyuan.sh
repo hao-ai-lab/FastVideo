@@ -13,10 +13,10 @@ torchrun --nnodes 1 --nproc_per_node 8 \
     --data_json_path /data/yanguo.sun/hunyuan-video/datasets/videos2caption.json \
     --validation_prompt_dir /data/yanguo.sun/hunyuan-video/datasets/validation \
     --gradient_checkpointing \
-    --train_batch_size=1 \
+    --train_batch_size=2 \
     --num_latent_t 32 \
-    --sp_size 4 \
-    --train_sp_batch_size 1 \
+    --sp_size 8 \
+    --train_sp_batch_size 2 \
     --dataloader_num_workers 4 \
     --gradient_accumulation_steps=1 \
     --max_train_steps=20 \

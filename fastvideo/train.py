@@ -138,7 +138,7 @@ def train_one_step(
             dtype=latents.dtype,
         )
         noisy_model_input = (1.0 - sigmas) * latents + sigmas * noise
-        with torch.autocast("musa", dtype=torch.bfloat16):
+        with torch_musa.core.amp.autocast(dtype=torch.bfloat16):
             input_kwargs = {
                 "hidden_states": noisy_model_input,
                 "encoder_hidden_states": encoder_hidden_states,
@@ -158,9 +158,7 @@ def train_one_step(
             target = noise - latents
 
         loss = (torch.mean((model_pred.float() - target.float())**2) / gradient_accumulation_steps)
-
         loss.backward()
-
         avg_loss = loss.detach().clone()
         dist.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
         total_loss += avg_loss.item()
@@ -168,10 +166,10 @@ def train_one_step(
     #grad_norm = transformer.clip_grad_norm_(max_grad_norm)
     #grad_norm = torch.tensor(0.0)
     params = [p for p in transformer.parameters() if p.grad is not None]
-    if len(params) == 0:
-        grad_norm = torch.tensor(0.0)
-    else:
+    if len(params) > 0:
         grad_norm = torch.nn.utils.clip_grad_norm_(params, max_grad_norm)
+    else:
+        grad_norm = torch.tensor(0.0)
     optimizer.step()
     lr_scheduler.step()
     return total_loss, grad_norm.item()
@@ -319,7 +317,6 @@ def main(args):
         weight_decay=args.weight_decay,
         eps=1e-8,
     )
-
     init_steps = 0
     if args.resume_from_lora_checkpoint:
         transformer, optimizer, init_steps = resume_lora_optimizer(transformer, args.resume_from_lora_checkpoint,
