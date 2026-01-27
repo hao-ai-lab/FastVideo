@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from fastvideo import VideoGenerator
+from fastvideo.configs.sample import SamplingParam
 
 
 def main():
@@ -15,6 +16,8 @@ def main():
         text_encoder_cpu_offload=True,
         pin_cpu_memory=True,
     )
+
+    sampling_param = SamplingParam.from_pretrained(model_path)
 
     # video2world example from official repo
     video_path = "cosmos-predict2.5/assets/base/robot_pouring.mp4"
@@ -33,27 +36,11 @@ def main():
         "The final frame captures the robotic arm with the pitcher finishing the pour, with the glass now filled to a higher level, while the pitcher is slightly tilted but still held securely by the gripper."
     )
 
-    negative_prompt = (
-        "The video captures a series of frames showing ugly scenes, static with no motion, motion blur, "
-        "over-saturation, shaky footage, low resolution, grainy texture, pixelated images, poorly lit areas, "
-        "underexposed and overexposed scenes, poor color balance, washed out colors, choppy sequences, jerky movements, "
-        "low frame rate, artifacting, color banding, unnatural transitions, outdated special effects, fake elements, "
-        "unconvincing visuals, poorly edited content, jump cuts, visual noise, and flickering. "
-        "Overall, the video is of poor quality."
-    )
-
     generator.generate_video(
         prompt,
-        negative_prompt=negative_prompt,
+        sampling_param=sampling_param,
         video_path=str(video_path),
         num_cond_frames=1,
-        height=704,
-        width=1280,
-        num_frames=77,
-        num_inference_steps=35,
-        guidance_scale=7.0,
-        fps=24,
-        seed=0,
         output_path="outputs_video/cosmos2_5_v2w.mp4",
         save_video=True,
     )

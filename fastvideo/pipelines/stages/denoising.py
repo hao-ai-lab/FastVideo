@@ -1021,8 +1021,6 @@ class CosmosDenoisingStage(DenoisingStage):
 class Cosmos25DenoisingStage(CosmosDenoisingStage):
     """Denoising stage for Cosmos 2.5 DiT (expects 1D/2D timestep, not 5D)."""
 
-    _MODE_ATTR = "cosmos25_denoise_mode"
-
     def forward(
         self,
         batch: ForwardBatch,
@@ -1097,14 +1095,12 @@ class Cosmos25DenoisingStage(CosmosDenoisingStage):
         padding_mask = pad_mask.to(target_dtype) if isinstance(
             pad_mask, torch.Tensor) else None
 
-        mode = getattr(batch, self._MODE_ATTR, None)
-
         # Conditioning fields are attached by latent preparation stage.
         conditioning_latents = getattr(batch, "conditioning_latents", None)
         cond_indicator = getattr(batch, "cond_indicator", None)
-        if mode is None:
-            mode = "v2w" if conditioning_latents is not None else "t2w"
-        is_conditioned = (mode != "t2w")
+        # Infer whether this is a conditioned run (V2W/I2W) purely from the presence
+        # of conditioning latents. Avoid carrying explicit mode flags on the batch.
+        is_conditioned = (conditioning_latents is not None)
 
         init_noise_4d = latents_4d.clone()
         if condition_mask is None:
@@ -1148,8 +1144,7 @@ class Cosmos25DenoisingStage(CosmosDenoisingStage):
                         device=latents.device,
                         dtype=torch.float32,
                     )
-                    if (mode == "v2w" and cond_indicator is not None
-                            and t_frames > 0):
+                    if cond_indicator is not None and t_frames > 0:
                         cond_t = cond_indicator[0, 0, :t_frames, 0, 0]
                         cond_mask_t = (cond_t > 0.5)
                         if bool(cond_mask_t.any().item()):
@@ -1247,7 +1242,6 @@ class Cosmos25T2WDenoisingStage(Cosmos25DenoisingStage):
         batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
-        setattr(batch, self._MODE_ATTR, "t2w")
         for name in self._CONDITIONING_FIELDS:
             if hasattr(batch, name):
                 setattr(batch, name, None)
@@ -1262,7 +1256,6 @@ class Cosmos25V2WDenoisingStage(Cosmos25DenoisingStage):
         batch: ForwardBatch,
         fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
-        setattr(batch, self._MODE_ATTR, "v2w")
         return super().forward(batch, fastvideo_args)
 
 
@@ -1286,9 +1279,7 @@ class Cosmos25AutoDenoisingStage(PipelineStage):
     ) -> ForwardBatch:
         conditioning_latents = getattr(batch, "conditioning_latents", None)
         if conditioning_latents is not None:
-            setattr(batch, Cosmos25DenoisingStage._MODE_ATTR, "v2w")
             return self._v2w.forward(batch, fastvideo_args)
-        setattr(batch, Cosmos25DenoisingStage._MODE_ATTR, "t2w")
         return self._t2w.forward(batch, fastvideo_args)
 
     def verify_input(self, batch: ForwardBatch,

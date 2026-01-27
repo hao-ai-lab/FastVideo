@@ -1,4 +1,5 @@
 from fastvideo import VideoGenerator
+from fastvideo.configs.sample import SamplingParam
 
 
 def main():
@@ -15,6 +16,9 @@ def main():
         pin_cpu_memory=True,
     )
 
+    # Load default sampling parameters (negative_prompt, resolution, steps, etc.)
+    sampling_param = SamplingParam.from_pretrained(model_path)
+
     prompt = (
         "A high-definition video captures the precision of robotic welding in an industrial setting. "
         "The first frame showcases a robotic arm, equipped with a welding torch, positioned over a large metal structure. "
@@ -30,24 +34,9 @@ def main():
         "underscoring the ongoing nature of the welding operation."
     )
 
-    negative_prompt = (
-        "The video captures a series of frames showing ugly scenes, static with no motion, motion blur, "
-        "over-saturation, shaky footage, low resolution, grainy texture, pixelated images, poorly lit areas, "
-        "underexposed and overexposed scenes, poor color balance, washed out colors, choppy sequences, jerky movements, "
-        "low frame rate, artifacting, color banding, unnatural transitions, outdated special effects, fake elements, "
-        "unconvincing visuals, poorly edited content, jump cuts, visual noise, and flickering. "
-        "Overall, the video is of poor quality."
-    )
-
-    video = generator.generate_video(
+    generator.generate_video(
         prompt,
-        negative_prompt=negative_prompt,
-        height=704,
-        width=1280,
-        num_frames=77,
-        num_inference_steps=35,
-        guidance_scale=7.0,
-        fps=24,
+        sampling_param=sampling_param,
         output_path="outputs_video/cosmos2_5_t2w.mp4",
         save_video=True,
     )

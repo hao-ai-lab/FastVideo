@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from fastvideo import VideoGenerator
+from fastvideo.configs.sample import SamplingParam
 
 
 def main():
@@ -16,6 +17,8 @@ def main():
         pin_cpu_memory=True,
     )
 
+    sampling_param = SamplingParam.from_pretrained(model_path)
+
     # image2world example from official repo
     image_path = "cosmos-predict2.5/assets/base/bus_terminal.jpg"
 
@@ -30,26 +33,11 @@ def main():
         "Overhead signage in Chinese characters remains illuminated, enhancing the vibrant, urban night scene."
     )
 
-    negative_prompt = (
-        "The video captures a series of frames showing ugly scenes, static with no motion, motion blur, "
-        "over-saturation, shaky footage, low resolution, grainy texture, pixelated images, poorly lit areas, "
-        "underexposed and overexposed scenes, poor color balance, washed out colors, choppy sequences, jerky movements, "
-        "low frame rate, artifacting, color banding, unnatural transitions, outdated special effects, fake elements, "
-        "unconvincing visuals, poorly edited content, jump cuts, visual noise, and flickering. "
-        "Overall, the video is of poor quality."
-    )
-
     generator.generate_video(
         prompt,
-        negative_prompt=negative_prompt,
+        sampling_param=sampling_param,
         image_path=str(image_path),
-        height=704,
-        width=1280,
-        num_frames=93,
-        num_inference_steps=35,
-        guidance_scale=7.0,
-        fps=24,
-        seed=0,
+        num_cond_frames=1,
         output_path="outputs_video/cosmos2_5_i2w.mp4",
         save_video=True,
     )

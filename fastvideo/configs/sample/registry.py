@@ -10,7 +10,7 @@ from fastvideo.configs.sample.hyworld import HYWorld_SamplingParam
 from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
 
 from fastvideo.configs.sample.cosmos import Cosmos_Predict2_2B_Video2World_SamplingParam
-from fastvideo.configs.sample.cosmos2_5 import Cosmos_Predict2_5_2B_Diffusers_SamplingParam
+from fastvideo.configs.sample.cosmos2_5 import Cosmos25SamplingParamBase
 from fastvideo.configs.sample.ltx2 import LTX2SamplingParam
 
 # isort: off
@@ -89,8 +89,7 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     Cosmos_Predict2_2B_Video2World_SamplingParam,
 
     # Cosmos2.5
-    "KyleShao/Cosmos-Predict2.5-2B-Diffusers":
-    Cosmos_Predict2_5_2B_Diffusers_SamplingParam,
+    "KyleShao/Cosmos-Predict2.5-2B-Diffusers": Cosmos25SamplingParamBase,
 
     # MatrixGame2.0 models
     "FastVideo/Matrix-Game-2.0-Base-Diffusers": MatrixGame2_SamplingParam,
@@ -160,7 +159,7 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
     "matrixgame": MatrixGame2_SamplingParam,
     "turbodiffusion":
     TurboDiffusionT2V_1_3B_SamplingParam,  # Default to T2V for fallback
-    "cosmos25": Cosmos_Predict2_5_2B_Diffusers_SamplingParam,
+    "cosmos25": Cosmos25SamplingParamBase,
     "cosmos": Cosmos_Predict2_2B_Video2World_SamplingParam,
     "ltx2": LTX2SamplingParam,
     # Other fallbacks by architecture
