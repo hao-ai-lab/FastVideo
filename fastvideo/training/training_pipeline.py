@@ -443,11 +443,24 @@ class TrainingPipeline(LoRAPipeline, ABC):
             # make sure no implicit broadcasting happens
             assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
 
-            sharded_pred = shard_latents_across_sp(model_pred)
-            sharded_target = shard_latents_across_sp(target)
-            loss = (torch.mean(
-                (sharded_pred.float() - sharded_target.float())**2) /
-                    self.training_args.gradient_accumulation_steps)
+            # Compute loss on an SP shard to avoid redundant work, without
+            # requiring num_latent_t (or T) to be divisible by sp_size.
+            #
+            # We shard along the flattened token axis (t*h*w) and pad if needed.
+            # For correct normalization across SP ranks, use local SSE (sum of
+            # squared errors) and scale by sp_world_size / total_numel.
+            sp_world_size = get_sp_group().world_size
+            if sp_world_size > 1:
+                sharded_pred = shard_latents_across_sp(model_pred)
+                sharded_target = shard_latents_across_sp(target)
+                local_sse = ((sharded_pred.float() -
+                              sharded_target.float())**2).sum()
+                loss = (sp_world_size * local_sse /
+                        model_pred.numel()) / self.training_args.gradient_accumulation_steps
+            else:
+                loss = (torch.mean(
+                    (model_pred.float() - target.float())**2) /
+                        self.training_args.gradient_accumulation_steps)
 
             loss.backward()
 
