@@ -42,7 +42,7 @@ def calculate_attention_flops(batch_size, num_heads, seq_len_q, seq_len_k, head_
 def benchmark_sageattn3(batch_size, num_heads, seq_len, head_dim, 
                         is_causal=False, dtype=torch.bfloat16, 
                         per_block_mean=True, single_level_p_quant=False,
-                        num_warmups=10, num_tests=50):
+                        num_warmups=100, num_tests=1000):
     """
     Benchmark SageAttention3 and return performance metrics.
     
