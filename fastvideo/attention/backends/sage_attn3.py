@@ -248,7 +248,7 @@ USE_TORCH_16BIT_BWD = False
 USE_QAT_ATTN = False
 class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, q_BLHD, k_BLHD, v_BLHD, is_causal=False, per_block_mean=False):
+    def forward(ctx, q_BLHD, k_BLHD, v_BLHD, is_causal=False, per_block_mean=True):
         """
         Inputs:  q/k/v in [B, L, H, D]
         Returns: out in  [B, L, H, D]
@@ -282,7 +282,7 @@ class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
 
 
 
-def sageattn_blackwell_with_16bit_bwd(q_BLHD, k_BLHD, v_BLHD, is_causal=False, per_block_mean=False):
+def sageattn_blackwell_with_16bit_bwd(q_BLHD, k_BLHD, v_BLHD, is_causal=False, per_block_mean=True):
     """
     Forward: uses sageattn_blackwell under the hood.
     Backward: recomputes FlashAttention fwd+bwd in 16bit directly.
@@ -471,7 +471,7 @@ def qat_attn(q_BLHD, k_BLHD, v_BLHD, is_causal=False):
     use_high_prec_o = True
     smooth_q = False
     sm_scale = 1.0 / sqrt(q_BHLD.shape[-1])
-    use_global_sf_qkv = True
+    use_global_sf_qkv = False
     use_global_sf_p = False
     o_BHLD = attention(q_BHLD, k_BHLD, v_BHLD, is_causal, sm_scale,
                        use_qat_qkv_backward, smooth_k, warp_specialize, IS_QAT,
