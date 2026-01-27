@@ -166,25 +166,25 @@ Purpose:
 - Official checkpoints often use different prefixes or module layouts than
   FastVideo, so we translate names via the mapping (during load or conversion).
 - Mapping aligns three things:
-  1) the official implementation’s module names,
-  2) the checkpoint `state_dict` keys,
-  3) FastVideo’s model classes and layer naming conventions.
+  1. the official implementation’s module names,
+  2. the checkpoint `state_dict` keys,
+  3. FastVideo’s model classes and layer naming conventions.
 - If names don’t align, weights won’t load; implement the FastVideo model and
   define mapping rules first.
 
 Action:
 
-1) Implement the FastVideo model + config mapping.
-   - Add/extend the model in `fastvideo/models/...` and config in
-     `fastvideo/configs/models/...` (including `param_names_mapping`).
-   - Reuse existing FastVideo layers/modules where possible.
-   - Use FastVideo’s attention layers:
-     - `DistributedAttention` only for full‑sequence self‑attention in the DiT.
-     - `LocalAttention` for cross‑attention and other attention layers.
-   - See the “Configuration System” and “Weights and Diffusers format” sections
-     in `docs/design/overview.md` for how these pieces connect.
-   - If you are using an agent, ask it to implement the model, config mapping,
-     and a parity test together so you can validate numerics immediately.
+- Implement the FastVideo model + config mapping.
+  - Add/extend the model in `fastvideo/models/...` and config in
+    `fastvideo/configs/models/...` (including `param_names_mapping`).
+  - Reuse existing FastVideo layers/modules where possible.
+  - Use FastVideo’s attention layers:
+    - `DistributedAttention` only for full‑sequence self‑attention in the DiT.
+    - `LocalAttention` for cross‑attention and other attention layers.
+  - See the “Configuration System” and “Weights and Diffusers format” sections
+    in `docs/design/overview.md` for how these pieces connect.
+  - If you are using an agent, ask it to implement the model, config mapping,
+    and a parity test together so you can validate numerics immediately.
 
 !!! note
     After the first component is aligned and parity‑tested, open a **DRAFT PR**
@@ -445,20 +445,20 @@ Recommendation:
 The Wan2.1 T2V 1.3B Diffusers pipeline is a good “standard” example for
 FastVideo integration.
 
-1) Verify model config + mapping.
+1. Verify model config + mapping.
    - DiT mapping: `fastvideo/configs/models/dits/wanvideo.py`
    - VAE: `fastvideo/models/vaes/wanvae.py`
    - Text encoder: `fastvideo/models/encoders/t5.py`
 
-2) Parity test the core components.
+2. Parity test the core components.
    - Example tests: `fastvideo/tests/transformers/test_wanvideo.py`,
      `fastvideo/tests/vaes/test_wan_vae.py`,
      `fastvideo/tests/encoders/test_t5_encoder.py`
 
-3) Pipeline wiring.
+3. Pipeline wiring.
    - Pipeline: `fastvideo/pipelines/basic/wan/wan_pipeline.py`
    - Pipeline config: `fastvideo/configs/pipelines/wan.py`
    - Sampling defaults: `fastvideo/configs/sample/wan.py`
 
-4) Minimal example.
+4. Minimal example.
    - Script: `examples/inference/basic/basic.py`
