@@ -3,7 +3,7 @@
 GLM-Image inference example using FastVideo.
 
 This example demonstrates how to generate images using the GLM-Image model
-through FastVideo's pipeline infrastructure.
+through FastVideo's VideoGenerator API.
 
 Usage:
     python examples/inference/basic/basic_glm_image.py
@@ -11,64 +11,48 @@ Usage:
 
 import os
 
-# Set environment variables for single-GPU distributed setup
-os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
-os.environ.setdefault("MASTER_PORT", "29501")
-os.environ.setdefault("RANK", "0")
-os.environ.setdefault("WORLD_SIZE", "1")
+from PIL import Image
 
-from fastvideo.pipelines.basic.glm_image import GlmImagePipeline
-from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
+from fastvideo import VideoGenerator
 
 OUTPUT_PATH = "image_output"
 
 
-
 def main():
-    # Load the GLM-Image pipeline
-    pipe = GlmImagePipeline.from_pretrained(
+    # FastVideo will automatically use the optimal default arguments for GLM-Image.
+    generator = VideoGenerator.from_pretrained(
         "zai-org/GLM-Image",
         num_gpus=1,
         trust_remote_code=True,
     )
 
-    # Create a batch with generation parameters
+    # Generate images - use save_video=False and return_frames=True
+    # to get raw frames that we can save as images
     prompt = (
         "A beautiful landscape photography with rolling hills, "
         "a winding river, and a vibrant sunset in the background. "
         "Warm golden light, photorealistic style."
     )
     
-    batch = ForwardBatch(
-        data_type="image",
-        prompt=prompt,
-        negative_prompt="",
+    os.makedirs(OUTPUT_PATH, exist_ok=True)
+    
+    # Generate first image
+    result = generator.generate_video(
+        prompt,
+        output_path=OUTPUT_PATH,
+        save_video=False,
+        return_frames=True,
         height=1024,
         width=1024,
         num_inference_steps=50,
-        guidance_scale=7.5,
-        guidance_rescale=0.7,
-        do_classifier_free_guidance=True,
-        num_frames=1,
-        seed=42,
+        guidance_scale=7.5,  
     )
     
-    # Generate the image
-    result = pipe.forward(batch, pipe.fastvideo_args)
-    
-    # Output is in result.output as a tensor [B, C, T, H, W]
-    print(f"Generated image tensor shape: {result.output.shape}")
-    
-    # Save the output image
-    import torch
-    from torchvision.utils import save_image
-    
-    os.makedirs(OUTPUT_PATH, exist_ok=True)
-    # result.output is [B, C, 1, H, W] for images
-    image_tensor = result.output.squeeze(2) # [B, C, H, W]
-    save_path = os.path.join(OUTPUT_PATH, "output.png")
-    save_image(image_tensor, save_path)
-    print(f"Image saved to {save_path}")
+    # Save as PNG image (result is a list of frames, take the first/only one)
+    if result and len(result) > 0:
+        img = Image.fromarray(result[0])
+        img.save(os.path.join(OUTPUT_PATH, "landscape.png"))
+        print(f"Saved image to {OUTPUT_PATH}/landscape.png")
 
 
 if __name__ == "__main__":
