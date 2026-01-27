@@ -113,6 +113,7 @@ class FastVideoArgs:
     num_gpus: int = 1
     tp_size: int = -1
     sp_size: int = -1
+    ring_degree: int = 1 
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
     dist_timeout: int | None = None  # timeout for torch.distributed
@@ -331,6 +332,12 @@ class FastVideoArgs:
             type=int,
             default=FastVideoArgs.sp_size,
             help="The sequence parallelism size.",
+        )
+        parser.add_argument(
+            "--ring-degree",
+            type=int,
+            default=FastVideoArgs.ring_degree,
+            help="Ring attention degree (number of GPUs in ring topology). If > 1, enables ring attention.",
         )
         parser.add_argument(
             "--hsdp-replicate-dim",
