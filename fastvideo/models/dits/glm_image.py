@@ -423,9 +423,9 @@ class GlmImageAttention(nn.Module):
             # Match SGLang: text part uses provided mask, image part is always 1
             mix_attn_mask[:, :text_seq_length] = text_attn_mask.float().to(device)
             
-            # Use 2D mask (B, L) for simplified backend handling. 
-            # flash_attn/unpad_input and standard SDPA can both handle this.
-            attention_mask_kv = (mix_attn_mask > 0) # (B, L)
+            # Convert to SDPA format: (B, 1, 1, L) for key-padding style mask
+            # True = attend, False = ignore (will be converted to additive mask by SDPA)
+            attention_mask_kv = (mix_attn_mask > 0).unsqueeze(1).unsqueeze(2)  # (B, 1, 1, L)
         else:
             attention_mask_kv = None
 

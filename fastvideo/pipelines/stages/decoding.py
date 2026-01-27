@@ -244,10 +244,10 @@ class DecodingStage(PipelineStage):
 
         # Apply post-decoding hook if configured
         # This allows pipelines to apply custom transformations after VAE decoding
-        if hasattr(fastvideo_args.pipeline_config, 'post_decoding') and \
-           fastvideo_args.pipeline_config.post_decoding is not None:
+        post_decoding_hook = getattr(fastvideo_args.pipeline_config, 'post_decoding', None)
+        if post_decoding_hook is not None:
             logger.debug("Applying post_decoding hook")
-            frames = fastvideo_args.pipeline_config.post_decoding(frames)
+            frames = post_decoding_hook(frames)
 
         # Convert to CPU float32 for compatibility
         frames = frames.cpu().float()

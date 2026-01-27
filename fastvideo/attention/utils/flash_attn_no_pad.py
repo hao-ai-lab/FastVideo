@@ -30,14 +30,7 @@ def flash_attn_no_pad(qkv,
     nheads = qkv.shape[-2]
     x = rearrange(qkv, "b s three h d -> b s (three h d)")
 
-    # Handle version differences in flash_attn unpad_input
-    unpad_output = unpad_input(x, key_padding_mask)
-    if len(unpad_output) == 5:
-        x_unpad, indices, cu_seqlens, max_s, used_seqlens_in_batch = unpad_output
-    else:
-        # Older versions return 4 values or different order?
-        # Typically: x_unpad, indices, cu_seqlens, max_s
-        x_unpad, indices, cu_seqlens, max_s = unpad_output[:4]
+    x_unpad, indices, cu_seqlens, max_s, _ = unpad_input(x, key_padding_mask)
 
     x_unpad = rearrange(x_unpad,
                         "nnz (three h d) -> nnz three h d",
@@ -76,32 +69,12 @@ def flash_attn_no_pad_v3(qkv,
     batch_size, seqlen, _, nheads, head_dim = qkv.shape
     query, key, value = qkv.unbind(dim=2)
 
-    # Handle version differences in flash_attn unpad_input for query
-    unpad_output_q = unpad_input(rearrange(query, "b s h d -> b s (h d)"),
-                                 key_padding_mask)
-    if len(unpad_output_q) >= 4:
-        query_unpad, indices, cu_seqlens_q, max_seqlen_q = unpad_output_q[:4]
-    else:
-        raise ValueError(
-            f"Unexpected unpad_input output length: {len(unpad_output_q)}")
-
-    # Handle version differences for key
-    unpad_output_k = unpad_input(rearrange(key, "b s h d -> b s (h d)"),
-                                 key_padding_mask)
-    if len(unpad_output_k) >= 3:
-        key_unpad, _, cu_seqlens_k = unpad_output_k[:3]
-    else:
-        raise ValueError(
-            f"Unexpected unpad_input output length: {len(unpad_output_k)}")
-
-    # Handle version differences for value
-    unpad_output_v = unpad_input(rearrange(value, "b s h d -> b s (h d)"),
-                                 key_padding_mask)
-    if len(unpad_output_v) >= 1:
-        value_unpad = unpad_output_v[0]
-    else:
-        raise ValueError(
-            f"Unexpected unpad_input output length: {len(unpad_output_v)}")
+    query_unpad, indices, cu_seqlens_q, max_seqlen_q, _ = unpad_input(
+        rearrange(query, "b s h d -> b s (h d)"), key_padding_mask)
+    key_unpad, _, cu_seqlens_k, _, _ = unpad_input(
+        rearrange(key, "b s h d -> b s (h d)"), key_padding_mask)
+    value_unpad, _, _, _, _ = unpad_input(
+        rearrange(value, "b s h d -> b s (h d)"), key_padding_mask)
 
     query_unpad = rearrange(query_unpad, "nnz (h d) -> nnz h d", h=nheads)
     key_unpad = rearrange(key_unpad, "nnz (h d) -> nnz h d", h=nheads)
