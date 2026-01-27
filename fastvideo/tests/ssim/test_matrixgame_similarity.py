@@ -5,7 +5,7 @@ import torch
 import pytest
 
 from fastvideo import VideoGenerator
-from fastvideo.models.dits.matrix_game.utils import create_action_presets
+from fastvideo.models.dits.matrixgame.utils import create_action_presets
 from fastvideo.logger import init_logger
 from fastvideo.tests.utils import (
     compute_video_ssim_torchvision,
