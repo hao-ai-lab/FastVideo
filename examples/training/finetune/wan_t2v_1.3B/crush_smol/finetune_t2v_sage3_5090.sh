@@ -80,7 +80,6 @@ miscellaneous_args=(
   --dit_precision "fp32"
   --num_euler_timesteps 50
   --ema_start_step 0
-  --enable_gradient_checkpointing_type "full"
   # --resume_from_checkpoint "checkpoints/wan_t2v_finetune/checkpoint-2500"
 )
 

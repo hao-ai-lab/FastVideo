@@ -24,7 +24,7 @@ def main():
         pin_cpu_memory=False, # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
         # image_encoder_cpu_offload=False,
         # Load custom weights from checkpoint-5000
-        init_weights_from_safetensors="/workspace/FastVideo-Quantization/bz=32_test"
+        init_weights_from_safetensors="/workspace/FastVideo-Quantization/M2_32"
     )
 
     # sampling_param = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")

@@ -262,55 +262,23 @@ class _SageAttnBlackwellWith16bitBwd(torch.autograd.Function):
         v_BHLD = v_BLHD.permute(0, 2, 1, 3).contiguous()
 
         with torch.no_grad():
-            if USE_QAT_ATTN:
-                fq_q, fq_k, fq_v = preprocess(q_BHLD, k_BHLD, v_BHLD)
-                # Compute attention probabilities and output
-                p = qat_attn_qk_torch(fq_q, fq_k)  # [B, H, L, L] where B=1
-                fq_p = get_fake_quant(p)  # [B, H, L, L] - preserves shape
-                out_BHLD = fq_p @ fq_v
-                high_prec_o = p @ fq_v
-                # Save fake quantized tensors and high precision output for backward
-                ctx.save_for_backward(fq_q, fq_k, fq_v, high_prec_o)
-                out_BLHD = out_BHLD.permute(0, 2, 1, 3).contiguous()
-            elif USE_TORCH_4BIT_FWD:
-                out_BHLD, p = attn_forward_4bit(q_BHLD, k_BHLD, v_BHLD, is_causal)
-                # Convert to BLHD for saving
-                out_BLHD = out_BHLD.permute(0, 2, 1, 3).contiguous()
-                ctx.save_for_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD)
-            else:
-                out_BHLD = sageattn_blackwell(
-                    q_BHLD, k_BHLD, v_BHLD,
-                    attn_mask=None,
-                    is_causal=is_causal,
-                    per_block_mean=per_block_mean,
-                )
-                # Convert to BLHD for saving
-                out_BLHD = out_BHLD.permute(0, 2, 1, 3).contiguous()
-                ctx.save_for_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD)
+            out_BHLD = sageattn_blackwell(
+                q_BHLD, k_BHLD, v_BHLD,
+                attn_mask=None,
+                is_causal=is_causal,
+                per_block_mean=per_block_mean,
+            )
+            # Convert to BLHD for saving
+            out_BLHD = out_BHLD.permute(0, 2, 1, 3).contiguous()
+            ctx.save_for_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD)
 
         return out_BLHD
 
     @staticmethod
     def backward(ctx, grad_out_BLHD):
         is_causal = ctx.is_causal
-        if USE_QAT_ATTN:
-            fq_q, fq_k, fq_v, high_prec_o = ctx.saved_tensors
-            # Convert from BHLD (saved format) to BLHD (expected by qat_attn_backward_16bit)
-            fq_q_BLHD = fq_q.permute(0, 2, 1, 3).contiguous()
-            fq_k_BLHD = fq_k.permute(0, 2, 1, 3).contiguous()
-            fq_v_BLHD = fq_v.permute(0, 2, 1, 3).contiguous()
-            high_prec_o_BLHD = high_prec_o.permute(0, 2, 1, 3).contiguous()
-            # qat_attn_backward_16bit expects BLHD format and returns BLHD format
-            grad_q_BLHD, grad_k_BLHD, grad_v_BLHD, _, _, _ = qat_attn_backward_16bit(
-                fq_q_BLHD, fq_k_BLHD, fq_v_BLHD, high_prec_o_BLHD, grad_out_BLHD, is_causal
-            )
-            return grad_q_BLHD, grad_k_BLHD, grad_v_BLHD, None, None
-        else:
-            q_BLHD, k_BLHD, v_BLHD, out_BLHD = ctx.saved_tensors
-            if USE_TORCH_16BIT_BWD:
-                return attn_backward_16bit(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal)
-            else:
-                return flash_attn_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal)
+        q_BLHD, k_BLHD, v_BLHD, out_BLHD = ctx.saved_tensors
+        return flash_attn_backward(q_BLHD, k_BLHD, v_BLHD, out_BLHD, grad_out_BLHD, is_causal)
 
 
 
@@ -498,16 +466,16 @@ def qat_attn(q_BLHD, k_BLHD, v_BLHD, is_causal=False):
     smooth_k = False
     warp_specialize = True
     IS_QAT = True
-    two_level_quant_P = False
-    fake_quant_P = True
+    two_level_quant_P_sage3 = False
+    fake_quant_P_bwd = True
     use_high_prec_o = True
     smooth_q = False
     sm_scale = 1.0 / sqrt(q_BHLD.shape[-1])
-    use_global_sf_qkv = False
+    use_global_sf_qkv = True
     use_global_sf_p = False
     o_BHLD = attention(q_BHLD, k_BHLD, v_BHLD, is_causal, sm_scale,
                        use_qat_qkv_backward, smooth_k, warp_specialize, IS_QAT,
-                       two_level_quant_P, fake_quant_P, use_high_prec_o, smooth_q, use_global_sf_p, use_global_sf_qkv)
+                       two_level_quant_P_sage3, fake_quant_P_bwd, use_high_prec_o, smooth_q, use_global_sf_p, use_global_sf_qkv)
     return o_BHLD.permute(0, 2, 1, 3).contiguous()
 
 
@@ -563,8 +531,7 @@ class SageAttention3Impl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        # output = sageattn_blackwell_with_16bit_bwd(query, key, value, is_causal=self.causal)
+        output = sageattn_blackwell_with_16bit_bwd(query, key, value, is_causal=self.causal)
         # output = sageattn_blackwell_with_triton_bwd(query, key, value, is_causal=self.causal)
-        # output = attn_forward_4bit_fwd_16bit_bwd(query, key, value)
-        output = qat_attn(query, key, value, is_causal=self.causal)
+        # output = qat_attn(query, key, value, is_causal=self.causal)
         return output

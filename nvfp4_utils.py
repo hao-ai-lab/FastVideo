@@ -20,6 +20,7 @@ def _compute_quant_and_scale(src_tensor, valid_src_mask, use_global_sf=True, two
     abs_tensor = tl.where(valid_src_mask, abs_tensor, -1.0)  # Don't consider padding tensors in scale computation
     
     if two_level_quant_P:
+        # row max from SageAttn3 paper
         global_max_val = tl.max(f32_tensor, axis=1, keep_dims=True)  # (BLOCK_SIZE_OUT_DIM, 1)
         global_max_val = tl.maximum(global_max_val, 1e-8)
         s_enc = ((6 * 448) / global_max_val).reshape([BLOCK_SIZE_OUT_DIM, 1, 1])

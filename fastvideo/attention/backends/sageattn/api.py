@@ -77,7 +77,7 @@ def triton_group_mean(q: torch.Tensor):
     return q_out, qm
 
 
-def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_mean: bool = True, disable_smoothing_q: bool = True):
+def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_mean: bool = True, enable_smoothing_q: bool = True, enable_smoothing_k: bool = True):
 
     def pad_to_block_size(x):
         L = x.size(2)
@@ -86,19 +86,20 @@ def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_
             return x.contiguous()
         return F.pad(x, (0, 0, 0, pad_len), value=0).contiguous()
     
-    # k -= k.mean(dim=-2, keepdim=True)  
+    if enable_smoothing_k:
+        k -= k.mean(dim=-2, keepdim=True)  
     q, k, v = map(lambda x: pad_to_block_size(x), [q, k, v])
-    if per_block_mean and not disable_smoothing_q:
+    if per_block_mean and enable_smoothing_q:
         q, qm = triton_group_mean(q)
-    elif not disable_smoothing_q:
+    elif enable_smoothing_q:
         qm = q.mean(dim=-2, keepdim=True)
         q = q - qm
-    if disable_smoothing_q:  # used to disable q smoothing
-        B, H, L, D = q.shape
-        delta_s = torch.zeros((B, H, L // BLOCK_M, k.shape[2]), device=q.device, dtype=torch.float32)
-    else:
+    if enable_smoothing_q:  # used to disable q smoothing
         _, qm = triton_group_mean(q)
         delta_s = torch.matmul(qm, k.transpose(-2, -1)).to(torch.float32).contiguous()
+    else:
+        B, H, L, D = q.shape
+        delta_s = torch.zeros((B, H, L // BLOCK_M, k.shape[2]), device=q.device, dtype=torch.float32)
         
     return q, k, v, delta_s
 
@@ -140,7 +141,7 @@ def blockscaled_fp4_attn(qlist: Tuple,
     return fp4attn_cuda.fwd(qlist[0], klist[0], vlist[0], qlist[1], klist[1], vlist[1], delta_s, KL, None, softmax_scale, is_causal, per_block_mean, is_bf16, single_level_p_quant)
 
 
-def sageattn_blackwell(q, k, v, attn_mask = None, is_causal = False, per_block_mean = True, single_level_p_quant = True, **kwargs):
+def sageattn_blackwell(q, k, v, attn_mask = None, is_causal = False, per_block_mean = True, single_level_p_quant = False, **kwargs):
     """
     SageAttention3 Blackwell kernel for FP4 attention.
     

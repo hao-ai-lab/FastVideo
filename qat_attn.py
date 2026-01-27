@@ -45,6 +45,7 @@ def _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid,
                     STAGE: tl.constexpr, offs_m: tl.constexpr, offs_n: tl.constexpr,
                     N_CTX: tl.constexpr, warp_specialize: tl.constexpr, IS_HOPPER: tl.constexpr,
                     IS_QAT: tl.constexpr,
+                    fake_quant_P: tl.constexpr = True,
                     two_level_quant_P: tl.constexpr = False,
                     use_global_sf_P: tl.constexpr = True):
     # range of values handled by this stage (kv blocks)
@@ -79,7 +80,7 @@ def _attn_fwd_inner(acc, high_prec_acc, l_i, m_i, q, q_valid,
             m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
             qk = qk * qk_scale - m_ij[:, None]
         p = tl.math.exp2(qk)
-        if IS_QAT:
+        if IS_QAT:  
             p, high_prec_p = fake_quantize(
                 src_tensor=p,
                 valid_src_mask=tl.full(shape=p.shape, value=1.0, dtype=p.dtype) == 1.0,
@@ -200,6 +201,7 @@ def _attn_fwd(sm_scale, M,
               warp_specialize: tl.constexpr,
               IS_HOPPER: tl.constexpr,
               IS_QAT: tl.constexpr,
+              fake_quant_P: tl.constexpr = True,
               two_level_quant_P: tl.constexpr = False,
               use_global_sf_P: tl.constexpr = True,
               ):
@@ -266,7 +268,7 @@ def _attn_fwd(sm_scale, M,
             offset_y_kv, dtype, start_m, qk_scale,
             BLOCK_M, HEAD_DIM, BLOCK_N,
             4 - STAGE, offs_m, offs_n, N_CTX_KV,
-            warp_specialize, IS_HOPPER, IS_QAT, two_level_quant_P, use_global_sf_P
+            warp_specialize, IS_HOPPER, IS_QAT, fake_quant_P, two_level_quant_P, use_global_sf_P
         )
     # stage 2: on-band
     if STAGE & 2:
@@ -276,7 +278,7 @@ def _attn_fwd(sm_scale, M,
             offset_y_kv, dtype, start_m, qk_scale,
             BLOCK_M, HEAD_DIM, BLOCK_N,
             2, offs_m, offs_n, N_CTX_KV,
-            warp_specialize, IS_HOPPER, IS_QAT, two_level_quant_P, use_global_sf_P
+            warp_specialize, IS_HOPPER, IS_QAT, fake_quant_P, two_level_quant_P, use_global_sf_P
         )
     # epilogue
     m_i += tl.math.log2(l_i)
@@ -990,6 +992,7 @@ class _attention(torch.autograd.Function):
             warp_specialize=warp_specialize,
             IS_HOPPER=is_hopper(),
             IS_QAT=IS_QAT,
+            fake_quant_P=fake_quant_P,
             two_level_quant_P=two_level_quant_P,
             use_global_sf_P=use_global_sf_P,
             num_warps=4,
