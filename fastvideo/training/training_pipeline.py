@@ -21,9 +21,9 @@ from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm.auto import tqdm
 
 import fastvideo.envs as envs
-from fastvideo.attention.backends.video_sparse_attn import (
-    VideoSparseAttentionMetadataBuilder)
-from fastvideo.attention.backends.vmoba import VideoMobaAttentionMetadataBuilder
+# from fastvideo.attention.backends.video_sparse_attn import (
+#     VideoSparseAttentionMetadataBuilder)
+# from fastvideo.attention.backends.vmoba import VideoMobaAttentionMetadataBuilder
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset import build_parquet_map_style_dataloader
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
@@ -55,8 +55,10 @@ from fastvideo.attention.backends.sage_attn3 import SageAttention3Impl
 
 import wandb  # isort: skip
 
-vsa_available = is_vsa_available()
-vmoba_available = is_vmoba_available()
+# vsa_available = is_vsa_available()
+# vmoba_available = is_vmoba_available()
+vsa_available = False
+vmoba_available = False
 
 logger = init_logger(__name__)
 
