@@ -8,35 +8,11 @@ from fastvideo.attention.backends.sageattn.quantization.bench.bench_utils import
 
 
 def calculate_attention_flops(batch_size, num_heads, seq_len_q, seq_len_k, head_dim, is_causal=False):
-    """
-    Calculate FLOPs for attention operation.
-    
-    For standard attention:
-    - QK^T: batch * num_heads * seq_len_q * seq_len_k * head_dim * 2 FLOPs
-    - Softmax: batch * num_heads * seq_len_q * seq_len_k * 3 FLOPs (exp, sum, div)
-    - Attention * V: batch * num_heads * seq_len_q * seq_len_k * head_dim * 2 FLOPs
-    
-    For causal attention, we only compute the lower triangular part:
-    - QK^T: batch * num_heads * seq_len_q * (seq_len_k + 1) / 2 * head_dim * 2
-    - Softmax: batch * num_heads * seq_len_q * (seq_len_k + 1) / 2 * 3
-    - Attention * V: batch * num_heads * seq_len_q * seq_len_k * head_dim * 2
-    
-    Note: SageAttention3 uses FP4 quantization, but we calculate theoretical FLOPs
-    based on the standard attention computation for comparison purposes.
-    """
+    """Calculate FLOPs for attention (FlashAttention standard - matmuls only)."""
+    f = 4 * batch_size * num_heads * seq_len_q * seq_len_k * head_dim
     if is_causal:
-        # Causal attention: only compute lower triangular part
-        qk_flops = batch_size * num_heads * seq_len_q * (seq_len_k + 1) / 2 * head_dim * 2
-        softmax_flops = batch_size * num_heads * seq_len_q * (seq_len_k + 1) / 2 * 3
-        attn_v_flops = batch_size * num_heads * seq_len_q * seq_len_k * head_dim * 2
-    else:
-        # Full attention
-        qk_flops = batch_size * num_heads * seq_len_q * seq_len_k * head_dim * 2
-        softmax_flops = batch_size * num_heads * seq_len_q * seq_len_k * 3
-        attn_v_flops = batch_size * num_heads * seq_len_q * seq_len_k * head_dim * 2
-    
-    total_flops = qk_flops + softmax_flops + attn_v_flops
-    return total_flops
+        f = f // 2
+    return f
 
 
 def benchmark_sageattn3(batch_size, num_heads, seq_len, head_dim, 
