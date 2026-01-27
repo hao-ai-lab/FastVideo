@@ -835,6 +835,18 @@ def get_sp_group() -> GroupCoordinator:
     return _SP
 
 
+def get_ring_group() -> ProcessGroup:
+    """Return the raw torch ProcessGroup for ring attention.
+    
+    Yunchang expects a raw torch ProcessGroup, not our GroupCoordinator wrapper.
+    This unwraps the SP group's device_group.
+    
+    Returns:
+        The raw torch.distributed.ProcessGroup for sequence parallelism.
+    """
+    assert _SP is not None, ("sequence model parallel group is not initialized")
+    return get_sp_group().device_group
+
 _DP: GroupCoordinator | None = None
 
 
