@@ -152,7 +152,7 @@ nav:
     - Overview: attention/index.md
     - Video Sparse Attention: attention/vsa/index.md
     - Sliding Tile Attention: attention/sta/index.md
-    - Adding a New Attention Backend: attention/developer/index.md
+    - Backend Development: contributing/attention_backend.md
   - Utilities:
     - LoRA: utilities/lora.md
     - Debugging: utilities/debugging.md
@@ -167,7 +167,7 @@ nav:
     - Testing: contributing/testing.md
     - Profiling: contributing/profiling.md
     - Coding Agents: contributing/coding_agents.md
-    - Adding a New Attention Backend: attention/developer/index.md
+    - Attention Backend Development: contributing/attention_backend.md
   - API Reference:
     - FastVideo: api/fastvideo.md
 

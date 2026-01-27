@@ -73,6 +73,11 @@ If you prefer a containerized environment, use the dev image documented in
 
 See the [Testing Guide](testing.md) for how to add and run tests in FastVideo.
 
+## Attention backend development
+
+If you are adding a new attention kernel or backend, follow
+[Attention Backend Development](attention_backend.md).
+
 ## Contributing with coding agents
 
 For a step‑by‑step workflow on adding pipelines or components with coding
