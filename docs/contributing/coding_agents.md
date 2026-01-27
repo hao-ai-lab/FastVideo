@@ -96,6 +96,7 @@ Diffusers format](../design/overview.md#weights-and-diffusers-format) for detail
 ### Do I have official weights + local paths ready?
 
 Standardize local paths as:
+
 - `official_weights/<model_name>/` for official checkpoints
 - `converted_weights/<model_name>/` if conversion is required (can be created later)
 
