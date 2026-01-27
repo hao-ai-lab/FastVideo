@@ -125,7 +125,6 @@ nav:
   - Inference:
     - Quick Start: inference/inference_quick_start.md
     - Configuration: inference/configuration.md
-    - Offloading: inference/offloading.md
     - Optimizations: inference/optimizations.md
     - ComfyUI: inference/comfyui.md
     - Support Matrix: inference/support_matrix.md
@@ -153,9 +152,10 @@ nav:
     - Overview: attention/index.md
     - Video Sparse Attention: attention/vsa/index.md
     - Sliding Tile Attention: attention/sta/index.md
-    - Adding a New Attention Backend: attention/developer/index.md
+    - Backend Development: contributing/attention_backend.md
   - Utilities:
     - LoRA: utilities/lora.md
+    - Debugging: utilities/debugging.md
   - Design:
     - Overview: design/overview.md
   - Developer Guide:
@@ -166,7 +166,8 @@ nav:
       - RunPod: contributing/developer_env/runpod.md
     - Testing: contributing/testing.md
     - Profiling: contributing/profiling.md
-    - Adding a New Attention Backend: attention/developer/index.md
+    - Coding Agents: contributing/coding_agents.md
+    - Attention Backend Development: contributing/attention_backend.md
   - API Reference:
     - FastVideo: api/fastvideo.md
 
