@@ -2,7 +2,6 @@
 from dataclasses import asdict
 import math
 import os
-import gc
 import time
 from abc import ABC, abstractmethod
 from collections import deque
@@ -14,7 +13,6 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torchvision
-from diffusers import FlowMatchEulerDiscreteScheduler
 from einops import rearrange
 from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
@@ -142,12 +140,13 @@ class TrainingPipeline(LoRAPipeline, ABC):
             )
         elif training_args.optimizer_type == "muon":
             self.optimizer = get_muon_optimizer(
-                    self.transformer,
-                    lr=training_args.learning_rate,
-                    weight_decay=training_args.weight_decay,
-                )
+                self.transformer,
+                lr=training_args.learning_rate,
+                weight_decay=training_args.weight_decay,
+            )
         else:
-            raise ValueError(f"Unsupported optimizer type: {training_args.optimizer_type}")
+            raise ValueError(
+                f"Unsupported optimizer type: {training_args.optimizer_type}")
 
         self.init_steps = 0
         logger.info("optimizer: %s", self.optimizer)
@@ -169,12 +168,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 filter(lambda p: p.requires_grad, params_to_optimize_2))
             if training_args.optimizer_type == "adamw":
                 self.optimizer_2 = torch.optim.AdamW(
-                        params_to_optimize_2,
-                        lr=training_args.learning_rate,
-                        betas=(0.9, 0.999),
-                        weight_decay=training_args.weight_decay,
-                        eps=1e-8,
-                    )
+                    params_to_optimize_2,
+                    lr=training_args.learning_rate,
+                    betas=(0.9, 0.999),
+                    weight_decay=training_args.weight_decay,
+                    eps=1e-8,
+                )
             elif training_args.optimizer_type == "muon":
                 self.optimizer_2 = get_muon_optimizer(
                     self.transformer_2,
@@ -182,7 +181,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     weight_decay=training_args.weight_decay,
                 )
             else:
-                raise ValueError(f"Unsupported optimizer type: {training_args.optimizer_type}")
+                raise ValueError(
+                    f"Unsupported optimizer type: {training_args.optimizer_type}"
+                )
 
             self.lr_scheduler_2 = get_scheduler(
                 training_args.lr_scheduler,
@@ -698,13 +699,16 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     "vsa_sparsity": current_vsa_sparsity,
                 }
                 try:
-                    metrics["batch_size"] = int(training_batch.raw_latent_shape[0])
+                    metrics["batch_size"] = int(
+                        training_batch.raw_latent_shape[0])
 
                     patch_t, patch_h, patch_w = self.training_args.pipeline_config.dit_config.patch_size
-                    seq_len = (training_batch.raw_latent_shape[2] // patch_t) * (
-                        training_batch.raw_latent_shape[3] //
-                        patch_h) * (training_batch.raw_latent_shape[4] // patch_w)
-                    context_len = int(training_batch.encoder_hidden_states.shape[1])
+                    seq_len = (
+                        training_batch.raw_latent_shape[2] // patch_t) * (
+                            training_batch.raw_latent_shape[3] // patch_h) * (
+                                training_batch.raw_latent_shape[4] // patch_w)
+                    context_len = int(
+                        training_batch.encoder_hidden_states.shape[1])
 
                     metrics["dit_seq_len"] = int(seq_len)
                     metrics["context_len"] = context_len
@@ -714,7 +718,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     metrics["hidden_dim"] = arch_config.hidden_size
                     metrics["num_layers"] = arch_config.num_layers
                     metrics["ffn_dim"] = arch_config.ffn_dim
-                except:
+                except Exception:
                     pass
 
                 self.tracker.log(metrics, step)

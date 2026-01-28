@@ -206,7 +206,8 @@ class DistillationPipeline(TrainingPipeline):
                 weight_decay=training_args.weight_decay,
             )
         else:
-            raise ValueError(f"Unsupported optimizer type: {training_args.optimizer_type}")
+            raise ValueError(
+                f"Unsupported optimizer type: {training_args.optimizer_type}")
 
         self.fake_score_lr_scheduler = get_scheduler(
             training_args.fake_score_lr_scheduler,
@@ -225,12 +226,12 @@ class DistillationPipeline(TrainingPipeline):
                        self.fake_score_transformer_2.parameters()))
             if training_args.optimizer_type == "adamw":
                 self.fake_score_optimizer_2 = torch.optim.AdamW(
-                        fake_score_params_2,
-                        lr=fake_score_lr,
-                        betas=betas,
-                        weight_decay=training_args.weight_decay,
-                        eps=1e-8,
-                    )
+                    fake_score_params_2,
+                    lr=fake_score_lr,
+                    betas=betas,
+                    weight_decay=training_args.weight_decay,
+                    eps=1e-8,
+                )
             elif training_args.optimizer_type == "muon":
                 self.fake_score_optimizer_2 = get_muon_optimizer(
                     self.fake_score_transformer_2,
@@ -238,7 +239,9 @@ class DistillationPipeline(TrainingPipeline):
                     weight_decay=training_args.weight_decay,
                 )
             else:
-                raise ValueError(f"Unsupported optimizer type: {training_args.optimizer_type}")
+                raise ValueError(
+                    f"Unsupported optimizer type: {training_args.optimizer_type}"
+                )
 
             self.fake_score_lr_scheduler_2 = get_scheduler(
                 training_args.fake_score_lr_scheduler,
@@ -921,7 +924,7 @@ class DistillationPipeline(TrainingPipeline):
         self.video_latent_shape = training_batch.latents.shape
 
         self.video_latent_shape_sp = training_batch.latents.shape
-        
+
         return training_batch
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:

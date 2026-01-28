@@ -5,7 +5,7 @@ from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.models.utils import pred_noise_to_pred_video, pred_noise_to_x_bound
+from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.causal_denoising import CausalDMDDenosingStage
 from fastvideo.utils import PRECISION_TO_TYPE
@@ -27,6 +27,7 @@ except ImportError:
     VideoSparseAttentionBackend = None  # type: ignore
 
 logger = init_logger(__name__)
+
 
 class Hy15CausalDMDDenosingStage(CausalDMDDenosingStage):
     """
@@ -71,13 +72,6 @@ class Hy15CausalDMDDenosingStage(CausalDMDDenosingStage):
             timesteps = scheduler_timesteps[1000 - timesteps]
         timesteps = timesteps.to(get_local_torch_device())
         logger.info("[causal_denoising] timesteps: %s", timesteps)
-
-        if fastvideo_args.pipeline_config.dit_config.boundary_ratio is not None:
-            boundary_timestep = fastvideo_args.pipeline_config.dit_config.boundary_ratio * self.scheduler.num_train_timesteps
-            high_noise_timesteps = timesteps[timesteps >= boundary_timestep]
-        else:
-            boundary_timestep = None
-            high_noise_timesteps = None
 
         # Image kwargs (kept empty unless caller provides compatible args)
         image_embeds = batch.image_embeds
@@ -306,8 +300,8 @@ class Hy15CausalDMDDenosingStage(CausalDMDDenosingStage):
                         noise_latents_btchw = self.scheduler.add_noise(
                             pred_video_btchw.flatten(0, 1),
                             noise_btchw.flatten(0, 1),
-                            next_timestep).unflatten(
-                                0, pred_video_btchw.shape[:2])
+                            next_timestep).unflatten(0,
+                                                     pred_video_btchw.shape[:2])
                         current_latents = noise_latents_btchw.permute(
                             0, 2, 1, 3, 4)
                     else:

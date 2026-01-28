@@ -201,8 +201,12 @@ class Hy15ODEInitTrainingPipeline(TrainingPipeline):
         training_batch.encoder_hidden_states_image = encoder_hidden_states_image
         training_batch.infos = infos
 
-        return training_batch, trajectory_latents[:, :, :self.training_args.num_latent_t].to(
-            device, dtype=torch.bfloat16), trajectory_timesteps.to(device)
+        return training_batch, trajectory_latents[:, :, :self.training_args.
+                                                  num_latent_t].to(
+                                                      device,
+                                                      dtype=torch.bfloat16
+                                                  ), trajectory_timesteps.to(
+                                                      device)
 
     def _get_timestep(self,
                       min_timestep: int,
@@ -376,8 +380,16 @@ class Hy15ODEInitTrainingPipeline(TrainingPipeline):
             uniform_timestep=False)
         timestep = self.noise_scheduler.timesteps[indexes.cpu()].to(device)
 
-        latents = self.noise_scheduler.add_noise(target_latent.flatten(0, 1), torch.randn_like(target_latent.flatten(0, 1)), timestep.flatten(0, 1)).unflatten(0, (B, num_frames))
-        noisy_input = torch.cat([latents, torch.zeros_like(latents), torch.zeros_like(latents[:, :, 0:1])], dim=2)
+        latents = self.noise_scheduler.add_noise(
+            target_latent.flatten(0, 1),
+            torch.randn_like(target_latent.flatten(0, 1)),
+            timestep.flatten(0, 1)).unflatten(0, (B, num_frames))
+        noisy_input = torch.cat([
+            latents,
+            torch.zeros_like(latents),
+            torch.zeros_like(latents[:, :, 0:1])
+        ],
+                                dim=2)
 
         # Prepare inputs for transformer
         latent_vis_dict["noisy_input"] = latents.permute(
@@ -387,13 +399,22 @@ class Hy15ODEInitTrainingPipeline(TrainingPipeline):
 
         logger.info("timestep: %s", timestep)
         txt_input_kwargs = {
-            "txt_inference": True,
-            "vision_inference": False,
-            "encoder_hidden_states": encoder_hidden_states,
-            "encoder_hidden_states_image": encoder_hidden_states_image,
-            "encoder_attention_mask": encoder_attention_mask,
-            "timestep": torch.zeros([latents.shape[0]], device=latents.device, dtype=torch.bfloat16),
-            "cache_txt": True,
+            "txt_inference":
+            True,
+            "vision_inference":
+            False,
+            "encoder_hidden_states":
+            encoder_hidden_states,
+            "encoder_hidden_states_image":
+            encoder_hidden_states_image,
+            "encoder_attention_mask":
+            encoder_attention_mask,
+            "timestep":
+            torch.zeros([latents.shape[0]],
+                        device=latents.device,
+                        dtype=torch.bfloat16),
+            "cache_txt":
+            True,
         }
         with set_forward_context(current_timestep=timestep,
                                  attn_metadata=None,
@@ -411,15 +432,15 @@ class Hy15ODEInitTrainingPipeline(TrainingPipeline):
         with set_forward_context(current_timestep=timestep,
                                  attn_metadata=None,
                                  forward_batch=None):
-            noise_pred = self.transformer(**vision_input_kwargs).permute(0, 2, 1, 3, 4)
+            noise_pred = self.transformer(**vision_input_kwargs).permute(
+                0, 2, 1, 3, 4)
 
         from fastvideo.models.utils import pred_noise_to_pred_video
         pred_video = pred_noise_to_pred_video(
             pred_noise=noise_pred.flatten(0, 1),
             noise_input_latent=latents.flatten(0, 1),
             timestep=timestep.to(dtype=torch.bfloat16).flatten(0, 1),
-            scheduler=self.noise_scheduler).unflatten(
-                0, noise_pred.shape[:2])
+            scheduler=self.noise_scheduler).unflatten(0, noise_pred.shape[:2])
         latent_vis_dict["pred_video"] = pred_video.permute(
             0, 2, 1, 3, 4).detach().clone().cpu()
 

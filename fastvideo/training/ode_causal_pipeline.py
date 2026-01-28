@@ -160,8 +160,12 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             device, dtype=torch.bfloat16)
         training_batch.infos = infos
 
-        return training_batch, trajectory_latents[:, :, :self.training_args.num_latent_t].to(
-            device, dtype=torch.bfloat16), trajectory_timesteps.to(device)
+        return training_batch, trajectory_latents[:, :, :self.training_args.
+                                                  num_latent_t].to(
+                                                      device,
+                                                      dtype=torch.bfloat16
+                                                  ), trajectory_timesteps.to(
+                                                      device)
 
         ## TEMP Used for loading the sf .pt files directly
         """

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import copy
 import os
-import gc
 import time
 from collections import deque
 from typing import Any
@@ -187,17 +186,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             num_generated_frames += 1
             min_num_frames += 1
 
-        # Create noise with dynamic shape
-        if initial_latent is not None:
-            noise_shape = [
-                batch_size, num_generated_frames - 1,
-                *self.video_latent_shape[2:]
-            ]
-        else:
-            noise_shape = [
-                batch_size, num_generated_frames, *self.video_latent_shape[2:]
-            ]
-
         if training_batch.use_gt_trajectory and training_batch.trajectory_latents is not None:
             noise = training_batch.trajectory_latents.to(self.device,
                                                          dtype=dtype)
@@ -278,7 +266,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                                  start_timestep_index,
                                                  end_timestep_index,
                                                  device=noise.device)
-        start_gradient_frame_index = max(0, num_output_frames - num_training_frames)
+        start_gradient_frame_index = max(
+            0, num_output_frames - num_training_frames)
 
         for block_index, current_num_frames in enumerate(all_num_frames):
             noisy_input = noise[:, current_start_frame -
@@ -456,7 +445,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         if pred_image_or_video.shape[1] > num_training_frames:
             with torch.no_grad():
                 # Re-encode to get image latent
-                latent_to_decode = pred_image_or_video[:, :-(num_training_frames-1), ...]
+                latent_to_decode = pred_image_or_video[:, :-(
+                    num_training_frames - 1), ...]
                 # Decode to video
                 latent_to_decode = latent_to_decode.permute(
                     0, 2, 1, 3, 4)  # [B, C, F, H, W]
@@ -487,8 +477,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 image_latent = image_latent.permute(0, 2, 1, 3,
                                                     4)  # [B, F, C, H, W]
 
-            pred_image_or_video_last_21 = torch.cat(
-                [image_latent, pred_image_or_video[:, -(num_training_frames-1):, ...]], dim=1)
+            pred_image_or_video_last_21 = torch.cat([
+                image_latent,
+                pred_image_or_video[:, -(num_training_frames - 1):, ...]
+            ],
+                                                    dim=1)
         else:
             pred_image_or_video_last_21 = pred_image_or_video
 
