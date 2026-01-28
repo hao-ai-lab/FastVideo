@@ -759,8 +759,9 @@ class FastVideoArgs:
         assert self.hsdp_replicate_dim <= self.num_gpus and self.num_gpus % self.hsdp_replicate_dim == 0, "num_gpus must >= and be divisible by hsdp_replicate_dim"
         assert self.hsdp_shard_dim <= self.num_gpus and self.num_gpus % self.hsdp_shard_dim == 0, "num_gpus must >= and be divisible by hsdp_shard_dim"
 
-        if (self.ring_size > 1 or self.sp_size != self.num_gpus
-            ) and self.sp_size * self.ring_size != self.num_gpus:
+        # Validate ring_size and sp_size relationship
+        # Only validate when ring attention is explicitly enabled (ring_size > 1)
+        if self.ring_size > 1 and self.sp_size * self.ring_size != self.num_gpus:
             raise ValueError(
                 f"sp_size ({self.sp_size}) * ring_size ({self.ring_size}) = {self.sp_size * self.ring_size}, "
                 f"but must equal num_gpus ({self.num_gpus})")
