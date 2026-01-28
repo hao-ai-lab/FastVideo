@@ -316,13 +316,16 @@ class DenoisingStage(PipelineStage):
                 else:
                     t_expand = t.repeat(latent_model_input.shape[0])
 
-                use_meanflow = getattr(self.transformer.config, "use_meanflow", False)
+                use_meanflow = getattr(self.transformer.config, "use_meanflow",
+                                       False)
                 if use_meanflow:
                     if i == len(timesteps) - 1:
-                        timesteps_r = torch.tensor([0.0], device=get_local_torch_device())
+                        timesteps_r = torch.tensor(
+                            [0.0], device=get_local_torch_device())
                     else:
                         timesteps_r = timesteps[i + 1]
-                    timesteps_r = timesteps_r.repeat(latent_model_input.shape[0])
+                    timesteps_r = timesteps_r.repeat(
+                        latent_model_input.shape[0])
                 else:
                     timesteps_r = None
 

@@ -26,7 +26,8 @@ class HunyuanVideo152SRPipeline(ComposedPipelineBase):
 
     _required_config_modules = [
         "text_encoder", "text_encoder_2", "tokenizer", "tokenizer_2", "vae",
-        "transformer", "transformer_2", "transformer_3", "scheduler", "upsampler", "upsampler_2"
+        "transformer", "transformer_2", "transformer_3", "scheduler",
+        "upsampler", "upsampler_2"
     ]
 
     def create_pipeline_stages(self, fastvideo_args: FastVideoArgs):
