@@ -181,6 +181,33 @@ def apply_rotary_emb(
     return xq_out, xk_out
 
 
+def apply_rotary_emb_single(
+    xq: torch.Tensor,
+    freqs_cis: Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]],
+    head_first: bool = False,
+    use_fused_rope: bool = False,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    xk_out = None
+    if use_fused_rope:
+        freqs_cis = freqs_cis.to(xq.device)
+        xq_out = torch.rope(xq.float(), freq_cis=freqs_cis, rotary_interleaved=True, batch_first=True, multi_latent_attention=False).type_as(xq)
+    else:
+        if isinstance(freqs_cis, tuple):
+            cos, sin = reshape_for_broadcast(freqs_cis, xq, head_first)  # [S, D]
+            cos, sin = cos.to(xq.device), sin.to(xq.device)
+            # real * cos - imag * sin
+            # imag * cos + real * sin
+            xq_out = (xq.float() * cos + rotate_half(xq.float()) * sin).type_as(xq)
+        else:
+            # view_as_complex will pack [..., D/2, 2](real) to [..., D/2](complex)
+            xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))  # [B, S, H, D//2]
+            freqs_cis = reshape_for_broadcast(freqs_cis, xq_, head_first).to(xq.device)  # [S, D//2] --> [1, S, 1, D//2]
+            xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3).type_as(xq)
+
+    return xq_out
+
+
+
 def get_nd_rotary_pos_embed(
     rope_dim_list,
     start,

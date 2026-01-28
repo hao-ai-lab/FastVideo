@@ -10,13 +10,28 @@ from fastvideo.models.hunyuan.modules.posemb_layers import get_nd_rotary_pos_emb
 from fastvideo.utils.parallel_states import mccl_info
 
 from .activation_layers import get_activation_layer
-from .attenion import parallel_attention
+from .attenion import parallel_attention, tile, untile
 from .embed_layers import PatchEmbed, TextProjection, TimestepEmbedder
 from .mlp_layers import MLP, FinalLayer, MLPEmbedder
 from .modulate_layers import ModulateDiT, apply_gate, modulate
 from .norm_layers import get_norm_layer
-from .posemb_layers import apply_rotary_emb
+from .posemb_layers import apply_rotary_emb, apply_rotary_emb_single
 from .token_refiner import SingleTokenRefiner
+
+        
+import torch
+import torch.nn.functional as F
+from einops import rearrange
+
+try:
+    from st_attn import sliding_tile_attention
+except ImportError:
+    print("Could not load Sliding Tile Attention.")
+    sliding_tile_attention = None
+
+from fastvideo.models.flash_attn_no_pad import flash_attn_no_pad
+from fastvideo.utils.communications import all_gather, all_to_all_4D
+from fastvideo.utils.parallel_states import get_sequence_parallel_state, mccl_info
 
 
 class MMDoubleStreamBlock(nn.Module):
@@ -196,6 +211,124 @@ class MMDoubleStreamBlock(nn.Module):
             gate=txt_mod2_gate,
         )
         return img, txt
+
+
+# class MMSingleStreamBlock(nn.Module):
+#     """
+#     A DiT block with parallel linear layers as described in
+#     https://arxiv.org/abs/2302.05442 and adapted modulation interface.
+#     Also refer to (SD3): https://arxiv.org/abs/2403.03206
+#                   (Flux.1): https://github.com/black-forest-labs/flux
+#     """
+
+#     def __init__(
+#         self,
+#         hidden_size: int,
+#         heads_num: int,
+#         mlp_width_ratio: float = 4.0,
+#         mlp_act_type: str = "gelu_tanh",
+#         qk_norm: bool = True,
+#         qk_norm_type: str = "rms",
+#         qk_scale: float = None,
+#         dtype: Optional[torch.dtype] = None,
+#         device: Optional[torch.device] = None,
+#         use_fused_rmsnorm : bool = False,
+#         use_fused_rope : bool = False,
+#     ):
+#         factory_kwargs = {"device": device, "dtype": dtype}
+#         norm_layer_factory_kwargs = {"device": device, "dtype": dtype}
+#         if qk_norm_type == "rms" and use_fused_rmsnorm:
+#             norm_layer_factory_kwargs['use_fused_rmsnorm'] = True
+#         super().__init__()
+
+#         self.deterministic = False
+#         self.hidden_size = hidden_size
+#         self.heads_num = heads_num
+#         head_dim = hidden_size // heads_num
+#         mlp_hidden_dim = int(hidden_size * mlp_width_ratio)
+#         self.mlp_hidden_dim = mlp_hidden_dim
+#         self.scale = qk_scale or head_dim**-0.5
+
+#         # qkv and mlp_in
+#         self.linear1 = nn.Linear(hidden_size, hidden_size * 3 + mlp_hidden_dim, **factory_kwargs)
+#         # proj and mlp_out
+#         self.linear2 = nn.Linear(hidden_size + mlp_hidden_dim, hidden_size, **factory_kwargs)
+
+#         qk_norm_layer = get_norm_layer(qk_norm_type)
+#         self.q_norm = (qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **norm_layer_factory_kwargs)
+#                        if qk_norm else nn.Identity())
+#         self.k_norm = (qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **norm_layer_factory_kwargs)
+#                        if qk_norm else nn.Identity())
+
+#         self.pre_norm = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs)
+
+#         self.mlp_act = get_activation_layer(mlp_act_type)()
+#         self.modulation = ModulateDiT(
+#             hidden_size,
+#             factor=3,
+#             act_layer=get_activation_layer("silu"),
+#             **factory_kwargs,
+#         )
+#         self.hybrid_seq_parallel_attn = None
+#         self.use_fused_rope = use_fused_rope
+
+#     def enable_deterministic(self):
+#         self.deterministic = True
+
+#     def disable_deterministic(self):
+#         self.deterministic = False
+
+#     def forward(
+#         self,
+#         x: torch.Tensor,
+#         vec: torch.Tensor,
+#         txt_len: int,
+#         freqs_cis: Tuple[torch.Tensor, torch.Tensor] = None,
+#         text_mask: torch.Tensor = None,
+#         mask_strategy=None,
+#     ) -> torch.Tensor:
+#         mod_shift, mod_scale, mod_gate = self.modulation(vec).chunk(3, dim=-1)
+#         x_mod = modulate(self.pre_norm(x), shift=mod_shift, scale=mod_scale)
+#         qkv, mlp = torch.split(self.linear1(x_mod), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
+
+#         q, k, v = rearrange(qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num)
+
+#         # Apply QK-Norm if needed.
+#         q = self.q_norm(q).to(v)
+#         k = self.k_norm(k).to(v)
+
+#         # def shrink_head(encoder_state, dim):
+#         #     local_heads = encoder_state.shape[dim] // mccl_info.sp_size
+#         #     return encoder_state.narrow(dim, mccl_info.rank_within_group * local_heads, local_heads)
+
+#         # freqs_cis = (
+#         #     shrink_head(freqs_cis[0], dim=0),
+#         #     shrink_head(freqs_cis[1], dim=0),
+#         # )
+
+#         img_q, txt_q = q[:, :-txt_len, :, :], q[:, -txt_len:, :, :]
+#         img_k, txt_k = k[:, :-txt_len, :, :], k[:, -txt_len:, :, :]
+#         img_v, txt_v = v[:, :-txt_len, :, :], v[:, -txt_len:, :, :]
+#         img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False, use_fused_rope=self.use_fused_rope)
+#         assert (img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
+#                 ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
+#         img_q, img_k = img_qq, img_kk
+
+#         attn = parallel_attention(
+#             (img_q, txt_q),
+#             (img_k, txt_k),
+#             (img_v, txt_v),
+#             img_q_len=img_q.shape[1],
+#             img_kv_len=img_k.shape[1],
+#             text_mask=text_mask,
+#             mask_strategy=mask_strategy,
+#         )
+
+#         # attention computation end
+
+#         # Compute activation in mlp stream, cat again and run second linear layer.
+#         output = self.linear2(torch.cat((attn, self.mlp_act(mlp)), 2))
+#         return x + apply_gate(output, gate=mod_gate)
 
 
 class MMSingleStreamBlock(nn.Module):

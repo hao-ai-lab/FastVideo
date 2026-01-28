@@ -17,7 +17,7 @@ def broadcast(input_: torch.Tensor):
     dist.broadcast(input_, src=src, group=mccl_info.group)
 
 
-def _all_to_all_4D(input: torch.tensor, scatter_idx: int = 2, gather_idx: int = 1, group=None) -> torch.tensor:
+def _all_to_all_4D(input: torch.tensor, scatter_idx: int = 2, gather_idx: int = 1, group=None, async_op=False):
     """
     all-to-all for QKV
 
@@ -48,17 +48,19 @@ def _all_to_all_4D(input: torch.tensor, scatter_idx: int = 2, gather_idx: int = 
         # https://pytorch.org/docs/stable/distributed.html#torch.distributed.all_to_all_single
         # (P, seq_len/P, bs, hc/P, hs) scatter seqlen -all2all-> (P, seq_len/P, bs, hc/P, hs) scatter head
         if seq_world_size > 1:
-            dist.all_to_all_single(output, input_t, group=group)
-            torch.musa.synchronize()
+            handle = dist.all_to_all_single(output, input_t, group=group, async_op=async_op)
+            if not async_op:
+                torch.musa.synchronize()
         else:
             output = input_t
+            handle = None
         # if scattering the seq-dim, transpose the heads back to the original dimension
         output = output.reshape(seqlen, bs, shard_hc, hs)
 
         # (seq_len, bs, hc/P, hs) -reshape-> (bs, seq_len, hc/P, hs)
         output = output.transpose(0, 1).contiguous().reshape(bs, seqlen, shard_hc, hs)
 
-        return output
+        return output, handle
 
     elif scatter_idx == 1 and gather_idx == 2:
         # input (torch.tensor): a tensor sharded along dim 1 (bs, seqlen, hc/P, hs) output: (bs, seqlen/P, hc, hs)
@@ -79,10 +81,12 @@ def _all_to_all_4D(input: torch.tensor, scatter_idx: int = 2, gather_idx: int = 
         # https://pytorch.org/docs/stable/distributed.html#torch.distributed.all_to_all_single
         # (P, bs x hc/P, seqlen/P, hs) scatter seqlen -all2all-> (P, bs x seq_len/P, hc/P, hs) scatter head
         if seq_world_size > 1:
-            dist.all_to_all_single(output, input_t, group=group)
-            torch.musa.synchronize()
+            handle = dist.all_to_all_single(output, input_t, group=group, async_op=async_op)
+            if not async_op:
+                torch.musa.synchronize()
         else:
             output = input_t
+            handle = None
 
         # if scattering the seq-dim, transpose the heads back to the original dimension
         output = output.reshape(hc, shard_seqlen, bs, hs)
@@ -90,7 +94,7 @@ def _all_to_all_4D(input: torch.tensor, scatter_idx: int = 2, gather_idx: int = 
         # (hc, seqlen/N, bs, hs) -tranpose(0,2)-> (bs, seqlen/N, hc, hs)
         output = output.transpose(0, 2).contiguous().reshape(bs, shard_seqlen, hc, hs)
 
-        return output
+        return output, handle
     else:
         raise RuntimeError("scatter_idx must be 1 or 2 and gather_idx must be 1 or 2")
 
@@ -104,18 +108,22 @@ class SeqAllToAll4D(torch.autograd.Function):
         input: Tensor,
         scatter_idx: int,
         gather_idx: int,
-    ) -> Tensor:
+        async_op: bool = False,
+    ):
         ctx.group = group
         ctx.scatter_idx = scatter_idx
         ctx.gather_idx = gather_idx
 
-        return _all_to_all_4D(input, scatter_idx, gather_idx, group=group)
+        return _all_to_all_4D(input, scatter_idx, gather_idx, group=group, async_op=async_op)
 
     @staticmethod
     def backward(ctx: Any, *grad_output: Tensor) -> Tuple[None, Tensor, None, None]:
+        grad_input = grad_output[0]
+        d_input, _ = SeqAllToAll4D.apply(ctx.group, grad_input, ctx.gather_idx, ctx.scatter_idx)
         return (
             None,
-            SeqAllToAll4D.apply(ctx.group, *grad_output, ctx.gather_idx, ctx.scatter_idx),
+            d_input,
+            None,
             None,
             None,
         )
@@ -125,8 +133,13 @@ def all_to_all_4D(
     input_: torch.Tensor,
     scatter_dim: int = 2,
     gather_dim: int = 1,
+    async_op: bool = False,
 ):
-    return SeqAllToAll4D.apply(mccl_info.group, input_, scatter_dim, gather_dim)
+    output, worker = SeqAllToAll4D.apply(mccl_info.group, input_, scatter_dim, gather_dim, async_op)
+    if worker:
+        return output, worker
+    else:
+        return output
 
 
 def _all_to_all(
