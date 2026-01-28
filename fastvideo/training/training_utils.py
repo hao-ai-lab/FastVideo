@@ -869,13 +869,8 @@ def shard_latents_across_sp(latents: torch.Tensor) -> torch.Tensor:
     sp_world_size = get_sp_world_size()
     rank_in_sp_group = get_sp_parallel_rank()
     if sp_world_size > 1:
-        # IMPORTANT:
-        # Do NOT shard on the raw temporal dimension `t` (which would require
-        # t % sp_world_size == 0). Instead, shard on the flattened token axis
-        # (t*h*w), which is the effective sequence length for video latents.
-        #
-        # We allow padding on the flattened axis so that (t*h*w) does not need
-        # to be divisible by sp_world_size.
+        # Shard on the flattened token axis (t*h*w) rather than raw `t`, so we
+        # don't require t % sp_world_size == 0. Pad on the flattened axis if needed.
         assert latents.ndim == 5, f"Expected latents [b,c,t,h,w], got {latents.shape}"
         b, c, t, h, w = latents.shape
         latents = latents.reshape(b, c, t * h * w)
