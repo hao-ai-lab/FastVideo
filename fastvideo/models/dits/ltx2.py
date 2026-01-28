@@ -23,11 +23,12 @@ from fastvideo.configs.models.dits import LTX2VideoConfig
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather,
     sequence_model_parallel_all_gather_with_unpad,
+    sequence_model_parallel_all_to_all_4D,
     sequence_model_parallel_shard,
 )
 from fastvideo.distributed.parallel_state import get_sp_parallel_rank, get_sp_world_size
 from fastvideo.distributed.utils import create_attention_mask_for_padding
-from fastvideo.forward_context import get_forward_context, set_forward_context
+from fastvideo.forward_context import ForwardContext, get_forward_context, set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import CachableDiT
 from fastvideo.platforms import AttentionBackendEnum
@@ -304,15 +305,12 @@ class VideoLatentPatchifier:
         self,
         output_shape: VideoLatentShape,
         device: Optional[torch.device] = None,
-        start_frame: int = 0,
     ) -> torch.Tensor:
         """Get patch grid bounds for RoPE computation.
 
         Args:
             output_shape: Shape of the video latent tensor
             device: Device to create tensors on
-            start_frame: Starting frame offset for SP (each rank computes RoPE
-                        with global frame positions, not local positions)
         """
         frames = output_shape.frames
         height = output_shape.height
@@ -320,7 +318,7 @@ class VideoLatentPatchifier:
         batch_size = output_shape.batch
 
         grid_coords = torch.meshgrid(
-            torch.arange(start=start_frame, end=frames + start_frame, step=self._patch_size[0], device=device),
+            torch.arange(start=0, end=frames, step=self._patch_size[0], device=device),
             torch.arange(start=0, end=height, step=self._patch_size[1], device=device),
             torch.arange(start=0, end=width, step=self._patch_size[2], device=device),
             indexing="ij",
@@ -384,21 +382,16 @@ class AudioLatentPatchifier:
         self,
         output_shape: AudioLatentShape,
         device: Optional[torch.device] = None,
-        start_frame: int = 0,
     ) -> torch.Tensor:
         """Get patch grid bounds for audio RoPE computation.
 
         Args:
             output_shape: Shape of the audio latent tensor
             device: Device to create tensors on
-            start_frame: Starting frame offset for SP (each rank computes RoPE
-                        with global frame positions, not local positions)
         """
-        # Apply start_frame offset for SP
-        frame_offset = start_frame + self.shift
         start_timings = self._get_audio_latent_time_in_sec(
-            frame_offset,
-            output_shape.frames + frame_offset,
+            self.shift,
+            output_shape.frames + self.shift,
             torch.float32,
             device,
         )
@@ -406,8 +399,8 @@ class AudioLatentPatchifier:
                                                           -1).unsqueeze(1)
 
         end_timings = self._get_audio_latent_time_in_sec(
-            frame_offset + 1,
-            output_shape.frames + frame_offset + 1,
+            self.shift + 1,
+            output_shape.frames + self.shift + 1,
             torch.float32,
             device,
         )
@@ -986,6 +979,205 @@ class TransformerConfig:
     context_dim: int
 
 
+class LTXDistributedAttention(DistributedAttention):
+    """LTX-2 specialized DistributedAttention that handles LTX-style RoPE internally."""
+
+    def __init__(
+        self,
+        num_heads: int,
+        head_size: int,
+        rope_type: LTXRopeType,
+        num_kv_heads: int | None = None,
+        softmax_scale: float | None = None,
+        causal: bool = False,
+        supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
+        prefix: str = "",
+        **extra_impl_args,
+    ) -> None:
+        super().__init__(
+            num_heads=num_heads,
+            head_size=head_size,
+            num_kv_heads=num_kv_heads,
+            softmax_scale=softmax_scale,
+            causal=causal,
+            supported_attention_backends=supported_attention_backends,
+            prefix=prefix,
+            **extra_impl_args,
+        )
+        self.rope_type = rope_type
+
+    @torch.compiler.disable
+    def forward(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        replicated_q: torch.Tensor | None = None,
+        replicated_k: torch.Tensor | None = None,
+        replicated_v: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        ltx_freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """Forward pass with LTX-2 style RoPE application.
+
+        Args:
+            q: Query tensor [batch_size, seq_len, num_heads, head_dim]
+            k: Key tensor [batch_size, seq_len, num_heads, head_dim]
+            v: Value tensor [batch_size, seq_len, num_heads, head_dim]
+            replicated_q: Replicated query tensor for text tokens
+            replicated_k: Replicated key tensor
+            replicated_v: Replicated value tensor
+            attention_mask: Attention mask [batch_size, seq_len]
+            ltx_freqs_cis: LTX-2 style RoPE (cos, sin) with shape [B, H, T, D]
+
+        Returns:
+            Tuple of output tensor and optional replicated output
+        """
+        assert q.dim() == 4 and k.dim() == 4 and v.dim() == 4, "Expected 4D tensors"
+        batch_size, seq_len, num_heads, head_dim = q.shape
+        local_rank = get_sp_parallel_rank()
+        world_size = get_sp_world_size()
+
+        forward_context: ForwardContext = get_forward_context()
+        ctx_attn_metadata = forward_context.attn_metadata
+
+        # Stack QKV
+        qkv = torch.cat([q, k, v], dim=0)  # [3*batch, seq_len, num_heads, head_dim]
+
+        # Redistribute heads across sequence dimension
+        qkv = sequence_model_parallel_all_to_all_4D(qkv, scatter_dim=2, gather_dim=1)
+
+        # After all-to-all, each rank has the full sequence but only a subset of heads
+        valid_seq_len = None
+        if attention_mask is not None:
+            valid_seq_len = (attention_mask[0] == 1).sum().item()
+            qkv = qkv[:, :valid_seq_len, :, :]
+
+        # Apply LTX-2 style RoPE after all-to-all (when we have full sequence)
+        if ltx_freqs_cis is not None:
+            cos, sin = ltx_freqs_cis
+            heads_per_rank = num_heads // world_size
+            head_start = local_rank * heads_per_rank
+            head_end = head_start + heads_per_rank
+            # Slice to this rank's heads: [B, H/SP, T, D]
+            cos_local = cos[:, head_start:head_end, :valid_seq_len, :]
+            sin_local = sin[:, head_start:head_end, :valid_seq_len, :]
+
+            # Apply RoPE to Q and K together (first 2*batch_size in dim 0)
+            qk_part = qkv[:batch_size * 2]
+            # Transpose to [2*B, H/SP, T, D] for LTX RoPE application
+            qk_part = qk_part.transpose(1, 2)
+            qk_part = apply_ltx_rotary_emb_4d(qk_part, (cos_local, sin_local), self.rope_type)
+            # Transpose back to [2*B, T, H/SP, D]
+            qkv[:batch_size * 2] = qk_part.transpose(1, 2)
+
+        # Apply backend-specific preprocess_qkv
+        qkv = self.attn_impl.preprocess_qkv(qkv, ctx_attn_metadata)
+
+        # Concatenate with replicated QKV if provided
+        if replicated_q is not None:
+            assert replicated_k is not None and replicated_v is not None
+            replicated_qkv = torch.cat(
+                [replicated_q, replicated_k, replicated_v],
+                dim=0)  # [3, seq_len, num_heads, head_dim]
+            heads_per_rank = num_heads // world_size
+            replicated_qkv = replicated_qkv[:, :, local_rank *
+                                            heads_per_rank:(local_rank + 1) *
+                                            heads_per_rank]
+            qkv = torch.cat([qkv, replicated_qkv], dim=1)
+
+        q, k, v = qkv.chunk(3, dim=0)
+
+        output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+
+        # Redistribute back if using sequence parallelism
+        replicated_output = None
+        if replicated_q is not None:
+            split_idx = seq_len * world_size if valid_seq_len is None else valid_seq_len
+            replicated_output = output[:, split_idx:]
+            output = output[:, :split_idx]
+            replicated_output = sequence_model_parallel_all_gather(
+                replicated_output.contiguous(), dim=2)
+
+        # Apply backend-specific postprocess_output
+        output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
+
+        if attention_mask is not None:
+            pad_len = (attention_mask[0] == 0).sum().item()
+            output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad_len))
+
+        output = sequence_model_parallel_all_to_all_4D(output, scatter_dim=1, gather_dim=2)
+
+        return output, replicated_output
+
+
+class LTXLocalAttention(LocalAttention):
+    """LTX-2 specialized LocalAttention that handles LTX-style RoPE internally."""
+
+    def __init__(
+        self,
+        num_heads: int,
+        head_size: int,
+        rope_type: LTXRopeType,
+        num_kv_heads: int | None = None,
+        softmax_scale: float | None = None,
+        causal: bool = False,
+        supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
+        **extra_impl_args,
+    ) -> None:
+        super().__init__(
+            num_heads=num_heads,
+            head_size=head_size,
+            num_kv_heads=num_kv_heads,
+            softmax_scale=softmax_scale,
+            causal=causal,
+            supported_attention_backends=supported_attention_backends,
+            **extra_impl_args,
+        )
+        self.rope_type = rope_type
+
+    def forward(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        ltx_freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
+        ltx_k_freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        """Forward pass with LTX-2 style RoPE application.
+
+        Args:
+            q: Query tensor [batch_size, seq_len, num_heads, head_dim]
+            k: Key tensor [batch_size, seq_len, num_heads, head_dim]
+            v: Value tensor [batch_size, seq_len, num_heads, head_dim]
+            ltx_freqs_cis: LTX-2 style RoPE (cos, sin) for Q with shape [B, H, T, D]
+            ltx_k_freqs_cis: LTX-2 style RoPE (cos, sin) for K (if different from Q)
+
+        Returns:
+            Output tensor after local attention
+        """
+        assert q.dim() == 4 and k.dim() == 4 and v.dim() == 4, "Expected 4D tensors"
+
+        forward_context: ForwardContext = get_forward_context()
+        ctx_attn_metadata = forward_context.attn_metadata
+
+        # Apply LTX-2 style RoPE
+        if ltx_freqs_cis is not None:
+            # Use separate K RoPE if provided (for cross-attention), otherwise use same as Q
+            k_freqs = ltx_k_freqs_cis if ltx_k_freqs_cis is not None else ltx_freqs_cis
+            # Transpose to [B, H, T, D] for RoPE application
+            q = q.transpose(1, 2)
+            k = k.transpose(1, 2)
+            q = apply_ltx_rotary_emb_4d(q, ltx_freqs_cis, self.rope_type)
+            k = apply_ltx_rotary_emb_4d(k, k_freqs, self.rope_type)
+            # Transpose back to [B, T, H, D]
+            q = q.transpose(1, 2)
+            k = k.transpose(1, 2)
+
+        output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+        return output
+
+
 class LTXSelfAttention(nn.Module):
     """LTX-2 attention block with RMSNorm + FastVideo LocalAttention."""
     def __init__(
@@ -1013,17 +1205,19 @@ class LTXSelfAttention(nn.Module):
         self.to_v = nn.Linear(context_dim, inner_dim, bias=True)
         self.to_out = nn.Sequential(nn.Linear(inner_dim, query_dim, bias=True), nn.Identity())
 
-        self.attn = LocalAttention(
+        self.attn = LTXLocalAttention(
             num_heads=heads,
             head_size=dim_head,
+            rope_type=rope_type,
             dropout_rate=0,
             softmax_scale=None,
             causal=False,
             supported_attention_backends=supported_attention_backends,
         )
-        self.attn_masked = LocalAttention(
+        self.attn_masked = LTXLocalAttention(
             num_heads=heads,
             head_size=dim_head,
+            rope_type=rope_type,
             dropout_rate=0,
             softmax_scale=None,
             causal=False,
@@ -1046,15 +1240,13 @@ class LTXSelfAttention(nn.Module):
         q = self.q_norm(q)
         k = self.k_norm(k)
 
-        if pe is not None:
-            q = apply_ltx_rotary_emb(q, pe, self.rope_type)
-            k = apply_ltx_rotary_emb(k, pe if k_pe is None else k_pe, self.rope_type)
-
+        # RoPE is applied inside LTXLocalAttention
         b, q_len, _ = q.shape
         k_len = k.shape[1]
         q = q.view(b, q_len, self.heads, self.dim_head)
         k = k.view(b, k_len, self.heads, self.dim_head)
         v = v.view(b, k_len, self.heads, self.dim_head)
+
         if mask is not None:
             if mask.ndim == 2:
                 mask = mask.unsqueeze(0)
@@ -1076,15 +1268,15 @@ class LTXSelfAttention(nn.Module):
                 attn_metadata=attn_metadata,
                 forward_batch=forward_batch,
             ):
-                out = self.attn_masked(q, k, v)
+                out = self.attn_masked(q, k, v, ltx_freqs_cis=pe, ltx_k_freqs_cis=k_pe)
         else:
-            out = self.attn(q, k, v)
+            out = self.attn(q, k, v, ltx_freqs_cis=pe, ltx_k_freqs_cis=k_pe)
         out = out.reshape(b, q_len, -1)
         return self.to_out(out)
 
 
 class LTXDistributedSelfAttention(nn.Module):
-    """LTX-2 attention block with RMSNorm + FastVideo DistributedAttention for SP."""
+    """LTX-2 attention block with RMSNorm + LTXDistributedAttention for SP."""
 
     def __init__(
         self,
@@ -1112,20 +1304,14 @@ class LTXDistributedSelfAttention(nn.Module):
         self.to_v = nn.Linear(context_dim, inner_dim, bias=True)
         self.to_out = nn.Sequential(nn.Linear(inner_dim, query_dim, bias=True), nn.Identity())
 
-        self.attn = DistributedAttention(
+        self.attn = LTXDistributedAttention(
             num_heads=heads,
             head_size=dim_head,
+            rope_type=rope_type,
             causal=False,
             supported_attention_backends=supported_attention_backends,
             prefix=f"{prefix}.attn",
         )
-
-    def _make_rope_apply_fn(self):
-        """Create a RoPE apply function that captures the rope_type."""
-        rope_type = self.rope_type
-        def apply_fn(tensor, freqs_cis):
-            return apply_ltx_rotary_emb_4d(tensor, freqs_cis, rope_type)
-        return apply_fn
 
     def forward(
         self,
@@ -1153,11 +1339,8 @@ class LTXDistributedSelfAttention(nn.Module):
         q = self.q_norm(q)
         k = self.k_norm(k)
 
-        # NOTE: For distributed attention with SP, we do NOT apply RoPE here.
-        # RoPE is applied inside DistributedAttention AFTER the all-to-all,
+        # RoPE is applied inside LTXDistributedAttention AFTER the all-to-all,
         # when each rank has the full sequence (but subset of heads).
-        # This is necessary because sharding may not align to frame boundaries.
-
         b, q_len, _ = q.shape
         k_len = k.shape[1]
         q = q.view(b, q_len, self.heads, self.dim_head)
@@ -1168,10 +1351,8 @@ class LTXDistributedSelfAttention(nn.Module):
         # and slice to this rank's heads
         out, _ = self.attn(
             q, k, v,
-            freqs_cis=None,  # Not using Wan-style RoPE
             attention_mask=attention_mask,
-            ltx_freqs_cis=pe,  # LTX-2 style RoPE with per-head rotations
-            ltx_rope_apply_fn=self._make_rope_apply_fn() if pe is not None else None,
+            ltx_freqs_cis=pe,
         )
 
         out = out.reshape(b, q_len, -1)
@@ -2087,7 +2268,7 @@ class LTX2Transformer3DModel(CachableDiT):
         # The full RoPE will be passed to DistributedAttention which applies it after
         # the all-to-all (when each rank has the full sequence but subset of heads).
         positions = self.patchifier.get_patch_grid_bounds(
-            video_shape, device=hidden_states.device, start_frame=0
+            video_shape, device=hidden_states.device
         )
         positions = _get_pixel_coords(
             positions,
@@ -2149,7 +2330,7 @@ class LTX2Transformer3DModel(CachableDiT):
             # Compute audio RoPE positions for the FULL sequence (before sharding)
             # Same as video: full RoPE is applied after all-to-all in DistributedAttention
             audio_positions = self.audio_patchifier.get_patch_grid_bounds(
-                audio_shape, device=audio_hidden_states.device, start_frame=0
+                audio_shape, device=audio_hidden_states.device
             )
 
             audio_modality = Modality(
