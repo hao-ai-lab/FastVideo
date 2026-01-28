@@ -338,7 +338,6 @@ class FastVideoArgs:
             type=int,
             default=FastVideoArgs.ring_size,
             help="Ring attention size (number of GPUs in ring topology). "
-            "Must satisfy: sp_size * ring_size == num_gpus. "
             "If > 1, enables ring attention.",
         )
         parser.add_argument(
@@ -758,13 +757,6 @@ class FastVideoArgs:
         assert self.sp_size <= self.num_gpus and self.num_gpus % self.sp_size == 0, "num_gpus must >= and be divisible by sp_size"
         assert self.hsdp_replicate_dim <= self.num_gpus and self.num_gpus % self.hsdp_replicate_dim == 0, "num_gpus must >= and be divisible by hsdp_replicate_dim"
         assert self.hsdp_shard_dim <= self.num_gpus and self.num_gpus % self.hsdp_shard_dim == 0, "num_gpus must >= and be divisible by hsdp_shard_dim"
-
-        # Validate ring_size and sp_size relationship
-        # Only validate when ring attention is explicitly enabled (ring_size > 1)
-        if self.ring_size > 1 and self.sp_size * self.ring_size != self.num_gpus:
-            raise ValueError(
-                f"sp_size ({self.sp_size}) * ring_size ({self.ring_size}) = {self.sp_size * self.ring_size}, "
-                f"but must equal num_gpus ({self.num_gpus})")
 
         if self.num_gpus < max(self.tp_size, self.sp_size):
             self.num_gpus = max(self.tp_size, self.sp_size)
