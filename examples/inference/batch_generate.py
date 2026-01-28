@@ -352,7 +352,6 @@ Examples:
                 prompt=prompt,
                 output_path=output_path,
                 save_video=True,
-                guidance_scale=3.0,
                 **kwargs
             )
             
