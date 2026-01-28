@@ -241,9 +241,12 @@ class DenoisingStage(PipelineStage):
             temporal_scale = fastvideo_args.pipeline_config.vae_config.temporal_compression_ratio
             spatial_scale = fastvideo_args.pipeline_config.vae_config.spatial_compression_ratio
             patch_size = fastvideo_args.pipeline_config.dit_config.patch_size
-            seq_len = ((F - 1) // temporal_scale + 1) * (
-                batch.height // spatial_scale) * (
-                    batch.width // spatial_scale) // (patch_size * patch_size)
+            if isinstance(patch_size, int):
+                patch_size = (patch_size, patch_size, patch_size)
+            seq_len = ((F - 1) // temporal_scale +
+                       1) * (batch.height // spatial_scale) * (
+                           batch.width // spatial_scale) // (patch_size[1] *
+                                                             patch_size[2])
 
         # Initialize lists for ODE trajectory
         trajectory_timesteps: list[torch.Tensor] = []
@@ -414,7 +417,6 @@ class DenoisingStage(PipelineStage):
                             **action_kwargs,
                         )
 
-                    assert batch.do_classifier_free_guidance, "do_classifier_free_guidance is not supported"
                     if batch.do_classifier_free_guidance:
                         batch.is_cfg_negative = True
                         with set_forward_context(

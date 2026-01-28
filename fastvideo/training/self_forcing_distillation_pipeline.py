@@ -67,7 +67,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         self.noise_scheduler = SelfForcingFlowMatchScheduler(
             num_inference_steps=1000,
-            shift=5.0,
+            shift=self.timestep_shift,
             sigma_min=0.0,
             extra_one_step=True,
             training=True)

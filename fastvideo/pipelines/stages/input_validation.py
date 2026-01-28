@@ -118,10 +118,11 @@ class InputValidationStage(PipelineStage):
                 oh, ow = batch.height, batch.width
                 img = img.resize((ow, oh), Image.LANCZOS)
             else:
-                # Standard Wan logic
                 patch_size = fastvideo_args.pipeline_config.dit_config.arch_config.patch_size
+                if isinstance(patch_size, int):
+                    patch_size = (patch_size, patch_size, patch_size)
                 vae_stride = fastvideo_args.pipeline_config.vae_config.arch_config.spatial_compression_ratio
-                dh, dw = patch_size * vae_stride, patch_size * vae_stride
+                dh, dw = patch_size[1] * vae_stride, patch_size[2] * vae_stride
                 max_area = 480 * 848
                 ow, oh = best_output_size(iw, ih, dw, dh, max_area)
 

@@ -84,7 +84,6 @@ class ComposedPipelineBase(ABC):
 
         # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
-        # fastvideo_args.dit_cpu_offload = False
         with self.profiler_controller.region("profiler_region_model_loading"):
             self.modules = self.load_modules(fastvideo_args, loaded_modules)
 
