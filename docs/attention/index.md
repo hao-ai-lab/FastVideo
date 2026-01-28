@@ -6,6 +6,8 @@ FastVideo provides highly optimized custom attention kernels to accelerate video
 
 * **[Video Sparse Attention (VSA)](vsa/index.md)**: Sparse attention mechanism selecting top-k blocks.
 * **[Sliding Tile Attention (STA)](sta/index.md)**: Optimized attention for window-based video generation.
+* **Backend development guide**: See the developer guide at
+  [Attention Backend Development](../contributing/attention_backend.md).
 
 ## General Build Instructions
 

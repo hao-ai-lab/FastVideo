@@ -1,14 +1,15 @@
 """Extract FastVideo-style LoRA adapters from a fine-tuned model by SVDing (FT - base).
 
 Usage:
-    python scripts/lora_extraction/extract_lora.py \
+    python scripts/lora_extraction/extract_lora.py \\
         --base <base_model> --ft <fine_tuned_model> --out adapter.safetensors --rank 16
         
-example: python extract_lora.py \
-        --base Wan-AI/Wan2.2-TI2V-5B-Diffusers \ 
-        --ft FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers \ 
-        --out fastvideo_adapter.safetensors \ 
-        --rank 16
+Example for models with architectural differences (fallback is automatic):
+    python extract_lora.py \\
+        --base Wan-AI/Wan2.1-T2V-1.3B-Diffusers \\
+        --ft FastVideo/FastWan2.1-T2V-1.3B-Diffusers \\
+        --out fastvideo_adapter.safetensors \\
+        --rank 32
 """
 
 from __future__ import annotations
@@ -34,8 +35,52 @@ from tqdm import tqdm
 _HAVE_SAFETENSORS = True
 try:
     from safetensors.torch import save_file as safetensors_save  # type: ignore
+    from safetensors import safe_open  # type: ignore
 except Exception:
     _HAVE_SAFETENSORS = False
+    safe_open = None  # type: ignore
+
+
+def load_transformer_state_dict_from_safetensors(model_path: str) -> Dict[str, torch.Tensor]:
+    """Load transformer weights directly from safetensors files.
+    
+    This bypasses the pipeline loader and works even when the model has
+    architectural differences (e.g., extra layers in fine-tuned model).
+    
+    Args:
+        model_path: HuggingFace model ID or local path
+        
+    Returns:
+        State dict with all transformer weights
+    """
+    from huggingface_hub import snapshot_download
+    import os
+    
+    # Download or locate the model
+    if os.path.isdir(model_path):
+        local_path = model_path
+    else:
+        local_path = snapshot_download(model_path)
+    
+    # Find transformer directory
+    transformer_dir = os.path.join(local_path, "transformer")
+    if not os.path.isdir(transformer_dir):
+        raise FileNotFoundError(f"Transformer directory not found at {transformer_dir}")
+    
+    # Load all safetensors files
+    state_dict: Dict[str, torch.Tensor] = {}
+    for fname in sorted(os.listdir(transformer_dir)):
+        if fname.endswith('.safetensors'):
+            fpath = os.path.join(transformer_dir, fname)
+            with safe_open(fpath, framework='pt', device='cpu') as f:
+                for key in f.keys():
+                    state_dict[key] = f.get_tensor(key)
+    
+    if not state_dict:
+        raise ValueError(f"No safetensors files found in {transformer_dir}")
+    
+    LOG.info("Loaded %d keys directly from safetensors", len(state_dict))
+    return state_dict
 
 # Configure minimal logging
 LOG = logging.getLogger("extract_lora")
@@ -296,22 +341,25 @@ def extract_lora_adapter(
     """
     configure_logging(log_level)
 
-    # ensure fastvideo import
-    try:
-        import fastvideo  # noqa: F401
-    except Exception as exc:
-        LOG.error("Failed to import fastvideo: %s", exc)
-        sys.exit(2)
-
     out_path = Path(out)
     checkpoint_path = Path(checkpoint) if checkpoint else None
 
-    # load state_dicts
-    LOG.info("Loading base model: %s", base)
-    base_sd = load_transformer_state_dict_from_model(base)
+    # Load both models - ensure consistent loading method for matching keys
+    try:
+        import fastvideo  # noqa: F401
+        LOG.info("Loading base model via pipeline: %s", base)
+        base_sd = load_transformer_state_dict_from_model(base)
+        LOG.info("Loading fine-tuned model via pipeline: %s", ft)
+        ft_sd = load_transformer_state_dict_from_model(ft)
+    except Exception as exc:
+        LOG.warning("Pipeline loading failed: %s", exc)
+        LOG.info("Falling back to direct safetensors loading for BOTH models...")
+        # Direct loading - both models use same method for consistent keys
+        LOG.info("Loading base model directly from safetensors: %s", base)
+        base_sd = load_transformer_state_dict_from_safetensors(base)
+        LOG.info("Loading fine-tuned model directly from safetensors: %s", ft)
+        ft_sd = load_transformer_state_dict_from_safetensors(ft)
 
-    LOG.info("Loading fine-tuned model: %s", ft)
-    ft_sd = load_transformer_state_dict_from_model(ft)
 
     resume_idx = 0
     adapter_existing: Dict[str, torch.Tensor] = {}

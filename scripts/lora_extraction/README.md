@@ -19,6 +19,10 @@ python extract_lora.py \
 - `--rank`: LoRA rank (16, 32, 64, 128)
 - `--full-rank`: Extract full-rank adapter (optional)
 
+
+> **Note:** The script automatically handles architectural differences (e.g., FastWan has extra `gate_compress` layers) by falling back to direct safetensors loading for both models if pipeline loading fails.
+
+
 ## Merge Adapter
 
 ```bash

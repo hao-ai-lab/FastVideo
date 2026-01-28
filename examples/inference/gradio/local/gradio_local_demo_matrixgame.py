@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 
 from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
-from fastvideo.models.dits.matrix_game.utils import expand_action_to_frames
+from fastvideo.models.dits.matrixgame.utils import expand_action_to_frames
 
 
 VARIANT_CONFIG = {
