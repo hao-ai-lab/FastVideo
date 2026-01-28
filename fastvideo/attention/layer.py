@@ -6,7 +6,9 @@ import torch.nn as nn
 from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather, sequence_model_parallel_all_to_all_4D)
-from fastvideo.distributed.parallel_state import (get_ring_group, get_sp_parallel_rank, get_sp_world_size)
+from fastvideo.distributed.parallel_state import (get_ring_group,
+                                                  get_sp_parallel_rank,
+                                                  get_sp_world_size)
 from fastvideo.forward_context import ForwardContext, get_forward_context
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
@@ -98,20 +100,18 @@ class DistributedAttention(nn.Module):
         ctx_attn_metadata = forward_context.attn_metadata
 
         from fastvideo.fastvideo_args import get_current_fastvideo_args
-        
+
         fastvideo_args = get_current_fastvideo_args()
         # Ring attention requires sequence-sharded QKV.
-        use_ring_attention = (
-            fastvideo_args.ring_degree > 1
-            and replicated_q is None  
-        )
-        
+        use_ring_attention = (fastvideo_args.ring_degree > 1
+                              and replicated_q is None)
+
         # Get ring group and check size
         if use_ring_attention:
             ring_group = get_ring_group()
             if torch.distributed.get_world_size(ring_group) > 1:
                 from yunchang import ring_flash_attn_func
-                
+
                 # Apply RoPE locally before calling ring attention
                 if freqs_cis is not None:
                     cos, sin = freqs_cis
@@ -122,7 +122,7 @@ class DistributedAttention(nn.Module):
                         sin = sin[rank_offset:rank_offset + local_seq_len]
                     q = _apply_rotary_emb(q, cos, sin, is_neox_style=False)
                     k = _apply_rotary_emb(k, cos, sin, is_neox_style=False)
-                
+
                 causal = getattr(self.attn_impl, 'causal', False)
 
                 # Call ring attention
@@ -136,7 +136,7 @@ class DistributedAttention(nn.Module):
                     window_size=(-1, -1),
                     group=ring_group,
                 )
-                
+
                 # Ring attention output is already correctly shaped per rank
                 return output, None
 
