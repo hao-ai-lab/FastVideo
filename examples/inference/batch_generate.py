@@ -7,6 +7,7 @@ Takes a text file with one prompt per line and generates videos for each prompt.
 Usage:
     python batch_generate.py --prompts prompts.txt --output_dir outputs/
     python batch_generate.py --prompts prompts.txt --model Wan-AI/Wan2.1-T2V-14B-Diffusers --num_gpus 2
+    python batch_generate.py --prompts prompts.txt --attention_backend SAGE_ATTN_THREE
 """
 
 import argparse
@@ -15,8 +16,8 @@ import re
 import time
 from pathlib import Path
 
-from fastvideo import VideoGenerator
-from fastvideo.configs.sample import SamplingParam
+# Note: VideoGenerator import is deferred to main() so we can set
+# FASTVIDEO_ATTENTION_BACKEND environment variable first
 
 
 def sanitize_filename(prompt: str, max_length: int = 50) -> str:
@@ -77,7 +78,29 @@ Examples:
 
   # Use custom fine-tuned weights
   python batch_generate.py --prompts prompts.txt --init_weights_from_safetensors checkpoints/my_model/transformer
+
+  # Use SageAttention3 backend (RTX 5090 only)
+  python batch_generate.py --prompts prompts.txt --attention_backend SAGE_ATTN_THREE
+
+  # Use Flash Attention backend
+  python batch_generate.py --prompts prompts.txt --attention_backend FLASH_ATTN
         """
+    )
+    
+    # Attention backend argument (must be parsed early)
+    parser.add_argument(
+        "--attention_backend",
+        type=str,
+        default=None,
+        choices=[
+            "TORCH_SDPA",
+            "FLASH_ATTN",
+            "SLIDING_TILE_ATTN",
+            "VIDEO_SPARSE_ATTN",
+            "SAGE_ATTN",
+            "SAGE_ATTN_THREE",
+        ],
+        help="Attention backend to use (default: auto-detect). SAGE_ATTN_THREE requires RTX 5090."
     )
     
     # Input/Output arguments
@@ -232,6 +255,14 @@ Examples:
     
     args = parser.parse_args()
     
+    # Set attention backend BEFORE importing VideoGenerator
+    if args.attention_backend:
+        os.environ["FASTVIDEO_ATTENTION_BACKEND"] = args.attention_backend
+        print(f"Using attention backend: {args.attention_backend}")
+    
+    # Now import VideoGenerator (after setting env var)
+    from fastvideo import VideoGenerator
+    
     # Validate inputs
     if not os.path.exists(args.prompts):
         raise FileNotFoundError(f"Prompts file not found: {args.prompts}")
@@ -321,6 +352,7 @@ Examples:
                 prompt=prompt,
                 output_path=output_path,
                 save_video=True,
+                guidance_scale=3.0,
                 **kwargs
             )
             
