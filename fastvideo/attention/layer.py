@@ -101,10 +101,15 @@ class DistributedAttention(nn.Module):
 
         from fastvideo.fastvideo_args import get_current_fastvideo_args
 
-        fastvideo_args = get_current_fastvideo_args()
-        # Ring attention requires sequence-sharded QKV.
-        use_ring_attention = (fastvideo_args.ring_degree > 1
-                              and replicated_q is None)
+        try:
+            fastvideo_args = get_current_fastvideo_args()
+        except ValueError:
+            fastvideo_args = None
+
+        # Ring attention requires sequence-sharded QKV and is inference-only.
+        use_ring_attention = (fastvideo_args is not None
+                              and fastvideo_args.ring_degree > 1
+                              and replicated_q is None and not self.training)
 
         # Get ring group and check size
         if use_ring_attention:
