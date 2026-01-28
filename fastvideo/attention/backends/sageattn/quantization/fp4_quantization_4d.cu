@@ -537,7 +537,14 @@ __global__ void scaled_fp4_quant_two_level_kernel(
                                 (threadIdx.x % NUM_THREADS_PER_TOKEN) * CVT_FP4_ELTS_PER_THREAD / 2)[0] = reinterpret_cast<uint64_t*>(e2m1Vals)[0];
   }
   
-  // Save second-level scale (per-16-element)
+  // Step 8: Compute COMBINED scale (s_16 * s_row) for the kernel to use
+  // The kernel only applies one scale factor, so we need to combine both levels
+  // Dequantization: x_quant * s_combined = x_quant * s_16 * s_row
+  float SFCombined = SFValue * SFRowValue;
+  uint8_t SFCombinedFP8;
+  reinterpret_cast<__nv_fp8_e4m3&>(SFCombinedFP8) = __nv_fp8_e4m3(SFCombined);
+
+  // Save combined scale (per-16-element) - this is what the kernel actually uses
   uint8_t* output_sf_save_base = output_sf + batch_id * stride_bz_output_sf + head_id * stride_h_output_sf + (token_id / 64) * 64 * stride_seq_output_sf;
   uint32_t token_id_local = token_id % 64;
 
@@ -545,13 +552,13 @@ __global__ void scaled_fp4_quant_two_level_kernel(
     uint32_t col_id_local = threadIdx.x % NUM_THREADS_PER_TOKEN;
     uint32_t offset_local = (col_id_local / 4) * 256 + (col_id_local % 4) + 
                             (token_id_local / 16) * 4 + (token_id_local % 16) * 16;
-    reinterpret_cast<uint8_t*>(output_sf_save_base + offset_local)[0] = SFValueFP8;
+    reinterpret_cast<uint8_t*>(output_sf_save_base + offset_local)[0] = SFCombinedFP8;
   } else {
     if (threadIdx.x % 2 == 0) {
       uint32_t col_id_local = (threadIdx.x % NUM_THREADS_PER_TOKEN) / 2;
       uint32_t offset_local = (col_id_local / 4) * 256 + (col_id_local % 4) + 
                             (token_id_local / 16) * 4 + (token_id_local % 16) * 16;
-      reinterpret_cast<uint8_t*>(output_sf_save_base + offset_local)[0] = SFValueFP8;
+      reinterpret_cast<uint8_t*>(output_sf_save_base + offset_local)[0] = SFCombinedFP8;
     }
   }
 
@@ -709,7 +716,14 @@ __global__ void scaled_fp4_quant_trans_two_level_kernel(
                                 (token_block_id * BLOCK_SIZE + (threadIdx.x % NUM_THREADS_PER_SEQ) * CVT_FP4_ELTS_PER_THREAD) / 2)[0] = reinterpret_cast<uint64_t*>(e2m1Vals)[0];
   }
 
-  // Save second-level scale
+  // Step 8: Compute COMBINED scale (s_16 * s_row) for the kernel to use
+  // The kernel only applies one scale factor, so we need to combine both levels
+  // Dequantization: x_quant * s_combined = x_quant * s_16 * s_row
+  float SFCombined = SFValue * SFRowValue;
+  uint8_t SFCombinedFP8;
+  reinterpret_cast<__nv_fp8_e4m3&>(SFCombinedFP8) = __nv_fp8_e4m3(SFCombined);
+
+  // Save combined scale (what the kernel actually uses)
   uint8_t *output_sf_save_base = output_sf + 
                                 batch_id * stride_bz_output_sf +
                                 head_id * stride_h_output_sf +
@@ -720,13 +734,13 @@ __global__ void scaled_fp4_quant_trans_two_level_kernel(
     uint32_t col_id_local = token_block_id * BLOCK_SIZE / CVT_FP4_ELTS_PER_THREAD + threadIdx.x % NUM_THREADS_PER_SEQ;
     uint32_t offset_local = (col_id_local / 4) * 256 + (col_id_local % 4) + 
                             (row_id_local / 16) * 4 + (row_id_local % 16) * 16;
-    reinterpret_cast<uint8_t*>(output_sf_save_base + offset_local)[0] = SFValueFP8;
+    reinterpret_cast<uint8_t*>(output_sf_save_base + offset_local)[0] = SFCombinedFP8;
   } else {
     if (threadIdx.x % 2 == 0) {
       uint32_t col_id_local = token_block_id * BLOCK_SIZE / CVT_FP4_ELTS_PER_THREAD + (threadIdx.x % NUM_THREADS_PER_SEQ) / 2;
       uint32_t offset_local = (col_id_local / 4) * 256 + (col_id_local % 4) + 
                               (row_id_local / 16) * 4 + (row_id_local % 16) * 16;
-      reinterpret_cast<uint8_t*>(output_sf_save_base + offset_local)[0] = SFValueFP8;
+      reinterpret_cast<uint8_t*>(output_sf_save_base + offset_local)[0] = SFCombinedFP8;
     }
   }
 
