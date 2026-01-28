@@ -13,6 +13,9 @@ from fastvideo.pipelines.stages.denoising import DenoisingStage
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
+from fastvideo.attention.backends.sdpa import SDPAMetadata
+from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.attention.selector import backend_name_to_enum
 
 
 class GlmImageDenoisingStage(DenoisingStage):
@@ -59,7 +62,7 @@ class GlmImageDenoisingStage(DenoisingStage):
 
         timesteps = batch.timesteps
         prompt_embeds = batch.prompt_embeds[0]  # (2, L, D) for CFG
-        attention_mask = getattr(batch, 'attention_mask', None)
+        text_attention_mask = getattr(batch, 'attention_mask', None)
 
         # Prepare target_size and crop_coords
         bs = 2 if guidance_scale > 1.0 else 1
@@ -78,6 +81,16 @@ class GlmImageDenoisingStage(DenoisingStage):
             prior_token_drop = getattr(batch, 'prior_token_drop',
                                        torch.tensor([False], device=device))
 
+        # Compute image sequence length from latents
+        # Get patch_size from transformer config (patch_size is in latent space)
+        patch_size = self.transformer.patch_size
+        _, _, h, w = latents.shape
+        image_seq_length = (h // patch_size) * (w // patch_size)
+
+        # Compute text sequence length from prompt_embeds
+        text_seq_length = prompt_embeds.shape[1] if prompt_embeds.dim() >= 2 else 0
+
+        # The mask will be set in forward context before each transformer call
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 # Prepare model input (CFG pass)
@@ -92,8 +105,39 @@ class GlmImageDenoisingStage(DenoisingStage):
                 latent_model_input = latent_model_input.to(dtype)
                 t_expand = t.expand(latent_model_input.shape[0])
 
+                # Create combined attention mask for [text, image] sequence
+                attn_metadata = None
+                if text_attention_mask is not None:
+                    first_block = self.transformer.transformer_blocks[0]
+                    attn_backend_name = first_block.attn1.attn.backend.name if hasattr(first_block.attn1.attn, 'backend') else None
+                    
+                    if attn_backend_name == "SDPA" or backend_name_to_enum(attn_backend_name) == AttentionBackendEnum.TORCH_SDPA:
+                        batch_size = latent_model_input.shape[0]
+                        # Create combined mask: text part uses provided mask, image part is always 1
+                        mix_attn_mask = torch.ones(
+                            (batch_size, text_seq_length + image_seq_length),
+                            device=device,
+                            dtype=torch.float32
+                        )
+                        # Expand text mask to batch size if needed
+                        if text_attention_mask.shape[0] == 1 and batch_size > 1:
+                            text_attention_mask = text_attention_mask.repeat(batch_size, 1)
+                        # Set text part of mask
+                        mix_attn_mask[:, :text_seq_length] = text_attention_mask.float().to(device)
+                        
+                        # Convert to SDPA format: (B, 1, 1, L) for key-padding style mask
+                        # True = attend, False = ignore (will be converted to additive mask by SDPA)
+                        attention_mask_kv = (mix_attn_mask > 0).unsqueeze(1).unsqueeze(2)  # (B, 1, 1, L)
+                        
+                        # Create SDPAMetadata with the mask
+                        attn_metadata = SDPAMetadata(
+                            current_timestep=i,
+                            attn_mask=attention_mask_kv
+                        )
+                    # If using Flash Attention, masks are not supported - attn_metadata remains None
+
                 with torch.no_grad(), set_forward_context(current_timestep=i,
-                                                          attn_metadata=None,
+                                                          attn_metadata=attn_metadata,
                                                           forward_batch=batch):
                     # Predict noise
                     noise_pred = self.transformer(latent_model_input,
@@ -102,8 +146,7 @@ class GlmImageDenoisingStage(DenoisingStage):
                                                   prior_token_id,
                                                   prior_token_drop,
                                                   target_size,
-                                                  crop_coords,
-                                                  attention_mask=attention_mask)
+                                                  crop_coords)
 
                     # Apply Classifier-Free Guidance
                     if guidance_scale > 1.0:
