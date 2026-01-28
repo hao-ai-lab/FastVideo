@@ -3,6 +3,8 @@
 import torch
 import torch.nn as nn
 
+from yunchang import ring_flash_attn_func
+
 from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather, sequence_model_parallel_all_to_all_4D)
@@ -115,7 +117,6 @@ class DistributedAttention(nn.Module):
         # Get ring group and use ring attention
         if use_ring_attention:
             ring_group = get_ring_group()
-            from yunchang import ring_flash_attn_func
 
             # Apply RoPE locally before calling ring attention
             if freqs_cis is not None:
