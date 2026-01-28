@@ -77,7 +77,7 @@ def triton_group_mean(q: torch.Tensor):
     return q_out, qm
 
 
-def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_mean: bool = True, enable_smoothing_q: bool = False, enable_smoothing_k: bool = True):
+def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_mean: bool = True, enable_smoothing_q: bool = False, enable_smoothing_k: bool = False):
 
     def pad_to_block_size(x):
         L = x.size(2)
@@ -102,90 +102,29 @@ def preprocess_qkv(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, per_block_
         
     return q, k, v, delta_s
 
-def scale_and_quant_fp4(x: torch.Tensor, two_level: bool = False) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Quantize input tensor to FP4 with block-scaled quantization.
-    
-    Args:
-        x: Input tensor [B, H, N, D]
-        two_level: If True, use two-level quantization with per-row first-level scale
-                   and per-16-element second-level scale. If False, use standard
-                   single-level per-16-element quantization.
-    
-    Returns:
-        packed_fp4: Quantized FP4 values [B, H, N, D // 2]
-        fp8_scale: Per-16-element scale factors [B, H, N, D // 16]
-        fp8_scale_row: Per-row scale factors [B, H, N, 1] (only meaningful if two_level=True,
-                       otherwise returns ones)
-    """
+def scale_and_quant_fp4(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     assert x.ndim == 4
     B, H, N, D = x.shape
     packed_fp4 = torch.empty((B, H, N, D // 2), device=x.device, dtype=torch.uint8)
     fp8_scale = torch.empty((B, H, N, D // 16), device=x.device, dtype=torch.float8_e4m3fn)
-    
-    if two_level:
-        fp8_scale_row = torch.empty((B, H, N, 1), device=x.device, dtype=torch.float8_e4m3fn)
-        fp4quant_cuda.scaled_fp4_quant_two_level(x, packed_fp4, fp8_scale, fp8_scale_row, 1)
-    else:
-        fp4quant_cuda.scaled_fp4_quant(x, packed_fp4, fp8_scale, 1)
-        # Return dummy scale_row (all ones represented as FP8)
-        fp8_scale_row = torch.ones((B, H, N, 1), device=x.device, dtype=torch.float8_e4m3fn)
-    
-    return packed_fp4, fp8_scale, fp8_scale_row
+    fp4quant_cuda.scaled_fp4_quant(x, packed_fp4, fp8_scale, 1)
+    return packed_fp4, fp8_scale
 
-def scale_and_quant_fp4_permute(x: torch.Tensor, two_level: bool = False) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Quantize input tensor to FP4 with permutation for K tensor.
-    
-    Args:
-        x: Input tensor [B, H, N, D]
-        two_level: If True, use two-level quantization
-    
-    Returns:
-        packed_fp4: Quantized FP4 values [B, H, N, D // 2]
-        fp8_scale: Per-16-element scale factors [B, H, N, D // 16]
-        fp8_scale_row: Per-row scale factors [B, H, N, 1]
-    """
+def scale_and_quant_fp4_permute(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     assert x.ndim == 4
     B, H, N, D = x.shape
     packed_fp4 = torch.empty((B, H, N, D // 2), device=x.device, dtype=torch.uint8)
     fp8_scale = torch.empty((B, H, N, D // 16), device=x.device, dtype=torch.float8_e4m3fn)
-    
-    if two_level:
-        fp8_scale_row = torch.empty((B, H, N, 1), device=x.device, dtype=torch.float8_e4m3fn)
-        fp4quant_cuda.scaled_fp4_quant_permute_two_level(x, packed_fp4, fp8_scale, fp8_scale_row, 1)
-    else:
-        fp4quant_cuda.scaled_fp4_quant_permute(x, packed_fp4, fp8_scale, 1)
-        fp8_scale_row = torch.ones((B, H, N, 1), device=x.device, dtype=torch.float8_e4m3fn)
-    
-    return packed_fp4, fp8_scale, fp8_scale_row
+    fp4quant_cuda.scaled_fp4_quant_permute(x, packed_fp4, fp8_scale, 1)
+    return packed_fp4, fp8_scale
 
-def scale_and_quant_fp4_transpose(x: torch.Tensor, two_level: bool = False) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Quantize input tensor to FP4 with transpose for V tensor.
-    
-    Args:
-        x: Input tensor [B, H, N, D]
-        two_level: If True, use two-level quantization
-    
-    Returns:
-        packed_fp4: Quantized FP4 values [B, H, D, N // 2]
-        fp8_scale: Per-16-element scale factors [B, H, D, N // 16]
-        fp8_scale_row: Per-row (head_dim element) scale factors [B, H, D, 1]
-    """
+def scale_and_quant_fp4_transpose(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     assert x.ndim == 4
     B, H, N, D = x.shape
     packed_fp4 = torch.empty((B, H, D, N // 2), device=x.device, dtype=torch.uint8)
     fp8_scale = torch.empty((B, H, D, N // 16), device=x.device, dtype=torch.float8_e4m3fn)
-    
-    if two_level:
-        fp8_scale_row = torch.empty((B, H, D, 1), device=x.device, dtype=torch.float8_e4m3fn)
-        fp4quant_cuda.scaled_fp4_quant_trans_two_level(x, packed_fp4, fp8_scale, fp8_scale_row, 1)
-    else:
-        fp4quant_cuda.scaled_fp4_quant_trans(x, packed_fp4, fp8_scale, 1)
-        fp8_scale_row = torch.ones((B, H, D, 1), device=x.device, dtype=torch.float8_e4m3fn)
-    
-    return packed_fp4, fp8_scale, fp8_scale_row
+    fp4quant_cuda.scaled_fp4_quant_trans(x, packed_fp4, fp8_scale, 1)
+    return packed_fp4, fp8_scale
 
 def blockscaled_fp4_attn(qlist: Tuple, 
                          klist: Tuple,
@@ -195,48 +134,13 @@ def blockscaled_fp4_attn(qlist: Tuple,
                          is_causal: bool = False, 
                          per_block_mean: bool = True,
                          is_bf16: bool = True,
-                         single_level_p_quant: bool = False,
-                         two_level_qkv_quant: bool = False,
-                         q_scale_row: torch.Tensor = None,
-                         k_scale_row: torch.Tensor = None,
-                         v_scale_row: torch.Tensor = None
+                         single_level_p_quant: bool = False
                         ):
-    """
-    Block-scaled FP4 attention kernel.
-    
-    Args:
-        qlist: Tuple of (packed_fp4_q, fp8_scale_q)
-        klist: Tuple of (packed_fp4_k, fp8_scale_k)
-        vlist: Tuple of (packed_fp4_v, fp8_scale_v)
-        delta_s: Delta scores for Q smoothing
-        KL: Key sequence length (unpadded)
-        is_causal: Whether to use causal masking
-        per_block_mean: Whether to use per-block mean for Q smoothing
-        is_bf16: Whether output is bfloat16
-        single_level_p_quant: P quantization mode (single vs two-level)
-        two_level_qkv_quant: If True, QKV uses two-level quantization (row_scale tensors must be provided)
-        q_scale_row: Per-row scale for Q [B, H, N, 1] (used when two_level_qkv_quant=True)
-        k_scale_row: Per-row scale for K [B, H, N, 1] (used when two_level_qkv_quant=True)
-        v_scale_row: Per-row scale for V [B, H, D, 1] (used when two_level_qkv_quant=True)
-    
-    Returns:
-        Output tensor and softmax LSE
-    """
     softmax_scale = (qlist[0].shape[-1] * 2) ** (-0.5)
-    
-    # Pass row scales to kernel for two-level QKV quantization
-    # The kernel will use these to properly rescale during the attention computation
-    return fp4attn_cuda.fwd(
-        qlist[0], klist[0], vlist[0], 
-        qlist[1], klist[1], vlist[1], 
-        delta_s, KL, None, softmax_scale, 
-        is_causal, per_block_mean, is_bf16, 
-        single_level_p_quant, two_level_qkv_quant,
-        q_scale_row, k_scale_row, v_scale_row
-    )
+    return fp4attn_cuda.fwd(qlist[0], klist[0], vlist[0], qlist[1], klist[1], vlist[1], delta_s, KL, None, softmax_scale, is_causal, per_block_mean, is_bf16, single_level_p_quant)
 
 
-def sageattn_blackwell(q, k, v, attn_mask = None, is_causal = False, per_block_mean = True, single_level_p_quant = True, two_level_qkv_quant = False, **kwargs):
+def sageattn_blackwell(q, k, v, attn_mask = None, is_causal = False, per_block_mean = True, single_level_p_quant = True, **kwargs):
     """
     SageAttention3 Blackwell kernel for FP4 attention.
     
@@ -247,16 +151,10 @@ def sageattn_blackwell(q, k, v, attn_mask = None, is_causal = False, per_block_m
         attn_mask: Attention mask (not used)
         is_causal: Whether to use causal masking
         per_block_mean: Whether to use per-block mean for Q smoothing
-        single_level_p_quant: If True, use single-level quantization for P: s_P2, P̂_2 = φ(P̃) directly
+        single_level_p_quant: If True, use single-level quantization: s_P2, P̂_2 = φ(P̃) directly
                               (standard per-block FP4 quantization like V, no s_P1).
                               If False (default), use two-level quantization:
                               s_P1 = rowmax(P̃)/(448×6), then s_P2, P̂_2 = φ(P̃/s_P1).
-        two_level_qkv_quant: If True, use two-level quantization for Q, K, V:
-                              - Level 1: Per-row scale s_row = absmax_row(x)/(448×6)
-                              - Level 2: Per-16-element scale s_16 = absmax_block(x/s_row)/6
-                              This provides better dynamic range similar to P quantization.
-                              Note: absmax is used (not max) because Q, K, V can have negative values.
-                              If False (default), use standard single-level per-16-element quantization.
         **kwargs: Additional arguments (ignored)
     
     Returns:
@@ -269,29 +167,18 @@ def sageattn_blackwell(q, k, v, attn_mask = None, is_causal = False, per_block_m
     KL = k.size(2)
     is_bf16 = q.dtype == torch.bfloat16
     q, k, v, delta_s = preprocess_qkv(q, k, v, per_block_mean)
-    
-    # Quantize Q, K, V with optional two-level quantization
-    q_packed, q_scale, q_scale_row = scale_and_quant_fp4(q, two_level=two_level_qkv_quant)
-    k_packed, k_scale, k_scale_row = scale_and_quant_fp4_permute(k, two_level=two_level_qkv_quant)
-    v_packed, v_scale, v_scale_row = scale_and_quant_fp4_transpose(v, two_level=two_level_qkv_quant)
-    
-    qlist_from_cuda = (q_packed, q_scale)
-    klist_from_cuda = (k_packed, k_scale)
-    vlist_from_cuda = (v_packed, v_scale)
-    
+    qlist_from_cuda = scale_and_quant_fp4(q)
+    klist_from_cuda = scale_and_quant_fp4_permute(k)
+    vlist_from_cuda = scale_and_quant_fp4_transpose(v)
     o_fp4 = blockscaled_fp4_attn(
-        qlist_from_cuda,
-        klist_from_cuda, 
-        vlist_from_cuda,
-        delta_s,
-        KL,
-        is_causal,
-        per_block_mean,
-        is_bf16,
-        single_level_p_quant,
-        two_level_qkv_quant,
-        q_scale_row,
-        k_scale_row,
-        v_scale_row
+    qlist_from_cuda,
+    klist_from_cuda, 
+    vlist_from_cuda,
+    delta_s,
+    KL,
+    is_causal,
+    per_block_mean,
+    is_bf16,
+    single_level_p_quant
     )[0][:, :, :QL, :].contiguous()
     return o_fp4
