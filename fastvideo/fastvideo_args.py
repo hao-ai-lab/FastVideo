@@ -762,10 +762,8 @@ class FastVideoArgs:
         if (self.ring_size > 1 or self.sp_size != self.num_gpus
             ) and self.sp_size * self.ring_size != self.num_gpus:
             raise ValueError(
-                f"Invalid configuration: sp_size ({self.sp_size}) * ring_size ({self.ring_size}) "
-                f"must equal num_gpus ({self.num_gpus}). "
-                f"Got: {self.sp_size} * {self.ring_size} = {self.sp_size * self.ring_size}"
-            )
+                f"sp_size ({self.sp_size}) * ring_size ({self.ring_size}) = {self.sp_size * self.ring_size}, "
+                f"but must equal num_gpus ({self.num_gpus})")
 
         if self.num_gpus < max(self.tp_size, self.sp_size):
             self.num_gpus = max(self.tp_size, self.sp_size)
