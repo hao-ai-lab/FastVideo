@@ -9,8 +9,6 @@ from typing import Any
 import numpy as np
 import torch
 import torch.distributed as dist
-import torch.nn.functional as F
-from einops import rearrange
 from tqdm.auto import tqdm
 
 import fastvideo.envs as envs
@@ -170,7 +168,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         # During training, the number of generated frames should be uniformly sampled from
         # [21, self.num_training_frames], but still being a multiple of self.num_frame_per_block
-        min_num_frames = 20 if self.independent_first_frame else 21
+        min_num_frames = num_training_frames - 1 if self.independent_first_frame else num_training_frames
         max_num_frames = num_training_frames - 1 if self.independent_first_frame else num_training_frames
         assert max_num_frames % self.num_frame_per_block == 0
         assert min_num_frames % self.num_frame_per_block == 0
@@ -204,12 +202,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             noise = training_batch.trajectory_latents.to(self.device,
                                                          dtype=dtype)
         else:
-            noise = torch.randn(noise_shape, device=self.device, dtype=dtype)
-        if self.sp_world_size > 1:
-            noise = rearrange(noise,
-                              "b (n t) c h w -> b n t c h w",
-                              n=self.sp_world_size).contiguous()
-            noise = noise[:, self.rank_in_sp_group, :, :, :, :]
+            noise = training_batch.latents.to(self.device, dtype=dtype)
 
         batch_size, num_frames, num_channels, height, width = noise.shape
 
@@ -285,7 +278,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                                  start_timestep_index,
                                                  end_timestep_index,
                                                  device=noise.device)
-        start_gradient_frame_index = max(0, num_output_frames - 21)
+        start_gradient_frame_index = max(0, num_output_frames - num_training_frames)
 
         for block_index, current_num_frames in enumerate(all_num_frames):
             noisy_input = noise[:, current_start_frame -
@@ -460,10 +453,10 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         # Slice last 21 frames if we generated more
         gradient_mask = None
-        if pred_image_or_video.shape[1] > 21:
+        if pred_image_or_video.shape[1] > num_training_frames:
             with torch.no_grad():
                 # Re-encode to get image latent
-                latent_to_decode = pred_image_or_video[:, :-20, ...]
+                latent_to_decode = pred_image_or_video[:, :-(num_training_frames-1), ...]
                 # Decode to video
                 latent_to_decode = latent_to_decode.permute(
                     0, 2, 1, 3, 4)  # [B, C, F, H, W]
@@ -495,7 +488,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                                     4)  # [B, F, C, H, W]
 
             pred_image_or_video_last_21 = torch.cat(
-                [image_latent, pred_image_or_video[:, -20:, ...]], dim=1)
+                [image_latent, pred_image_or_video[:, -(num_training_frames-1):, ...]], dim=1)
         else:
             pred_image_or_video_last_21 = pred_image_or_video
 

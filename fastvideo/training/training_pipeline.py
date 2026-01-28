@@ -634,8 +634,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         logger.info("Initialized random seeds with seed: %s",
                     self.seed + self.global_rank)
 
-        self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
-
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
 
