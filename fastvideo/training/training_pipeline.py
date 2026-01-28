@@ -446,7 +446,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
             # Defensive: avoid NaNs/div0 if an upstream bug ever produces empty tensors.
             # mean(empty) -> NaN; division by 0 -> inf/NaN. Keep a 0 loss with grad history.
             if model_pred.numel() == 0:
-                loss = (model_pred.sum() * 0.0) / self.training_args.gradient_accumulation_steps
+                loss = (model_pred.sum() *
+                        0.0) / self.training_args.gradient_accumulation_steps
             else:
                 # Compute MSE on one SP shard. We shard along the flattened token axis
                 # (t*h*w) with optional padding so (t*h*w) need not be divisible by sp_size.
