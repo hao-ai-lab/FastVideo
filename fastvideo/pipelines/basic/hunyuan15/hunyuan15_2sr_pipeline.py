@@ -112,8 +112,6 @@ class HunyuanVideo152SRPipeline(ComposedPipelineBase):
             self.post_init()
 
         self.get_module("transformer").to(get_local_torch_device())
-        self.get_module("transformer_2").to(get_local_torch_device())
-        self.get_module("transformer_3").to(get_local_torch_device())
         # Execute each stage
         logger.info("Running pipeline stages: %s",
                     self._stage_name_mapping.keys())
@@ -128,6 +126,7 @@ class HunyuanVideo152SRPipeline(ComposedPipelineBase):
         self.get_module("transformer").to("cpu")
 
         # 720p SR
+        self.get_module("transformer_2").to(get_local_torch_device())
         batch.lq_latents = batch.latents
         batch.latents = None
         batch.height = 720
@@ -139,6 +138,7 @@ class HunyuanVideo152SRPipeline(ComposedPipelineBase):
         self.get_module("transformer_2").to("cpu")
 
         # 1080p SR
+        self.get_module("transformer_3").to(get_local_torch_device())
         batch.lq_latents = batch.latents
         batch.latents = None
         batch.height = 1072
@@ -147,6 +147,7 @@ class HunyuanVideo152SRPipeline(ComposedPipelineBase):
         batch = self.sr_1080p_latent_preparation_stage(batch, fastvideo_args)
         batch = self.image_encoding_stage(batch, fastvideo_args)
         batch = self.sr_1080p_denoising_stage(batch, fastvideo_args)
+        self.get_module("transformer_3").to("cpu")
 
         start_time = time.time()
         batch = self.decoding_stage(batch, fastvideo_args)

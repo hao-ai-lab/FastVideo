@@ -15,6 +15,7 @@ from fastvideo.pipelines.stages import (
     ConditioningStage, DecodingStage, DenoisingStage, InputValidationStage,
     LatentPreparationStage, TextEncodingStage, TimestepPreparationStage,
     Hy15ImageEncodingStage, SRDenoisingStage)
+from fastvideo.distributed.parallel_state import get_local_torch_device
 
 # TODO(will): move PRECISION_TO_TYPE to better place
 
@@ -103,6 +104,7 @@ class HunyuanVideo15SRPipeline(ComposedPipelineBase):
         logger.info("Running pipeline stages: %s",
                     self._stage_name_mapping.keys())
         # logger.info("Batch: %s", batch)
+        self.get_module("transformer").to(get_local_torch_device())
         batch = self.input_validation_stage(batch, fastvideo_args)
         batch = self.prompt_encoding_stage_primary(batch, fastvideo_args)
         batch = self.conditioning_stage(batch, fastvideo_args)
@@ -110,8 +112,9 @@ class HunyuanVideo15SRPipeline(ComposedPipelineBase):
         batch = self.latent_preparation_stage(batch, fastvideo_args)
         batch = self.image_encoding_stage(batch, fastvideo_args)
         batch = self.denoising_stage(batch, fastvideo_args)
-        # self.get_module("transformer").to("cpu")
+        self.get_module("transformer").to("cpu")
 
+        self.get_module("transformer_2").to(get_local_torch_device())
         batch.lq_latents = batch.latents
         batch.latents = None
         batch.height = batch.height_sr
@@ -119,6 +122,7 @@ class HunyuanVideo15SRPipeline(ComposedPipelineBase):
         batch = self.sr_latent_preparation_stage(batch, fastvideo_args)
         batch = self.image_encoding_stage(batch, fastvideo_args)
         batch = self.sr_denoising_stage(batch, fastvideo_args)
+        self.get_module("transformer_2").to("cpu")
 
         start_time = time.time()
         batch = self.decoding_stage(batch, fastvideo_args)
