@@ -847,6 +847,7 @@ def get_ring_group() -> ProcessGroup:
     assert _SP is not None, ("sequence model parallel group is not initialized")
     return get_sp_group().device_group
 
+
 _DP: GroupCoordinator | None = None
 
 
