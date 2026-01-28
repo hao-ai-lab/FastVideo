@@ -20,9 +20,10 @@ from fastvideo.training.checkpointing_utils import (ModelWrapper,
                                                     RandomStateWrapper,
                                                     SchedulerWrapper)
 
-from einops import rearrange
 from fastvideo.distributed.parallel_state import (get_sp_parallel_rank,
                                                   get_sp_world_size)
+from fastvideo.distributed.utils import (compute_padding_for_sp,
+                                         pad_sequence_tensor)
 
 logger = init_logger(__name__)
 
@@ -867,10 +868,25 @@ def shard_latents_across_sp(latents: torch.Tensor) -> torch.Tensor:
     sp_world_size = get_sp_world_size()
     rank_in_sp_group = get_sp_parallel_rank()
     if sp_world_size > 1:
-        latents = rearrange(latents,
-                            "b c (n s) h w -> b c n s h w",
-                            n=sp_world_size).contiguous()
-        latents = latents[:, :, rank_in_sp_group, :, :, :]
+        # Shard on the flattened token axis (t*h*w) rather than raw `t`, so we
+        # don't require t % sp_world_size == 0. Pad on the flattened axis if needed.
+        assert latents.ndim == 5, f"Expected latents [b,c,t,h,w], got {latents.shape}"
+        b, c, t, h, w = latents.shape
+        latents = latents.reshape(b, c, t * h * w)
+
+        original_seq_len = latents.shape[2]
+        padded_seq_len, padding_amount = compute_padding_for_sp(
+            original_seq_len, sp_world_size)
+        if padding_amount > 0:
+            latents = pad_sequence_tensor(latents,
+                                          padded_seq_len,
+                                          seq_dim=2,
+                                          pad_value=0.0)
+
+        elements_per_rank = padded_seq_len // sp_world_size
+        start = rank_in_sp_group * elements_per_rank
+        end = (rank_in_sp_group + 1) * elements_per_rank
+        latents = latents[:, :, start:end].contiguous()
     return latents
 
 
