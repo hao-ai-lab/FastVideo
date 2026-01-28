@@ -15,7 +15,6 @@ from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.attention.backends.sdpa import SDPAMetadata
 from fastvideo.platforms import AttentionBackendEnum
-from fastvideo.attention.selector import backend_name_to_enum
 
 
 class GlmImageDenoisingStage(DenoisingStage):
@@ -109,9 +108,9 @@ class GlmImageDenoisingStage(DenoisingStage):
                 attn_metadata = None
                 if text_attention_mask is not None:
                     first_block = self.transformer.transformer_blocks[0]
-                    attn_backend_name = first_block.attn1.attn.backend.name if hasattr(first_block.attn1.attn, 'backend') else None
+                    attn_backend = getattr(first_block.attn1.attn, 'backend', None)
                     
-                    if attn_backend_name == "SDPA" or backend_name_to_enum(attn_backend_name) == AttentionBackendEnum.TORCH_SDPA:
+                    if attn_backend is not None and attn_backend == AttentionBackendEnum.TORCH_SDPA:
                         batch_size = latent_model_input.shape[0]
                         # Create combined mask: text part uses provided mask, image part is always 1
                         mix_attn_mask = torch.ones(
