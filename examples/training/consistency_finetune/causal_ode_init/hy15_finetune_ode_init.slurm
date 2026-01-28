@@ -22,31 +22,25 @@ export NODE_RANK=$SLURM_PROCID
 nodes=( $(scontrol show hostnames $SLURM_JOB_NODELIST) )
 export MASTER_ADDR=${nodes[0]}
 export TOKENIZERS_PARALLELISM=false
-# export WANDB_API_KEY="8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde"
-export WANDB_API_KEY="50632ebd88ffd970521cec9ab4a1a2d7e85bfc45"
-# export WANDB_API_KEY='your_wandb_api_key_here'
+export WANDB_API_KEY='your_wandb_api_key_here'
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
-
-source ~/conda/miniconda/bin/activate
-conda activate wei-fv-distill
-export HOME="/mnt/weka/home/hao.zhang/wei"
 
 # Configs
 NUM_GPUS=8
 NUM_TOTAL_GPUS=64
 
 MODEL_PATH="weizhou03/SFHunyuanVideo-1.5-Diffusers-480p_t2v"
-DATA_DIR="/mnt/weka/home/hao.zhang/wl/sharefs/wl/release/fv-ode-preprocessing-16k-hy15-121"
-VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/wl/FastVideo/examples/distill/Wan2.2-TI2V-5B-Diffusers/Data-free/validation_64.json"
+DATA_DIR="your_data_dir"
+VALIDATION_DATASET_FILE="your_validation_data_dir"
 # IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
   --tracker_project_name "hy15_ode_init"
-  --output_dir "/mnt/weka/home/hao.zhang/wei/hy15_ode_init_1333_new"
-  --wandb_run_name "hy15_ode_init_1333_new"
+  --output_dir "your_output_dir"
+  --wandb_run_name "your_wandb_run_name"
   --warp_denoising_step
   --dmd_denoising_steps '1000,760,520,280,0'
   --log_visualization
@@ -55,10 +49,10 @@ training_args=(
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 2
-  --num_latent_t 31
+  --num_latent_t 21
   --num_height 480
   --num_width 848
-  --num_frames 121
+  --num_frames 81
   --enable_gradient_checkpointing_type "full"
 )
 
@@ -111,8 +105,6 @@ miscellaneous_args=(
   --not_apply_cfg_solver
   --dit_precision "fp32"
   --num_euler_timesteps 50
-  --ema_start_step 0
-  # --enable_gradient_checkpointing_type "full"
 )
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
