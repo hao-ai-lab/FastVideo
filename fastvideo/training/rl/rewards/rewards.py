@@ -35,7 +35,7 @@ class MultiRewardAggregator(nn.Module):
         self,
         reward_models: list[BaseRewardModel],
         reward_weights: list[float] | None = None,
-        normalize_rewards: bool = True
+        normalize_rewards: bool = False
     ):
         """
         Initialize multi-reward aggregator.
@@ -335,4 +335,4 @@ def create_reward_models(
         len(models_list)
     )
 
-    return MultiRewardAggregator(models_list, weights, normalize_rewards=True)
+    return MultiRewardAggregator(models_list, weights)

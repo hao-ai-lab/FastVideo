@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from collections import defaultdict
 from collections.abc import Hashable
-from contextlib import nullcontext
+from contextlib import nullcontext, contextmanager
 from typing import Any
 from collections.abc import Generator
 
@@ -484,3 +484,31 @@ class LoRAPipeline(ComposedPipelineBase):
                 with _get_hook_ctx(module):
                     for name, layer in layers.items():
                         layer.unmerge_lora_weights()
+
+    @contextmanager
+    def disable_adapter(self):
+        """
+        Context manager to temporarily disable LoRA adapters.
+        This is used for computing reference model outputs in GRPO training.
+        Aligned with flow_grpo's PeftModel.disable_adapter().
+        """
+        # Store original disable_lora states
+        original_states = {}
+        for (
+                transformer_name,
+                transformer_lora_layers,
+        ) in self.lora_layers.items():
+            for layer_name, layer in transformer_lora_layers.all_lora_layers():
+                original_states[(transformer_name, layer_name)] = layer.disable_lora
+                layer.disable_lora = True
+        
+        try:
+            yield
+        finally:
+            # Restore original disable_lora states
+            for (
+                    transformer_name,
+                    transformer_lora_layers,
+            ) in self.lora_layers.items():
+                for layer_name, layer in transformer_lora_layers.all_lora_layers():
+                    layer.disable_lora = original_states[(transformer_name, layer_name)]

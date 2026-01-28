@@ -63,7 +63,7 @@ class OcrScorerVideo(BaseRewardModel):
             logger.warning("Failed to extract quoted text from prompt: %s",
                            prompt)
             target_text = prompt.replace(' ', '').lower()
-
+        
         if not target_text:
             return 0.0
 
@@ -75,7 +75,6 @@ class OcrScorerVideo(BaseRewardModel):
 
         # Convert from [C, T, H, W] to [T, H, W, C] for easier frame extraction
         video_np = np.transpose(video_np, (1, 2, 3, 0))  # [T, H, W, C]
-        logger.info(f"in ocr 1.5, video_np[0][0]: {video_np[0][0]}")
 
         # Normalize to [0, 255] uint8 if needed
         if video_np.max() <= 1.0:
@@ -88,11 +87,9 @@ class OcrScorerVideo(BaseRewardModel):
         # Sample frames at specified interval
         for frame_idx in range(0, T, self.frame_interval):
             frame = video_np[frame_idx]  # [H, W, C]
-            logger.info(f"in ocr 2, frame.shape: {frame.shape}")
             # Run OCR
             try:
                 result = self.ocr.ocr(frame, cls=False)
-                logger.info(f"in ocr 3, result: {result}")
                 if result and result[0]:
                     recognized_text = "".join(
                         [line[1][0] for line in result[0] if line[1][1] > 0])
@@ -102,7 +99,6 @@ class OcrScorerVideo(BaseRewardModel):
                 logger.info("OCR failed on frame %d: %s", frame_idx, str(e))
                 recognized_text = ''
 
-            logger.info(f"in ocr 4, recognized_text: {recognized_text}")
 
             recognized_text = recognized_text.replace(' ', '').lower()
             if target_text in recognized_text:
@@ -112,11 +108,9 @@ class OcrScorerVideo(BaseRewardModel):
             dist = min(dist, len(target_text))
             reward = 1.0 - dist / len(target_text)
 
-            logger.info(f"in ocr 5, reward: {reward}")
             if reward > 0:
                 frame_rewards.append(reward)
 
-        logger.info(f"in ocr 6, frame_rewards: {frame_rewards}")
 
         return sum([reward / len(frame_rewards)
                     for reward in frame_rewards]) if frame_rewards else 0.0
@@ -145,7 +139,6 @@ class OcrScorerVideo(BaseRewardModel):
             torch.Tensor), f"videos must be torch.Tensor, got {type(videos)}"
         assert videos.ndim == 5, f"videos must have 5 dimensions [B, C, T, H, W], got shape {videos.shape}"
 
-        logger.info(f"in ocr 1, videos.shape: {videos.shape}")
 
         B, C, T, H, W = videos.shape
         assert len(
@@ -153,17 +146,36 @@ class OcrScorerVideo(BaseRewardModel):
         ) == B, f"Number of prompts ({len(prompts)}) must match batch size ({B})"
 
         rewards = []
+        # myregion: Debug: Track memory during OCR reward computation
+        import os
+        gpu_id = int(os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",")[0])
+        mem_used_before = os.popen(
+            f"nvidia-smi -i {gpu_id} --query-gpu=memory.used --format=csv,noheader,nounits"
+        ).read().strip()
+        logger.info(f"OCR: Before processing videos, VRAM used: {mem_used_before} MiB, B={B}")
+        # endregion
         for b in range(B):
             # Extract single video: [C, T, H, W]
             video = videos[b]
+            # myregion: Debug: Track memory per video
+            if b == 0:
+                mem_used = os.popen(
+                    f"nvidia-smi -i {gpu_id} --query-gpu=memory.used --format=csv,noheader,nounits"
+                ).read().strip()
+                logger.info(f"OCR: Before processing video {b}, VRAM used: {mem_used} MiB, video.shape: {video.shape}")
+            # endregion
             reward = self._process_single_video(video, prompts[b])
             rewards.append(reward)
-
-        logger.info(f"in ocr 7, rewards: {rewards}")
+            # myregion: Debug: Track memory per video
+            if b == 0:
+                mem_used = os.popen(
+                    f"nvidia-smi -i {gpu_id} --query-gpu=memory.used --format=csv,noheader,nounits"
+                ).read().strip()
+                logger.info(f"OCR: After processing video {b}, VRAM used: {mem_used} MiB")
+            # endregion
 
         rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
 
-        logger.info(f"in ocr 8, rewards: {rewards}")
 
         # Check for NaN or Inf values
         if torch.isnan(rewards).any() or torch.isinf(rewards).any():

@@ -24,8 +24,8 @@ class TextPromptDataset(Dataset):
     def __getitem__(self, idx):
         # Debug mode: always return the same prompt for evaluation.
         # Keep dataset length/sampling behavior unchanged.
-        # return {"prompt": self.prompts[idx], "metadata": {}}
-        return {"prompt": FIXED_DEBUG_PROMPT, "metadata": {}}
+        return {"prompt": self.prompts[idx], "metadata": {}}
+        # return {"prompt": FIXED_DEBUG_PROMPT, "metadata": {}}
 
     @staticmethod
     def collate_fn(examples):
@@ -49,8 +49,8 @@ class GenevalPromptDataset(Dataset):
     def __getitem__(self, idx):
         # Debug mode: always return the same prompt for evaluation.
         # Keep metadata passthrough unchanged.
-        # return {"prompt": self.prompts[idx], "metadata": self.metadatas[idx]}
-        return {"prompt": FIXED_DEBUG_PROMPT, "metadata": self.metadatas[idx]}
+        return {"prompt": self.prompts[idx], "metadata": self.metadatas[idx]}
+        # return {"prompt": FIXED_DEBUG_PROMPT, "metadata": self.metadatas[idx]}
 
     @staticmethod
     def collate_fn(examples):
