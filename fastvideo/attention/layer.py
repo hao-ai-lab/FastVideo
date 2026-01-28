@@ -105,44 +105,45 @@ class DistributedAttention(nn.Module):
         except ValueError:
             fastvideo_args = None
 
-        # Ring attention requires sequence-sharded QKV and is inference-only.
+        # Ring attention requires sequence-sharded QKV
+        sp_world_size = get_sp_world_size()
         use_ring_attention = (fastvideo_args is not None
                               and fastvideo_args.ring_size > 1
-                              and replicated_q is None and not self.training)
+                              and replicated_q is None and not self.training
+                              and sp_world_size > 1)
 
-        # Get ring group and check size
+        # Get ring group and use ring attention
         if use_ring_attention:
             ring_group = get_ring_group()
-            if get_sp_world_size() > 1:
-                from yunchang import ring_flash_attn_func
+            from yunchang import ring_flash_attn_func
 
-                # Apply RoPE locally before calling ring attention
-                if freqs_cis is not None:
-                    cos, sin = freqs_cis
-                    local_seq_len = q.shape[1]
-                    if cos.shape[0] > local_seq_len:
-                        rank_offset = get_sp_parallel_rank() * local_seq_len
-                        cos = cos[rank_offset:rank_offset + local_seq_len]
-                        sin = sin[rank_offset:rank_offset + local_seq_len]
-                    q = _apply_rotary_emb(q, cos, sin, is_neox_style=False)
-                    k = _apply_rotary_emb(k, cos, sin, is_neox_style=False)
+            # Apply RoPE locally before calling ring attention
+            if freqs_cis is not None:
+                cos, sin = freqs_cis
+                local_seq_len = q.shape[1]
+                if cos.shape[0] > local_seq_len:
+                    rank_offset = get_sp_parallel_rank() * local_seq_len
+                    cos = cos[rank_offset:rank_offset + local_seq_len]
+                    sin = sin[rank_offset:rank_offset + local_seq_len]
+                q = _apply_rotary_emb(q, cos, sin, is_neox_style=False)
+                k = _apply_rotary_emb(k, cos, sin, is_neox_style=False)
 
-                causal = getattr(self.attn_impl, 'causal', False)
+            causal = getattr(self.attn_impl, 'causal', False)
 
-                # Call ring attention
-                output = ring_flash_attn_func(
-                    q,
-                    k,
-                    v,
-                    dropout_p=0.0,
-                    softmax_scale=self.softmax_scale,
-                    causal=causal,
-                    window_size=(-1, -1),
-                    group=ring_group,
-                )
+            # Call ring attention
+            output = ring_flash_attn_func(
+                q,
+                k,
+                v,
+                dropout_p=0.0,
+                softmax_scale=self.softmax_scale,
+                causal=causal,
+                window_size=(-1, -1),
+                group=ring_group,
+            )
 
-                # Ring attention output is already correctly shaped per rank
-                return output, None
+            # Ring attention output is already correctly shaped per rank
+            return output, None
 
         # Stack QKV
         qkv = torch.cat([q, k, v],
