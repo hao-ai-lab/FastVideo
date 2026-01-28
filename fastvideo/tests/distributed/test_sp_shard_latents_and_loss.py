@@ -153,3 +153,66 @@ def test_sharded_loss_gradient_matches_full_mse_after_rank_avg(sp_dist, shape):
     dist.barrier()
 
 
+def test_padding_does_not_change_global_sse(sp_dist):
+    """
+    Padding-specific correctness test.
+
+    When (t*h*w) is NOT divisible by sp_size, shard_latents_across_sp pads with
+    zeros on the flattened axis. This test validates that:
+    1) Summed SSE across SP ranks equals the full (unpadded) SSE.
+    2) Any padded tokens that land on a rank are exactly zero for both pred/target.
+    """
+    from fastvideo.distributed.utils import compute_padding_for_sp
+
+    ws = _world_size()
+    device = torch.device(f"cuda:{int(os.environ.get('LOCAL_RANK', '0'))}")
+
+    b, c, t, h = 2, 2, 1, 1
+    # Force padding for any ws>1: seq_len = 2*ws + 1  -> remainder 1
+    w = 2 * ws + 1
+    seq_len = t * h * w
+    assert seq_len % ws != 0
+
+    pred = torch.empty((b, c, t, h, w), device=device, dtype=torch.float32)
+    target = torch.empty((b, c, t, h, w), device=device, dtype=torch.float32)
+    if _rank() == 0:
+        pred.normal_()
+        target.normal_()
+    _broadcast_tensor_(pred)
+    _broadcast_tensor_(target)
+
+    # Full (unpadded) SSE reference.
+    full_sse = ((pred - target)**2).sum()
+
+    # Sharded local SSE (includes padded region, which should contribute 0).
+    sharded_pred = shard_latents_across_sp(pred)
+    sharded_target = shard_latents_across_sp(target)
+    local_sse = ((sharded_pred - sharded_target)**2).sum()
+
+    global_sse = local_sse.clone()
+    dist.all_reduce(global_sse, op=dist.ReduceOp.SUM)
+    torch.testing.assert_close(global_sse, full_sse, rtol=1e-5, atol=1e-6)
+
+    # Explicitly validate padded tokens are zeros on ranks that cover them.
+    padded_seq_len, padding_amount = compute_padding_for_sp(seq_len, ws)
+    assert padding_amount > 0
+    elements_per_rank = padded_seq_len // ws
+    start = _rank() * elements_per_rank
+    end = (_rank() + 1) * elements_per_rank
+
+    if end > seq_len:
+        # There is padding on this rank: positions [max(seq_len, start), end)
+        pad_start_global = max(seq_len, start)
+        pad_end_global = end
+        pad_start_local = pad_start_global - start
+        pad_end_local = pad_end_global - start
+        assert pad_start_local < pad_end_local
+
+        pad_slice_pred = sharded_pred[:, :, pad_start_local:pad_end_local]
+        pad_slice_target = sharded_target[:, :, pad_start_local:pad_end_local]
+        torch.testing.assert_close(pad_slice_pred, torch.zeros_like(pad_slice_pred))
+        torch.testing.assert_close(pad_slice_target, torch.zeros_like(pad_slice_target))
+
+    dist.barrier()
+
+
