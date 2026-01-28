@@ -140,7 +140,7 @@ def blockscaled_fp4_attn(qlist: Tuple,
     return fp4attn_cuda.fwd(qlist[0], klist[0], vlist[0], qlist[1], klist[1], vlist[1], delta_s, KL, None, softmax_scale, is_causal, per_block_mean, is_bf16, single_level_p_quant)
 
 
-def sageattn_blackwell(q, k, v, attn_mask = None, is_causal = False, per_block_mean = True, single_level_p_quant = True, **kwargs):
+def sageattn_blackwell(q, k, v, attn_mask = None, is_causal = False, per_block_mean = True, single_level_p_quant = False, **kwargs):
     """
     SageAttention3 Blackwell kernel for FP4 attention.
     
