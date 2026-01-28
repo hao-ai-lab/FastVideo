@@ -10,6 +10,7 @@ from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
 
 from fastvideo.configs.sample.cosmos import Cosmos_Predict2_2B_Video2World_SamplingParam
 from fastvideo.configs.sample.cosmos2_5 import Cosmos_Predict2_5_2B_Diffusers_SamplingParam
+from fastvideo.configs.sample.flux import FluxSamplingParam
 from fastvideo.configs.sample.ltx2 import LTX2SamplingParam
 
 # isort: off
@@ -48,6 +49,7 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v":
     Hunyuan15_720P_SamplingParam,
     "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VSamplingParam,
+    "black-forest-labs/FLUX.1-dev": FluxSamplingParam,
 
     # Wan2.1
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V_1_3B_SamplingParam,
@@ -134,6 +136,7 @@ SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "cosmos2_5" in id.lower(),
     "cosmos":
     lambda id: "cosmos" in id.lower() and "2_5" not in id.lower(),
+    "flux": lambda id: "flux" in id.lower(),
     "ltx2":
     lambda id: "ltx2" in id.lower() or "ltx-2" in id.lower(),
     # Add other pipeline architecture detectors
@@ -156,6 +159,7 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
     TurboDiffusionT2V_1_3B_SamplingParam,  # Default to T2V for fallback
     "cosmos25": Cosmos_Predict2_5_2B_Diffusers_SamplingParam,
     "cosmos": Cosmos_Predict2_2B_Video2World_SamplingParam,
+    "flux": FluxSamplingParam,
     "ltx2": LTX2SamplingParam,
     # Other fallbacks by architecture
 }
