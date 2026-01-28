@@ -1,41 +1,25 @@
+import os
+
 from fastvideo import VideoGenerator
-import json
-# from fastvideo.configs.sample import SamplingParam
 
-OUTPUT_PATH = "video_samples_hy15"
-def main():
-    # FastVideo will automatically use the optimal default arguments for the
-    # model.
-    # If a local path is provided, FastVideo will make a best effort
-    # attempt to identify the optimal arguments.
+PROMPT = (
+    "A cinematic portrait of a fox, 35mm film, soft light, gentle grain."
+)
+
+
+def main() -> None:
     generator = VideoGenerator.from_pretrained(
-        "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
-        # FastVideo will automatically handle distributed setup
+        os.environ.get("FLUX_MODEL_PATH", "black-forest-labs/FLUX.1-dev"),
         num_gpus=1,
-        use_fsdp_inference=True,
-        dit_cpu_offload=True,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
-        pin_cpu_memory=True, # set to false if low CPU RAM or hit obscure "CUDA error: Invalid argument"
-        # image_encoder_cpu_offload=False,
     )
 
-    prompt = (
-        "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
-        "wide with interest. The playful yet serene atmosphere is complemented by soft "
-        "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
+    output_path = "outputs_image/flux_basic/output_flux_t2i.mp4"
+    generator.generate_video(
+        prompt=PROMPT,
+        output_path=output_path,
+        save_video=True,
     )
-
-    video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True, negative_prompt="", num_frames=81, fps=16)
-
-    prompt2 = (
-        "A majestic lion strides across the golden savanna, its powerful frame "
-        "glistening under the warm afternoon sun. The tall grass ripples gently in "
-        "the breeze, enhancing the lion's commanding presence. The tone is vibrant, "
-        "embodying the raw energy of the wild. Low angle, steady tracking shot, "
-        "cinematic.")
-
-    video2 = generator.generate_video(prompt2, output_path=OUTPUT_PATH, save_video=True, negative_prompt="", num_frames=81, fps=16)
+    generator.shutdown()
 
 
 if __name__ == "__main__":
