@@ -65,6 +65,10 @@ void set_params_fprop(Flash_fwd_params &params,
                       bool per_block_mean,
                       bool is_bf16,
                       bool single_level_p_quant=false,
+                      bool two_level_qkv_quant=false,
+                      const at::Tensor* sfq_row=nullptr,
+                      const at::Tensor* sfk_row=nullptr,
+                      const at::Tensor* sfv_row=nullptr,
                       bool seqlenq_ngroups_swapped=false) {
 
     // Reset the parameters
@@ -182,6 +186,28 @@ void set_params_fprop(Flash_fwd_params &params,
     params.is_seqlens_k_cumulative = true;
     params.is_bf16 = is_bf16;
     params.single_level_p_quant = single_level_p_quant;
+    params.two_level_qkv_quant = two_level_qkv_quant;
+    
+    // Set two-level QKV quantization row scale pointers and strides
+    if (two_level_qkv_quant && sfq_row != nullptr && sfk_row != nullptr && sfv_row != nullptr) {
+        params.sfq_row_ptr = sfq_row->data_ptr();
+        params.sfk_row_ptr = sfk_row->data_ptr();
+        params.sfv_row_ptr = sfv_row->data_ptr();
+        params.sfq_row_batch_stride = sfq_row->stride(0);
+        params.sfk_row_batch_stride = sfk_row->stride(0);
+        params.sfv_row_batch_stride = sfv_row->stride(0);
+        params.sfq_row_seq_stride = sfq_row->stride(2);
+        params.sfk_row_seq_stride = sfk_row->stride(2);
+        params.sfv_row_seq_stride = sfv_row->stride(2);
+        params.sfq_row_head_stride = sfq_row->stride(1);
+        params.sfk_row_head_stride = sfk_row->stride(1);
+        params.sfv_row_head_stride = sfv_row->stride(1);
+    } else {
+        params.sfq_row_ptr = nullptr;
+        params.sfk_row_ptr = nullptr;
+        params.sfv_row_ptr = nullptr;
+    }
+    
     #ifdef FLASHATTENTION_DISABLE_UNEVEN_K
         TORCH_CHECK(d == d_rounded, "This flash attention build does not support headdim not being a multiple of 32.");
     #endif
@@ -217,7 +243,11 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x (head_size
         bool is_causal, 
         bool per_block_mean,
         bool is_bf16,
-        bool single_level_p_quant=false  // If true, use only per-row scale s_P2 (no per-block s_P1)
+        bool single_level_p_quant=false,  // If true, use only per-row scale s_P2 (no per-block s_P1)
+        bool two_level_qkv_quant=false,   // If true, use two-level quantization for Q, K, V
+        c10::optional<at::Tensor> sfq_row=c10::nullopt,  // Per-row scale for Q
+        c10::optional<at::Tensor> sfk_row=c10::nullopt,  // Per-row scale for K
+        c10::optional<at::Tensor> sfv_row=c10::nullopt   // Per-row scale for V
     ) {
 
     auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -290,6 +320,12 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x (head_size
     at::Tensor p;
 
     Flash_fwd_params params;
+    
+    // Handle optional row scale tensors for two-level quantization
+    const at::Tensor* sfq_row_ptr = sfq_row.has_value() ? &sfq_row.value() : nullptr;
+    const at::Tensor* sfk_row_ptr = sfk_row.has_value() ? &sfk_row.value() : nullptr;
+    const at::Tensor* sfv_row_ptr = sfv_row.has_value() ? &sfv_row.value() : nullptr;
+    
     set_params_fprop(params,
                      batch_size,
                      seqlen_q, seqlen_k, unpadded_k,
@@ -309,7 +345,11 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x (head_size
                      /*window_size_right=*/is_causal ? 0 : -1,
                      per_block_mean,
                      is_bf16,
-                     single_level_p_quant
+                     single_level_p_quant,
+                     two_level_qkv_quant,
+                     sfq_row_ptr,
+                     sfk_row_ptr,
+                     sfv_row_ptr
                     );
     // TODO: 132 sm count?
     auto tile_count_semaphore = is_causal ? torch::full({1}, 132, opts.dtype(torch::kInt32)) : torch::empty({1}, opts.dtype(torch::kInt32));

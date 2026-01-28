@@ -55,7 +55,7 @@ struct Qkv_params {
     index_t ds_batch_stride;
     index_t ds_row_stride;
     index_t ds_head_stride;
-    // The stride of the Q, K and V scale factor matrices.
+    // The stride of the Q, K and V scale factor matrices (per-16-element scales).
     index_t sfq_batch_stride;
     index_t sfk_batch_stride;
     index_t sfv_batch_stride;
@@ -65,6 +65,22 @@ struct Qkv_params {
     index_t sfq_head_stride;
     index_t sfk_head_stride;
     index_t sfv_head_stride;
+    
+    // Two-level quantization: Per-row scale factors for Q, K, V
+    // These are first-level scales: s_row = rowmax / (448 * 6)
+    // Used when two_level_qkv_quant is enabled
+    void *__restrict__ sfq_row_ptr;
+    void *__restrict__ sfk_row_ptr;
+    void *__restrict__ sfv_row_ptr;
+    index_t sfq_row_batch_stride;
+    index_t sfk_row_batch_stride;
+    index_t sfv_row_batch_stride;
+    index_t sfq_row_seq_stride;
+    index_t sfk_row_seq_stride;
+    index_t sfv_row_seq_stride;
+    index_t sfq_row_head_stride;
+    index_t sfk_row_head_stride;
+    index_t sfv_row_head_stride;
 
     // The number of heads.
     int h, h_k;
@@ -162,6 +178,7 @@ struct Flash_fwd_params : public Qkv_params {
     bool is_causal;
     bool per_block_mean;
     bool single_level_p_quant;  // If true, use single-level 1x16 block scale quantization for P (like V), instead of two-level quantization
+    bool two_level_qkv_quant;   // If true, use two-level quantization for Q, K, V: per-row scale + per-16-element scale
     // If is_seqlens_k_cumulative, then seqlen_k is cu_seqlens_k[bidb + 1] - cu_seqlens_k[bidb].
     // Otherwise it's cu_seqlens_k[bidb], i.e., we use cu_seqlens_k to store the sequence lengths of K.
     bool is_seqlens_k_cumulative;

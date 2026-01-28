@@ -24,6 +24,31 @@ namespace flash {
 
 using namespace cute;
 
+/*
+ * Two-Level Quantization Architecture:
+ * 
+ * For P (attention probabilities, computed in this file):
+ *   - Level 1: s_P1 = absmax_row(P̃)/(448×6) - per-row scale (P >= 0, so max == absmax)
+ *   - Level 2: s_P2 = absmax_block(P̃/s_P1)/6 - per-16-element scale
+ *   - Controlled by: single_level_p_quant flag
+ * 
+ * For Q, K, V (computed in quantization kernels, see fp4_quantization_4d.cu):
+ *   - Level 1: s_row = absmax_row(x)/(448×6) - per-row scale (stored in sfq_row, sfk_row, sfv_row)
+ *   - Level 2: s_16 = absmax_block(x/s_row)/6 - per-16-element scale (stored in sfq, sfk, sfv)
+ *   - Controlled by: two_level_qkv_quant flag (params.two_level_qkv_quant)
+ *   - Note: Q, K, V can have negative values, so absmax (not max) is required
+ * 
+ * When two_level_qkv_quant is enabled:
+ *   - The quantized values are: x_fp4 = round(x / (s_row * s_16))
+ *   - Dequantization requires: x ≈ x_fp4 * s_16 * s_row
+ *   - The row scales are passed via params.sfq_row_ptr, params.sfk_row_ptr, params.sfv_row_ptr
+ *   - The kernel needs to apply both scale levels during MMA computation
+ * 
+ * The two-level approach provides better dynamic range by:
+ *   1. First normalizing values to a standard range using s_row
+ *   2. Then applying finer-grained per-block quantization
+ */
+
 template <int Rows>
 struct SoftmaxFused{
 
@@ -71,8 +96,9 @@ struct SoftmaxFused{
                 float max_recv = __shfl_xor_sync(int32_t(-1), row_max(mi), 2); // exchange max in a quad in a row
                 row_max(mi) = fmaxf(row_max(mi), max_recv);
 
-                // Two-level P quantization (default): s_P1 = rowmax(P̃)/(448×6), then s_P2,P̂_2 = φ(P̃/s_P1)
+                // Two-level P quantization (default): s_P1 = absmax_row(P̃)/(448×6), then s_P2,P̂_2 = φ(P̃/s_P1)
                 //   - Pre-scales P to [0, 448×6] range before φ, output scaled by s_P1
+                //   - Since P is softmax output (P >= 0), absmax == max
                 // Single-level P quantization: s_P2, P̂_2 = φ(P̃) directly (like V quantization)
                 //   - No s_P1, just standard per-block FP4 quantization φ
                 const float s_P1_offset = single_level_p_quant ? 0.f : fp8_scalexfp4_scale_log2;
@@ -83,8 +109,9 @@ struct SoftmaxFused{
                 for (int ni = 0; ni < size<1>(acc_reduction_view); ni++) {
                     acc_reduction_view(mi, ni) = flash::ptx_exp2(acc_reduction_view(mi, ni) * softmax_scale_log2 - max_scaled);
                 }
-                // s_P2 = max(P_block)/6 — per-block scale factor from φ function (same formula for both modes)
+                // s_P2 = absmax(P_block)/6 — per-block scale factor from φ function (same formula for both modes)
                 // The difference is in max_scaled: two-level includes 448×6 pre-scaling, single-level doesn't
+                // Since P >= 0 after softmax, absmax == max
                 CUTLASS_PRAGMA_UNROLL
                 for (int sfi = 0; sfi < size<1>(AbsMaxP); sfi++) {
                     AbsMaxP(mi, sfi) = flash::ptx_exp2(AbsMaxP(mi, sfi) * softmax_scale_log2 - max_scaled + fp4_scale_log2);
@@ -123,7 +150,8 @@ struct SoftmaxFused{
                                         : (row_max(mi) == -INFINITY ? 0.0f : row_max(mi));
                 scores_scale(mi) = flash::ptx_exp2((scores_max_prev(mi) - scores_max_cur) * softmax_scale_log2);
 
-                // Two-level P quantization (default): s_P1 = rowmax(P̃)/(448×6), then s_P2,P̂_2 = φ(P̃/s_P1)
+                // Two-level P quantization (default): s_P1 = absmax_row(P̃)/(448×6), then s_P2,P̂_2 = φ(P̃/s_P1)
+                //   - Since P is softmax output (P >= 0), absmax == max
                 // Single-level P quantization: s_P2, P̂_2 = φ(P̃) directly (like V quantization)
                 const float s_P1_offset = single_level_p_quant ? 0.f : fp8_scalexfp4_scale_log2;
                 const float max_scaled = InfCheck
@@ -135,7 +163,7 @@ struct SoftmaxFused{
                     acc_reduction_view(mi, ni) = flash::ptx_exp2(acc_reduction_view(mi, ni) * softmax_scale_log2 - max_scaled);
                     row_sum(mi) += acc_reduction_view(mi, ni);
                 }
-                // s_P2 = max(P_block)/6 — per-block scale factor from φ function
+                // s_P2 = absmax(P_block)/6 — per-block scale factor from φ function (absmax == max since P >= 0)
                 CUTLASS_PRAGMA_UNROLL
                 for (int sfi = 0; sfi < size<1>(AbsMaxP); sfi++) {
                     AbsMaxP(mi, sfi) = flash::ptx_exp2(AbsMaxP(mi, sfi) * softmax_scale_log2 - max_scaled + fp4_scale_log2);
