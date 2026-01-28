@@ -113,7 +113,7 @@ class FastVideoArgs:
     num_gpus: int = 1
     tp_size: int = -1
     sp_size: int = -1
-    ring_degree: int = 1
+    ring_size: int = 1
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
     dist_timeout: int | None = None  # timeout for torch.distributed
@@ -334,11 +334,12 @@ class FastVideoArgs:
             help="The sequence parallelism size.",
         )
         parser.add_argument(
-            "--ring-degree",
+            "--ring-size",
             type=int,
-            default=FastVideoArgs.ring_degree,
-            help=
-            "Ring attention degree (number of GPUs in ring topology). If > 1, enables ring attention.",
+            default=FastVideoArgs.ring_size,
+            help="Ring attention size (number of GPUs in ring topology). "
+            "Must satisfy: sp_size * ring_size == num_gpus. "
+            "If > 1, enables ring attention.",
         )
         parser.add_argument(
             "--hsdp-replicate-dim",
@@ -757,6 +758,14 @@ class FastVideoArgs:
         assert self.sp_size <= self.num_gpus and self.num_gpus % self.sp_size == 0, "num_gpus must >= and be divisible by sp_size"
         assert self.hsdp_replicate_dim <= self.num_gpus and self.num_gpus % self.hsdp_replicate_dim == 0, "num_gpus must >= and be divisible by hsdp_replicate_dim"
         assert self.hsdp_shard_dim <= self.num_gpus and self.num_gpus % self.hsdp_shard_dim == 0, "num_gpus must >= and be divisible by hsdp_shard_dim"
+
+        if (self.ring_size > 1 or self.sp_size != self.num_gpus
+            ) and self.sp_size * self.ring_size != self.num_gpus:
+            raise ValueError(
+                f"Invalid configuration: sp_size ({self.sp_size}) * ring_size ({self.ring_size}) "
+                f"must equal num_gpus ({self.num_gpus}). "
+                f"Got: {self.sp_size} * {self.ring_size} = {self.sp_size * self.ring_size}"
+            )
 
         if self.num_gpus < max(self.tp_size, self.sp_size):
             self.num_gpus = max(self.tp_size, self.sp_size)

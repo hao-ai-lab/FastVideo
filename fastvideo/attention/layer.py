@@ -13,6 +13,7 @@ from fastvideo.forward_context import ForwardContext, get_forward_context
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
 from fastvideo.layers.rotary_embedding import _apply_rotary_emb
+from fastvideo.fastvideo_args import get_current_fastvideo_args
 
 
 class DistributedAttention(nn.Module):
@@ -99,8 +100,6 @@ class DistributedAttention(nn.Module):
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
 
-        from fastvideo.fastvideo_args import get_current_fastvideo_args
-
         try:
             fastvideo_args = get_current_fastvideo_args()
         except ValueError:
@@ -108,13 +107,13 @@ class DistributedAttention(nn.Module):
 
         # Ring attention requires sequence-sharded QKV and is inference-only.
         use_ring_attention = (fastvideo_args is not None
-                              and fastvideo_args.ring_degree > 1
+                              and fastvideo_args.ring_size > 1
                               and replicated_q is None and not self.training)
 
         # Get ring group and check size
         if use_ring_attention:
             ring_group = get_ring_group()
-            if torch.distributed.get_world_size(ring_group) > 1:
+            if get_sp_world_size() > 1:
                 from yunchang import ring_flash_attn_func
 
                 # Apply RoPE locally before calling ring attention
