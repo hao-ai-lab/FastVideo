@@ -134,6 +134,7 @@ class ForwardBatch:
 
     # Camera control inputs (HYWorld)
     pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
+    chunk_latent_frames: int | None = None
 
     # Latent dimensions
     height_latents: list[int] | int | None = None

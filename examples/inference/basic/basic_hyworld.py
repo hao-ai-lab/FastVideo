@@ -14,32 +14,44 @@ def main():
     parser = argparse.ArgumentParser(description="HYWorld video generation with FastVideo")
     parser.add_argument("--prompt", type=str, default=DEFAULT_PROMPT, help="Text prompt for video generation")
     parser.add_argument("--image", type=str, default=DEFAULT_IMAGE, help="Path or URL to input image")
-    parser.add_argument("--pose", type=str, default='w-31', help="Pose string (e.g., 'a-31', 'w-31', 's-31', 'd-31')")
+    parser.add_argument("--pose", type=str, default='d-31', help="Pose string (e.g., 'a-31', 'w-31', 's-31', 'd-31')")
     parser.add_argument("--output_path", type=str, default=OUTPUT_PATH, help="Output video path")
     parser.add_argument("--num-frames", type=int, default=125, help="Number of frames")
     parser.add_argument("--seed", type=int, default=1, help="Random seed")
     parser.add_argument("--resolution", type=str, default="480p", help="Only support 480p for now")
+    parser.add_argument("--mode", type=str, default="ar", choices=["bi", "ar"], help="Model mode: 'bi' (bidirectional, chunk=16) or 'ar' (autoregressive, chunk=4)")
     args = parser.parse_args()
+
+    # Set chunk_latent_frames based on mode
+    chunk_latent_frames = 16 if args.mode == "bi" else 4
 
     # Automatically determine resolution from input image
     HEIGHT, WIDTH = get_resolution_from_image(args.image, args.resolution)
     print(f"Image: {args.image}")
     print(f"Pose: {args.pose}")
+    print(f"Mode: {args.mode} (chunk_latent_frames={chunk_latent_frames})")
     print(f"Resolution: {HEIGHT}x{WIDTH} (from {args.resolution} buckets)")
     print(f"Num frames: {args.num_frames}")
     print(f"Output path: {args.output_path}")
 
+    if args.mode == "bi":
+        model_path = "FastVideo/HY-WorldPlay-Bidirectional-Diffusers"
+    elif args.mode == "ar":
+        model_path = "FastVideo/HY-WorldPlay-AR-Diffusers"
+    else:
+        raise ValueError(f"Invalid mode: {args.mode}")
+
     # Initialize generator
     print("\nInitializing VideoGenerator for HYWorld...")
     generator = VideoGenerator.from_pretrained(
-        "FastVideo/HY-WorldPlay-Bidirectional-Diffusers",
+        model_path,
         num_gpus=1,
         use_fsdp_inference=True,
-        dit_cpu_offload=True,
-        vae_cpu_offload=True,
-        text_encoder_cpu_offload=True,
+        dit_cpu_offload=False,
+        vae_cpu_offload=False,
+        text_encoder_cpu_offload=False,
         pin_cpu_memory=True,
-        image_encoder_cpu_offload=True,
+        image_encoder_cpu_offload=False,
     )
 
     # Generate video
@@ -57,6 +69,7 @@ def main():
         height=HEIGHT,
         width=WIDTH,
         seed=args.seed,
+        chunk_latent_frames=chunk_latent_frames,
     )
 
     print(f"\nVideo saved to: {args.output_path}")
