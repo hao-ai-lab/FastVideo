@@ -302,7 +302,6 @@ class LocalAttention(nn.Module):
         k: torch.Tensor,
         v: torch.Tensor,
         freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
-        attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Apply local attention between query, key and value tensors.
@@ -311,6 +310,7 @@ class LocalAttention(nn.Module):
             q (torch.Tensor): Query tensor of shape [batch_size, seq_len, num_heads, head_dim]
             k (torch.Tensor): Key tensor of shape [batch_size, seq_len, num_heads, head_dim] 
             v (torch.Tensor): Value tensor of shape [batch_size, seq_len, num_heads, head_dim]
+            freqs_cis (Optional[tuple[torch.Tensor, torch.Tensor]]): Rotary embedding frequencies
             
         Returns:
             torch.Tensor: Output tensor after local attention
@@ -327,26 +327,5 @@ class LocalAttention(nn.Module):
             q = _apply_rotary_emb(q, cos, sin, is_neox_style=False)
             k = _apply_rotary_emb(k, cos, sin, is_neox_style=False)
 
-        # Handle attention_mask through forward context
-        if attention_mask is not None:
-            current_timestep = forward_context.current_timestep
-            forward_batch = forward_context.forward_batch
-            if ctx_attn_metadata is None:
-                # Create new metadata and update forward context
-                new_attn_metadata = SDPAMetadata(
-                    current_timestep=current_timestep,
-                    attn_mask=attention_mask
-                )
-                with set_forward_context(
-                    current_timestep=current_timestep,
-                    attn_metadata=new_attn_metadata,
-                    forward_batch=forward_batch,
-                ):
-                    output = self.attn_impl.forward(q, k, v, new_attn_metadata)
-            else:
-                # Update existing metadata's mask
-                ctx_attn_metadata.attn_mask = attention_mask
-                output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
-        else:
-            output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+        output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
         return output

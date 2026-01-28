@@ -360,7 +360,6 @@ class GlmImageAttention(nn.Module):
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
         image_rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         kv_cache: Optional[GlmImageLayerKVCache] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -409,27 +408,7 @@ class GlmImageAttention(nn.Module):
             elif kv_cache.mode == "skip":
                 pass
 
-        # 5. Attention
-        if attention_mask is not None:
-            # Generate the combined mask for [text, image]
-            # text_attn_mask shape: (batch_size, text_seq_length)
-            text_attn_mask = attention_mask
-            device = query.device
-            dtype = query.dtype
-            
-            mix_attn_mask = torch.ones(
-                (batch_size, text_seq_length + image_seq_length), device=device
-            )
-            # Match SGLang: text part uses provided mask, image part is always 1
-            mix_attn_mask[:, :text_seq_length] = text_attn_mask.float().to(device)
-            
-            # Convert to SDPA format: (B, 1, 1, L) for key-padding style mask
-            # True = attend, False = ignore (will be converted to additive mask by SDPA)
-            attention_mask_kv = (mix_attn_mask > 0).unsqueeze(1).unsqueeze(2)  # (B, 1, 1, L)
-        else:
-            attention_mask_kv = None
-
-        hidden_states = self.attn(query, key, value, attention_mask=attention_mask_kv)
+        hidden_states = self.attn(query, key, value)
         hidden_states = hidden_states.flatten(2, 3)
         hidden_states = hidden_states.to(query.dtype)
 
@@ -495,7 +474,6 @@ class GlmImageTransformerBlock(nn.Module):
                 List[Tuple[torch.Tensor, torch.Tensor]],
             ]
         ] = None,
-        attention_mask: Optional[Dict[str, torch.Tensor]] = None,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         kv_cache: Optional[GlmImageLayerKVCache] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -521,7 +499,6 @@ class GlmImageTransformerBlock(nn.Module):
             hidden_states=norm_hidden_states,
             encoder_hidden_states=norm_encoder_hidden_states,
             image_rotary_emb=image_rotary_emb,
-            attention_mask=attention_mask,
             kv_cache=kv_cache,
             **attention_kwargs,
         )
@@ -766,7 +743,6 @@ class GlmImageTransformer2DModel(BaseDiT):
         target_size: torch.Tensor,
         crop_coords: torch.Tensor,
         attention_kwargs: Optional[Dict[str, Any]] = None,
-        attention_mask: Optional[torch.Tensor] = None,
         kv_caches: Optional[GlmImageKVCache] = None,
         kv_caches_mode: Optional[str] = None,
         freqs_cis: Optional[
@@ -821,7 +797,6 @@ class GlmImageTransformer2DModel(BaseDiT):
                 encoder_hidden_states,
                 temb,
                 image_rotary_emb,
-                attention_mask,
                 attention_kwargs,
                 kv_cache=kv_caches[idx] if kv_caches is not None else None,
             )
