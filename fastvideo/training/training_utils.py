@@ -20,7 +20,6 @@ from fastvideo.training.checkpointing_utils import (ModelWrapper,
                                                     RandomStateWrapper,
                                                     SchedulerWrapper)
 
-from einops import rearrange
 from fastvideo.distributed.parallel_state import (get_sp_parallel_rank,
                                                   get_sp_world_size)
 from fastvideo.distributed.utils import (compute_padding_for_sp,

@@ -451,11 +451,10 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 sharded_target = shard_latents_across_sp(target)
                 local_sse = ((sharded_pred.float() -
                               sharded_target.float())**2).sum()
-                loss = (sp_world_size * local_sse /
-                        model_pred.numel()) / self.training_args.gradient_accumulation_steps
+                loss = (sp_world_size * local_sse / model_pred.numel()
+                        ) / self.training_args.gradient_accumulation_steps
             else:
-                loss = (torch.mean(
-                    (model_pred.float() - target.float())**2) /
+                loss = (torch.mean((model_pred.float() - target.float())**2) /
                         self.training_args.gradient_accumulation_steps)
 
             loss.backward()
