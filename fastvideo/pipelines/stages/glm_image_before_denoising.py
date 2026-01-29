@@ -203,13 +203,13 @@ class GlmImageBeforeDenoisingStage(PipelineStage):
         # 4. Prepare Latents
         # GLM-Image uses 16 channels, VAE compression factor is 8
         # Add extra dimension for video compatibility: [B, C, T, H, W] with T=1
-        
+
         # Set seed for deterministic latent generation
         if batch.seed is not None:
             torch.manual_seed(batch.seed)
             if torch.cuda.is_available():
                 torch.cuda.manual_seed(batch.seed)
-        
+
         latents = torch.randn((1, 16, 1, batch.height // 8, batch.width // 8),
                               device=device,
                               dtype=dtype)
