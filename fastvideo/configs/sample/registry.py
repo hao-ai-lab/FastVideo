@@ -46,6 +46,8 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "hunyuanvideo-community/HunyuanVideo": HunyuanSamplingParam,
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v":
     Hunyuan15_480P_SamplingParam,
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v":
+    Hunyuan15_480P_SamplingParam,
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v":
     Hunyuan15_720P_SamplingParam,
     "FastVideo/HY-WorldPlay-Bidirectional-Diffusers": HYWorld_SamplingParam,

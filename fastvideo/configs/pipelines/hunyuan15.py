@@ -9,7 +9,7 @@ import torch
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import HunyuanVideo15Config
 from fastvideo.configs.models.encoders import (BaseEncoderOutput,
-                                               Qwen2_5_VLConfig, T5Config)
+                                               Qwen2_5_VLConfig, T5Config, SiglipVisionConfig)
 from fastvideo.configs.models.vaes import Hunyuan15VAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 
@@ -137,3 +137,13 @@ class Hunyuan15T2V720PConfig(Hunyuan15T2V480PConfig):
 
     # HunyuanConfig-specific parameters with defaults
     flow_shift: int = 9
+
+@dataclass
+class Hunyuan15I2V480PConfig(Hunyuan15T2V480PConfig):
+    image_encoder_config: EncoderConfig = field(
+        default_factory=SiglipVisionConfig)
+    image_encoder_precision: str = "bf16"
+
+    def __post_init__(self):
+        self.vae_config.load_encoder = True
+        self.vae_config.load_decoder = True
