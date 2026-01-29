@@ -59,7 +59,7 @@ class HYWorldDenoisingStage(DenoisingStage):
                 - viewmats: torch.Tensor | None - Camera view matrices (B, T, 4, 4)
                 - Ks: torch.Tensor | None - Camera intrinsics (B, T, 3, 3)
                 - action: torch.Tensor | None - Action conditioning (B, T)
-                - chunk_latent_frames: int - Number of frames per chunk (default: 16 for bidirectional model)
+                - chunk_latent_frames: int - Number of frames per chunk (bi: 16; ar: 4)
                 These can be passed via batch.extra dict or as direct attributes.
             fastvideo_args: The inference arguments.
             
@@ -82,8 +82,7 @@ class HYWorldDenoisingStage(DenoisingStage):
         Ks = getattr(batch, "Ks", None) or batch.extra.get("Ks", None)
         action = getattr(batch, "action", None) or batch.extra.get(
             "action", None)
-        chunk_latent_frames = (getattr(batch, "chunk_latent_frames", None)
-                               or batch.extra.get("chunk_latent_frames", 16))  # 16 for bidirectional model
+        chunk_latent_frames = batch.chunk_latent_frames
         stabilization_level = 15
         points_local = (getattr(batch, "points_local", None)
                         or batch.extra.get("points_local", None))
@@ -422,6 +421,14 @@ class HYWorldDenoisingStage(DenoisingStage):
                 "pose",
                 "pose string must be provided (e.g., 'w-31', 'a-15'). "
                 "Provide pose in batch.pose or batch.extra['pose'].",
+            )
+
+        # Check chunk_latent_frames is specified
+        if batch.chunk_latent_frames is None:
+            result.add_failure(
+                "chunk_latent_frames",
+                "chunk_latent_frames must be specified. "
+                "Use 16 for bidirectional model (bi), 4 for autoregressive model (ar).",
             )
 
         result.add_check("num_inference_steps", batch.num_inference_steps,

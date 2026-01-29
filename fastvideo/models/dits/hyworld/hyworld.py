@@ -246,8 +246,8 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
 
         # Build attention metadata. For AR ("torch_causal"), we inject a 4D chunk-wise
         # causal mask into the forward context so TORCH_SDPA can consume it.
-        from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
         if self.attn_mode == "torch_causal":
+            from fastvideo.attention.backends.sdpa import SDPAMetadataBuilder
             sp_world_size = get_sp_world_size()
             if seq_attention_mask is not None:
                 vision_seq_length = int((seq_attention_mask[0] == 1).sum().item())
@@ -261,25 +261,22 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
                 batch_size=batch_size,
                 device=img_q.device,
             )
+            attn_metadata = SDPAMetadataBuilder().build(
+                current_timestep=0,
+                attn_mask=attn_mask,
+            )
         else:
-            attn_mask = encoder_attention_mask
-
-        attn_metadata = FlashAttnMetadataBuilder().build(
-            current_timestep=0,
-            attn_mask=attn_mask,
-        )
+            from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
+            attn_metadata = FlashAttnMetadataBuilder().build(
+                current_timestep=0,
+                attn_mask=encoder_attention_mask,
+            )
         # Run distributed attention
         with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
             img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v, freqs_cis=freqs_cis, attention_mask=seq_attention_mask)
         
-        # begin hyworld
-        # attention with prope
-        attn_metadata_prope = FlashAttnMetadataBuilder().build(
-            current_timestep=0,
-            attn_mask=attn_mask,
-        )
-        # NOTE: Do NOT pass freqs_cis to prope attention - HY-WorldPlay does not apply RoPE to prope
-        with set_forward_context(current_timestep=0, attn_metadata=attn_metadata_prope):
+        # HYWORLD-SPECIFIC: Attention with ProPE
+        with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
             img_attn_prope, _ = self.attn(
                 img_q_prope, img_k_prope, img_v_prope, txt_q, txt_k, txt_v, 
                 freqs_cis=None, attention_mask=seq_attention_mask  # No RoPE for prope attention
@@ -291,11 +288,10 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
             img_attn_prope = apply_fn_o(img_attn_prope) # [batch, num_heads, seqlen, head_dim]
             img_attn_prope = rearrange(img_attn_prope, "B H L D -> B L (H D)")
 
-        # add prope to img_attn
+        # Add ProPE to img_attn
         img_attn_out, _ = self.img_attn_proj(img_attn.view(batch_size, image_seq_len, -1))
         img_attn_prope_out, _ = self.img_attn_prope_proj(img_attn_prope)
         img_attn_out = img_attn_out + img_attn_prope_out
-        # end hyworld
 
         # Use fused operation for residual connection, normalization, and modulation
         img_mlp_input, img_residual = self.img_attn_residual_mlp_norm(
@@ -386,20 +382,23 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
         config: HYWorldConfig,
         hf_config: dict[str, Any],
     ) -> None:
+        attn_mode = getattr(config.arch_config, "attn_mode", "flash")
+
+        # For AR model, set TORCH_SDPA backend globally BEFORE parent init (which creates attention modules)
+        if attn_mode == "torch_causal":
+            from fastvideo.attention.selector import global_force_attn_backend
+            global_force_attn_backend(AttentionBackendEnum.TORCH_SDPA)
+        
         super().__init__(config=config, hf_config=hf_config)
 
         # Replace double_blocks with HY-World version that supports ProPE
-        attn_mode = getattr(config.arch_config, "attn_mode", "flash")
-        supported_attention_backends = ((AttentionBackendEnum.TORCH_SDPA,)
-                                        if attn_mode == "torch_causal"
-                                        else self._supported_attention_backends)
         self.double_blocks = nn.ModuleList([
             HYWorldDoubleStreamBlock(
                 hidden_size=self.hidden_size,
                 num_attention_heads=self.num_attention_heads,
                 mlp_ratio=config.arch_config.mlp_ratio,
                 dtype=None,
-                supported_attention_backends=supported_attention_backends,
+                supported_attention_backends=self._supported_attention_backends,
                 attn_mode=attn_mode,
                 prefix=f"{config.prefix}.double_blocks.{i}"
             )
