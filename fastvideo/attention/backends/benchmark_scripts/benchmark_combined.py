@@ -270,11 +270,11 @@ def generate_plot(results: Dict[str, Dict[int, Optional[float]]],
     methods = list(results.keys())
     x_labels = [f"{sl//1024}K" for sl in seq_lens]
     
-    # Colors for each method (matching the reference image style)
+    # Colors for each method (red, blue, green scheme)
     colors = {
-        'FlashAttn': '#FFA500',   # Orange
-        'SageAttn3': '#228B22',   # Forest Green
-        'FP4': '#32CD32',         # Lime Green (lighter than SageAttn3)
+        'FlashAttn': '#1E90FF',   # Blue (Dodger Blue)
+        'SageAttn3': '#228B22',   # Green (Forest Green)
+        'FP4': '#DC143C',         # Red (Crimson)
     }
     
     # Number of methods and positions
@@ -316,12 +316,15 @@ def generate_plot(results: Dict[str, Dict[int, Optional[float]]],
                         fontsize=8, rotation=0)
     
     # Customize plot
-    ax.set_xlabel('Sequence Length', fontsize=12)
-    ax.set_ylabel('Speed (TOPS)', fontsize=12)
-    ax.set_title(f'{device_name}, (Head dim = {head_dim}, causal = {is_causal})', fontsize=14)
+    ax.set_xlabel('Sequence Length', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Speed (TOPS)', fontsize=12, fontweight='bold')
+    ax.set_title(f'{device_name}, (Head dim = {head_dim}, causal = {is_causal})', fontsize=14, fontweight='bold')
     ax.set_xticks(x)
     ax.set_xticklabels(x_labels)
-    ax.legend(loc='upper left', ncol=len(methods), fontsize=10)
+    legend = ax.legend(loc='upper left', ncol=len(methods), fontsize=10)
+    # Make legend text bold
+    for text in legend.get_texts():
+        text.set_fontweight('bold')
     
     # Set y-axis to start from 0
     ax.set_ylim(bottom=0)

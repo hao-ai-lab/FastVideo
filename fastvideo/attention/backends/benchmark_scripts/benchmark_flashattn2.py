@@ -115,28 +115,24 @@ def run_benchmark_suite():
     # Default configurations to test
     # (batch_size, num_heads, seq_len, head_dim, is_causal, dtype)
     configs = [
-        (1, 16, 512, 64, False, torch.bfloat16),
         (1, 16, 1024, 64, False, torch.bfloat16),
         (1, 16, 2048, 64, False, torch.bfloat16),
         (1, 16, 4096, 64, False, torch.bfloat16),
         (1, 16, 8192, 64, False, torch.bfloat16),
         (1, 16, 16384, 64, False, torch.bfloat16),
 
-        (1, 16, 512, 128, False, torch.bfloat16),
         (1, 16, 1024, 128, False, torch.bfloat16),
         (1, 16, 2048, 128, False, torch.bfloat16),
         (1, 16, 4096, 128, False, torch.bfloat16),
         (1, 16, 8192, 128, False, torch.bfloat16),
         (1, 16, 16384, 128, False, torch.bfloat16),
 
-        (1, 32, 512, 64, False, torch.bfloat16),
         (1, 32, 1024, 64, False, torch.bfloat16),
         (1, 32, 2048, 64, False, torch.bfloat16),
         (1, 32, 4096, 64, False, torch.bfloat16),
         (1, 32, 8192, 64, False, torch.bfloat16),
         (1, 32, 16384, 64, False, torch.bfloat16),
 
-        (1, 32, 512, 128, False, torch.bfloat16),
         (1, 32, 1024, 128, False, torch.bfloat16),
         (1, 32, 2048, 128, False, torch.bfloat16),
         (1, 32, 4096, 128, False, torch.bfloat16),
