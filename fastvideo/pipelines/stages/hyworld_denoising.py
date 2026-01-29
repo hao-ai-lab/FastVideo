@@ -110,8 +110,9 @@ class HYWorldDenoisingStage(DenoisingStage):
             Ks = Ks.unsqueeze(0)  # (1, T, 3, 3)
             action = action.unsqueeze(0)  # (1, T)
 
-            logger.info("Converted pose '%s' to viewmats, Ks, and action for %d latent frames",
-                       pose, latent_num)
+            logger.info(
+                "Converted pose '%s' to viewmats, Ks, and action for %d latent frames",
+                pose, latent_num)
 
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
