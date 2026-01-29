@@ -299,13 +299,15 @@ class TextEncoderLoader(ComponentLoader):
                 fastvideo_args.pipeline_config.text_encoder_precisions[0]
             )
         except Exception:
-            encoder_config = (
-                fastvideo_args.pipeline_config.text_encoder_configs[1]
-            )
-            encoder_config.update_model_arch(model_config)
-            encoder_precision = (
-                fastvideo_args.pipeline_config.text_encoder_precisions[1]
-            )
+            text_encoder_configs = fastvideo_args.pipeline_config.text_encoder_configs
+            if len(text_encoder_configs) > 1:
+                encoder_config = text_encoder_configs[1]
+                encoder_config.update_model_arch(model_config)
+                encoder_precision = (
+                    fastvideo_args.pipeline_config.text_encoder_precisions[1]
+                )
+            else:
+                raise
 
         target_device = get_local_torch_device()
         # TODO(will): add support for other dtypes
