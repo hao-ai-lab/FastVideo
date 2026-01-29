@@ -40,6 +40,25 @@ from fastvideo.hooks.layerwise_offload import enable_layerwise_offload
 logger = init_logger(__name__)
 
 
+def _filter_config_for_arch(config: dict, arch_config) -> dict:
+    """
+    Filter config dict to only include fields that are valid in the arch_config.
+    This handles HuggingFace configs that may have extra architecture fields not in FastVideo's arch_config.
+    
+    Args:
+        config: Configuration dict from HuggingFace model
+        arch_config: Target arch_config dataclass
+        
+    Returns:
+        Filtered config dict with only valid fields for the arch_config
+    """
+    from dataclasses import fields as dc_fields
+    valid_fields = {f.name for f in dc_fields(arch_config)}
+    # Always keep these fields as they're used for model class resolution and metadata
+    valid_fields.update(['architectures', '_class_name'])
+    return {k: v for k, v in config.items() if k in valid_fields}
+
+
 class ComponentLoader(ABC):
     """Base class for loading a specific type of model component."""
 
@@ -456,7 +475,8 @@ class ImageEncoderLoader(TextEncoderLoader):
         logger.info("HF Model config: %s", model_config)
 
         encoder_config = fastvideo_args.pipeline_config.image_encoder_config
-        encoder_config.update_model_arch(model_config)
+        filtered_config = _filter_config_for_arch(model_config, encoder_config.arch_config)
+        encoder_config.update_model_arch(filtered_config)
 
         from fastvideo.platforms import current_platform
 
@@ -613,10 +633,16 @@ class VAELoader(ComponentLoader):
                             vae_config,
                             "ltx2_temporal_tile_overlap_in_frames", 24),
                     )
+            # Handle standard diffusers VAEs (AutoencoderKL, etc.) that aren't in FastVideo registry
+            elif class_name in ("AutoencoderKL", "AutoencoderTiny"):
+                from diffusers import AutoencoderKL as DiffusersAutoencoderKL
+                vae = DiffusersAutoencoderKL.from_pretrained(model_path).to(target_device)
             else:
                 config.pop("_class_name", None)
+                config.pop("_name_or_path", None)
                 vae_config = fastvideo_args.pipeline_config.vae_config
-                vae_config.update_model_arch(config)
+                filtered_config = _filter_config_for_arch(config, vae_config.arch_config)
+                vae_config.update_model_arch(filtered_config)
                 vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
                 vae = vae_cls(vae_config).to(target_device)
 
@@ -745,7 +771,8 @@ class TransformerLoader(ComponentLoader):
 
         # Config from Diffusers supersedes fastvideo's model config
         dit_config = fastvideo_args.pipeline_config.dit_config
-        dit_config.update_model_arch(config)
+        filtered_config = _filter_config_for_arch(config, dit_config.arch_config)
+        dit_config.update_model_arch(filtered_config)
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 

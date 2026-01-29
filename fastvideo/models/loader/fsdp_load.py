@@ -340,7 +340,7 @@ def load_model_from_full_model_state_dict(
                        unused_keys)
 
     # List of allowed parameter name patterns
-    ALLOWED_NEW_PARAM_PATTERNS = ["gate_compress", "proj_l"]  # Can be extended as needed
+    ALLOWED_NEW_PARAM_PATTERNS = ["gate_compress", "proj_l", "adaLN_modulation"]  # Can be extended as needed
     for new_param_name in unused_keys:
         if not any(pattern in new_param_name
                    for pattern in ALLOWED_NEW_PARAM_PATTERNS):

@@ -58,6 +58,12 @@ class TimestepPreparationStage(PipelineStage):
         if n_tokens is not None and "n_tokens" in inspect.signature(
                 scheduler.set_timesteps).parameters:
             extra_set_timesteps_kwargs["n_tokens"] = n_tokens
+        
+        # Handle mu parameter for FLUX scheduler with dynamic shifting
+        if "mu" in inspect.signature(scheduler.set_timesteps).parameters:
+            # Try to get flow_shift from pipeline config, default to 3.0 for FLUX
+            flow_shift = getattr(fastvideo_args.pipeline_config, 'flow_shift', 3.0)
+            extra_set_timesteps_kwargs["mu"] = flow_shift
 
         # Handle custom timesteps or sigmas
         if timesteps is not None and sigmas is not None:
