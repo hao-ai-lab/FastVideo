@@ -34,6 +34,93 @@ from fastvideo.utils.communications import all_gather, all_to_all_4D
 from fastvideo.utils.parallel_states import get_sequence_parallel_state, mccl_info
 
 
+def _prehook_split_img_attn_qkv(module, state_dict, prefix, local_metadata,
+                               strict, missing_keys, unexpected_keys, error_msgs):
+    """
+    Convert checkpoint keys:
+      {prefix}img_attn_qkv.(weight|bias)
+    -> expected keys:
+      {prefix}img_attn_q.(weight|bias), img_attn_k..., img_attn_v...
+    """
+
+    w_key = prefix + "img_attn_qkv.weight"
+    b_key = prefix + "img_attn_qkv.bias"
+
+    # Only act if checkpoint provides qkv, and current module expects q/k/v
+    if w_key in state_dict:
+        W = state_dict.pop(w_key)  # Linear weight: [out, in] = [3D, D]
+        if W.ndim != 2 or W.shape[0] % 3 != 0:
+            error_msgs.append(f"[qkv split] Unexpected shape for {w_key}: {tuple(W.shape)}")
+            return
+        qW, kW, vW = W.chunk(3, dim=0)
+        state_dict[prefix + "img_attn_q.weight"] = qW
+        state_dict[prefix + "img_attn_k.weight"] = kW
+        state_dict[prefix + "img_attn_v.weight"] = vW
+
+    if b_key in state_dict:
+        B = state_dict.pop(b_key)  # bias: [3D]
+        if B.ndim != 1 or B.shape[0] % 3 != 0:
+            error_msgs.append(f"[qkv split] Unexpected shape for {b_key}: {tuple(B.shape)}")
+            return
+        qB, kB, vB = B.chunk(3, dim=0)
+        state_dict[prefix + "img_attn_q.bias"] = qB
+        state_dict[prefix + "img_attn_k.bias"] = kB
+        state_dict[prefix + "img_attn_v.bias"] = vB
+
+
+def _prehook_split_linear1(module, state_dict, prefix, local_metadata,
+                           strict, missing_keys, unexpected_keys, error_msgs):
+    """
+    Convert checkpoint keys:
+      {prefix}linear1.(weight|bias)
+    -> expected keys:
+      {prefix}linear_q.(weight|bias), linear_k..., linear_v..., linear_mlp...
+    """
+
+    w_key = prefix + "linear1.weight"
+    b_key = prefix + "linear1.bias"
+
+    # Only act if checkpoint provides linear1
+    if w_key in state_dict:
+        W = state_dict.pop(w_key)  # Linear weight: [3D + M, D]
+        # W has shape [out, in].
+        # The split in forward was: qkv, mlp = split(linear1(x), [3D, M], dim=-1)
+        # So in weight matrix (output dim is dim 0), the first 3D rows are qkv, next M rows are mlp.
+        hidden_size = module.hidden_size
+        mlp_hidden_dim = module.mlp_hidden_dim
+        
+        # Verify shape
+        expected_out_dim = 3 * hidden_size + mlp_hidden_dim
+        if W.shape[0] != expected_out_dim:
+             error_msgs.append(f"[linear1 split] Unexpected shape for {w_key}: {tuple(W.shape)}, expected out_dim={expected_out_dim}")
+             return
+
+        qkvW, mlpW = torch.split(W, [3 * hidden_size, mlp_hidden_dim], dim=0)
+        qW, kW, vW = qkvW.chunk(3, dim=0)
+
+        state_dict[prefix + "linear_q.weight"] = qW
+        state_dict[prefix + "linear_k.weight"] = kW
+        state_dict[prefix + "linear_v.weight"] = vW
+        state_dict[prefix + "linear_mlp.weight"] = mlpW
+
+    if b_key in state_dict:
+        B = state_dict.pop(b_key)
+        hidden_size = module.hidden_size
+        mlp_hidden_dim = module.mlp_hidden_dim
+        
+        expected_out_dim = 3 * hidden_size + mlp_hidden_dim
+        if B.shape[0] != expected_out_dim:
+             error_msgs.append(f"[linear1 split] Unexpected shape for {b_key}: {tuple(B.shape)}")
+             return
+
+        qkvB, mlpB = torch.split(B, [3 * hidden_size, mlp_hidden_dim], dim=0)
+        qB, kB, vB = qkvB.chunk(3, dim=0)
+        
+        state_dict[prefix + "linear_q.bias"] = qB
+        state_dict[prefix + "linear_k.bias"] = kB
+        state_dict[prefix + "linear_v.bias"] = vB
+        state_dict[prefix + "linear_mlp.bias"] = mlpB
+
 class MMDoubleStreamBlock(nn.Module):
     """
     A multimodal dit block with separate modulation for
@@ -74,7 +161,12 @@ class MMDoubleStreamBlock(nn.Module):
         )
         self.img_norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs)
 
-        self.img_attn_qkv = nn.Linear(hidden_size, hidden_size * 3, bias=qkv_bias, **factory_kwargs)
+        # self.img_attn_qkv = nn.Linear(hidden_size, hidden_size * 3, bias=qkv_bias, **factory_kwargs)
+        self.img_attn_q = nn.Linear(hidden_size, hidden_size * 1, bias=qkv_bias, **factory_kwargs)
+        self.img_attn_k = nn.Linear(hidden_size, hidden_size * 1, bias=qkv_bias, **factory_kwargs)
+        self.img_attn_v = nn.Linear(hidden_size, hidden_size * 1, bias=qkv_bias, **factory_kwargs)
+        self._register_load_state_dict_pre_hook(_prehook_split_img_attn_qkv, with_module=True)
+        
         qk_norm_layer = get_norm_layer(qk_norm_type)
         self.img_attn_q_norm = (qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **norm_layer_factory_kwargs)
                                 if qk_norm else nn.Identity())
@@ -152,8 +244,13 @@ class MMDoubleStreamBlock(nn.Module):
         # Prepare image for attention.
         img_modulated = self.img_norm1(img)
         img_modulated = modulate(img_modulated, shift=img_mod1_shift, scale=img_mod1_scale)
-        img_qkv = self.img_attn_qkv(img_modulated)
-        img_q, img_k, img_v = rearrange(img_qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num)
+        # img_qkv = self.img_attn_qkv(img_modulated)
+        img_q = self.img_attn_q(img_modulated)
+        img_k = self.img_attn_k(img_modulated)
+        img_v = self.img_attn_v(img_modulated)
+        img_q = rearrange(img_q, "B L (H D) -> B L H D", H=self.heads_num)
+        img_k = rearrange(img_k, "B L (H D) -> B L H D", H=self.heads_num)
+        img_v = rearrange(img_v, "B L (H D) -> B L H D", H=self.heads_num)
         # Apply QK-Norm if needed
         img_q = self.img_attn_q_norm(img_q).to(img_v)
         img_k = self.img_attn_k_norm(img_k).to(img_v)
@@ -169,7 +266,8 @@ class MMDoubleStreamBlock(nn.Module):
             #     shrink_head(freqs_cis[0], dim=0),
             #     shrink_head(freqs_cis[1], dim=0),
             # )
-            img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False, use_fused_rope=self.use_fused_rope)
+            img_qq = apply_rotary_emb_single(img_q, freqs_cis, head_first=False, use_fused_rope=self.use_fused_rope)
+            img_kk = apply_rotary_emb_single(img_k, freqs_cis, head_first=False, use_fused_rope=self.use_fused_rope)
             assert (img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
                     ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
             img_q, img_k = img_qq, img_kk
@@ -368,7 +466,12 @@ class MMSingleStreamBlock(nn.Module):
         self.scale = qk_scale or head_dim**-0.5
 
         # qkv and mlp_in
-        self.linear1 = nn.Linear(hidden_size, hidden_size * 3 + mlp_hidden_dim, **factory_kwargs)
+        # self.linear1 = nn.Linear(hidden_size, hidden_size * 3 + mlp_hidden_dim, **factory_kwargs)
+        self.linear_q = nn.Linear(hidden_size, hidden_size, **factory_kwargs)
+        self.linear_k = nn.Linear(hidden_size, hidden_size, **factory_kwargs)
+        self.linear_v = nn.Linear(hidden_size, hidden_size, **factory_kwargs)
+        self.linear_mlp = nn.Linear(hidden_size, mlp_hidden_dim, **factory_kwargs)
+        self._register_load_state_dict_pre_hook(_prehook_split_linear1, with_module=True)
         # proj and mlp_out
         self.linear2 = nn.Linear(hidden_size + mlp_hidden_dim, hidden_size, **factory_kwargs)
 
@@ -407,9 +510,18 @@ class MMSingleStreamBlock(nn.Module):
     ) -> torch.Tensor:
         mod_shift, mod_scale, mod_gate = self.modulation(vec).chunk(3, dim=-1)
         x_mod = modulate(self.pre_norm(x), shift=mod_shift, scale=mod_scale)
-        qkv, mlp = torch.split(self.linear1(x_mod), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
+        # qkv, mlp = torch.split(self.linear1(x_mod), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
 
-        q, k, v = rearrange(qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num)
+        # q, k, v = rearrange(qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num)
+        
+        q = self.linear_q(x_mod)
+        k = self.linear_k(x_mod)
+        v = self.linear_v(x_mod)
+        mlp = self.linear_mlp(x_mod)
+
+        q = rearrange(q, "B L (H D) -> B L H D", H=self.heads_num)
+        k = rearrange(k, "B L (H D) -> B L H D", H=self.heads_num)
+        v = rearrange(v, "B L (H D) -> B L H D", H=self.heads_num)
 
         # Apply QK-Norm if needed.
         q = self.q_norm(q).to(v)
@@ -427,7 +539,8 @@ class MMSingleStreamBlock(nn.Module):
         img_q, txt_q = q[:, :-txt_len, :, :], q[:, -txt_len:, :, :]
         img_k, txt_k = k[:, :-txt_len, :, :], k[:, -txt_len:, :, :]
         img_v, txt_v = v[:, :-txt_len, :, :], v[:, -txt_len:, :, :]
-        img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False, use_fused_rope=self.use_fused_rope)
+        img_qq = apply_rotary_emb_single(img_q, freqs_cis, head_first=False, use_fused_rope=self.use_fused_rope)
+        img_kk = apply_rotary_emb_single(img_k, freqs_cis, head_first=False, use_fused_rope=self.use_fused_rope)
         assert (img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
                 ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
         img_q, img_k = img_qq, img_kk
