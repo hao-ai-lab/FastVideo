@@ -13,6 +13,9 @@ from fastvideo.utils import PRECISION_TO_TYPE
 class GlmImageDecodingStage(DecodingStage):
     """Decoding stage for GLM-Image (2D image generation)."""
 
+    def __init__(self, vae, pipeline=None) -> None:
+        super().__init__(vae, pipeline)
+
     @torch.no_grad()
     def decode(self, latents: torch.Tensor,
                fastvideo_args: FastVideoArgs) -> torch.Tensor:
