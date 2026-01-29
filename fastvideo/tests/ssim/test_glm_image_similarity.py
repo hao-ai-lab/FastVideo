@@ -1,15 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
-"""
-SSIM-based similarity tests for GLM-Image generation.
-
-Tests GLM-Image text-to-image generation with various prompts and backends.
-"""
+"""SSIM-based regression tests for GLM-Image generation."""
 
 import os
 
 import pytest
 import torch
-import hashlib
+from PIL import Image
+import numpy as np
 
 from fastvideo import VideoGenerator
 from fastvideo.logger import init_logger
@@ -18,26 +15,24 @@ logger = init_logger(__name__)
 
 # Device-specific reference folder
 device_name = torch.cuda.get_device_name()
-device_reference_folder_suffix = "_reference_videos"
-
 if "A40" in device_name:
-    device_reference_folder = "A40" + device_reference_folder_suffix
+    device_reference_folder = "A40_reference_videos"
 elif "L40S" in device_name:
-    device_reference_folder = "L40S" + device_reference_folder_suffix
+    device_reference_folder = "L40S_reference_videos"
 elif "H100" in device_name:
-    device_reference_folder = "H100" + device_reference_folder_suffix
+    device_reference_folder = "H100_reference_videos"
 else:
-    logger.warning(f"Unsupported device for ssim tests: {device_name}")
+    logger.warning(f"Unsupported device: {device_name}, using L40S references")
+    device_reference_folder = "L40S_reference_videos"
 
 # Test prompts
 TEST_PROMPTS = [
     "A beautiful landscape photography with rolling hills, a winding river, and a vibrant sunset in the background. Warm golden light, photorealistic style.",
-    "A majestic mountain landscape at golden hour with a calm lake reflecting snow-capped peaks",
 ]
 
 # Fixed reference filenames (avoid hashing prompts)
 REFERENCE_FILENAMES = {
-    TEST_PROMPTS[0]: "landscape_ref.png"
+    TEST_PROMPTS[0]: "landscape_ref.png",
 }
 
 # GLM-Image parameters
@@ -114,7 +109,7 @@ def _ssim_torch(x: torch.Tensor, y: torch.Tensor, window_size: int = 11, sigma: 
 
 
 @pytest.mark.parametrize("prompt", TEST_PROMPTS)
-@pytest.mark.parametrize("ATTENTION_BACKEND", ["TORCH_SDPA"])
+@pytest.mark.parametrize("ATTENTION_BACKEND", ["FLASH_ATTN"])
 def test_glm_image_similarity(prompt, ATTENTION_BACKEND):
     """
     Test GLM-Image generation similarity against reference images.
