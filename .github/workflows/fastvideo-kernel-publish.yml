@@ -1,0 +1,222 @@
+name: Publish FastVideo Kernel to PyPI on Version Change
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "fastvideo-kernel/pyproject.toml"
+  workflow_dispatch:
+
+jobs:
+  check-version-change:
+    runs-on: ubuntu-latest
+    outputs:
+      version-changed: ${{ steps.check-version.outputs.changed }}
+      new-version: ${{ steps.check-version.outputs.new-version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check if version changed
+        id: check-version
+        run: |
+          cd fastvideo-kernel
+          # Get current commit's version from pyproject.toml
+          # Use ^ to match start of line to avoid matching minimum-version
+          NEW_VERSION=$(grep -oP '^version\s*=\s*"\K[^"]+' pyproject.toml)
+          echo "New version: $NEW_VERSION"
+          
+          # Get previous version from git history
+          # Note: git show expects path relative to repo root
+          OLD_VERSION=$(git show HEAD~1:fastvideo-kernel/pyproject.toml | grep -oP '^version\s*=\s*"\K[^"]+' || echo "0.0.0")
+          echo "Old version: $OLD_VERSION"
+          
+          if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
+            echo "Version changed from $OLD_VERSION to $NEW_VERSION"
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "Version did not change"
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+  build_wheels:
+    name: Build Wheel
+    needs: check-version-change
+    if: ${{ needs.check-version-change.outputs.version-changed == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+          os: [ubuntu-22.04]
+          python-version: ['3.10', '3.11', '3.12']
+          torch-cuda:
+            # - torch-version: '2.5.1'
+            #   cuda-version: '12.4.1'
+            #   torch-cuda-short: 'cu124'
+            # - torch-version: '2.6.0'
+            #   cuda-version: '12.6.3'
+            #   torch-cuda-short: 'cu126'
+            # - torch-version: '2.7.1'
+            #   cuda-version: '12.8.0'
+            #   torch-cuda-short: 'cu128'
+            - torch-version: '2.9.1'
+              cuda-version: '12.8.0'
+              torch-cuda-short: 'cu128'
+
+    steps:
+      - name: Free up disk space
+        run: |
+          echo "Initial disk space:"
+          df -h
+          
+          # Remove large directories
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/lib/node_modules
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/rust
+          sudo rm -rf /usr/local/.ghcup
+          
+          # Remove cached files
+          sudo rm -rf /var/lib/apt/lists/*
+          sudo rm -rf /var/cache/apt/archives/*
+          
+          echo "Disk space after cleanup:"
+          df -h
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install CUDA ${{ matrix.torch-cuda.cuda-version }}
+        uses: Jimver/cuda-toolkit@v0.2.21
+        id: cuda-toolkit
+        with:
+          cuda: ${{ matrix.torch-cuda.cuda-version }}
+          linux-local-args: '["--toolkit"]'
+          method: 'network'
+
+      - name: Install dependencies (GCC, Clang, CUDA Paths, Git)
+        run: |
+          sudo apt update
+          sudo apt install -y git patchelf gcc-11 g++-11 clang-11
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100 --slave /usr/bin/g++ g++ /usr/bin/g++-11
+
+          # Allow Git to Access Safe Directory
+          git config --global --add safe.directory /__w/FastVideo/FastVideo
+
+          # Set CUDA environment variables
+          export CUDA_HOME=/usr/local/cuda-${{ matrix.torch-cuda.cuda-version }}
+          export PATH=${CUDA_HOME}/bin:${PATH}
+          export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
+          
+          # Verify installation
+          gcc --version
+          g++ --version
+          clang-11 --version
+          nvcc --version
+
+      - name: Install PyTorch ${{ matrix.torch-cuda.torch-version }}+cu${{ matrix.torch-cuda.cuda-version }}
+        run: |
+          pip install --upgrade pip
+          pip install typing-extensions==4.12.2
+          pip install --no-cache-dir torch==${{ matrix.torch-cuda.torch-version }} --index-url https://download.pytorch.org/whl/${{matrix.torch-cuda.torch-cuda-short}}
+          nvcc --version
+          python --version
+          python -c "import torch; print('PyTorch:', torch.__version__)"
+          python -c "import torch; print('CUDA:', torch.version.cuda)"
+          python -c "from torch.utils import cpp_extension; print (cpp_extension.CUDA_HOME)"
+
+      - name: Build wheel
+        run: |
+          export PYTHONPATH=$GITHUB_WORKSPACE:$PYTHONPATH
+          
+          pip install setuptools ninja packaging wheel triton scikit-build-core cmake build
+          
+          cd fastvideo-kernel
+          git submodule update --init --recursive  # Ensure ThunderKittens submodule is initialized
+          # Release builds are produced on GPU-less runners, so force-enable TK and target Hopper.
+          export TORCH_CUDA_ARCH_LIST="9.0a"
+          export CMAKE_ARGS="${CMAKE_ARGS:-} -DFASTVIDEO_KERNEL_BUILD_TK=ON -DCMAKE_CUDA_ARCHITECTURES=90a"
+          
+          # Build standard wheel (no local version suffix) for PyPI
+          python -m build --wheel --outdir dist
+          
+          # Fix the wheel to be manylinux compliant
+          pip install auditwheel
+          # Point auditwheel at torch libs, but do not vendor them into the wheel.
+          TORCH_LIB_DIR=$(python - <<'PY'
+          import os
+          import torch
+
+          print(os.path.join(os.path.dirname(torch.__file__), "lib"))
+          PY
+          )
+          export LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}"
+          # Target manylinux_2_35 (Ubuntu 22.04 native)
+          auditwheel repair dist/*.whl --plat manylinux_2_35_x86_64 -w fixed_dist \
+            --exclude libtorch_cuda.so \
+            --exclude libtorch_cpu.so \
+            --exclude libtorch.so \
+            --exclude libc10.so \
+            --exclude libc10_cuda.so \
+            --exclude libtorch_python.so
+          # Move fixed wheels back to dist for upload consistency
+          rm dist/*.whl
+          mv fixed_dist/*.whl dist/
+
+      - name: Upload wheel artifact
+        # Only upload if it's the "main" CUDA version we want on PyPI
+        # We upload all to artifacts for inspection/GH releases, but give them distinct artifact names
+        uses: actions/upload-artifact@v4
+        with:
+          name: fastvideo_kernel-py${{ matrix.python-version }}-${{ matrix.torch-cuda.torch-cuda-short }}-torch${{ matrix.torch-cuda.torch-version }}
+          path: fastvideo-kernel/dist/*.whl
+          retention-days: 90
+
+  publish_package:
+    name: Publish package
+    needs: [build_wheels, check-version-change]
+    if: ${{ needs.check-version-change.outputs.version-changed == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-22.04
+    permissions:
+      id-token: write  # Needed for OIDC Trusted Publishing
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Download PyPI wheels
+        uses: actions/download-artifact@v4
+        with:
+          path: fastvideo-kernel/dist/
+          pattern: 'fastvideo_kernel-py*'
+          merge-multiple: true
+
+      - name: Build source distribution
+        run: |
+          pip install build scikit-build-core cmake ninja
+          
+          cd fastvideo-kernel
+          # We don't need full CUDA/Torch to just package the source (sdist)
+          python -m build --sdist --outdir dist
+
+      - name: Publish release distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: fastvideo-kernel/dist/

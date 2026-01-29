@@ -2,7 +2,7 @@ from typing import Literal, get_args
 
 from fastvideo.layers.quantization.base_config import QuantizationConfig
 
-QuantizationMethods = Literal[None]
+QuantizationMethods = Literal[None, "AbsMaxFP8"]
 
 QUANTIZATION_METHODS: list[str] = list(get_args(QuantizationMethods))
 
@@ -50,7 +50,12 @@ def get_quantization_config(quantization: str) -> type[QuantizationConfig]:
     if quantization not in QUANTIZATION_METHODS:
         raise ValueError(f"Invalid quantization method: {quantization}")
 
-    method_to_config: dict[str, type[QuantizationConfig]] = {}
+    # lazy import to avoid triggering `torch.compile` too early
+    from .absmax_fp8 import AbsMaxFP8Config
+
+    method_to_config: dict[str, type[QuantizationConfig]] = {
+        "AbsMaxFP8": AbsMaxFP8Config,
+    }
     # Update the `method_to_config` with customized quantization methods.
     method_to_config.update(_CUSTOMIZED_METHOD_TO_QUANT_CONFIG)
 

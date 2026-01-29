@@ -9,6 +9,7 @@ fastvideo generate \
     --model-path $MODEL_BASE \
     --sp-size ${num_gpus} \
     --tp-size 1 \
+    --num-gpus ${num_gpus} \
     --height 768 \
     --width 1280 \
     --num-frames 117 \

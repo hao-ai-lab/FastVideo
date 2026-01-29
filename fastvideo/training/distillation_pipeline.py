@@ -593,11 +593,6 @@ class DistillationPipeline(TrainingPipeline):
         noise = torch.randn(self.video_latent_shape,
                             device=self.device,
                             dtype=dtype)
-        if self.sp_world_size > 1:
-            noise = rearrange(noise,
-                              "b (n t) c h w -> b n t c h w",
-                              n=self.sp_world_size).contiguous()
-            noise = noise[:, self.rank_in_sp_group, :, :, :, :]
         noisy_latent = self.noise_scheduler.add_noise(latents.flatten(0, 1),
                                                       noise.flatten(0, 1),
                                                       timestep).unflatten(
@@ -637,13 +632,6 @@ class DistillationPipeline(TrainingPipeline):
         current_noise_latents = torch.randn(self.video_latent_shape,
                                             device=self.device,
                                             dtype=dtype)
-        if self.sp_world_size > 1:
-            current_noise_latents = rearrange(
-                current_noise_latents,
-                "b (n t) c h w -> b n t c h w",
-                n=self.sp_world_size).contiguous()
-            current_noise_latents = current_noise_latents[:, self.
-                                                          rank_in_sp_group, :, :, :, :]
         current_noise_latents_copy = current_noise_latents.clone()
 
         # Only run intermediate steps if target_timestep_idx > 0
@@ -678,11 +666,6 @@ class DistillationPipeline(TrainingPipeline):
                     noise = torch.randn(self.video_latent_shape,
                                         device=self.device,
                                         dtype=pred_clean.dtype)
-                    if self.sp_world_size > 1:
-                        noise = rearrange(noise,
-                                          "b (n t) c h w -> b n t c h w",
-                                          n=self.sp_world_size).contiguous()
-                        noise = noise[:, self.rank_in_sp_group, :, :, :, :]
                     current_noise_latents = self.noise_scheduler.add_noise(
                         pred_clean.flatten(0, 1), noise.flatten(0, 1),
                         next_timestep_tensor).unflatten(0, pred_clean.shape[:2])
@@ -735,11 +718,6 @@ class DistillationPipeline(TrainingPipeline):
             noise = torch.randn(self.video_latent_shape,
                                 device=self.device,
                                 dtype=generator_pred_video.dtype)
-            if self.sp_world_size > 1:
-                noise = rearrange(noise,
-                                  "b (n t) c h w -> b n t c h w",
-                                  n=self.sp_world_size).contiguous()
-                noise = noise[:, self.rank_in_sp_group, :, :, :, :]
 
             noisy_latent = self.noise_scheduler.add_noise(
                 generator_pred_video.flatten(0, 1), noise.flatten(0, 1),
@@ -848,12 +826,6 @@ class DistillationPipeline(TrainingPipeline):
         fake_score_noise = torch.randn(self.video_latent_shape,
                                        device=self.device,
                                        dtype=generator_pred_video.dtype)
-        if self.sp_world_size > 1:
-            fake_score_noise = rearrange(fake_score_noise,
-                                         "b (n t) c h w -> b n t c h w",
-                                         n=self.sp_world_size).contiguous()
-            fake_score_noise = fake_score_noise[:, self.
-                                                rank_in_sp_group, :, :, :, :]
 
         noisy_generator_pred_video = self.noise_scheduler.add_noise(
             generator_pred_video.flatten(0, 1), fake_score_noise.flatten(0, 1),
@@ -925,16 +897,60 @@ class DistillationPipeline(TrainingPipeline):
         training_batch.latents = training_batch.latents.permute(0, 2, 1, 3, 4)
         self.video_latent_shape = training_batch.latents.shape
 
-        if self.sp_world_size > 1:
-            training_batch.latents = rearrange(
-                training_batch.latents,
-                "b (n t) c h w -> b n t c h w",
-                n=self.sp_world_size).contiguous()
-            training_batch.latents = training_batch.latents[:, self.
-                                                            rank_in_sp_group, :, :, :, :]
-
         self.video_latent_shape_sp = training_batch.latents.shape
 
+        return training_batch
+
+    def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
+        with self.tracker.timed("timing/get_next_batch"):
+            batch = next(self.train_loader_iter, None)  # type: ignore
+            if batch is None:
+                self.current_epoch += 1
+                # Reset iterator for next epoch
+                self.train_loader_iter = iter(self.train_dataloader)
+                # Get first batch of new epoch
+                batch = next(self.train_loader_iter)
+
+            device = get_local_torch_device()
+            dtype = torch.bfloat16
+
+            encoder_hidden_states = batch['text_embedding']
+            encoder_attention_mask = batch['text_attention_mask']
+            infos = batch['info_list']
+
+            if self.training_args.simulate_generator_forward:
+                batch_size = encoder_hidden_states.shape[0]
+                vae_config = self.training_args.pipeline_config.vae_config.arch_config
+                num_channels = vae_config.z_dim
+                spatial_compression_ratio = vae_config.spatial_compression_ratio
+
+                latent_height = self.training_args.num_height // spatial_compression_ratio
+                latent_width = self.training_args.num_width // spatial_compression_ratio
+
+                latents = torch.zeros(
+                    batch_size,
+                    num_channels,
+                    self.training_args.num_latent_t,
+                    latent_height,
+                    latent_width,
+                    device=device,
+                    dtype=dtype,
+                )
+            else:
+                if 'vae_latent' not in batch:
+                    raise ValueError(
+                        "vae_latent not found in batch and simulate_generator_forward is False"
+                    )
+                latents = batch['vae_latent']
+                latents = latents[:, :, :self.training_args.num_latent_t]
+                latents = latents.to(device, dtype=dtype)
+
+            training_batch.latents = latents
+            training_batch.encoder_hidden_states = encoder_hidden_states.to(
+                device, dtype=dtype)
+            training_batch.encoder_attention_mask = encoder_attention_mask.to(
+                device, dtype=dtype)
+            training_batch.infos = infos
         return training_batch
 
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:

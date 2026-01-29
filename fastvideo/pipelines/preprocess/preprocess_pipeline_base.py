@@ -320,11 +320,17 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     "pixel_values":
                     torch.stack(
                         [data["pixel_values"][i] for i in valid_indices]),
-                    "text": [data["text"][i] for i in valid_indices],
+                    "text": [data["text"][i] for i in valid_indices]
+                    if "text" in data else ["" for _ in valid_indices],
                     "path": [data["path"][i] for i in valid_indices],
                     "fps": [data["fps"][i] for i in valid_indices],
                     "duration": [data["duration"][i] for i in valid_indices],
                 }
+
+                if "action_path" in data:
+                    valid_data["action_path"] = [
+                        data["action_path"][i] for i in valid_indices
+                    ]
 
                 # VAE
                 with torch.autocast("cuda", dtype=torch.float32):
@@ -343,28 +349,35 @@ class BasePreprocessPipeline(ComposedPipelineBase):
                     prompt_embeds=[],
                     prompt_attention_mask=[],
                 )
-                assert hasattr(self, "prompt_encoding_stage")
-                result_batch = self.prompt_encoding_stage(batch, fastvideo_args)
-                prompt_embeds, prompt_attention_mask = result_batch.prompt_embeds[
-                    0], result_batch.prompt_attention_mask[0]
-                assert prompt_embeds.shape[0] == prompt_attention_mask.shape[0]
 
-                # Get sequence lengths from attention masks (number of 1s)
-                seq_lens = prompt_attention_mask.sum(dim=1)
+                if hasattr(self, "prompt_encoding_stage"):
+                    result_batch = self.prompt_encoding_stage(
+                        batch, fastvideo_args)
+                    prompt_embeds, prompt_attention_mask = result_batch.prompt_embeds[
+                        0], result_batch.prompt_attention_mask[0]
+                    assert prompt_embeds.shape[
+                        0] == prompt_attention_mask.shape[0]
 
-                non_padded_embeds = []
-                non_padded_masks = []
+                    # Get sequence lengths from attention masks (number of 1s)
+                    seq_lens = prompt_attention_mask.sum(dim=1)
 
-                # Process each item in the batch
-                for i in range(prompt_embeds.size(0)):
-                    seq_len = seq_lens[i].item()
-                    # Slice the embeddings and masks to keep only non-padding parts
-                    non_padded_embeds.append(prompt_embeds[i, :seq_len])
-                    non_padded_masks.append(prompt_attention_mask[i, :seq_len])
+                    non_padded_embeds = []
+                    non_padded_masks = []
 
-                # Update the tensors with non-padded versions
-                prompt_embeds = non_padded_embeds
-                prompt_attention_mask = non_padded_masks
+                    # Process each item in the batch
+                    for i in range(prompt_embeds.size(0)):
+                        seq_len = seq_lens[i].item()
+                        # Slice the embeddings and masks to keep only non-padding parts
+                        non_padded_embeds.append(prompt_embeds[i, :seq_len])
+                        non_padded_masks.append(
+                            prompt_attention_mask[i, :seq_len])
+
+                    # Update the tensors with non-padded versions
+                    prompt_embeds = non_padded_embeds
+                    prompt_attention_mask = non_padded_masks
+                else:
+                    bs = len(valid_indices)
+                    prompt_embeds = [torch.zeros(0) for _ in range(bs)]
 
             # Prepare batch data for Parquet dataset
             batch_data = []

@@ -13,7 +13,8 @@ from .fvd import (
     compute_statistics,
     FVDConfig,
 )
-from .i3d_model import I3DFeatureExtractor
+from .feature_extractors import (BaseFeatureExtractor, I3DFeatureExtractor,
+                                 load_extractor)
 from .video_utils import (
     load_video_auto,
     sample_clips_from_video,
@@ -27,7 +28,9 @@ __all__ = [
     'compute_frechet_distance',
     'compute_statistics',
     'FVDConfig',
+    'BaseFeatureExtractor',
     'I3DFeatureExtractor',
+    'load_extractor',
     'load_video_auto',
     'sample_clips_from_video',
     'load_video_clips_streaming',

@@ -360,7 +360,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
         current_vsa_sparsity = training_batch.current_vsa_sparsity
         assert latents_shape is not None
         assert training_batch.timesteps is not None
-        if vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
+        if envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN":
+            if not vsa_available:
+                raise ImportError(
+                    "FASTVIDEO_ATTENTION_BACKEND is set to VIDEO_SPARSE_ATTN, "
+                    "but fastvideo_kernel is not correctly installed or detected. "
+                    "Please ensure fastvideo-kernel is installed.")
             training_batch.attn_metadata = VideoSparseAttentionMetadataBuilder(  # type: ignore
             ).build(  # type: ignore
                 raw_latent_shape=latents_shape[2:5],
@@ -368,7 +373,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 patch_size=patch_size,
                 VSA_sparsity=current_vsa_sparsity,
                 device=get_local_torch_device())
-        elif vmoba_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN":
+        elif envs.FASTVIDEO_ATTENTION_BACKEND == "VMOBA_ATTN":
+            if not vmoba_available:
+                raise ImportError(
+                    "FASTVIDEO_ATTENTION_BACKEND is set to VMOBA_ATTN, "
+                    "but fastvideo_kernel (or flash_attn>=2.7.4) is not correctly installed."
+                )
             moba_params = self.training_args.moba_config.copy()
             moba_params.update({
                 "current_timestep":
@@ -432,10 +442,30 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
             # make sure no implicit broadcasting happens
             assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
-            loss = (torch.mean((model_pred.float() - target.float())**2) /
-                    self.training_args.gradient_accumulation_steps)
+
+            # Defensive: avoid NaNs/div0 if an upstream bug ever produces empty tensors.
+            # mean(empty) -> NaN; division by 0 -> inf/NaN. Keep a 0 loss with grad history.
+            if model_pred.numel() == 0:
+                loss = (model_pred.sum() *
+                        0.0) / self.training_args.gradient_accumulation_steps
+            else:
+                # Compute MSE on one SP shard. We shard along the flattened token axis
+                # (t*h*w) with optional padding so (t*h*w) need not be divisible by sp_size.
+                sp_world_size = get_sp_group().world_size
+                if sp_world_size > 1:
+                    sharded_pred = shard_latents_across_sp(model_pred)
+                    sharded_target = shard_latents_across_sp(target)
+                    local_sse = ((sharded_pred.float() -
+                                  sharded_target.float())**2).sum()
+                    loss = (sp_world_size * local_sse / model_pred.numel()
+                            ) / self.training_args.gradient_accumulation_steps
+                else:
+                    loss = (torch.mean(
+                        (model_pred.float() - target.float())**2) /
+                            self.training_args.gradient_accumulation_steps)
 
             loss.backward()
+
             avg_loss = loss.detach().clone()
 
         # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
@@ -486,21 +516,26 @@ class TrainingPipeline(LoRAPipeline, ABC):
             # Create noisy model input
             training_batch = self._prepare_dit_inputs(training_batch)
 
+            # old sharding code, need to shard latents and noise but not input
             # Shard latents across sp groups
-            training_batch.latents = shard_latents_across_sp(
-                training_batch.latents,
-                num_latent_t=self.training_args.num_latent_t)
+            training_batch.latents = training_batch.latents[:, :, :self.
+                                                            training_args.
+                                                            num_latent_t]
             # shard noisy_model_input to match
-            training_batch.noisy_model_input = shard_latents_across_sp(
-                training_batch.noisy_model_input,
-                num_latent_t=self.training_args.num_latent_t)
+            training_batch.noisy_model_input = training_batch.noisy_model_input[:, :, :
+                                                                                self
+                                                                                .
+                                                                                training_args
+                                                                                .
+                                                                                num_latent_t]
             # shard noise to match latents
-            training_batch.noise = shard_latents_across_sp(
-                training_batch.noise,
-                num_latent_t=self.training_args.num_latent_t)
+            training_batch.noise = training_batch.noise[:, :, :self.
+                                                        training_args.
+                                                        num_latent_t]
 
             training_batch = self._build_attention_metadata(training_batch)
             training_batch = self._build_input_kwargs(training_batch)
+
             training_batch = self._transformer_forward_and_compute_loss(
                 training_batch)
 
@@ -634,7 +669,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 seq_len = (training_batch.raw_latent_shape[2] // patch_t) * (
                     training_batch.raw_latent_shape[3] //
                     patch_h) * (training_batch.raw_latent_shape[4] // patch_w)
-                context_len = int(training_batch.encoder_hidden_states.shape[1])
+                if training_batch.encoder_hidden_states is not None:
+                    context_len = int(
+                        training_batch.encoder_hidden_states.shape[1])
+                else:
+                    context_len = 0
 
                 metrics["dit_seq_len"] = int(seq_len)
                 metrics["context_len"] = context_len
@@ -781,7 +820,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         validation_dataloader = DataLoader(validation_dataset,
                                            batch_size=None,
                                            num_workers=0)
-
+        # return
         self.transformer.eval()
         if getattr(self, "transformer_2", None) is not None:
             self.transformer_2.eval()

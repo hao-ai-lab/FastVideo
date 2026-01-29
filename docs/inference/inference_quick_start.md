@@ -3,6 +3,7 @@
 This page contains step-by-step instructions to get you quickly started with video generation using FastVideo.
 
 ## Requirements
+
 - **OS**: Linux (Tested on Ubuntu 22.04+)
 - **Python**: 3.10-3.12
 - **CUDA**: 12.8
@@ -21,9 +22,10 @@ conda activate fastvideo
 pip install fastvideo
 ```
 
-For advanced installation options, see the [Installation Guide](installation.md).
+For advanced installation options, see the [Installation Guide](../getting_started/installation.md).
 
 ## Generating Your First Video
+
 Here's a minimal example to generate a video using the default settings. Create a file called `example.py` with the following code:
 
 ```python
@@ -60,9 +62,10 @@ python example.py
 The generated video will be saved in the current directory under `my_videos/`  
 
 More inference example scripts can be found in `scripts/inference/`
+
 ## Available Models
 
-Please see the [support matrix](#support-matrix) for the list of supported models and their available optimizations.
+Please see the [support matrix](support_matrix.md) for the list of supported models and their available optimizations.
 
 ## Image-to-Video Generation
 
@@ -96,20 +99,28 @@ if __name__ == '__main__':
 Common issues and their solutions:
 
 ### Out of Memory Errors
+
 If you encounter CUDA out of memory errors:
+
 - Reduce `num_frames` or video resolution
 - Enable memory optimization with `enable_model_cpu_offload`
 - Try a smaller model or use distilled versions
 - Use `num_gpus` > 1 if multiple GPUs are available
+- Try enabling FSDP inference with `use_fsdp_inference=True` (may slow down generation)
+- Try enabling DiT layerwise offload with `dit_layerwise_offload=True` (now only a few models support this, but may introduce less overhead than FSDP)
 
 ### Slow Generation
+
 To speed up generation:
+
 - Reduce `num_inference_steps` (20-30 is usually sufficient)
 - Use half precision (`fp16`) for the VAE
 - Use multiple GPUs if available
 
 ### Unexpected Results
+
 If the generated video doesn't match your prompt:
+
 - Try increasing `guidance_scale` (7.0-9.0 works well)
 - Make your prompt more detailed and specific
 - Experiment with different random seeds
@@ -117,8 +128,8 @@ If the generated video doesn't match your prompt:
 
 ## Next Steps
 
-- Learn about [Advanced Inference Configurations](#inference-configuration)
-- Learn about using [Optimizations](#inference-optimizations)
-- See [Examples](../examples/examples_inference_index.md) for more usage scenarios
+- Learn about [Advanced Inference Configurations](configuration.md)
+- Learn about using [Optimizations](optimizations.md)
+- See [Examples](examples/examples_inference_index.md) for more usage scenarios
 - Join our [Community Discord](https://discord.gg/JA7cksDz86).
 - Join our [Community Slack](https://join.slack.com/t/fastvideo/shared_invite/zt-38u6p1jqe-yDI1QJOCEnbtkLoaI5bjZQ).

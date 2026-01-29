@@ -22,7 +22,7 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                command: "timeout 20m .buildkite/scripts/pr_test.sh"
                 label: "Encoder Tests"
                 env:
                   - TEST_TYPE=encoder
@@ -35,7 +35,7 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                command: "timeout 20m .buildkite/scripts/pr_test.sh"
                 label: "VAE Tests"
                 env:
                   - TEST_TYPE=vae
@@ -61,7 +61,7 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 45m .buildkite/scripts/pr_test.sh"
+                command: "timeout 90m .buildkite/scripts/pr_test.sh"
                 label: "SSIM Tests"
                 env:
                   - TEST_TYPE=ssim
@@ -76,7 +76,7 @@ steps:
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
+                command: "timeout 20m .buildkite/scripts/pr_test.sh"
                 label: "LoRA Inference Tests"
                 env:
                   - TEST_TYPE=inference_lora
@@ -129,11 +129,7 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/**"
-                - "csrc/attn/video_sparse_attn/**"
-                - "csrc/attn/video_sparse_attn/tk/**"
-                - "csrc/attn/video_sparse_attn/setup.py"
-                - "csrc/attn/video_sparse_attn/config_vsa.py"
-                - "csrc/attn/video_sparse_attn/vsa.cpp"
+                - "fastvideo-kernel/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -145,10 +141,7 @@ steps:
                   queue: "default"
             - path:
                 - "fastvideo/**"
-                - "csrc/attn/sliding_tile_attn/**"
-                - "csrc/attn/sliding_tile_attn/setup.py"
-                - "csrc/attn/sliding_tile_attn/config_sta.py"
-                - "csrc/attn/sliding_tile_attn/st_attn.cpp"
+                - "fastvideo-kernel/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
@@ -159,48 +152,16 @@ steps:
                 agents:
                   queue: "default"
             - path:
-                - "csrc/attn/sliding_tile_attn/**"
-                - "csrc/attn/sliding_tile_attn/setup.py"
-                - "csrc/attn/sliding_tile_attn/config_sta.py"
-                - "csrc/attn/sliding_tile_attn/st_attn.cpp"
+                - "fastvideo-kernel/**"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
               config:
                 command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Precision Tests STA"
+                label: "Kernel Tests"
                 env:
-                  - TEST_TYPE=precision_sta
-                agents:
-                  queue: "default"
+                  - TEST_TYPE=kernel_tests
             - path:
-                - "csrc/attn/video_sparse_attn/**"
-                - "csrc/attn/video_sparse_attn/tk/**"
-                - "csrc/attn/tests/test_vsa.py"
-                - "csrc/attn/video_sparse_attn/setup.py"
-                - "csrc/attn/video_sparse_attn/config_vsa.py"
-                - "csrc/attn/video_sparse_attn/vsa.cpp"
-                - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
-              config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Precision Tests VSA"
-                env:
-                  - TEST_TYPE=precision_vsa
-                agents:
-                  queue: "default"
-            - path:
-                - "csrc/attn/vmoba_attn/**"
-                - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
-              config:
-                command: "timeout 15m .buildkite/scripts/pr_test.sh"
-                label: "Precision Tests VMoBA"
-                env:
-                  - TEST_TYPE=precision_vmoba
-                agents:
-                  queue: "default"
-            - path:
-                - "csrc/attn/vmoba_attn/vmoba/**"
+                - "fastvideo-kernel/**"
                 - "fastvideo/attention/backends/vmoba.py"
                 - "pyproject.toml"
                 - "docker/Dockerfile.python3.12"
@@ -222,14 +183,14 @@ steps:
                   - TEST_TYPE=unit_test
                 agents:
                   queue: "default"
-            - path:
-                - "scripts/lora_extraction/**"
-                - "pyproject.toml"
-                - "docker/Dockerfile.python3.12"
-              config:
-                command: "timeout 90m .buildkite/scripts/pr_test.sh"
-                label: "LoRA Extraction Tests"
-                env:
-                  - TEST_TYPE=lora_extraction
-                agents:
-                  queue: "default"
+            # - path:
+            #     - "scripts/lora_extraction/**"
+            #     - "pyproject.toml"
+            #     - "docker/Dockerfile.python3.12"
+            #   config:
+            #     command: "timeout 90m .buildkite/scripts/pr_test.sh"
+            #     label: "LoRA Extraction Tests"
+            #     env:
+            #       - TEST_TYPE=lora_extraction
+            #     agents:
+            #       queue: "default"

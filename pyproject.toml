@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastvideo"
-version = "0.1.6"
+version = "0.1.7"
 description = "FastVideo"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,8 +27,9 @@ dependencies = [
     "timm==1.0.11",
     "peft>=0.15.0",
     "diffusers>=0.33.1",
-    "torch==2.9.0",
+    "torch>=2.9.1",
     "torchvision",
+    "torchaudio",
 
     # Acceleration & Optimization
     "accelerate==1.0.1",
@@ -44,6 +45,7 @@ dependencies = [
     "wandb>=0.21.0",
     "loguru",
     "test-tube==0.7.5",
+    
     # Miscellaneous Utilities
     "tqdm",
     "pytest",
@@ -56,6 +58,7 @@ dependencies = [
     "aiohttp",
     "huggingface_hub",
     "cloudpickle",
+    "omegaconf",
 
     # System & Monitoring Tools
     "gpustat",
@@ -63,6 +66,7 @@ dependencies = [
     "remote-pdb",
 
     # Kernel & Packaging
+    "fastvideo-kernel==0.2.5",
     "wheel",
 
     # Training Dependencies
@@ -74,6 +78,7 @@ dependencies = [
     # Preprocessing Dependencies
     "torchcodec==0.5.0",
     "ray>=2.49.1",
+    "ftfy==6.3.1",
 ]
 
 [tool.uv]
@@ -101,20 +106,24 @@ explicit = true
 
 [project.optional-dependencies]
 
-# flash-attn: pip install flash-attn==2.8.1 --no-cache-dir --no-build-isolation 
+# flash-attn: pip install flash-attn==2.8.1 --no-cache-dir --no-build-isolation
 
 
 lint = [
     "pre-commit==4.0.1",
 ]
 
-test = [ 
-    "av==14.3.0",
+test = [
+    "av",
     "pytorch-msssim==1.0.0",
     "pytest",
 ]
 
 dev = [ "fastvideo[lint]", "fastvideo[test]", ]
+
+rocm = [
+    "amdsmi",
+]
 
 [project.scripts]
 fastvideo = "fastvideo.entrypoints.cli.main:main"

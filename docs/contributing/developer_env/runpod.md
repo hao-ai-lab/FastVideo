@@ -1,15 +1,54 @@
 
 # 📦 Developing FastVideo on RunPod
 
-You can easily use the FastVideo Docker image as a custom container on [RunPod](https://www.runpod.io) for development or experimentation.
+You can easily use the FastVideo Pod Template on [RunPod](https://www.runpod.io) for development or experimentation.
 
 ## Creating a new pod
 
-Choose a GPU that supports CUDA 12.8
+- Make sure you are using the correct RunPod account.
+![RunPod Account Selection](../../assets/images/runpod_account.png)
 
-Pick 1 or 2 L40S GPU(s)
-
+- Use "Additional Filters" to select CUDA 12.8.
 ![RunPod CUDA selection](../../assets/images/runpod_cuda.png)
+
+- Click "Deploy" and Pick a single A40 or RTX 4090 GPU.
+![RunPod GPU Selection](../../assets/images/runpod_deploy.png)
+
+- Select the "FastVideo" or "fastvideo-dev" Pod Template.
+![RunPod Pod Template Selection](../../assets/images/runpod_create.png)
+
+- Set the Pod name to "<name>-<FastVideo>-<date>".
+
+- Finally, once the pod is deployed (will take a few minutes as the image is being pulled), you can SSH into it using "SSH exposed over TCP". You'll need to use the matching private ssh key you provided.
+![RunPod SSH](../../assets/images/runpod_ssh.png)
+
+## Working with the pod
+
+After SSH'ing into your pod, you'll find the correct `uv` environment already activated and you should be in /FastVideo/ directory. Make sure to use /FastVideo/ for all your work.
+
+To pull in the latest changes from the GitHub repo:
+
+```bash
+cd /FastVideo
+git pull
+```
+
+Run your development workflows as usual:
+
+```bash
+# Run linters
+pre-commit run --all-files
+
+# Run tests
+pytest tests/
+```
+
+Make sure to push your changes back to the GitHub repo as nothing will be saved to the pod when it is terminated.
+
+After you are done with your work, you can terminate the pod by clicking the "Terminate" and "Delete" buttons. Remember if the pod is not completely deleted, Runpod will keep charging you for it.
+
+## Extra Information:
+If you need to customize the pod template this section has some useful information. For the most part you can leave the defaults of the FastVideo Pod Template.
 
 When creating your pod template, use this image:
 
@@ -24,30 +63,3 @@ bash -c "apt update;DEBIAN_FRONTEND=noninteractive apt-get install openssh-serve
 ```
 
 ![RunPod template configuration](../../assets/images/runpod_template.png)
-
-After deploying, the pod will take a few minutes to pull the image and start the SSH service.
-
-![RunPod ssh](../../assets/images/runpod_ssh.png)
-
-## Working with the pod
-
-After SSH'ing into your pod, you'll find the `fastvideo-dev` Conda environment already activated.
-
-To pull in the latest changes from the GitHub repo:
-
-```bash
-cd /FastVideo
-git pull
-```
-
-`If you have a persistent volume and want to keep your code changes, you can move /FastVideo to /workspace/FastVideo, or simply clone the repository there.`
-
-Run your development workflows as usual:
-
-```bash
-# Run linters
-pre-commit run --all-files
-
-# Run tests
-pytest tests/
-```

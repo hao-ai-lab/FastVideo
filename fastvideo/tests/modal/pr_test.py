@@ -4,6 +4,7 @@ app = modal.App()
 
 import os
 
+model_vol = modal.Volume.from_name("hf-model-weights")
 image_version = os.getenv("IMAGE_VERSION")
 image_tag = f"ghcr.io/hao-ai-lab/fastvideo/fastvideo-dev:{image_version}"
 print(f"Using image: {image_tag}")
@@ -52,6 +53,10 @@ def run_test(pytest_command: str):
     git clone {git_repo} /FastVideo &&
     cd /FastVideo &&
     {checkout_command} &&
+    git submodule update --init --recursive &&
+    cd fastvideo-kernel &&
+    ./build.sh &&
+    cd .. &&
     uv pip install -e .[test] &&
     {pytest_command}
     """
@@ -62,29 +67,49 @@ def run_test(pytest_command: str):
     
     sys.exit(result.returncode)
 
-@app.function(gpu="H100:1", image=image, timeout=900, secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})])
+@app.function(gpu="H100:1", 
+              image=image, 
+              timeout=1200, 
+              secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})],
+              volumes={"/root/data": model_vol})
 def run_encoder_tests():
-    run_test("hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/encoders -vs")
+    run_test("export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/encoders -vs")
 
-@app.function(gpu="L40S:1", image=image, timeout=900, secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})])
+@app.function(gpu="L40S:1", image=image, timeout=1200, secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})],
+              volumes={"/root/data": model_vol})
 def run_vae_tests():
-    run_test("hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/vaes -vs")
+    run_test("export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/vaes -vs")
 
-@app.function(gpu="L40S:1", image=image, timeout=900, secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})])
+@app.function(gpu="L40S:1", image=image, timeout=900, secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})],
+              volumes={"/root/data": model_vol})
 def run_transformer_tests():
-    run_test("hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/transformers -vs")
+    run_test("export HF_HOME='/root/data/.cache' && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/transformers -vs")
 
-@app.function(gpu="L40S:2", image=image, timeout=2700, secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})])
+@app.function(
+    gpu="L40S:4", 
+    image=image, 
+    timeout=6000, 
+    secrets=[modal.Secret.from_dict({"HF_API_KEY": os.environ.get("HF_API_KEY", "")})],
+    volumes={"/root/data": model_vol} 
+)
 def run_ssim_tests():
-    run_test("hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/ssim -vs")
+    run_test("export HF_HOME='/root/data/.cache' && export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True && hf auth login --token $HF_API_KEY && pytest ./fastvideo/tests/ssim -vs")
 
-@app.function(gpu="L40S:4", image=image, timeout=900, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
+@app.function(gpu="L40S:4", 
+    image=image, 
+    timeout=900, 
+    secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})],
+    volumes={"/root/data": model_vol})
 def run_training_tests():
-    run_test("wandb login $WANDB_API_KEY && pytest ./fastvideo/tests/training/Vanilla -srP")
+    run_test("export HF_HOME='/root/data/.cache' && wandb login $WANDB_API_KEY && pytest ./fastvideo/tests/training/Vanilla -srP")
 
-@app.function(gpu="L40S:2", image=image, timeout=900, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
+@app.function(gpu="L40S:2", 
+    image=image, 
+    timeout=900, 
+    secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})],
+    volumes={"/root/data": model_vol})
 def run_training_lora_tests():
-    run_test("wandb login $WANDB_API_KEY && pytest ./fastvideo/tests/training/lora/test_lora_training.py -srP")
+    run_test("export HF_HOME='/root/data/.cache' && wandb login $WANDB_API_KEY && pytest ./fastvideo/tests/training/lora/test_lora_training.py -srP")
 
 @app.function(gpu="H100:2", image=image, timeout=900, secrets=[modal.Secret.from_dict({"WANDB_API_KEY": os.environ.get("WANDB_API_KEY", "")})])
 def run_training_tests_VSA():
@@ -95,22 +120,23 @@ def run_inference_tests_STA():
     run_test("pytest ./fastvideo/tests/inference/STA -srP")
 
 @app.function(gpu="H100:1", image=image, timeout=900)
-def run_precision_tests_STA():
-    run_test("python csrc/attn/tests/test_sta.py")
+def run_kernel_tests():
+    run_test("pytest fastvideo-kernel/tests/ -vs")
 
-@app.function(gpu="H100:1", image=image, timeout=900)
-def run_precision_tests_VSA():
-    run_test("python csrc/attn/tests/test_vsa.py")
+# @app.function(gpu="H100:1", image=image, timeout=900)
+# def run_precision_tests_VSA():
+#     # VSA correctness is covered by the same file now
+#     run_test("pytest fastvideo-kernel/tests/test_correctness.py")
 
-@app.function(gpu="L40S:1", image=image, timeout=900)
-def run_precision_tests_vmoba():
-    run_test("pytest csrc/attn/vmoba_attn/tests/test_vmoba_attn.py")
+# @app.function(gpu="L40S:1", image=image, timeout=900)
+# def run_precision_tests_vmoba():
+#     run_test("pytest fastvideo-kernel/tests/test_vmoba_correctness.py")
 
 @app.function(gpu="L40S:1", image=image, timeout=900)
 def run_inference_tests_vmoba():
     run_test('python fastvideo/tests/inference/vmoba/test_vmoba_inference.py')
 
-@app.function(gpu="L40S:1", image=image, timeout=3600)
+@app.function(gpu="L40S:1", image=image, timeout=1200)
 def run_inference_lora_tests():
     run_test("pytest ./fastvideo/tests/inference/lora/test_lora_inference_similarity.py -vs")
 

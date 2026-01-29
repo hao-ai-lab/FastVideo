@@ -6,6 +6,7 @@ import torch
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import WanVideoConfig
+from fastvideo.configs.models.dits.matrixgame import MatrixGameWanVideoConfig
 from fastvideo.configs.models.encoders import (BaseEncoderOutput,
                                                CLIPVisionConfig, T5Config,
                                                WAN2_1ControlCLIPVisionConfig)
@@ -190,3 +191,29 @@ class SelfForcingWan2_2_T2V480PConfig(Wan2_2_T2V_A14B_Config):
     def __post_init__(self) -> None:
         self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
+
+
+# =============================================
+# ============= Matrix Game ===================
+# =============================================
+@dataclass
+class MatrixGameBaseI2V480PConfig(WanI2V480PConfig):
+    dit_config: DiTConfig = field(default_factory=MatrixGameWanVideoConfig)
+    flow_shift: float | None = 5.0
+
+
+@dataclass
+class MatrixGameI2V480PConfig(WanI2V480PConfig):
+    dit_config: DiTConfig = field(default_factory=MatrixGameWanVideoConfig)
+
+    image_encoder_config: EncoderConfig = field(
+        default_factory=WAN2_1ControlCLIPVisionConfig)
+
+    is_causal: bool = True
+    flow_shift: float | None = 5.0
+    dmd_denoising_steps: list[int] | None = field(
+        default_factory=lambda: [1000, 666, 333])
+    warp_denoising_step: bool = True
+    context_noise: int = 0
+    num_frames_per_block: int = 3
+    # sliding_window_num_frames: int = 15

@@ -7,6 +7,8 @@ This module contains implementations of timestep preparation stages for diffusio
 
 import inspect
 
+import torch
+
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -71,7 +73,12 @@ class TimestepPreparationStage(PipelineStage):
                     f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
                     f" timestep schedules. Please check whether you are using the correct scheduler."
                 )
-            scheduler.set_timesteps(timesteps=timesteps,
+            # Convert timesteps to CPU if it's a tensor (for numpy conversion in scheduler)
+            if isinstance(timesteps, torch.Tensor):
+                timesteps_for_scheduler = timesteps.cpu()
+            else:
+                timesteps_for_scheduler = timesteps
+            scheduler.set_timesteps(timesteps=timesteps_for_scheduler,
                                     device=device,
                                     **extra_set_timesteps_kwargs)
             timesteps = scheduler.timesteps
@@ -116,3 +123,32 @@ class TimestepPreparationStage(PipelineStage):
         result.add_check("timesteps", batch.timesteps,
                          [V.is_tensor, V.with_dims(1)])
         return result
+
+
+class Cosmos25TimestepPreparationStage(TimestepPreparationStage):
+    """Cosmos 2.5 timestep preparation with scheduler-specific kwargs."""
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        scheduler = self.scheduler
+        device = get_local_torch_device()
+        num_inference_steps = batch.num_inference_steps
+
+        extra_kwargs: dict = {}
+        sig = inspect.signature(scheduler.set_timesteps)
+        if "shift" in sig.parameters:
+            extra_kwargs["shift"] = fastvideo_args.pipeline_config.flow_shift
+        # Prefer the canonical diffusers kwarg name if available.
+        if "use_karras_sigmas" in sig.parameters:
+            extra_kwargs["use_karras_sigmas"] = True
+        elif "use_kerras_sigma" in sig.parameters:
+            extra_kwargs["use_kerras_sigma"] = True
+
+        scheduler.set_timesteps(num_inference_steps,
+                                device=device,
+                                **extra_kwargs)
+        batch.timesteps = scheduler.timesteps
+        return batch

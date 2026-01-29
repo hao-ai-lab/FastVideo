@@ -22,7 +22,7 @@ import threading
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, fields, is_dataclass
-from functools import lru_cache, partial, wraps
+from functools import lru_cache, partial, wraps, cache
 from pathlib import Path
 from typing import Any, TextIO, TypeVar, cast
 
@@ -31,7 +31,7 @@ import filelock
 import imageio
 import numpy as np
 import torch
-import torchvision.utils as make_grid
+from torchvision.utils import make_grid
 import yaml
 from diffusers.loaders.lora_base import (
     _best_guess_weight_name)  # watch out for potetential removal from diffusers
@@ -543,9 +543,18 @@ def maybe_download_lora(model_name_or_path: str,
         Local path to the model
     """
 
+    # If it's already a file path, return it directly
+    if os.path.isfile(model_name_or_path):
+        return model_name_or_path
+
     local_path = maybe_download_model(model_name_or_path, local_dir, download)
     weight_name = _best_guess_weight_name(model_name_or_path,
                                           file_extension=".safetensors")
+
+    # If weight_name is None, assume local_path is already the full path
+    if weight_name is None:
+        return local_path
+
     return os.path.join(local_path, weight_name)
 
 
@@ -842,12 +851,12 @@ def set_random_seed(seed: int) -> None:
 
 @lru_cache(maxsize=1)
 def is_vsa_available() -> bool:
-    return importlib.util.find_spec("vsa") is not None
+    return importlib.util.find_spec("fastvideo_kernel.ops") is not None
 
 
 @lru_cache(maxsize=1)
 def is_vmoba_available() -> bool:
-    if importlib.util.find_spec("csrc.attn.vmoba_attn.vmoba") is None:
+    if importlib.util.find_spec("fastvideo_kernel.vmoba") is None:
         return False
     try:
         import flash_attn
@@ -1184,3 +1193,30 @@ def decorate_logs(process_name: str | None = None) -> None:
     pid = os.getpid()
     _add_prefix(sys.stdout, process_name, pid)
     _add_prefix(sys.stderr, process_name, pid)
+
+
+def _probe_pin_memory() -> bool:
+    from fastvideo.platforms import current_platform
+    if current_platform.is_cpu() or current_platform.is_mps(
+    ) or current_platform.is_npu():
+        return False
+
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.current_device()
+        _ = torch.empty(1024, device="cpu").pin_memory()
+        _ = torch.empty(1024, device="cpu", pin_memory=True)
+    except Exception as exc:
+        logger.warning("Pinned memory is unavailable: %s", exc)
+        return False
+
+    return True
+
+
+@cache
+def _cached_pin_memory_available(pid: int) -> bool:
+    return _probe_pin_memory()
+
+
+def is_pin_memory_available() -> bool:
+    return _cached_pin_memory_available(os.getpid())

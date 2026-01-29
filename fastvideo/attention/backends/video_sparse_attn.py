@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import torch
 
 try:
-    from vsa import video_sparse_attn
+    from fastvideo_kernel import video_sparse_attn
 except ImportError:
     video_sparse_attn = None
 
@@ -276,8 +276,9 @@ class VideoSparseAttentionImpl(AttentionImpl):
             query,
             key,
             value,
-            variable_block_sizes=attn_metadata.variable_block_sizes,
-            topk=cur_topk,
+            attn_metadata.variable_block_sizes,
+            attn_metadata.variable_block_sizes,
+            cur_topk,
             block_size=VSA_TILE_SIZE,
             compress_attn_weight=gate_compress).transpose(1, 2)
 

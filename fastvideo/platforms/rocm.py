@@ -59,6 +59,13 @@ class RocmPlatform(Platform):
         return float(torch.cuda.max_memory_allocated(device))
 
     @classmethod
+    def get_torch_device(cls):
+        """
+        Return torch.cuda
+        """
+        return torch.cuda
+
+    @classmethod
     def get_attn_backend_cls(cls, selected_backend: AttentionBackendEnum | None,
                              head_size: int, dtype: torch.dtype) -> str:
         logger.info("Trying FASTVIDEO_ATTENTION_BACKEND=%s",
@@ -71,8 +78,23 @@ class RocmPlatform(Platform):
         elif selected_backend in (AttentionBackendEnum.FLASH_ATTN, None):
             pass
 
-        elif selected_backend in (AttentionBackendEnum.SLIDING_TILE_ATTN,
-                                  AttentionBackendEnum.SAGE_ATTN):
+        elif selected_backend == AttentionBackendEnum.SLIDING_TILE_ATTN:
+            try:
+                from fastvideo_kernel import sliding_tile_attention  # noqa: F401
+
+                from fastvideo.attention.backends.sliding_tile_attn import (  # noqa: F401
+                    SlidingTileAttentionBackend)
+                logger.info("Using Sliding Tile Attention backend.")
+
+                return "fastvideo.attention.backends.sliding_tile_attn.SlidingTileAttentionBackend"
+            except ImportError as e:
+                logger.error(
+                    "Failed to import Sliding Tile Attention backend: %s",
+                    str(e))
+                raise ImportError(
+                    "Sliding Tile Attention backend is not installed. ") from e
+
+        elif selected_backend in (AttentionBackendEnum.SAGE_ATTN):
             raise ValueError(
                 f"{selected_backend.name} is not supported on {cls.device_name}."
             )

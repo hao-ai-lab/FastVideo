@@ -91,6 +91,14 @@ class ForwardBatch:
     video_path: str | None = None
     video_latent: torch.Tensor | None = None
 
+    # Refine inputs (LongCat)
+    refine_from: str | None = None
+    t_thresh: float = 0.5
+    spatial_refine_only: bool = False
+    num_cond_frames: int = 0
+    stage1_video: list[
+        PIL.Image.Image] | None = None  # Loaded frames from refine_from
+
     # Primary encoder embeddings
     prompt_embeds: list[torch.Tensor] = field(default_factory=list)
     negative_prompt_embeds: list[torch.Tensor] | None = None
@@ -118,6 +126,14 @@ class ForwardBatch:
     raw_latent_shape: tuple[int, ...] | None = None
     noise_pred: torch.Tensor | None = None
     image_latent: torch.Tensor | None = None
+
+    # Action control inputs (Matrix-Game)
+    mouse_cond: torch.Tensor | None = None  # Shape: (B, T, 2)
+    keyboard_cond: torch.Tensor | None = None  # Shape: (B, T, K)
+    grid_sizes: torch.Tensor | None = None  # Shape: (3,) [F,H,W]
+
+    # Camera control inputs (HYWorld)
+    pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
 
     # Latent dimensions
     height_latents: list[int] | int | None = None

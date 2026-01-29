@@ -1,41 +1,47 @@
 <div align="center">
 <img src=assets/logos/logo.svg width="30%"/>
 </div>
-**FastVideo is a unified post-training and inference framework for accelerated video generation.**
-
-FastVideo features an end-to-end unified pipeline for accelerating diffusion models, starting from data preprocessing to model training, finetuning, distillation, and inference. FastVideo is designed to be modular and extensible, allowing users to easily add new optimizations and techniques. Whether it is training-free optimizations or post-training optimizations, FastVideo has you covered.
 
 <p align="center">
-    | 🕹️ <a href="https://fastwan.fastvideo.org/"<b>Online Demo</b></a> | <a href="https://hao-ai-lab.github.io/FastVideo"><b>Documentation</b></a> | <a href="https://hao-ai-lab.github.io/FastVideo/inference/inference_quick_start/"><b> Quick Start</b></a> | 🤗 <a href="https://huggingface.co/collections/FastVideo/fastwan-6886a305d9799c8cd1496408"  target="_blank"><b>FastWan</b></a>  | 🟣💬 <a href="https://join.slack.com/t/fastvideo/shared_invite/zt-3f4lao1uq-u~Ipx6Lt4J27AlD2y~IdLQ" target="_blank"> <b>Slack</b> </a> |  🟣💬 <a href="https://ibb.co/c7g1qdD" target="_blank"> <b> WeChat </b> </a> |
+     | <a href="https://hao-ai-lab.github.io/FastVideo"><b>Documentation</b></a> | <a href="https://hao-ai-lab.github.io/FastVideo/inference/inference_quick_start/"><b> Quick Start</b></a> | <a href="https://github.com/hao-ai-lab/FastVideo/discussions/982"  target="_blank"><b>Weekly Dev Meeting</b></a>  | 🟣💬 <a href="https://join.slack.com/t/fastvideo/shared_invite/zt-3f4lao1uq-u~Ipx6Lt4J27AlD2y~IdLQ" target="_blank"> <b>Slack</b> </a> |  🟣💬 <a href="https://ibb.co/sv3MMKyv" target="_blank"> <b> WeChat </b> </a> |
 </p>
 
-<div align="center">
-<img src=assets/fastwan.png width="90%"/>
-</div>
+**FastVideo is a unified post-training and inference framework for accelerated video generation.**
 
 ## NEWS
 - ```2025/11/19```: Release [CausalWan2.2 I2V A14B Preview](https://huggingface.co/FastVideo/CausalWan2.2-I2V-A14B-Preview-Diffusers) models, [Blog](https://hao-ai-lab.github.io/blogs/fastvideo_causalwan_preview/) and [Inference Code!](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_self_forcing_causal_wan2_2_i2v.py)
-- ```2025/08/04```: Release [FastWan](https://hao-ai-lab.github.io/FastVideo/distillation/dmd.html) models and [Sparse-Distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/).
+- ```2025/08/04```: Release [FastWan](https://hao-ai-lab.github.io/FastVideo/distillation/dmd) models and [Sparse-Distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/).
+
+<details>
+<summary>More</summary>
+
 - ```2025/06/14```: Release finetuning and inference code for [VSA](https://arxiv.org/pdf/2505.13389)
 - ```2025/04/24```: [FastVideo V1](https://hao-ai-lab.github.io/blogs/fastvideo/) is released!
 - ```2025/02/18```: Release the inference code for [Sliding Tile Attention](https://hao-ai-lab.github.io/blogs/sta/).
 
+</details>
+
 ## Key Features
 
 FastVideo has the following features:
-- End-to-end post-training support:
-  - [Sparse distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/) for Wan2.1 and Wan2.2 to achineve >50x denoising speedup
-  - Data preprocessing pipeline for video data
+- End-to-end post-training support for bidirectional and autoregressive models:
   - Support full finetuning and LoRA finetuning for state-of-the-art open video DiTs
-  - Scalable training with FSDP2, sequence parallelism, and selective activation checkpointing, with near linear scaling to 64 GPUs
+  - Data preprocessing pipeline for video, image, and text data
+  - Distribution Matching Distillation (DMD2) stepwise distillation.
+  - Sparse attention with [Video Sparse Attention](https://arxiv.org/pdf/2505.13389)
+  - [Sparse distillation](https://hao-ai-lab.github.io/blogs/fastvideo_post_training/) to achineve >50x denoising speedup
+  - Scalable training with FSDP2, sequence parallelism, and selective activation checkpointing.
+  - Causal distillation through Self-Forcing
+  - See this [page](https://hao-ai-lab.github.io/FastVideo/training/overview/) for full list of supported models and recipes.
 - State-of-the-art performance optimizations for inference
-  - [Video Sparse Attention](https://arxiv.org/pdf/2505.13389)
-  - [Sliding Tile Attention](https://arxiv.org/pdf/2502.04507)
-  - [TeaCache](https://arxiv.org/pdf/2411.19108)
-  - [Sage Attention](https://arxiv.org/abs/2410.02367)
+  - Sequence Parallelism for distributed inference
+  - Multiple state-of-the-art attention backends
+  - User-friendly CLI and Python API
+  - See this [page](https://hao-ai-lab.github.io/FastVideo/inference/optimizations/) for full list of supported optimizations.
 - Diverse hardware and OS support
   - Support H100, A100, 4090
   - Support Linux, Windows, MacOS
+  - See this [page](https://hao-ai-lab.github.io/FastVideo/inference/hardware_support/) for full list of supported hardware and OS.
 
 ## Getting Started
 We recommend using an environment manager such as `Conda` to create a clean environment:
@@ -125,7 +131,7 @@ For a more detailed guide, please see our [inference quick start](https://hao-ai
 ## 🤝 Contributing
 
 We welcome all contributions. Please check out our guide [here](https://hao-ai-lab.github.io/FastVideo/contributing/overview/).
-See details in [development roadmap](https://github.com/hao-ai-lab/FastVideo/issues/468).
+See details in [development roadmap](https://github.com/hao-ai-lab/FastVideo/issues/899).
 ## Acknowledgement
 We learned and reused code from the following projects:
 - [Wan-Video](https://github.com/Wan-Video)

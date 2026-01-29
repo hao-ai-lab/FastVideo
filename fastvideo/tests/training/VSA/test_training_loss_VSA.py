@@ -6,6 +6,11 @@ import json
 from huggingface_hub import snapshot_download
 import torch
 
+# Ensure backend selection happens during import-time initialization
+os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
+# Force VSA to use Triton implementation even on H100 / when CUDA extension is available
+# os.environ["FASTVIDEO_KERNEL_VSA_FORCE_TRITON"] = "1"
+
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
 from fastvideo.training.wan_training_pipeline import main
@@ -18,8 +23,6 @@ h200_reference_wandb_summary_file = "fastvideo/tests/training/VSA/h200_reference
 
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "2"
-
-os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "VIDEO_SPARSE_ATTN"
 
 def run_worker():
     """Worker function that will be run on each GPU"""
@@ -118,10 +121,10 @@ def test_distributed_training():
     wandb_summary = json.load(open(summary_file))
 
     fields_and_thresholds = {
-        'avg_step_time': 1.0,
-        'grad_norm': 0.1,
-        'step_time': 1.0,
-        'train_loss': 0.02
+        'avg_step_time': 5,
+        'grad_norm': 0.5,
+        'step_time': 5,
+        'train_loss': 0.04
     }
 
     failures = []

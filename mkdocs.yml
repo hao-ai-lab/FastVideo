@@ -89,9 +89,10 @@ markdown_extensions:
   - admonition
   - pymdownx.highlight:
       anchor_linenums: true
-      line_spans: __span
+      # line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
+  - pymdownx.snippets
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
@@ -99,13 +100,10 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.emoji
-  - pymdownx.superfences
   - pymdownx.arithmatex:
       generic: true
   - pymdownx.critic
   - pymdownx.details
-  - pymdownx.highlight
-  - pymdownx.inlinehilite
   - pymdownx.keys
   - pymdownx.mark
   - pymdownx.smartsymbols
@@ -137,6 +135,7 @@ nav:
       - Optimizations: inference/examples/optimizations.md
       - STA Mask Search: inference/examples/sta_mask_search.md
   - Training:
+    - Overview: training/overview.md
     - Data Preprocessing: training/data_preprocess.md
     - Fine-tuning: training/finetune.md
     - Examples:
@@ -149,11 +148,14 @@ nav:
   - Distillation:
     - Data Preprocessing: distillation/data_preprocess.md
     - DMD: distillation/dmd.md
-  - Sliding Tile Attention:
-    - Installation: sliding_tile_attention/installation.md
-    - Demo: sliding_tile_attention/demo.md
-  - Video Sparse Attention:
-    - Installation: video_sparse_attention/installation.md
+  - Attention:
+    - Overview: attention/index.md
+    - Video Sparse Attention: attention/vsa/index.md
+    - Sliding Tile Attention: attention/sta/index.md
+    - Backend Development: contributing/attention_backend.md
+  - Utilities:
+    - LoRA: utilities/lora.md
+    - Debugging: utilities/debugging.md
   - Design:
     - Overview: design/overview.md
   - Developer Guide:
@@ -164,6 +166,8 @@ nav:
       - RunPod: contributing/developer_env/runpod.md
     - Testing: contributing/testing.md
     - Profiling: contributing/profiling.md
+    - Coding Agents: contributing/coding_agents.md
+    - Attention Backend Development: contributing/attention_backend.md
   - API Reference:
     - FastVideo: api/fastvideo.md
 

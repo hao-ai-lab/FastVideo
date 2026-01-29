@@ -18,11 +18,14 @@ class DiTArchConfig(ArchConfig):
         AttentionBackendEnum.SLIDING_TILE_ATTN, AttentionBackendEnum.SAGE_ATTN,
         AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA,
         AttentionBackendEnum.VIDEO_SPARSE_ATTN, AttentionBackendEnum.VMOBA_ATTN,
-        AttentionBackendEnum.SAGE_ATTN_THREE)
+        AttentionBackendEnum.SAGE_ATTN_THREE, AttentionBackendEnum.SLA_ATTN,
+        AttentionBackendEnum.SAGE_SLA_ATTN)
 
     hidden_size: int = 0
     num_attention_heads: int = 0
     num_channels_latents: int = 0
+    in_channels: int = 0
+    out_channels: int = 0
     exclude_lora_layers: list[str] = field(default_factory=list)
     boundary_ratio: float | None = None
 

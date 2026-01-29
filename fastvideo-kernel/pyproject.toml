@@ -1,0 +1,35 @@
+[build-system]
+requires = [
+    "scikit-build-core>=0.10",
+    "torch>=2.5.0",
+    "setuptools>=61.0.0",
+    "wheel"
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "fastvideo-kernel"
+version = "0.2.5"
+description = "Unified CUDA kernels for FastVideo"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Hao AI Lab", email = "contact@haoailab.com" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Environment :: GPU :: NVIDIA CUDA",
+]
+dependencies = [
+    "torch>=2.5.0",
+    "triton>=2.0.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/hao-ai-lab/FastVideo"
+
+[tool.scikit-build]
+cmake.build-type = "Release"
+minimum-version = "build-system.requires"
+wheel.packages = ["python/fastvideo_kernel"]

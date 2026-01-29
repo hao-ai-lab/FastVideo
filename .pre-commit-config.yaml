@@ -4,7 +4,7 @@ default_stages:
 exclude: |
   (?x)(
     fastvideo/third_party/.*|
-    csrc/.*|
+    fastvideo-kernel/.*|
     assets/.*|
     tests/.*|
     demo/.*|
@@ -68,7 +68,7 @@ repos:
     entry: bash
     args:
       - -c
-      - 'git ls-files | grep -v "^fastvideo/tests/ssim/" | grep -v "^fastvideo/tests/inference/lora/L40S_reference_videos/" | grep " " && echo "Filenames should not contain spaces!" && exit 1 || exit 0'
+      - 'git ls-files | grep -v "^\"*fastvideo/tests/ssim/" | grep -v "^\"*fastvideo/tests/inference/lora/L40S_reference_videos/" | grep " " && echo "Filenames should not contain spaces!" && exit 1 || exit 0'
     language: system
     always_run: true
     pass_filenames: false

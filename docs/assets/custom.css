@@ -2,9 +2,11 @@
     writing-mode: sideways-lr;
     white-space: nowrap;
     max-width: 0;
-    p {
-       margin: 0;
-    }
+}
+
+/* Keep header cell paragraph content tight (avoid CSS nesting for compatibility) */
+.vertical-table-header th.head:not(.stub) p {
+    margin: 0;
 }
 
 /* Image sizing classes */

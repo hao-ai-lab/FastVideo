@@ -50,6 +50,45 @@ class DecodingStage(PipelineStage):
         result.add_check("output", batch.output, [V.is_tensor, V.with_dims(5)])
         return result
 
+    def _denormalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
+        """Convert normalized latents into the VAE's expected latent space."""
+        # Some VAEs handle latent (de)normalization internally.
+        if bool(getattr(self.vae, "handles_latent_denorm", False)):
+            return latents
+
+        cfg = getattr(self.vae, "config", None)
+
+        # MatrixGame-style: z = z * std + mean
+        if (cfg is not None and hasattr(cfg, "latents_mean")
+                and hasattr(cfg, "latents_std")):
+            latents_mean = torch.tensor(cfg.latents_mean,
+                                        device=latents.device,
+                                        dtype=latents.dtype).view(
+                                            1, -1, 1, 1, 1)
+            latents_std = torch.tensor(cfg.latents_std,
+                                       device=latents.device,
+                                       dtype=latents.dtype).view(
+                                           1, -1, 1, 1, 1)
+            return latents * latents_std + latents_mean
+
+        # Diffusers-style: scaling_factor (+ optional shift_factor)
+        if hasattr(self.vae, "scaling_factor"):
+            if isinstance(self.vae.scaling_factor, torch.Tensor):
+                latents = latents / self.vae.scaling_factor.to(
+                    latents.device, latents.dtype)
+            else:
+                latents = latents / self.vae.scaling_factor
+
+            if hasattr(self.vae,
+                       "shift_factor") and self.vae.shift_factor is not None:
+                if isinstance(self.vae.shift_factor, torch.Tensor):
+                    latents = latents + self.vae.shift_factor.to(
+                        latents.device, latents.dtype)
+                else:
+                    latents = latents + self.vae.shift_factor
+
+        return latents
+
     @torch.no_grad()
     def decode(self, latents: torch.Tensor,
                fastvideo_args: FastVideoArgs) -> torch.Tensor:
@@ -76,21 +115,7 @@ class DecodingStage(PipelineStage):
         vae_autocast_enabled = (
             vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
-        if hasattr(self.vae, 'scaling_factor'):
-            if isinstance(self.vae.scaling_factor, torch.Tensor):
-                latents = latents / self.vae.scaling_factor.to(
-                    latents.device, latents.dtype)
-            else:
-                latents = latents / self.vae.scaling_factor
-
-        # Apply shifting if needed
-        if (hasattr(self.vae, "shift_factor")
-                and self.vae.shift_factor is not None):
-            if isinstance(self.vae.shift_factor, torch.Tensor):
-                latents += self.vae.shift_factor.to(latents.device,
-                                                    latents.dtype)
-            else:
-                latents += self.vae.shift_factor
+        latents = self._denormalize_latents(latents)
 
         # Decode latents
         with torch.autocast(device_type="cuda",
@@ -107,6 +132,57 @@ class DecodingStage(PipelineStage):
         # Normalize image to [0, 1] range
         image = (image / 2 + 0.5).clamp(0, 1)
         return image
+
+    @torch.no_grad()
+    def streaming_decode(
+        self,
+        latents: torch.Tensor,
+        fastvideo_args: FastVideoArgs,
+        cache: list[torch.Tensor | None] | None = None,
+        is_first_chunk: bool = False,
+    ) -> tuple[torch.Tensor, list[torch.Tensor | None]]:
+        """
+        Decode latent representations into pixel space using VAE with streaming cache.
+        
+        Args:
+            latents: Input latent tensor with shape (batch, channels, frames, height_latents, width_latents)
+            fastvideo_args: Configuration object.
+            cache: VAE cache from previous call, or None to initialize a new cache.
+            is_first_chunk: Whether this is the first chunk.
+            
+        Returns:
+            A tuple of (decoded_frames, updated_cache).
+        """
+        self.vae = self.vae.to(get_local_torch_device())
+        latents = latents.to(get_local_torch_device())
+
+        # Setup VAE precision
+        vae_dtype = PRECISION_TO_TYPE[
+            fastvideo_args.pipeline_config.vae_precision]
+        vae_autocast_enabled = (
+            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+
+        latents = self._denormalize_latents(latents)
+
+        # Initialize cache if needed
+        if cache is None:
+            cache = self.vae.get_streaming_cache()
+
+        # Decode latents with streaming
+        with torch.autocast(device_type="cuda",
+                            dtype=vae_dtype,
+                            enabled=vae_autocast_enabled):
+            if fastvideo_args.pipeline_config.vae_tiling:
+                self.vae.enable_tiling()
+            if not vae_autocast_enabled:
+                latents = latents.to(vae_dtype)
+            image, cache = self.vae.streaming_decode(latents, cache,
+                                                     is_first_chunk)
+
+        # Normalize image to [0, 1] range
+        image = (image / 2 + 0.5).clamp(0, 1)
+        assert cache is not None, "cache should not be None after streaming_decode"
+        return image, cache
 
     @torch.no_grad()
     def forward(
@@ -168,6 +244,21 @@ class DecodingStage(PipelineStage):
 
         # Convert to CPU float32 for compatibility
         frames = frames.cpu().float()
+
+        # Crop padding if this is a LongCat refinement
+        if hasattr(batch, 'num_cond_frames_added') and hasattr(
+                batch, 'new_frame_size_before_padding'):
+            num_cond_frames_added = batch.num_cond_frames_added
+            new_frame_size = batch.new_frame_size_before_padding
+            if num_cond_frames_added > 0 or frames.shape[2] != new_frame_size:
+                # frames is [B, C, T, H, W], crop temporal dimension
+                frames = frames[:, :,
+                                num_cond_frames_added:num_cond_frames_added +
+                                new_frame_size, :, :]
+                logger.info(
+                    "Cropped LongCat refinement padding: %s:%s, final shape: %s",
+                    num_cond_frames_added,
+                    num_cond_frames_added + new_frame_size, frames.shape)
 
         # Update batch with decoded image
         batch.output = frames

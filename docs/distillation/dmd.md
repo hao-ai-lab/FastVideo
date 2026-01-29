@@ -1,6 +1,6 @@
 # 🎯 Distillation
 
-We introduce a new finetuning strategy - **Sparse-distill**, which jointly integrates **[DMD](https://arxiv.org/abs/2405.14867)** and **[VSA](https://arxiv.org/abs/2505.13389)** in a single training process. This approach combines the benefits of both distillation to shorten diffusion steps and sparse attention to reduce attention computations, enabling much faster video generation.
+We introduce a new finetuning strategy - **Sparse-distill**, which jointly integrates **[DMD](https://arxiv.org/abs/2405.14867)** and **[VSA](https://arxiv.org/abs/2505.13389)** in a single training process. This approach combines the benefits of both distillation to shorten diffusion steps and sparse attention to reduce attention computation, enabling much faster video generation.
 
 ## 📊 Model Overview
 
@@ -13,7 +13,7 @@ We provide two distilled models:
 Both models are trained on **61×448×832** resolution but support generating videos with **any resolution** (1.3B  model mainly support 480P, 14B model support 480P and 720P, quality may degrade for different resolutions).
 
 ## ⚙️ Inference
-First install [VSA](https://hao-ai-lab.github.io/FastVideo/video_sparse_attention/installation.html). Set `MODEL_BASE` to your own model path and run:
+First install [VSA](../attention/vsa/index.md). Set `MODEL_BASE` to your own model path and run:
 
 ```bash
 bash scripts/inference/v1_inference_wan_dmd.sh

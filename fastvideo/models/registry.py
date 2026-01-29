@@ -26,16 +26,26 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
     "HunyuanGameCraftTransformer3DModel":
     ("dits", "hunyuangamecraft", "HunyuanGameCraftTransformer3DModel"),
+    "HunyuanVideo15Transformer3DModel":
+    ("dits", "hunyuanvideo15", "HunyuanVideo15Transformer3DModel"),
+    "HYWorldTransformer3DModel":
+    ("dits", "hyworld", "HYWorldTransformer3DModel"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
     "StepVideoModel": ("dits", "stepvideo", "StepVideoModel"),
-    "CosmosTransformer3DModel": ("dits", "cosmos", "CosmosTransformer3DModel")
+    "CosmosTransformer3DModel": ("dits", "cosmos", "CosmosTransformer3DModel"),
+    "Cosmos25Transformer3DModel": ("dits", "cosmos2_5", "Cosmos25Transformer3DModel"),
+    "LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"),  # Wrapper (Phase 1)
+    "LongCatTransformer3DModel": ("dits", "longcat", "LongCatTransformer3DModel"),  # Native (Phase 2)
+    "LTX2Transformer3DModel": ("dits", "ltx2", "LTX2Transformer3DModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
     # "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoDiT"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
+    "MatrixGameWanModel": ("dits", "matrixgame", "MatrixGameWanModel"),
+    "CausalMatrixGameWanModel": ("dits", "matrixgame", "CausalMatrixGameWanModel"),
 }
 
 _TEXT_ENCODER_MODELS = {
@@ -45,18 +55,34 @@ _TEXT_ENCODER_MODELS = {
     "T5EncoderModel": ("encoders", "t5", "T5EncoderModel"),
     "STEP1TextEncoder": ("encoders", "stepllm", "STEP1TextEncoder"),
     "BertModel": ("encoders", "clip", "CLIPTextModel"),
+    "Qwen2_5_VLTextModel": ("encoders", "qwen2_5", "Qwen2_5_VLTextModel"),
+    "Reason1TextEncoder": ("encoders", "reason1", "Reason1TextEncoder"),
+    "Qwen2_5_VLForConditionalGeneration":
+    ("encoders", "reason1", "Reason1TextEncoder"),
+    "LTX2GemmaTextEncoderModel": ("encoders", "gemma", "LTX2GemmaTextEncoderModel"),
 }
 
 _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
     # "HunyuanVideoTransformer3DModel": ("image_encoder", "hunyuanvideo", "HunyuanVideoImageEncoder"),
     "CLIPVisionModelWithProjection": ("encoders", "clip", "CLIPVisionModel"),
+    "CLIPVisionModel": ("encoders", "clip", "CLIPVisionModel"),
+    "SiglipVisionModel": ("encoders", "siglip", "SiglipVisionModel"),
 }
 
 _VAE_MODELS = {
     "AutoencoderKLHunyuanVideo":
     ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
+    "AutoencoderKLHYWorld": ("vaes", "hyworldvae", "AutoencoderKLHYWorld"),
+    "AutoencoderKLHunyuanVideo15": ("vaes", "hunyuan15vae", "AutoencoderKLHunyuanVideo15"),
     "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
-    "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo")
+    "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo"),
+    "CausalVideoAutoencoder": ("vaes", "ltx2vae", "LTX2CausalVideoAutoencoder"),
+}
+
+_AUDIO_MODELS = {
+    "LTX2AudioEncoder": ("audio", "ltx2_audio_vae", "LTX2AudioEncoder"),
+    "LTX2AudioDecoder": ("audio", "ltx2_audio_vae", "LTX2AudioDecoder"),
+    "LTX2Vocoder": ("audio", "ltx2_audio_vae", "LTX2Vocoder"),
 }
 
 _SCHEDULERS = {
@@ -65,9 +91,13 @@ _SCHEDULERS = {
      "FlowMatchEulerDiscreteScheduler"),
     "UniPCMultistepScheduler":
     ("schedulers", "scheduling_unipc_multistep", "UniPCMultistepScheduler"),
+    "FlowUniPCMultistepScheduler":
+    ("schedulers", "scheduling_flow_unipc_multistep", "FlowUniPCMultistepScheduler"),
     "SelfForcingFlowMatchScheduler":
     ("schedulers", "scheduling_self_forcing_flow_match",
      "SelfForcingFlowMatchScheduler"),
+    "RCMScheduler":
+    ("schedulers", "scheduling_rcm", "RCMScheduler"),
 }
 
 _FAST_VIDEO_MODELS = {
@@ -76,6 +106,7 @@ _FAST_VIDEO_MODELS = {
     **_TEXT_ENCODER_MODELS,
     **_IMAGE_ENCODER_MODELS,
     **_VAE_MODELS,
+    **_AUDIO_MODELS,
     **_SCHEDULERS,
 }
 
