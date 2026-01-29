@@ -8,16 +8,22 @@ from __future__ import annotations
 import itertools
 import math
 from dataclasses import dataclass, replace
+from math import prod
 from enum import Enum
 from typing import Any, Callable, Iterator, List, NamedTuple, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.distributed as dist
 from einops import rearrange
 
+from fastvideo.logger import init_logger
 from fastvideo.models.vaes.common import DiagonalGaussianDistribution
+from fastvideo.distributed.parallel_state import (get_sp_parallel_rank,
+                                                  get_sp_world_size)
 
+logger = init_logger(__name__)
 
 # =============================================================================
 # Enums
@@ -1620,8 +1626,14 @@ class LTX2CausalVideoAutoencoder(nn.Module):
     ) -> torch.Tensor:
         """Decode latents to video, using tiling if enabled."""
         if self._use_tiling:
-            # Collect all chunks from tiled decode and concatenate
-            chunks = list(self.tiled_decode(z, TilingConfig.default(), timestep, generator))
+            sp_world_size = get_sp_world_size()
+            if sp_world_size > 1:
+                chunks = list(
+                    self.parallel_tiled_decode(z, TilingConfig.default(), timestep, generator)) 
+                torch.cuda.synchronize()
+            else:
+                chunks = list(
+                    self.tiled_decode(z, TilingConfig.default(), timestep, generator))
             return torch.cat(chunks, dim=2)  # Concatenate along temporal dimension
         return self.decoder(z, timestep=timestep, generator=generator)
 
@@ -1802,3 +1814,183 @@ class LTX2CausalVideoAutoencoder(nn.Module):
         if previous_chunk is not None:
             previous_weights = previous_weights.clamp(min=1e-8)
             yield previous_chunk / previous_weights
+
+    @torch.inference_mode()
+    def parallel_tiled_decode(
+        self,
+        latent: torch.Tensor,
+        tiling_config: TilingConfig | None = None,
+        timestep: torch.Tensor | None = None,
+        generator: torch.Generator | None = None,
+    ) -> Iterator[torch.Tensor]:
+        world_size, rank = get_sp_world_size(), get_sp_parallel_rank()
+
+        full_video_shape = VideoLatentShape.from_torch_shape(latent.shape).upscale(
+            self.TIME_SCALE, self.SPATIAL_SCALE
+        )
+        tiles = self._prepare_tiles(latent, tiling_config)
+        temporal_groups = self._group_tiles_by_temporal_slice(tiles)
+
+        previous_chunk = None
+        previous_weights = None
+        previous_temporal_slice = None
+
+        # Build gathered_decoded_temporal_tiles: List[List[torch.Tensor]]
+        # Each inner list contains all decoded tiles for one temporal group
+        gathered_decoded_temporal_tiles = []
+        for temporal_group_tiles in temporal_groups:
+            # ===== CONTIGUOUS TILE ASSIGNMENT =====
+            num_tiles_in_group = len(temporal_group_tiles)
+            tiles_per_rank = (num_tiles_in_group + world_size - 1) // world_size
+            start_tile_idx = rank * tiles_per_rank
+            end_tile_idx = min((rank + 1) * tiles_per_rank, num_tiles_in_group)
+
+            # ===== DECODE LOCAL TILES =====
+            local_results = []
+            local_dim_metadata = []
+            local_tile_indices = []
+
+            for local_idx in range(start_tile_idx, end_tile_idx):
+                tile = temporal_group_tiles[local_idx]
+                decoded_tile = self.decoder(latent[tile.in_coords], timestep, generator)
+
+                # Flatten and store metadata
+                shape = decoded_tile.shape
+                decoded_flat = decoded_tile.reshape(-1)
+
+                local_results.append(decoded_flat)
+                local_dim_metadata.append(shape)
+                local_tile_indices.append(local_idx)
+
+            # ===== FLATTEN AND PAD =====
+            if local_results:
+                results = torch.cat(local_results, dim=0).contiguous()
+            else:
+                # Empty rank
+                results = torch.tensor([], device=latent.device, dtype=latent.dtype)
+            del local_results
+
+            # Gather sizes to determine padding
+            local_size = torch.tensor([results.size(0)], device=results.device, dtype=torch.int64)
+            all_sizes = [
+                torch.zeros(1, device=results.device, dtype=torch.int64)
+                for _ in range(world_size)
+            ]
+            dist.all_gather(all_sizes, local_size)
+            max_size = max(size.item() for size in all_sizes)
+
+            # Pad to max size
+            padded_results = torch.zeros(max_size, device=results.device, dtype=results.dtype)
+            padded_results[:results.size(0)] = results
+            del results
+
+            # ===== GATHER RESULTS AND METADATA =====
+            gathered_results = torch.zeros_like(padded_results).repeat(
+                world_size, *[1] * len(padded_results.shape)
+            ).contiguous()
+            dist.all_gather_into_tensor(gathered_results, padded_results)
+
+            gathered_dim_metadata = [None] * world_size
+            dist.all_gather_object(gathered_dim_metadata, local_dim_metadata)
+
+            gathered_tile_indices = [None] * world_size
+            dist.all_gather_object(gathered_tile_indices, local_tile_indices)
+
+            # ===== RECONSTRUCT TILE GRID =====
+            decoded_tiles_ordered = [None] * num_tiles_in_group
+
+            for rank_idx in range(world_size):
+                per_rank_metadata = gathered_dim_metadata[rank_idx]
+                per_rank_indices = gathered_tile_indices[rank_idx]
+
+                offset = 0
+                for tile_idx, shape in zip(per_rank_indices, per_rank_metadata):
+                    num_elements = prod(shape)
+                    tile_data = gathered_results[rank_idx, offset:offset + num_elements].reshape(shape)
+                    decoded_tiles_ordered[tile_idx] = tile_data
+                    offset += num_elements
+
+            # Store for this temporal group
+            gathered_decoded_temporal_tiles.append(decoded_tiles_ordered)
+
+        # blend the resulting tiles.
+        for i, temporal_group_tiles in enumerate(temporal_groups):
+            curr_temporal_slice = temporal_group_tiles[0].out_coords[2]
+
+            temporal_tile_buffer_shape = full_video_shape._replace(
+                frames=curr_temporal_slice.stop - curr_temporal_slice.start,
+            )
+
+            buffer = torch.zeros(
+                temporal_tile_buffer_shape.to_torch_shape(),
+                device=latent.device,
+                dtype=latent.dtype,
+            )
+            # curr_weights = self._accumulate_temporal_group_into_buffer(
+            #     group_tiles=temporal_group_tiles,
+            #     buffer=buffer,
+            #     latent=latent,
+            #     timestep=timestep,
+            #     generator=generator,
+            # )
+            temporal_slice = temporal_group_tiles[0].out_coords[2]
+            weights = torch.zeros_like(buffer)
+
+            # blend spatial tiles.
+            for j, tile in enumerate(temporal_group_tiles):
+                # decoded_tile = self.decoder(latent[tile.in_coords], timestep, generator)
+                decoded_tile = gathered_decoded_temporal_tiles[i][j]
+                mask = tile.blend_mask.to(device=buffer.device, dtype=buffer.dtype)
+                temporal_offset = tile.out_coords[2].start - temporal_slice.start
+                expected_temporal_len = tile.out_coords[2].stop - tile.out_coords[2].start
+                decoded_temporal_len = decoded_tile.shape[2]
+
+                actual_temporal_len = min(expected_temporal_len, decoded_temporal_len, buffer.shape[2] - temporal_offset)
+
+                chunk_coords = (
+                    slice(None),  # batch
+                    slice(None),  # channels
+                    slice(temporal_offset, temporal_offset + actual_temporal_len),
+                    tile.out_coords[3],  # height
+                    tile.out_coords[4],  # width
+                )
+
+                decoded_slice = decoded_tile[:, :, :actual_temporal_len, :, :]
+                mask_slice = mask[:, :, :actual_temporal_len, :, :] if mask.shape[2] > 1 else mask
+
+                buffer[chunk_coords] += decoded_slice * mask_slice
+                weights[chunk_coords] += mask_slice
+            curr_weights = weights
+
+
+            # Blend with previous temporal chunk if it exists
+            if previous_chunk is not None:
+                if previous_temporal_slice.stop > curr_temporal_slice.start:
+                    overlap_len = previous_temporal_slice.stop - curr_temporal_slice.start
+                    temporal_overlap_slice = slice(curr_temporal_slice.start - previous_temporal_slice.start, None)
+
+                    previous_chunk[:, :, temporal_overlap_slice, :, :] += buffer[:, :, slice(0, overlap_len), :, :]
+                    previous_weights[:, :, temporal_overlap_slice, :, :] += curr_weights[
+                        :, :, slice(0, overlap_len), :, :
+                    ]
+
+                    buffer[:, :, slice(0, overlap_len), :, :] = previous_chunk[:, :, temporal_overlap_slice, :, :]
+                    curr_weights[:, :, slice(0, overlap_len), :, :] = previous_weights[
+                        :, :, temporal_overlap_slice, :, :
+                    ]
+
+                # Yield the non-overlapping part of the previous chunk
+                previous_weights = previous_weights.clamp(min=1e-8)
+                yield_len = curr_temporal_slice.start - previous_temporal_slice.start
+                yield (previous_chunk / previous_weights)[:, :, :yield_len, :, :]
+
+            # Update state for next iteration
+            previous_chunk = buffer
+            previous_weights = curr_weights
+            previous_temporal_slice = curr_temporal_slice
+
+        # Yield any remaining chunk
+        if previous_chunk is not None:
+            previous_weights = previous_weights.clamp(min=1e-8)
+            yield previous_chunk / previous_weights       
+
