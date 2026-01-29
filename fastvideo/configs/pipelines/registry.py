@@ -7,7 +7,10 @@ from collections.abc import Callable
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.cosmos2_5 import Cosmos25Config
-from fastvideo.configs.pipelines.flux_2 import Flux2PipelineConfig
+from fastvideo.configs.pipelines.flux_2 import (
+    Flux2KleinPipelineConfig,
+    Flux2PipelineConfig,
+)
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuan15 import Hunyuan15T2V480PConfig, Hunyuan15T2V720PConfig
 from fastvideo.configs.pipelines.hyworld import HYWorldConfig
@@ -75,6 +78,9 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers": TurboDiffusionT2V_1_3B_Config,
     "loayrashid/TurboWan2.1-T2V-14B-Diffusers": TurboDiffusionT2V_14B_Config,
     "loayrashid/TurboWan2.2-I2V-A14B-Diffusers": TurboDiffusionI2V_A14B_Config,
+    # Flux2 Klein (distilled, 4-step, no guidance)
+    "black-forest-labs/FLUX.2-klein-4B": Flux2KleinPipelineConfig,
+    "black-forest-labs/FLUX.2-klein-9B": Flux2KleinPipelineConfig,
     # Add other specific weight variants
 }
 
@@ -115,6 +121,8 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "ltx2" in id.lower() or "ltx-2" in id.lower(),
     "flux2":
     lambda id: "flux2" in id.lower() or "flux_2" in id.lower() or "flux-2" in id.lower(),
+    "flux2klein":
+    lambda id: "flux2klein" in id.lower() or "flux2-klein" in id.lower() or "flux.2-klein" in id.lower(),
     # Add other pipeline architecture detectors
 }
 
@@ -140,6 +148,7 @@ PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "turbodiffusion": TurboDiffusionT2V_1_3B_Config,
     "ltx2": LTX2T2VConfig,
     "flux2": Flux2PipelineConfig,
+    "flux2klein": Flux2KleinPipelineConfig,
     # Other fallbacks by architecture
 }
 

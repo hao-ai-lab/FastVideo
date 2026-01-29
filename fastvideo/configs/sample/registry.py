@@ -34,6 +34,10 @@ from fastvideo.configs.sample.turbodiffusion import (
     TurboDiffusionT2V_14B_SamplingParam,
     TurboDiffusionI2V_A14B_SamplingParam,
 )
+from fastvideo.configs.sample.flux_2 import (
+    Flux2KleinSamplingParam,
+    Flux2SamplingParam,
+)
 # isort: on
 from fastvideo.logger import init_logger
 from fastvideo.utils import (maybe_download_model_index,
@@ -109,6 +113,10 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "Lightricks/LTX-2": LTX2SamplingParam,
     "FastVideo/LTX2-Distilled-Diffusers": LTX2SamplingParam,
 
+    # Flux2 Klein (distilled, 4-step, no guidance)
+    "black-forest-labs/FLUX.2-klein-4B": Flux2KleinSamplingParam,
+    "black-forest-labs/FLUX.2-klein-9B": Flux2KleinSamplingParam,
+
     # Add other specific weight variants
 }
 
@@ -163,6 +171,8 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
     "cosmos25": Cosmos_Predict2_5_2B_Diffusers_SamplingParam,
     "cosmos": Cosmos_Predict2_2B_Video2World_SamplingParam,
     "ltx2": LTX2SamplingParam,
+    "flux2klein": Flux2KleinSamplingParam,
+    "flux2": Flux2SamplingParam,
     # Other fallbacks by architecture
 }
 
