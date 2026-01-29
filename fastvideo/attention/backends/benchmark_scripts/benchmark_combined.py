@@ -119,12 +119,12 @@ def benchmark_sageattn3(batch_size, num_heads, seq_len, head_dim,
     return avg_time_ms
 
 
-def time_to_tops(time_ms, batch_size, num_heads, seq_len, head_dim, is_causal=False):
-    """Convert time to TOPS (Tera Operations Per Second)."""
+def time_to_tflops(time_ms, batch_size, num_heads, seq_len, head_dim, is_causal=False):
+    """Convert time to TFLOPs (Tera FLOPs per Second)."""
     total_flops = calculate_attention_flops(batch_size, num_heads, seq_len, seq_len, head_dim, is_causal)
     time_s = time_ms / 1000.0
-    tops = total_flops / (time_s * 1e12)
-    return tops
+    tflops = total_flops / (time_s * 1e12)
+    return tflops
 
 
 def run_benchmark_suite(head_dim=64, is_causal=False, num_heads=12, batch_size=1,
@@ -158,7 +158,7 @@ def run_benchmark_suite(head_dim=64, is_causal=False, num_heads=12, batch_size=1
     print("="*80)
     sys.stdout.flush()
     
-    # Results storage: {method_name: {seq_len: tops}}
+    # Results storage: {method_name: {seq_len: tflops}}
     results: Dict[str, Dict[int, Optional[float]]] = {
         'FlashAttn': {},
         'SageAttn3': {},
@@ -180,9 +180,9 @@ def run_benchmark_suite(head_dim=64, is_causal=False, num_heads=12, batch_size=1
                 is_causal=is_causal, dtype=dtype,
                 num_warmups=num_warmups, num_tests=num_tests
             )
-            tops = time_to_tops(time_ms, batch_size, num_heads, seq_len, head_dim, is_causal)
-            results['FlashAttn'][seq_len] = tops
-            print(f"{tops:.0f} TOPS ({time_ms:.3f} ms)")
+            tflops = time_to_tflops(time_ms, batch_size, num_heads, seq_len, head_dim, is_causal)
+            results['FlashAttn'][seq_len] = tflops
+            print(f"{tflops:.0f} TFLOPs ({time_ms:.3f} ms)")
         except Exception as e:
             print(f"OOM or Error: {e}")
             results['FlashAttn'][seq_len] = None
@@ -201,9 +201,9 @@ def run_benchmark_suite(head_dim=64, is_causal=False, num_heads=12, batch_size=1
                 enable_smoothing_k=True,
                 num_warmups=num_warmups, num_tests=num_tests
             )
-            tops = time_to_tops(time_ms, batch_size, num_heads, seq_len, head_dim, is_causal)
-            results['SageAttn3'][seq_len] = tops
-            print(f"{tops:.0f} TOPS ({time_ms:.3f} ms)")
+            tflops = time_to_tflops(time_ms, batch_size, num_heads, seq_len, head_dim, is_causal)
+            results['SageAttn3'][seq_len] = tflops
+            print(f"{tflops:.0f} TFLOPs ({time_ms:.3f} ms)")
         except Exception as e:
             print(f"OOM or Error: {e}")
             results['SageAttn3'][seq_len] = None
@@ -222,9 +222,9 @@ def run_benchmark_suite(head_dim=64, is_causal=False, num_heads=12, batch_size=1
                 enable_smoothing_k=False,
                 num_warmups=num_warmups, num_tests=num_tests
             )
-            tops = time_to_tops(time_ms, batch_size, num_heads, seq_len, head_dim, is_causal)
-            results['FP4'][seq_len] = tops
-            print(f"{tops:.0f} TOPS ({time_ms:.3f} ms)")
+            tflops = time_to_tflops(time_ms, batch_size, num_heads, seq_len, head_dim, is_causal)
+            results['FP4'][seq_len] = tflops
+            print(f"{tflops:.0f} TFLOPs ({time_ms:.3f} ms)")
         except Exception as e:
             print(f"OOM or Error: {e}")
             results['FP4'][seq_len] = None
@@ -232,7 +232,7 @@ def run_benchmark_suite(head_dim=64, is_causal=False, num_heads=12, batch_size=1
     
     # Print summary table
     print("\n" + "="*100)
-    print("Summary Table (TOPS)")
+    print("Summary Table (TFLOPs)")
     print("="*100)
     header = f"{'SeqLen':<10}"
     for method in results.keys():
@@ -317,7 +317,7 @@ def generate_plot(results: Dict[str, Dict[int, Optional[float]]],
     
     # Customize plot
     ax.set_xlabel('Sequence Length', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Speed (TOPS)', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Speed (TFLOPs)', fontsize=12, fontweight='bold')
     ax.set_title(f'{device_name}, (Head dim = {head_dim}, causal = {is_causal})', fontsize=14, fontweight='bold')
     ax.set_xticks(x)
     ax.set_xticklabels(x_labels)
@@ -351,7 +351,7 @@ def generate_plot(results: Dict[str, Dict[int, Optional[float]]],
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Combined Attention Benchmark (FlashAttn2 vs SageAttn3 vs FP4)')
     parser.add_argument('--batch-size', type=int, default=1, help='Batch size')
-    parser.add_argument('--num-heads', type=int, default=12, help='Number of attention heads')
+    parser.add_argument('--num-heads', type=int, default=16, help='Number of attention heads')
     parser.add_argument('--head-dim', type=int, default=64, choices=[64, 128], help='Head dimension')
     parser.add_argument('--causal', action='store_true', help='Use causal attention')
     parser.add_argument('--num-warmups', type=int, default=10, help='Number of warmup iterations')
