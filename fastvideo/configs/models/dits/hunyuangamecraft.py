@@ -37,7 +37,38 @@ class HunyuanGameCraftArchConfig(DiTArchConfig):
 
     param_names_mapping: dict = field(
         default_factory=lambda: {
-            # Camera net mappings
+            # IMPORTANT: Specific mappings MUST come before general ones!
+            
+            # individual_token_refiner combined mappings (most specific first)
+            r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.adaLN_modulation\.1\.(.*)$": r"txt_in.refiner_blocks.\1.adaLN_modulation.linear.\2",
+            r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.mlp\.fc1\.(.*)$": r"txt_in.refiner_blocks.\1.mlp.fc_in.\2",
+            r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.mlp\.fc2\.(.*)$": r"txt_in.refiner_blocks.\1.mlp.fc_out.\2",
+            r"^txt_in\.individual_token_refiner\.blocks\.(.*)$": r"txt_in.refiner_blocks.\1",
+            
+            # adaLN_modulation: .1. -> .linear. (index 0 is activation)
+            r"^(.*)\.adaLN_modulation\.1\.(.*)$": r"\1.adaLN_modulation.linear.\2",
+            
+            # Map Sequential indices to named attributes
+            # MLP layers: .0. -> .fc_in., .2. -> .fc_out. (index 1 is activation)
+            r"^(.*)\.mlp\.0\.(.*)$": r"\1.mlp.fc_in.\2",
+            r"^(.*)\.mlp\.2\.(.*)$": r"\1.mlp.fc_out.\2",
+            
+            # linear_1/linear_2 -> fc_in/fc_out (for embedders that don't use mlp wrapper)
+            r"^(.*)\.linear_1\.(.*)$": r"\1.fc_in.\2",
+            r"^(.*)\.linear_2\.(.*)$": r"\1.fc_out.\2",
+            
+            # in_layer/out_layer -> fc_in/fc_out (for vector_in embedder)
+            r"^(.*)\.in_layer\.(.*)$": r"\1.fc_in.\2",
+            r"^(.*)\.out_layer\.(.*)$": r"\1.fc_out.\2",
+            
+            # General fc1/fc2 mappings (AFTER specific ones)
+            r"^(.*)\.fc1\.(.*)$": r"\1.fc_in.\2",
+            r"^(.*)\.fc2\.(.*)$": r"\1.fc_out.\2",
+            
+            # modulation: .1. -> .linear.
+            r"^(.*)\.modulation\.1\.(.*)$": r"\1.modulation.linear.\2",
+            
+            # Camera net pass-through (encode_first/encode_second use Sequential, keep as-is)
             r"^camera_net\.(.*)$":
             r"camera_net.\1",
 
@@ -178,6 +209,7 @@ class HunyuanGameCraftArchConfig(DiTArchConfig):
     camera_down_coef: int = 8
     text_projection: str = "single_refiner"  # or "linear"
     use_attention_mask: bool = False
+    multitask_mask_training_type: str | None = None  # "concat" for multitask training
     
     exclude_lora_layers: list[str] = field(
         default_factory=lambda: ["img_in", "txt_in", "time_in", "vector_in", "camera_net"])

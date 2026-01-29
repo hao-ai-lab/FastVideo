@@ -249,6 +249,7 @@ class MMDoubleStreamBlock(nn.Module):
                                              params_dtype=dtype,
                                              prefix=f"{prefix}.img_attn_qkv")
 
+        # QK Normalization layers (critical for numerical alignment!)
         self.img_attn_q_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype)
         self.img_attn_k_norm = HunyuanRMSNorm(head_dim, eps=1e-6, dtype=dtype)
 
@@ -581,6 +582,7 @@ class HunyuanGameCraftTransformer3DModel(CachableDiT):
         self.use_attention_mask = config.use_attention_mask
         self.camera_in_channels = config.camera_in_channels
         self.camera_down_coef = config.camera_down_coef
+        self.multitask_mask_training_type = config.multitask_mask_training_type
 
         pe_dim = config.hidden_size // config.num_attention_heads
         if sum(config.rope_axes_dim) != pe_dim:
@@ -597,7 +599,8 @@ class HunyuanGameCraftTransformer3DModel(CachableDiT):
                                  self.in_channels,
                                  self.hidden_size,
                                  dtype=config.dtype,
-                                 prefix=f"{config.prefix}.img_in")
+                                 prefix=f"{config.prefix}.img_in",
+                                 multitask_mask_training_type=self.multitask_mask_training_type)
 
         # Text projection
         if self.text_projection == "linear":
@@ -639,10 +642,10 @@ class HunyuanGameCraftTransformer3DModel(CachableDiT):
             prefix=f"{config.prefix}.guidance_in")
                             if self.guidance_embeds else None)
 
-        # Camera network
+        # Camera network (always outputs to base out_channels, not multitask-expanded channels)
         self.camera_net = CameraNet(
             in_channels=self.camera_in_channels,
-            out_channels=self.in_channels,
+            out_channels=self.out_channels,
             downscale_coef=self.camera_down_coef,
             patch_size=self.patch_size,
             hidden_size=self.hidden_size,
