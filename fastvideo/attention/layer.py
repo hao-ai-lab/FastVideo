@@ -3,13 +3,12 @@
 import torch
 import torch.nn as nn
 
-from fastvideo.attention.backends.sdpa import SDPAMetadata
 from fastvideo.attention.selector import backend_name_to_enum, get_attn_backend
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather, sequence_model_parallel_all_to_all_4D)
 from fastvideo.distributed.parallel_state import (get_sp_parallel_rank,
                                                   get_sp_world_size)
-from fastvideo.forward_context import ForwardContext, get_forward_context, set_forward_context
+from fastvideo.forward_context import ForwardContext, get_forward_context
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import get_compute_dtype
 from fastvideo.layers.rotary_embedding import _apply_rotary_emb

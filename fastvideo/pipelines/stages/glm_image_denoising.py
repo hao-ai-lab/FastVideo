@@ -87,7 +87,8 @@ class GlmImageDenoisingStage(DenoisingStage):
         image_seq_length = (h // patch_size) * (w // patch_size)
 
         # Compute text sequence length from prompt_embeds
-        text_seq_length = prompt_embeds.shape[1] if prompt_embeds.dim() >= 2 else 0
+        text_seq_length = prompt_embeds.shape[1] if prompt_embeds.dim(
+        ) >= 2 else 0
 
         # The mask will be set in forward context before each transformer call
         with self.progress_bar(total=num_inference_steps) as progress_bar:
@@ -108,43 +109,45 @@ class GlmImageDenoisingStage(DenoisingStage):
                 attn_metadata = None
                 if text_attention_mask is not None:
                     first_block = self.transformer.transformer_blocks[0]
-                    attn_backend = getattr(first_block.attn1.attn, 'backend', None)
-                    
+                    attn_backend = getattr(first_block.attn1.attn, 'backend',
+                                           None)
+
                     if attn_backend is not None and attn_backend == AttentionBackendEnum.TORCH_SDPA:
                         batch_size = latent_model_input.shape[0]
                         # Create combined mask: text part uses provided mask, image part is always 1
                         mix_attn_mask = torch.ones(
                             (batch_size, text_seq_length + image_seq_length),
                             device=device,
-                            dtype=torch.float32
-                        )
+                            dtype=torch.float32)
                         # Expand text mask to batch size if needed
                         if text_attention_mask.shape[0] == 1 and batch_size > 1:
-                            text_attention_mask = text_attention_mask.repeat(batch_size, 1)
+                            text_attention_mask = text_attention_mask.repeat(
+                                batch_size, 1)
                         # Set text part of mask
-                        mix_attn_mask[:, :text_seq_length] = text_attention_mask.float().to(device)
-                        
+                        mix_attn_mask[:, :
+                                      text_seq_length] = text_attention_mask.float(
+                                      ).to(device)
+
                         # Convert to SDPA format: (B, 1, 1, L) for key-padding style mask
                         # True = attend, False = ignore (will be converted to additive mask by SDPA)
-                        attention_mask_kv = (mix_attn_mask > 0).unsqueeze(1).unsqueeze(2)  # (B, 1, 1, L)
-                        
+                        attention_mask_kv = (mix_attn_mask
+                                             > 0).unsqueeze(1).unsqueeze(
+                                                 2)  # (B, 1, 1, L)
+
                         # Create SDPAMetadata with the mask
                         attn_metadata = SDPAMetadata(
-                            current_timestep=i,
-                            attn_mask=attention_mask_kv
-                        )
+                            current_timestep=i, attn_mask=attention_mask_kv)
                     # If using Flash Attention, masks are not supported - attn_metadata remains None
 
-                with torch.no_grad(), set_forward_context(current_timestep=i,
-                                                          attn_metadata=attn_metadata,
-                                                          forward_batch=batch):
+                with torch.no_grad(), set_forward_context(
+                        current_timestep=i,
+                        attn_metadata=attn_metadata,
+                        forward_batch=batch):
                     # Predict noise
                     noise_pred = self.transformer(latent_model_input,
-                                                  prompt_embeds,
-                                                  t_expand,
+                                                  prompt_embeds, t_expand,
                                                   prior_token_id,
-                                                  prior_token_drop,
-                                                  target_size,
+                                                  prior_token_drop, target_size,
                                                   crop_coords)
 
                     # Apply Classifier-Free Guidance

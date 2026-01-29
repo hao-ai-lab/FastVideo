@@ -509,18 +509,13 @@ class VisionLanguageEncoderLoader(ComponentLoader):
             logger.warning("Failed to load processor: %s", e)
             processor = None
         
-        # Load the model - try GlmImageForConditionalGeneration directly for GLM-Image
+        # Load the model - try AutoModel with trust_remote_code
         # Always use device_map="auto" for AR model since it's needed for inference
+        
+        logger.info(f"Loading model with trust_remote_code={fastvideo_args.trust_remote_code}")
+
         try:
-            from transformers import GlmImageForConditionalGeneration
-            model = GlmImageForConditionalGeneration.from_pretrained(
-                model_path,
-                trust_remote_code=fastvideo_args.trust_remote_code,
-                torch_dtype=torch.bfloat16,
-                device_map="auto",
-            )
-        except ImportError:
-            # Fallback to AutoModel for other vision-language encoders
+            # First try loading with AutoModel which supports remote code
             from transformers import AutoModel
             model = AutoModel.from_pretrained(
                 model_path,
@@ -528,6 +523,23 @@ class VisionLanguageEncoderLoader(ComponentLoader):
                 torch_dtype=torch.bfloat16,
                 device_map="auto",
             )
+        except Exception as e:
+            logger.warning(f"AutoModel.from_pretrained failed: {e}")
+            # Try loading Config first to debug
+            try:
+                from transformers import AutoConfig
+                config = AutoConfig.from_pretrained(
+                    model_path, 
+                    trust_remote_code=fastvideo_args.trust_remote_code
+                )
+                logger.info(f"Successfully loaded config: {config}")
+                # If config loads, maybe we can use it to load model class dynamically?
+                # But for now re-raise
+                raise e
+            except Exception as config_error:
+                 logger.error(f"AutoConfig also failed: {config_error}")
+                 raise config_error
+        
         logger.info(
             "Loaded vision-language encoder: %s",
             model.__class__.__name__,
