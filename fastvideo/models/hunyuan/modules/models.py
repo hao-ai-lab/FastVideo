@@ -244,34 +244,7 @@ class MMDoubleStreamBlock(nn.Module):
         # Prepare image for attention.
         img_modulated = self.img_norm1(img)
         img_modulated = modulate(img_modulated, shift=img_mod1_shift, scale=img_mod1_scale)
-        # img_qkv = self.img_attn_qkv(img_modulated)
-        img_q = self.img_attn_q(img_modulated)
-        img_k = self.img_attn_k(img_modulated)
-        img_v = self.img_attn_v(img_modulated)
-        img_q = rearrange(img_q, "B L (H D) -> B L H D", H=self.heads_num)
-        img_k = rearrange(img_k, "B L (H D) -> B L H D", H=self.heads_num)
-        img_v = rearrange(img_v, "B L (H D) -> B L H D", H=self.heads_num)
-        # Apply QK-Norm if needed
-        img_q = self.img_attn_q_norm(img_q).to(img_v)
-        img_k = self.img_attn_k_norm(img_k).to(img_v)
-
-        # Apply RoPE if needed.
-        if freqs_cis is not None:
-
-            # def shrink_head(encoder_state, dim):
-            #     local_heads = encoder_state.shape[dim] // mccl_info.sp_size
-            #     return encoder_state.narrow(dim, mccl_info.rank_within_group * local_heads, local_heads)
-
-            # freqs_cis = (
-            #     shrink_head(freqs_cis[0], dim=0),
-            #     shrink_head(freqs_cis[1], dim=0),
-            # )
-            img_qq = apply_rotary_emb_single(img_q, freqs_cis, head_first=False, use_fused_rope=self.use_fused_rope)
-            img_kk = apply_rotary_emb_single(img_k, freqs_cis, head_first=False, use_fused_rope=self.use_fused_rope)
-            assert (img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
-                    ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
-            img_q, img_k = img_qq, img_kk
-
+        
         # Prepare txt for attention.
         txt_modulated = self.txt_norm1(txt)
         txt_modulated = modulate(txt_modulated, shift=txt_mod1_shift, scale=txt_mod1_scale)
@@ -281,15 +254,101 @@ class MMDoubleStreamBlock(nn.Module):
         txt_q = self.txt_attn_q_norm(txt_q).to(txt_v)
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_v)
 
-        attn = parallel_attention(
-            (img_q, txt_q),
-            (img_k, txt_k),
-            (img_v, txt_v),
-            img_q_len=img_q.shape[1],
-            img_kv_len=img_k.shape[1],
-            text_mask=text_mask,
-            mask_strategy=mask_strategy,
-        )
+        # ===== Overlap pipeline: compute Q, start async comm, then compute K, etc. =====
+        # Compute img_q
+        img_q = self.img_attn_q(img_modulated)
+        img_q = rearrange(img_q, "B L (H D) -> B L H D", H=self.heads_num)
+        qkv_type = img_q.dtype
+        img_q = self.img_attn_q_norm(img_q).to(qkv_type)
+        
+        # Apply RoPE to img_q
+        if freqs_cis is not None:
+            img_q = apply_rotary_emb_single(img_q, freqs_cis, head_first=False, use_fused_rope=self.use_fused_rope)
+        
+        query, encoder_query = img_q, txt_q
+        query_input = query
+        if get_sequence_parallel_state():
+            query_raw = specific_all_to_all_4D(query, scatter_idx=2, gather_idx=1, alloc_id=0, async_op=True)
+        
+        # Compute img_k while Q is being communicated
+        img_k = self.img_attn_k(img_modulated)
+        img_k = rearrange(img_k, "B L (H D) -> B L H D", H=self.heads_num)
+        img_k = self.img_attn_k_norm(img_k).to(qkv_type)
+        
+        # Apply RoPE to img_k
+        if freqs_cis is not None:
+            img_k = apply_rotary_emb_single(img_k, freqs_cis, head_first=False, use_fused_rope=self.use_fused_rope)
+        
+        key, encoder_key = img_k, txt_k
+        key_input = key
+        if get_sequence_parallel_state():
+            key_raw = specific_all_to_all_4D(key, scatter_idx=2, gather_idx=1, alloc_id=1, async_op=True)
+        
+        # Compute img_v while K is being communicated
+        img_v = self.img_attn_v(img_modulated)
+        img_v = rearrange(img_v, "B L (H D) -> B L H D", H=self.heads_num)
+        value, encoder_value = img_v, txt_v
+
+        text_length = text_mask.sum()
+
+        if get_sequence_parallel_state():
+            # V sync acts as implicit barrier for Q/K
+            value = specific_all_to_all_4D(value, scatter_idx=2, gather_idx=1, alloc_id=2, async_op=False)
+            # Now Q/K comms are guaranteed complete, transpose their buffers
+            query = transpose_all2all_output(query_input, query_raw, scatter_idx=2, gather_idx=1, group=mccl_info.group)
+            key = transpose_all2all_output(key_input, key_raw, scatter_idx=2, gather_idx=1, group=mccl_info.group)
+
+            def shrink_head(encoder_state, dim):
+                local_heads = encoder_state.shape[dim] // mccl_info.sp_size
+                return encoder_state.narrow(dim, mccl_info.rank_within_group * local_heads, local_heads)
+
+            encoder_query = shrink_head(encoder_query, dim=2)
+            encoder_key = shrink_head(encoder_key, dim=2)
+            encoder_value = shrink_head(encoder_value, dim=2)
+            # [b, s, h, d]
+
+        sequence_length = query.size(1)
+        encoder_sequence_length = encoder_query.size(1)
+
+        if mask_strategy[0] is not None:
+            query = torch.cat([tile(query, mccl_info.sp_size), encoder_query], dim=1).transpose(1, 2)
+            key = torch.cat([tile(key, mccl_info.sp_size), encoder_key], dim=1).transpose(1, 2)
+            value = torch.cat([tile(value, mccl_info.sp_size), encoder_value], dim=1).transpose(1, 2)
+
+            head_num = query.size(1)
+            current_rank = mccl_info.rank_within_group
+            start_head = current_rank * head_num
+            windows = [mask_strategy[head_idx + start_head] for head_idx in range(head_num)]
+
+            hidden_states = sliding_tile_attention(query, key, value, windows, text_length).transpose(1, 2)
+        else:
+            query = torch.cat([query, encoder_query], dim=1)
+            key = torch.cat([key, encoder_key], dim=1)
+            value = torch.cat([value, encoder_value], dim=1)
+            # B, S, 3, H, D
+            qkv = torch.stack([query, key, value], dim=2)
+
+            attn_mask = F.pad(text_mask, (sequence_length, 0), value=True)
+            hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
+
+        hidden_states, encoder_hidden_states = hidden_states.split_with_sizes((sequence_length, encoder_sequence_length),
+                                                                              dim=1)
+
+        if mask_strategy[0] is not None:
+            hidden_states = untile(hidden_states, mccl_info.sp_size)
+
+        if get_sequence_parallel_state():
+            hidden_states = all_to_all_4D(hidden_states, scatter_dim=1, gather_dim=2)
+            encoder_hidden_states = all_gather(encoder_hidden_states, dim=2).contiguous()
+
+        hidden_states = hidden_states.to(query.dtype)
+        encoder_hidden_states = encoder_hidden_states.to(query.dtype)
+
+        attn = torch.cat([hidden_states, encoder_hidden_states], dim=1)
+
+        b, s, a, d = attn.shape
+        attn = attn.reshape(b, s, -1)
+        # ===== parallel_attention inlined end =====
 
         # attention computation end
 
@@ -309,124 +368,6 @@ class MMDoubleStreamBlock(nn.Module):
             gate=txt_mod2_gate,
         )
         return img, txt
-
-
-# class MMSingleStreamBlock(nn.Module):
-#     """
-#     A DiT block with parallel linear layers as described in
-#     https://arxiv.org/abs/2302.05442 and adapted modulation interface.
-#     Also refer to (SD3): https://arxiv.org/abs/2403.03206
-#                   (Flux.1): https://github.com/black-forest-labs/flux
-#     """
-
-#     def __init__(
-#         self,
-#         hidden_size: int,
-#         heads_num: int,
-#         mlp_width_ratio: float = 4.0,
-#         mlp_act_type: str = "gelu_tanh",
-#         qk_norm: bool = True,
-#         qk_norm_type: str = "rms",
-#         qk_scale: float = None,
-#         dtype: Optional[torch.dtype] = None,
-#         device: Optional[torch.device] = None,
-#         use_fused_rmsnorm : bool = False,
-#         use_fused_rope : bool = False,
-#     ):
-#         factory_kwargs = {"device": device, "dtype": dtype}
-#         norm_layer_factory_kwargs = {"device": device, "dtype": dtype}
-#         if qk_norm_type == "rms" and use_fused_rmsnorm:
-#             norm_layer_factory_kwargs['use_fused_rmsnorm'] = True
-#         super().__init__()
-
-#         self.deterministic = False
-#         self.hidden_size = hidden_size
-#         self.heads_num = heads_num
-#         head_dim = hidden_size // heads_num
-#         mlp_hidden_dim = int(hidden_size * mlp_width_ratio)
-#         self.mlp_hidden_dim = mlp_hidden_dim
-#         self.scale = qk_scale or head_dim**-0.5
-
-#         # qkv and mlp_in
-#         self.linear1 = nn.Linear(hidden_size, hidden_size * 3 + mlp_hidden_dim, **factory_kwargs)
-#         # proj and mlp_out
-#         self.linear2 = nn.Linear(hidden_size + mlp_hidden_dim, hidden_size, **factory_kwargs)
-
-#         qk_norm_layer = get_norm_layer(qk_norm_type)
-#         self.q_norm = (qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **norm_layer_factory_kwargs)
-#                        if qk_norm else nn.Identity())
-#         self.k_norm = (qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **norm_layer_factory_kwargs)
-#                        if qk_norm else nn.Identity())
-
-#         self.pre_norm = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs)
-
-#         self.mlp_act = get_activation_layer(mlp_act_type)()
-#         self.modulation = ModulateDiT(
-#             hidden_size,
-#             factor=3,
-#             act_layer=get_activation_layer("silu"),
-#             **factory_kwargs,
-#         )
-#         self.hybrid_seq_parallel_attn = None
-#         self.use_fused_rope = use_fused_rope
-
-#     def enable_deterministic(self):
-#         self.deterministic = True
-
-#     def disable_deterministic(self):
-#         self.deterministic = False
-
-#     def forward(
-#         self,
-#         x: torch.Tensor,
-#         vec: torch.Tensor,
-#         txt_len: int,
-#         freqs_cis: Tuple[torch.Tensor, torch.Tensor] = None,
-#         text_mask: torch.Tensor = None,
-#         mask_strategy=None,
-#     ) -> torch.Tensor:
-#         mod_shift, mod_scale, mod_gate = self.modulation(vec).chunk(3, dim=-1)
-#         x_mod = modulate(self.pre_norm(x), shift=mod_shift, scale=mod_scale)
-#         qkv, mlp = torch.split(self.linear1(x_mod), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
-
-#         q, k, v = rearrange(qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num)
-
-#         # Apply QK-Norm if needed.
-#         q = self.q_norm(q).to(v)
-#         k = self.k_norm(k).to(v)
-
-#         # def shrink_head(encoder_state, dim):
-#         #     local_heads = encoder_state.shape[dim] // mccl_info.sp_size
-#         #     return encoder_state.narrow(dim, mccl_info.rank_within_group * local_heads, local_heads)
-
-#         # freqs_cis = (
-#         #     shrink_head(freqs_cis[0], dim=0),
-#         #     shrink_head(freqs_cis[1], dim=0),
-#         # )
-
-#         img_q, txt_q = q[:, :-txt_len, :, :], q[:, -txt_len:, :, :]
-#         img_k, txt_k = k[:, :-txt_len, :, :], k[:, -txt_len:, :, :]
-#         img_v, txt_v = v[:, :-txt_len, :, :], v[:, -txt_len:, :, :]
-#         img_qq, img_kk = apply_rotary_emb(img_q, img_k, freqs_cis, head_first=False, use_fused_rope=self.use_fused_rope)
-#         assert (img_qq.shape == img_q.shape and img_kk.shape == img_k.shape
-#                 ), f"img_kk: {img_qq.shape}, img_q: {img_q.shape}, img_kk: {img_kk.shape}, img_k: {img_k.shape}"
-#         img_q, img_k = img_qq, img_kk
-
-#         attn = parallel_attention(
-#             (img_q, txt_q),
-#             (img_k, txt_k),
-#             (img_v, txt_v),
-#             img_q_len=img_q.shape[1],
-#             img_kv_len=img_k.shape[1],
-#             text_mask=text_mask,
-#             mask_strategy=mask_strategy,
-#         )
-
-#         # attention computation end
-
-#         # Compute activation in mlp stream, cat again and run second linear layer.
-#         output = self.linear2(torch.cat((attn, self.mlp_act(mlp)), 2))
-#         return x + apply_gate(output, gate=mod_gate)
 
 
 class MMSingleStreamBlock(nn.Module):
