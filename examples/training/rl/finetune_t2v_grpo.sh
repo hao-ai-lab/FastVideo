@@ -13,15 +13,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VALIDATION_DATASET_FILE="$SCRIPT_DIR/validation.json"
 NUM_GPUS=1
 
-# use GPU 6 (changed to avoid conflicts)
-export CUDA_VISIBLE_DEVICES=6
+# use GPU 3 (changed to avoid conflicts)
+# export CUDA_VISIBLE_DEVICES=3
 
 
 # Training arguments
 training_args=(
   --tracker_project_name "wan_t2v_grpo"
   --output_dir "checkpoints/wan_t2v_grpo"
-  --max_train_steps 200 # 5000
+  --max_train_steps 1000 # 5000
   --train_batch_size 4
   # --train_sp_batch_size 4
   --train_sp_batch_size 1
@@ -63,7 +63,7 @@ dataset_args=(
 validation_args=(
   --log_validation True
   --validation_dataset_file $VALIDATION_DATASET_FILE
-  --validation_steps 5
+  --validation_steps 30
   --validation_sampling_steps "20" 
   --validation_guidance_scale "6.0"
 )

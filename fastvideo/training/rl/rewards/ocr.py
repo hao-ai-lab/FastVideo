@@ -146,33 +146,11 @@ class OcrScorerVideo(BaseRewardModel):
         ) == B, f"Number of prompts ({len(prompts)}) must match batch size ({B})"
 
         rewards = []
-        # myregion: Debug: Track memory during OCR reward computation
-        import os
-        gpu_id = int(os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",")[0])
-        mem_used_before = os.popen(
-            f"nvidia-smi -i {gpu_id} --query-gpu=memory.used --format=csv,noheader,nounits"
-        ).read().strip()
-        logger.info(f"OCR: Before processing videos, VRAM used: {mem_used_before} MiB, B={B}")
-        # endregion
         for b in range(B):
             # Extract single video: [C, T, H, W]
             video = videos[b]
-            # myregion: Debug: Track memory per video
-            if b == 0:
-                mem_used = os.popen(
-                    f"nvidia-smi -i {gpu_id} --query-gpu=memory.used --format=csv,noheader,nounits"
-                ).read().strip()
-                logger.info(f"OCR: Before processing video {b}, VRAM used: {mem_used} MiB, video.shape: {video.shape}")
-            # endregion
             reward = self._process_single_video(video, prompts[b])
             rewards.append(reward)
-            # myregion: Debug: Track memory per video
-            if b == 0:
-                mem_used = os.popen(
-                    f"nvidia-smi -i {gpu_id} --query-gpu=memory.used --format=csv,noheader,nounits"
-                ).read().strip()
-                logger.info(f"OCR: After processing video {b}, VRAM used: {mem_used} MiB")
-            # endregion
 
         rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
 
@@ -215,4 +193,3 @@ if __name__ == "__main__":
 
     # Call compute_reward method with video tensor
     reward = scorer.compute_reward(video_tensor, [example_prompt])
-    print(f"OCR Reward: {reward.item()}")
