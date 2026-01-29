@@ -32,7 +32,8 @@ class PatchEmbed(nn.Module):
                  flatten=True,
                  bias=True,
                  dtype=None,
-                 prefix: str = ""):
+                 prefix: str = "",
+                 multitask_mask_training_type=None):
         super().__init__()
         # Convert patch_size to 2-tuple
         if isinstance(patch_size, list | tuple):
@@ -43,6 +44,12 @@ class PatchEmbed(nn.Module):
 
         self.patch_size = patch_size
         self.flatten = flatten
+        
+        # Handle multitask mask training (concatenates mask with input)
+        # When enabled: input becomes [latent, latent_noisy, mask] = in_chans * 2 + 1
+        if multitask_mask_training_type == "concat":
+            orig_in_chans = in_chans
+            in_chans = in_chans * 2 + 1
 
         self.proj = nn.Conv3d(in_chans,
                               embed_dim,
@@ -50,6 +57,14 @@ class PatchEmbed(nn.Module):
                               stride=patch_size,
                               bias=bias,
                               dtype=dtype)
+        
+        # Initialize weights specially for multitask training
+        if multitask_mask_training_type == "concat":
+            nn.init.xavier_uniform_(
+                self.proj.weight[:, :orig_in_chans].reshape(self.proj.weight[:, :orig_in_chans].size(0), -1))
+            nn.init.zeros_(
+                self.proj.weight[:, orig_in_chans:].reshape(self.proj.weight[:, orig_in_chans:].size(0), -1))
+        
         self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
 
     def forward(self, x):

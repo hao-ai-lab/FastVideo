@@ -189,7 +189,7 @@ def test_gamecraft_transformer_distributed():
         logger.warning(f"REFERENCE_LATENT = {latent}")
 
 
-def test_gamecraft_vs_original():
+def test_gamecraft_vs_original(distributed_setup):
     """
     Test FastVideo GameCraft against original implementation (OPTIONAL).
     
@@ -256,7 +256,28 @@ def test_gamecraft_vs_original():
             guidance_embed=False,
             camera_in_channels=6,
             camera_down_coef=8,
+            multitask_mask_training_type="concat",  # Enable multitask training (33 input channels)
+            dtype=torch.bfloat16,  # Initialize in bfloat16 for Flash Attention
+            device=device,
         ).to(device)
+        
+        # Load checkpoint weights
+        from safetensors.torch import load_file
+        checkpoint_path = os.path.join(GAMECRAFT_MODEL_PATH, "transformer", "model.safetensors")
+        if os.path.exists(checkpoint_path):
+            logger.info(f"Loading checkpoint from {checkpoint_path}")
+            state_dict = load_file(checkpoint_path)
+            original_model.load_state_dict(state_dict, strict=True)
+            logger.info(f"✓ Loaded {len(state_dict)} parameters from checkpoint")
+        else:
+            logger.warning(f"Checkpoint not found at {checkpoint_path}, using random weights!")
+        
+        # Force convert ALL parameters to bfloat16 after loading checkpoint
+        for param in original_model.parameters():
+            param.data = param.data.to(torch.bfloat16)
+        for buffer in original_model.buffers():
+            buffer.data = buffer.data.to(torch.bfloat16)
+            
         original_model.eval()
         logger.info("✓ Original model loaded")
     except Exception as e:
@@ -268,10 +289,10 @@ def test_gamecraft_vs_original():
     # ============================================================
     logger.info("Loading FASTVIDEO GameCraft implementation...")
     
-    precision_str = "fp32"  # Use fp32 for accurate comparison
+    precision_str = "bf16"  # Use bfloat16 for Flash Attention compatibility
     args = FastVideoArgs(
         model_path=TRANSFORMER_PATH,
-        dit_cpu_offload=False,
+        dit_cpu_offload=True,  # Enable CPU offload to fit both models in memory
         pipeline_config=PipelineConfig(
             dit_config=HunyuanGameCraftConfig(),
             dit_precision=precision_str
@@ -293,52 +314,75 @@ def test_gamecraft_vs_original():
     text_seq_len = 256
     torch.manual_seed(42)  # Set seed for reproducibility
     
-    # Video latents [B, C, T, H, W]
-    hidden_states = torch.randn(
+    # Use bfloat16 for Flash Attention compatibility
+    dtype = torch.bfloat16
+    
+    # Video latents [B, C, T, H, W] - base 16 channels
+    hidden_states_base = torch.randn(
         batch_size, 16, 9, 88, 152,
         device=device,
-        dtype=torch.float32
+        dtype=dtype
     )
     
-    # Text embeddings [B, L, D] - for original
-    text_states_orig = torch.randn(
+    # For multitask training: concat [latent, latent_noisy, mask] = 16 + 16 + 1 = 33 channels
+    hidden_states_noisy = hidden_states_base + 0.1 * torch.randn_like(hidden_states_base)
+    mask_channel = torch.ones(batch_size, 1, 9, 88, 152, device=device, dtype=dtype)
+    hidden_states_multitask = torch.cat([hidden_states_base, hidden_states_noisy, mask_channel], dim=1)
+    
+    # Use base 16-channel for original model, 33-channel for FastVideo
+    hidden_states = hidden_states_base
+    
+    # Create SHARED text embeddings - both models must use the SAME embeddings!
+    # Base text tokens [B, L, D]
+    text_states_base = torch.randn(
         batch_size, text_seq_len, 4096,
         device=device,
-        dtype=torch.float32
+        dtype=dtype
     )
     
-    # Text embeddings [B, L+1, D] - for FastVideo (includes pooled at position 0)
-    text_states_fv = torch.randn(
+    # Pooled text embeddings [B, 768] - shared between both models
+    text_states_2 = torch.randn(batch_size, 768, device=device, dtype=dtype)
+    
+    # Format for ORIGINAL model: separate tokens and pooled
+    text_states_orig = text_states_base
+    
+    # Format for FASTVIDEO model: concat [pooled, tokens] into 257 tokens
+    # First token is pooled (768 dims), rest is zero-padded to 4096
+    text_states_fv = torch.zeros(
         batch_size, text_seq_len + 1, 4096,
         device=device,
-        dtype=torch.float32
+        dtype=dtype
     )
-    # Set first token to pooled embedding (768 dims)
-    text_states_fv[:, 0, 768:] = 0
-    
-    # Pooled text embeddings [B, 768]
-    text_states_2 = torch.randn(batch_size, 768, device=device, dtype=torch.float32)
+    text_states_fv[:, 0, :768] = text_states_2  # Pooled at position 0
+    text_states_fv[:, 1:, :] = text_states_base  # Original tokens at positions 1+
     
     # Camera latents [B, T, 6, H, W]
+    # Use 33 frames so after temporal compression (33->17->9) it matches video's 9 frames
     camera_latents = torch.randn(
-        batch_size, 9, 6, 704, 1216,
+        batch_size, 33, 6, 704, 1216,
         device=device,
-        dtype=torch.float32
+        dtype=dtype
     )
     
     # Timestep
-    timestep = torch.tensor([500.0], device=device, dtype=torch.float32)
+    timestep = torch.tensor([500.0], device=device, dtype=dtype)
     
-    # Rotary embeddings (if needed by original)
-    # These should be computed the same way in both implementations
-    from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
+    # Manually compute rotary embeddings with correct shape [seq_len, head_dim]
+    import math
+    seq_len = 9 * 44 * 76  # 30096
+    head_dim = 128  # sum of rope_axes_dim
     
-    tt, th, tw = 9, 88, 152  # After patchification
-    freqs_cos, freqs_sin = get_rotary_pos_embed(
-        (tt, th, tw), 3072, 24, [16, 56, 56], 256
-    )
-    freqs_cos = freqs_cos.to(device)
-    freqs_sin = freqs_sin.to(device)
+    # Create position indices
+    positions = torch.arange(seq_len, device=device).unsqueeze(1)  # [seq_len, 1]
+    dim_indices = torch.arange(0, head_dim, 2, device=device) / head_dim  # [head_dim/2]
+    freqs = positions * (1.0 / (256 ** dim_indices))  # [seq_len, head_dim/2]
+    
+    # Expand to full head_dim by repeating each freq
+    freqs = freqs.repeat_interleave(2, dim=1)[:, :head_dim]  # [seq_len, head_dim]
+    
+    # Create cos and sin
+    freqs_cos = torch.cos(freqs).to(dtype)
+    freqs_sin = torch.sin(freqs).to(dtype)
     
     logger.info(f"  Video latents: {hidden_states.shape}")
     logger.info(f"  Text states: {text_states_orig.shape}")
@@ -349,14 +393,17 @@ def test_gamecraft_vs_original():
     # ============================================================
     logger.info("Running ORIGINAL forward pass...")
     
+    # Create text attention mask (all ones = attend to all tokens)
+    text_mask = torch.ones(batch_size, text_seq_len, device=device, dtype=torch.bool)
+    
     with torch.no_grad():
         try:
             output_original = original_model(
-                x=hidden_states.clone(),
+                x=hidden_states_multitask.clone(),  # Use 33-channel multitask input
                 t=timestep.clone(),
                 text_states=text_states_orig.clone(),
                 text_states_2=text_states_2.clone(),
-                text_mask=None,
+                text_mask=text_mask,
                 freqs_cos=freqs_cos,
                 freqs_sin=freqs_sin,
                 guidance=None,
@@ -384,7 +431,7 @@ def test_gamecraft_vs_original():
         forward_batch = ForwardBatch(data_type="dummy")
         with set_forward_context(current_timestep=0, attn_metadata=None, forward_batch=forward_batch):
             output_fastvideo = fastvideo_model(
-                hidden_states=hidden_states.clone(),
+                hidden_states=hidden_states_multitask.clone(),  # Use 33-channel multitask input
                 encoder_hidden_states=text_states_fv.clone(),
                 timestep=timestep.clone(),
                 camera_latents=camera_latents.clone(),
