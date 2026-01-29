@@ -68,7 +68,7 @@ def _build_torch_causal_chunk_attn_mask(
         latent_seq_length = 1560
 
     chunk_seq_length = latent_seq_length * 4
-    chunk_num = int(vision_seq_length) // int(chunk_seq_length)
+    chunk_num = vision_seq_length // chunk_seq_length
 
     # Build [S, S] then expand to [B, 1, S, S] (broadcastable over heads).
     causal_mask = torch.zeros(

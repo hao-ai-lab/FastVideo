@@ -385,12 +385,22 @@ class HYWorldMidBlock(nn.Module):
             feat_cache: List of cached features for each conv layer
             feat_idx: List containing current cache index [idx]
         """
-        hidden_states = self.resnets[0](hidden_states, feat_cache, feat_idx)
-
-        for attn, resnet in zip(self.attentions, self.resnets[1:]):
-            if attn is not None:
-                hidden_states = attn(hidden_states)
-            hidden_states = resnet(hidden_states, feat_cache, feat_idx)
+        if torch.is_grad_enabled() and self.gradient_checkpointing:
+            hidden_states = self._gradient_checkpointing_func(
+                self.resnets[0], hidden_states, feat_cache, feat_idx
+            )
+            for attn, resnet in zip(self.attentions, self.resnets[1:]):
+                if attn is not None:
+                    hidden_states = self._gradient_checkpointing_func(attn, hidden_states)
+                hidden_states = self._gradient_checkpointing_func(
+                    resnet, hidden_states, feat_cache, feat_idx
+                )
+        else:
+            hidden_states = self.resnets[0](hidden_states, feat_cache, feat_idx)
+            for attn, resnet in zip(self.attentions, self.resnets[1:]):
+                if attn is not None:
+                    hidden_states = attn(hidden_states)
+                hidden_states = resnet(hidden_states, feat_cache, feat_idx)
 
         return hidden_states
 
@@ -449,12 +459,22 @@ class HYWorldDownBlock3D(nn.Module):
             feat_cache: List of cached features for each conv layer
             feat_idx: List containing current cache index [idx]
         """
-        for resnet in self.resnets:
-            hidden_states = resnet(hidden_states, feat_cache, feat_idx)
-
-        if self.downsamplers is not None:
-            for downsampler in self.downsamplers:
-                hidden_states = downsampler(hidden_states, feat_cache, feat_idx)
+        if torch.is_grad_enabled() and self.gradient_checkpointing:
+            for resnet in self.resnets:
+                hidden_states = self._gradient_checkpointing_func(
+                    resnet, hidden_states, feat_cache, feat_idx
+                )
+            if self.downsamplers is not None:
+                for downsampler in self.downsamplers:
+                    hidden_states = self._gradient_checkpointing_func(
+                        downsampler, hidden_states, feat_cache, feat_idx
+                    )
+        else:
+            for resnet in self.resnets:
+                hidden_states = resnet(hidden_states, feat_cache, feat_idx)
+            if self.downsamplers is not None:
+                for downsampler in self.downsamplers:
+                    hidden_states = downsampler(hidden_states, feat_cache, feat_idx)
 
         return hidden_states
 
@@ -518,14 +538,20 @@ class HYWorldUpBlock3D(nn.Module):
         """
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for resnet in self.resnets:
-                hidden_states = self._gradient_checkpointing_func(resnet, hidden_states)
+                hidden_states = self._gradient_checkpointing_func(
+                    resnet, hidden_states, feat_cache, feat_idx
+                )
+            if self.upsamplers is not None:
+                for upsampler in self.upsamplers:
+                    hidden_states = self._gradient_checkpointing_func(
+                        upsampler, hidden_states, feat_cache, feat_idx, first_chunk
+                    )
         else:
             for resnet in self.resnets:
                 hidden_states = resnet(hidden_states, feat_cache, feat_idx)
-
-        if self.upsamplers is not None:
-            for upsampler in self.upsamplers:
-                hidden_states = upsampler(hidden_states, feat_cache, feat_idx, first_chunk)
+            if self.upsamplers is not None:
+                for upsampler in self.upsamplers:
+                    hidden_states = upsampler(hidden_states, feat_cache, feat_idx, first_chunk)
 
         return hidden_states
 
@@ -622,8 +648,8 @@ class HYWorldEncoder3D(nn.Module):
 
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for down_block in self.down_blocks:
-                hidden_states = self._gradient_checkpointing_func(down_block, hidden_states)
-            hidden_states = self._gradient_checkpointing_func(self.mid_block, hidden_states)
+                hidden_states = self._gradient_checkpointing_func(down_block, hidden_states, feat_cache, feat_idx)
+            hidden_states = self._gradient_checkpointing_func(self.mid_block, hidden_states, feat_cache, feat_idx)
         else:
             for down_block in self.down_blocks:
                 hidden_states = down_block(hidden_states, feat_cache, feat_idx)
@@ -753,9 +779,9 @@ class HYWorldDecoder3D(nn.Module):
             hidden_states = self.conv_in(hidden_states) + hidden_states.repeat_interleave(repeats=self.repeat, dim=1)
 
         if torch.is_grad_enabled() and self.gradient_checkpointing:
-            hidden_states = self._gradient_checkpointing_func(self.mid_block, hidden_states)
+            hidden_states = self._gradient_checkpointing_func(self.mid_block, hidden_states, feat_cache, feat_idx)
             for up_block in self.up_blocks:
-                hidden_states = self._gradient_checkpointing_func(up_block, hidden_states)
+                hidden_states = self._gradient_checkpointing_func(up_block, hidden_states, feat_cache, feat_idx, first_chunk)
         else:
             hidden_states = self.mid_block(hidden_states, feat_cache, feat_idx)
             for up_block in self.up_blocks:
@@ -869,6 +895,11 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
         self._enc_conv_num = self._cached_conv_counts["encoder"]
         self._enc_conv_idx = [0]
         self._enc_feat_map: List[Optional[torch.Tensor]] = [None] * self._enc_conv_num
+
+    def _set_gradient_checkpointing(self, module, value=False):
+        """Enable or disable gradient checkpointing on encoder and decoder."""
+        if isinstance(module, (HYWorldEncoder3D, HYWorldDecoder3D, HYWorldMidBlock, HYWorldUpBlock3D, HYWorldDownBlock3D)):
+            module.gradient_checkpointing = value
 
     def _encode(self, x: torch.Tensor) -> torch.Tensor:
         """
