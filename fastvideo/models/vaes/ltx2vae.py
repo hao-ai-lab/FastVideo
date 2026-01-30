@@ -1913,6 +1913,9 @@ class LTX2CausalVideoAutoencoder(nn.Module):
             # Store for this temporal group
             gathered_decoded_temporal_tiles.append(decoded_tiles_ordered)
 
+        # Only rank 0 performs blending (other ranks already have all data after all_gather)
+        if rank != 0:
+            return  # Non-rank-0 workers exit early, yielding nothing
         # blend the resulting tiles.
         for i, temporal_group_tiles in enumerate(temporal_groups):
             curr_temporal_slice = temporal_group_tiles[0].out_coords[2]

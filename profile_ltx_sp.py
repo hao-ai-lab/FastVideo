@@ -8,7 +8,7 @@ from fastvideo.models.vaes.ltx2vae import TilingConfig
 
 MODEL_ID = "FastVideo/LTX2-Distilled-Diffusers"
 LATENT_SHAPE = (1, 128, 16, 34, 60)
-GPU_COUNTS = [4, 2, 1]
+GPU_COUNTS = [8, 4, 2, 1]
 # GPU_COUNTS = [2]
 
 
@@ -22,8 +22,9 @@ def _time_parallel_tiled_decode(worker, latent_shape):
     vae.enable_tiling()
 
     dtype = next(vae.decoder.parameters()).dtype
+    rank = dist.get_rank()
 
-    if dist.get_rank() == 0:
+    if rank == 0:
         latent = torch.randn(latent_shape, device=device, dtype=dtype)
     else:
         latent = torch.empty(latent_shape, device=device, dtype=dtype)
@@ -38,21 +39,29 @@ def _time_parallel_tiled_decode(worker, latent_shape):
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             start = time.perf_counter()
-            output = torch.cat(
-                list(
-                    vae.parallel_tiled_decode(latent,
-                                              tiling_config=tiling_config)),
-                dim=2,
-            )
+
+            # All ranks participate in parallel_tiled_decode (for distributed decode)
+            # but only rank 0 gets results (others yield nothing and return early)
+            result_chunks = list(
+                vae.parallel_tiled_decode(latent, tiling_config=tiling_config))
+
+            # Only rank 0 has results to concatenate
+            if result_chunks:
+                output = torch.cat(result_chunks, dim=2)
+            else:
+                output = None  # Non-rank-0 workers have nothing
+
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             elapsed = time.perf_counter() - start
 
-    del output
+    if output is not None:
+        del output
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    return {"seconds": elapsed}
+    # Only rank 0 returns timing (other ranks' results are discarded anyway)
+    return {"seconds": elapsed, "rank": rank}
 
 
 def run():

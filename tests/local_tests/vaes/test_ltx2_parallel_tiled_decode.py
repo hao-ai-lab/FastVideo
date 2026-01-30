@@ -12,6 +12,7 @@ def _parallel_vs_tiled_decode(worker, latent_shape, use_bf16=True):
     from fastvideo.distributed.parallel_state import get_local_torch_device
 
     device = get_local_torch_device()
+    rank = dist.get_rank()
 
     vae = worker.pipeline.modules["vae"]
     vae.eval()
@@ -19,7 +20,7 @@ def _parallel_vs_tiled_decode(worker, latent_shape, use_bf16=True):
 
     dtype = next(vae.decoder.parameters()).dtype
 
-    if dist.get_rank() == 0:
+    if rank == 0:
         z = torch.randn(latent_shape, device=device, dtype=dtype)
     else:
         z = torch.empty(latent_shape, device=device, dtype=dtype)
@@ -30,20 +31,25 @@ def _parallel_vs_tiled_decode(worker, latent_shape, use_bf16=True):
         with torch.autocast(device_type="cuda",
                             dtype=dtype,
                             enabled=torch.cuda.is_available()):
-            out_parallel = torch.cat(
-                list(
-                    vae.parallel_tiled_decode(z,
-                                              tiling_config=TilingConfig.default()
-                                              )),
-                dim=2)
-        out_parallel_cpu = out_parallel.float().cpu()
-        del out_parallel
+            # All ranks participate in decode, but only rank 0 gets results
+            result_chunks = list(
+                vae.parallel_tiled_decode(z, tiling_config=TilingConfig.default())
+            )
+            
+            if result_chunks:
+                out_parallel = torch.cat(result_chunks, dim=2)
+                out_parallel_cpu = out_parallel.float().cpu()
+                del out_parallel
+            else:
+                out_parallel_cpu = None  # Non-rank-0 workers
+                
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
         dist.barrier()
 
-        if dist.get_rank() == 0:
+        # Only rank 0 runs the comparison
+        if rank == 0:
             with torch.autocast(device_type="cuda",
                                 dtype=dtype,
                                 enabled=torch.cuda.is_available()):
@@ -74,8 +80,8 @@ def test_ltx2_parallel_tiled_decode_parity():
 
     generator = VideoGenerator.from_pretrained(
         "FastVideo/LTX2-Distilled-Diffusers",
-        num_gpus=2,
-        sp_size=2,
+        num_gpus=8,
+        sp_size=8,
         tp_size=1,
         use_fsdp_inference=False,
         dit_cpu_offload=True,
