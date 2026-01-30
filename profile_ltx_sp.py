@@ -6,7 +6,6 @@ import torch
 from fastvideo import VideoGenerator
 from fastvideo.models.vaes.ltx2vae import TilingConfig
 
-
 MODEL_ID = "FastVideo/LTX2-Distilled-Diffusers"
 LATENT_SHAPE = (1, 128, 16, 34, 60)
 GPU_COUNTS = [4, 2, 1]
@@ -14,7 +13,6 @@ GPU_COUNTS = [4, 2, 1]
 
 
 def _time_parallel_tiled_decode(worker, latent_shape):
-    import torch
     import torch.distributed as dist
     from fastvideo.distributed.parallel_state import get_local_torch_device
 
@@ -34,18 +32,16 @@ def _time_parallel_tiled_decode(worker, latent_shape):
     tiling_config = TilingConfig.default()
 
     with torch.inference_mode():
-        with torch.autocast(
-            device_type="cuda", dtype=dtype, enabled=torch.cuda.is_available()
-        ):
+        with torch.autocast(device_type="cuda",
+                            dtype=dtype,
+                            enabled=torch.cuda.is_available()):
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             start = time.perf_counter()
             output = torch.cat(
                 list(
-                    vae.parallel_tiled_decode(
-                        latent, tiling_config=tiling_config
-                    )
-                ),
+                    vae.parallel_tiled_decode(latent,
+                                              tiling_config=tiling_config)),
                 dim=2,
             )
             if torch.cuda.is_available():
