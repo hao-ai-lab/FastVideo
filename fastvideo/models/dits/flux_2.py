@@ -29,7 +29,7 @@ from fastvideo.layers.rotary_embedding import (
     _apply_rotary_emb,
 )
 from fastvideo.models.dits.base import CachableDiT
-from fastvideo.platforms import current_platform
+from fastvideo.platforms import AttentionBackendEnum, current_platform
 from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)  # pylint: disable=invalid-name
@@ -147,6 +147,7 @@ class Flux2Attention(torch.nn.Module, AttentionModuleMixin):
         eps: float = 1e-5,
         out_dim: int = None,
         elementwise_affine: bool = True,
+        supported_attention_backends: Optional[Tuple[AttentionBackendEnum, ...]] = None,
     ):
         super().__init__()
 
@@ -214,6 +215,7 @@ class Flux2Attention(torch.nn.Module, AttentionModuleMixin):
             head_size=self.head_dim,
             softmax_scale=None,
             causal=False,
+            supported_attention_backends=supported_attention_backends,
         )
 
     def forward(
@@ -319,6 +321,7 @@ class Flux2ParallelSelfAttention(torch.nn.Module, AttentionModuleMixin):
         elementwise_affine: bool = True,
         mlp_ratio: float = 4.0,
         mlp_mult_factor: int = 2,
+        supported_attention_backends: Optional[Tuple[AttentionBackendEnum, ...]] = None,
     ):
         super().__init__()
 
@@ -361,6 +364,7 @@ class Flux2ParallelSelfAttention(torch.nn.Module, AttentionModuleMixin):
             head_size=self.head_dim,
             softmax_scale=None,
             causal=False,
+            supported_attention_backends=supported_attention_backends,
         )
 
     def forward(
@@ -423,6 +427,7 @@ class Flux2SingleTransformerBlock(nn.Module):
         mlp_ratio: float = 3.0,
         eps: float = 1e-6,
         bias: bool = False,
+        supported_attention_backends: Optional[Tuple[AttentionBackendEnum, ...]] = None,
     ):
         super().__init__()
 
@@ -441,6 +446,7 @@ class Flux2SingleTransformerBlock(nn.Module):
             eps=eps,
             mlp_ratio=mlp_ratio,
             mlp_mult_factor=2,
+            supported_attention_backends=supported_attention_backends,
         )
 
     def forward(
@@ -494,6 +500,7 @@ class Flux2TransformerBlock(nn.Module):
         mlp_ratio: float = 3.0,
         eps: float = 1e-6,
         bias: bool = False,
+        supported_attention_backends: Optional[Tuple[AttentionBackendEnum, ...]] = None,
     ):
         super().__init__()
         self.mlp_hidden_dim = int(dim * mlp_ratio)
@@ -511,6 +518,7 @@ class Flux2TransformerBlock(nn.Module):
             added_proj_bias=bias,
             out_bias=bias,
             eps=eps,
+            supported_attention_backends=supported_attention_backends,
         )
 
         self.norm2 = nn.LayerNorm(dim, elementwise_affine=False, eps=eps)
@@ -793,6 +801,7 @@ class Flux2Transformer2DModel(CachableDiT):
         )
 
         # 5. Double Stream Transformer Blocks
+        supported_attention_backends = self._supported_attention_backends
         self.transformer_blocks = nn.ModuleList(
             [
                 Flux2TransformerBlock(
@@ -802,6 +811,7 @@ class Flux2Transformer2DModel(CachableDiT):
                     mlp_ratio=mlp_ratio,
                     eps=eps,
                     bias=False,
+                    supported_attention_backends=supported_attention_backends,
                 )
                 for _ in range(num_layers)
             ]
@@ -817,6 +827,7 @@ class Flux2Transformer2DModel(CachableDiT):
                     mlp_ratio=mlp_ratio,
                     eps=eps,
                     bias=False,
+                    supported_attention_backends=supported_attention_backends,
                 )
                 for _ in range(num_single_layers)
             ]
