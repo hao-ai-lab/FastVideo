@@ -675,7 +675,8 @@ class Flux2PosEmbed(nn.Module):
         self.axes_dim = axes_dim
         self.dtype = (
             torch.float32
-            if current_platform.is_mps() or current_platform.is_musa()
+            if current_platform.is_mps()
+            or getattr(current_platform, "is_musa", lambda: False)()
             else torch.float64
         )
 
