@@ -9,6 +9,7 @@ from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits.flux_2 import Flux2Config
 from fastvideo.configs.models.encoders import BaseEncoderOutput
 from fastvideo.configs.models.encoders.base import EncoderArchConfig
+from fastvideo.configs.models.encoders.qwen3 import Qwen3TextConfig
 from fastvideo.configs.models.vaes.flux2vae import Flux2VAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig, preprocess_text
 
@@ -79,7 +80,7 @@ class Flux2KleinPipelineConfig(Flux2PipelineConfig):
     """Configuration for Flux2 Klein (distilled, 4-step, no guidance)."""
     embedded_cfg_scale: float = 0.0  # No guidance for distilled Klein
     text_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (Flux2KleinTextEncoderConfig(),)
+        default_factory=lambda: (Qwen3TextConfig(),)
     )
     text_encoder_precisions: tuple[str, ...] = field(
         default_factory=lambda: ("bf16",)
