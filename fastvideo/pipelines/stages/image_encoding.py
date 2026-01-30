@@ -451,7 +451,8 @@ class ImageVAEEncodingStage(PipelineStage):
         Returns:
             The batch with encoded outputs.
         """
-        assert batch.pil_image is not None
+        if batch.pil_image is None:
+            return batch
         if fastvideo_args.mode == ExecutionMode.INFERENCE:
             assert batch.pil_image is not None and isinstance(
                 batch.pil_image, PIL.Image.Image)
