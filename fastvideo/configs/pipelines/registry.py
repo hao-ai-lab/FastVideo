@@ -9,6 +9,7 @@ from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.cosmos2_5 import Cosmos25Config
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuan15 import Hunyuan15T2V480PConfig, Hunyuan15T2V720PConfig
+from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
 from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.ltx2 import LTX2T2VConfig
 from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
@@ -63,6 +64,9 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "FastVideo/Matrix-Game-2.0-Base-Diffusers": MatrixGameI2V480PConfig,
     "FastVideo/Matrix-Game-2.0-GTA-Diffusers": MatrixGameI2V480PConfig,
     "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers": MatrixGameI2V480PConfig,
+    # HunyuanGameCraft models
+    "Tencent/HunyuanGameCraft": HunyuanGameCraftPipelineConfig,
+    "converted_weights/HunyuanGameCraft": HunyuanGameCraftPipelineConfig,
     # LongCat Video models
     "FastVideo/LongCat-Video-T2V-Diffusers": LongCatT2V480PConfig,
     "FastVideo/LongCat-Video-I2V-Diffusers": LongCatT2V480PConfig,
@@ -93,6 +97,8 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "hyworld" in id.lower(),
     "matrixgame":
     lambda id: "matrix-game" in id.lower() or "matrixgame" in id.lower(),
+    "hunyuangamecraft":
+    lambda id: "hunyuangamecraft" in id.lower() or "gamecraft" in id.lower(),
     "wanpipeline":
     lambda id: "wanpipeline" in id.lower(),
     "wanimagetovideo":
@@ -124,6 +130,7 @@ PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "hunyuan":
     HunyuanConfig,  # Base Hunyuan config as fallback for any Hunyuan variant
     "matrixgame": MatrixGameI2V480PConfig,
+    "hunyuangamecraft": HunyuanGameCraftPipelineConfig,
     "hunyuan15":
     Hunyuan15T2V480PConfig,  # Base Hunyuan15 config as fallback for any Hunyuan15 variant
     "hyworld":
