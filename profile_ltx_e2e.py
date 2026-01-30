@@ -30,6 +30,9 @@ def main() -> None:
         dit_layerwise_offload=False,
     )
 
+    all_stage_times: list[list[float]] = []  # Each element is one iteration's stage times
+    stage_names: list[str] = []
+    
     for i in range(10):
         result = generator.generate_video(
             prompt,
@@ -42,7 +45,7 @@ def main() -> None:
             height = 1088, # TODO: Make hw same between LTX2 and HY15
             width = 1920,
             guidance_scale=1.0,
-            num_inference_steps=1,
+            # num_inference_steps=1,
         )
         print(f"==================OUTPUT LOGGING INFO {i=}=====================")
         logging_info = result.get("logging_info") if isinstance(result, dict) else None
@@ -54,11 +57,39 @@ def main() -> None:
             logging_info.get_stage_info(stage_name).get("execution_time", 0.0)
             for stage_name in stage_names
         ]
+        all_stage_times.append(stage_execution_times)
         # for name, exec_time in zip(stage_names, stage_execution_times):
         #     print(f"{name}, {exec_time * 1e3:.5f}")
         print(",".join(stage_names))
         print(",".join([f"{e * 1e3:.5f}" for e in stage_execution_times]))
         print(f"=====================End LOGGING INFO {i=}=====================")
+    
+    # Calculate average time for each stage
+    if all_stage_times and stage_names:
+        num_stages = len(stage_names)
+        
+        # Average including all rounds
+        avg_with_warmup = [
+            sum(times[j] for times in all_stage_times) / len(all_stage_times)
+            for j in range(num_stages)
+        ]
+        
+        # Average excluding first round (warmup)
+        times_no_warmup = all_stage_times[1:]  # Skip first iteration
+        avg_no_warmup = [
+            sum(times[j] for times in times_no_warmup) / len(times_no_warmup)
+            for j in range(num_stages)
+        ] if times_no_warmup else avg_with_warmup
+        
+        print("\n==================AVERAGE TIMING SUMMARY=====================")
+        print("Stage names,", ",".join(stage_names))
+        print(f"Avg (all rounds),     {','.join(f'{t * 1e3:.5f}' for t in avg_with_warmup)}")
+        print(f"Avg (excl. warmup),   {','.join(f'{t * 1e3:.5f}' for t in avg_no_warmup)}")
+        print(f"Total avg (all),      {sum(avg_with_warmup) * 1e3:.5f} ms")
+        print(f"Total avg (no warmup),{sum(avg_no_warmup) * 1e3:.5f} ms")
+        print("==============================================================")
+
+    
 
 
 if __name__ == "__main__":
