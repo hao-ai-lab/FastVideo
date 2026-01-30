@@ -1630,7 +1630,9 @@ class LTX2CausalVideoAutoencoder(nn.Module):
             if sp_world_size > 1:
                 chunks = list(
                     self.parallel_tiled_decode(z, TilingConfig.default(), timestep, generator)) 
-                torch.cuda.synchronize()
+                # Non-rank-0 workers yield nothing after blending optimization
+                if not chunks:
+                    return torch.empty(0, 0, 0, 0, 0, device=z.device, dtype=z.dtype)
             else:
                 chunks = list(
                     self.tiled_decode(z, TilingConfig.default(), timestep, generator))
@@ -1996,4 +1998,3 @@ class LTX2CausalVideoAutoencoder(nn.Module):
         if previous_chunk is not None:
             previous_weights = previous_weights.clamp(min=1e-8)
             yield previous_chunk / previous_weights       
-
