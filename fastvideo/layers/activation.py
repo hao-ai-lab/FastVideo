@@ -83,6 +83,7 @@ class QuickGELU(CustomOp):
 
 _ACTIVATION_REGISTRY = {
     "gelu": nn.GELU,
+    "gelu_tanh": lambda: nn.GELU(approximate="tanh"),
     "gelu_new": NewGELU,
     "gelu_pytorch_tanh": lambda: nn.GELU(approximate="tanh"),
     "relu": nn.ReLU,
@@ -104,6 +105,7 @@ def get_act_fn(act_fn_name: str) -> nn.Module:
 
 _ACTIVATION_AND_MUL_REGISTRY = {
     "gelu": GeluAndMul,
+    "gelu_tanh": lambda: GeluAndMul(approximate="tanh"),
     "silu": SiluAndMul,
 }
 
