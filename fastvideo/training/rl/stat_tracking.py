@@ -3,15 +3,10 @@
 Per-prompt statistics tracking for GRPO training.
 
 This module ports the PerPromptStatTracker from FlowGRPO to FastVideo.
-It tracks reward statistics per unique prompt and computes normalized advantages.
+For GRPO, mean/std are computed from the current batch only; the pipeline
+calls clear() after each compute_advantages so the next step gets fresh stats.
 
-Ported from:
-- flow_grpo/flow_grpo/stat_tracking.py
-
-Key adaptations:
-1. Uses FastVideo's logging instead of print statements
-2. Works with single GPU (no distributed logic)
-3. Supports numpy arrays and torch tensors
+Ported from: flow_grpo/flow_grpo/stat_tracking.py
 """
 
 import numpy as np
@@ -55,108 +50,43 @@ class PerPromptStatTracker:
         type: str = 'grpo'
     ) -> np.ndarray:
         """
-        Update statistics and compute normalized advantages.
-        
-        Args:
-            prompts: List or array of prompt strings (one per sample)
-            rewards: Array or tensor of reward values (one per sample)
-            type: Advantage computation type:
-                - 'grpo': Normalize by (reward - mean) / std (default)
-                - 'rwr': Return rewards as-is (reward-weighted regression)
-                - 'sft': Binary advantages (1 for max, 0 otherwise)
-                - 'dpo': DPO-style advantages (1 for max, -1 for min)
-        
-        Returns:
-            advantages: Normalized advantages array [num_samples] or [num_samples, ...]
-                       Shape matches rewards shape
+        Compute normalized advantages from rewards (GRPO: per-prompt mean/std).
+
+        Caller should call clear() after each step so mean/std use the current batch only.
         """
-        # Convert to numpy arrays
         prompts = np.array(prompts)
         if isinstance(rewards, torch.Tensor):
             rewards = rewards.detach().cpu().numpy()
         rewards = np.array(rewards, dtype=np.float64)
-        
-        # Ensure rewards are 1D (one reward per sample)
-        # FlowGRPO expects rewards to be aggregated per sample
+
         if rewards.ndim > 1:
-            # If multi-dimensional, flatten or take mean
-            # For [B, num_steps] shape, we typically want one reward per sample
-            # So we take the mean across timesteps
-            if rewards.ndim == 2:
-                # Assume shape is [B, num_steps] - take mean across timesteps
-                rewards = rewards.mean(axis=1)
-            else:
-                # Flatten and take mean for higher dimensions
-                rewards = rewards.reshape(len(prompts), -1).mean(axis=1)
-        
-        # Ensure prompts and rewards have matching lengths
+            rewards = rewards.reshape(len(prompts), -1).mean(axis=1)
         assert len(prompts) == len(rewards), \
             f"Prompts ({len(prompts)}) and rewards ({len(rewards)}) must have same length"
-        
+
         unique_prompts = np.unique(prompts)
         advantages = np.zeros_like(rewards, dtype=np.float64)
-        
-        # First pass: collect rewards for each prompt
+
+        # First pass: store current-batch rewards per prompt (used for mean/std)
         for prompt in unique_prompts:
-            prompt_mask = prompts == prompt
-            prompt_rewards = rewards[prompt_mask]
-            
-            # Store rewards in stats
+            prompt_rewards = rewards[prompts == prompt]
             if prompt not in self.stats:
                 self.stats[prompt] = []
             self.stats[prompt].extend(prompt_rewards.tolist())
             self.history_prompts.add(hash(prompt))
-        
-        # Second pass: compute statistics and advantages
+
+        # Second pass: GRPO (reward - mean) / std per prompt
         for prompt in unique_prompts:
             prompt_mask = prompts == prompt
             prompt_rewards = rewards[prompt_mask]
-            
-            # Stack all historical rewards for this prompt
-            if len(self.stats[prompt]) > 0:
-                all_prompt_rewards = np.array(self.stats[prompt])
-            else:
-                all_prompt_rewards = prompt_rewards
-            
-            # Compute mean and std
+            all_prompt_rewards = np.array(self.stats[prompt])
             mean = np.mean(all_prompt_rewards, axis=0, keepdims=True)
-            
             if self.global_std:
-                # Use global std across all rewards
                 std = np.std(rewards, axis=0, keepdims=True) + 1e-4
             else:
-                # Use per-prompt std
                 std = np.std(all_prompt_rewards, axis=0, keepdims=True) + 1e-4
-            
-            # Compute advantages based on type
-            if type == 'grpo':
-                # GRPO: normalize by (reward - mean) / std
-                advantages[prompt_mask] = (prompt_rewards - mean) / std
-            elif type == 'rwr':
-                # Reward-weighted regression: use rewards as-is
-                advantages[prompt_mask] = prompt_rewards
-            elif type == 'sft':
-                # Supervised fine-tuning: binary (1 for max, 0 otherwise)
-                max_reward = np.max(prompt_rewards)
-                advantages[prompt_mask] = (prompt_rewards == max_reward).astype(np.float64)
-            elif type == 'dpo':
-                # DPO-style: 1 for max, -1 for min
-                prompt_rewards_tensor = torch.tensor(prompt_rewards)
-                max_idx = torch.argmax(prompt_rewards_tensor)
-                min_idx = torch.argmin(prompt_rewards_tensor)
-                
-                # If all rewards are the same, use first two indices
-                if max_idx == min_idx:
-                    min_idx = torch.tensor(0)
-                    max_idx = torch.tensor(1) if len(prompt_rewards_tensor) > 1 else torch.tensor(0)
-                
-                result = torch.zeros_like(prompt_rewards_tensor, dtype=torch.float64)
-                result[max_idx] = 1.0
-                result[min_idx] = -1.0
-                advantages[prompt_mask] = result.numpy()
-            else:
-                raise ValueError(f"Unknown advantage type: {type}. Must be one of: 'grpo', 'rwr', 'sft', 'dpo'")
-        
+            advantages[prompt_mask] = (prompt_rewards - mean) / std
+
         return advantages
 
     def get_stats(self) -> tuple[float, int]:
@@ -179,10 +109,8 @@ class PerPromptStatTracker:
 
     def clear(self) -> None:
         """
-        Clear all statistics (but keep history_prompts for tracking).
-        
-        This is typically called after each epoch to reset per-epoch statistics
-        while maintaining a record of all prompts seen during training.
+        Clear stats so the next update() uses current-batch-only mean/std.
+        Called by the pipeline after each compute_advantages (GRPO).
         """
         self.stats = {}
         logger.debug("Cleared per-prompt statistics (kept %d unique prompts in history)", 

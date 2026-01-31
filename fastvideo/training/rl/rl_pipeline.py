@@ -15,6 +15,7 @@ import math
 import os
 from typing import Any
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -156,7 +157,7 @@ class RLPipeline(TrainingPipeline):
         rank = self.global_rank # current rank
 
         # Build RL prompt dataloader
-        train_dataloader, test_dataloader, train_dataset, test_dataset = build_rl_prompt_dataloader(
+        train_dataloader, test_dataloader, train_dataset, test_dataset, train_sampler = build_rl_prompt_dataloader(
             dataset_path=rl_dataset_path,
             dataset_type=rl_dataset_type,
             split='train',
@@ -173,8 +174,11 @@ class RLPipeline(TrainingPipeline):
         self.train_dataset = train_dataset
         self.test_dataloader = test_dataloader
         self.test_dataset = test_dataset
+
+        self.train_sampler = train_sampler
         self.train_loader_iter = iter(self.train_dataloader)
-        self.current_epoch = 0
+        self.current_step = 0
+        self.train_sampler.set_step(self.current_step)
 
         self.num_update_steps_per_epoch = math.ceil(
             len(self.train_dataloader) /
@@ -262,11 +266,17 @@ class RLPipeline(TrainingPipeline):
         with self.tracker.timed("timing/get_next_batch"):
             try:
                 batch = next(self.train_loader_iter)
+                self.current_step += 1
+                self.train_sampler.set_step(self.current_step)
             except StopIteration:
                 # Reset iterator for next epoch
-                self.current_epoch += 1
+                self.train_sampler.set_step(0)
                 self.train_loader_iter = iter(self.train_dataloader)
                 batch = next(self.train_loader_iter)
+
+                batch = next(self.train_loader_iter)
+                self.current_step += 1
+                self.train_sampler.set_step(self.current_step)
 
             # RL prompt dataloader returns (prompts, metadatas) tuple
             prompts, metadatas = batch
@@ -806,6 +816,8 @@ class RLPipeline(TrainingPipeline):
 
         # Get rewards
         rewards = training_batch.reward_scores
+        world_size = getattr(self, "world_size", 1)
+        global_rank = getattr(self, "global_rank", 0)
 
         # Check if per-prompt stat tracking is enabled
         per_prompt_stat_tracking = getattr(
@@ -815,16 +827,53 @@ class RLPipeline(TrainingPipeline):
         )
 
         if per_prompt_stat_tracking:
-            # Use PerPromptStatTracker for per-prompt normalization
-            # This computes (reward - mean_per_prompt) / std_per_prompt
-            advantages_np = self.stat_tracker.update(
-                prompts=prompts,
-                rewards=rewards,
-                type='grpo'  # GRPO-style normalization
-            )
-            advantages = torch.as_tensor(advantages_np,
-                                         device=rewards.device,
-                                         dtype=rewards.dtype)
+            # Multi-GPU: all-gather rewards and prompts so per-prompt mean/std
+            # are computed across all ranks (same as flow_grpo).
+            if world_size > 1:
+                wg = get_world_group()
+                # All-gather rewards: each rank has [B], result is [B * world_size]
+                rewards_1d = rewards.view(-1) if rewards.dim() > 1 else rewards
+                rewards_1d = rewards_1d.contiguous().to(self.device)
+                gathered_rewards = wg.all_gather(rewards_1d, dim=0)
+                # Gather prompts: broadcast each rank's list in turn
+                gathered_prompts_lists = []
+                for src in range(world_size):
+                    if global_rank == src:
+                        obj_list = [prompts]
+                    else:
+                        obj_list = [None]
+                    wg.broadcast_object_list(obj_list, src=src)
+                    gathered_prompts_lists.append(obj_list[0])
+                prompts_global = [
+                    p for plist in gathered_prompts_lists for p in plist
+                ]
+                rewards_global = gathered_rewards
+                # Run stat tracker on global data
+                advantages_np = self.stat_tracker.update(
+                    prompts=prompts_global,
+                    rewards=rewards_global,
+                    type='grpo'
+                )
+                # Slice back to this rank's indices (same as flow_grpo reshape + [rank])
+                local_batch_size = len(prompts)
+                advantages_flat = np.asarray(advantages_np).ravel()
+                advantages_np_local = advantages_flat[
+                    global_rank * local_batch_size : (global_rank + 1) * local_batch_size
+                ]
+                advantages = torch.as_tensor(
+                    advantages_np_local,
+                    device=rewards.device,
+                    dtype=rewards.dtype,
+                )
+            else:
+                advantages_np = self.stat_tracker.update(
+                    prompts=prompts,
+                    rewards=rewards,
+                    type='grpo'
+                )
+                advantages = torch.as_tensor(advantages_np,
+                                             device=rewards.device,
+                                             dtype=rewards.dtype)
         else:
             # Global normalization: (reward - global_mean) / global_std
             advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-4)
@@ -844,6 +893,9 @@ class RLPipeline(TrainingPipeline):
         training_batch.returns = returns
         training_batch.advantage_mean = advantages.mean().item()
         training_batch.advantage_std = advantages.std().item()
+
+        # Reset stats so next step uses current-batch-only mean/std (same as flow_grpo per epoch)
+        self.stat_tracker.clear()
 
         logger.info("==== RL pipeline: compute_advantages FINISH ====")
         return training_batch

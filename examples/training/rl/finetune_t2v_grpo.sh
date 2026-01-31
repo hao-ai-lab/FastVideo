@@ -22,8 +22,7 @@ training_args=(
   --tracker_project_name "wan_t2v_grpo"
   --output_dir "checkpoints/wan_t2v_grpo"
   --max_train_steps 1000 # 5000
-  --train_batch_size 4
-  # --train_sp_batch_size 4
+  --train_batch_size 8
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
   --num_latent_t 20

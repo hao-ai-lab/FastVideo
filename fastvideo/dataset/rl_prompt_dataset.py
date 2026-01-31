@@ -106,7 +106,7 @@ class KRepeatSampler(Sampler):
         return len(self.dataset) // self.batch_size
     
     def set_step(self, step):
-        """Used to synchronize the random state for different epochs."""
+        """Used to synchronize the random state for different steps."""
         self.step = step
 
 
@@ -181,5 +181,5 @@ def build_rl_prompt_dataloader(
         num_workers=test_num_workers,
     )
     
-    return train_dataloader, test_dataloader, train_dataset, test_dataset
+    return train_dataloader, test_dataloader, train_dataset, test_dataset, train_sampler
 
