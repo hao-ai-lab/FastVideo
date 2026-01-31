@@ -98,6 +98,11 @@ class GlmImageBeforeDenoisingStage(PipelineStage):
                                            batch.width)
         th, tw, pth, ptw = self._parse_shape(batch.prompt)
 
+        if batch.seed is not None:
+            torch.manual_seed(batch.seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed(batch.seed)
+
         # 2. Generate AR tokens
         if self.vision_language_encoder is not None:
             # Expand prompt for AR model (SGLang style)
@@ -120,8 +125,17 @@ class GlmImageBeforeDenoisingStage(PipelineStage):
 
             # Total tokens: small_image + large_image
             max_new = (th * tw) + (pth * ptw) + 1
+            
+            # Use sampling to match SGLang/creative generation quality
+            # top_p=0.7, top_k=50, temperature=1.0 are reasonable defaults for image generation
             outputs = self.vision_language_encoder.generate(
-                **inputs, max_new_tokens=max_new, do_sample=False)
+                **inputs, 
+                max_new_tokens=max_new, 
+                do_sample=True,
+                top_p=0.7,
+                top_k=50,
+                temperature=1.0
+            )
 
             # Extract large image tokens
             gen_tokens = outputs[0][inputs.input_ids.shape[-1]:]

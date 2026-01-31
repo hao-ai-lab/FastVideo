@@ -515,14 +515,16 @@ class VisionLanguageEncoderLoader(ComponentLoader):
         logger.info(f"Loading model with trust_remote_code={fastvideo_args.trust_remote_code}")
 
         try:
-            # First try loading with AutoModel which supports remote code
-            from transformers import AutoModel
-            model = AutoModel.from_pretrained(
+            # Import GlmImageForConditionalGeneration directly since Auto classes don't support it
+            from transformers import GlmImageForConditionalGeneration
+            from fastvideo.distributed.parallel_state import get_local_torch_device
+            
+            target_device = get_local_torch_device()
+            model = GlmImageForConditionalGeneration.from_pretrained(
                 model_path,
                 trust_remote_code=fastvideo_args.trust_remote_code,
                 torch_dtype=torch.bfloat16,
-                device_map="auto",
-            )
+            ).to(target_device)
         except Exception as e:
             logger.warning(f"AutoModel.from_pretrained failed: {e}")
             # Try loading Config first to debug
