@@ -297,35 +297,23 @@ class SingleStreamBlock(nn.Module):
 
 class LastLayer(nn.Module):
 
-    def __init__(self,
-                 hidden_size: int,
-                 patch_size: int,
-                 out_channels: int,
-                 dtype: torch.dtype | None,
-                 prefix: str = ""):
+    def __init__(self, hidden_size: int, patch_size: int, out_channels: int):
         super().__init__()
-        self.norm_final = FP32LayerNorm(hidden_size,
-                                        elementwise_affine=False,
-                                        eps=1e-6)
-        self.linear = ReplicatedLinear(hidden_size,
-                                       patch_size * patch_size * out_channels,
-                                       bias=True,
-                                       params_dtype=dtype,
-                                       prefix=f"{prefix}.linear")
+        self.norm_final = nn.LayerNorm(hidden_size,
+                                       elementwise_affine=False,
+                                       eps=1e-6)
+        self.linear = nn.Linear(hidden_size,
+                               patch_size * patch_size * out_channels,
+                               bias=True)
         self.adaLN_modulation = nn.Sequential(
             nn.SiLU(),
-            ReplicatedLinear(hidden_size,
-                             2 * hidden_size,
-                             bias=True,
-                             params_dtype=dtype,
-                             prefix=f"{prefix}.adaLN_modulation"),
+            nn.Linear(hidden_size, 2 * hidden_size, bias=True),
         )
 
     def forward(self, x: torch.Tensor, vec: torch.Tensor) -> torch.Tensor:
-        mod = self.adaLN_modulation(vec)
-        shift, scale = mod.chunk(2, dim=1)
+        shift, scale = self.adaLN_modulation(vec).chunk(2, dim=1)
         x = (1 + scale[:, None, :]) * self.norm_final(x) + shift[:, None, :]
-        x, _ = self.linear(x)
+        x = self.linear(x)
         return x
 
 
@@ -429,9 +417,7 @@ class FluxTransformer2DModel(BaseDiT):
 
         self.final_layer = LastLayer(self.hidden_size,
                                      patch_size=1,
-                                     out_channels=self.out_channels,
-                                     dtype=dtype,
-                                     prefix=f"{config.prefix}.final_layer")
+                                     out_channels=self.out_channels)
 
         self.__post_init__()
 
