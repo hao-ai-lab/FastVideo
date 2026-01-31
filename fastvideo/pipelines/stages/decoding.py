@@ -61,15 +61,16 @@ class DecodingStage(PipelineStage):
         # MatrixGame-style: z = z * std + mean
         if (cfg is not None and hasattr(cfg, "latents_mean")
                 and hasattr(cfg, "latents_std")):
-            latents_mean = torch.tensor(cfg.latents_mean,
-                                        device=latents.device,
-                                        dtype=latents.dtype).view(
-                                            1, -1, 1, 1, 1)
-            latents_std = torch.tensor(cfg.latents_std,
-                                       device=latents.device,
-                                       dtype=latents.dtype).view(
-                                           1, -1, 1, 1, 1)
-            return latents * latents_std + latents_mean
+            if cfg.latents_mean is not None and cfg.latents_std is not None:
+                latents_mean = torch.tensor(cfg.latents_mean,
+                                            device=latents.device,
+                                            dtype=latents.dtype).view(
+                                                1, -1, 1, 1, 1)
+                latents_std = torch.tensor(cfg.latents_std,
+                                           device=latents.device,
+                                           dtype=latents.dtype).view(
+                                               1, -1, 1, 1, 1)
+                return latents * latents_std + latents_mean
 
         # Diffusers-style: scaling_factor (+ optional shift_factor)
         if hasattr(self.vae, "scaling_factor"):

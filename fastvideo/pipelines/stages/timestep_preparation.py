@@ -20,6 +20,76 @@ from fastvideo.pipelines.stages.validators import VerificationResult
 logger = init_logger(__name__)
 
 
+def _to_scalar(value):
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        return _to_scalar(value[0]) if value else None
+    if torch.is_tensor(value):
+        if value.numel() == 0:
+            return None
+        return int(value.flatten()[0].item())
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _calculate_shift(
+    image_seq_len: int,
+    base_image_seq_len: int,
+    max_image_seq_len: int,
+    base_shift: float,
+    max_shift: float,
+) -> float:
+    if max_image_seq_len == base_image_seq_len:
+        return float(base_shift)
+    slope = (max_shift - base_shift) / (max_image_seq_len - base_image_seq_len)
+    intercept = base_shift - slope * base_image_seq_len
+    return float(image_seq_len * slope + intercept)
+
+
+def _get_dynamic_shifting_mu(batch: ForwardBatch, fastvideo_args: FastVideoArgs,
+                             scheduler) -> float | None:
+    cfg = getattr(scheduler, "config", None)
+    if cfg is None:
+        return None
+
+    base_shift = getattr(cfg, "base_shift", None)
+    max_shift = getattr(cfg, "max_shift", None)
+    base_seq_len = getattr(cfg, "base_image_seq_len", None)
+    max_seq_len = getattr(cfg, "max_image_seq_len", None)
+    if (base_shift is None or max_shift is None or base_seq_len is None
+            or max_seq_len is None):
+        return None
+
+    height = _to_scalar(batch.height)
+    width = _to_scalar(batch.width)
+    image_seq_len = None
+
+    if height is not None and width is not None:
+        arch_config = fastvideo_args.pipeline_config.vae_config.arch_config
+        vae_scale = getattr(arch_config, "vae_scale_factor", None)
+        if vae_scale is None:
+            vae_scale = getattr(arch_config, "spatial_compression_ratio", None)
+        if vae_scale is not None:
+            # Flux packs latents in 2x2 patches, so account for that when present.
+            pack_factor = 2 if hasattr(fastvideo_args.pipeline_config,
+                                       "maybe_pack_latents") else 1
+            denom = vae_scale * pack_factor
+            if denom > 0:
+                image_seq_len = (height // denom) * (width // denom)
+
+    if image_seq_len is None:
+        image_seq_len = _to_scalar(batch.n_tokens)
+
+    if image_seq_len is None:
+        return None
+
+    return _calculate_shift(image_seq_len, base_seq_len, max_seq_len,
+                            base_shift, max_shift)
+
+
 class TimestepPreparationStage(PipelineStage):
     """
     Stage for preparing timesteps for the diffusion process.
@@ -59,13 +129,19 @@ class TimestepPreparationStage(PipelineStage):
                 scheduler.set_timesteps).parameters:
             extra_set_timesteps_kwargs["n_tokens"] = n_tokens
         
-        # Handle mu parameter for FLUX scheduler with dynamic shifting
+        # Handle mu parameter for schedulers with dynamic shifting
         if "mu" in inspect.signature(scheduler.set_timesteps).parameters:
-            # Try to get flow_shift from pipeline config, default to 3.0 for FLUX
-            flow_shift = getattr(fastvideo_args.pipeline_config, "flow_shift", None)
-            if flow_shift is None:
-                flow_shift = 3.0
-            extra_set_timesteps_kwargs["mu"] = flow_shift
+            mu = None
+            if getattr(scheduler.config, "use_dynamic_shifting", False):
+                mu = _get_dynamic_shifting_mu(batch, fastvideo_args, scheduler)
+            if mu is None:
+                # Fall back to flow_shift for compatibility.
+                flow_shift = getattr(fastvideo_args.pipeline_config, "flow_shift",
+                                     None)
+                if flow_shift is None:
+                    flow_shift = 3.0
+                mu = flow_shift
+            extra_set_timesteps_kwargs["mu"] = mu
 
         # Handle custom timesteps or sigmas
         if timesteps is not None and sigmas is not None:
