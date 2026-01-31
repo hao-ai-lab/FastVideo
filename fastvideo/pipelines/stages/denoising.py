@@ -182,23 +182,11 @@ class DenoisingStage(PipelineStage):
 
         # Get latents and embeddings
         latents = batch.latents
-        
-        # For FLUX models, use T5 embeddings (index 1) as primary, not CLIP (index 0)
-        is_flux = self.transformer.__class__.__name__ == "FluxTransformer2DModel"
-        if is_flux and len(batch.prompt_embeds) > 1:
-            # Use T5 embeddings for FLUX
-            prompt_embeds = [batch.prompt_embeds[1]]  # T5 is at index 1
-            if batch.do_classifier_free_guidance and batch.negative_prompt_embeds is not None:
-                neg_prompt_embeds = [batch.negative_prompt_embeds[1]]  # T5 negative
-        else:
-            # For other models, use the first encoder's embeddings
-            prompt_embeds = batch.prompt_embeds
-            if batch.do_classifier_free_guidance:
-                neg_prompt_embeds = batch.negative_prompt_embeds
-        
+        prompt_embeds = batch.prompt_embeds
         assert not torch.isnan(
             prompt_embeds[0]).any(), "prompt_embeds contains nan"
         if batch.do_classifier_free_guidance:
+            neg_prompt_embeds = batch.negative_prompt_embeds
             assert neg_prompt_embeds is not None
             assert not torch.isnan(
                 neg_prompt_embeds[0]).any(), "neg_prompt_embeds contains nan"
