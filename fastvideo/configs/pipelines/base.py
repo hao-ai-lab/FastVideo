@@ -2,7 +2,7 @@
 import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, fields
-from enum import Enum
+from enum import Enum, auto
 from typing import Any, cast
 
 import torch
@@ -26,8 +26,47 @@ class STA_Mode(str, Enum):
     NONE = None
 
 
+class DataType(str, Enum):
+    IMAGE = "image"
+    VIDEO = "video"
+
+
+class ModelTaskType(Enum):
+    # TODO: check if I2V/TI2V models can work w/wo text
+
+    I2V = auto()  # Image to Video
+    T2V = auto()  # Text to Video
+    TI2V = auto()  # Text and Image to Video
+
+    T2I = auto()  # Text to Image
+    I2I = auto()  # Image to Image
+    TI2I = auto()  # Image to Image or Text-Image to Image
+
+    def is_image_gen(self) -> bool:
+        return self in (ModelTaskType.T2I, ModelTaskType.I2I, ModelTaskType.TI2I)
+
+    def requires_image_input(self) -> bool:
+        return self in (ModelTaskType.I2V, ModelTaskType.I2I)
+
+    def accepts_image_input(self) -> bool:
+        return self in (
+            ModelTaskType.I2V,
+            ModelTaskType.I2I,
+            ModelTaskType.TI2I,
+            ModelTaskType.TI2V,
+        )
+
+    def data_type(self) -> DataType:
+        return DataType.IMAGE if self.is_image_gen() else DataType.VIDEO
+
+
 def preprocess_text(prompt: str) -> str:
     return prompt
+
+
+def shard_rotary_emb_for_sp(freqs: torch.Tensor) -> torch.Tensor:
+    # Placeholder for sequence-parallel sharding; identity for now.
+    return freqs
 
 
 def postprocess_text(output: BaseEncoderOutput) -> torch.tensor:
@@ -225,7 +264,6 @@ class PipelineConfig:
         DiTConfig.add_cli_args(parser, prefix=f"{prefix_with_dot}dit-config")
 
         return parser
-
     def update_config_from_dict(self,
                                 args: dict[str, Any],
                                 prefix: str = "") -> None:
@@ -379,6 +417,12 @@ class PipelineConfig:
 
         if hasattr(self, "__post_init__"):
             self.__post_init__()
+
+
+@dataclass
+class ImagePipelineConfig(PipelineConfig):
+    """Alias for image-focused pipelines (kept for compatibility)."""
+    pass
 
 
 @dataclass

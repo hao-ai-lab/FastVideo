@@ -7,57 +7,37 @@ import torch
 from diffusers.image_processor import VaeImageProcessor
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
-from fastvideo.models.dits.flux import FluxConfig
-from fastvideo.configs.models.encoders import (BaseEncoderOutput,
-                                               CLIPTextConfig, T5Config)
-from collections.abc import Callable
-from dataclasses import dataclass, field
-
-import torch
-
-from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import FluxConfig
-from fastvideo.configs.models.encoders import BaseEncoderOutput, CLIPTextConfig, T5Config
-from fastvideo.configs.pipelines.base import PipelineConfig
-
-# from fastvideo.encoders.base import TextEncoderArchConfig
-# from fastvideo.config.models.encoders.qwen3 import Qwen3TextConfig
-# from fastvideo.encoders.qwen_image import (
-#     _is_transformer_layer,
-# )
-# from fastvideo.models.vaes.flux import Flux2VAEConfig, FluxVAEConfig
-# from fastvideo.pipeline_configs.base import (
-#     ImagePipelineConfig,
-#     ModelTaskType,
-#     preprocess_text,
-#     shard_rotary_emb_for_sp,
-# )
-# from fastvideo.configs.pipeline_configs.hunyuan import (
-#     clip_postprocess_text,
-#     clip_preprocess_text,
-# )
-# from fastvideo.configs.pipeline_configs.qwen_image import _pack_latents
-
-
-from collections.abc import Callable
-from dataclasses import dataclass, field
-
-import torch
-
-from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
-from fastvideo.configs.models.dits import FluxConfig
-from fastvideo.configs.models.encoders import BaseEncoderOutput, CLIPTextConfig, T5Config
-from fastvideo.configs.pipelines.base import PipelineConfig
-
-# right
+from fastvideo.configs.models.encoders import (
+    BaseEncoderOutput,
+    CLIPTextConfig,
+    T5Config,
+    TextEncoderConfig,
+)
+from fastvideo.configs.models.encoders.base import TextEncoderArchConfig
+from fastvideo.configs.models.encoders import Qwen2_5_VLConfig as Qwen3TextConfig
+from fastvideo.configs.models.encoders.qwen2_5 import _is_transformer_layer
+from fastvideo.configs.models.vaes.fluxvae import Flux2VAEConfig, FluxVAEConfig
+from fastvideo.configs.pipelines.base import (
+    ImagePipelineConfig,
+    ModelTaskType,
+    preprocess_text,
+    shard_rotary_emb_for_sp,
+)
+from fastvideo.configs.pipelines.hunyuan import (
+    clip_postprocess_text,
+    clip_preprocess_text,
+)
+from fastvideo.configs.pipelines.qwen_image import _pack_latents
 from fastvideo.distributed import get_local_torch_device
+
 
 def t5_postprocess_text(outputs: BaseEncoderOutput, _text_inputs) -> torch.Tensor:
     return outputs.last_hidden_state
 
 
 @dataclass
-class FluxPipelineConfig(PipelineConfig):
+class FluxPipelineConfig(ImagePipelineConfig):
     """Configuration for the FLUX pipeline."""
 
     embedded_cfg_scale: float = 3.5
@@ -707,3 +687,9 @@ class Flux2KleinPipelineConfig(Flux2PipelineConfig):
             return_tensors=return_tensors,
             **tok_kwargs,
         )
+
+
+@dataclass
+class FluxT2IConfig(FluxPipelineConfig):
+    """Alias for registry compatibility."""
+    pass
