@@ -164,7 +164,7 @@ class DecodingStage(PipelineStage):
             # if fastvideo_args.vae_sp:
             #     self.vae.enable_parallel()
             if not vae_autocast_enabled:
-                latents = latents.to(vae_dtype)
+                decode_latents = decode_latents.to(vae_dtype)
             image = self.vae.decode(decode_latents)
             if hasattr(image, "sample"):
                 image = image.sample
