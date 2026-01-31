@@ -3,6 +3,7 @@
 Decoding stage for diffusion pipelines.
 """
 
+import inspect
 import weakref
 
 import torch
@@ -73,20 +74,28 @@ class DecodingStage(PipelineStage):
                 return latents * latents_std + latents_mean
 
         # Diffusers-style: scaling_factor (+ optional shift_factor)
-        if hasattr(self.vae, "scaling_factor"):
-            if isinstance(self.vae.scaling_factor, torch.Tensor):
-                latents = latents / self.vae.scaling_factor.to(
-                    latents.device, latents.dtype)
+        scaling_factor = getattr(self.vae, "scaling_factor", None)
+        if scaling_factor is None and cfg is not None:
+            scaling_factor = getattr(cfg, "scaling_factor", None)
+        if scaling_factor is not None:
+            if isinstance(scaling_factor, torch.Tensor):
+                latents = latents / scaling_factor.to(latents.device,
+                                                     latents.dtype)
             else:
-                latents = latents / self.vae.scaling_factor
+                latents = latents / scaling_factor
 
-            if hasattr(self.vae,
-                       "shift_factor") and self.vae.shift_factor is not None:
-                if isinstance(self.vae.shift_factor, torch.Tensor):
-                    latents = latents + self.vae.shift_factor.to(
+            shift_factor = None
+            if cfg is not None and hasattr(cfg, "shift_factor"):
+                shift_factor = cfg.shift_factor
+            elif hasattr(self.vae, "shift_factor"):
+                shift_factor = self.vae.shift_factor
+
+            if shift_factor is not None:
+                if isinstance(shift_factor, torch.Tensor):
+                    latents = latents + shift_factor.to(
                         latents.device, latents.dtype)
                 else:
-                    latents = latents + self.vae.shift_factor
+                    latents = latents + shift_factor
 
         return latents
 
@@ -118,6 +127,25 @@ class DecodingStage(PipelineStage):
 
         latents = self._denormalize_latents(latents)
 
+        decode_latents = latents
+        decode_ctx = None
+        preprocess = getattr(fastvideo_args.pipeline_config,
+                             "preprocess_decoding", None)
+        if callable(preprocess):
+            preprocess_kwargs = {}
+            sig = inspect.signature(preprocess)
+            if "vae" in sig.parameters:
+                preprocess_kwargs["vae"] = self.vae
+            if "server_args" in sig.parameters:
+                preprocess_kwargs["server_args"] = None
+            if "fastvideo_args" in sig.parameters:
+                preprocess_kwargs["fastvideo_args"] = fastvideo_args
+            result = preprocess(latents, **preprocess_kwargs)
+            if isinstance(result, tuple) and len(result) == 2:
+                decode_latents, decode_ctx = result
+            else:
+                decode_latents = result
+
         # Decode latents
         with torch.autocast(device_type="cuda",
                             dtype=vae_dtype,
@@ -128,7 +156,25 @@ class DecodingStage(PipelineStage):
             #     self.vae.enable_parallel()
             if not vae_autocast_enabled:
                 latents = latents.to(vae_dtype)
-            image = self.vae.decode(latents)
+            image = self.vae.decode(decode_latents)
+            if hasattr(image, "sample"):
+                image = image.sample
+            postprocess = getattr(fastvideo_args.pipeline_config,
+                                  "postprocess_decoding", None)
+            if callable(postprocess):
+                postprocess_kwargs = {}
+                sig = inspect.signature(postprocess)
+                if "vae" in sig.parameters:
+                    postprocess_kwargs["vae"] = self.vae
+                if "server_args" in sig.parameters:
+                    postprocess_kwargs["server_args"] = None
+                if "fastvideo_args" in sig.parameters:
+                    postprocess_kwargs["fastvideo_args"] = fastvideo_args
+                if "ctx" in sig.parameters or len(sig.parameters) > 1:
+                    image = postprocess(image, decode_ctx,
+                                        **postprocess_kwargs)
+                else:
+                    image = postprocess(image, **postprocess_kwargs)
 
         # Normalize image to [0, 1] range
         image = (image / 2 + 0.5).clamp(0, 1)

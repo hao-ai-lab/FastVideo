@@ -167,6 +167,29 @@ class FluxPipelineConfig(ImagePipelineConfig):
         latents = latents.reshape(batch_size, channels // (2 * 2), height, width)
         return latents
 
+    def preprocess_decoding(self, latents, vae=None):
+        if latents.ndim != 5:
+            return latents, None
+        batch_size, channels, num_frames, height, width = latents.shape
+        if num_frames == 1:
+            return latents[:, :, 0], {"unsqueeze_time": True}
+        flat = latents.permute(0, 2, 1, 3, 4).reshape(
+            batch_size * num_frames, channels, height, width
+        )
+        return flat, {"batch_size": batch_size, "num_frames": num_frames}
+
+    def postprocess_decoding(self, images, ctx, vae=None):
+        if not ctx:
+            return images
+        if ctx.get("unsqueeze_time"):
+            return images.unsqueeze(2)
+        batch_size = ctx.get("batch_size")
+        num_frames = ctx.get("num_frames")
+        if batch_size is None or num_frames is None:
+            return images
+        images = images.reshape(batch_size, num_frames, *images.shape[1:])
+        return images.permute(0, 2, 1, 3, 4)
+
     def prepare_pos_cond_kwargs(self, batch, device, rotary_emb, dtype):
         return {
             "freqs_cis": self.get_freqs_cis(
