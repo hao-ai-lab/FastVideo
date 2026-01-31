@@ -45,6 +45,7 @@ class FluxPipelineConfig(ImagePipelineConfig):
     embedded_cfg_scale: float = 3.5
     flow_shift: float | None = 3.0
     timestep_input_scale: float | None = 1.0 / 1000.0
+    embedded_cfg_scale_multiplier: float = 1.0
 
     task_type: ModelTaskType = ModelTaskType.T2I
 

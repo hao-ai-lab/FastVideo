@@ -354,8 +354,11 @@ class DenoisingStage(PipelineStage):
                         latent_model_input.shape[0],
                         dtype=torch.float32,
                         device=get_local_torch_device(),
-                    ).to(target_dtype) *
-                    1000.0 if fastvideo_args.pipeline_config.embedded_cfg_scale
+                    ).to(target_dtype) * getattr(
+                        fastvideo_args.pipeline_config,
+                        "embedded_cfg_scale_multiplier",
+                        1000.0,
+                    ) if fastvideo_args.pipeline_config.embedded_cfg_scale
                     is not None else None)
 
                 # Predict noise residual
@@ -1296,8 +1299,11 @@ class DmdDenoisingStage(DenoisingStage):
                         latent_model_input.shape[0],
                         dtype=torch.float32,
                         device=get_local_torch_device(),
-                    ).to(target_dtype) *
-                    1000.0 if fastvideo_args.pipeline_config.embedded_cfg_scale
+                    ).to(target_dtype) * getattr(
+                        fastvideo_args.pipeline_config,
+                        "embedded_cfg_scale_multiplier",
+                        1000.0,
+                    ) if fastvideo_args.pipeline_config.embedded_cfg_scale
                     is not None else None)
 
                 # Predict noise residual
