@@ -32,7 +32,9 @@ from fastvideo.configs.pipelines.qwen_image import _pack_latents
 from fastvideo.distributed import get_local_torch_device
 
 
-def t5_postprocess_text(outputs: BaseEncoderOutput, _text_inputs) -> torch.Tensor:
+def t5_postprocess_text(
+    outputs: BaseEncoderOutput, _text_inputs: torch.Tensor | None = None
+) -> torch.Tensor:
     return outputs.last_hidden_state
 
 
