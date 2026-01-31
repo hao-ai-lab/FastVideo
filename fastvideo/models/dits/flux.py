@@ -164,7 +164,7 @@ class DoubleStreamBlock(nn.Module):
         self.img_mlp = MLP(hidden_size,
                            mlp_hidden_dim,
                            bias=True,
-                           act_type="gelu_pytorch_tanh",
+                           act_type="gelu_tanh",
                            dtype=dtype,
                            prefix=f"{prefix}.img_mlp")
 
@@ -184,7 +184,7 @@ class DoubleStreamBlock(nn.Module):
         self.txt_mlp = MLP(hidden_size,
                            mlp_hidden_dim,
                            bias=True,
-                           act_type="gelu_pytorch_tanh",
+                           act_type="gelu_tanh",
                            dtype=dtype,
                            prefix=f"{prefix}.txt_mlp")
 
@@ -268,7 +268,7 @@ class SingleStreamBlock(nn.Module):
         self.pre_norm = FP32LayerNorm(hidden_size,
                                       elementwise_affine=False,
                                       eps=1e-6)
-        self.mlp_act = get_act_fn("gelu_pytorch_tanh")
+        self.mlp_act = get_act_fn("gelu_tanh")
         self.modulation = Modulation(hidden_size, double=False, dtype=dtype)
 
         self.attn = LocalAttention(
