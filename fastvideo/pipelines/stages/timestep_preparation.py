@@ -6,6 +6,7 @@ This module contains implementations of timestep preparation stages for diffusio
 """
 
 import inspect
+import math
 
 import torch
 
@@ -18,6 +19,47 @@ from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 
 logger = init_logger(__name__)
+
+
+def _to_scalar(value):
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        return _to_scalar(value[0]) if value else None
+    if torch.is_tensor(value):
+        if value.numel() == 0:
+            return None
+        return int(value.flatten()[0].item())
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _compute_image_seq_len(batch: ForwardBatch,
+                           fastvideo_args: FastVideoArgs) -> int | None:
+    height = _to_scalar(batch.height)
+    width = _to_scalar(batch.width)
+    if height is None or width is None:
+        return None
+
+    arch_config = fastvideo_args.pipeline_config.vae_config.arch_config
+    vae_scale = getattr(arch_config, "vae_scale_factor", None)
+    if vae_scale is None:
+        vae_scale = getattr(arch_config, "spatial_compression_ratio", None)
+    denom = int(vae_scale * 2) if vae_scale is not None else 16
+    if denom <= 0:
+        return None
+    return math.ceil(height / denom) * math.ceil(width / denom)
+
+
+def _compute_mu(image_seq_len: int, base_shift: float, max_shift: float,
+                base_seq_len: int, max_seq_len: int) -> float:
+    if max_seq_len == base_seq_len:
+        return float(base_shift)
+    m = (max_shift - base_shift) / (max_seq_len - base_seq_len)
+    b = base_shift - m * base_seq_len
+    return float(m * image_seq_len + b)
 
 
 class TimestepPreparationStage(PipelineStage):
@@ -58,6 +100,29 @@ class TimestepPreparationStage(PipelineStage):
         if n_tokens is not None and "n_tokens" in inspect.signature(
                 scheduler.set_timesteps).parameters:
             extra_set_timesteps_kwargs["n_tokens"] = n_tokens
+
+        if "mu" in inspect.signature(scheduler.set_timesteps).parameters:
+            mu = None
+            cfg = getattr(scheduler, "config", None)
+            if cfg is not None and getattr(cfg, "use_dynamic_shifting", False):
+                image_seq_len = _compute_image_seq_len(
+                    batch, fastvideo_args)
+                if image_seq_len is not None:
+                    base_shift = getattr(cfg, "base_shift", 0.5)
+                    max_shift = getattr(cfg, "max_shift", 1.15)
+                    base_seq_len = getattr(cfg, "base_image_seq_len", 256)
+                    max_seq_len = getattr(cfg, "max_image_seq_len", 4096)
+                    mu = _compute_mu(image_seq_len, base_shift, max_shift,
+                                     base_seq_len, max_seq_len)
+
+            if mu is None:
+                flow_shift = getattr(fastvideo_args.pipeline_config,
+                                     "flow_shift", None)
+                if flow_shift is not None:
+                    mu = flow_shift
+
+            if mu is not None:
+                extra_set_timesteps_kwargs["mu"] = mu
 
         # Handle custom timesteps or sigmas
         if timesteps is not None and sigmas is not None:
