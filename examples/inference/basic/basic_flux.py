@@ -56,7 +56,7 @@ def main():
     #     "wide with interest. The playful yet serene atmosphere is complemented by soft "
     #     "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
     # )
-    PROMPT = (
+    prompt = (
     "A cinematic portrait of a fox, 35mm film, soft light, gentle grain."
 )
     video = generator.generate_video(prompt, output_path=OUTPUT_PATH, save_video=True)
