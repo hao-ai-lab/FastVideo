@@ -152,22 +152,6 @@ class DenoisingStage(PipelineStage):
             },
         )
 
-        pos_cond_kwargs = self.prepare_extra_func_kwargs(
-            self.transformer.forward,
-            {
-                "encoder_hidden_states_2": batch.clip_embedding_pos,
-                "encoder_attention_mask": batch.prompt_attention_mask,
-            },
-        )
-
-        neg_cond_kwargs = self.prepare_extra_func_kwargs(
-            self.transformer.forward,
-            {
-                "encoder_hidden_states_2": batch.clip_embedding_neg,
-                "encoder_attention_mask": batch.negative_attention_mask,
-            },
-        )
-
         action_kwargs = self.prepare_extra_func_kwargs(
             self.transformer.forward,
             {
@@ -183,13 +167,53 @@ class DenoisingStage(PipelineStage):
         # Get latents and embeddings
         latents = batch.latents
         prompt_embeds = batch.prompt_embeds
-        assert not torch.isnan(
-            prompt_embeds[0]).any(), "prompt_embeds contains nan"
+        if hasattr(fastvideo_args.pipeline_config, "get_pos_prompt_embeds"):
+            prompt_embeds = fastvideo_args.pipeline_config.get_pos_prompt_embeds(
+                batch)
+        if isinstance(prompt_embeds, list):
+            assert not torch.isnan(
+                prompt_embeds[0]).any(), "prompt_embeds contains nan"
+        else:
+            assert not torch.isnan(prompt_embeds).any(
+            ), "prompt_embeds contains nan"
         if batch.do_classifier_free_guidance:
             neg_prompt_embeds = batch.negative_prompt_embeds
             assert neg_prompt_embeds is not None
-            assert not torch.isnan(
-                neg_prompt_embeds[0]).any(), "neg_prompt_embeds contains nan"
+            if hasattr(fastvideo_args.pipeline_config, "get_neg_prompt_embeds"):
+                neg_prompt_embeds = fastvideo_args.pipeline_config.get_neg_prompt_embeds(
+                    batch)
+            if isinstance(neg_prompt_embeds, list):
+                assert not torch.isnan(
+                    neg_prompt_embeds[0]
+                ).any(), "neg_prompt_embeds contains nan"
+            else:
+                assert not torch.isnan(neg_prompt_embeds).any(
+                ), "neg_prompt_embeds contains nan"
+
+        pooled_pos = batch.clip_embedding_pos
+        pooled_neg = batch.clip_embedding_neg
+        if hasattr(fastvideo_args.pipeline_config, "get_pos_prompt_embeds"):
+            if isinstance(batch.prompt_embeds, list) and batch.prompt_embeds:
+                pooled_pos = batch.prompt_embeds[0]
+            if isinstance(batch.negative_prompt_embeds, list
+                          ) and batch.negative_prompt_embeds:
+                pooled_neg = batch.negative_prompt_embeds[0]
+
+        pos_cond_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "encoder_hidden_states_2": pooled_pos,
+                "encoder_attention_mask": batch.prompt_attention_mask,
+            },
+        )
+
+        neg_cond_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "encoder_hidden_states_2": pooled_neg,
+                "encoder_attention_mask": batch.negative_attention_mask,
+            },
+        )
 
         # (Wan2.2) Calculate timestep to switch from high noise expert to low noise expert
         boundary_ratio = fastvideo_args.pipeline_config.dit_config.boundary_ratio
