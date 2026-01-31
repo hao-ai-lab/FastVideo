@@ -338,6 +338,11 @@ class DenoisingStage(PipelineStage):
                     t_expand = timestep.repeat(latent_model_input.shape[0], 1)
                 else:
                     t_expand = t.repeat(latent_model_input.shape[0])
+                timestep_input_scale = getattr(
+                    fastvideo_args.pipeline_config, "timestep_input_scale",
+                    None)
+                if timestep_input_scale is not None:
+                    t_expand = t_expand * timestep_input_scale
 
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)
