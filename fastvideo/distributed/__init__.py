@@ -18,6 +18,7 @@ __all__ = [
     "cleanup_dist_env_and_memory",
     "model_parallel_is_initialized",
     "maybe_init_distributed_environment_and_model_parallel",
+    "warmup_sequence_parallel_communication",
 
     # World group
     "get_world_group",

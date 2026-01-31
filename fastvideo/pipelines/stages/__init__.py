@@ -27,6 +27,7 @@ from fastvideo.pipelines.stages.ltx2_audio_decoding import LTX2AudioDecodingStag
 from fastvideo.pipelines.stages.ltx2_denoising import LTX2DenoisingStage
 from fastvideo.pipelines.stages.ltx2_latent_preparation import (
     LTX2LatentPreparationStage)
+from fastvideo.pipelines.stages.ltx2_text_encoding import LTX2TextEncodingStage
 from fastvideo.pipelines.stages.matrixgame_denoising import (
     MatrixGameCausalDenoisingStage)
 from fastvideo.pipelines.stages.hyworld_denoising import HYWorldDenoisingStage
@@ -61,6 +62,7 @@ __all__ = [
     "CosmosDenoisingStage",
     "Cosmos25DenoisingStage",
     "LTX2DenoisingStage",
+    "LTX2TextEncodingStage",
     "EncodingStage",
     "DecodingStage",
     "ImageEncodingStage",
