@@ -366,9 +366,11 @@ class ImageTransformStage(DatasetStage):
             image = self.transform_topcrop(image)
         elif self.transform is not None:
             image = self.transform(image)
+            image = image.float() / 127.5 - 1.0
+        else:
+            image = image.float() / 127.5 - 1.0
 
         image = image.transpose(0, 1)  # [1 C H W] -> [C 1 H W]
-        image = image.float() / 127.5 - 1.0
         batch.pixel_values = image
         return batch
 
