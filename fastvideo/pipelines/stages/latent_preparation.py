@@ -128,6 +128,24 @@ class LatentPreparationStage(PipelineStage):
                 spatial_compression_ratio,
             )
             bcthw_shape = shape
+            prepare_latent_shape = getattr(
+                fastvideo_args.pipeline_config, "prepare_latent_shape", None)
+            if callable(prepare_latent_shape):
+                override = prepare_latent_shape(batch, batch_size, num_frames)
+                override = tuple(override)
+                if len(override) == 4:
+                    override = (
+                        override[0],
+                        override[1],
+                        num_frames,
+                        override[2],
+                        override[3],
+                    )
+                if len(override) != 5:
+                    raise ValueError(
+                        "prepare_latent_shape must return 4D or 5D shape")
+                shape = override
+                bcthw_shape = override
 
         # Validate generator if it's a list
         if isinstance(generator, list) and len(generator) != batch_size:
@@ -156,6 +174,17 @@ class LatentPreparationStage(PipelineStage):
             if (not is_longcat_refine) and hasattr(self.scheduler,
                                                    "init_noise_sigma"):
                 latents = latents * self.scheduler.init_noise_sigma
+
+        pack_latents = getattr(fastvideo_args.pipeline_config,
+                               "pack_latents_for_denoising", None)
+        if (not self.use_btchw_layout) and callable(pack_latents):
+            latents = pack_latents(latents)
+            if latents.ndim == 4:
+                latents = latents.unsqueeze(2)
+            elif latents.ndim != 5:
+                raise ValueError(
+                    "pack_latents_for_denoising must return 4D or 5D latents")
+            bcthw_shape = latents.shape
 
         # Update batch with prepared latents
         batch.latents = latents

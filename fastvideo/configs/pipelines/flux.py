@@ -156,18 +156,53 @@ class FluxPipelineConfig(ImagePipelineConfig):
         return cos, sin
 
     def post_denoising_loop(self, latents, batch):
-        # unpack latents for flux
-        (
-            latents,
-            batch_size,
-            channels,
-            height,
-            width,
-        ) = self._unpad_and_unpack_latents(latents, batch)
-        latents = latents.reshape(batch_size, channels // (2 * 2), height, width)
-        return latents
+        return self.unpack_latents_for_decoding(latents)
+
+    def pack_latents_for_denoising(self, latents: torch.Tensor) -> torch.Tensor:
+        if latents.ndim == 5:
+            if latents.shape[2] != 1:
+                return latents
+            latents_4d = latents[:, :, 0]
+        elif latents.ndim == 4:
+            latents_4d = latents
+        else:
+            return latents
+
+        in_channels = self.dit_config.arch_config.in_channels
+        vae_latent_channels = self.vae_config.arch_config.latent_channels
+        if latents_4d.shape[1] == in_channels:
+            return latents_4d.unsqueeze(2)
+        if latents_4d.shape[1] != vae_latent_channels:
+            return latents
+
+        packed = _patchify_latents(latents_4d)
+        return packed.unsqueeze(2)
+
+    def unpack_latents_for_decoding(self,
+                                    latents: torch.Tensor) -> torch.Tensor:
+        if latents.ndim == 5:
+            if latents.shape[2] != 1:
+                return latents
+            latents_4d = latents[:, :, 0]
+            add_time = True
+        elif latents.ndim == 4:
+            latents_4d = latents
+            add_time = False
+        else:
+            return latents
+
+        in_channels = self.dit_config.arch_config.in_channels
+        vae_latent_channels = self.vae_config.arch_config.latent_channels
+        if latents_4d.shape[1] == vae_latent_channels:
+            return latents_4d.unsqueeze(2) if add_time else latents_4d
+        if latents_4d.shape[1] != in_channels:
+            return latents
+
+        unpacked = _unpatchify_latents(latents_4d)
+        return unpacked.unsqueeze(2) if add_time else unpacked
 
     def preprocess_decoding(self, latents, vae=None):
+        latents = self.unpack_latents_for_decoding(latents)
         if latents.ndim != 5:
             return latents, None
         batch_size, channels, num_frames, height, width = latents.shape
