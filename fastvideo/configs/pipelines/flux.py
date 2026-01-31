@@ -43,6 +43,7 @@ class FluxPipelineConfig(ImagePipelineConfig):
     """Configuration for the FLUX pipeline."""
 
     embedded_cfg_scale: float = 3.5
+    flow_shift: float | None = 3.0
 
     task_type: ModelTaskType = ModelTaskType.T2I
 

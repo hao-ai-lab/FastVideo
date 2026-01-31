@@ -62,7 +62,9 @@ class TimestepPreparationStage(PipelineStage):
         # Handle mu parameter for FLUX scheduler with dynamic shifting
         if "mu" in inspect.signature(scheduler.set_timesteps).parameters:
             # Try to get flow_shift from pipeline config, default to 3.0 for FLUX
-            flow_shift = getattr(fastvideo_args.pipeline_config, 'flow_shift', 3.0)
+            flow_shift = getattr(fastvideo_args.pipeline_config, "flow_shift", None)
+            if flow_shift is None:
+                flow_shift = 3.0
             extra_set_timesteps_kwargs["mu"] = flow_shift
 
         # Handle custom timesteps or sigmas
