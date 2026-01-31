@@ -74,9 +74,10 @@ class DecodingStage(PipelineStage):
                 return latents * latents_std + latents_mean
 
         # Diffusers-style: scaling_factor (+ optional shift_factor)
-        scaling_factor = getattr(self.vae, "scaling_factor", None)
-        if scaling_factor is None and cfg is not None:
-            scaling_factor = getattr(cfg, "scaling_factor", None)
+        scaling_factor = getattr(cfg, "scaling_factor",
+                                 None) if cfg is not None else None
+        if scaling_factor is None:
+            scaling_factor = getattr(self.vae, "scaling_factor", None)
         if scaling_factor is not None:
             if isinstance(scaling_factor, torch.Tensor):
                 latents = latents / scaling_factor.to(latents.device,
@@ -122,6 +123,14 @@ class DecodingStage(PipelineStage):
         # Setup VAE precision
         vae_dtype = PRECISION_TO_TYPE[
             fastvideo_args.pipeline_config.vae_precision]
+        has_decode_hook = callable(
+            getattr(fastvideo_args.pipeline_config, "preprocess_decoding",
+                    None))
+        if has_decode_hook and not isinstance(self.vae, ParallelTiledVAE):
+            try:
+                vae_dtype = next(self.vae.parameters()).dtype
+            except StopIteration:
+                pass
         vae_autocast_enabled = (
             vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
