@@ -94,6 +94,13 @@ class TimestepPreparationStage(PipelineStage):
         timesteps = batch.timesteps
         sigmas = batch.sigmas
         n_tokens = batch.n_tokens
+        force_dynamic_shifting = getattr(fastvideo_args.pipeline_config,
+                                         "force_dynamic_shifting", None)
+        if force_dynamic_shifting is not None and hasattr(
+                scheduler, "config") and hasattr(scheduler.config,
+                                                 "use_dynamic_shifting"):
+            scheduler.config.use_dynamic_shifting = bool(
+                force_dynamic_shifting)
 
         # Prepare extra kwargs for set_timesteps
         extra_set_timesteps_kwargs = {}
