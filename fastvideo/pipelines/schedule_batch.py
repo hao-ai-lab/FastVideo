@@ -26,7 +26,7 @@ from fastvideo.configs.sample.teacache import (
 )
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
-from sglang.multimodal_gen.runtime.utils.perf_logger import RequestTimings
+from fastvideo.perf_logger import RequestTimings
 from fastvideo.utils import align_to
 
 logger = init_logger(__name__)
@@ -271,13 +271,13 @@ class Req:
         if self.is_warmup:
             self.set_as_warmup()
 
-    def adjust_size(self, server_args: ServerArgs):
+    def adjust_size(self, server_args: FastVideoArgs):
         pass
 
     def __str__(self):
         return pprint.pformat(asdict(self), indent=2, width=120)
 
-    def log(self, server_args: ServerArgs):
+    def log(self, server_args: FastVideoArgs):
         if self.is_warmup:
             return
         # TODO: in some cases (e.g., TI2I), height and weight might be undecided at this moment

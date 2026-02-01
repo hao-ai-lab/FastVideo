@@ -38,6 +38,9 @@ if TYPE_CHECKING:
     FASTVIDEO_TORCH_PROFILE_REGIONS: str = ""
     FASTVIDEO_SERVER_DEV_MODE: bool = False
     FASTVIDEO_STAGE_LOGGING: bool = False
+    FASTVIDEO_PERF_LOG_DIR: str | None = None
+    FASTVIDEO_DIFFUSION_STAGE_LOGGING: bool = False
+    FASTVIDEO_DIFFUSION_SYNC_STAGE_PROFILING: bool = False
     FASTVIDEO_HOST_IP: str = ""
     FASTVIDEO_LOOPBACK_IP: str = ""
 
@@ -275,6 +278,19 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # taken for each stage
     "FASTVIDEO_STAGE_LOGGING":
     lambda: bool(int(os.getenv("FASTVIDEO_STAGE_LOGGING", "0"))),
+
+    # Directory for diffusion performance logs
+    "FASTVIDEO_PERF_LOG_DIR":
+    lambda: os.getenv("FASTVIDEO_PERF_LOG_DIR"),
+
+    # Enable diffusion stage logging (perf_logger)
+    "FASTVIDEO_DIFFUSION_STAGE_LOGGING":
+    lambda: bool(int(os.getenv("FASTVIDEO_DIFFUSION_STAGE_LOGGING", "0"))),
+
+    # Sync CUDA before/after stage profiling for more accurate timings
+    "FASTVIDEO_DIFFUSION_SYNC_STAGE_PROFILING":
+    lambda: bool(
+        int(os.getenv("FASTVIDEO_DIFFUSION_SYNC_STAGE_PROFILING", "0"))),
 }
 
 # end-env-vars-definition
