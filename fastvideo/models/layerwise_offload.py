@@ -222,3 +222,67 @@ class LayerwiseOffloadManager:
                 target = self._get_target(name)
                 self._record_meta(name, target)
                 target.data = self._make_placeholder(name)
+
+class OffloadableDiTMixin:
+    """
+    A mixin that registers forward hooks for a DiT to enable layerwise offload
+    """
+
+    # the list of names of a DiT's layers/blocks
+    layer_names: List[str]
+    layerwise_offload_managers: list[LayerwiseOffloadManager] = []
+
+    def configure_layerwise_offload(self, server_args: ServerArgs):
+        self.layerwise_offload_managers = []
+        for layer_name in self.layer_names:
+            # a manager per layer-list
+            module_list = getattr(self, layer_name, None)
+            if module_list is None or not isinstance(module_list, torch.nn.ModuleList):
+                continue
+
+            num_layers = len(module_list)
+            if server_args.dit_offload_prefetch_size < 1.0:
+                prefetch_size = 1 + int(
+                    round(server_args.dit_offload_prefetch_size * (num_layers - 1))
+                )
+            else:
+                prefetch_size = int(server_args.dit_offload_prefetch_size)
+
+            manager = LayerwiseOffloadManager(
+                model=self,
+                layers_attr_str=layer_name,
+                num_layers=num_layers,
+                enabled=True,
+                pin_cpu_memory=server_args.pin_cpu_memory,
+                prefetch_size=prefetch_size,
+            )
+            self.layerwise_offload_managers.append(manager)
+
+        logger.info(
+            f"Enabled layerwise offload for {self.__class__.__name__} on modules: {self.layer_names}"
+        )
+
+    def prepare_for_next_req(self):
+        if self.layerwise_offload_managers is None:
+            return
+        for manager in self.layerwise_offload_managers:
+            manager.prepare_for_next_req(non_blocking=True)
+
+    def disable_offload(self) -> None:
+        """Disable layerwise offload: load all layers to GPU and remove hooks."""
+        if self.layerwise_offload_managers is None:
+            return
+        for manager in self.layerwise_offload_managers:
+            if manager.enabled:
+                manager.remove_forward_hooks()
+                manager.load_all_layers()
+
+    def enable_offload(self) -> None:
+        """Re-enable layerwise offload: sync weights to CPU, release layers, and restore hooks."""
+        if self.layerwise_offload_managers is None:
+            return
+        for manager in self.layerwise_offload_managers:
+            if manager.enabled:
+                manager.sync_all_layers_to_cpu()
+                manager.release_all()
+                manager.register_forward_hooks()

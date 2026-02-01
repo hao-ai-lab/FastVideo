@@ -527,6 +527,7 @@ from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import get_1d_rotary_pos_embed, _apply_rotary_emb
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import CachableDiT
+from fastvideo.hooks.layerwise_offload import OffloadableDiTMixin
 
 logger = init_logger(__name__)  # pylint: disable=invalid-name
 
