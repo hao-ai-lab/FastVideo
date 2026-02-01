@@ -4,6 +4,7 @@ Decoding stage for diffusion pipelines.
 """
 
 import inspect
+import os
 import weakref
 
 import torch
@@ -300,6 +301,25 @@ class DecodingStage(PipelineStage):
 
         # Convert to CPU float32 for compatibility
         frames = frames.cpu().float()
+
+        # Debug: optionally dump the first frame as a PNG for quick inspection
+        if fastvideo_args.output_type != "latent":
+            debug_png = os.environ.get("FASTVIDEO_DEBUG_SAVE_FIRST_FRAME")
+            if debug_png:
+                try:
+                    from PIL import Image
+                    import numpy as np
+                    first = frames[0]
+                    if first.ndim == 4:
+                        first = first[:, 0, :, :]
+                    if first.shape[0] == 1:
+                        first = first.repeat(3, 1, 1)
+                    img = (first.clamp(0, 1).permute(1, 2, 0).numpy() * 255.0)
+                    img = img.astype(np.uint8)
+                    Image.fromarray(img).save(debug_png)
+                    logger.info("Saved debug frame to %s", debug_png)
+                except Exception as exc:
+                    logger.warning("Failed to save debug frame: %s", exc)
 
         # Crop padding if this is a LongCat refinement
         if hasattr(batch, 'num_cond_frames_added') and hasattr(
