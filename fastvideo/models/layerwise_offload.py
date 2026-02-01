@@ -5,11 +5,18 @@
 # This implementation provides a lightweight layerwise CPU offload manager
 # with async H2D prefetch using a dedicated CUDA stream, following SGLang's design.
 
+from __future__ import annotations
+
 import re
 from contextlib import contextmanager
-from typing import Dict, Set, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import torch
+
+from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.logger import init_logger
+
+logger = init_logger(__name__)
 
 
 class LayerwiseOffloadManager:
@@ -223,6 +230,81 @@ class LayerwiseOffloadManager:
                 self._record_meta(name, target)
                 target.data = self._make_placeholder(name)
 
+    @torch.compiler.disable
+    def prepare_for_next_req(self, non_blocking: bool = True) -> None:
+        """Prepare offload state for the next request."""
+        if not self.enabled:
+            return
+        self.release_all()
+        self.prefetch_layer(0, non_blocking=non_blocking)
+
+    @torch.compiler.disable
+    def load_all_layers(self) -> None:
+        """Load all layers to GPU and keep them resident."""
+        if not self.enabled or self.device is None:
+            return
+        for layer_idx in range(self.num_layers):
+            self.prefetch_layer(layer_idx, non_blocking=False)
+        if self.copy_stream is not None:
+            torch.cuda.current_stream().wait_stream(self.copy_stream)
+
+    def sync_all_layers_to_cpu(self) -> None:
+        """Sync layers back to CPU (inference-only no-op beyond release)."""
+        if not self.enabled:
+            return
+        self.release_all()
+
+    def register_forward_hooks(self) -> None:
+        """Hook-based offload is not used in this manager."""
+        return None
+
+    def remove_forward_hooks(self) -> None:
+        """Hook-based offload is not used in this manager."""
+        return None
+
+    def enable(self) -> None:
+        """Enable offload after it was disabled."""
+        if self.enabled:
+            return
+        if not torch.cuda.is_available():
+            return
+        self.enabled = True
+        self.device = torch.device("cuda", torch.cuda.current_device())
+        self.copy_stream = torch.cuda.Stream()
+        self.initialize()
+
+    def disable(self) -> None:
+        """Disable offload and keep all layers on GPU."""
+        if not self.enabled:
+            return
+        self.load_all_layers()
+        self.enabled = False
+
+
+class _MultiLayerwiseOffloadManager:
+    """Thin wrapper to unify multiple LayerwiseOffloadManagers."""
+
+    def __init__(self, managers: list[LayerwiseOffloadManager]):
+        self.managers = managers
+        self.enabled = any(m.enabled for m in managers)
+
+    def release_all(self) -> None:
+        for manager in self.managers:
+            manager.release_all()
+
+    def prepare_for_next_req(self, non_blocking: bool = True) -> None:
+        for manager in self.managers:
+            manager.prepare_for_next_req(non_blocking=non_blocking)
+
+    def load_all_layers(self) -> None:
+        for manager in self.managers:
+            manager.load_all_layers()
+
+    def sync_all_layers_to_cpu(self) -> None:
+        for manager in self.managers:
+            manager.sync_all_layers_to_cpu()
+
+
 class OffloadableDiTMixin:
     """
     A mixin that registers forward hooks for a DiT to enable layerwise offload
@@ -232,7 +314,7 @@ class OffloadableDiTMixin:
     layer_names: List[str]
     layerwise_offload_managers: list[LayerwiseOffloadManager] = []
 
-    def configure_layerwise_offload(self, server_args: ServerArgs):
+    def configure_layerwise_offload(self, fastvideo_args: FastVideoArgs):
         self.layerwise_offload_managers = []
         for layer_name in self.layer_names:
             # a manager per layer-list
@@ -240,26 +322,30 @@ class OffloadableDiTMixin:
             if module_list is None or not isinstance(module_list, torch.nn.ModuleList):
                 continue
 
-            num_layers = len(module_list)
-            if server_args.dit_offload_prefetch_size < 1.0:
-                prefetch_size = 1 + int(
-                    round(server_args.dit_offload_prefetch_size * (num_layers - 1))
-                )
-            else:
-                prefetch_size = int(server_args.dit_offload_prefetch_size)
-
             manager = LayerwiseOffloadManager(
                 model=self,
-                layers_attr_str=layer_name,
-                num_layers=num_layers,
-                enabled=True,
-                pin_cpu_memory=server_args.pin_cpu_memory,
-                prefetch_size=prefetch_size,
+                module_list_attr=layer_name,
+                num_layers=len(module_list),
+                enabled=fastvideo_args.dit_layerwise_offload,
+                pin_cpu_memory=fastvideo_args.pin_cpu_memory,
+                auto_initialize=True,
             )
             self.layerwise_offload_managers.append(manager)
 
+        if not self.layerwise_offload_managers:
+            return
+
+        if len(self.layerwise_offload_managers) == 1:
+            self._layerwise_offload_manager = self.layerwise_offload_managers[0]
+        else:
+            self._layerwise_offload_manager = _MultiLayerwiseOffloadManager(
+                self.layerwise_offload_managers
+            )
+
         logger.info(
-            f"Enabled layerwise offload for {self.__class__.__name__} on modules: {self.layer_names}"
+            "Enabled layerwise offload for %s on modules: %s",
+            self.__class__.__name__,
+            self.layer_names,
         )
 
     def prepare_for_next_req(self):
@@ -274,15 +360,12 @@ class OffloadableDiTMixin:
             return
         for manager in self.layerwise_offload_managers:
             if manager.enabled:
-                manager.remove_forward_hooks()
-                manager.load_all_layers()
+                manager.disable()
 
     def enable_offload(self) -> None:
         """Re-enable layerwise offload: sync weights to CPU, release layers, and restore hooks."""
         if self.layerwise_offload_managers is None:
             return
         for manager in self.layerwise_offload_managers:
-            if manager.enabled:
-                manager.sync_all_layers_to_cpu()
-                manager.release_all()
-                manager.register_forward_hooks()
+            if not manager.enabled:
+                manager.enable()

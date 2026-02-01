@@ -524,10 +524,10 @@ from fastvideo.configs.models.dits.flux import FluxConfig
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ColumnParallelLinear
 from fastvideo.layers.mlp import MLP
-from fastvideo.layers.rotary_embedding import get_1d_rotary_pos_embed, _apply_rotary_emb
+from fastvideo.layers.rotary_embedding import get_1d_rotary_pos_embed
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import CachableDiT
-from fastvideo.hooks.layerwise_offload import OffloadableDiTMixin
+from fastvideo.models.layerwise_offload import OffloadableDiTMixin
 
 logger = init_logger(__name__)  # pylint: disable=invalid-name
 
@@ -627,10 +627,9 @@ class FluxAttention(torch.nn.Module, AttentionModuleMixin):
                 self.inner_dim, query_dim, bias=out_bias, gather_output=True
             )
 
-        self.attn = USPAttention(
+        self.attn = LocalAttention(
             num_heads=num_heads,
             head_size=self.head_dim,
-            dropout_rate=0,
             softmax_scale=None,
             causal=False,
         )
@@ -648,48 +647,23 @@ class FluxAttention(torch.nn.Module, AttentionModuleMixin):
         query = query.unflatten(-1, (self.heads, -1))
         key = key.unflatten(-1, (self.heads, -1))
         value = value.unflatten(-1, (self.heads, -1))
-        query, key = apply_qk_norm(
-            q=query,
-            k=key,
-            q_norm=self.norm_q,
-            k_norm=self.norm_k,
-            head_dim=self.head_dim,
-            allow_inplace=True,
-        )
+        query = self.norm_q(query)
+        key = self.norm_k(key)
 
         if self.added_kv_proj_dim is not None:
             encoder_query = encoder_query.unflatten(-1, (self.heads, -1))
             encoder_key = encoder_key.unflatten(-1, (self.heads, -1))
             encoder_value = encoder_value.unflatten(-1, (self.heads, -1))
 
-            encoder_query, encoder_key = apply_qk_norm(
-                q=encoder_query,
-                k=encoder_key,
-                q_norm=self.norm_added_q,
-                k_norm=self.norm_added_k,
-                head_dim=self.head_dim,
-                allow_inplace=True,
-            )
+            encoder_query = self.norm_added_q(encoder_query)
+            encoder_key = self.norm_added_k(encoder_key)
 
             bsz, seq_len, _, _ = query.shape
             query = torch.cat([encoder_query, query], dim=1)
             key = torch.cat([encoder_key, key], dim=1)
             value = torch.cat([encoder_value, value], dim=1)
 
-        if freqs_cis is not None:
-            cos, sin = freqs_cis
-            cos_sin_cache = torch.cat(
-                [
-                    cos.to(dtype=torch.float32).contiguous(),
-                    sin.to(dtype=torch.float32).contiguous(),
-                ],
-                dim=-1,
-            )
-            query, key = apply_flashinfer_rope_qk_inplace(
-                query, key, cos_sin_cache, is_neox=False
-            )
-
-        x = self.attn(query, key, value)
+        x = self.attn(query, key, value, freqs_cis=freqs_cis)
         x = x.flatten(2, 3)
         x = x.to(query.dtype)
 
