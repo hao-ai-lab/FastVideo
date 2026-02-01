@@ -83,7 +83,8 @@ class HYWorldDenoisingStage(DenoisingStage):
         action = getattr(batch, "action", None) or batch.extra.get(
             "action", None)
         chunk_latent_frames = (getattr(batch, "chunk_latent_frames", None)
-                               or batch.extra.get("chunk_latent_frames", 16))  # 16 for bidirectional model
+                               or batch.extra.get("chunk_latent_frames", 16)
+                               )  # 16 for bidirectional model
         stabilization_level = 15
         points_local = (getattr(batch, "points_local", None)
                         or batch.extra.get("points_local", None))
@@ -111,8 +112,9 @@ class HYWorldDenoisingStage(DenoisingStage):
             Ks = Ks.unsqueeze(0)  # (1, T, 3, 3)
             action = action.unsqueeze(0)  # (1, T)
 
-            logger.info("Converted pose '%s' to viewmats, Ks, and action for %d latent frames",
-                       pose, latent_num)
+            logger.info(
+                "Converted pose '%s' to viewmats, Ks, and action for %d latent frames",
+                pose, latent_num)
 
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
@@ -414,14 +416,25 @@ class HYWorldDenoisingStage(DenoisingStage):
                          [V.is_tensor, V.with_dims(5)])
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
 
-        # Check for HYWorld-specific inputs - pose string is required
-        # (will be converted to viewmats/Ks/action in forward())
+        # Check for HYWorld-specific inputs - either pose string OR
+        # (viewmats, Ks, action) must be provided
         pose = getattr(batch, "pose", None) or batch.extra.get("pose", None)
-        if pose is None:
+        viewmats = getattr(batch, "viewmats", None) or batch.extra.get(
+            "viewmats", None)
+        Ks = getattr(batch, "Ks", None) or batch.extra.get("Ks", None)
+        action = getattr(batch, "action", None) or batch.extra.get(
+            "action", None)
+
+        has_pose = pose is not None
+        has_direct_inputs = (viewmats is not None and Ks is not None
+                             and action is not None)
+
+        if not has_pose and not has_direct_inputs:
             result.add_failure(
-                "pose",
-                "pose string must be provided (e.g., 'w-31', 'a-15'). "
-                "Provide pose in batch.pose or batch.extra['pose'].",
+                "pose_or_camera_inputs",
+                "Either pose string OR (viewmats, Ks, action) must be provided. "
+                "Provide pose in batch.pose or batch.extra['pose'], or "
+                "viewmats/Ks/action in batch.extra.",
             )
 
         result.add_check("num_inference_steps", batch.num_inference_steps,
