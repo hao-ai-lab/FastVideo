@@ -33,7 +33,8 @@ from fastvideo.pipelines.stages.stepvideo_encoding import (
 from fastvideo.pipelines.stages.text_encoding import (Cosmos25TextEncodingStage,
                                                       TextEncodingStage)
 from fastvideo.pipelines.stages.timestep_preparation import (
-    Cosmos25TimestepPreparationStage, TimestepPreparationStage)
+    Cosmos25TimestepPreparationStage, FluxTimestepPreparationStage,
+    TimestepPreparationStage)
 
 # LongCat stages
 from fastvideo.pipelines.stages.longcat_video_vae_encoding import LongCatVideoVAEEncodingStage
@@ -45,6 +46,7 @@ __all__ = [
     "InputValidationStage",
     "TimestepPreparationStage",
     "Cosmos25TimestepPreparationStage",
+    "FluxTimestepPreparationStage",
     "LatentPreparationStage",
     "CosmosLatentPreparationStage",
     "Cosmos25LatentPreparationStage",

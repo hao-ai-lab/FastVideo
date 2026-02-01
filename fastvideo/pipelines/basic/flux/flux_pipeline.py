@@ -10,7 +10,7 @@ from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
                                         DenoisingStage, InputValidationStage,
                                         LatentPreparationStage,
                                         TextEncodingStage,
-                                        TimestepPreparationStage)
+                                        FluxTimestepPreparationStage)
 
 logger = init_logger(__name__)
 
@@ -52,7 +52,7 @@ class FluxPipeline(ComposedPipelineBase):
                        stage=ConditioningStage())
 
         self.add_stage(stage_name="timestep_preparation_stage",
-                       stage=TimestepPreparationStage(
+                       stage=FluxTimestepPreparationStage(
                            scheduler=self.get_module("scheduler")))
 
         self.add_stage(stage_name="latent_preparation_stage",

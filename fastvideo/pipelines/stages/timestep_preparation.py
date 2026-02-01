@@ -224,3 +224,23 @@ class Cosmos25TimestepPreparationStage(TimestepPreparationStage):
                                 **extra_kwargs)
         batch.timesteps = scheduler.timesteps
         return batch
+
+
+class FluxTimestepPreparationStage(TimestepPreparationStage):
+    """Flux-specific timestep preparation (scales timesteps for Flux embedding)."""
+
+    def forward(
+        self,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> ForwardBatch:
+        batch = super().forward(batch, fastvideo_args)
+
+        timestep_input_scale = getattr(fastvideo_args.pipeline_config,
+                                       "timestep_input_scale", None)
+        if timestep_input_scale is not None and batch.timesteps is not None:
+            scaled = batch.timesteps * float(timestep_input_scale)
+            batch.timesteps = scaled
+            self.scheduler.timesteps = scaled
+
+        return batch
