@@ -47,6 +47,10 @@ class FluxPipelineConfig(ImagePipelineConfig):
     timestep_input_scale: float | None = 1.0 / 1000.0
     embedded_cfg_scale_multiplier: float = 1.0
     force_dynamic_shifting: bool = True
+    use_flux_ode_schedule: bool = True
+    flux_base_shift: float = 0.5
+    flux_max_shift: float = 1.15
+    flux_shift: bool = True
 
     task_type: ModelTaskType = ModelTaskType.T2I
 
@@ -92,6 +96,35 @@ class FluxPipelineConfig(ImagePipelineConfig):
 
     def prepare_sigmas(self, sigmas, num_inference_steps):
         return self._prepare_sigmas(sigmas, num_inference_steps)
+
+    def _flux_time_shift(self, mu: float, sigma: float,
+                         t: torch.Tensor) -> torch.Tensor:
+        return torch.exp(torch.tensor(mu, device=t.device, dtype=t.dtype)) / (
+            torch.exp(torch.tensor(mu, device=t.device, dtype=t.dtype)) +
+            (1 / t - 1)**sigma)
+
+    def _flux_get_lin_fn(self, x1: float = 256, y1: float = 0.5,
+                         x2: float = 4096,
+                         y2: float = 1.15) -> Callable[[float], float]:
+        m = (y2 - y1) / (x2 - x1)
+        b = y1 - m * x1
+        return lambda x: m * x + b
+
+    def get_flux_timesteps(self,
+                           num_steps: int,
+                           image_seq_len: int,
+                           device: torch.device,
+                           dtype: torch.dtype) -> torch.Tensor:
+        timesteps = torch.linspace(1,
+                                   0,
+                                   num_steps + 1,
+                                   device=device,
+                                   dtype=dtype)
+        if self.flux_shift:
+            mu = self._flux_get_lin_fn(y1=self.flux_base_shift,
+                                       y2=self.flux_max_shift)(image_seq_len)
+            timesteps = self._flux_time_shift(mu, 1.0, timesteps)
+        return timesteps
 
     def prepare_latent_shape(self, batch, batch_size, num_frames):
         height = 2 * (

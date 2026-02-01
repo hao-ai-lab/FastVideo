@@ -152,6 +152,22 @@ class DenoisingStage(PipelineStage):
             },
         )
 
+        pos_cond_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "encoder_hidden_states_2": batch.clip_embedding_pos,
+                "encoder_attention_mask": batch.prompt_attention_mask,
+            },
+        )
+
+        neg_cond_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "encoder_hidden_states_2": batch.clip_embedding_neg,
+                "encoder_attention_mask": batch.negative_attention_mask,
+            },
+        )
+
         action_kwargs = self.prepare_extra_func_kwargs(
             self.transformer.forward,
             {
@@ -167,53 +183,13 @@ class DenoisingStage(PipelineStage):
         # Get latents and embeddings
         latents = batch.latents
         prompt_embeds = batch.prompt_embeds
-        if hasattr(fastvideo_args.pipeline_config, "get_pos_prompt_embeds"):
-            prompt_embeds = fastvideo_args.pipeline_config.get_pos_prompt_embeds(
-                batch)
-        if isinstance(prompt_embeds, list):
-            assert not torch.isnan(
-                prompt_embeds[0]).any(), "prompt_embeds contains nan"
-        else:
-            assert not torch.isnan(prompt_embeds).any(
-            ), "prompt_embeds contains nan"
+        assert not torch.isnan(
+            prompt_embeds[0]).any(), "prompt_embeds contains nan"
         if batch.do_classifier_free_guidance:
             neg_prompt_embeds = batch.negative_prompt_embeds
             assert neg_prompt_embeds is not None
-            if hasattr(fastvideo_args.pipeline_config, "get_neg_prompt_embeds"):
-                neg_prompt_embeds = fastvideo_args.pipeline_config.get_neg_prompt_embeds(
-                    batch)
-            if isinstance(neg_prompt_embeds, list):
-                assert not torch.isnan(
-                    neg_prompt_embeds[0]
-                ).any(), "neg_prompt_embeds contains nan"
-            else:
-                assert not torch.isnan(neg_prompt_embeds).any(
-                ), "neg_prompt_embeds contains nan"
-
-        pooled_pos = batch.clip_embedding_pos
-        pooled_neg = batch.clip_embedding_neg
-        if hasattr(fastvideo_args.pipeline_config, "get_pos_prompt_embeds"):
-            if isinstance(batch.prompt_embeds, list) and batch.prompt_embeds:
-                pooled_pos = batch.prompt_embeds[0]
-            if isinstance(batch.negative_prompt_embeds, list
-                          ) and batch.negative_prompt_embeds:
-                pooled_neg = batch.negative_prompt_embeds[0]
-
-        pos_cond_kwargs = self.prepare_extra_func_kwargs(
-            self.transformer.forward,
-            {
-                "encoder_hidden_states_2": pooled_pos,
-                "encoder_attention_mask": batch.prompt_attention_mask,
-            },
-        )
-
-        neg_cond_kwargs = self.prepare_extra_func_kwargs(
-            self.transformer.forward,
-            {
-                "encoder_hidden_states_2": pooled_neg,
-                "encoder_attention_mask": batch.negative_attention_mask,
-            },
-        )
+            assert not torch.isnan(
+                neg_prompt_embeds[0]).any(), "neg_prompt_embeds contains nan"
 
         # (Wan2.2) Calculate timestep to switch from high noise expert to low noise expert
         boundary_ratio = fastvideo_args.pipeline_config.dit_config.boundary_ratio
@@ -338,11 +314,6 @@ class DenoisingStage(PipelineStage):
                     t_expand = timestep.repeat(latent_model_input.shape[0], 1)
                 else:
                     t_expand = t.repeat(latent_model_input.shape[0])
-                timestep_input_scale = getattr(
-                    fastvideo_args.pipeline_config, "timestep_input_scale",
-                    None)
-                if timestep_input_scale is not None:
-                    t_expand = t_expand * timestep_input_scale
 
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)
@@ -354,11 +325,8 @@ class DenoisingStage(PipelineStage):
                         latent_model_input.shape[0],
                         dtype=torch.float32,
                         device=get_local_torch_device(),
-                    ).to(target_dtype) * getattr(
-                        fastvideo_args.pipeline_config,
-                        "embedded_cfg_scale_multiplier",
-                        1000.0,
-                    ) if fastvideo_args.pipeline_config.embedded_cfg_scale
+                    ).to(target_dtype) *
+                    1000.0 if fastvideo_args.pipeline_config.embedded_cfg_scale
                     is not None else None)
 
                 # Predict noise residual
@@ -1299,11 +1267,8 @@ class DmdDenoisingStage(DenoisingStage):
                         latent_model_input.shape[0],
                         dtype=torch.float32,
                         device=get_local_torch_device(),
-                    ).to(target_dtype) * getattr(
-                        fastvideo_args.pipeline_config,
-                        "embedded_cfg_scale_multiplier",
-                        1000.0,
-                    ) if fastvideo_args.pipeline_config.embedded_cfg_scale
+                    ).to(target_dtype) *
+                    1000.0 if fastvideo_args.pipeline_config.embedded_cfg_scale
                     is not None else None)
 
                 # Predict noise residual
