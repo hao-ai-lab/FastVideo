@@ -30,7 +30,9 @@ from fastvideo.distributed import (
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.pipelines import TrainingBatch
+from fastvideo.pipelines import ForwardBatch, TrainingBatch
+from fastvideo.configs.sample import SamplingParam
+from fastvideo.utils import shallow_asdict
 from fastvideo.platforms import current_platform
 from fastvideo.training.activation_checkpoint import apply_activation_checkpointing
 from fastvideo.training.training_pipeline import TrainingPipeline
@@ -311,20 +313,281 @@ class HYWorldTrainingPipeline(TrainingPipeline):
         )
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
-        """Initialize the validation pipeline for HYWorld.
-        
-        NOTE: Following the original HY-WorldPlay approach, we don't load the full
-        validation pipeline (VAE, text encoders, image encoder) during training init.
-        This saves ~10-15GB of GPU memory. Instead, we use lazy VAE loading for
-        train-time video visualization when needed.
-        """
-        logger.info(
-            "Skipping full validation pipeline init to save GPU memory...")
-        logger.info(
-            "Use _get_train_vis_vae() for lazy VAE loading if video logging is needed."
+        """Initialize the validation pipeline for HYWorld."""
+        logger.info("Initializing HYWorld validation pipeline...")
+        from fastvideo.pipelines.basic.hyworld.hyworld_pipeline import HYWorldPipeline
+
+        args_copy = deepcopy(training_args)
+        args_copy.inference_mode = True
+        args_copy.dit_cpu_offload = True
+
+        self.validation_pipeline = HYWorldPipeline.from_pretrained(
+            training_args.model_path,
+            args=None,
+            inference_mode=True,
+            loaded_modules={
+                "transformer": self.get_module("transformer"),
+            },
+            tp_size=training_args.tp_size,
+            sp_size=training_args.sp_size,
+            num_gpus=training_args.num_gpus,
+            dit_cpu_offload=True,
         )
-        self.validation_pipeline = None
         self._train_vis_vae = None
+
+    def _log_validation(self, transformer, training_args: TrainingArgs,
+                        global_step: int) -> None:
+        """Generate validation videos. Uses training data if no validation_dataset_file is set."""
+        training_args.inference_mode = True
+        training_args.dit_cpu_offload = True
+        if not training_args.log_validation:
+            return
+        if self.validation_pipeline is None:
+            logger.warning("Validation pipeline is not initialized, skipping validation")
+            return
+
+        logger.info("Starting validation at step %s", global_step)
+
+        # Create sampling parameters
+        sampling_param = SamplingParam.from_pretrained(training_args.model_path)
+
+        # Use training dataloader if no validation_dataset_file is set
+        if not training_args.validation_dataset_file:
+            logger.info("No validation_dataset_file set, using training dataloader for validation")
+            validation_dataloader = [next(iter(self.train_dataloader))]
+        else:
+            from fastvideo.training.training_pipeline import ValidationDataset
+            from torch.utils.data import DataLoader
+            validation_dataset = ValidationDataset(training_args.validation_dataset_file)
+            validation_dataloader = DataLoader(validation_dataset, batch_size=None, num_workers=0)
+
+        self.transformer.eval()
+
+        validation_steps = training_args.validation_sampling_steps.split(",")
+        validation_steps = [int(step) for step in validation_steps]
+        validation_steps = [step for step in validation_steps if step > 0]
+
+        world_group = get_world_group()
+        num_sp_groups = world_group.world_size // self.sp_group.world_size
+
+        for num_inference_steps in validation_steps:
+            logger.info("rank: %s: num_inference_steps: %s",
+                        self.global_rank, num_inference_steps)
+            step_videos: list[np.ndarray] = []
+            step_captions: list[str] = []
+
+            for validation_batch in validation_dataloader:
+                batch = self._prepare_validation_batch(
+                    sampling_param, training_args, validation_batch, num_inference_steps)
+
+                logger.info("rank: %s: batch.prompt: %s", self.global_rank, batch.prompt)
+                step_captions.append(batch.prompt or "")
+
+
+                output_batch = self.validation_pipeline.forward(batch, training_args)
+                samples = output_batch.output
+
+                if self.rank_in_sp_group != 0:
+                    continue
+
+                # Process outputs
+                import torchvision
+                video = rearrange(samples, "b c t h w -> t b c h w")
+                frames = []
+                for x in video:
+                    x = torchvision.utils.make_grid(x, nrow=6)
+                    x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+                    frames.append((x * 255).numpy().astype(np.uint8))
+                step_videos.append(frames)
+
+            # Only sp_group leaders need to send results to global rank 0
+            if self.rank_in_sp_group == 0:
+                if self.global_rank == 0:
+                    all_videos = step_videos
+                    all_captions = step_captions
+
+                    # Receive from other sp_group leaders
+                    for sp_group_idx in range(1, num_sp_groups):
+                        src_rank = sp_group_idx * self.sp_world_size
+                        recv_videos = world_group.recv_object(src=src_rank)
+                        recv_captions = world_group.recv_object(src=src_rank)
+                        all_videos.extend(recv_videos)
+                        all_captions.extend(recv_captions)
+
+                    # Save and log videos
+                    vis_dir = os.path.join(training_args.output_dir, "validation_videos")
+                    os.makedirs(vis_dir, exist_ok=True)
+
+                    for i, (video, caption) in enumerate(zip(all_videos, all_captions)):
+                        filename = os.path.join(
+                            vis_dir,
+                            f"validation_step_{global_step}_infer_{num_inference_steps}_video_{i}.mp4")
+                        imageio.mimsave(filename, video, fps=sampling_param.fps)
+
+                        self.tracker.log(
+                            {f"validation_video_{num_inference_steps}steps": wandb.Video(filename, caption=caption)},
+                            step=global_step,
+                        )
+                else:
+                    # Other sp_group leaders send their results to global rank 0
+                    world_group.send_object(step_videos, dst=0)
+                    world_group.send_object(step_captions, dst=0)
+
+        self.transformer.train()
+
+    def _prepare_validation_batch(self, sampling_param: SamplingParam,
+                                  training_args: TrainingArgs,
+                                  validation_batch: dict,
+                                  num_inference_steps: int) -> ForwardBatch:
+        """Prepare a ForwardBatch for validation with HYWorld-specific inputs."""
+        # Helper to get first element if value is a list/tuple
+        def _get_first(val):
+            if isinstance(val, (list, tuple)) and len(val) > 0:
+                return val[0]
+            return val
+
+        # Get prompt from validation batch
+        prompt = _get_first(validation_batch.get('prompt', ''))
+
+        sampling_param.prompt = prompt
+        sampling_param.height = training_args.num_height
+        sampling_param.width = training_args.num_width
+        # Note: HYWorld training data doesn't have image_path, it has image_cond (VAE latent)
+        # Don't set image_path for HYWorld - we'll use image_cond directly
+        sampling_param.image_path = None
+        sampling_param.num_inference_steps = num_inference_steps
+        sampling_param.data_type = "video"
+        assert self.seed is not None
+        sampling_param.seed = self.seed
+
+        # Calculate latent sizes
+        temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        num_frames = (training_args.num_latent_t - 1) * temporal_compression_factor + 1
+        sampling_param.num_frames = num_frames
+
+        latents_size = [
+            (sampling_param.num_frames - 1) // 4 + 1,
+            sampling_param.height // 8,
+            sampling_param.width // 8
+        ]
+        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
+
+        batch = ForwardBatch(
+            **shallow_asdict(sampling_param),
+            latents=None,
+            generator=torch.Generator(device="cpu").manual_seed(self.seed),
+            n_tokens=n_tokens,
+            eta=0.0,
+            VSA_sparsity=training_args.VSA_sparsity,
+        )
+
+        # Add HYWorld-specific inputs from validation batch (take first sample if batched)
+        # Note: denoising stage expects 'viewmats', 'Ks', 'action' (not w2c/intrinsic)
+        # Use float32 for camera matrices since they may be converted to numpy for frame selection
+        if 'w2c' in validation_batch:
+            w2c = validation_batch['w2c']
+            if w2c.dim() > 3:  # Batched: [B, T, 4, 4] -> [T, 4, 4]
+                w2c = w2c[0]
+            if w2c.dim() == 3:  # Add batch dim: [T, 4, 4] -> [1, T, 4, 4]
+                w2c = w2c.unsqueeze(0)
+            batch.viewmats = w2c.to(get_local_torch_device(), dtype=torch.float32)
+        if 'intrinsic' in validation_batch:
+            intrinsic = validation_batch['intrinsic']
+            if intrinsic.dim() > 3:  # Batched
+                intrinsic = intrinsic[0]
+            if intrinsic.dim() == 3:  # Add batch dim
+                intrinsic = intrinsic.unsqueeze(0)
+            batch.Ks = intrinsic.to(get_local_torch_device(), dtype=torch.float32)
+        if 'action' in validation_batch:
+            action = validation_batch['action']
+            if action.dim() > 1:  # Batched
+                action = action[0]
+            if action.dim() == 1:  # Add batch dim
+                action = action.unsqueeze(0)
+            batch.action = action.to(get_local_torch_device(), dtype=torch.float32)
+
+        # HYWorld: use pre-computed embeddings from training data
+        # Pass these directly so encoding stages use them instead of encoding from scratch
+        
+        # image_cond → image_latent (VAE-encoded first frame, used by denoising stage)
+        # Note: image_cond from training data has shape [B, C, 1, H, W] (single frame)
+        # We need to expand it to match the full temporal dimension like training does
+        if 'image_cond' in validation_batch and validation_batch['image_cond'] is not None:
+            image_cond = validation_batch['image_cond']
+            if image_cond.dim() > 4:  # Batched: [B, C, T, H, W] -> [C, T, H, W]
+                image_cond = image_cond[0]
+            # Ensure batch dimension
+            if image_cond.dim() == 4:
+                image_cond = image_cond.unsqueeze(0)
+            
+            # Expand temporal dimension to match latent frames (like _prepare_cond_latents does)
+            # image_cond is [1, C, 1, H, W], expand to [1, C, T, H, W]
+            latent_temporal = training_args.num_latent_t
+            if image_cond.shape[2] == 1 and latent_temporal > 1:
+                # Repeat along temporal dimension and zero out all except first frame
+                image_cond = image_cond.repeat(1, 1, latent_temporal, 1, 1)
+                image_cond[:, :, 1:, :, :] = 0.0
+            
+            # Add mask channel (1 for first frame, 0 for rest) like HYWorldImageEncodingStage does
+            mask = torch.zeros(1, 1, latent_temporal, image_cond.shape[3], image_cond.shape[4], 
+                              device=image_cond.device, dtype=image_cond.dtype)
+            mask[:, :, 0, :, :] = 1.0
+            image_latent = torch.cat([image_cond, mask], dim=1)
+            
+            batch.image_latent = image_latent.to(get_local_torch_device(), dtype=torch.bfloat16)
+
+        # vision_states → image_embeds (CLIP/SigLIP features, used by denoising stage)
+        if 'vision_states' in validation_batch and validation_batch['vision_states'] is not None:
+            vision_states = validation_batch['vision_states']
+            if vision_states.dim() > 3:  # Batched: [B, num_tokens, dim] -> [num_tokens, dim]
+                vision_states = vision_states[0]
+            # Ensure batch dimension and wrap in list (matching HYWorldImageEncodingStage output)
+            if vision_states.dim() == 2:
+                vision_states = vision_states.unsqueeze(0)
+            batch.image_embeds = [vision_states.to(get_local_torch_device(), dtype=torch.bfloat16)]
+
+        # Pre-computed text embeddings
+        # Need shape [1, seq_len, dim] with batch dimension for pipeline
+        if 'prompt_embed' in validation_batch and validation_batch['prompt_embed'] is not None:
+            prompt_embed = validation_batch['prompt_embed']
+            if prompt_embed.dim() > 2:  # Batched: [B, seq_len, dim] -> take first sample
+                prompt_embed = prompt_embed[0:1]  # Keep batch dim: [1, seq_len, dim]
+            elif prompt_embed.dim() == 2:  # Add batch dim if missing
+                prompt_embed = prompt_embed.unsqueeze(0)
+            batch.prompt_embeds = [prompt_embed.to(get_local_torch_device(), dtype=torch.bfloat16)]
+
+        if 'byt5_text_states' in validation_batch and validation_batch['byt5_text_states'] is not None:
+            byt5_states = validation_batch['byt5_text_states']
+            if byt5_states.dim() > 2:  # Batched
+                byt5_states = byt5_states[0:1]  # Keep batch dim
+            elif byt5_states.dim() == 2:
+                byt5_states = byt5_states.unsqueeze(0)
+            # Add as second element in prompt_embeds list (HYWorld uses dual text encoders)
+            if hasattr(batch, 'prompt_embeds') and batch.prompt_embeds:
+                batch.prompt_embeds.append(byt5_states.to(get_local_torch_device(), dtype=torch.bfloat16))
+
+        # Attention masks
+        if 'prompt_mask' in validation_batch and validation_batch['prompt_mask'] is not None:
+            prompt_mask = validation_batch['prompt_mask']
+            if prompt_mask.dim() > 1:
+                prompt_mask = prompt_mask[0:1]
+            batch.prompt_attention_mask = [prompt_mask.to(get_local_torch_device(), dtype=torch.bfloat16)]
+
+        if 'byt5_text_mask' in validation_batch and validation_batch['byt5_text_mask'] is not None:
+            byt5_mask = validation_batch['byt5_text_mask']
+            if byt5_mask.dim() > 1:
+                byt5_mask = byt5_mask[0:1]
+            if hasattr(batch, 'prompt_attention_mask') and batch.prompt_attention_mask:
+                batch.prompt_attention_mask.append(byt5_mask.to(get_local_torch_device(), dtype=torch.bfloat16))
+
+        # Set default negative embeddings (zeros) for classifier-free guidance
+        if hasattr(batch, 'prompt_embeds') and batch.prompt_embeds:
+            batch.negative_prompt_embeds = [torch.zeros_like(e) for e in batch.prompt_embeds]
+            batch.negative_attention_mask = batch.prompt_attention_mask
+
+        # HYWorld AR model uses chunk_latent_frames=4
+        batch.chunk_latent_frames = 4
+        return batch
 
     def _get_train_vis_vae(self):
         """
@@ -620,35 +883,6 @@ class HYWorldTrainingPipeline(TrainingPipeline):
                 step=step,
             )
 
-    def _initialize_full_validation_pipeline(self, training_args: TrainingArgs):
-        """Initialize the full validation pipeline (loads VAE, text encoders, etc).
-        
-        WARNING: This loads ~10-15GB of additional components to GPU memory.
-        Only call this if you need full validation inference during training.
-        """
-        logger.info(
-            "Initializing full HYWorld validation pipeline (high memory usage)..."
-        )
-        from fastvideo.pipelines.basic.hyworld.hyworld_pipeline import HYWorldPipeline
-
-        args_copy = deepcopy(training_args)
-        args_copy.inference_mode = True
-
-        validation_pipeline = HYWorldPipeline.from_pretrained(
-            training_args.model_path,
-            args=args_copy,
-            inference_mode=True,
-            loaded_modules={
-                "transformer": self.get_module("transformer"),
-            },
-            tp_size=training_args.tp_size,
-            sp_size=training_args.sp_size,
-            num_gpus=training_args.num_gpus,
-            pin_cpu_memory=training_args.pin_cpu_memory,
-            dit_cpu_offload=True,
-        )
-        self.validation_pipeline = validation_pipeline
-
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         """Get the next batch from the dataloader with HYWorld-specific data."""
         batch = next(self.train_loader_iter, None)
@@ -760,6 +994,8 @@ class HYWorldTrainingPipeline(TrainingPipeline):
         indices = (
             self.noise_scheduler.config.num_train_timesteps -
             self.timestep_transform(indices, self.train_time_shift)).long()
+        # Clamp indices to valid range [0, num_train_timesteps - 1]
+        indices = indices.clamp(0, self.noise_scheduler.config.num_train_timesteps - 1)
 
         # For memory training, modify timesteps for outside window
         if hasattr(training_batch, 'select_window_out_flag'
@@ -1103,9 +1339,6 @@ class HYWorldTrainingPipeline(TrainingPipeline):
 
                 # Run full validation after checkpoint
                 if self.training_args.log_validation:
-                    if self.validation_pipeline is None:
-                        self._initialize_full_validation_pipeline(
-                            self.training_args)
                     self._log_validation(self.transformer, self.training_args,
                                          step)
 
@@ -1120,8 +1353,6 @@ class HYWorldTrainingPipeline(TrainingPipeline):
 
         # Run final validation
         if self.training_args.log_validation:
-            if self.validation_pipeline is None:
-                self._initialize_full_validation_pipeline(self.training_args)
             self._log_validation(self.transformer, self.training_args,
                                  self.training_args.max_train_steps)
 

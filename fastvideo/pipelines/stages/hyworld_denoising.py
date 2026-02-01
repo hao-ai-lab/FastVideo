@@ -76,25 +76,21 @@ class HYWorldDenoisingStage(DenoisingStage):
                 pipeline.add_module("transformer", self.transformer)
             fastvideo_args.model_loaded["transformer"] = True
 
-        # Extract HYWorld-specific parameters from batch.extra or batch attributes
-        viewmats = getattr(batch, "viewmats", None) or batch.extra.get(
-            "viewmats", None)
-        Ks = getattr(batch, "Ks", None) or batch.extra.get("Ks", None)
-        action = getattr(batch, "action", None) or batch.extra.get(
-            "action", None)
+        # Extract HYWorld-specific parameters from batch attributes
+        viewmats = getattr(batch, "viewmats", None)
+        Ks = getattr(batch, "Ks", None)
+        action = getattr(batch, "action", None)
         chunk_latent_frames = batch.chunk_latent_frames
         stabilization_level = 15
-        points_local = (getattr(batch, "points_local", None)
-                        or batch.extra.get("points_local", None))
+        points_local = getattr(batch, "points_local", None)
 
         # If viewmats/Ks/action not provided, convert from pose string
         if viewmats is None or Ks is None or action is None:
-            pose = getattr(batch, "pose", None) or batch.extra.get("pose", None)
+            pose = getattr(batch, "pose", None)
             if pose is None:
                 raise ValueError(
                     "Either pose string or (viewmats, Ks, action) must be provided. "
-                    "Provide pose in batch.pose or batch.extra['pose'], or "
-                    "viewmats/Ks/action in batch.extra.")
+                    "Set batch.pose for pose string, or batch.viewmats/batch.Ks/batch.action.")
 
             # Get num_frames from batch
             num_frames = batch.num_frames
@@ -181,8 +177,17 @@ class HYWorldDenoisingStage(DenoisingStage):
         cond_latents = batch.image_latent
 
         # Calculate chunk configuration
+        # Use minimum of latent frames and viewmats frames to avoid out-of-bounds access
         latent_frames = latents.shape[2]
-        chunk_num = latent_frames // chunk_latent_frames
+        viewmats_frames = viewmats.shape[1]
+        effective_frames = min(latent_frames, viewmats_frames)
+        chunk_num = effective_frames // chunk_latent_frames
+        
+        if latent_frames != viewmats_frames:
+            logger.warning(
+                "Frame count mismatch: latents has %d frames, viewmats has %d frames. "
+                "Using %d effective frames (%d chunks).",
+                latent_frames, viewmats_frames, effective_frames, chunk_num)
 
         # Initialize lists for ODE trajectory
         trajectory_timesteps: list[torch.Tensor] = []
@@ -414,23 +419,22 @@ class HYWorldDenoisingStage(DenoisingStage):
                          [V.is_tensor, V.with_dims(5)])
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
 
-        # Check for HYWorld-specific inputs - pose string is required
-        # (will be converted to viewmats/Ks/action in forward())
-        pose = getattr(batch, "pose", None) or batch.extra.get("pose", None)
-        if pose is None:
-            result.add_failure(
-                "pose",
-                "pose string must be provided (e.g., 'w-31', 'a-15'). "
-                "Provide pose in batch.pose or batch.extra['pose'].",
-            )
+        # Check for HYWorld-specific inputs:
+        # Either pose string OR pre-computed viewmats/Ks/action must be provided
+        pose = getattr(batch, "pose", None)
+        viewmats = getattr(batch, "viewmats", None)
+        Ks = getattr(batch, "Ks", None)
+        action = getattr(batch, "action", None)
+        
+        has_pose = pose is not None
+        has_precomputed = viewmats is not None and Ks is not None and action is not None
+        
+        # Either pose or precomputed camera params must be provided
+        pose_or_params = "valid" if (has_pose or has_precomputed) else None
+        result.add_check("pose_or_camera_params", pose_or_params, V.not_none)
 
         # Check chunk_latent_frames is specified
-        if batch.chunk_latent_frames is None:
-            result.add_failure(
-                "chunk_latent_frames",
-                "chunk_latent_frames must be specified. "
-                "Use 16 for bidirectional model (bi), 4 for autoregressive model (ar).",
-            )
+        result.add_check("chunk_latent_frames", batch.chunk_latent_frames, V.not_none)
 
         result.add_check("num_inference_steps", batch.num_inference_steps,
                          V.positive_int)

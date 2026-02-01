@@ -39,17 +39,19 @@ export MASTER_PORT=29612
 # =============================================================================
 # WandB
 # =============================================================================
-export WANDB_API_KEY=XXXX
-export WANDB_ENTITY=XXXX
-WANDB_PROJECT=XXXX
-WANDB_RUN_NAME=XXXX
+export WANDB_ENTITY=mhuo
+WANDB_PROJECT=hyworld
+WANDB_RUN_NAME=test_run
 
-NUM_FRAMES=125
-NUM_LATENT_T=32
+NUM_FRAMES=61
+NUM_LATENT_T=16
+# NUM_FRAMES=13
+# NUM_LATENT_T=4
 NUM_HEIGHT=256
 NUM_WIDTH=256
 MAX_TRAIN_STEPS=2000
-LOG_STEPS=25
+TRAIN_VIDEO_LOG_STEPS=1
+VALIDATION_STEPS=1
 
 # =============================================================================
 # Training arguments
@@ -72,11 +74,24 @@ training_args=(
   --num-width ${NUM_WIDTH}
   --num-frames ${NUM_FRAMES}
   --seed 3208
-  --train-video-log-steps ${LOG_STEPS}
+  --train-video-log-steps ${TRAIN_VIDEO_LOG_STEPS}
   --train-video-log-max-samples 1
   --train-video-log-fps 25
   --tracker-project-name "${WANDB_PROJECT}"
   --wandb-run-name "${WANDB_RUN_NAME}"
+  --enable-gradient-checkpointing-type "full"
+  --weighting-scheme "logit_normal"
+  --logit-mean 0.0
+  --logit-std 1.0
+)
+
+### Validation arguments
+validation_args=(
+  --log-validation True
+  --validation-steps ${VALIDATION_STEPS}
+  --validation-sampling-steps "50"
+  --validation-guidance-scale "1.0"
+  --flow-shift 3.0
 )
 
 # =============================================================================
@@ -113,7 +128,7 @@ dataset_args=(
 optimizer_args=(
   --learning-rate 2e-5
   --mixed-precision bf16
-  --training-state-checkpointing-steps 500
+  --training-state-checkpointing-steps ${VALIDATION_STEPS}
   --weight-decay 1e-4
   --max-grad-norm 1.0
   --lr-scheduler "constant"
@@ -172,6 +187,7 @@ torchrun \
   "${dataset_args[@]}" \
   "${training_args[@]}" \
   "${optimizer_args[@]}" \
-  "${miscellaneous_args[@]}"
+  "${miscellaneous_args[@]}" \
+  "${validation_args[@]}"
 
 echo "Training complete!"
