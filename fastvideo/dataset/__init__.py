@@ -8,6 +8,10 @@ from fastvideo.dataset.preprocessing_datasets import VideoCaptionMergedDataset, 
 from fastvideo.dataset.transform import (CenterCropResizeVideo, Normalize255,
                                          TemporalRandomCrop)
 from fastvideo.dataset.validation_dataset import ValidationDataset
+from fastvideo.dataset.hyworld_camera_dataset import (
+    HYWorldCameraDataset,
+    build_hyworld_camera_dataloader,
+)
 
 
 def getdataset(args) -> VideoCaptionMergedDataset:
@@ -46,6 +50,10 @@ def gettextdataset(args) -> TextDataset:
 
 
 __all__ = [
-    "build_parquet_map_style_dataloader", "ValidationDataset",
-    "VideoCaptionMergedDataset", "TextDataset"
+    "build_parquet_map_style_dataloader",
+    "build_hyworld_camera_dataloader",
+    "ValidationDataset",
+    "VideoCaptionMergedDataset",
+    "TextDataset",
+    "HYWorldCameraDataset",
 ]

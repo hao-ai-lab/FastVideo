@@ -42,6 +42,73 @@ from .camera_rope import prope_qkv
 logger = init_logger(__name__)
 
 
+def _build_torch_causal_chunk_attn_mask(
+    *,
+    vision_seq_length: int,
+    text_seq_length: int,
+    encoder_attention_mask: torch.Tensor | None,
+    attn_param: dict[str, Any] | None,
+    batch_size: int,
+    device: torch.device,
+) -> torch.Tensor:
+    """
+    Build the HY-WorldPlay AR ("torch_causal") chunk-wise causal mask, adapted to
+    FastVideo's token concatenation order: [vision, text].
+
+    Mask semantics follow torch SDPA bool masks: True = allowed, False = blocked.
+    """
+    total_seq_length = int(vision_seq_length) + int(text_seq_length)
+
+    # NOTE: This must match the *actual* latent token grid (H*W) for the current resolution.
+    # The legacy implementation hardcoded 1560 (=30*52 for 480x832 with /16 VAE spatial compression).
+    if attn_param is not None and "thw" in attn_param and len(attn_param["thw"]) >= 3:
+        latent_seq_length = int(attn_param["thw"][-1]) * int(attn_param["thw"][-2])
+    else:
+        # Fallback to the legacy constant (kept only for safety/backward compatibility).
+        latent_seq_length = 1560
+
+    chunk_seq_length = latent_seq_length * 4
+    chunk_num = vision_seq_length // chunk_seq_length
+
+    # Build [S, S] then expand to [B, 1, S, S] (broadcastable over heads).
+    causal_mask = torch.zeros(
+        (total_seq_length, total_seq_length),
+        device=device,
+        dtype=torch.bool,
+    )
+
+    # Allow all queries (vision + text) to attend to all text keys.
+    # In FastVideo concat order, text tokens are appended after vision tokens.
+    if text_seq_length > 0:
+        causal_mask[:, vision_seq_length:] = True
+        # Text queries should not attend to vision keys.
+        causal_mask[vision_seq_length:, :vision_seq_length] = False
+
+    # Chunk-wise causal over vision tokens (full attention within a chunk, causal across chunks).
+    for i in range(chunk_num):
+        start_i = i * chunk_seq_length
+        end_i = min(start_i + chunk_seq_length, vision_seq_length)
+        for j in range(i + 1):
+            start_j = j * chunk_seq_length
+            end_j = min(start_j + chunk_seq_length, vision_seq_length)
+            causal_mask[start_i:end_i, start_j:end_j] = True
+
+    causal_mask = causal_mask.unsqueeze(0).unsqueeze(1).expand(batch_size, 1, -1, -1)
+
+    # Optionally AND-in text key padding mask (FastVideo uses True=valid).
+    if encoder_attention_mask is not None and text_seq_length > 0:
+        enc_mask = encoder_attention_mask.to(device=device, dtype=torch.bool)
+        # Prevent all-False rows/cols causing NaNs in SDPA (mirrors other FastVideo attention code).
+        if enc_mask.shape[1] > 0:
+            enc_mask = enc_mask.clone()
+            enc_mask[:, 0] = True
+        key_valid = torch.ones((batch_size, total_seq_length), device=device, dtype=torch.bool)
+        key_valid[:, vision_seq_length:] = enc_mask
+        causal_mask = causal_mask & key_valid.view(batch_size, 1, 1, total_seq_length)
+
+    return causal_mask
+
+
 class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
     """
     Extended MMDoubleStreamBlock with ProPE (Projective Positional Encoding) support
@@ -55,6 +122,7 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
         mlp_ratio: float,
         dtype: torch.dtype | None = None,
         supported_attention_backends: tuple[AttentionBackendEnum, ...] | None = None,
+        attn_mode: str = "flash",
         prefix: str = "",
     ):
         super().__init__(
@@ -66,6 +134,7 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
             prefix=prefix,
         )
         self.hidden_size = hidden_size
+        self.attn_mode = attn_mode
 
         # Add ProPE projection layer for camera-aware attention
         self.img_attn_prope_proj = ReplicatedLinear(
@@ -91,6 +160,7 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
         seq_attention_mask: torch.Tensor,
         viewmats: torch.Tensor,
         Ks: torch.Tensor,
+        attn_param: Optional[dict[str, Any]] = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass with ProPE camera conditioning.
@@ -174,24 +244,39 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
         img_v_prope = img_v_prope.permute(0, 2, 1, 3)  # [batch, seqlen, num_heads, head_dim]
         # end hyworld
 
-        from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
-        attn_metadata = FlashAttnMetadataBuilder().build(
-            current_timestep=0,
-            attn_mask=encoder_attention_mask,
-        )
+        # Build attention metadata. For AR ("torch_causal"), we inject a 4D chunk-wise
+        # causal mask into the forward context so TORCH_SDPA can consume it.
+        if self.attn_mode == "torch_causal":
+            from fastvideo.attention.backends.sdpa import SDPAMetadataBuilder
+            sp_world_size = get_sp_world_size()
+            if seq_attention_mask is not None:
+                vision_seq_length = int((seq_attention_mask[0] == 1).sum().item())
+            else:
+                vision_seq_length = int(image_seq_len) * int(sp_world_size)
+            attn_mask = _build_torch_causal_chunk_attn_mask(
+                vision_seq_length=vision_seq_length,
+                text_seq_length=int(text_seq_len),
+                encoder_attention_mask=encoder_attention_mask,
+                attn_param=attn_param,
+                batch_size=batch_size,
+                device=img_q.device,
+            )
+            attn_metadata = SDPAMetadataBuilder().build(
+                current_timestep=0,
+                attn_mask=attn_mask,
+            )
+        else:
+            from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
+            attn_metadata = FlashAttnMetadataBuilder().build(
+                current_timestep=0,
+                attn_mask=encoder_attention_mask,
+            )
         # Run distributed attention
         with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
             img_attn, txt_attn = self.attn(img_q, img_k, img_v, txt_q, txt_k, txt_v, freqs_cis=freqs_cis, attention_mask=seq_attention_mask)
         
-        # begin hyworld
-        # attention with prope
-        from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
-        attn_metadata_prope = FlashAttnMetadataBuilder().build(
-            current_timestep=0,
-            attn_mask=encoder_attention_mask,
-        )       
-        # NOTE: Do NOT pass freqs_cis to prope attention - HY-WorldPlay does not apply RoPE to prope
-        with set_forward_context(current_timestep=0, attn_metadata=attn_metadata_prope):
+        # HYWORLD-SPECIFIC: Attention with ProPE
+        with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
             img_attn_prope, _ = self.attn(
                 img_q_prope, img_k_prope, img_v_prope, txt_q, txt_k, txt_v, 
                 freqs_cis=None, attention_mask=seq_attention_mask  # No RoPE for prope attention
@@ -203,11 +288,10 @@ class HYWorldDoubleStreamBlock(MMDoubleStreamBlock):
             img_attn_prope = apply_fn_o(img_attn_prope) # [batch, num_heads, seqlen, head_dim]
             img_attn_prope = rearrange(img_attn_prope, "B H L D -> B L (H D)")
 
-        # add prope to img_attn
+        # Add ProPE to img_attn
         img_attn_out, _ = self.img_attn_proj(img_attn.view(batch_size, image_seq_len, -1))
         img_attn_prope_out, _ = self.img_attn_prope_proj(img_attn_prope)
         img_attn_out = img_attn_out + img_attn_prope_out
-        # end hyworld
 
         # Use fused operation for residual connection, normalization, and modulation
         img_mlp_input, img_residual = self.img_attn_residual_mlp_norm(
@@ -298,6 +382,13 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
         config: HYWorldConfig,
         hf_config: dict[str, Any],
     ) -> None:
+        attn_mode = getattr(config.arch_config, "attn_mode", "flash")
+
+        # For AR model, set TORCH_SDPA backend globally BEFORE parent init (which creates attention modules)
+        if attn_mode == "torch_causal":
+            from fastvideo.attention.selector import global_force_attn_backend
+            global_force_attn_backend(AttentionBackendEnum.TORCH_SDPA)
+        
         super().__init__(config=config, hf_config=hf_config)
 
         # Replace double_blocks with HY-World version that supports ProPE
@@ -308,6 +399,7 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
                 mlp_ratio=config.arch_config.mlp_ratio,
                 dtype=None,
                 supported_attention_backends=self._supported_attention_backends,
+                attn_mode=attn_mode,
                 prefix=f"{config.prefix}.double_blocks.{i}"
             )
             for i in range(config.arch_config.num_layers)
@@ -369,6 +461,8 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
         post_patch_num_frames = num_frames // p_t
         post_patch_height = height // p_h
         post_patch_width = width // p_w
+        # Attention params used by AR ("torch_causal") to infer latent token grid (H*W).
+        attn_param = {"thw": (post_patch_num_frames, post_patch_height, post_patch_width)}
 
         # 1. RoPE
         # Get rotary embeddings
@@ -536,8 +630,9 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
                     temb_txt,
                     freqs_cis,
                     seq_attention_mask,
-                    viewmats_seq, # hyworld
-                    Ks_seq, # hyworld
+                    viewmats_seq,
+                    Ks_seq,
+                    attn_param,
                 )
         else:
             for block in self.double_blocks:
@@ -549,8 +644,9 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
                     temb_txt,
                     freqs_cis,
                     seq_attention_mask,
-                    viewmats=viewmats_seq, # hyworld
-                    Ks=Ks_seq, # hyworld
+                    viewmats_seq,
+                    Ks_seq,
+                    attn_param,
                 )
 
 

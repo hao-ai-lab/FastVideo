@@ -40,6 +40,7 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v":
     Hunyuan15T2V720PConfig,
     "FastVideo/HY-WorldPlay-Bidirectional-Diffusers": HYWorldConfig,
+    "FastVideo/HY-WorldPlay-AR-Diffusers": HYWorldConfig,
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V480PConfig,
     "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers": WanI2V480PConfig,
     "IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers": WANV2VConfig,

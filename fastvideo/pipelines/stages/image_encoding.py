@@ -161,7 +161,14 @@ class HYWorldImageEncodingStage(ImageEncodingStage):
         - First frame contains the encoded reference image
         - All other frames are zeros
         - Mask channel is 1 for first frame, 0 for rest
+        
+        If pre-computed image_embeds and image_latent are already set, skip encoding.
         """
+        # Skip encoding if pre-computed values exist (e.g., from training data)
+        if (hasattr(batch, 'image_embeds') and batch.image_embeds is not None and
+            hasattr(batch, 'image_latent') and batch.image_latent is not None):
+            return batch
+
         device = get_local_torch_device()
 
         # Default vision embed dimensions for HunyuanVideo1.5/HYWorld

@@ -20,6 +20,7 @@ from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.utils import dict_to_3d_list
 from fastvideo.models.dits.hyworld.retrieval_context import (
     generate_points_in_sphere, select_aligned_memory_frames)
+from fastvideo.models.dits.hyworld.pose import pose_to_input, compute_latent_num
 
 logger = init_logger(__name__)
 
@@ -58,7 +59,7 @@ class HYWorldDenoisingStage(DenoisingStage):
                 - viewmats: torch.Tensor | None - Camera view matrices (B, T, 4, 4)
                 - Ks: torch.Tensor | None - Camera intrinsics (B, T, 3, 3)
                 - action: torch.Tensor | None - Action conditioning (B, T)
-                - chunk_latent_frames: int - Number of frames per chunk (default: 4)
+                - chunk_latent_frames: int - Number of frames per chunk (bi: 16; ar: 4)
                 These can be passed via batch.extra dict or as direct attributes.
             fastvideo_args: The inference arguments.
             
@@ -75,23 +76,39 @@ class HYWorldDenoisingStage(DenoisingStage):
                 pipeline.add_module("transformer", self.transformer)
             fastvideo_args.model_loaded["transformer"] = True
 
-        # Extract HYWorld-specific parameters from batch.extra or batch attributes
-        viewmats = getattr(batch, "viewmats", None) or batch.extra.get(
-            "viewmats", None)
-        Ks = getattr(batch, "Ks", None) or batch.extra.get("Ks", None)
-        action = getattr(batch, "action", None) or batch.extra.get(
-            "action", None)
-        chunk_latent_frames = (getattr(batch, "chunk_latent_frames", None)
-                               or batch.extra.get("chunk_latent_frames", 4))
+        # Extract HYWorld-specific parameters from batch attributes
+        viewmats = getattr(batch, "viewmats", None)
+        Ks = getattr(batch, "Ks", None)
+        action = getattr(batch, "action", None)
+        chunk_latent_frames = batch.chunk_latent_frames
         stabilization_level = 15
-        points_local = (getattr(batch, "points_local", None)
-                        or batch.extra.get("points_local", None))
+        points_local = getattr(batch, "points_local", None)
 
+        # If viewmats/Ks/action not provided, convert from pose string
         if viewmats is None or Ks is None or action is None:
-            raise ValueError(
-                "viewmats, Ks, and action are required for HYWorld denoising. "
-                "Please provide them in batch.extra['viewmats'], batch.extra['Ks'], "
-                "and batch.extra['action']")
+            pose = getattr(batch, "pose", None)
+            if pose is None:
+                raise ValueError(
+                    "Either pose string or (viewmats, Ks, action) must be provided. "
+                    "Set batch.pose for pose string, or batch.viewmats/batch.Ks/batch.action.")
+
+            # Get num_frames from batch
+            num_frames = batch.num_frames
+            if isinstance(num_frames, list):
+                num_frames = num_frames[0]
+
+            # Calculate number of latents and convert pose to tensors
+            latent_num = compute_latent_num(num_frames)
+            viewmats, Ks, action = pose_to_input(pose, latent_num)
+
+            # Add batch dimension
+            viewmats = viewmats.unsqueeze(0)  # (1, T, 4, 4)
+            Ks = Ks.unsqueeze(0)  # (1, T, 3, 3)
+            action = action.unsqueeze(0)  # (1, T)
+
+            logger.info(
+                "Converted pose '%s' to viewmats, Ks, and action for %d latent frames",
+                pose, latent_num)
 
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
@@ -160,8 +177,17 @@ class HYWorldDenoisingStage(DenoisingStage):
         cond_latents = batch.image_latent
 
         # Calculate chunk configuration
+        # Use minimum of latent frames and viewmats frames to avoid out-of-bounds access
         latent_frames = latents.shape[2]
-        chunk_num = latent_frames // chunk_latent_frames
+        viewmats_frames = viewmats.shape[1]
+        effective_frames = min(latent_frames, viewmats_frames)
+        chunk_num = effective_frames // chunk_latent_frames
+        
+        if latent_frames != viewmats_frames:
+            logger.warning(
+                "Frame count mismatch: latents has %d frames, viewmats has %d frames. "
+                "Using %d effective frames (%d chunks).",
+                latent_frames, viewmats_frames, effective_frames, chunk_num)
 
         # Initialize lists for ODE trajectory
         trajectory_timesteps: list[torch.Tensor] = []
@@ -266,12 +292,9 @@ class HYWorldDenoisingStage(DenoisingStage):
                     latents_concat = torch.concat(
                         [latent_model_input, cond_latents_input], dim=1)
 
-                    # Note: Unlike some other pipelines, HYWorld runs CFG sequentially (two passes)
-                    # rather than batching pos/neg together, following the original implementation
                     latents_concat = self.scheduler.scale_model_input(
                         latents_concat, t)
 
-                    # Keep batch size 1 for sequential CFG
                     t_expand_txt = t.unsqueeze(0)
                     t_expand = timestep_input
                     viewmats_input = viewmats_input.to(device)
@@ -287,7 +310,6 @@ class HYWorldDenoisingStage(DenoisingStage):
                         batch.is_cfg_negative = False
 
                         # Prepare transformer kwargs with HYWorld-specific inputs
-                        # Note: batch size 1 for sequential CFG (matching original HY-WorldPlay)
                         transformer_kwargs = {
                             **image_kwargs,
                             "timestep": t_expand,
@@ -397,34 +419,22 @@ class HYWorldDenoisingStage(DenoisingStage):
                          [V.is_tensor, V.with_dims(5)])
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
 
-        # Check for HYWorld-specific inputs
-        viewmats = getattr(batch, "viewmats", None) or batch.extra.get(
-            "viewmats", None)
-        Ks = getattr(batch, "Ks", None) or batch.extra.get("Ks", None)
-        action = getattr(batch, "action", None) or batch.extra.get(
-            "action", None)
+        # Check for HYWorld-specific inputs:
+        # Either pose string OR pre-computed viewmats/Ks/action must be provided
+        pose = getattr(batch, "pose", None)
+        viewmats = getattr(batch, "viewmats", None)
+        Ks = getattr(batch, "Ks", None)
+        action = getattr(batch, "action", None)
+        
+        has_pose = pose is not None
+        has_precomputed = viewmats is not None and Ks is not None and action is not None
+        
+        # Either pose or precomputed camera params must be provided
+        pose_or_params = "valid" if (has_pose or has_precomputed) else None
+        result.add_check("pose_or_camera_params", pose_or_params, V.not_none)
 
-        if viewmats is None:
-            result.add_failure(
-                "viewmats",
-                "viewmats must be provided in batch.extra['viewmats'] or as batch.viewmats",
-            )
-        else:
-            result.add_check("viewmats", viewmats, V.is_tensor)
-
-        if Ks is None:
-            result.add_failure(
-                "Ks", "Ks must be provided in batch.extra['Ks'] or as batch.Ks")
-        else:
-            result.add_check("Ks", Ks, V.is_tensor)
-
-        if action is None:
-            result.add_failure(
-                "action",
-                "action must be provided in batch.extra['action'] or as batch.action",
-            )
-        else:
-            result.add_check("action", action, V.is_tensor)
+        # Check chunk_latent_frames is specified
+        result.add_check("chunk_latent_frames", batch.chunk_latent_frames, V.not_none)
 
         result.add_check("num_inference_steps", batch.num_inference_steps,
                          V.positive_int)
