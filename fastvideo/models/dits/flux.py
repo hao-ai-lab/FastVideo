@@ -504,18 +504,13 @@
 
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from fastvideo.attention import LocalAttention
-from fastvideo.configs.models.dits import FluxConfig
-from fastvideo.layers.activation import get_act_fn
-from fastvideo.layers.layernorm import FP32LayerNorm, RMSNorm
-from fastvideo.layers.linear import ReplicatedLinear
-from fastvideo.layers.mlp import MLP
-from fastvideo.layers.rotary_embedding import get_1d_rotary_pos_embed
-from fastvideo.models.dits.base import BaseDiT
-from fastvideo.platforms import AttentionBackendEnum
 import torch
 import torch.nn as nn
 from diffusers.models.attention import AttentionModuleMixin, FeedForward
+from diffusers.models.embeddings import (
+    CombinedTimestepGuidanceTextProjEmbeddings,
+    CombinedTimestepTextProjEmbeddings,
+)
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.normalization import (
     AdaLayerNormContinuous,
@@ -524,27 +519,35 @@ from diffusers.models.normalization import (
 )
 from torch.nn import LayerNorm as LayerNorm
 
+from fastvideo.attention import LocalAttention
 from fastvideo.configs.models.dits.flux import FluxConfig
-from fastvideo.layers.attention import USPAttention
-
-# from sglang.multimodal_gen.runtime.layers.layernorm import LayerNorm as LayerNorm
-from fastvideo.layers.layernorm import RMSNorm, apply_qk_norm
+from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ColumnParallelLinear
-from fastvideo.layers.mlp import MLP
-from fastvideo.layers.rotary_embedding import (
-    NDRotaryEmbedding,
-    apply_flashinfer_rope_qk_inplace,
-)
-from fastvideo.layers.visual_embedding import (
-    CombinedTimestepGuidanceTextProjEmbeddings,
-    CombinedTimestepTextProjEmbeddings,
-)
-from fastvideo.models.dits.base import CachableDiT
-from fastvideo.platforms import current_platform
-from fastvideo.hooks.layerwise_offload import OffloadableDiTMixin
+from fastvideo.layers.rotary_embedding import get_1d_rotary_pos_embed, _apply_rotary_emb
 from fastvideo.logger import init_logger
+from fastvideo.models.dits.base import CachableDiT
 
 logger = init_logger(__name__)  # pylint: disable=invalid-name
+
+
+def _apply_qk_norm(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    q_norm: nn.Module,
+    k_norm: nn.Module,
+    value_dtype: torch.dtype,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    q = q_norm(q).to(value_dtype)
+    k = k_norm(k).to(value_dtype)
+    return q, k
+
+
+def _apply_rotary_emb_2d(
+    x: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+) -> torch.Tensor:
+    return _apply_rotary_emb(x, cos, sin, is_neox_style=False)
 
 
 def _get_qkv_projections(
@@ -641,11 +644,9 @@ class FluxAttention(torch.nn.Module, AttentionModuleMixin):
                 self.inner_dim, query_dim, bias=out_bias, gather_output=True
             )
 
-        self.attn = USPAttention(
+        self.attn = LocalAttention(
             num_heads=num_heads,
             head_size=self.head_dim,
-            dropout_rate=0,
-            softmax_scale=None,
             causal=False,
         )
 
@@ -662,13 +663,12 @@ class FluxAttention(torch.nn.Module, AttentionModuleMixin):
         query = query.unflatten(-1, (self.heads, -1))
         key = key.unflatten(-1, (self.heads, -1))
         value = value.unflatten(-1, (self.heads, -1))
-        query, key = apply_qk_norm(
+        query, key = _apply_qk_norm(
             q=query,
             k=key,
             q_norm=self.norm_q,
             k_norm=self.norm_k,
-            head_dim=self.head_dim,
-            allow_inplace=True,
+            value_dtype=value.dtype,
         )
 
         if self.added_kv_proj_dim is not None:
@@ -676,13 +676,12 @@ class FluxAttention(torch.nn.Module, AttentionModuleMixin):
             encoder_key = encoder_key.unflatten(-1, (self.heads, -1))
             encoder_value = encoder_value.unflatten(-1, (self.heads, -1))
 
-            encoder_query, encoder_key = apply_qk_norm(
+            encoder_query, encoder_key = _apply_qk_norm(
                 q=encoder_query,
                 k=encoder_key,
                 q_norm=self.norm_added_q,
                 k_norm=self.norm_added_k,
-                head_dim=self.head_dim,
-                allow_inplace=True,
+                value_dtype=encoder_value.dtype,
             )
 
             bsz, seq_len, _, _ = query.shape
@@ -692,16 +691,9 @@ class FluxAttention(torch.nn.Module, AttentionModuleMixin):
 
         if freqs_cis is not None:
             cos, sin = freqs_cis
-            cos_sin_cache = torch.cat(
-                [
-                    cos.to(dtype=torch.float32).contiguous(),
-                    sin.to(dtype=torch.float32).contiguous(),
-                ],
-                dim=-1,
-            )
-            query, key = apply_flashinfer_rope_qk_inplace(
-                query, key, cos_sin_cache, is_neox=False
-            )
+            # cos/sin are expected to be shaped [seq_len, head_dim/2]
+            query = _apply_rotary_emb_2d(query, cos, sin)
+            key = _apply_rotary_emb_2d(key, cos, sin)
 
         x = self.attn(query, key, value)
         x = x.flatten(2, 3)
@@ -901,27 +893,29 @@ class FluxPosEmbed(nn.Module):
     # modified from https://github.com/black-forest-labs/flux/blob/c00d7c60b085fce8058b9df845e036090873f2ce/src/flux/modules/layers.py#L11
     def __init__(self, theta: int, axes_dim: List[int]):
         super().__init__()
-        self.rope = NDRotaryEmbedding(
-            rope_dim_list=axes_dim,
-            rope_theta=theta,
-            use_real=False,
-            repeat_interleave_real=False,
-            dtype=(
-                torch.float32
-                if current_platform.is_mps() or current_platform.is_musa()
-                else torch.float64
-            ),
-        )
+        self.theta = theta
+        self.axes_dim = axes_dim
 
     def forward(self, ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         pos = ids.float()
-        # TODO: potential error: flux use n_axes = ids.shape[-1]
-        # see: https://github.com/huggingface/diffusers/blob/17c0e79dbdf53fb6705e9c09cc1a854b84c39249/src/diffusers/models/transformers/transformer_flux.py#L509
-        freqs_cos, freqs_sin = self.rope.forward_uncached(pos=pos)
-        return freqs_cos.contiguous().float(), freqs_sin.contiguous().float()
+        cos_out = []
+        sin_out = []
+        for i, dim in enumerate(self.axes_dim):
+            cos, sin = get_1d_rotary_pos_embed(
+                dim,
+                pos[:, i],
+                theta=self.theta,
+                dtype=torch.float32,
+                device=pos.device,
+            )
+            cos_out.append(cos)
+            sin_out.append(sin)
+        freqs_cos = torch.cat(cos_out, dim=-1).to(ids.device)
+        freqs_sin = torch.cat(sin_out, dim=-1).to(ids.device)
+        return freqs_cos, freqs_sin
 
 
-class FluxTransformer2DModel(CachableDiT, OffloadableDiTMixin):
+class FluxTransformer2DModel(CachableDiT):
     """
     The Transformer model introduced in Flux.
 
@@ -941,7 +935,13 @@ class FluxTransformer2DModel(CachableDiT, OffloadableDiTMixin):
             self.config.num_attention_heads * self.config.attention_head_dim
         )
 
-        self.rotary_emb = FluxPosEmbed(theta=10000, axes_dim=self.config.axes_dims_rope)
+        self.hidden_size = self.inner_dim
+        self.num_attention_heads = self.config.num_attention_heads
+        self.num_channels_latents = self.config.num_channels_latents
+
+        self.rotary_emb = FluxPosEmbed(
+            theta=self.config.rope_theta, axes_dim=self.config.rope_axes_dim
+        )
 
         text_time_guidance_cls = (
             CombinedTimestepGuidanceTextProjEmbeddings
@@ -998,6 +998,8 @@ class FluxTransformer2DModel(CachableDiT, OffloadableDiTMixin):
             "transformer_blocks",
             "single_transformer_blocks",
         ]
+
+        self.__post_init__()
 
     def forward(
         self,
