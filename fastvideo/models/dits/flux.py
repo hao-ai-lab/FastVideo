@@ -523,6 +523,7 @@ from fastvideo.attention import LocalAttention
 from fastvideo.configs.models.dits.flux import FluxConfig
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ColumnParallelLinear
+from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import get_1d_rotary_pos_embed, _apply_rotary_emb
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import CachableDiT
