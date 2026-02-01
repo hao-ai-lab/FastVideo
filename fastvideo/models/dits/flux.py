@@ -912,6 +912,7 @@ class FluxTransformer2DModel(CachableDiT, OffloadableDiTMixin):
         self.out_channels = (
             getattr(self.config, "out_channels", None) or self.config.in_channels
         )
+        self.num_channels_latents = self.config.num_channels_latents
         self.num_attention_heads = self.config.num_attention_heads
         self.inner_dim = self.num_attention_heads * self.config.attention_head_dim
         self.hidden_size = self.inner_dim
