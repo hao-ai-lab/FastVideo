@@ -944,6 +944,21 @@ class TrainingArgs(FastVideoArgs):
     last_step_only: bool = False  # Only use the last timestep for training
     context_noise: int = 0  # Context noise level for cache updates
 
+    # HYWorld-specific training arguments
+    json_path: str = ""  # Path to JSON file with dataset info (HYWorld)
+    window_frames: int = 24  # Window size for training (HYWorld)
+    action: bool = True  # Enable action conditioning (HYWorld)
+    causal: bool = True  # Enable causal training (HYWorld)
+    train_time_shift: float = 1.0  # Time shift for timestep transformation (HYWorld)
+    i2v_rate: float = 0.5  # Image-to-video rate (HYWorld)
+    neg_prompt_path: str = ""  # Path to negative prompt embeddings (HYWorld)
+    neg_byt5_path: str = ""  # Path to negative ByT5 embeddings (HYWorld)
+
+    # Train-time video logging (lightweight validation using training batch predictions)
+    train_video_log_steps: int = 0  # Log decoded train videos every N steps (0 = disabled)
+    train_video_log_max_samples: int = 1  # Max samples to log per step
+    train_video_log_fps: int = 25  # FPS for logged videos
+
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
         provided_args = clean_cli_args(args)
@@ -1177,25 +1192,25 @@ class TrainingArgs(FastVideoArgs):
                             help="FSDP sharding strategy")
 
         parser.add_argument(
-            "--weighting_scheme",
+            "--weighting-scheme",
             type=str,
             default="uniform",
             choices=["sigma_sqrt", "logit_normal", "mode", "cosmap", "uniform"],
         )
         parser.add_argument(
-            "--logit_mean",
+            "--logit-mean",
             type=float,
             default=0.0,
             help="mean to use when using the `'logit_normal'` weighting scheme.",
         )
         parser.add_argument(
-            "--logit_std",
+            "--logit-std",
             type=float,
             default=1.0,
             help="std to use when using the `'logit_normal'` weighting scheme.",
         )
         parser.add_argument(
-            "--mode_scale",
+            "--mode-scale",
             type=float,
             default=1.29,
             help=
@@ -1365,6 +1380,57 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             default=TrainingArgs.context_noise,
                             help="Context noise level for cache updates")
+
+        # HYWorld-specific training arguments
+        parser.add_argument(
+            "--json-path",
+            type=str,
+            default="",
+            help="Path to JSON file with dataset info (HYWorld)")
+        parser.add_argument("--window-frames",
+                            type=int,
+                            default=24,
+                            help="Window size for training (HYWorld)")
+        parser.add_argument("--action",
+                            action=StoreBoolean,
+                            default=True,
+                            help="Enable action conditioning (HYWorld)")
+        parser.add_argument("--causal",
+                            action=StoreBoolean,
+                            default=True,
+                            help="Enable causal training (HYWorld)")
+        parser.add_argument(
+            "--train-time-shift",
+            type=float,
+            default=1.0,
+            help="Time shift for timestep transformation (HYWorld)")
+        parser.add_argument("--i2v-rate",
+                            type=float,
+                            default=0.5,
+                            help="Image-to-video rate (HYWorld)")
+        parser.add_argument("--neg-prompt-path",
+                            type=str,
+                            default="",
+                            help="Path to negative prompt embeddings (HYWorld)")
+        parser.add_argument("--neg-byt5-path",
+                            type=str,
+                            default="",
+                            help="Path to negative ByT5 embeddings (HYWorld)")
+
+        # Train-time video logging (lightweight validation using training batch predictions)
+        parser.add_argument(
+            "--train-video-log-steps",
+            type=int,
+            default=TrainingArgs.train_video_log_steps,
+            help="Log decoded train videos every N steps (0 = disabled)")
+        parser.add_argument("--train-video-log-max-samples",
+                            type=int,
+                            default=TrainingArgs.train_video_log_max_samples,
+                            help="Max samples to log per step")
+        parser.add_argument("--train-video-log-fps",
+                            type=int,
+                            default=TrainingArgs.train_video_log_fps,
+                            help="FPS for logged videos")
 
         return parser
 

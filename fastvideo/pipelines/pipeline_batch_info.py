@@ -243,6 +243,8 @@ class TrainingBatch:
     timesteps: torch.Tensor | None = None
     sigmas: torch.Tensor | None = None
     noise: torch.Tensor | None = None
+    # Optional: store model output for visualization/debug logging
+    model_pred: torch.Tensor | None = None
 
     attn_metadata_vsa: AttentionMetadata | None = None
     attn_metadata: AttentionMetadata | None = None
@@ -270,6 +272,26 @@ class TrainingBatch:
     dmd_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     fake_score_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
+
+    # HYWorld-specific attributes (camera pose and action)
+    prompt_embed: torch.Tensor | None = None
+    w2c: torch.Tensor | None = None  # World-to-camera matrices [B, T, 4, 4]
+    intrinsic: torch.Tensor | None = None  # Camera intrinsics [B, T, 3, 3]
+    action: torch.Tensor | None = None  # Action labels
+    video_path: str | None = None
+    image_cond: torch.Tensor | None = None  # Image conditioning latent
+    vision_states: torch.Tensor | None = None  # Vision encoder states
+    prompt_mask: torch.Tensor | None = None  # Prompt attention mask
+    byt5_text_states: torch.Tensor | None = None  # ByT5 text states
+    byt5_text_mask: torch.Tensor | None = None  # ByT5 attention mask
+    select_window_out_flag: int = 0  # Memory training flag
+    i2v_mask: torch.Tensor | None = None  # I2V mask for loss computation
+    # Dataset debug/visualization metadata (latent indices in the ORIGINAL sequence before repacking).
+    # - in-window: both are None
+    # - out-window: `selected_history_frame_id` includes history indices AND the current chunk indices
+    selected_history_frame_id: list[int] | None = None
+    current_frame_idx: int | None = None
+    temporal_context_size: int | None = None
 
 
 @dataclass
