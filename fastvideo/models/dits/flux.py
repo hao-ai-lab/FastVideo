@@ -861,23 +861,32 @@ class FluxPosEmbed(nn.Module):
     # modified from https://github.com/black-forest-labs/flux/blob/c00d7c60b085fce8058b9df845e036090873f2ce/src/flux/modules/layers.py#L11
     def __init__(self, theta: int, axes_dim: List[int]):
         super().__init__()
-        self.rope = NDRotaryEmbedding(
-            rope_dim_list=axes_dim,
-            rope_theta=theta,
-            use_real=False,
-            repeat_interleave_real=False,
-            dtype=(
-                torch.float32
-                if current_platform.is_mps() or current_platform.is_musa()
-                else torch.float64
-            ),
-        )
+        self.theta = float(theta)
+        self.axes_dim = axes_dim
 
     def forward(self, ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         pos = ids.float()
-        # TODO: potential error: flux use n_axes = ids.shape[-1]
-        # see: https://github.com/huggingface/diffusers/blob/17c0e79dbdf53fb6705e9c09cc1a854b84c39249/src/diffusers/models/transformers/transformer_flux.py#L509
-        freqs_cos, freqs_sin = self.rope.forward_uncached(pos=pos)
+        pos = pos.reshape(-1, pos.shape[-1])
+        if pos.shape[-1] != len(self.axes_dim):
+            raise ValueError(
+                "Expected ids last dim to match axes_dim, got "
+                f"{pos.shape[-1]} vs {len(self.axes_dim)}"
+            )
+
+        cos_parts = []
+        sin_parts = []
+        for axis_idx, axis_dim in enumerate(self.axes_dim):
+            cos, sin = get_1d_rotary_pos_embed(
+                axis_dim,
+                pos[:, axis_idx],
+                theta=self.theta,
+                device=pos.device,
+            )
+            cos_parts.append(cos)
+            sin_parts.append(sin)
+
+        freqs_cos = torch.cat(cos_parts, dim=-1)
+        freqs_sin = torch.cat(sin_parts, dim=-1)
         return freqs_cos.contiguous().float(), freqs_sin.contiguous().float()
 
 
@@ -901,7 +910,15 @@ class FluxTransformer2DModel(CachableDiT, OffloadableDiTMixin):
             self.config.num_attention_heads * self.config.attention_head_dim
         )
 
-        self.rotary_emb = FluxPosEmbed(theta=10000, axes_dim=self.config.axes_dims_rope)
+        axes_dim = getattr(self.config, "rope_axes_dim", None) or getattr(
+            self.config, "axes_dims_rope", None
+        )
+        if axes_dim is None:
+            head_dim = self.config.attention_head_dim
+            axes_dim = [head_dim // 3 for _ in range(3)]
+        self.rotary_emb = FluxPosEmbed(
+            theta=getattr(self.config, "rope_theta", 10000), axes_dim=axes_dim
+        )
 
         text_time_guidance_cls = (
             CombinedTimestepGuidanceTextProjEmbeddings

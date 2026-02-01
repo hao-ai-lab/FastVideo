@@ -7,6 +7,9 @@ from fastvideo.logger import init_logger
 
 logger = init_logger(__name__)
 
+# Backwards-compatible re-export for models expecting OffloadableDiTMixin here.
+from fastvideo.models.layerwise_offload import OffloadableDiTMixin  # noqa: E402
+
 
 def _tensor_placeholder(tensor: torch.Tensor,
                         device: torch.device) -> torch.Tensor:
