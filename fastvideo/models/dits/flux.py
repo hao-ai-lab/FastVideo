@@ -554,13 +554,15 @@ def _apply_rotary_emb_2d(
 def _get_qkv_projections(
     attn: "FluxAttention", hidden_states, encoder_hidden_states=None
 ):
-    qkv, _ = attn.qkv(hidden_states)
-    query, key, value = qkv.chunk(3, dim=-1)
+    query, _ = attn.to_q(hidden_states)
+    key, _ = attn.to_k(hidden_states)
+    value, _ = attn.to_v(hidden_states)
 
     encoder_query = encoder_key = encoder_value = None
     if encoder_hidden_states is not None and attn.added_kv_proj_dim is not None:
-        encoder_qkv, _ = attn.add_qkv(encoder_hidden_states)
-        encoder_query, encoder_key, encoder_value = encoder_qkv.chunk(3, dim=-1)
+        encoder_query, _ = attn.add_q_proj(encoder_hidden_states)
+        encoder_key, _ = attn.add_k_proj(encoder_hidden_states)
+        encoder_value, _ = attn.add_v_proj(encoder_hidden_states)
 
     return query, key, value, encoder_query, encoder_key, encoder_value
 
@@ -599,8 +601,14 @@ class FluxAttention(torch.nn.Module, AttentionModuleMixin):
         self.norm_q = RMSNorm(dim_head, eps=eps)
         self.norm_k = RMSNorm(dim_head, eps=eps)
 
-        self.qkv = ColumnParallelLinear(
-            query_dim, self.inner_dim * 3, bias=bias, gather_output=True
+        self.to_q = ColumnParallelLinear(
+            query_dim, self.inner_dim, bias=bias, gather_output=True
+        )
+        self.to_k = ColumnParallelLinear(
+            query_dim, self.inner_dim, bias=bias, gather_output=True
+        )
+        self.to_v = ColumnParallelLinear(
+            query_dim, self.inner_dim, bias=bias, gather_output=True
         )
 
         if not self.pre_only:
@@ -616,9 +624,21 @@ class FluxAttention(torch.nn.Module, AttentionModuleMixin):
         if added_kv_proj_dim is not None:
             self.norm_added_q = RMSNorm(dim_head, eps=eps)
             self.norm_added_k = RMSNorm(dim_head, eps=eps)
-            self.add_qkv = ColumnParallelLinear(
+            self.add_q_proj = ColumnParallelLinear(
                 added_kv_proj_dim,
-                self.inner_dim * 3,
+                self.inner_dim,
+                bias=added_proj_bias,
+                gather_output=True,
+            )
+            self.add_k_proj = ColumnParallelLinear(
+                added_kv_proj_dim,
+                self.inner_dim,
+                bias=added_proj_bias,
+                gather_output=True,
+            )
+            self.add_v_proj = ColumnParallelLinear(
+                added_kv_proj_dim,
+                self.inner_dim,
                 bias=added_proj_bias,
                 gather_output=True,
             )
@@ -711,28 +731,24 @@ class FluxSingleTransformerBlock(nn.Module):
     ):
         super().__init__()
         self.mlp_hidden_dim = int(dim * mlp_ratio)
-        self.head_dim = attention_head_dim
-        self.heads = num_attention_heads
-        self.inner_dim = self.heads * self.head_dim
 
         self.norm = AdaLayerNormZeroSingle(dim)
-        self.act_mlp = nn.GELU(approximate="tanh")
-        self.linear1 = ColumnParallelLinear(
-            dim,
-            self.inner_dim * 3 + self.mlp_hidden_dim,
-            bias=True,
-            gather_output=True,
+        self.proj_mlp = ColumnParallelLinear(
+            dim, self.mlp_hidden_dim, bias=True, gather_output=True
         )
-        self.linear2 = ColumnParallelLinear(
+        self.act_mlp = nn.GELU(approximate="tanh")
+        self.proj_out = ColumnParallelLinear(
             dim + self.mlp_hidden_dim, dim, bias=True, gather_output=True
         )
 
-        self.norm_q = RMSNorm(attention_head_dim, eps=1e-6)
-        self.norm_k = RMSNorm(attention_head_dim, eps=1e-6)
-        self.attn = LocalAttention(
+        self.attn = FluxAttention(
+            query_dim=dim,
+            dim_head=attention_head_dim,
             num_heads=num_attention_heads,
-            head_size=attention_head_dim,
-            causal=False,
+            out_dim=dim,
+            bias=True,
+            eps=1e-6,
+            pre_only=True,
             supported_attention_backends=supported_attention_backends,
         )
 
@@ -749,35 +765,18 @@ class FluxSingleTransformerBlock(nn.Module):
 
         residual = hidden_states
         norm_hidden_states, gate = self.norm(hidden_states, emb=temb)
-        linear1_out, _ = self.linear1(norm_hidden_states)
-        qkv, mlp_hidden_states = torch.split(
-            linear1_out,
-            [self.inner_dim * 3, self.mlp_hidden_dim],
-            dim=-1,
-        )
-        mlp_hidden_states = self.act_mlp(mlp_hidden_states)
-        query, key, value = qkv.chunk(3, dim=-1)
-        query = query.unflatten(-1, (self.heads, -1))
-        key = key.unflatten(-1, (self.heads, -1))
-        value = value.unflatten(-1, (self.heads, -1))
-        query, key = _apply_qk_norm(
-            q=query,
-            k=key,
-            q_norm=self.norm_q,
-            k_norm=self.norm_k,
-            value_dtype=value.dtype,
-        )
+        proj_hidden_states, _ = self.proj_mlp(norm_hidden_states)
+        mlp_hidden_states = self.act_mlp(proj_hidden_states)
         joint_attention_kwargs = joint_attention_kwargs or {}
-        if freqs_cis is not None:
-            cos, sin = freqs_cis
-            query = _apply_rotary_emb_2d(query, cos, sin)
-            key = _apply_rotary_emb_2d(key, cos, sin)
-        attn_output = self.attn(query, key, value)
-        attn_output = attn_output.flatten(2, 3).to(query.dtype)
+        attn_output = self.attn(
+            x=norm_hidden_states,
+            freqs_cis=freqs_cis,
+            **joint_attention_kwargs,
+        )
 
         hidden_states = torch.cat([attn_output, mlp_hidden_states], dim=2)
         gate = gate.unsqueeze(1)
-        proj_out, _ = self.linear2(hidden_states)
+        proj_out, _ = self.proj_out(hidden_states)
         hidden_states = gate * proj_out
         hidden_states = residual + hidden_states
         if hidden_states.dtype == torch.float16:
