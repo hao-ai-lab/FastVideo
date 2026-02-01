@@ -103,7 +103,7 @@ python setup.py install  # or pip install -e .
 
 **`SAGE_ATTN_THREE`**
 
-[SageAttention 3](https://huggingface.co/jt-zhang/SageAttention3) is an advanced attention mechanism that leverages FP4 quantization and Blackwell GPU Tensor Cores for significant performance improvements.
+[SageAttention 3](https://github.com/thu-ml/SageAttention/tree/main/sageattention3_blackwell) is an advanced attention mechanism that leverages FP4 quantization and Blackwell GPU Tensor Cores for significant performance improvements.
 
 #### Hardware Requirements
 
@@ -113,11 +113,7 @@ python setup.py install  # or pip install -e .
 
 Note that Sage Attention 3 requires `python>=3.13`, `torch>=2.8.0`, `CUDA >=12.8`. If you are using `uv` and using `torch==2.8.0` make sure that `sentencepiece==0.2.1` in the pyproject.toml file.
 
-To use Sage Attention 3 in FastVideo, first get access to the SageAttention3 code, then move `sageattn/` and `setup.py` to the directory `fastvideo/attention/backends`, then install from using:
-
-```bash
-python setup.py install
-```
+To use Sage Attention 3 in FastVideo, follow the `README.md` in the linked repository to install the package from source.
 
 ## Teacache
 
