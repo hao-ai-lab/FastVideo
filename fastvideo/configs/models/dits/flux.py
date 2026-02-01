@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from typing import Tuple
 
 from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
+from fastvideo.platforms import AttentionBackendEnum
 
 
 @dataclass
@@ -108,6 +109,15 @@ class FluxArchConfig(DiTArchConfig):
     out_channels: int | None = None
 
     def __post_init__(self) -> None:
+        if not self._supported_attention_backends:
+            self._supported_attention_backends = (
+                AttentionBackendEnum.FLASH_ATTN,
+                AttentionBackendEnum.TORCH_SDPA,
+            )
+        else:
+            self._supported_attention_backends = tuple(
+                self._supported_attention_backends
+            )
         self.hidden_size = self.num_attention_heads * self.attention_head_dim
         if sum(self.rope_axes_dim) != self.attention_head_dim:
             half = self.attention_head_dim // 2

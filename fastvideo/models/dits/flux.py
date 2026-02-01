@@ -581,6 +581,7 @@ class FluxAttention(torch.nn.Module, AttentionModuleMixin):
         out_dim: int = None,
         context_pre_only: Optional[bool] = None,
         pre_only: bool = False,
+        supported_attention_backends=None,
     ):
         super().__init__()
 
@@ -648,6 +649,7 @@ class FluxAttention(torch.nn.Module, AttentionModuleMixin):
             num_heads=num_heads,
             head_size=self.head_dim,
             causal=False,
+            supported_attention_backends=supported_attention_backends,
         )
 
     def forward(
@@ -724,6 +726,7 @@ class FluxSingleTransformerBlock(nn.Module):
         num_attention_heads: int,
         attention_head_dim: int,
         mlp_ratio: float = 4.0,
+        supported_attention_backends=None,
     ):
         super().__init__()
         self.mlp_hidden_dim = int(dim * mlp_ratio)
@@ -745,6 +748,7 @@ class FluxSingleTransformerBlock(nn.Module):
             bias=True,
             eps=1e-6,
             pre_only=True,
+            supported_attention_backends=supported_attention_backends,
         )
 
     def forward(
@@ -792,6 +796,7 @@ class FluxTransformerBlock(nn.Module):
         attention_head_dim: int,
         qk_norm: str = "rms_norm",
         eps: float = 1e-6,
+        supported_attention_backends=None,
     ):
         super().__init__()
 
@@ -807,6 +812,7 @@ class FluxTransformerBlock(nn.Module):
             context_pre_only=False,
             bias=True,
             eps=eps,
+            supported_attention_backends=supported_attention_backends,
         )
 
         self.norm2 = LayerNorm(dim, eps=1e-6, elementwise_affine=False)
@@ -968,6 +974,7 @@ class FluxTransformer2DModel(CachableDiT):
                     dim=self.inner_dim,
                     num_attention_heads=self.config.num_attention_heads,
                     attention_head_dim=self.config.attention_head_dim,
+                    supported_attention_backends=self.config._supported_attention_backends,
                 )
                 for _ in range(self.config.num_layers)
             ]
@@ -979,6 +986,7 @@ class FluxTransformer2DModel(CachableDiT):
                     dim=self.inner_dim,
                     num_attention_heads=self.config.num_attention_heads,
                     attention_head_dim=self.config.attention_head_dim,
+                    supported_attention_backends=self.config._supported_attention_backends,
                 )
                 for _ in range(self.config.num_single_layers)
             ]
