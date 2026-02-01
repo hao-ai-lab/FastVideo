@@ -115,3 +115,33 @@ class PerPromptStatTracker:
         self.stats = {}
         logger.debug("Cleared per-prompt statistics (kept %d unique prompts in history)", 
                     len(self.history_prompts))
+
+
+def _unit_test_stat_tracker() -> None:
+    """
+    Unit test: 8 trajectories, 2 unique prompts (k=4), hardcoded rewards, global_std=False.
+    Prints advantage for each trajectory.
+    """
+    tracker = PerPromptStatTracker(global_std=False)
+
+    # Batch of 8: prompt "A" x4, prompt "B" x4; k=4 samples per prompt
+    prompts = ["A", "A", "A", "A", "B", "B", "B", "B"]
+    # Hardcoded rewards (per trajectory)
+    rewards = np.array([1.0, 2.0, 3.0, 4.0, 0.5, 1.0, 1.5, 2.0], dtype=np.float64)
+
+    advantages = tracker.update(prompts, rewards)
+
+    print("PerPromptStatTracker unit test (global_std=False, k=4, 2 prompts)")
+    print("=" * 60)
+    print(f"{'Traj':<6} {'Prompt':<8} {'Reward':<10} {'Advantage':<12}")
+    print("-" * 60)
+    for i in range(8):
+        print(f"{i:<6} {prompts[i]:<8} {rewards[i]:<10.4f} {advantages[i]:<12.6f}")
+    print("=" * 60)
+    print("Per-prompt normalization: advantages for prompt A use mean/std of A only; same for B.")
+    avg_group_size, history_count = tracker.get_stats()
+    print(f"get_stats() -> avg_group_size={avg_group_size}, history_prompts={history_count}")
+
+
+if __name__ == "__main__":
+    _unit_test_stat_tracker()

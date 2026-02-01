@@ -18,7 +18,7 @@ training_args=(
   --tracker_project_name "wan_t2v_grpo"
   --output_dir "checkpoints/wan_t2v_grpo_4gpu"
   --max_train_steps 1000
-  --train_batch_size 8
+  --train_batch_size 16
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
   --num_latent_t 20
@@ -78,7 +78,6 @@ cfg_args=( --guidance_scale 4.5 )
 miscellaneous_args=(
   --inference_mode False
   --checkpoints_total_limit 17
-  --training_cfg_rate 0.0
   --dit_precision "fp32"
   --num_euler_timesteps 50
   --ema_start_step 0

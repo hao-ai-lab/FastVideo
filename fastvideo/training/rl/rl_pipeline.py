@@ -432,28 +432,11 @@ class RLPipeline(TrainingPipeline):
         with torch.no_grad():
             # Sample multiple times per prompt if needed
             for _ in range(sample_time_per_prompt):
-                # NOTE: For batch processing, we need different seeds for each item in the batch.
-                # InputValidationStage will create a list of generators from the base seed.
-                # We use noise_random_generator (NOT validation_random_generator) to ensure
-                # proper stochasticity for RL training.
-                # Generate a base seed for this sampling call
-                base_seed = int(
-                    torch.randint(
-                        low=1,
-                        high=2**31 - 1,
-                        size=(1, ),
-                        generator=self.noise_random_generator,
-                        device=self.device,
-                    ).item())
+                
                 
                 # Set seed in sampling_param - InputValidationStage will use this to create
                 # a list of generators (one per batch item)
                 sampling_param.seed = self.seed
-                
-                # Don't pass a generator - let InputValidationStage create the proper list
-                # of generators from the seed. This ensures each batch item gets its own
-                # generator with a unique seed (seed, seed+1, seed+2, ...)
-                generator = None
                 
                 rl_data = ForwardBatch.RLData(
                     enabled=True,
@@ -463,26 +446,7 @@ class RLPipeline(TrainingPipeline):
                     store_trajectory=True,
                     keep_trajectory_on_cpu=False,
                 )
-                
-                # Prepare ForwardBatch initialization parameters for logging
-                # Use shallow_asdict to get all fields from sampling_param (like validation)
-                sampling_param_dict = shallow_asdict(sampling_param)
-                batch_init_params = {
-                    **sampling_param_dict,
-                    "latents": None,
-                    "generator": "None (InputValidationStage will create list)",
-                    "n_tokens": n_tokens,
-                    "eta": 0.0,
-                    "VSA_sparsity": self.training_args.VSA_sparsity,
-                    "rl_data": {
-                        "enabled": rl_data.enabled,
-                        "collect_log_probs": rl_data.collect_log_probs,
-                        "collect_kl": rl_data.collect_kl,
-                        "kl_reward": rl_data.kl_reward,
-                        "store_trajectory": rl_data.store_trajectory,
-                        "keep_trajectory_on_cpu": rl_data.keep_trajectory_on_cpu,
-                    },
-                }
+
                 
                 # Create ForwardBatch using same pattern as validation: **shallow_asdict(sampling_param)
                 # This ensures all fields from SamplingParam are included
