@@ -75,12 +75,12 @@ from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
 
 # SPDX-License-Identifier: Apache-2.0
 
-from fastvideo.pipelines_core import LoRAPipeline
-from fastvideo.pipelines_core.composed_pipeline_base import (
+from fastvideo.pipelines import LoRAPipeline
+from fastvideo.pipelines import (
     ComposedPipelineBase,
 )
 from fastvideo.pipelines_core.schedule_batch import Req
-from fastvideo.pipelines_core.stages import (
+from fastvideo.pipelines import (
     ConditioningStage,
     DecodingStage,
     DenoisingStage,
@@ -89,7 +89,7 @@ from fastvideo.pipelines_core.stages import (
     TextEncodingStage,
     TimestepPreparationStage,
 )
-from fastvideo.server_args import ServerArgs
+from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 
 # TODO(will): move PRECISION_TO_TYPE to better place
@@ -110,7 +110,7 @@ def calculate_shift(
     return mu
 
 
-def prepare_mu(batch: Req, server_args: ServerArgs):
+def prepare_mu(batch: Req, server_args: FastVideoArgs):
     height = batch.height
     width = batch.width
     vae_scale_factor = (
@@ -142,7 +142,7 @@ class FluxPipeline(LoRAPipeline, ComposedPipelineBase):
         "scheduler",
     ]
 
-    def create_pipeline_stages(self, server_args: ServerArgs):
+    def create_pipeline_stages(self, server_args: FastVideoArgs):
         """Set up pipeline stages with proper dependency injection."""
 
         self.add_stage(
