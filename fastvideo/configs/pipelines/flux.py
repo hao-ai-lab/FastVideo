@@ -66,7 +66,7 @@ class FluxPipelineConfig(ImagePipelineConfig):
 
     # Text encoding stage
     text_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (CLIPTextConfig(), T5Config())
+        default_factory=lambda: (T5Config(), CLIPTextConfig())
     )
 
     text_encoder_precisions: tuple[str, ...] = field(
@@ -74,15 +74,16 @@ class FluxPipelineConfig(ImagePipelineConfig):
     )
 
     preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
-        default_factory=lambda: (clip_preprocess_text, preprocess_text),
+        default_factory=lambda: (preprocess_text, clip_preprocess_text),
     )
 
     postprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
-        default_factory=lambda: (clip_postprocess_text, t5_postprocess_text)
+        default_factory=lambda: (t5_postprocess_text, clip_postprocess_text)
     )
 
     text_encoder_extra_args: list[dict] = field(
         default_factory=lambda: [
+            None,
             dict(
                 max_length=77,
                 padding="max_length",
@@ -90,7 +91,6 @@ class FluxPipelineConfig(ImagePipelineConfig):
                 return_overflowing_tokens=False,
                 return_length=False,
             ),
-            None,
         ]
     )
 
@@ -145,10 +145,10 @@ class FluxPipelineConfig(ImagePipelineConfig):
         return _pack_latents(latents, batch_size, num_channels_latents, height, width)
 
     def get_pos_prompt_embeds(self, batch):
-        return batch.prompt_embeds[1]
+        return batch.prompt_embeds[0]
 
     def get_neg_prompt_embeds(self, batch):
-        return batch.negative_prompt_embeds[1]
+        return batch.negative_prompt_embeds[0]
 
     def _prepare_latent_image_ids(self, original_height, original_width, device):
         vae_scale_factor = self.vae_config.arch_config.vae_scale_factor
@@ -264,31 +264,27 @@ class FluxPipelineConfig(ImagePipelineConfig):
     def prepare_pos_cond_kwargs(self, batch, device, rotary_emb, dtype):
         return {
             "freqs_cis": self.get_freqs_cis(
-                batch.prompt_embeds[1],
+                batch.prompt_embeds[0],
                 batch.width,
                 batch.height,
                 device,
                 rotary_emb,
                 batch,
             ),
-            "pooled_projections": (
-                batch.pooled_embeds[0] if batch.pooled_embeds else None
-            ),
+            "pooled_projections": batch.clip_embedding_pos,
         }
 
     def prepare_neg_cond_kwargs(self, batch, device, rotary_emb, dtype):
         return {
             "freqs_cis": self.get_freqs_cis(
-                batch.negative_prompt_embeds[1],
+                batch.negative_prompt_embeds[0],
                 batch.width,
                 batch.height,
                 device,
                 rotary_emb,
                 batch,
             ),
-            "pooled_projections": (
-                batch.neg_pooled_embeds[0] if batch.neg_pooled_embeds else None
-            ),
+            "pooled_projections": batch.clip_embedding_neg,
         }
 
 

@@ -15,6 +15,17 @@ from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
 logger = init_logger(__name__)
 
 
+class FluxPromptEncodingStage(TextEncodingStage):
+    def forward(self, batch, fastvideo_args):
+        batch = super().forward(batch, fastvideo_args)
+        if len(batch.prompt_embeds) > 1:
+            batch.clip_embedding_pos = batch.prompt_embeds[1]
+        if batch.do_classifier_free_guidance and batch.negative_prompt_embeds:
+            if len(batch.negative_prompt_embeds) > 1:
+                batch.clip_embedding_neg = batch.negative_prompt_embeds[1]
+        return batch
+
+
 class FluxPipeline(ComposedPipelineBase):
     _required_config_modules = [
         "text_encoder", "text_encoder_2", "tokenizer", "tokenizer_2", "vae",
@@ -26,14 +37,14 @@ class FluxPipeline(ComposedPipelineBase):
                        stage=InputValidationStage())
 
         self.add_stage(stage_name="prompt_encoding_stage_primary",
-                       stage=TextEncodingStage(
+                       stage=FluxPromptEncodingStage(
                            text_encoders=[
-                               self.get_module("text_encoder"),
-                               self.get_module("text_encoder_2")
+                               self.get_module("text_encoder_2"),
+                               self.get_module("text_encoder")
                            ],
                            tokenizers=[
-                               self.get_module("tokenizer"),
-                               self.get_module("tokenizer_2")
+                               self.get_module("tokenizer_2"),
+                               self.get_module("tokenizer")
                            ],
                        ))
 
