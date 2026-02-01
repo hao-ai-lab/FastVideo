@@ -42,7 +42,7 @@ def t5_postprocess_text(
 class FluxPipelineConfig(ImagePipelineConfig):
     """Configuration for the FLUX pipeline."""
 
-    embedded_cfg_scale: float = 3.5
+    embedded_cfg_scale: float = 0.0035
     flow_shift: float | None = 3.0
     timestep_input_scale: float | None = 1.0 / 1000.0
     embedded_cfg_scale_multiplier: float = 1.0
@@ -511,7 +511,7 @@ def flux2_pack_latents(latents):
 
 @dataclass
 class Flux2PipelineConfig(FluxPipelineConfig):
-    embedded_cfg_scale: float = 4.0
+    embedded_cfg_scale: float = 0.004
 
     task_type: ModelTaskType = ModelTaskType.TI2I
 
