@@ -782,9 +782,6 @@ class HYWorldTrainingPipeline(TrainingPipeline):
             n_dim=latents.ndim,
             dtype=latents.dtype,
         )
-        # print(sigmas.shape, sigmas.dtype)
-        # print(sigmas)
-        # exit()
         sigmas = rearrange(sigmas, '(B D) C T H W -> B C (D T) H W', D=latent_t)
         noisy_model_input = (1.0 -
                              sigmas) * training_batch.latents + sigmas * noise
@@ -891,39 +888,9 @@ class HYWorldTrainingPipeline(TrainingPipeline):
                                 enabled=True):
                 model_pred = self.transformer(**input_kwargs)
 
-            # DEBUG: Check raw model output
-            if self.global_rank == 0 and training_batch.current_timestep <= 5:
-                raw_output = model_pred.detach().float()
-                logger.info(
-                    f"[DEBUG step={training_batch.current_timestep}] raw_output shape: {raw_output.shape}, "
-                    f"mean: {raw_output.mean():.6f}, std: {raw_output.std():.6f}, "
-                    f"min: {raw_output.min():.6f}, max: {raw_output.max():.6f}")
-                logger.info(
-                    f"[DEBUG] noisy_model_input mean: {training_batch.noisy_model_input.float().mean():.6f}, "
-                    f"std: {training_batch.noisy_model_input.float().std():.6f}"
-                )
-                logger.info(
-                    f"[DEBUG] sigmas mean: {training_batch.sigmas.float().mean():.6f}, "
-                    f"min: {training_batch.sigmas.min():.6f}, max: {training_batch.sigmas.max():.6f}"
-                )
-                logger.info(
-                    f"[DEBUG] latents mean: {training_batch.latents.float().mean():.6f}, "
-                    f"std: {training_batch.latents.float().std():.6f}")
-
             if self.training_args.precondition_outputs:
                 assert training_batch.sigmas is not None
                 model_pred = training_batch.noisy_model_input - model_pred * training_batch.sigmas
-
-            # DEBUG: Check model_pred after preconditioning
-            if self.global_rank == 0 and training_batch.current_timestep <= 5:
-                logger.info(
-                    f"[DEBUG] model_pred (after precond) mean: {model_pred.detach().float().mean():.6f}, "
-                    f"std: {model_pred.detach().float().std():.6f}")
-                diff_from_gt = (model_pred.detach().float() -
-                                training_batch.latents.float()).abs()
-                logger.info(
-                    f"[DEBUG] |model_pred - latents| mean: {diff_from_gt.mean():.6f}, max: {diff_from_gt.max():.6f}"
-                )
 
             # Stash model output for optional visualization (detach to avoid autograd retention)
             if self._should_log_train_videos(training_batch.current_timestep):
@@ -950,10 +917,6 @@ class HYWorldTrainingPipeline(TrainingPipeline):
             loss = diff.sum() / max(
                 i2v_mask.sum(),
                 1) / self.training_args.gradient_accumulation_steps
-
-            # DEBUG: Check loss value
-            if self.global_rank == 0 and training_batch.current_timestep <= 5:
-                logger.info(f"[DEBUG] loss: {loss.item():.6f}")
 
             loss.backward()
             avg_loss = loss.detach().clone()
@@ -1042,15 +1005,6 @@ class HYWorldTrainingPipeline(TrainingPipeline):
         num_trainable_params = count_trainable(self.transformer)
         logger.info("Starting training with %s B trainable parameters",
                     round(num_trainable_params / 1e9, 3))
-
-        # DEBUG: Verify model is trainable
-        if self.global_rank == 0:
-            requires_grad_count = sum(1 for p in self.transformer.parameters()
-                                      if p.requires_grad)
-            total_params_count = sum(1 for p in self.transformer.parameters())
-            logger.info(
-                f"[DEBUG] Parameters with requires_grad=True: {requires_grad_count}/{total_params_count}"
-            )
 
         # Set random seeds
         self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
