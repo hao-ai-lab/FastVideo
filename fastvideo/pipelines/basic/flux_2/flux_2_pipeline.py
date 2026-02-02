@@ -10,6 +10,9 @@ using the modular pipeline architecture.
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
+from fastvideo.pipelines.basic.flux_2.flux_2_timestep_preparation import (
+    Flux2TimestepPreparationStage,
+)
 from fastvideo.pipelines.stages import (
     ConditioningStage,
     DecodingStage,
@@ -18,7 +21,6 @@ from fastvideo.pipelines.stages import (
     InputValidationStage,
     LatentPreparationStage,
     TextEncodingStage,
-    TimestepPreparationStage,
 )
 
 logger = init_logger(__name__)
@@ -75,7 +77,7 @@ class Flux2Pipeline(LoRAPipeline, ComposedPipelineBase):
 
         self.add_stage(
             stage_name="timestep_preparation_stage",
-            stage=TimestepPreparationStage(
+            stage=Flux2TimestepPreparationStage(
                 scheduler=self.get_module("scheduler"),
             ),
         )
