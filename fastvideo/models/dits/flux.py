@@ -653,6 +653,15 @@ class FluxAttention(torch.nn.Module, AttentionModuleMixin):
         query = self.norm_q(query)
         key = self.norm_k(key)
 
+        if query.dim() > 4:
+            seq = math.prod(query.shape[1:-2])
+            query = query.reshape(query.shape[0], seq, query.shape[-2],
+                                  query.shape[-1])
+            key = key.reshape(key.shape[0], seq, key.shape[-2],
+                              key.shape[-1])
+            value = value.reshape(value.shape[0], seq, value.shape[-2],
+                                  value.shape[-1])
+
         if self.added_kv_proj_dim is not None:
             encoder_query = encoder_query.unflatten(-1, (self.heads, -1))
             encoder_key = encoder_key.unflatten(-1, (self.heads, -1))
@@ -660,6 +669,23 @@ class FluxAttention(torch.nn.Module, AttentionModuleMixin):
 
             encoder_query = self.norm_added_q(encoder_query)
             encoder_key = self.norm_added_k(encoder_key)
+
+            if encoder_query.dim() > 4:
+                enc_seq = math.prod(encoder_query.shape[1:-2])
+                encoder_query = encoder_query.reshape(encoder_query.shape[0],
+                                                      enc_seq,
+                                                      encoder_query.shape[-2],
+                                                      encoder_query.shape[-1])
+                encoder_key = encoder_key.reshape(encoder_key.shape[0],
+                                                  enc_seq,
+                                                  encoder_key.shape[-2],
+                                                  encoder_key.shape[-1])
+                encoder_value = encoder_value.reshape(
+                    encoder_value.shape[0],
+                    enc_seq,
+                    encoder_value.shape[-2],
+                    encoder_value.shape[-1],
+                )
 
             bsz, seq_len, _, _ = query.shape
             query = torch.cat([encoder_query, query], dim=1)
