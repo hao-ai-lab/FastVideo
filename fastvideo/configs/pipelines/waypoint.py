@@ -49,12 +49,9 @@ class WaypointT2VConfig(PipelineConfig):
     vae_tiling: bool = False
     vae_sp: bool = False
     
-    # Text encoding - uses UMT5-XL
+    # Text encoding - uses UMT5-XL (loaded from model subfolder)
     text_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (T5Config(
-            model_id="google/umt5-xl",
-            max_position_embeddings=512,
-        ), ))
+        default_factory=lambda: (T5Config(), ))
     postprocess_text_funcs: tuple = field(
         default_factory=lambda: (umt5_postprocess_text, ))
     
