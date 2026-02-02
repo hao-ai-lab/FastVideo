@@ -109,18 +109,22 @@ class MLP(nn.Module):
 
 
 class AdaLN(nn.Module):
-    """Adaptive Layer Normalization for output."""
+    """Adaptive Layer Normalization for output (produces scale + shift)."""
     
     def __init__(self, d_model: int):
         super().__init__()
-        self.fc = nn.Linear(d_model, d_model, bias=False)
+        # Output 2*d_model: first half is scale, second half is shift
+        self.fc = nn.Linear(d_model, 2 * d_model, bias=False)
     
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
-        # cond: [B, N, D] -> [B, 1, D] for broadcasting
-        scale = self.fc(cond)
-        if scale.dim() == 3 and scale.shape[1] > 1:
-            scale = scale[:, :1, :]  # Take first frame's conditioning
-        return rms_norm(x) * (1 + scale)
+        # cond: [B, N, D] -> take first frame for modulation
+        if cond.dim() == 3:
+            cond = cond[:, 0:1, :]  # [B, 1, D]
+        
+        scale_shift = self.fc(cond)  # [B, 1, 2*D]
+        scale, shift = scale_shift.chunk(2, dim=-1)  # Each [B, 1, D]
+        
+        return rms_norm(x) * (1 + scale) + shift
 
 
 class CFG(nn.Module):
@@ -310,9 +314,9 @@ class GatedSelfAttention(nn.Module):
         self.v_proj = nn.Linear(d_model, n_kv_heads * self.head_dim, bias=False)
         self.out_proj = nn.Linear(d_model, d_model, bias=False)
         
-        # Gating
+        # Per-head gating: learnable [n_heads, n_heads] matrix
         if gated_attn:
-            self.gate_proj = nn.Linear(d_model, d_model, bias=False)
+            self.gate_proj = nn.Parameter(torch.ones(n_heads, n_heads))
         
         # Attention
         self.attn = LocalAttention(
@@ -360,12 +364,18 @@ class GatedSelfAttention(nn.Module):
         attn_out = self.attn(q, k, v)
         attn_out = attn_out.reshape(B, L, D)
         
-        # Output projection with optional gating
+        # Output projection with optional per-head gating
         out = self.out_proj(attn_out)
         
         if self.gated_attn:
-            gate = torch.sigmoid(self.gate_proj(x))
-            out = out * gate
+            # Per-head gate: apply gate_proj [n_heads, n_heads] to attention output
+            # Reshape to [B, L, n_heads, head_dim], apply gate, reshape back
+            out_heads = out.view(B, L, self.n_heads, self.head_dim)
+            # gate_proj is [n_heads, n_heads], apply sigmoid and einsum
+            gate = torch.sigmoid(self.gate_proj)  # [n_heads, n_heads]
+            # Weight contribution from each head
+            out_heads = torch.einsum('blhd,gh->blgd', out_heads, gate)
+            out = out_heads.reshape(B, L, D)
         
         return out
     
@@ -378,18 +388,26 @@ class GatedSelfAttention(nn.Module):
 
 
 class CrossAttention(nn.Module):
-    """Cross-attention for prompt conditioning."""
+    """Cross-attention for prompt conditioning.
+    
+    Uses context_dim as inner dimension (not d_model), matching checkpoint structure.
+    """
     
     def __init__(self, d_model: int, context_dim: int, n_heads: int):
         super().__init__()
         self.d_model = d_model
+        self.context_dim = context_dim
         self.n_heads = n_heads
-        self.head_dim = d_model // n_heads
+        # Inner dimension is context_dim, not d_model
+        self.head_dim = context_dim // n_heads
         
-        self.q_proj = nn.Linear(d_model, d_model, bias=False)
-        self.k_proj = nn.Linear(context_dim, d_model, bias=False)
-        self.v_proj = nn.Linear(context_dim, d_model, bias=False)
-        self.out_proj = nn.Linear(d_model, d_model, bias=False)
+        # Q: project from d_model to context_dim
+        self.q_proj = nn.Linear(d_model, context_dim, bias=False)
+        # K, V: project from context_dim to context_dim
+        self.k_proj = nn.Linear(context_dim, context_dim, bias=False)
+        self.v_proj = nn.Linear(context_dim, context_dim, bias=False)
+        # Out: project from context_dim back to d_model
+        self.out_proj = nn.Linear(context_dim, d_model, bias=False)
         
         self.attn = LocalAttention(
             num_heads=n_heads,
@@ -409,7 +427,7 @@ class CrossAttention(nn.Module):
         context: torch.Tensor,
         context_pad_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        B, L, D = x.shape
+        B, L, _ = x.shape
         _, S, _ = context.shape
         
         q = self.q_proj(x).view(B, L, self.n_heads, self.head_dim)
@@ -418,7 +436,7 @@ class CrossAttention(nn.Module):
         
         # TODO: Handle context_pad_mask properly
         attn_out = self.attn(q, k, v)
-        attn_out = attn_out.reshape(B, L, D)
+        attn_out = attn_out.reshape(B, L, self.context_dim)
         
         return self.out_proj(attn_out)
 
