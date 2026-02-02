@@ -20,7 +20,7 @@ def main():
     sampling_param = SamplingParam.from_pretrained(model_path)
 
     # video2world example from official repo
-    video_path = "cosmos-predict2.5/assets/base/robot_pouring.mp4"
+    video_path = "../../../videos/robot_pouring.mp4"
 
     prompt = (
         "A robotic arm, primarily white with black joints and cables, is shown in a clean, modern indoor setting with a white tabletop. "

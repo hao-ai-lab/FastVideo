@@ -20,7 +20,7 @@ def main():
     sampling_param = SamplingParam.from_pretrained(model_path)
 
     # image2world example from official repo
-    image_path = "cosmos-predict2.5/assets/base/bus_terminal.jpg"
+    image_path = "../../../images/bus_terminal.jpg"
 
     prompt = (
         "A nighttime city bus terminal gradually shifts from stillness to subtle movement. "
