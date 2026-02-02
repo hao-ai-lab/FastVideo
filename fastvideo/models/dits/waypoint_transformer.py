@@ -436,10 +436,10 @@ class CrossAttention(nn.Module):
         attn_mask = None
         if context_pad_mask is not None:
             # context_pad_mask: [B, S] where True = valid, False = pad
-            # SDPA expects: [B, 1, 1, S] where -inf = masked
+            # SDPA expects: [B, 1, 1, S] where -inf = masked, same dtype as q
             attn_mask = context_pad_mask.unsqueeze(1).unsqueeze(2)
             attn_mask = attn_mask.expand(B, 1, L, S)
-            attn_mask = torch.where(attn_mask, 0.0, float('-inf'))
+            attn_mask = torch.where(attn_mask, 0.0, float('-inf')).to(q.dtype)
         
         # Attention using PyTorch SDPA
         attn_out = F.scaled_dot_product_attention(
