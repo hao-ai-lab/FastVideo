@@ -127,7 +127,14 @@ class DecodingStage(PipelineStage):
             #     self.vae.enable_parallel()
             if not vae_autocast_enabled:
                 latents = latents.to(vae_dtype)
+            # Image VAEs (e.g. Flux2) expect 4D (B, C, H, W); squeeze T when 5D with T=1
+            squeezed_for_vae = False
+            if latents.ndim == 5 and latents.shape[2] == 1:
+                latents = latents.squeeze(2)
+                squeezed_for_vae = True
             image = self.vae.decode(latents)
+            if squeezed_for_vae:
+                image = image.unsqueeze(2)
 
         # Normalize image to [0, 1] range
         image = (image / 2 + 0.5).clamp(0, 1)
