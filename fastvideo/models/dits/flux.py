@@ -1106,6 +1106,21 @@ class FluxTransformer2DModel(CachableDiT, OffloadableDiTMixin):
             logger.warning(
                 "Passing `scale` via `joint_attention_kwargs` when not using the PEFT backend is ineffective."
             )
+
+        restore_spatial: tuple[int, int, int, int, int] | None = None
+        if hidden_states.ndim == 5:
+            bsz, channels, time, height, width = hidden_states.shape
+            hidden_states = hidden_states.permute(0, 2, 3, 4, 1).reshape(
+                bsz, time * height * width, channels
+            )
+            restore_spatial = (bsz, channels, time, height, width)
+        elif hidden_states.ndim == 4:
+            bsz, channels, height, width = hidden_states.shape
+            hidden_states = hidden_states.permute(0, 2, 3, 1).reshape(
+                bsz, height * width, channels
+            )
+            restore_spatial = (bsz, channels, 1, height, width)
+
         hidden_states, _ = self.x_embedder(hidden_states)
 
         # Only pass guidance to time_text_embed if the model supports it
@@ -1146,6 +1161,18 @@ class FluxTransformer2DModel(CachableDiT, OffloadableDiTMixin):
         hidden_states = self.norm_out(hidden_states, temb)
 
         output, _ = self.proj_out(hidden_states)
+
+        if restore_spatial is not None:
+            bsz, channels, time, height, width = restore_spatial
+            expected_seq = time * height * width
+            if output.shape[1] != expected_seq:
+                raise ValueError(
+                    "FluxTransformer2DModel output sequence length does not match "
+                    f"spatial shape: got {output.shape[1]} vs expected {expected_seq}."
+                )
+            output = output.reshape(
+                bsz, time, height, width, output.shape[-1]
+            ).permute(0, 4, 1, 2, 3).contiguous()
 
         return output
 
