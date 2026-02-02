@@ -491,29 +491,83 @@ def process_custom_actions(keyboard_tensor, mouse_tensor, forward_speed=DEFAULT_
     viewmats = torch.as_tensor(np.array(w2c_list))
     intrinsics = torch.as_tensor(np.array(intrinsic_list))
 
-    # 4. Generate Action Labels DIRECTLY from inputs
-    # HyWorld Label Logic:
-    # Trans One-Hot: [Forward, Backward, Right, Left] (Indices 0, 1, 2, 3)
-    # Rotate One-Hot: [Right, Left, Up, Down] (Indices 0, 1, 2, 3)
+    # 4. Generate Action Labels by analyzing the generated trajectory
+    # This ensures consistency with complex simultaneous movements, exactly as pose_to_input does.
     
-    trans_one_hot = torch.zeros((keyboard_tensor.shape[0], 4), dtype=torch.long)
-    trans_one_hot[:, 0] = (keyboard_tensor[:, 0] > 0.5).long() # Forward
-    trans_one_hot[:, 1] = (keyboard_tensor[:, 1] > 0.5).long() # Backward
-    trans_one_hot[:, 2] = (keyboard_tensor[:, 3] > 0.5).long() # Right
-    trans_one_hot[:, 3] = (keyboard_tensor[:, 2] > 0.5).long() # Left
+    # Calculate relative camera-to-world transforms
+    # c2ws = inverse(viewmats)
+    c2ws = np.linalg.inv(np.array(w2c_list))
     
-    rotate_one_hot = torch.zeros((mouse_tensor.shape[0], 4), dtype=torch.long)
-    rotate_one_hot[:, 0] = (mouse_tensor[:, 1] > 1e-4).long()  # Yaw Right
-    rotate_one_hot[:, 1] = (mouse_tensor[:, 1] < -1e-4).long() # Yaw Left
-    rotate_one_hot[:, 2] = (mouse_tensor[:, 0] > 1e-4).long()  # Pitch Up
-    rotate_one_hot[:, 3] = (mouse_tensor[:, 0] < -1e-4).long() # Pitch Down
+    # Calculate relative movement between frames
+    # relative_c2w[i] = inv(c2ws[i-1]) @ c2ws[i]
+    C_inv = np.linalg.inv(c2ws[:-1])
+    relative_c2w = np.zeros_like(c2ws)
+    relative_c2w[0, ...] = c2ws[0, ...] # First is anchor
+    relative_c2w[1:, ...] = C_inv @ c2ws[1:, ...]
+    
+    # Initialize one-hot action encodings
+    trans_one_hot = np.zeros((relative_c2w.shape[0], 4), dtype=np.int32)
+    rotate_one_hot = np.zeros((relative_c2w.shape[0], 4), dtype=np.int32)
+
+    move_norm_valid = 0.0001
+    
+    # Skip index 0 (anchor/identity)
+    for i in range(1, relative_c2w.shape[0]):
+        move_dirs = relative_c2w[i, :3, 3]  # direction vector
+        move_norms = np.linalg.norm(move_dirs)
+        
+        if move_norms > move_norm_valid:  # threshold for movement
+            move_norm_dirs = move_dirs / move_norms
+            angles_rad = np.arccos(move_norm_dirs.clip(-1.0, 1.0))
+            trans_angles_deg = angles_rad * (180.0 / np.pi)  # convert to degrees
+        else:
+            trans_angles_deg = np.zeros(3)
+
+        R_rel = relative_c2w[i, :3, :3]
+        r = R.from_matrix(R_rel)
+        rot_angles_deg = r.as_euler("xyz", degrees=True)
+
+        # Determine movement actions based on trajectory
+        # Note: HyWorld logic checks if rotation is small before assigning translation labels
+        # to avoid ambiguity in TPS mode, but here we generally want to capture the dominant movement.
+        tps = False # Default assumption, can be made an arg if needed
+        
+        if move_norms > move_norm_valid:
+            if (not tps) or (
+                tps and abs(rot_angles_deg[1]) < 5e-2 and abs(rot_angles_deg[0]) < 5e-2
+            ):
+                # Z-axis (Forward/Back)
+                if trans_angles_deg[2] < 60:
+                    trans_one_hot[i, 0] = 1  # forward
+                elif trans_angles_deg[2] > 120:
+                    trans_one_hot[i, 1] = 1  # backward
+
+                # X-axis (Right/Left)
+                if trans_angles_deg[0] < 60:
+                    trans_one_hot[i, 2] = 1  # right
+                elif trans_angles_deg[0] > 120:
+                    trans_one_hot[i, 3] = 1  # left
+
+        # Determine rotation actions
+        # Y-axis (Yaw)
+        if rot_angles_deg[1] > 5e-2:
+            rotate_one_hot[i, 0] = 1  # right
+        elif rot_angles_deg[1] < -5e-2:
+            rotate_one_hot[i, 1] = 1  # left
+
+        # X-axis (Pitch)
+        if rot_angles_deg[0] > 5e-2:
+            rotate_one_hot[i, 2] = 1  # up
+        elif rot_angles_deg[0] < -5e-2:
+            rotate_one_hot[i, 3] = 1  # down
+
+    trans_one_hot = torch.tensor(trans_one_hot)
+    rotate_one_hot = torch.tensor(rotate_one_hot)
 
     # Convert to single labels
     trans_label = one_hot_to_one_dimension(trans_one_hot)
     rotate_label = one_hot_to_one_dimension(rotate_one_hot)
     action_labels = trans_label * 9 + rotate_label
-
-    action_labels = torch.cat([torch.tensor([0]), action_labels])
 
     return viewmats, intrinsics, action_labels
 
