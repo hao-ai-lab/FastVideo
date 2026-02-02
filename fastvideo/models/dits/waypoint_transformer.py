@@ -396,15 +396,17 @@ class CrossAttention(nn.Module):
     """Cross-attention for prompt conditioning.
     
     Uses context_dim as inner dimension (not d_model), matching checkpoint structure.
+    Uses a fixed head_dim=64 and calculates n_heads from context_dim.
     """
     
-    def __init__(self, d_model: int, context_dim: int, n_heads: int):
+    def __init__(self, d_model: int, context_dim: int, head_dim: int = 64):
         super().__init__()
         self.d_model = d_model
         self.context_dim = context_dim
-        self.n_heads = n_heads
-        # Inner dimension is context_dim, not d_model
-        self.head_dim = context_dim // n_heads
+        self.head_dim = head_dim
+        # Calculate n_heads from context_dim and head_dim
+        assert context_dim % head_dim == 0, f"context_dim {context_dim} must be divisible by head_dim {head_dim}"
+        self.n_heads = context_dim // head_dim
         
         # Q: project from d_model to context_dim
         self.q_proj = nn.Linear(d_model, context_dim, bias=False)
@@ -499,7 +501,7 @@ class WaypointBlock(nn.Module):
             and layer_idx % prompt_conditioning_period == 0
         )
         self.prompt_cross_attn = (
-            CrossAttention(d_model, prompt_embedding_dim, n_heads)
+            CrossAttention(d_model, prompt_embedding_dim)  # Uses head_dim=64 internally
             if do_prompt_cond else None
         )
         
