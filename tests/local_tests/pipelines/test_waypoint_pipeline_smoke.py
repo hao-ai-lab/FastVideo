@@ -208,10 +208,10 @@ def test_waypoint_pipeline_import():
 def test_waypoint_config_loading():
     """Test that Waypoint pipeline config loads correctly."""
     from fastvideo.configs.pipelines.waypoint import WaypointT2VConfig
-    from fastvideo.configs.pipelines.registry import PIPE_NAME_TO_CONFIG, PIPELINE_DETECTOR
+    from fastvideo.configs.pipelines.registry import PIPE_NAME_TO_CONFIG
     
-    # Check config is registered
-    assert "WaypointPipeline" in PIPE_NAME_TO_CONFIG
+    # Check config is registered (key is model path, not pipeline name)
+    assert "Overworld/Waypoint-1-Small" in PIPE_NAME_TO_CONFIG
     
     # Instantiate config
     config = WaypointT2VConfig()
