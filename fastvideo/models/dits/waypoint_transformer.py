@@ -580,6 +580,11 @@ class WaypointTransformer(nn.Module):
 # Main WorldModel
 # =============================================================================
 
+def is_blocks(name: str) -> bool:
+    """FSDP shard condition for transformer blocks."""
+    return ".blocks." in name
+
+
 class WaypointWorldModel(BaseDiT):
     """
     Waypoint World Model for interactive video generation.
@@ -591,9 +596,23 @@ class WaypointWorldModel(BaseDiT):
     - The current noise level
     """
     
-    def __init__(self, config):
-        super().__init__()
+    # Required class attributes for BaseDiT
+    _fsdp_shard_conditions = [is_blocks]
+    _compile_conditions = []
+    param_names_mapping = {}  # Direct loading - checkpoint keys match model keys
+    reverse_param_names_mapping = {}
+    
+    def __init__(self, config, hf_config: dict = None):
+        # Skip BaseDiT.__init__ and call nn.Module.__init__ directly
+        # because Waypoint uses a different config structure
+        nn.Module.__init__(self)
         self.config = config
+        self.hf_config = hf_config or {}
+        
+        # Required attributes for BaseDiT compatibility
+        self.hidden_size = config.d_model
+        self.num_attention_heads = config.n_heads
+        self.num_channels_latents = config.channels
         
         # Timestep/noise conditioning
         self.denoise_step_emb = NoiseConditioner(config.d_model)
