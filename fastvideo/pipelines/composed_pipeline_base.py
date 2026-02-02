@@ -404,14 +404,50 @@ class ComposedPipelineBase(ABC):
                 modules[module_name] = loaded_modules[module_name]
                 continue
 
-            # we load the module from the extra config module map if it exists
-            if module_name in self._extra_config_module_map:
-                load_module_name = self._extra_config_module_map[module_name]
-            else:
-                load_module_name = module_name
+            # Resolve module spec. Supported:
+            # - Standard diffusers model_index.json:
+            #     "transformer": ["diffusers", "WorldModel"]
+            # - Modular pipelines (diffusers ModularPipeline style):
+            #     "text_encoder": [null, null, {"pretrained_model_name_or_path": "google/umt5-xl", "type_hint": ["transformers","UMT5EncoderModel"]}]
+            transformers_or_diffusers: str
+            component_model_path: str
+            if (isinstance(module_spec, (list, tuple))
+                    and len(module_spec) == 2):
+                transformers_or_diffusers = module_spec[0]
+                # architecture = module_spec[1]  # currently unused by loaders
+                # we load the module from the extra config module map if it exists
+                if module_name in self._extra_config_module_map:
+                    load_module_name = self._extra_config_module_map[module_name]
+                else:
+                    load_module_name = module_name
+                component_model_path = os.path.join(self.model_path,
+                                                    load_module_name)
+            elif (isinstance(module_spec, (list, tuple))
+                  and len(module_spec) == 3 and isinstance(module_spec[2], dict)):
+                cfg: dict[str, Any] = module_spec[2]
+                type_hint = cfg.get("type_hint")
+                if isinstance(type_hint, (list, tuple)) and len(type_hint) >= 1:
+                    transformers_or_diffusers = type_hint[0]
+                else:
+                    transformers_or_diffusers = "diffusers"
 
-            component_model_path = os.path.join(self.model_path,
-                                                load_module_name)
+                src = cfg.get("pretrained_model_name_or_path", "")
+                if not isinstance(src, str) or not src.strip():
+                    raise ValueError(
+                        f"Invalid pretrained_model_name_or_path for module {module_name}"
+                    )
+                src_local = maybe_download_model(src.strip())
+                subfolder = cfg.get("subfolder", None)
+                component_model_path = (os.path.join(src_local, subfolder)
+                                        if subfolder else src_local)
+                # extra map does not apply in this mode (explicit module path).
+                load_module_name = module_name
+            else:
+                raise ValueError(
+                    f"Unsupported module spec for {module_name}: {module_spec}"
+                )
+
+            # we load the module from the extra config module map if it exists
             module = PipelineComponentLoader.load_module(
                 module_name=load_module_name,
                 component_model_path=component_model_path,

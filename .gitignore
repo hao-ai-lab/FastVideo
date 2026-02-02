@@ -33,6 +33,7 @@ env
 **.txt
 *.log
 weights/
+official_weights/
 
 # SSIM test outputs
 fastvideo/tests/ssim/generated_videos/

@@ -5,6 +5,8 @@ import glob
 import json
 import os
 import time
+import importlib.util
+import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable
 from copy import deepcopy
@@ -649,11 +651,22 @@ class VAELoader(ComponentLoader):
                             "ltx2_temporal_tile_overlap_in_frames", 24),
                     )
             else:
-                config.pop("_class_name", None)
-                vae_config = fastvideo_args.pipeline_config.vae_config
-                vae_config.update_model_arch(config)
-                vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
-                vae = vae_cls(vae_config).to(target_device)
+                # Standard FastVideo VAE path. For custom diffusers VAEs that are
+                # implemented as local python modules (via `auto_map`), fall back
+                # to dynamic import + safetensors load.
+                try:
+                    config.pop("_class_name", None)
+                    config.pop("_diffusers_version", None)
+                    config.pop("auto_map", None)
+                    vae_config = fastvideo_args.pipeline_config.vae_config
+                    vae_config.update_model_arch(config)
+                    vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+                    vae = vae_cls(vae_config).to(target_device)
+                except Exception:
+                    return self._load_dynamic_diffusers_vae(
+                        model_path=model_path,
+                        device=target_device,
+                    )
 
         # Find all safetensors files
         safetensors_list = glob.glob(
@@ -694,6 +707,67 @@ class VAELoader(ComponentLoader):
         strict_load = class_name == "AutoencoderKL"
         vae.load_state_dict(loaded, strict=strict_load)
 
+        return vae.eval()
+
+    def _load_dynamic_diffusers_vae(self, model_path: str,
+                                    device: torch.device) -> nn.Module:
+        """Load a VAE defined by local python source in the model folder.
+
+        This supports repos that ship `auto_map` in their diffusers config, e.g.
+        Waypoint's `WorldEngineVAE` (`auto_map.AutoModel = "ae_model.WorldEngineVAE"`).
+        """
+        raw_config = get_diffusers_config(model=model_path)
+        class_name = raw_config.get("_class_name")
+        assert class_name is not None
+
+        auto_map = raw_config.get("auto_map") or {}
+        target = (auto_map.get("AutoModel") or auto_map.get("AutoencoderKL")
+                  or auto_map.get("Autoencoder"))
+        if not target or not isinstance(target, str) or "." not in target:
+            raise ValueError(
+                f"Unsupported dynamic VAE config in {model_path}: missing auto_map target"
+            )
+
+        module_name, cls_name = target.rsplit(".", 1)
+        py_path = os.path.join(model_path, f"{module_name}.py")
+        if not os.path.exists(py_path):
+            raise FileNotFoundError(f"Missing dynamic module: {py_path}")
+
+        unique_mod = f"fastvideo_dynamic_vae_{uuid.uuid4().hex}"
+        spec = importlib.util.spec_from_file_location(unique_mod, py_path)
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+
+        cls = getattr(mod, cls_name, None)
+        if cls is None:
+            raise AttributeError(f"Class {cls_name} not found in {py_path}")
+
+        # Filter non-init kwargs.
+        cfg = dict(raw_config)
+        for k in ("_class_name", "_diffusers_version", "auto_map"):
+            cfg.pop(k, None)
+
+        # Instantiate (try common signatures).
+        try:
+            vae = cls(**cfg)
+        except Exception:
+            try:
+                vae = cls(cfg)
+            except Exception:
+                vae = cls()
+
+        # Load weights.
+        safetensors_list = glob.glob(os.path.join(str(model_path), "*.safetensors"))
+        if not safetensors_list:
+            raise ValueError(f"No safetensors files found in {model_path}")
+        loaded: dict[str, torch.Tensor] = {}
+        for sf_file in safetensors_list:
+            loaded.update(safetensors_load_file(sf_file))
+        if hasattr(vae, "load_state_dict"):
+            vae.load_state_dict(loaded, strict=False)
+
+        vae = vae.to(device)
         return vae.eval()
 
 

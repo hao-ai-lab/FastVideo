@@ -7,7 +7,7 @@ from typing import List, Optional
 from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
 
 
-def is_blocks(n: str, m) -> bool:
+def is_blocks(n: str, _) -> bool:
     """Check if a parameter belongs to transformer blocks for FSDP sharding."""
     return "transformer.blocks" in n
 

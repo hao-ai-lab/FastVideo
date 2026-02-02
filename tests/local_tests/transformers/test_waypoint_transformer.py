@@ -94,7 +94,8 @@ class TestWaypointTransformerParity:
     def test_forward_pass(self, waypoint_config, device):
         """Test that forward pass runs without errors."""
         import safetensors.torch as st
-        from fastvideo.models.dits.waypoint_transformer import WaypointWorldModel, CtrlInput
+        from fastvideo.models.dits.waypoint_transformer import WaypointWorldModel
+        from fastvideo.pipelines.basic.waypoint.waypoint_pipeline import CtrlInput
         
         # Load model
         weights_file = os.path.join(WEIGHTS_PATH, "transformer", "diffusion_pytorch_model.safetensors")

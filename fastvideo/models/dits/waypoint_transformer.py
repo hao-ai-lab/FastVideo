@@ -11,63 +11,28 @@ Reference: https://huggingface.co/Overworld/Waypoint-1-Small
 """
 
 import math
-from dataclasses import dataclass
-from typing import Optional, Set, Tuple
+from typing import Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from fastvideo.attention import DistributedAttention, LocalAttention
+from fastvideo.attention.backends.sdpa import SDPAMetadata
+from fastvideo.forward_context import set_forward_context
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
+from fastvideo.platforms import AttentionBackendEnum
 
 logger = init_logger(__name__)
 
 
 # =============================================================================
-# Control Input Dataclass
+# Note: CtrlInput is defined in fastvideo/pipelines/basic/waypoint/waypoint_pipeline.py
+# to avoid circular imports and keep pipeline-specific code separate
 # =============================================================================
-
-@dataclass
-class CtrlInput:
-    """Controller input for Waypoint world model.
-    
-    Attributes:
-        button: Set of pressed button IDs (0-255). Uses Owl-Control keycodes.
-        mouse: Tuple of (x, y) mouse velocity as floats.
-        scroll: Scroll wheel value (-1, 0, or 1).
-    """
-    button: Set[int] = None
-    mouse: Tuple[float, float] = (0.0, 0.0)
-    scroll: float = 0.0
-    
-    def __post_init__(self):
-        if self.button is None:
-            self.button = set()
-    
-    def to_tensors(self, device: torch.device, dtype: torch.dtype, n_buttons: int = 256):
-        """Convert to tensor format expected by the model.
-        
-        Returns:
-            mouse: [1, 1, 2] tensor
-            button: [1, 1, n_buttons] one-hot tensor
-            scroll: [1, 1, 1] tensor
-        """
-        # Mouse velocity
-        mouse = torch.tensor([[list(self.mouse)]], device=device, dtype=dtype)
-        
-        # One-hot button encoding
-        button = torch.zeros(1, 1, n_buttons, device=device, dtype=dtype)
-        for b in self.button:
-            if 0 <= b < n_buttons:
-                button[0, 0, b] = 1.0
-        
-        # Scroll
-        scroll = torch.tensor([[[self.scroll]]], device=device, dtype=dtype)
-        
-        return mouse, button, scroll
 
 
 # =============================================================================
@@ -323,6 +288,24 @@ class GatedSelfAttention(nn.Module):
         self.k_proj = nn.Linear(d_model, n_kv_heads * self.head_dim, bias=False)
         self.v_proj = nn.Linear(d_model, n_kv_heads * self.head_dim, bias=False)
         self.out_proj = nn.Linear(d_model, d_model, bias=False)
+
+        # Prefer LocalAttention for correctness in unit tests (works without
+        # requiring FastVideo distributed/SP groups). If SP is initialized, we
+        # can optionally switch to DistributedAttention at runtime.
+        self.local_attn_layer = LocalAttention(
+            num_heads=n_heads,
+            head_size=self.head_dim,
+            num_kv_heads=n_kv_heads,
+            causal=causal,
+            supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA, ),
+        )
+        self.dist_attn_layer = DistributedAttention(
+            num_heads=n_heads,
+            head_size=self.head_dim,
+            num_kv_heads=n_kv_heads,
+            causal=causal,
+            supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA, ),
+        )
         
         # Per-head gating: learnable [n_heads, n_heads] matrix
         # Use a simple Linear-like wrapper to get gate_proj.weight naming
@@ -345,29 +328,34 @@ class GatedSelfAttention(nn.Module):
         v = self.v_proj(x)
         
         # Reshape for attention: [B, L, n_heads, head_dim] -> [B, n_heads, L, head_dim]
-        q = q.view(B, L, self.n_heads, self.head_dim).transpose(1, 2)
-        k = k.view(B, L, self.n_kv_heads, self.head_dim).transpose(1, 2)
-        v = v.view(B, L, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        q = q.view(B, L, self.n_heads, self.head_dim)
+        k = k.view(B, L, self.n_kv_heads, self.head_dim)
+        v = v.view(B, L, self.n_kv_heads, self.head_dim)
         
         # Apply RoPE if provided
         if pos_emb is not None:
-            q = self._apply_rope(q.transpose(1, 2), pos_emb).transpose(1, 2)
-            k = self._apply_rope(k.transpose(1, 2), pos_emb).transpose(1, 2)
+            q = self._apply_rope(q, pos_emb)
+            k = self._apply_rope(k, pos_emb)
         
-        # GQA: repeat K, V heads if needed
-        if self.n_kv_heads < self.n_heads:
-            repeat_factor = self.n_heads // self.n_kv_heads
-            k = k.repeat_interleave(repeat_factor, dim=1)
-            v = v.repeat_interleave(repeat_factor, dim=1)
-        
-        # Attention using PyTorch SDPA
-        attn_out = F.scaled_dot_product_attention(
-            q, k, v,
-            is_causal=self.causal,
-            scale=self.scale,
-        )
-        # [B, n_heads, L, head_dim] -> [B, L, D]
-        attn_out = attn_out.transpose(1, 2).reshape(B, L, D)
+        # Attention via FastVideo DistributedAttention (SDPA backend).
+        # Note: forward_context is required; for now we only need a timestep
+        # and no explicit mask (causal handled by backend).
+        meta = SDPAMetadata(current_timestep=0, attn_mask=None)
+        use_dist = False
+        try:
+            import torch.distributed as dist
+            if dist.is_initialized():
+                from fastvideo.distributed.parallel_state import get_sp_world_size
+                use_dist = get_sp_world_size() > 1
+        except Exception:
+            use_dist = False
+
+        with set_forward_context(current_timestep=0, attn_metadata=meta):
+            if use_dist:
+                attn_out, _ = self.dist_attn_layer(q=q, k=k, v=v)
+            else:
+                attn_out = self.local_attn_layer(q=q, k=k, v=v)
+        attn_out = attn_out.reshape(B, L, D)
         
         # Output projection with optional per-head gating
         out = self.out_proj(attn_out)
@@ -415,8 +403,14 @@ class CrossAttention(nn.Module):
         self.v_proj = nn.Linear(context_dim, context_dim, bias=False)
         # Out: project from context_dim back to d_model
         self.out_proj = nn.Linear(context_dim, d_model, bias=False)
-        
-        self.scale = self.head_dim ** -0.5
+
+        self.attn_layer = LocalAttention(
+            num_heads=self.n_heads,
+            head_size=self.head_dim,
+            num_kv_heads=self.n_heads,
+            causal=False,
+            supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA, ),
+        )
     
     def forward(
         self,
@@ -427,29 +421,22 @@ class CrossAttention(nn.Module):
         B, L, _ = x.shape
         _, S, _ = context.shape
         
-        # [B, L, context_dim] -> [B, n_heads, L, head_dim]
-        q = self.q_proj(x).view(B, L, self.n_heads, self.head_dim).transpose(1, 2)
-        k = self.k_proj(context).view(B, S, self.n_heads, self.head_dim).transpose(1, 2)
-        v = self.v_proj(context).view(B, S, self.n_heads, self.head_dim).transpose(1, 2)
+        q = self.q_proj(x).view(B, L, self.n_heads, self.head_dim)
+        k = self.k_proj(context).view(B, S, self.n_heads, self.head_dim)
+        v = self.v_proj(context).view(B, S, self.n_heads, self.head_dim)
         
         # Create attention mask from padding mask if provided
         attn_mask = None
         if context_pad_mask is not None:
             # context_pad_mask: [B, S] where True = valid, False = pad
-            # SDPA expects: [B, 1, 1, S] where -inf = masked, same dtype as q
-            attn_mask = context_pad_mask.unsqueeze(1).unsqueeze(2)
-            attn_mask = attn_mask.expand(B, 1, L, S)
-            attn_mask = torch.where(attn_mask, 0.0, float('-inf')).to(q.dtype)
-        
-        # Attention using PyTorch SDPA
-        attn_out = F.scaled_dot_product_attention(
-            q, k, v,
-            attn_mask=attn_mask,
-            is_causal=False,
-            scale=self.scale,
-        )
-        # [B, n_heads, L, head_dim] -> [B, L, context_dim]
-        attn_out = attn_out.transpose(1, 2).reshape(B, L, self.context_dim)
+            # SDPA expects broadcastable mask [B, 1, L, S] with -inf for masked.
+            attn_mask = context_pad_mask.unsqueeze(1).unsqueeze(2).expand(B, 1, L, S)
+            attn_mask = torch.where(attn_mask, 0.0, float("-inf")).to(q.dtype)
+
+        meta = SDPAMetadata(current_timestep=0, attn_mask=attn_mask)
+        with set_forward_context(current_timestep=0, attn_metadata=meta):
+            attn_out = self.attn_layer(q=q, k=k, v=v)
+        attn_out = attn_out.reshape(B, L, self.context_dim)
         
         return self.out_proj(attn_out)
 
