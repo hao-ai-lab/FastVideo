@@ -15,8 +15,14 @@ import math
 import os
 from typing import Any
 
+import imageio
 import numpy as np
 import torch
+import torchvision
+from einops import rearrange
+from torch.utils.data import DataLoader
+
+from fastvideo.dataset.validation_dataset import ValidationDataset
 import torch.distributed as dist
 import torch.nn as nn
 
@@ -306,6 +312,167 @@ class RLPipeline(TrainingPipeline):
         # Set validation_pipeline to None for now
         self.validation_pipeline = None
 
+    @torch.no_grad()
+    def _log_validation(self, transformer, training_args, global_step) -> None:
+        """
+        Generate validation videos, log them to the tracker, and compute mean
+        reward on validation videos (logged as validation_reward_mean).
+        """
+        training_args.inference_mode = True
+        training_args.dit_cpu_offload = False
+        if not training_args.log_validation:
+            return
+        if self.validation_pipeline is None:
+            raise ValueError("Validation pipeline is not set")
+
+        logger.info("Starting validation", local_main_process_only=False)
+
+        sampling_param = SamplingParam.from_pretrained(training_args.model_path)
+
+        logger.info(
+            "rank: %s: fastvideo_args.validation_dataset_file: %s",
+            self.global_rank,
+            training_args.validation_dataset_file,
+            local_main_process_only=False,
+        )
+        validation_dataset = ValidationDataset(
+            training_args.validation_dataset_file
+        )
+        validation_dataloader = DataLoader(
+            validation_dataset, batch_size=None, num_workers=0
+        )
+
+        self.transformer.eval()
+        if getattr(self, "transformer_2", None) is not None:
+            self.transformer_2.eval()
+
+        validation_steps = training_args.validation_sampling_steps.split(",")
+        validation_steps = [int(step) for step in validation_steps]
+        validation_steps = [step for step in validation_steps if step > 0]
+        world_group = get_world_group()
+        num_sp_groups = world_group.world_size // self.sp_group.world_size
+
+        for num_inference_steps in validation_steps:
+            logger.info(
+                "rank: %s: num_inference_steps: %s",
+                self.global_rank,
+                num_inference_steps,
+                local_main_process_only=False,
+            )
+            step_videos: list[list[np.ndarray]] = []
+            step_captions: list[str] = []
+
+            for validation_batch in validation_dataloader:
+                batch = self._prepare_validation_batch(
+                    sampling_param,
+                    training_args,
+                    validation_batch,
+                    num_inference_steps,
+                )
+                logger.info(
+                    "rank: %s: rank_in_sp_group: %s, batch.prompt: %s",
+                    self.global_rank,
+                    self.rank_in_sp_group,
+                    batch.prompt,
+                    local_main_process_only=False,
+                )
+
+                assert batch.prompt is not None and isinstance(batch.prompt, str)
+                step_captions.append(batch.prompt)
+
+                output_batch = self.validation_pipeline.forward(
+                    batch, training_args
+                )
+                samples = output_batch.output
+
+                if self.rank_in_sp_group != 0:
+                    continue
+
+                video = rearrange(samples, "b c t h w -> t b c h w")
+                frames = []
+                for x in video:
+                    x = torchvision.utils.make_grid(x, nrow=6)
+                    x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+                    frames.append((x * 255).numpy().astype(np.uint8))
+                step_videos.append(frames)
+
+            if self.rank_in_sp_group == 0:
+                if self.global_rank == 0:
+                    all_videos = step_videos
+                    all_captions = step_captions
+
+                    for sp_group_idx in range(1, num_sp_groups):
+                        src_rank = sp_group_idx * self.sp_world_size
+                        recv_videos = world_group.recv_object(src=src_rank)
+                        recv_captions = world_group.recv_object(src=src_rank)
+                        all_videos.extend(recv_videos)
+                        all_captions.extend(recv_captions)
+
+                    video_filenames = []
+                    for i, (video_frames, caption) in enumerate(
+                        zip(all_videos, all_captions, strict=True)
+                    ):
+                        os.makedirs(training_args.output_dir, exist_ok=True)
+                        filename = os.path.join(
+                            training_args.output_dir,
+                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4",
+                        )
+                        imageio.mimsave(
+                            filename, video_frames, fps=sampling_param.fps
+                        )
+                        video_filenames.append(filename)
+
+                    artifacts = []
+                    video_logs: dict[str, Any] = {}
+                    for i, (filename, caption) in enumerate(
+                        zip(video_filenames, all_captions, strict=True)
+                    ):
+                        video_artifact = self.tracker.video(
+                            filename, caption=caption
+                        )
+                        if video_artifact is not None:
+                            artifacts.append(video_artifact)
+                            video_logs[f"validation_video_{num_inference_steps}_steps_{i}"] = video_artifact
+                    if artifacts:
+                        logs = {
+                            f"validation_videos_{num_inference_steps}_steps": artifacts
+                        }
+                        self.tracker.log_artifacts(logs, global_step)
+                        if video_logs:
+                            self.tracker.log(video_logs, global_step)
+
+                    # Compute mean reward on validation videos and log to tracker
+                    if (
+                        self.reward_models is not None
+                        and all_videos
+                        and all_captions
+                    ):
+                        # Convert all_videos (list of list of [H,W,C] frames) to [B, C, T, H, W]
+                        video_tensors = []
+                        for frames_list in all_videos:
+                            # frames_list: list of (H, W, C) uint8
+                            arr = np.stack(frames_list, axis=0)
+                            t = torch.from_numpy(arr).float() / 255.0
+                            t = t.permute(3, 0, 1, 2)
+                            video_tensors.append(t)
+                        videos_batch = torch.stack(video_tensors)
+                        reward_scores = self.reward_models.compute_reward(
+                            videos_batch, all_captions
+                        )
+                        validation_reward_mean = reward_scores.mean().item()
+                        self.tracker.log(
+                            {"validation_reward_mean": validation_reward_mean},
+                            global_step,
+                        )
+                else:
+                    world_group.send_object(step_videos, dst=0)
+                    world_group.send_object(step_captions, dst=0)
+
+        training_args.inference_mode = False
+        self.transformer.train()
+        if getattr(self, "transformer_2", None) is not None:
+            self.transformer_2.train()
+
     def collect_trajectories(self,
                              training_batch: TrainingBatch) -> TrainingBatch:
         """
@@ -376,7 +543,6 @@ class RLPipeline(TrainingPipeline):
         
         height = self.training_args.num_height
         width = self.training_args.num_width
-        num_frames = self.training_args.num_frames
         num_videos_per_prompt = 1  # Each prompt in batch generates one video (batch already has repeated prompts if needed)
         sample_time_per_prompt = 1  # config.sample.sample_time_per_prompt - hardcoded
         kl_reward = getattr(self.training_args.rl_args, 'kl_reward', 0.0)
@@ -391,9 +557,9 @@ class RLPipeline(TrainingPipeline):
             # Fall back to hardcoded value (was 6.0, matching validation default)
             guidance_scale = 6.0
 
-        latents_size = [(num_frames - 1) // 4 + 1,
-                        height // 8, width // 8]
-        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
+        # latents_size = [(num_frames - 1) // 4 + 1,
+        #                 height // 8, width // 8]
+        # n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
         # Compute num_frames using same formula as validation pipeline
         # This ensures correct video duration (matches validation)
@@ -409,9 +575,6 @@ class RLPipeline(TrainingPipeline):
         sampling_param.guidance_scale = guidance_scale
         sampling_param.num_frames = num_frames
         sampling_param.num_videos_per_prompt = num_videos_per_prompt
-
-        # Store fps for use in debug code
-        self._debug_fps = 24
 
         if self.sampling_pipeline is None:
             raise RuntimeError("Sampling pipeline is not initialized")
@@ -456,7 +619,7 @@ class RLPipeline(TrainingPipeline):
                     **shallow_asdict(sampling_param),
                     latents=None,
                     generator=None,  # Let InputValidationStage create generators from seed
-                    n_tokens=n_tokens,  # Add n_tokens like validation
+                    # n_tokens=n_tokens,  # Add n_tokens like validation
                     eta=0.0,  # Add eta like validation
                     VSA_sparsity=self.training_args.VSA_sparsity,  # Add VSA_sparsity like validation
                     rl_data=rl_data,  # RL-specific field (not in validation)
@@ -592,7 +755,7 @@ class RLPipeline(TrainingPipeline):
 #                 os.makedirs(out_dir, exist_ok=True)
 #                 batch_size = decoded_videos.shape[0]
 #                 logger.info(f"Debug region: Saving {batch_size} videos from batch")
-#                 fps = getattr(self, "_debug_fps", 24)
+#                 fps = 24
 #                 videos_np_list = []
 #                 for batch_idx in range(batch_size):
 #                     vid = decoded_videos[batch_idx].detach().to(torch.float32).cpu()
@@ -711,10 +874,7 @@ class RLPipeline(TrainingPipeline):
             else:
                 global_mean = training_batch.reward_mean
                 global_count = reward_scores.numel()
-            if getattr(self, "global_rank", 0) == 0:
-                step = getattr(training_batch, "current_timestep", 0)
-                reward_sum = global_mean * global_count
-                logger.info(f"RL_METRIC_FASTVIDEO_REWARD step={step} reward_mean={global_mean:.6f} reward_sum={reward_sum:.6f} reward_list=[]")
+            # reward_mean (global_mean) is logged via self.tracker.log in train_one_step
 
         return training_batch
 
@@ -756,14 +916,10 @@ class RLPipeline(TrainingPipeline):
             - advantage_mean: Mean advantage
             - advantage_std: Std of advantages
         """
-        if training_batch.reward_scores is None:
-            raise ValueError("Rewards must be computed before advantages")
-
         logger.info("==== RL pipeline: compute_advantages START ====")
-        if self.stat_tracker is None:
-            raise RuntimeError(
-                "Stat tracker not initialized. Call initialize_training_pipeline first."
-            )
+        assert training_batch.reward_scores is not None, "Rewards must be computed before advantages"
+
+        assert self.stat_tracker is not None, "Stat tracker not initialized. Call initialize_training_pipeline first."
 
         # Get prompts from prompt_ids (decode token IDs to strings)
         if training_batch.prompt_ids is not None:
@@ -1101,6 +1257,7 @@ class RLPipeline(TrainingPipeline):
         # Accumulate metrics across timesteps (for logging only, losses are backpropped immediately)
         policy_losses = []
         kl_losses = []
+        total_losses = []
         clip_fractions = []
         importance_ratios = []
         approx_kls = []
@@ -1110,8 +1267,6 @@ class RLPipeline(TrainingPipeline):
 
         # Scale factor for loss: average across timesteps, gradient accumulation, and ranks (multi-GPU)
         world_size = max(1, getattr(self, "world_size", 1))
-        loss_scale = 1.0 / (num_steps * self.training_args.gradient_accumulation_steps * world_size)
-
         # Loop over timesteps - do backward() after each timestep to free activations
         # This matches flow_grpo's approach and prevents OOM from accumulating activations
         for j in range(num_steps):
@@ -1133,17 +1288,6 @@ class RLPipeline(TrainingPipeline):
                 guidance_scale,
                 return_dt_and_std_dev_t=True)
             
-            # Debug: Check shapes and values for alignment with flow_grpo
-            if j == 0:
-                logger.info(f"Debug timestep {j}: prev_sample_mean.shape={prev_sample_mean.shape}")
-                logger.info(f"Debug timestep {j}: std_dev_t.shape={std_dev_t.shape}, dt.shape={dt.shape}")
-            
-            # Debug: Check for NaN/Inf in computed log_prob
-            if j == 0:
-                logger.info(f"Debug timestep {j}: log_prob stats: min={log_prob.min().item():.6f}, max={log_prob.max().item():.6f}, mean={log_prob.mean().item():.6f}, has_nan={torch.isnan(log_prob).any().item()}, has_inf={torch.isinf(log_prob).any().item()}")
-                logger.info(f"Debug timestep {j}: std_dev_t stats: min={std_dev_t.min().item():.6f}, max={std_dev_t.max().item():.6f}, mean={std_dev_t.mean().item():.6f}, has_nan={torch.isnan(std_dev_t).any().item()}, has_inf={torch.isinf(std_dev_t).any().item()}")
-                logger.info(f"Debug timestep {j}: dt stats: min={dt.min().item():.6f}, max={dt.max().item():.6f}, mean={dt.mean().item():.6f}, has_nan={torch.isnan(dt).any().item()}, has_inf={torch.isinf(dt).any().item()}")
-
             # Compute reference log probability with adapter disabled (if using LoRA)
             # Aligned with flow_grpo: use transformer.module.disable_adapter() if wrapped, or pipeline.disable_adapter()
             if kl_beta > 0:
@@ -1161,22 +1305,17 @@ class RLPipeline(TrainingPipeline):
                         # Direct PeftModel (not wrapped)
                         disable_adapter_ctx = transformer.disable_adapter()
                     
-                    if disable_adapter_ctx is not None:
-                        with disable_adapter_ctx:
-                            _, _, prev_sample_mean_ref, std_dev_t_ref, dt_ref = self._compute_log_prob_for_timestep(
-                                latents_j,
-                                next_latents_j,
-                                timesteps_j,
-                                j,
-                                prompt_embeds,
-                                negative_prompt_embeds,
-                                guidance_scale,
-                                return_dt_and_std_dev_t=True)
-                    else:
-                        # No adapter to disable, use current model (shouldn't happen in practice with LoRA)
-                        prev_sample_mean_ref = prev_sample_mean.detach()
-                        std_dev_t_ref = std_dev_t.detach()
-                        dt_ref = dt.detach()
+                    # if disable_adapter_ctx is not None:
+                    with disable_adapter_ctx:
+                        _, _, prev_sample_mean_ref, _ , dt_ref = self._compute_log_prob_for_timestep(
+                            latents_j,
+                            next_latents_j,
+                            timesteps_j,
+                            j,
+                            prompt_embeds,
+                            negative_prompt_embeds,
+                            guidance_scale,
+                            return_dt_and_std_dev_t=True)
 
                 # Compute KL loss: KL = (mean_diff)^2 / (2 * (std_dev_t * dt_ref)^2)
                 # FlowGRPO uses: kl_loss = ((prev_sample_mean - prev_sample_mean_ref) ** 2).mean(dim=(1,2,3), keepdim=True) / (2 * (std_dev_t * dt_ref) ** 2)
@@ -1208,7 +1347,7 @@ class RLPipeline(TrainingPipeline):
             policy_loss_j = torch.maximum(unclipped_loss, clipped_loss).mean()
 
             # Total loss for this timestep (scaled for averaging)
-            total_loss_j = (policy_loss_j + kl_beta * kl_loss_j) * loss_scale
+            total_loss_j = (policy_loss_j + kl_beta * kl_loss_j)
 
             # Backward pass after each timestep to free activations (aligned with flow_grpo)
             # This prevents OOM by not accumulating activations across all timesteps
@@ -1222,6 +1361,7 @@ class RLPipeline(TrainingPipeline):
             with torch.no_grad():
                 policy_losses.append(policy_loss_j.detach())
                 kl_losses.append(kl_loss_j.detach())
+                total_losses.append(total_loss_j.detach())
 
                 # Clip fraction
                 clip_fraction_j = ((ratio < 1.0 - clip_range) |
@@ -1240,27 +1380,23 @@ class RLPipeline(TrainingPipeline):
             del prev_sample, log_prob, prev_sample_mean, std_dev_t, dt
             del advantages_j_clipped, ratio, unclipped_loss, clipped_loss, policy_loss_j, total_loss_j, kl_loss_j
             if kl_beta > 0:
-                del prev_sample_mean_ref, std_dev_t_ref, dt_ref
-            # Force garbage collection periodically to free GPU memory
-            if j % 5 == 0:
-                torch.cuda.empty_cache()
+                del prev_sample_mean_ref, dt_ref
+            
 
-        # Average losses across timesteps (for metrics only, backward already done)
+        # Average metrics across timesteps (stack then mean; backward already done per timestep)
         policy_loss = torch.stack(policy_losses).mean()
-        kl_loss = torch.stack(kl_losses).mean(
-        ) if kl_beta > 0 else torch.tensor(0.0, device=policy_loss.device)
-
-        # Total loss (for logging/metrics only)
-        total_loss = policy_loss + kl_beta * kl_loss
+        kl_loss = torch.stack(kl_losses).mean()
+        if kl_beta == 0:
+            kl_loss = torch.tensor(0.0, device=policy_loss.device)
+        total_loss = torch.stack(total_losses).mean()
 
         # Compute metrics
         metrics = {
             "policy_loss": policy_loss.item(),
-            "kl_loss": kl_loss.item() if kl_beta > 0 else 0.0,
+            "kl_loss": kl_loss.item(),
             "total_loss": total_loss.item(),
             "clip_fraction": torch.stack(clip_fractions).mean().item(),
-            "importance_ratio_mean":
-            torch.stack(importance_ratios).mean().item(),
+            "importance_ratio_mean": torch.stack(importance_ratios).mean().item(),
             "approx_kl": torch.stack(approx_kls).mean().item(),
         }
 
@@ -1309,41 +1445,53 @@ class RLPipeline(TrainingPipeline):
             # 5. Compute GRPO loss
             # Note: _compute_grpo_loss now does backward() internally after each timestep
             # to prevent OOM from accumulating activations (aligned with flow_grpo)
-            if training_batch.log_probs is not None and training_batch.old_log_probs is not None:
-                # Compute GRPO loss (policy loss + KL loss)
-                # Backward is done inside _compute_grpo_loss after each timestep
-                total_loss, metrics = self._compute_grpo_loss(training_batch)
 
-                # Store metrics in training batch
-                training_batch.policy_loss = metrics.get("policy_loss", 0.0)
-                training_batch.kl_divergence = metrics.get(
-                    "kl_loss", 0.0)  # KL loss is the KL divergence
-                training_batch.importance_ratio = metrics.get(
-                    "importance_ratio_mean", 1.0)
-                training_batch.clip_fraction = metrics.get("clip_fraction", 0.0)
-                training_batch.value_loss = 0.0  # GRPO doesn't use value loss
-                training_batch.entropy = 0.0  # Not computed for now
+            # Compute GRPO loss (policy loss + KL loss)
+            # Backward is done inside _compute_grpo_loss after each timestep
+            total_loss, metrics = self._compute_grpo_loss(training_batch)
 
-                # Accumulate total loss (local)
-                if training_batch.total_loss is None:
-                    training_batch.total_loss = 0.0
-                training_batch.total_loss += total_loss.item()
+            # Store metrics in training batch
+            training_batch.policy_loss = metrics.get("policy_loss", 0.0)
+            training_batch.kl_divergence = metrics.get(
+                "kl_loss", 0.0)  # KL loss is the KL divergence
+            training_batch.importance_ratio = metrics.get(
+                "importance_ratio_mean", 1.0)
+            training_batch.clip_fraction = metrics.get("clip_fraction", 0.0)
+            training_batch.value_loss = 0.0  # GRPO doesn't use value loss
+            training_batch.entropy = 0.0  # Not computed for now
 
-                # Multi-GPU: allreduce total_loss for logging (mean across ranks)
-                step = training_batch.current_timestep if hasattr(training_batch, "current_timestep") else (getattr(self, "current_trainstep", 0) if hasattr(self, "current_trainstep") else 0)
-                total_loss_t = torch.tensor(total_loss.item(), device=self.device)
-                if getattr(self, "world_size", 1) > 1:
-                    get_world_group().all_reduce(total_loss_t, op=dist.ReduceOp.AVG)
-                total_loss_value = total_loss_t.item()
+            # Accumulate total loss (local)
+            if training_batch.total_loss is None:
+                training_batch.total_loss = 0.0
+            training_batch.total_loss += total_loss.item()
 
-                if getattr(self, "global_rank", 0) == 0:
-                    reward_mean = training_batch.reward_mean if hasattr(training_batch, "reward_mean") else 0.0
-                    reward_std = training_batch.reward_std if hasattr(training_batch, "reward_std") else 0.0
-                    logger.info(f"RL_METRIC_FASTVIDEO_LOSS step={step} total_loss={total_loss_value:.6f}")
-                    logger.info(f"STEP_METRIC step={step} reward_mean={reward_mean:.6f} reward_std={reward_std:.6f} "
-                               f"policy_loss={metrics.get('policy_loss', 0.0):.6f} kl_loss={metrics.get('kl_loss', 0.0):.6f} "
-                               f"total_loss={total_loss_value:.6f} importance_ratio={metrics.get('importance_ratio_mean', 1.0):.6f} "
-                               f"clip_fraction={metrics.get('clip_fraction', 0.0):.6f}")
+            # Multi-GPU: allreduce losses for logging (mean across diffusion timesteps and ranks)
+            step = training_batch.current_timestep if hasattr(training_batch, "current_timestep") else (getattr(self, "current_trainstep", 0) if hasattr(self, "current_trainstep") else 0)
+            total_loss_t = torch.tensor(total_loss.item(), device=self.device)
+            policy_loss_t = torch.tensor(metrics.get("policy_loss", 0.0), device=self.device)
+            kl_loss_t = torch.tensor(metrics.get("kl_loss", 0.0), device=self.device)
+            if getattr(self, "world_size", 1) > 1:
+                wg = get_world_group()
+                wg.all_reduce(total_loss_t, op=dist.ReduceOp.AVG)
+                wg.all_reduce(policy_loss_t, op=dist.ReduceOp.AVG)
+                wg.all_reduce(kl_loss_t, op=dist.ReduceOp.AVG)
+            total_loss_value = total_loss_t.item()
+            policy_loss_value = policy_loss_t.item()
+            kl_loss_value = kl_loss_t.item()
+
+            if getattr(self, "global_rank", 0) == 0:
+                reward_mean = training_batch.reward_mean if hasattr(training_batch, "reward_mean") else 0.0
+                reward_std = training_batch.reward_std if hasattr(training_batch, "reward_std") else 0.0
+                tracker_metrics = {
+                    "reward_mean": reward_mean,
+                    "reward_std": reward_std,
+                    "total_loss": total_loss_value,
+                    "policy_loss": policy_loss_value,
+                    "kl_loss": kl_loss_value,
+                    "importance_ratio": metrics.get("importance_ratio_mean", 1.0),
+                    "clip_fraction": metrics.get("clip_fraction", 0.0),
+                }
+                self.tracker.log(tracker_metrics, step)
 
         # Clip gradients
         training_batch = self._clip_grad_norm(training_batch)
