@@ -888,6 +888,15 @@ class Flux2Transformer2DModel(CachableDiT):
 
         num_txt_tokens = encoder_hidden_states.shape[1]
 
+        # 0.5. Reshape 5D latent (B, C, T, H, W) from pipeline to 3D (B, T*H*W, C) for transformer
+        input_was_5d = False
+        if hidden_states.dim() == 5:
+            input_was_5d = True
+            b, c_in, t, h, w = hidden_states.shape
+            hidden_states = hidden_states.permute(0, 2, 3, 4, 1).reshape(
+                b, t * h * w, c_in
+            )
+
         # 1. Calculate timestep embedding and modulation parameters
         timestep = timestep.to(hidden_states.dtype)
         if guidance is not None:
@@ -934,6 +943,12 @@ class Flux2Transformer2DModel(CachableDiT):
         # 6. Output layers
         hidden_states = self.norm_out(hidden_states, temb)
         output, _ = self.proj_out(hidden_states)
+
+        # Reshape 3D (B, T*H*W, C) back to 5D (B, C, T, H, W) for scheduler
+        if input_was_5d:
+            output = output.reshape(b, t, h, w, self.out_channels).permute(
+                0, 4, 1, 2, 3
+            )
 
         return output
 
