@@ -882,6 +882,10 @@ class Flux2Transformer2DModel(CachableDiT):
         else:
             lora_scale = 1.0
 
+        # Pipeline passes prompt_embeds as a list (one per text encoder); use first
+        if isinstance(encoder_hidden_states, (list, tuple)):
+            encoder_hidden_states = encoder_hidden_states[0]
+
         num_txt_tokens = encoder_hidden_states.shape[1]
 
         # 1. Calculate timestep embedding and modulation parameters
