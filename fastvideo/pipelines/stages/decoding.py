@@ -110,8 +110,12 @@ class DecodingStage(PipelineStage):
         """
         Flux2: BN denormalize then unpatchify packed 128ch -> 32ch for VAE.
         Uses vae.bn running_mean/running_var and vae.config.batch_norm_eps.
+        Skips BN when stats are invalid (NaN, inf, or all zeros) to avoid NaNs.
         """
-        bn_mean = self.vae.bn.running_mean.view(1, -1, 1, 1).to(
+        running_mean = self.vae.bn.running_mean.view(1, -1, 1, 1).to(
+            latents.device, latents.dtype
+        )
+        running_var = self.vae.bn.running_var.view(1, -1, 1, 1).to(
             latents.device, latents.dtype
         )
         cfg = getattr(self.vae, "config", None)
@@ -119,13 +123,21 @@ class DecodingStage(PipelineStage):
         eps = getattr(arch, "batch_norm_eps", None) or getattr(
             cfg, "batch_norm_eps", 1e-5
         )
-        bn_std = torch.sqrt(
-            self.vae.bn.running_var.view(1, -1, 1, 1).to(
-                latents.device, latents.dtype
-            )
-            + eps
+        # Skip BN if stats are invalid (unloaded, NaN, or would produce zero std)
+        mean_ok = torch.isfinite(running_mean).all().item()
+        var_ok = (
+            torch.isfinite(running_var).all().item()
+            and (running_var + eps > 0).all().item()
         )
-        latents = latents * bn_std + bn_mean
+        if mean_ok and var_ok:
+            bn_std = torch.sqrt(torch.clamp(running_var + eps, min=1e-6))
+            latents = latents * bn_std + running_mean
+            # Clamp to avoid inf/huge values that can cause NaN in VAE decode
+            latents = latents.clamp(-10.0, 10.0)
+        else:
+            logger.warning(
+                "Flux2 VAE BN stats invalid (NaN/inf or zero var); skipping BN denorm"
+            )
         return self._unpatchify_latents(latents)
 
     @torch.no_grad()
