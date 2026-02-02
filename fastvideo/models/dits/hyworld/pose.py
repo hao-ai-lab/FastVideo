@@ -15,7 +15,7 @@ import torch
 from scipy.spatial.transform import Rotation as R
 from typing import Union, Optional
 
-from .trajectory import generate_camera_trajectory_local
+from fastvideo.models.dits.hyworld.trajectory import generate_camera_trajectory_local
 
 
 # Mapping from one-hot action encoding to single label
@@ -411,3 +411,211 @@ def compute_num_frames(latent_num: int) -> int:
         Number of video frames
     """
     return (latent_num - 1) * 4 + 1
+
+def reformat_keyboard_and_mouse_tensors(keyboard_tensor, mouse_tensor):
+    """
+    Reformat the keyboard and mouse tensors to the format compatible with HyWorld.
+    """
+    num_frames = keyboard_tensor.shape[0]
+    assert (num_frames - 1) % 4 == 0, "num_frames must be a multiple of 4"
+    assert mouse_tensor.shape[0] == num_frames, "mouse_tensor must have the same number of frames as keyboard_tensor"
+    keyboard_tensor = keyboard_tensor[1:, :]
+    mouse_tensor = mouse_tensor[1:, :]
+    groups = keyboard_tensor.view(-1, 4, keyboard_tensor.shape[1])
+    assert (groups == groups[:, 0:1]).all(dim=1).all(), "keyboard_tensor must have the same value for each group"
+    groups = mouse_tensor.view(-1, 4, mouse_tensor.shape[1])
+    assert (groups == groups[:, 0:1]).all(dim=1).all(), "mouse_tensor must have the same value for each group"
+    
+    return keyboard_tensor[::4], mouse_tensor[::4]
+
+def process_custom_actions(keyboard_tensor, mouse_tensor, forward_speed=DEFAULT_FORWARD_SPEED):
+    """
+    Process custom keyboard and mouse tensors into model inputs (viewmats, intrinsics, action_labels).
+    Assumes inputs correspond to each LATENT frame.
+    """
+    keyboard_tensor, mouse_tensor = reformat_keyboard_and_mouse_tensors(keyboard_tensor, mouse_tensor)
+
+    motions = []
+    
+    # 1. Translate tensors to motions for trajectory generation
+    for t in range(keyboard_tensor.shape[0]):
+        frame_motion = {}
+        
+        # --- Translation ---
+        # MatrixGame convention: 0:W, 1:S, 2:A, 3:D
+        fwd = 0.0
+        if keyboard_tensor[t, 0] > 0.5: fwd += forward_speed   # W
+        if keyboard_tensor[t, 1] > 0.5: fwd -= forward_speed   # S
+        if fwd != 0: frame_motion["forward"] = fwd
+        
+        rgt = 0.0
+        if keyboard_tensor[t, 2] > 0.5: rgt -= forward_speed   # A (Left is negative Right)
+        if keyboard_tensor[t, 3] > 0.5: rgt += forward_speed   # D (Right)
+        if rgt != 0: frame_motion["right"] = rgt
+        
+        # --- Rotation ---
+        # MatrixGame convention: mouse is [Pitch, Yaw] (or Y, X)
+        # Apply scaling (e.g. to match HyWorld distribution)
+        pitch = mouse_tensor[t, 0].item()
+        yaw = mouse_tensor[t, 1].item()
+        
+        if abs(pitch) > 1e-4: frame_motion["pitch"] = pitch
+        if abs(yaw) > 1e-4: frame_motion["yaw"] = yaw
+        
+        motions.append(frame_motion)
+
+    # 2. Generate Camera Trajectory
+    # generate_camera_trajectory_local returns T+1 poses (starting at Identity)
+    # We take the first T poses to match the latent count.
+    # Pose 0 is Identity. Pose 1 is Identity + Motion[0].
+    poses = generate_camera_trajectory_local(motions)
+    # poses = np.array(poses[:T])
+    
+    # 3. Compute Viewmats (w2c) and Intrinsics
+    w2c_list = []
+    intrinsic_list = []
+    
+    # Setup default intrinsic (normalized)
+    K = np.array(DEFAULT_INTRINSIC)
+    K[0, 0] /= K[0, 2] * 2
+    K[1, 1] /= K[1, 2] * 2
+    K[0, 2] = 0.5
+    K[1, 2] = 0.5
+    
+    for i in range(len(poses)):
+        c2w = np.array(poses[i])
+        w2c = np.linalg.inv(c2w)
+        w2c_list.append(w2c)
+        intrinsic_list.append(K)
+        
+    viewmats = torch.as_tensor(np.array(w2c_list))
+    intrinsics = torch.as_tensor(np.array(intrinsic_list))
+
+    # 4. Generate Action Labels DIRECTLY from inputs
+    # HyWorld Label Logic:
+    # Trans One-Hot: [Forward, Backward, Right, Left] (Indices 0, 1, 2, 3)
+    # Rotate One-Hot: [Right, Left, Up, Down] (Indices 0, 1, 2, 3)
+    
+    trans_one_hot = torch.zeros((keyboard_tensor.shape[0], 4), dtype=torch.long)
+    trans_one_hot[:, 0] = (keyboard_tensor[:, 0] > 0.5).long() # Forward
+    trans_one_hot[:, 1] = (keyboard_tensor[:, 1] > 0.5).long() # Backward
+    trans_one_hot[:, 2] = (keyboard_tensor[:, 3] > 0.5).long() # Right
+    trans_one_hot[:, 3] = (keyboard_tensor[:, 2] > 0.5).long() # Left
+    
+    rotate_one_hot = torch.zeros((mouse_tensor.shape[0], 4), dtype=torch.long)
+    rotate_one_hot[:, 0] = (mouse_tensor[:, 1] > 1e-4).long()  # Yaw Right
+    rotate_one_hot[:, 1] = (mouse_tensor[:, 1] < -1e-4).long() # Yaw Left
+    rotate_one_hot[:, 2] = (mouse_tensor[:, 0] > 1e-4).long()  # Pitch Up
+    rotate_one_hot[:, 3] = (mouse_tensor[:, 0] < -1e-4).long() # Pitch Down
+
+    # Convert to single labels
+    trans_label = one_hot_to_one_dimension(trans_one_hot)
+    rotate_label = one_hot_to_one_dimension(rotate_one_hot)
+    action_labels = trans_label * 9 + rotate_label
+
+    action_labels = torch.cat([torch.tensor([0]), action_labels])
+
+    return viewmats, intrinsics, action_labels
+
+if __name__ == "__main__":
+    print("Running comparison test between process_custom_actions and pose_to_input...")
+
+    def test_process_custom_actions(pose_string: str, keyboard: torch.Tensor, mouse: torch.Tensor, latent_num: int):
+        # Run process_custom_actions
+        # Note: We need to pass float tensors
+        print("Running process_custom_actions...")
+        viewmats_1, intrinsics_1, labels_1 = process_custom_actions(
+            keyboard, mouse
+        )
+        
+        print(f"Running pose_to_input with string: '{pose_string}'...")
+        viewmats_2, intrinsics_2, labels_2 = pose_to_input(
+            pose_string, latent_num=latent_num
+        )
+
+        # print(f"Viewmats: {viewmats_1} vs \n {viewmats_2}")
+        # print(f"Intrinsics: {intrinsics_1} vs \n {intrinsics_2}")
+        # print(f"Labels: {labels_1} vs \n {labels_2}")
+        # 3. Compare Results
+        print("\nComparison Results:")
+        
+        # Check Shapes
+        print(f"Shapes (Viewmats): {viewmats_1.shape} vs {viewmats_2.shape}")
+        assert viewmats_1.shape == viewmats_2.shape, "Shape mismatch for viewmats"
+        
+        # Check Values
+        # Viewmats
+        diff_viewmats = (viewmats_1 - viewmats_2).abs().max().item()
+        print(f"Max difference in Viewmats: {diff_viewmats}")
+        if diff_viewmats < 1e-5:
+            print("✅ Viewmats match.")
+        else:
+            print("❌ Viewmats mismatch.")
+
+        # Check intrinsics
+        diff_intrinsics = (intrinsics_1 - intrinsics_2).abs().max().item()
+        print(f"Max difference in Intrinsics: {diff_intrinsics}")
+        if diff_intrinsics < 1e-5:
+            print("✅ Intrinsics match.")
+        else:
+            print("❌ Intrinsics mismatch.")
+
+        # Check labels
+        diff_labels = (labels_1 - labels_2).abs().max().item()
+        print(f"Max difference in Labels: {diff_labels}")
+        if diff_labels < 1e-5:
+            print("✅ Labels match.")
+        else:
+            print("❌ Labels mismatch.")
+
+        print("All checks passed.")
+    
+    # Define shared parameters
+
+    latent_num = 13
+    pose_string = "w-2, a-3, s-1, d-6"
+
+    num_frames = 4 * (latent_num - 1) + 1
+    keyboard = torch.zeros((num_frames, 6))
+    mouse = torch.zeros((num_frames, 2))
+
+    # Frame 0 is ignored/start
+    # Frames 1-8: Press W (index 0)
+    keyboard[1:9, 0] = 1.0
+    # Frames 9-20: Press A (index 2)
+    keyboard[9:21, 2] = 1.0
+    # Frames 21-24: Press S (index 1)
+    keyboard[21:25, 1] = 1.0
+    # Frames 25-48: Press D (index 3)
+    keyboard[25:49, 3] = 1.0
+
+    test_process_custom_actions(pose_string, keyboard, mouse, latent_num)
+
+    # Test keyboard AND mouse
+    latent_num = 25
+    pose_string = "w-2, up-2, a-3, down-4, s-1, left-2, d-6, right-4"
+
+    num_frames = 4 * (latent_num - 1) + 1
+    keyboard = torch.zeros((num_frames, 6))
+    mouse = torch.zeros((num_frames, 2))
+
+    # Frame 0 is ignored/start
+    # Frames 1-8: Press W (index 0)
+    keyboard[1:9, 0] = 1.0
+    # Frames 17-28: Press A (index 2)
+    keyboard[17:29, 2] = 1.0
+    # Frames 45-48: Press S (index 1)
+    keyboard[45:49, 1] = 1.0
+    # Frames 57-80: Press D (index 3)
+    keyboard[57:81, 3] = 1.0
+    
+    # Frames 9-16: Press Up (index 4)
+    mouse[9:17, 0] = DEFAULT_PITCH_SPEED
+    # Frames 25-32: Press Down (index 5)
+    mouse[29:45, 0] = -DEFAULT_PITCH_SPEED
+    # Frames 41-48: Press Left (index 6)
+    mouse[49:57, 1] = -DEFAULT_YAW_SPEED
+    # Frames 57-64: Press Right (index 7)
+    mouse[81:, 1] = DEFAULT_YAW_SPEED
+
+    test_process_custom_actions(pose_string, keyboard, mouse, latent_num)
