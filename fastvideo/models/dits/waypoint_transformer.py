@@ -292,8 +292,8 @@ class GateProj(nn.Module):
         super().__init__()
         self.weight = nn.Parameter(torch.ones(n_heads, n_heads))
     
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x is [B, L, n_heads, head_dim], apply gate across head dimension
+    def forward(self) -> torch.Tensor:
+        """Return sigmoid of the gate weights."""
         return torch.sigmoid(self.weight)
 
 
