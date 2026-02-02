@@ -8,18 +8,13 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
   background: #1a1a1a;
   color: white;
-  display: flex;
-  justify-content: center;
-  align-items: center;
   min-height: 100vh;
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 #app {
   width: 100%;
-  height: 100vh;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
 }
