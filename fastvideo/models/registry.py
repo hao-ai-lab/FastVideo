@@ -42,6 +42,7 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "LingBotWorldTransformer3DModel": ("dits", "lingbotworld", "LingBotWorldTransformer3DModel"),
     "Gen3CTransformer3DModel": ("dits", "gen3c", "Gen3CTransformer3DModel"),
     "Kandinsky5Transformer3DModel": ("dits", "kandinsky5", "Kandinsky5Transformer3DModel"),
+    "WorldModel": ("dits", "waypoint_transformer", "WaypointWorldModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
