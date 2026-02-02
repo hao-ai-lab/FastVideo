@@ -18,12 +18,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from fastvideo.attention import LocalAttention
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
-from fastvideo.platforms import AttentionBackendEnum
 
 logger = init_logger(__name__)
 
@@ -180,7 +178,7 @@ class ControllerInputEmbedding(nn.Module):
 class NoiseConditioner(nn.Module):
     """Timestep/noise level conditioner using sinusoidal embeddings."""
     
-    def __init__(self, d_model: int, freq_dim: int = 256):
+    def __init__(self, d_model: int, freq_dim: int = 512):
         super().__init__()
         self.freq_dim = freq_dim
         self.mlp = MLP(freq_dim, d_model * 4, d_model)
@@ -287,6 +285,18 @@ class CondHead(nn.Module):
 # Attention Layers
 # =============================================================================
 
+class GateProj(nn.Module):
+    """Simple wrapper to create gate_proj.weight naming in state_dict."""
+    
+    def __init__(self, n_heads: int):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(n_heads, n_heads))
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x is [B, L, n_heads, head_dim], apply gate across head dimension
+        return torch.sigmoid(self.weight)
+
+
 class GatedSelfAttention(nn.Module):
     """Gated self-attention with GQA support."""
     
@@ -315,21 +325,11 @@ class GatedSelfAttention(nn.Module):
         self.out_proj = nn.Linear(d_model, d_model, bias=False)
         
         # Per-head gating: learnable [n_heads, n_heads] matrix
+        # Use a simple Linear-like wrapper to get gate_proj.weight naming
         if gated_attn:
-            self.gate_proj = nn.Parameter(torch.ones(n_heads, n_heads))
+            self.gate_proj = GateProj(n_heads)
         
-        # Attention
-        self.attn = LocalAttention(
-            num_heads=n_heads,
-            head_size=self.head_dim,
-            dropout_rate=0,
-            softmax_scale=None,
-            causal=causal,
-            supported_attention_backends=(
-                AttentionBackendEnum.FLASH_ATTN,
-                AttentionBackendEnum.TORCH_SDPA,
-            )
-        )
+        self.scale = self.head_dim ** -0.5
     
     def forward(
         self,
@@ -344,25 +344,30 @@ class GatedSelfAttention(nn.Module):
         k = self.k_proj(x)
         v = self.v_proj(x)
         
-        # Reshape for attention
-        q = q.view(B, L, self.n_heads, self.head_dim)
-        k = k.view(B, L, self.n_kv_heads, self.head_dim)
-        v = v.view(B, L, self.n_kv_heads, self.head_dim)
+        # Reshape for attention: [B, L, n_heads, head_dim] -> [B, n_heads, L, head_dim]
+        q = q.view(B, L, self.n_heads, self.head_dim).transpose(1, 2)
+        k = k.view(B, L, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        v = v.view(B, L, self.n_kv_heads, self.head_dim).transpose(1, 2)
         
         # Apply RoPE if provided
         if pos_emb is not None:
-            q = self._apply_rope(q, pos_emb)
-            k = self._apply_rope(k, pos_emb)
+            q = self._apply_rope(q.transpose(1, 2), pos_emb).transpose(1, 2)
+            k = self._apply_rope(k.transpose(1, 2), pos_emb).transpose(1, 2)
         
         # GQA: repeat K, V heads if needed
         if self.n_kv_heads < self.n_heads:
             repeat_factor = self.n_heads // self.n_kv_heads
-            k = k.repeat_interleave(repeat_factor, dim=2)
-            v = v.repeat_interleave(repeat_factor, dim=2)
+            k = k.repeat_interleave(repeat_factor, dim=1)
+            v = v.repeat_interleave(repeat_factor, dim=1)
         
-        # Attention
-        attn_out = self.attn(q, k, v)
-        attn_out = attn_out.reshape(B, L, D)
+        # Attention using PyTorch SDPA
+        attn_out = F.scaled_dot_product_attention(
+            q, k, v,
+            is_causal=self.causal,
+            scale=self.scale,
+        )
+        # [B, n_heads, L, head_dim] -> [B, L, D]
+        attn_out = attn_out.transpose(1, 2).reshape(B, L, D)
         
         # Output projection with optional per-head gating
         out = self.out_proj(attn_out)
@@ -371,8 +376,8 @@ class GatedSelfAttention(nn.Module):
             # Per-head gate: apply gate_proj [n_heads, n_heads] to attention output
             # Reshape to [B, L, n_heads, head_dim], apply gate, reshape back
             out_heads = out.view(B, L, self.n_heads, self.head_dim)
-            # gate_proj is [n_heads, n_heads], apply sigmoid and einsum
-            gate = torch.sigmoid(self.gate_proj)  # [n_heads, n_heads]
+            # gate_proj.weight is [n_heads, n_heads], apply sigmoid and einsum
+            gate = self.gate_proj()  # [n_heads, n_heads] with sigmoid
             # Weight contribution from each head
             out_heads = torch.einsum('blhd,gh->blgd', out_heads, gate)
             out = out_heads.reshape(B, L, D)
@@ -409,17 +414,7 @@ class CrossAttention(nn.Module):
         # Out: project from context_dim back to d_model
         self.out_proj = nn.Linear(context_dim, d_model, bias=False)
         
-        self.attn = LocalAttention(
-            num_heads=n_heads,
-            head_size=self.head_dim,
-            dropout_rate=0,
-            softmax_scale=None,
-            causal=False,
-            supported_attention_backends=(
-                AttentionBackendEnum.FLASH_ATTN,
-                AttentionBackendEnum.TORCH_SDPA,
-            )
-        )
+        self.scale = self.head_dim ** -0.5
     
     def forward(
         self,
@@ -430,13 +425,29 @@ class CrossAttention(nn.Module):
         B, L, _ = x.shape
         _, S, _ = context.shape
         
-        q = self.q_proj(x).view(B, L, self.n_heads, self.head_dim)
-        k = self.k_proj(context).view(B, S, self.n_heads, self.head_dim)
-        v = self.v_proj(context).view(B, S, self.n_heads, self.head_dim)
+        # [B, L, context_dim] -> [B, n_heads, L, head_dim]
+        q = self.q_proj(x).view(B, L, self.n_heads, self.head_dim).transpose(1, 2)
+        k = self.k_proj(context).view(B, S, self.n_heads, self.head_dim).transpose(1, 2)
+        v = self.v_proj(context).view(B, S, self.n_heads, self.head_dim).transpose(1, 2)
         
-        # TODO: Handle context_pad_mask properly
-        attn_out = self.attn(q, k, v)
-        attn_out = attn_out.reshape(B, L, self.context_dim)
+        # Create attention mask from padding mask if provided
+        attn_mask = None
+        if context_pad_mask is not None:
+            # context_pad_mask: [B, S] where True = valid, False = pad
+            # SDPA expects: [B, 1, 1, S] where -inf = masked
+            attn_mask = context_pad_mask.unsqueeze(1).unsqueeze(2)
+            attn_mask = attn_mask.expand(B, 1, L, S)
+            attn_mask = torch.where(attn_mask, 0.0, float('-inf'))
+        
+        # Attention using PyTorch SDPA
+        attn_out = F.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask=attn_mask,
+            is_causal=False,
+            scale=self.scale,
+        )
+        # [B, n_heads, L, head_dim] -> [B, L, context_dim]
+        attn_out = attn_out.transpose(1, 2).reshape(B, L, self.context_dim)
         
         return self.out_proj(attn_out)
 
