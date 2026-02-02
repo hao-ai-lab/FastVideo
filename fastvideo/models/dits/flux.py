@@ -521,6 +521,7 @@ from torch.nn import LayerNorm as LayerNorm
 
 from fastvideo.attention import LocalAttention
 from fastvideo.configs.models.dits.flux import FluxConfig
+from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ColumnParallelLinear
 from fastvideo.layers.mlp import MLP
@@ -997,6 +998,7 @@ class FluxTransformer2DModel(CachableDiT, OffloadableDiTMixin):
         guidance: torch.Tensor = None,
         freqs_cis: torch.Tensor = None,
         joint_attention_kwargs: Optional[Dict[str, Any]] = None,
+        encoder_hidden_states_2: torch.Tensor | None = None,
     ) -> Union[torch.Tensor, Transformer2DModelOutput]:
         """
         The [`FluxTransformer2DModel`] forward method.
@@ -1018,6 +1020,85 @@ class FluxTransformer2DModel(CachableDiT, OffloadableDiTMixin):
                 [diffusers.models.attention_processor](https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/attention_processor.py).
 
         """
+        pooled_from_list = None
+        if isinstance(encoder_hidden_states, (list, tuple)):
+            if len(encoder_hidden_states) > 1:
+                pooled_from_list = encoder_hidden_states[1]
+            encoder_hidden_states = encoder_hidden_states[0]
+
+        if encoder_hidden_states_2 is not None:
+            pooled_from_list = encoder_hidden_states_2
+
+        if isinstance(pooled_projections, (list, tuple)):
+            pooled_projections = pooled_projections[0] if pooled_projections else None
+
+        timestep_from_pooled = None
+        if timestep is None and torch.is_tensor(pooled_projections):
+            pooled_dim = pooled_projections.shape[-1] if pooled_projections.ndim > 0 else None
+            expected_dim = getattr(self.config, "pooled_projection_dim", None)
+            if pooled_projections.ndim <= 1 or (
+                pooled_projections.ndim == 2 and pooled_dim == 1
+            ):
+                timestep_from_pooled = pooled_projections
+                pooled_projections = None
+            elif expected_dim is not None and pooled_dim != expected_dim:
+                if pooled_from_list is not None:
+                    timestep_from_pooled = pooled_projections
+                    pooled_projections = None
+
+        if pooled_projections is None and pooled_from_list is not None:
+            pooled_projections = pooled_from_list
+        if timestep is None and timestep_from_pooled is not None:
+            timestep = timestep_from_pooled
+
+        if timestep is None:
+            try:
+                ctx = get_forward_context()
+                batch = ctx.forward_batch
+                if batch is not None and batch.timesteps is not None:
+                    timesteps_ctx = batch.timesteps
+                    idx = ctx.current_timestep
+                    if torch.is_tensor(timesteps_ctx):
+                        if timesteps_ctx.ndim == 0:
+                            timestep = timesteps_ctx
+                        elif 0 <= idx < timesteps_ctx.shape[0]:
+                            timestep = timesteps_ctx[idx]
+                        else:
+                            timestep = timesteps_ctx[-1]
+                    elif isinstance(timesteps_ctx, (list, tuple)) and timesteps_ctx:
+                        idx = min(idx, len(timesteps_ctx) - 1)
+                        timestep = timesteps_ctx[idx]
+            except Exception:
+                timestep = None
+
+        if timestep is not None and not torch.is_tensor(timestep):
+            timestep = torch.tensor(
+                timestep, device=hidden_states.device, dtype=hidden_states.dtype
+            )
+        if torch.is_tensor(timestep):
+            if timestep.ndim == 0:
+                timestep = timestep[None]
+            elif timestep.ndim == 2 and timestep.shape[1] == 1:
+                timestep = timestep[:, 0]
+            if timestep.ndim == 1:
+                batch_size = (
+                    pooled_projections.shape[0]
+                    if torch.is_tensor(pooled_projections)
+                    else hidden_states.shape[0]
+                )
+                if timestep.shape[0] == 1 and batch_size > 1:
+                    timestep = timestep.repeat(batch_size)
+
+        if pooled_projections is None:
+            raise ValueError(
+                "FluxTransformer2DModel requires pooled_projections (e.g. CLIP pooled embeddings)."
+            )
+        if timestep is None:
+            raise ValueError(
+                "FluxTransformer2DModel requires `timestep` (received None). "
+                "Make sure the denoising stage passes timesteps or a forward context is set."
+            )
+
         if (
             joint_attention_kwargs is not None
             and joint_attention_kwargs.get("scale", None) is not None
