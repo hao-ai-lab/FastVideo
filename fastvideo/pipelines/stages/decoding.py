@@ -166,7 +166,16 @@ class DecodingStage(PipelineStage):
         vae_autocast_enabled = (
             vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
-        latents = self._denormalize_latents(latents)
+        # Flux2: denormalize only 32ch VAE input, not 128ch packed (scaling_factor is for VAE space)
+        is_flux2_packed = (
+            latents.ndim == 5
+            and latents.shape[1] == 128
+            and hasattr(self.vae, "bn")
+            and getattr(self.vae, "post_quant_conv", None) is not None
+            and self.vae.post_quant_conv.weight.shape[1] == 32
+        )
+        if not is_flux2_packed:
+            latents = self._denormalize_latents(latents)
 
         # Decode latents
         with torch.autocast(device_type="cuda",
@@ -192,6 +201,8 @@ class DecodingStage(PipelineStage):
                 and self.vae.post_quant_conv.weight.shape[1] == 32
             ):
                 latents = self._flux2_bn_denorm_and_unpatchify(latents)
+                # Denormalize 32ch VAE input (scaling_factor / shift_factor for VAE space)
+                latents = self._denormalize_latents(latents)
             image = self.vae.decode(latents)
             if squeezed_for_vae:
                 image = image.unsqueeze(2)
