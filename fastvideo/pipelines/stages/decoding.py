@@ -89,6 +89,45 @@ class DecodingStage(PipelineStage):
 
         return latents
 
+    @staticmethod
+    def _unpatchify_latents(latents: torch.Tensor) -> torch.Tensor:
+        """
+        Flux2: (B, 128, H', W') -> (B, 32, 2*H', 2*W').
+        Inverse of 2x2 patch packing; matches diffusers Flux2Pipeline._unpatchify_latents.
+        """
+        batch_size, num_channels, height, width = latents.shape
+        # 128 -> 32*2*2
+        latents = latents.reshape(
+            batch_size, num_channels // (2 * 2), 2, 2, height, width
+        )
+        latents = latents.permute(0, 1, 4, 2, 5, 3)
+        latents = latents.reshape(
+            batch_size, num_channels // (2 * 2), height * 2, width * 2
+        )
+        return latents
+
+    def _flux2_bn_denorm_and_unpatchify(self, latents: torch.Tensor) -> torch.Tensor:
+        """
+        Flux2: BN denormalize then unpatchify packed 128ch -> 32ch for VAE.
+        Uses vae.bn running_mean/running_var and vae.config.batch_norm_eps.
+        """
+        bn_mean = self.vae.bn.running_mean.view(1, -1, 1, 1).to(
+            latents.device, latents.dtype
+        )
+        cfg = getattr(self.vae, "config", None)
+        arch = getattr(cfg, "arch_config", None) if cfg else None
+        eps = getattr(arch, "batch_norm_eps", None) or getattr(
+            cfg, "batch_norm_eps", 1e-5
+        )
+        bn_std = torch.sqrt(
+            self.vae.bn.running_var.view(1, -1, 1, 1).to(
+                latents.device, latents.dtype
+            )
+            + eps
+        )
+        latents = latents * bn_std + bn_mean
+        return self._unpatchify_latents(latents)
+
     @torch.no_grad()
     def decode(self, latents: torch.Tensor,
                fastvideo_args: FastVideoArgs) -> torch.Tensor:
@@ -132,6 +171,15 @@ class DecodingStage(PipelineStage):
             if latents.ndim == 5 and latents.shape[2] == 1:
                 latents = latents.squeeze(2)
                 squeezed_for_vae = True
+            # Flux2 packed: 128ch packed -> BN denorm + unpatchify -> 32ch for VAE
+            if (
+                latents.ndim == 4
+                and latents.shape[1] == 128
+                and hasattr(self.vae, "bn")
+                and getattr(self.vae, "post_quant_conv", None) is not None
+                and self.vae.post_quant_conv.weight.shape[1] == 32
+            ):
+                latents = self._flux2_bn_denorm_and_unpatchify(latents)
             image = self.vae.decode(latents)
             if squeezed_for_vae:
                 image = image.unsqueeze(2)
