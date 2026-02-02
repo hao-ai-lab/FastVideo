@@ -12,6 +12,7 @@ from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
 from fastvideo.configs.sample.cosmos import Cosmos_Predict2_2B_Video2World_SamplingParam
 from fastvideo.configs.sample.cosmos2_5 import Cosmos_Predict2_5_2B_Diffusers_SamplingParam
 from fastvideo.configs.sample.ltx2 import LTX2SamplingParam
+from fastvideo.configs.sample.waypoint import WaypointSamplingParam
 
 # isort: off
 from fastvideo.configs.sample.wan import (
@@ -109,6 +110,9 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "Lightricks/LTX-2": LTX2SamplingParam,
     "FastVideo/LTX2-Distilled-Diffusers": LTX2SamplingParam,
 
+    # Waypoint models
+    "Overworld/Waypoint-1-Small": WaypointSamplingParam,
+
     # Add other specific weight variants
 }
 
@@ -140,6 +144,8 @@ SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "cosmos" in id.lower() and "2_5" not in id.lower(),
     "ltx2":
     lambda id: "ltx2" in id.lower() or "ltx-2" in id.lower(),
+    "waypoint":
+    lambda id: "waypoint" in id.lower() or "worldengine" in id.lower(),
     # Add other pipeline architecture detectors
 }
 
@@ -163,6 +169,7 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
     "cosmos25": Cosmos_Predict2_5_2B_Diffusers_SamplingParam,
     "cosmos": Cosmos_Predict2_2B_Video2World_SamplingParam,
     "ltx2": LTX2SamplingParam,
+    "waypoint": WaypointSamplingParam,
     # Other fallbacks by architecture
 }
 
