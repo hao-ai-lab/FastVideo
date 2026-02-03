@@ -1105,32 +1105,28 @@ class RLPipeline(TrainingPipeline):
             negative_prompt_embeds = negative_prompt_embeds.to(compute_dtype)
 
         # Predict noise with transformer
-        if guidance_scale > 1.0 and negative_prompt_embeds is not None:
-            # Classifier-free guidance: concatenate negative and positive prompts
-            # For CFG, we need to run transformer twice or concatenate inputs
-            # FlowGRPO concatenates: [negative_embeds, positive_embeds]
-            latent_model_input_cfg = torch.cat([latent_model_input] * 2)
-            prompt_embeds_cfg = torch.cat(
-                [negative_prompt_embeds, prompt_embeds])
-            timestep_cfg = timestep.repeat(2)
+        if guidance_scale > 1.0:
             with set_forward_context(
                     current_timestep=current_timestep,
                     attn_metadata=None,
                     forward_batch=None,
             ):
-                noise_pred = transformer(
-                    hidden_states=latent_model_input_cfg,
-                    timestep=timestep_cfg,
-                    encoder_hidden_states=prompt_embeds_cfg,
+                noise_pred_text = transformer(
+                    hidden_states=latent_model_input,
+                    timestep=timestep,
+                    encoder_hidden_states=prompt_embeds,
                     return_dict=False,
                 )[0]
-            # noise_pred = noise_pred.to(prompt_embeds.dtype)
-            noise_pred = noise_pred
-
-            # Split and apply guidance
-            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-            noise_pred = noise_pred_uncond + guidance_scale * (
-                noise_pred_text - noise_pred_uncond)
+                noise_pred_uncond = transformer(
+                    hidden_states=latent_model_input,
+                    timestep=timestep,
+                    encoder_hidden_states=negative_prompt_embeds,
+                    return_dict=False,
+                )[0]
+            noise_pred = (
+                noise_pred_uncond
+                + guidance_scale * (noise_pred_text - noise_pred_uncond)
+            )
         else:
             with set_forward_context(
                     current_timestep=current_timestep,
@@ -1145,8 +1141,7 @@ class RLPipeline(TrainingPipeline):
                     return_dict=False,
                 )[0]
                 # noise_pred = noise_pred.to(prompt_embeds.dtype)
-            noise_pred
-
+            
         # Compute log probability using SDE step
         # Use next_latents as prev_sample to compute log prob of the actual transition
         return sde_step_with_logprob(
