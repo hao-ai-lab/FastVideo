@@ -58,6 +58,8 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V_14B_720P_SamplingParam,
     "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers":
     Wan2_1_Fun_1_3B_InP_SamplingParam,
+    "weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers":
+    Wan2_1_Fun_1_3B_InP_SamplingParam,
     "IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers":
     Wan2_1_Fun_1_3B_Control_SamplingParam,
 

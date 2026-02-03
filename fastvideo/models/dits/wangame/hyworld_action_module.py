@@ -1,0 +1,231 @@
+import torch
+import torch.nn as nn
+
+from fastvideo.layers.visual_embedding import TimestepEmbedder, ModulateProjection, timestep_embedding
+from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.attention import DistributedAttention
+from fastvideo.forward_context import set_forward_context
+from fastvideo.models.dits.wanvideo import WanImageEmbedding
+
+from fastvideo.models.dits.hyworld.camera_rope import prope_qkv
+from fastvideo.layers.rotary_embedding import _apply_rotary_emb
+from fastvideo.layers.mlp import MLP
+
+class WanGameActionTimeImageEmbedding(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        time_freq_dim: int,
+        image_embed_dim: int | None = None,
+    ):
+        super().__init__()
+
+        self.time_freq_dim = time_freq_dim
+        self.time_embedder = TimestepEmbedder(
+            dim, frequency_embedding_size=time_freq_dim, act_layer="silu")
+        self.time_modulation = ModulateProjection(dim,
+                                                  factor=6,
+                                                  act_layer="silu")
+        
+        self.image_embedder = None
+        if image_embed_dim is not None:
+            self.image_embedder = WanImageEmbedding(image_embed_dim, dim)
+
+        self.action_embedder = MLP(
+            time_freq_dim,
+            dim,
+            dim,
+            bias=True,
+            act_type="silu"
+        )
+        # Initialize with zeros for residual-like behavior
+        nn.init.zeros_(self.action_embedder.fc_out.weight)
+        if self.action_embedder.fc_out.bias is not None:
+            nn.init.zeros_(self.action_embedder.fc_out.bias)
+
+    def forward(
+        self,
+        timestep: torch.Tensor,
+        action: torch.Tensor,
+        encoder_hidden_states: torch.Tensor, # Kept for interface compatibility
+        encoder_hidden_states_image: torch.Tensor | None = None,
+        timestep_seq_len: int | None = None,
+    ):
+        temb = self.time_embedder(timestep, timestep_seq_len)
+
+        action_emb = timestep_embedding(action.flatten(), self.time_freq_dim)
+        action_embedder_dtype = next(iter(self.action_embedder.parameters())).dtype
+        if (
+            action_emb.dtype != action_embedder_dtype
+            and action_embedder_dtype != torch.int8
+        ):
+            action_emb = action_emb.to(action_embedder_dtype)
+        action_emb = self.action_embedder(action_emb).type_as(temb)
+        temb = temb + action_emb
+
+        timestep_proj = self.time_modulation(temb)
+
+        # MatrixGame does not use text embeddings, so we ignore encoder_hidden_states
+        
+        if encoder_hidden_states_image is not None:
+            assert self.image_embedder is not None
+            encoder_hidden_states_image = self.image_embedder(
+                encoder_hidden_states_image)
+
+        encoder_hidden_states = torch.zeros((timestep.shape[0], 0, temb.shape[-1]),
+                                            device=temb.device,
+                                            dtype=temb.dtype)
+
+        return temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image
+
+class WanGameActionSelfAttention(nn.Module):
+    """
+    Self-attention module with support for:
+    - Standard RoPE-based attention
+    - Camera PRoPE-based attention (when viewmats and Ks are provided)
+    - KV caching for autoregressive generation
+    """
+
+    def __init__(self,
+                 dim: int,
+                 num_heads: int,
+                 local_attn_size: int = -1,
+                 sink_size: int = 0,
+                 qk_norm=True,
+                 eps=1e-6) -> None:
+        assert dim % num_heads == 0
+        super().__init__()
+        self.dim = dim
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+        self.local_attn_size = local_attn_size
+        self.sink_size = sink_size
+        self.qk_norm = qk_norm
+        self.eps = eps
+        self.max_attention_size = 32760 if local_attn_size == -1 else local_attn_size * 1560
+
+        # Scaled dot product attention (using DistributedAttention for SP support)
+        self.attn = DistributedAttention(
+            num_heads=num_heads,
+            head_size=self.head_dim,
+            softmax_scale=None,
+            causal=False,
+            supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
+                                          AttentionBackendEnum.TORCH_SDPA))
+
+    def forward(self,
+                q: torch.Tensor,
+                k: torch.Tensor,
+                v: torch.Tensor,
+                freqs_cis: tuple[torch.Tensor, torch.Tensor],
+                kv_cache: dict | None = None,
+                current_start: int = 0,
+                cache_start: int | None = None,
+                viewmats: torch.Tensor | None = None,
+                Ks: torch.Tensor | None = None,
+                is_cache: bool = False,
+                attention_mask: torch.Tensor | None = None):
+        """
+        Forward pass with camera PRoPE attention combining standard RoPE and projective positional encoding.
+        
+        Args:
+            q, k, v: Query, key, value tensors [B, L, num_heads, head_dim]
+            freqs_cis: RoPE frequency cos/sin tensors
+            kv_cache: KV cache dict (may have None values for training)
+            current_start: Current position for KV cache
+            cache_start: Cache start position
+            viewmats: Camera view matrices for PRoPE [B, cameras, 4, 4]
+            Ks: Camera intrinsics for PRoPE [B, cameras, 3, 3]
+            is_cache: Whether to store to KV cache (for inference)
+            attention_mask: Attention mask [B, L] (1 = attend, 0 = mask)
+        """
+        if cache_start is None:
+            cache_start = current_start
+
+        # Apply RoPE manually
+        cos, sin = freqs_cis
+        query_rope = _apply_rotary_emb(q, cos, sin, is_neox_style=False).type_as(v)
+        key_rope = _apply_rotary_emb(k, cos, sin, is_neox_style=False).type_as(v)
+        value_rope = v
+
+        # Get PRoPE transformed q, k, v
+        query_prope, key_prope, value_prope, apply_fn_o = prope_qkv(
+            q.transpose(1, 2),  # [B, num_heads, L, head_dim]
+            k.transpose(1, 2),
+            v.transpose(1, 2),
+            viewmats=viewmats,
+            Ks=Ks,
+            patches_x=40,  # hardcoded for now
+            patches_y=22,
+        )
+        # PRoPE returns [B, num_heads, L, head_dim], convert to [B, L, num_heads, head_dim]
+        query_prope = query_prope.transpose(1, 2)
+        key_prope = key_prope.transpose(1, 2)
+        value_prope = value_prope.transpose(1, 2)
+
+        # KV cache handling
+        if kv_cache is not None:
+            cache_key = kv_cache.get("k", None)
+            cache_value = kv_cache.get("v", None)
+
+            if cache_value is not None and not is_cache:
+                cache_key_rope, cache_key_prope = cache_key.chunk(2, dim=-1)
+                cache_value_rope, cache_value_prope = cache_value.chunk(2, dim=-1)
+
+                key_rope = torch.cat([cache_key_rope, key_rope], dim=1)
+                value_rope = torch.cat([cache_value_rope, value_rope], dim=1)
+                key_prope = torch.cat([cache_key_prope, key_prope], dim=1)
+                value_prope = torch.cat([cache_value_prope, value_prope], dim=1)
+
+            if is_cache:
+                # Store to cache (update input dict directly)
+                kv_cache["k"] = torch.cat([key_rope, key_prope], dim=-1)
+                kv_cache["v"] = torch.cat([value_rope, value_prope], dim=-1)
+
+        # Concatenate rope and prope paths (matching original)
+        query_all = torch.cat([query_rope, query_prope], dim=0)
+        key_all = torch.cat([key_rope, key_prope], dim=0)
+        value_all = torch.cat([value_rope, value_prope], dim=0)
+
+        # Check if Q and KV have different sequence lengths (KV cache mode)
+        # In this case, use LocalAttention (supports different Q/KV lengths)
+        if query_all.shape[1] != key_all.shape[1]:
+            raise ValueError("Q and KV have different sequence lengths")
+            # KV cache mode: Q has new tokens only, KV has cached + new tokens
+            # Use LocalAttention which supports different Q/KV lengths
+            # LocalAttention will use the appropriate backend (SageAttn, FlashAttn, etc.)
+            if not hasattr(self, '_kv_cache_attn'):
+                from fastvideo.attention import LocalAttention
+                self._kv_cache_attn = LocalAttention(
+                    num_heads=self.num_heads,
+                    head_size=self.head_dim,
+                    causal=False,
+                    supported_attention_backends=(AttentionBackendEnum.SAGE_ATTN,
+                                                  AttentionBackendEnum.FLASH_ATTN,
+                                                  AttentionBackendEnum.TORCH_SDPA)
+                )
+            hidden_states_all = self._kv_cache_attn(query_all, key_all, value_all)
+        else:
+            # Same sequence length: use DistributedAttention (supports SP)
+            # Create default attention mask if not provided
+            if attention_mask is None:
+                batch_size, seq_len = q.shape[0], q.shape[1]
+                attention_mask = torch.ones(batch_size, seq_len, device=q.device, dtype=q.dtype)
+        
+            if q.dtype == torch.float32:
+                from fastvideo.attention.backends.sdpa import SDPAMetadataBuilder
+                attn_metadata_builder = SDPAMetadataBuilder
+            else:
+                from fastvideo.attention.backends.flash_attn import FlashAttnMetadataBuilder
+                attn_metadata_builder = FlashAttnMetadataBuilder
+            attn_metadata = attn_metadata_builder().build(
+                current_timestep=0,
+                attn_mask=attention_mask,
+            )
+            with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
+                hidden_states_all, _ = self.attn(query_all, key_all, value_all, attention_mask=attention_mask)
+
+        hidden_states_rope, hidden_states_prope = hidden_states_all.chunk(2, dim=0)
+        hidden_states_prope = apply_fn_o(hidden_states_prope.transpose(1, 2)).transpose(1, 2)
+
+        return hidden_states_rope, hidden_states_prope

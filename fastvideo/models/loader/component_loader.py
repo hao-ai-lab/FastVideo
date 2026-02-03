@@ -806,6 +806,10 @@ class TransformerLoader(ComponentLoader):
             cls_name.startswith("Cosmos25")
             or cls_name == "Cosmos25Transformer3DModel"
             or getattr(fastvideo_args.pipeline_config, "prefix", "") == "Cosmos25"
+        ) and not (
+            cls_name.startswith("WanGame")
+            or cls_name == "WanGameActionTransformer3DModel"
+            or getattr(fastvideo_args.pipeline_config, "prefix", "") == "WanGame"
         )
         model = maybe_load_fsdp_model(
             model_cls=model_cls,

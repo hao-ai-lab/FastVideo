@@ -168,6 +168,20 @@ class DenoisingStage(PipelineStage):
             },
         )
 
+        if batch.mouse_cond is not None and batch.keyboard_cond is not None:
+            from fastvideo.models.dits.hyworld.pose import process_custom_actions
+            viewmats, intrinsics, action_labels = process_custom_actions(batch.keyboard_cond, batch.mouse_cond)
+            camera_action_kwargs = self.prepare_extra_func_kwargs(
+                self.transformer.forward,
+                {
+                    "viewmats": viewmats.unsqueeze(0).to(get_local_torch_device(), dtype=target_dtype),
+                    "Ks": intrinsics.unsqueeze(0).to(get_local_torch_device(), dtype=target_dtype),
+                    "action": action_labels.unsqueeze(0).to(get_local_torch_device(), dtype=target_dtype),
+                },
+            )
+        else:
+            camera_action_kwargs = {}
+
         action_kwargs = self.prepare_extra_func_kwargs(
             self.transformer.forward,
             {
@@ -406,6 +420,7 @@ class DenoisingStage(PipelineStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                             **action_kwargs,
+                            **camera_action_kwargs,
                         )
 
                     if batch.do_classifier_free_guidance:
@@ -423,6 +438,7 @@ class DenoisingStage(PipelineStage):
                                 **image_kwargs,
                                 **neg_cond_kwargs,
                                 **action_kwargs,
+                                **camera_action_kwargs,
                             )
 
                         noise_pred_text = noise_pred

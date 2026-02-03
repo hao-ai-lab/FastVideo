@@ -433,6 +433,10 @@ def process_custom_actions(keyboard_tensor, mouse_tensor, forward_speed=DEFAULT_
     Process custom keyboard and mouse tensors into model inputs (viewmats, intrinsics, action_labels).
     Assumes inputs correspond to each LATENT frame.
     """
+    if keyboard_tensor.ndim == 3:
+        keyboard_tensor = keyboard_tensor.squeeze(0)
+    if mouse_tensor.ndim == 3:
+        mouse_tensor = mouse_tensor.squeeze(0)
     keyboard_tensor, mouse_tensor = reformat_keyboard_and_mouse_tensors(keyboard_tensor, mouse_tensor)
 
     motions = []
