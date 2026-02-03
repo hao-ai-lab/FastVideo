@@ -20,9 +20,8 @@ This example demonstrates:
 
 import os
 import sys
-import asyncio
-from dataclasses import dataclass
-from typing import Optional, Set, Tuple
+from dataclasses import dataclass, field
+from typing import Set, Tuple
 
 import torch
 
@@ -45,13 +44,9 @@ class CtrlInput:
         mouse: Tuple of (x, y) mouse velocity as floats.
         scroll: Scroll wheel value (-1, 0, or 1).
     """
-    button: Set[int] = None
+    button: Set[int] = field(default_factory=set)
     mouse: Tuple[float, float] = (0.0, 0.0)
     scroll: float = 0.0
-    
-    def __post_init__(self):
-        if self.button is None:
-            self.button = set()
 
 
 # Common keyboard mappings (Owl-Control keycodes)
@@ -109,7 +104,7 @@ def get_keyboard_input() -> CtrlInput:
     return ctrl
 
 
-async def main():
+def main():
     """Main streaming generation loop."""
     # Check if model path exists
     if not os.path.exists(WAYPOINT_MODEL_PATH):
@@ -123,8 +118,7 @@ async def main():
     
     # Import here to avoid import errors before CUDA check
     try:
-        from fastvideo.pipelines.basic.waypoint import WaypointPipeline
-        from fastvideo.pipelines.basic.waypoint.waypoint_pipeline import CtrlInput as PipelineCtrlInput
+        from fastvideo.pipelines.basic.waypoint import WaypointPipeline  # noqa: F401
     except ImportError as e:
         print(f"Error importing Waypoint pipeline: {e}")
         print("Please ensure FastVideo is installed correctly.")
@@ -250,5 +244,5 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
 

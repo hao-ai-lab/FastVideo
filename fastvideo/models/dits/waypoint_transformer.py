@@ -11,8 +11,7 @@ Reference: https://huggingface.co/Overworld/Waypoint-1-Small
 """
 
 import math
-from dataclasses import dataclass
-from typing import Optional, Set, Tuple
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -27,47 +26,9 @@ logger = init_logger(__name__)
 
 
 # =============================================================================
-# Control Input Dataclass
+# Note: CtrlInput is defined in fastvideo/pipelines/basic/waypoint/waypoint_pipeline.py
+# to avoid circular imports and keep pipeline-specific code separate
 # =============================================================================
-
-@dataclass
-class CtrlInput:
-    """Controller input for Waypoint world model.
-    
-    Attributes:
-        button: Set of pressed button IDs (0-255). Uses Owl-Control keycodes.
-        mouse: Tuple of (x, y) mouse velocity as floats.
-        scroll: Scroll wheel value (-1, 0, or 1).
-    """
-    button: Set[int] = None
-    mouse: Tuple[float, float] = (0.0, 0.0)
-    scroll: float = 0.0
-    
-    def __post_init__(self):
-        if self.button is None:
-            self.button = set()
-    
-    def to_tensors(self, device: torch.device, dtype: torch.dtype, n_buttons: int = 256):
-        """Convert to tensor format expected by the model.
-        
-        Returns:
-            mouse: [1, 1, 2] tensor
-            button: [1, 1, n_buttons] one-hot tensor
-            scroll: [1, 1, 1] tensor
-        """
-        # Mouse velocity
-        mouse = torch.tensor([[list(self.mouse)]], device=device, dtype=dtype)
-        
-        # One-hot button encoding
-        button = torch.zeros(1, 1, n_buttons, device=device, dtype=dtype)
-        for b in self.button:
-            if 0 <= b < n_buttons:
-                button[0, 0, b] = 1.0
-        
-        # Scroll
-        scroll = torch.tensor([[[self.scroll]]], device=device, dtype=dtype)
-        
-        return mouse, button, scroll
 
 
 # =============================================================================
