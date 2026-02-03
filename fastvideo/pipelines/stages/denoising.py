@@ -84,7 +84,7 @@ def sde_step_with_logprob(
     sigmas = scheduler.sigmas.to(sample.device, sample.dtype)
     sigma = sigmas[step_indices].view(-1, 1, 1, 1, 1)
     sigma_prev = sigmas[prev_step_indices].view(-1, 1, 1, 1, 1)
-    sigma_max = sigmas[0].item()
+    sigma_max = sigmas[1].item()
     sigma_min = sigmas[-1].item()
 
     dt = sigma_prev - sigma

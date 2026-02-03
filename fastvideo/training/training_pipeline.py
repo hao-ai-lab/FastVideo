@@ -538,9 +538,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
             else:
                 self.optimizer.step()
                 self.lr_scheduler.step()
-
-        training_batch.total_loss = training_batch.total_loss
-        training_batch.grad_norm = training_batch.grad_norm
+        
         return training_batch
 
     def _resume_from_checkpoint(self) -> None:

@@ -3,7 +3,7 @@
 
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export WANDB_API_KEY="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"
 
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 RL_DATASET_DIR="data/ocr/"
@@ -11,20 +11,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VALIDATION_DATASET_FILE="$SCRIPT_DIR/validation.json"
 NUM_GPUS=4
 
-# export CUDA_VISIBLE_DEVICES=4,5,6,7
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # Training arguments (aligned with WandB sample + train; SFT not used)
 training_args=(
   --tracker_project_name "wan_t2v_grpo"
   --output_dir "checkpoints/wan_t2v_grpo_4gpu"
-  --max_train_steps 1000
-  --train_batch_size 16
+  --max_train_steps 3000
+  --train_batch_size 8
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
   --num_latent_t 20
   --num_height 240
   --num_width 416
-  --num_frames 33
+  --num_frames 77
   --lora_rank 32
   --lora_training True
 )
@@ -74,10 +75,12 @@ rl_args=(
   --rl_warmup_steps 0
   --reward-models "{\"paddle_ocr\": 1.0}"
 )
-cfg_args=( --guidance_scale 4.5 )
+cfg_args=( 
+  --guidance_scale 4.5 
+)
 miscellaneous_args=(
   --inference_mode False
-  --checkpoints_total_limit 17
+  --checkpoints_total_limit 67
   --dit_precision "fp32"
   --num_euler_timesteps 50
   --ema_start_step 0
@@ -87,7 +90,7 @@ miscellaneous_args=(
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
-  --master_port 29902 \
+  --master_port 29866 \
   "fastvideo/training/wan_rl_training_pipeline.py" \
   "${parallel_args[@]}" \
   "${model_args[@]}" \

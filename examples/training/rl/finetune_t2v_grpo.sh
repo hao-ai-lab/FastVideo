@@ -28,7 +28,7 @@ training_args=(
   --num_latent_t 20
   --num_height 240
   --num_width 416
-  --num_frames 33
+  --num_frames 77
   --lora_rank 32
   --lora_training True
 )
@@ -64,7 +64,7 @@ validation_args=(
   --validation_dataset_file $VALIDATION_DATASET_FILE
   --validation_steps 30
   --validation_sampling_steps "20" 
-  --validation_guidance_scale "6.0"
+  --validation_guidance_scale "4.5"
 )
 
 # Optimizer arguments

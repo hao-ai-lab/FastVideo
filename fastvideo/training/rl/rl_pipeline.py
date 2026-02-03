@@ -14,6 +14,7 @@ import json
 import math
 import os
 from typing import Any
+from copy import deepcopy
 
 import imageio
 import numpy as np
@@ -26,6 +27,7 @@ from fastvideo.dataset.validation_dataset import ValidationDataset
 import torch.distributed as dist
 import torch.nn as nn
 
+from fastvideo.pipelines.basic.wan.wan_pipeline import WanPipeline
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.distributed import get_world_group
 from fastvideo.fastvideo_args import TrainingArgs
@@ -214,13 +216,49 @@ class RLPipeline(TrainingPipeline):
 
         logger.info("RL pipeline initialization complete")
         self.sampling_pipeline = self._build_sampling_pipeline(training_args)
-
+    
     def _build_sampling_pipeline(self, training_args: TrainingArgs):
-        if self.validation_pipeline is not None:
-            return self.validation_pipeline
-        raise RuntimeError(
-            "Sampling pipeline is not initialized. Override _build_sampling_pipeline in the RL pipeline subclass."
-        )
+        return self._create_inference_pipeline(training_args,
+                                            dit_cpu_offload=False)
+    
+    def _create_inference_pipeline(self, training_args: TrainingArgs,
+                                   dit_cpu_offload: bool):
+        args_copy = deepcopy(training_args)
+        args_copy.inference_mode = True
+        loaded_modules = {
+            "transformer": self.get_module("transformer"),
+        }
+        transformer_2 = self.get_module("transformer_2", None)
+        if transformer_2 is not None:
+            loaded_modules["transformer_2"] = transformer_2
+        text_encoder = self.get_module("text_encoder", None)
+        if text_encoder is not None:
+            loaded_modules["text_encoder"] = text_encoder
+        tokenizer = self.get_module("tokenizer", None)
+        if tokenizer is not None:
+            loaded_modules["tokenizer"] = tokenizer
+        vae = self.get_module("vae", None)
+        if vae is not None:
+            loaded_modules["vae"] = vae
+        # Use UniPCMultistepScheduler for RL sampling to match flow_grpo
+        scheduler = self.get_module("scheduler", None)
+        if scheduler is not None:
+            loaded_modules["scheduler"] = scheduler
+
+        pipeline = WanPipeline.from_pretrained(
+            training_args.model_path,
+            args=args_copy,  # type: ignore
+            inference_mode=True,
+            loaded_modules=loaded_modules,
+            tp_size=training_args.tp_size,
+            sp_size=training_args.sp_size,
+            num_gpus=training_args.num_gpus,
+            pin_cpu_memory=training_args.pin_cpu_memory,
+            dit_cpu_offload=dit_cpu_offload)
+        # Override scheduler to use UniPCMultistepScheduler
+        if scheduler is not None:
+            pipeline.modules["scheduler"] = scheduler
+        return pipeline
 
     def _initialize_value_model(self, training_args: TrainingArgs) -> None:
         """Initialize the value model and its optimizer."""
@@ -306,11 +344,6 @@ class RLPipeline(TrainingPipeline):
                 } for prompt in prompts]
 
         return training_batch
-
-    def initialize_validation_pipeline(self, training_args: TrainingArgs):
-        """Initialize validation pipeline for RL (similar to base implementation)."""
-        # Set validation_pipeline to None for now
-        self.validation_pipeline = None
 
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
@@ -1337,6 +1370,18 @@ class RLPipeline(TrainingPipeline):
             # Compute importance ratio
             ratio = torch.exp(log_prob - old_log_probs_j)
 
+            # myregion debug
+            if j == 0:
+                logger.info(
+                    "RL_METRIC: GRPO first timestep (j=0): ratio mean=%.6f min=%.6f max=%.6f | "
+                    "log_prob mean=%.6f min=%.6f max=%.6f | "
+                    "old_log_probs_j mean=%.6f min=%.6f max=%.6f",
+                    ratio.mean().item(), ratio.min().item(), ratio.max().item(),
+                    log_prob.mean().item(), log_prob.min().item(), log_prob.max().item(),
+                    old_log_probs_j.mean().item(), old_log_probs_j.min().item(), old_log_probs_j.max().item(),
+                )
+            # endregion
+
             # Clipped surrogate objective
             unclipped_loss = -advantages_j_clipped * ratio
             clipped_loss = -advantages_j_clipped * torch.clamp(
@@ -1375,8 +1420,8 @@ class RLPipeline(TrainingPipeline):
                 approx_kl_j = 0.5 * torch.mean((log_prob - old_log_probs_j)**2)
                 approx_kls.append(approx_kl_j)
 
-            # Explicitly delete intermediate tensors to free memory
-            # This helps prevent OOM by freeing activations after backward()
+            # Explicitly delete intermediate tensors to free memory (only removes local
+            # variable names; list contents above are separate tensors and are unchanged)
             del prev_sample, log_prob, prev_sample_mean, std_dev_t, dt
             del advantages_j_clipped, ratio, unclipped_loss, clipped_loss, policy_loss_j, total_loss_j, kl_loss_j
             if kl_beta > 0:
