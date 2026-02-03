@@ -35,7 +35,7 @@ export HOME="/mnt/weka/home/hao.zhang/wei"
 
 MODEL_PATH="weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers"
 DATA_DIR="mc_wasd_10/preprocessed/combined_parquet_dataset"
-VALIDATION_DATASET_FILE="mc_wasd_10/validation.json"
+VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation.json"
 # Configs
 NUM_GPUS=8
 
@@ -43,7 +43,7 @@ NUM_GPUS=8
 training_args=(
   --tracker_project_name "wangame_1.3b_overfit"
   --output_dir "wangame_1.3b_overfit"
-  --max_train_steps 1500
+  --max_train_steps 15000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
@@ -88,8 +88,8 @@ validation_args=(
 optimizer_args=(
   --learning_rate 2e-5
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 1000
-  --training_state_checkpointing_steps 1000
+  --weight_only_checkpointing_steps 1000000
+  --training_state_checkpointing_steps 10000000
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )

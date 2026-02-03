@@ -1,0 +1,404 @@
+{
+    "data": [
+        {
+            "caption": "0",
+            "image_path": "../../../../mc_wasd_10/validate/000000.jpg",
+            "action_path": "../../../../mc_wasd_10/videos/000000_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "1",
+            "image_path": "../../../../mc_wasd_10/validate/000001.jpg",
+            "action_path": "../../../../mc_wasd_10/videos/000001_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "2",
+            "image_path": "../../../../mc_wasd_10/validate/000002.jpg",
+            "action_path": "../../../../mc_wasd_10/videos/000002_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "3",
+            "image_path": "../../../../mc_wasd_10/validate/000003.jpg",
+            "action_path": "../../../../mc_wasd_10/videos/000003_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "4",
+            "image_path": "../../../../mc_wasd_10/validate/000004.jpg",
+            "action_path": "../../../../mc_wasd_10/videos/000004_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "5",
+            "image_path": "../../../../mc_wasd_10/validate/000005.jpg",
+            "action_path": "../../../../mc_wasd_10/videos/000005_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "6",
+            "image_path": "../../../../mc_wasd_10/validate/000006.jpg",
+            "action_path": "../../../../mc_wasd_10/videos/000006_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "7",
+            "image_path": "../../../../mc_wasd_10/validate/000007.jpg",
+            "action_path": "../../../../mc_wasd_10/videos/000007_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "00. Hold [W] + Static",
+            "image_path": "../../../../mc_wasd_10/validate/000000.jpg",
+            "action_path": "action/000000_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "01. Hold [S] + Static",
+            "image_path": "../../../../mc_wasd_10/validate/000001.jpg",
+            "action_path": "action/000001_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "02. Hold [A] + Static",
+            "image_path": "../../../../mc_wasd_10/validate/000002.jpg",
+            "action_path": "action/000002_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "03. Hold [D] + Static",
+            "image_path": "../../../../mc_wasd_10/validate/000003.jpg",
+            "action_path": "action/000003_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "04. Hold [WA] + Static",
+            "image_path": "../../../../mc_wasd_10/validate/000004.jpg",
+            "action_path": "action/000004_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "05. Hold [WD] + Static",
+            "image_path": "../../../../mc_wasd_10/validate/000005.jpg",
+            "action_path": "action/000005_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "06. Hold [SA] + Static",
+            "image_path": "../../../../mc_wasd_10/validate/000006.jpg",
+            "action_path": "action/000006_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "07. Hold [SD] + Static",
+            "image_path": "../../../../mc_wasd_10/validate/000007.jpg",
+            "action_path": "action/000007_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "08. No Key + Hold [up]",
+            "image_path": "../../../../mc_wasd_10/validate/000000.jpg",
+            "action_path": "action/000008_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "09. No Key + Hold [down]",
+            "image_path": "../../../../mc_wasd_10/validate/000001.jpg",
+            "action_path": "action/000009_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "10. No Key + Hold [left]",
+            "image_path": "../../../../mc_wasd_10/validate/000002.jpg",
+            "action_path": "action/000010_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "11. No Key + Hold [right]",
+            "image_path": "../../../../mc_wasd_10/validate/000003.jpg",
+            "action_path": "action/000011_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "12. No Key + Hold [up_right]",
+            "image_path": "../../../../mc_wasd_10/validate/000004.jpg",
+            "action_path": "action/000012_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "13. No Key + Hold [up_left]",
+            "image_path": "../../../../mc_wasd_10/validate/000005.jpg",
+            "action_path": "action/000013_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "14. No Key + Hold [down_right]",
+            "image_path": "../../../../mc_wasd_10/validate/000006.jpg",
+            "action_path": "action/000014_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "15. No Key + Hold [down_left]",
+            "image_path": "../../../../mc_wasd_10/validate/000007.jpg",
+            "action_path": "action/000015_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "00. Hold [W] + Static",
+            "image_path": "../../../../mc_wasd_10/validate/gen_000000.jpg",
+            "action_path": "action/000000_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "01. Hold [S] + Static",
+            "image_path": "../../../../mc_wasd_10/validate/gen_000001.jpg",
+            "action_path": "action/000001_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "02. Hold [A] + Static",
+            "image_path": "../../../../mc_wasd_10/validate/gen_000002.jpg",
+            "action_path": "action/000002_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "03. Hold [D] + Static",
+            "image_path": "../../../../mc_wasd_10/validate/gen_000003.jpg",
+            "action_path": "action/000003_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "04. Hold [WA] + Static",
+            "image_path": "../../../../mc_wasd_10/validate/gen_000004.jpg",
+            "action_path": "action/000004_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "05. Hold [WD] + Static",
+            "image_path": "../../../../mc_wasd_10/validate/gen_000005.jpg",
+            "action_path": "action/000005_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "06. Hold [SA] + Static",
+            "image_path": "../../../../mc_wasd_10/validate/gen_000006.jpg",
+            "action_path": "action/000006_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "07. Hold [SD] + Static",
+            "image_path": "../../../../mc_wasd_10/validate/gen_000007.jpg",
+            "action_path": "action/000007_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "08. No Key + Hold [up]",
+            "image_path": "../../../../mc_wasd_10/validate/gen_000000.jpg",
+            "action_path": "action/000008_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "09. No Key + Hold [down]",
+            "image_path": "../../../../mc_wasd_10/validate/gen_000001.jpg",
+            "action_path": "action/000009_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "10. No Key + Hold [left]",
+            "image_path": "../../../../mc_wasd_10/validate/gen_000002.jpg",
+            "action_path": "action/000010_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "11. No Key + Hold [right]",
+            "image_path": "../../../../mc_wasd_10/validate/gen_000003.jpg",
+            "action_path": "action/000011_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "12. No Key + Hold [up_right]",
+            "image_path": "../../../../mc_wasd_10/validate/gen_000004.jpg",
+            "action_path": "action/000012_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "13. No Key + Hold [up_left]",
+            "image_path": "../../../../mc_wasd_10/validate/gen_000005.jpg",
+            "action_path": "action/000013_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "14. No Key + Hold [down_right]",
+            "image_path": "../../../../mc_wasd_10/validate/gen_000006.jpg",
+            "action_path": "action/000014_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "15. No Key + Hold [down_left]",
+            "image_path": "../../../../mc_wasd_10/validate/gen_000007.jpg",
+            "action_path": "action/000015_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        }
+    ]
+}

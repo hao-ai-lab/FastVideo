@@ -4,6 +4,7 @@ import os
 import pathlib
 
 import datasets
+import numpy as np
 from torch.utils.data import IterableDataset
 
 from fastvideo.distributed import (get_sp_world_size, get_world_rank,
@@ -159,6 +160,26 @@ class ValidationDataset(IterableDataset):
                                    control_video_path)
                 else:
                     sample["control_video"] = load_video(control_video_path)
+
+            if sample.get("action_path", None) is not None:
+                action_path = sample["action_path"]
+                action_path = os.path.join(self.dir, action_path)
+                sample["action_path"] = action_path
+                if not pathlib.Path(action_path).is_file():
+                    logger.warning("Action file %s does not exist.", action_path)
+                else:
+                    try:
+                        action_data = np.load(action_path, allow_pickle=True)
+                        num_frames = sample["num_frames"]
+                        if action_data.dtype == object: action_data = action_data.item()
+                        if isinstance(action_data, dict):
+                            sample["keyboard_cond"] = action_data["keyboard"][:num_frames]
+                            sample["mouse_cond"] = action_data["mouse"][:num_frames]
+                        else:
+                            sample["keyboard_cond"] = action_data[:num_frames]
+                    except Exception as e:
+                        logger.error("Error loading action file %s: %s",
+                                        action_path, e)
 
             sample = {k: v for k, v in sample.items() if v is not None}
             yield sample
