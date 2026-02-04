@@ -16,6 +16,9 @@ import os
 import pytest
 import torch
 
+from fastvideo.attention.backends.sdpa import SDPAMetadata
+from fastvideo.forward_context import set_forward_context
+
 # Skip if weights not available
 WEIGHTS_PATH = "official_weights/Waypoint-1-Small"
 SKIP_REASON = f"Waypoint weights not found at {WEIGHTS_PATH}"
@@ -91,8 +94,11 @@ class TestWaypointTransformerParity:
             print(f"\n✗ Weight loading failed: {e}")
             pytest.fail(f"Weight loading failed: {e}")
     
-    def test_forward_pass(self, waypoint_config, device):
-        """Test that forward pass runs without errors."""
+    def test_forward_pass(self, waypoint_config, device, distributed_setup):
+        """Test that forward pass runs without errors.
+        
+        Uses distributed_setup fixture to initialize distributed environment (SP=1).
+        """
         import safetensors.torch as st
         from fastvideo.models.dits.waypoint_transformer import WaypointWorldModel
         from fastvideo.pipelines.basic.waypoint.waypoint_pipeline import CtrlInput
@@ -127,8 +133,13 @@ class TestWaypointTransformerParity:
         ctrl = CtrlInput(button={48, 42}, mouse=(0.1, 0.2), scroll=0.0)
         mouse, button, scroll = ctrl.to_tensors(device, torch.bfloat16, n_buttons=256)
         
-        # Forward pass
-        with torch.no_grad():
+        # Forward pass with forward context (required for attention layers)
+        attn_metadata = SDPAMetadata(current_timestep=0, attn_mask=None)
+        with torch.no_grad(), set_forward_context(
+            current_timestep=0,
+            attn_metadata=attn_metadata,
+            forward_batch=None,
+        ):
             try:
                 output = model(
                     x=x,

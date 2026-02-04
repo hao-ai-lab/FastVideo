@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 import torch
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig
-from fastvideo.configs.models.dits.waypoint_transformer import WaypointArchConfig
+from fastvideo.configs.models.dits.waypoint_transformer import WaypointConfig
 from fastvideo.configs.models.encoders import BaseEncoderOutput, T5Config
 from fastvideo.configs.pipelines.base import PipelineConfig
 
@@ -42,7 +42,7 @@ class WaypointT2VConfig(PipelineConfig):
     """
     
     # DiT configuration
-    dit_config: DiTConfig = field(default_factory=WaypointArchConfig)
+    dit_config: DiTConfig = field(default_factory=WaypointConfig)
     
     # VAE is loaded from the model repo (WorldEngineVAE) via dynamic module import.
     vae_tiling: bool = False

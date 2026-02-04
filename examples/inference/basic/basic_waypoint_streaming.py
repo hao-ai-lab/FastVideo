@@ -10,35 +10,12 @@ Usage:
     python examples/inference/basic/basic_waypoint_streaming.py
 """
 
-from dataclasses import dataclass, field
-from typing import Set, Tuple
-
 import torch
 
 from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
+from fastvideo.pipelines.basic.waypoint.waypoint_pipeline import CtrlInput
 
-# A FastVideo-compatible model repo ID / local path (needs `model_index.json`).
-# For local testing, create a stub repo via:
-#   python scripts/convert_waypoint_stub_repo.py --out converted/waypoint_diffusers_stub
-# Then run with:
-#   WAYPOINT_MODEL_ID=converted/waypoint_diffusers_stub python examples/inference/basic/basic_waypoint_streaming.py
-import os
-MODEL_ID = os.getenv("WAYPOINT_MODEL_ID", "FastVideo/Waypoint-1-Small-Diffusers")
 OUTPUT_PATH = "video_samples_waypoint"
-
-
-@dataclass
-class CtrlInput:
-    """Controller input for Waypoint world model.
-    
-    Attributes:
-        button: Set of pressed button IDs (0-255). Uses Owl-Control keycodes.
-        mouse: Tuple of (x, y) mouse velocity as floats.
-        scroll: Scroll wheel value (-1, 0, or 1).
-    """
-    button: Set[int] = field(default_factory=set)
-    mouse: Tuple[float, float] = (0.0, 0.0)
-    scroll: float = 0.0
 
 
 # Common keyboard mappings (Owl-Control keycodes)
@@ -102,7 +79,7 @@ def main():
         raise SystemExit("CUDA is required for Waypoint inference.")
 
     generator = StreamingVideoGenerator.from_pretrained(
-        MODEL_ID,
+        "FastVideo/Waypoint-1-Small-Diffusers",
         num_gpus=1,
         use_fsdp_inference=False,
         dit_cpu_offload=False,
