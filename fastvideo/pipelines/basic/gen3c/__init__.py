@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-GEN3C Pipeline for FastVideo.
-
 GEN3C is a 3D-informed world-consistent video generation model with precise camera control.
 """
 

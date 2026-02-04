@@ -1,15 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-"""
-GEN3C DiT Configuration for FastVideo.
-
-GEN3C is a video-conditioned diffusion model with 3D cache support for camera control.
-It extends Cosmos 2.5 architecture with additional input channels for:
-- condition_video_input_mask: Binary mask indicating conditioning frames (1 channel)
-- condition_video_pose: VAE-encoded 3D cache buffers (frame_buffer_max * 32 channels)
-  Each buffer consists of:
-  - warped_frame latent (16 channels)
-  - warped_mask latent (16 channels)
-"""
 from dataclasses import dataclass, field
 
 from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
@@ -40,7 +29,7 @@ class Gen3CArchConfig(DiTArchConfig):
             r"time_embed.t_embedder.linear_1.\1",
             r"^net\.t_embedder\.1\.linear_2\.(.*)$":
             r"time_embed.t_embedder.linear_2.\1",
-            
+
             # Augment sigma embedding (GEN3C-specific)
             r"^net\.augment_sigma_embedder\.0\.(.*)$":
             r"augment_sigma_embed.time_proj.\1",
@@ -153,53 +142,54 @@ class Gen3CArchConfig(DiTArchConfig):
     # Base VAE latent channels
     in_channels: int = 16
     out_channels: int = 16
-    
+
     # Number of 3D cache buffers (each buffer = warped_frame + warped_mask = 32 latent channels)
     frame_buffer_max: int = 2
-    
-    # Attention configuration
-    num_attention_heads: int = 16
-    attention_head_dim: int = 128  # 2048 / 16
+
+    # Attention configuration (7B model: 32 heads x 128 dim = 4096 hidden)
+    num_attention_heads: int = 32
+    attention_head_dim: int = 128  # 4096 / 32
     num_layers: int = 28
     mlp_ratio: float = 4.0
-    
+
     # Text encoder configuration
     text_embed_dim: int = 1024
-    
+
     # AdaLN-LoRA configuration
     adaln_lora_dim: int = 256
     use_adaln_lora: bool = True
-    
+
     # GEN3C-specific: augment sigma embedding for conditioning noise augmentation
-    add_augment_sigma_embedding: bool = True
-    
+    # Note: The official GEN3C-Cosmos-7B checkpoint was trained without this
+    add_augment_sigma_embedding: bool = False
+
     # Position embedding configuration
     max_size: tuple[int, int, int] = (128, 240, 240)  # T, H, W
     patch_size: tuple[int, int, int] = (1, 2, 2)
     rope_scale: tuple[float, float, float] = (2.0, 1.0, 1.0)  # T, H, W scaling
-    
+
     # GEN3C uses learnable positional embeddings in addition to RoPE
     extra_pos_embed_type: str = "learnable"
-    
+
     # Padding mask handling
     concat_padding_mask: bool = True
-    
+
     # Cross-attention projection (not used in GEN3C 7B)
     use_crossattn_projection: bool = False
-    
+
     # RoPE FPS modulation
     rope_enable_fps_modulation: bool = True
-    
+
     # QK normalization
     qk_norm: str = "rms_norm"
     eps: float = 1e-6
-    
+
     # Affine embedding normalization
     affine_emb_norm: bool = True
-    
+
     # Block format (THWBD for GEN3C compatibility)
     block_x_format: str = "THWBD"
-    
+
     exclude_lora_layers: list[str] = field(default_factory=lambda: ["embedder"])
 
     def __post_init__(self):
@@ -207,7 +197,7 @@ class Gen3CArchConfig(DiTArchConfig):
         self.out_channels = self.out_channels or self.in_channels
         self.hidden_size = self.num_attention_heads * self.attention_head_dim
         self.num_channels_latents = self.in_channels
-        
+
         # Calculate total input channels for patch embedding:
         # - in_channels (16): VAE latent
         # - condition_video_input_mask (1): Binary mask for conditioning frames
