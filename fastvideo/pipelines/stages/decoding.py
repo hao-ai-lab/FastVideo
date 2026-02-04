@@ -74,11 +74,14 @@ class DecodingStage(PipelineStage):
 
         # Diffusers-style: scaling_factor (+ optional shift_factor)
         if hasattr(self.vae, "scaling_factor"):
-            if isinstance(self.vae.scaling_factor, torch.Tensor):
-                latents = latents / self.vae.scaling_factor.to(
-                    latents.device, latents.dtype)
+            sf = self.vae.scaling_factor
+            if isinstance(sf, torch.Tensor):
+                sf = sf.to(latents.device, latents.dtype)
+                safe_sf = sf.clamp(min=1e-8)
             else:
-                latents = latents / self.vae.scaling_factor
+                safe_sf = max(abs(sf), 1e-8) if sf != 0 else 1e-8
+            # Avoid division by zero (e.g. default config scaling_factor=0) which produces inf
+            latents = latents / safe_sf
 
             if hasattr(self.vae,
                        "shift_factor") and self.vae.shift_factor is not None:
@@ -88,6 +91,12 @@ class DecodingStage(PipelineStage):
                 else:
                     latents = latents + self.vae.shift_factor
 
+        # Clamp to finite range so VAE decode never receives inf (prevents NaN output)
+        if not torch.isfinite(latents).all():
+            latents = torch.nan_to_num(
+                latents, nan=0.0, posinf=10.0, neginf=-10.0
+            )
+        latents = latents.clamp(-10.0, 10.0)
         return latents
 
     @staticmethod

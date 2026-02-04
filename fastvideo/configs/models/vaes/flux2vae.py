@@ -38,7 +38,10 @@ class Flux2VAEArchConfig(VAEArchConfig):
     batch_norm_eps: float = 1e-5
     batch_norm_momentum: float = 0.1
     patch_size: Tuple[int, int] = (1, 1)
-    
+
+    # Latent scaling for decode: avoid division-by-zero; match Flux/Flux2 convention (e.g. 0.13025)
+    scaling_factor: float = 0.13025
+
     # Spatial compression (for images, this is typically 8)
     spatial_compression_ratio: int = 8
     temporal_compression_ratio: int = 1  # Images don't have temporal dimension
