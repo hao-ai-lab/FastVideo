@@ -263,8 +263,7 @@ class GateProj(nn.Module):
 class GatedSelfAttention(nn.Module):
     """Gated self-attention with GQA support.
     
-    Uses DistributedAttention for full self-attention when sequence parallelism
-    is initialized, falls back to LocalAttention otherwise (e.g., unit tests).
+    Uses DistributedAttention for full self-attention (supports sequence parallelism).
     """
     
     def __init__(
@@ -291,16 +290,8 @@ class GatedSelfAttention(nn.Module):
         self.v_proj = nn.Linear(d_model, n_kv_heads * self.head_dim, bias=False)
         self.out_proj = nn.Linear(d_model, d_model, bias=False)
 
-        # LocalAttention for single-GPU / unit tests
-        self.local_attn = LocalAttention(
-            num_heads=n_heads,
-            head_size=self.head_dim,
-            num_kv_heads=n_kv_heads,
-            causal=causal,
-            supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA, ),
-        )
-        # DistributedAttention for sequence parallelism
-        self.dist_attn = DistributedAttention(
+        # DistributedAttention for full self-attention (supports sequence parallelism)
+        self.attn = DistributedAttention(
             num_heads=n_heads,
             head_size=self.head_dim,
             num_kv_heads=n_kv_heads,
@@ -313,16 +304,6 @@ class GatedSelfAttention(nn.Module):
             self.gate_proj = GateProj(n_heads)
         
         self.scale = self.head_dim ** -0.5
-    
-    def _use_distributed(self) -> bool:
-        """Check if distributed attention should be used."""
-        try:
-            if torch.distributed.is_initialized():
-                from fastvideo.distributed.parallel_state import get_sp_world_size
-                return get_sp_world_size() > 1
-        except Exception:
-            pass
-        return False
     
     def forward(
         self,
@@ -342,11 +323,8 @@ class GatedSelfAttention(nn.Module):
             q = self._apply_rope(q, pos_emb)
             k = self._apply_rope(k, pos_emb)
         
-        # Use DistributedAttention when SP is active, LocalAttention otherwise
-        if self._use_distributed():
-            attn_out, _ = self.dist_attn(q=q, k=k, v=v)
-        else:
-            attn_out = self.local_attn(q=q, k=k, v=v)
+        # Attention via DistributedAttention
+        attn_out, _ = self.attn(q=q, k=k, v=v)
         attn_out = attn_out.reshape(B, L, D)
         
         # Output projection with optional per-head gating
