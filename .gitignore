@@ -32,6 +32,7 @@ env
 **.txt
 *.log
 weights/
+official_weights/
 
 # Distribution / packaging
 build/

@@ -297,14 +297,14 @@ class GatedSelfAttention(nn.Module):
             head_size=self.head_dim,
             num_kv_heads=n_kv_heads,
             causal=causal,
-            supported_attention_backends=(AttentionBackendEnum.SDPA, ),
+            supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA, ),
         )
         self.dist_attn_layer = DistributedAttention(
             num_heads=n_heads,
             head_size=self.head_dim,
             num_kv_heads=n_kv_heads,
             causal=causal,
-            supported_attention_backends=(AttentionBackendEnum.SDPA, ),
+            supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA, ),
         )
         
         # Per-head gating: learnable [n_heads, n_heads] matrix
@@ -409,7 +409,7 @@ class CrossAttention(nn.Module):
             head_size=self.head_dim,
             num_kv_heads=self.n_heads,
             causal=False,
-            supported_attention_backends=(AttentionBackendEnum.SDPA, ),
+            supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA, ),
         )
     
     def forward(
