@@ -119,7 +119,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-dir",
-        default="outputs_video/ltx2_no_guidance_compare",
+        default="outputs_video/ltx2_compare",
         help="Directory to save both generated mp4 files.",
     )
     return parser.parse_args()
@@ -137,6 +137,9 @@ PROMPT = (
     "off. He shouts, \"Wheeeew!\" as he flaps his wings with full commitment. "
     "The woman covers her face, on the verge of tears. The tone is deadpan, "
     "absurd, and quietly tragic.")
+
+PROMPT = (
+    "A curious raccoon peeks through a vibrant field of yellow sunflowers.")
 
 official_negative_prompt = (
     "blurry, out of focus, overexposed, underexposed, low contrast, washed out colors, excessive noise, "
@@ -284,32 +287,31 @@ def main() -> None:
             guidance_scale=setting.guidance_scale,
             seed=setting.seed,
         )
-        generator.shutdown()
+    generator.shutdown()
 
-        with torch.no_grad():
-            for setting in SETTINGS:
-                ref_video_iter, ref_audio = _run_reference_pipeline(
-                    ref_pipeline=ref_pipeline,
-                    prompt=setting.prompt,
-                    negative_prompt=setting.negative_prompt,
-                    seed=setting.seed,
-                    height=setting.height,
-                    width=setting.width,
-                    num_frames=setting.num_frames,
-                    fps=setting.fps,
-                    steps=setting.steps,
-                    guidance_scale=setting.guidance_scale,
-                )
-                ref_video_u8 = _to_fhwc_uint8(ref_video_iter)
-                encode_video(
-                    video=ref_video_u8,
-                    fps=int(setting.fps),
-                    audio=ref_audio,
-                    audio_sample_rate=AUDIO_SAMPLE_RATE,
-                    output_path=str(output_dir /
-                                    ("ref_" + setting.output_name)),
-                    video_chunks_number=1,
-                )
+    with torch.no_grad():
+        for setting in SETTINGS:
+            ref_video_iter, ref_audio = _run_reference_pipeline(
+                ref_pipeline=ref_pipeline,
+                prompt=setting.prompt,
+                negative_prompt=setting.negative_prompt,
+                seed=setting.seed,
+                height=setting.height,
+                width=setting.width,
+                num_frames=setting.num_frames,
+                fps=setting.fps,
+                steps=setting.steps,
+                guidance_scale=setting.guidance_scale,
+            )
+            ref_video_u8 = _to_fhwc_uint8(ref_video_iter)
+            encode_video(
+                video=ref_video_u8,
+                fps=int(setting.fps),
+                audio=ref_audio,
+                audio_sample_rate=AUDIO_SAMPLE_RATE,
+                output_path=str(output_dir / ("ref_" + setting.output_name)),
+                video_chunks_number=1,
+            )
 
 
 if __name__ == "__main__":
