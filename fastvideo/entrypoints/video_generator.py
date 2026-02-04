@@ -9,6 +9,7 @@ diffusion models.
 import math
 import os
 import re
+import threading
 import time
 from copy import deepcopy
 from typing import Any
@@ -372,8 +373,18 @@ class VideoGenerator:
 
         # Run inference
         start_time = time.perf_counter()
-        output_batch = self.executor.execute_forward(batch, fastvideo_args)
-        samples = output_batch.output
+
+        # Execute forward pass in a new thread for non-blocking tensor allocation
+        result_container = {}
+        def execute_forward_thread():
+            result_container['output_batch'] = self.executor.execute_forward(batch, fastvideo_args)
+        thread = threading.Thread(target=execute_forward_thread)
+        thread.start()
+        samples = torch.empty((1, 3, sampling_param.num_frames, sampling_param.height, sampling_param.width), device='cpu', pin_memory=True)
+        thread.join()
+
+        output_batch = result_container['output_batch']
+        samples.copy_(output_batch.output)
         logging_info = output_batch.logging_info
 
         gen_time = time.perf_counter() - start_time
