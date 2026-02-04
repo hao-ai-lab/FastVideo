@@ -14,6 +14,7 @@ from fastvideo.models.loader.component_loader import VAELoader
 from fastvideo.models.vaes.common import ParallelTiledVAE
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
+from fastvideo.pipelines.stages.utils import debug_nan_check
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.utils import PRECISION_TO_TYPE
@@ -200,10 +201,13 @@ class DecodingStage(PipelineStage):
                 and getattr(self.vae, "post_quant_conv", None) is not None
                 and self.vae.post_quant_conv.weight.shape[1] == 32
             ):
+                debug_nan_check(latents, "5_before_flux2_unpatchify")
                 latents = self._flux2_bn_denorm_and_unpatchify(latents)
                 # Denormalize 32ch VAE input (scaling_factor / shift_factor for VAE space)
                 latents = self._denormalize_latents(latents)
+            debug_nan_check(latents, "5_before_vae_decode")
             image = self.vae.decode(latents)
+            debug_nan_check(image, "6_after_vae_decode")
             if squeezed_for_vae:
                 image = image.unsqueeze(2)
 
