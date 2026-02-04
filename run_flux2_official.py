@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Run official FLUX.2 Klein 4B via Diffusers for comparison with FastVideo.
+Uses base Flux2Pipeline (Flux2KleinPipeline not in diffusers 0.36).
 Use same prompt, seed, resolution, and steps as your FastVideo run.
 
 Usage:
@@ -8,14 +9,14 @@ Usage:
   python run_flux2_official.py
 """
 import torch
-from diffusers import Flux2KleinPipeline
+from diffusers import Flux2Pipeline
 
 def main():
     device = "cuda"
     dtype = torch.bfloat16
 
-    print("Loading Flux2KleinPipeline from black-forest-labs/FLUX.2-klein-4B ...")
-    pipe = Flux2KleinPipeline.from_pretrained(
+    print("Loading Flux2Pipeline from black-forest-labs/FLUX.2-klein-4B ...")
+    pipe = Flux2Pipeline.from_pretrained(
         "black-forest-labs/FLUX.2-klein-4B",
         torch_dtype=dtype,
     )
@@ -24,7 +25,8 @@ def main():
     prompt = "a red apple on a table"
     generator = torch.Generator(device=device).manual_seed(0)
 
-    print(f"Generating: prompt={prompt!r}, seed=0, 1024x1024, 4 steps")
+    # Klein is 4-step distilled; guidance_scale 1.0
+    print("Generating: prompt=%r, seed=0, 1024x1024, 4 steps" % (prompt,))
     image = pipe(
         prompt,
         height=1024,
