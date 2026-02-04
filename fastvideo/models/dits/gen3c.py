@@ -1,9 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-GEN3C DiT Model for FastVideo.
-
-GEN3C (3D-Informed World-Consistent Video Generation with Precise Camera Control)
-is a video-conditioned diffusion model that uses a 3D cache for camera control.
+GEN3C is a video-conditioned diffusion model that uses a 3D cache for camera control.
 
 Key Features:
 - Extends Cosmos 2.5 architecture with video conditioning inputs

@@ -1,19 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-3D Cache Manager for GEN3C.
-
 This module implements the 3D cache system for GEN3C video generation with camera control.
 The cache maintains a point cloud representation of the scene, enabling:
 - Unprojecting depth maps to 3D world points
 - Forward warping rendered views to new camera poses
 - Managing multiple frame buffers for temporal consistency
-
-Reference: GEN3C (https://arxiv.org/abs/2503.03751)
 """
 
 from __future__ import annotations
-
-from typing import Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -25,7 +19,11 @@ def inverse_with_conversion(mtx: torch.Tensor) -> torch.Tensor:
     return torch.linalg.inv(mtx.to(torch.float32)).to(mtx.dtype)
 
 
-def create_grid(b: int, h: int, w: int, device: str = "cpu", dtype: torch.dtype = torch.float32) -> torch.Tensor:
+def create_grid(b: int,
+                h: int,
+                w: int,
+                device: str = "cpu",
+                dtype: torch.dtype = torch.float32) -> torch.Tensor:
     """
     Create a dense grid of (x, y) coordinates of shape (b, 2, h, w).
     
@@ -39,8 +37,10 @@ def create_grid(b: int, h: int, w: int, device: str = "cpu", dtype: torch.dtype 
     Returns:
         Grid tensor of shape (b, 2, h, w)
     """
-    x = torch.arange(0, w, device=device, dtype=dtype).view(1, 1, 1, w).expand(b, 1, h, w)
-    y = torch.arange(0, h, device=device, dtype=dtype).view(1, 1, h, 1).expand(b, 1, h, w)
+    x = torch.arange(0, w, device=device,
+                     dtype=dtype).view(1, 1, 1, w).expand(b, 1, h, w)
+    y = torch.arange(0, h, device=device,
+                     dtype=dtype).view(1, 1, h, 1).expand(b, 1, h, w)
     return torch.cat([x, y], dim=1)
 
 
@@ -49,7 +49,7 @@ def unproject_points(
     w2c: torch.Tensor,
     intrinsic: torch.Tensor,
     is_depth: bool = True,
-    mask: Optional[torch.Tensor] = None,
+    mask: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
     Unproject depth map to 3D world points.
@@ -67,7 +67,7 @@ def unproject_points(
     b, _, h, w = depth.shape
     device = depth.device
     dtype = depth.dtype
-    
+
     if mask is None:
         mask = depth > 0
     if mask.dim() == depth.dim() and mask.shape[1] == 1:
@@ -84,7 +84,8 @@ def unproject_points(
     x_valid = x_idx.to(dtype)
     y_valid = y_idx.to(dtype)
     ones = torch.ones_like(x_valid)
-    pos = torch.stack([x_valid, y_valid, ones], dim=1).unsqueeze(-1)  # (N, 3, 1)
+    pos = torch.stack([x_valid, y_valid, ones],
+                      dim=1).unsqueeze(-1)  # (N, 3, 1)
 
     intrinsic_inv_valid = intrinsic_inv[b_idx]  # (N, 3, 3)
     unnormalized_pos = torch.matmul(intrinsic_inv_valid, pos)  # (N, 3, 1)
@@ -97,12 +98,16 @@ def unproject_points(
         direction = unnormalized_pos / (norm_val + 1e-8)
         world_points_cam = depth_valid * direction
 
-    ones_h = torch.ones((world_points_cam.shape[0], 1, 1), device=device, dtype=dtype)
-    world_points_homo = torch.cat([world_points_cam, ones_h], dim=1)  # (N, 4, 1)
+    ones_h = torch.ones((world_points_cam.shape[0], 1, 1),
+                        device=device,
+                        dtype=dtype)
+    world_points_homo = torch.cat([world_points_cam, ones_h],
+                                  dim=1)  # (N, 4, 1)
 
     trans = inverse_with_conversion(w2c)  # (b, 4, 4)
     trans_valid = trans[b_idx]  # (N, 4, 4)
-    world_points_transformed = torch.matmul(trans_valid, world_points_homo)  # (N, 4, 1)
+    world_points_transformed = torch.matmul(trans_valid,
+                                            world_points_homo)  # (N, 4, 1)
     sparse_points = world_points_transformed[:, :3, 0]  # (N, 3)
 
     out_points = torch.zeros((b, h, w, 3), device=device, dtype=dtype)
@@ -129,28 +134,33 @@ def project_points(
     world_points = world_points.unsqueeze(-1)  # (b, h, w, 3, 1)
     b, h, w, _, _ = world_points.shape
 
-    ones_4d = torch.ones((b, h, w, 1, 1), device=world_points.device, dtype=world_points.dtype)
-    world_points_homo = torch.cat([world_points, ones_4d], dim=3)  # (b, h, w, 4, 1)
+    ones_4d = torch.ones((b, h, w, 1, 1),
+                         device=world_points.device,
+                         dtype=world_points.dtype)
+    world_points_homo = torch.cat([world_points, ones_4d],
+                                  dim=3)  # (b, h, w, 4, 1)
 
     trans_4d = w2c[:, None, None]  # (b, 1, 1, 4, 4)
-    camera_points_homo = torch.matmul(trans_4d, world_points_homo)  # (b, h, w, 4, 1)
+    camera_points_homo = torch.matmul(trans_4d,
+                                      world_points_homo)  # (b, h, w, 4, 1)
 
     camera_points = camera_points_homo[:, :, :, :3]  # (b, h, w, 3, 1)
     intrinsic_4d = intrinsic[:, None, None]  # (b, 1, 1, 3, 3)
-    projected_points = torch.matmul(intrinsic_4d, camera_points)  # (b, h, w, 3, 1)
+    projected_points = torch.matmul(intrinsic_4d,
+                                    camera_points)  # (b, h, w, 3, 1)
 
     return projected_points
 
 
 def bilinear_splatting(
     frame1: torch.Tensor,
-    mask1: Optional[torch.Tensor],
+    mask1: torch.Tensor | None,
     depth1: torch.Tensor,
     flow12: torch.Tensor,
-    flow12_mask: Optional[torch.Tensor] = None,
+    flow12_mask: torch.Tensor | None = None,
     is_image: bool = False,
     depth_weight_scale: float = 50.0,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Bilinear splatting for forward warping.
     
@@ -170,31 +180,34 @@ def bilinear_splatting(
     b, c, h, w = frame1.shape
     device = frame1.device
     dtype = frame1.dtype
-    
+
     if mask1 is None:
         mask1 = torch.ones(size=(b, 1, h, w), device=device, dtype=dtype)
     if flow12_mask is None:
         flow12_mask = torch.ones(size=(b, 1, h, w), device=device, dtype=dtype)
-    
+
     grid = create_grid(b, h, w, device=device, dtype=dtype)
     trans_pos = flow12 + grid
 
     trans_pos_offset = trans_pos + 1
     trans_pos_floor = torch.floor(trans_pos_offset).long()
     trans_pos_ceil = torch.ceil(trans_pos_offset).long()
-    
+
     trans_pos_offset = torch.stack([
         torch.clamp(trans_pos_offset[:, 0], min=0, max=w + 1),
         torch.clamp(trans_pos_offset[:, 1], min=0, max=h + 1)
-    ], dim=1)
+    ],
+                                   dim=1)
     trans_pos_floor = torch.stack([
         torch.clamp(trans_pos_floor[:, 0], min=0, max=w + 1),
         torch.clamp(trans_pos_floor[:, 1], min=0, max=h + 1)
-    ], dim=1)
+    ],
+                                  dim=1)
     trans_pos_ceil = torch.stack([
         torch.clamp(trans_pos_ceil[:, 0], min=0, max=w + 1),
         torch.clamp(trans_pos_ceil[:, 1], min=0, max=h + 1)
-    ], dim=1)
+    ],
+                                 dim=1)
 
     # Bilinear weights
     prox_weight_nw = (1 - (trans_pos_offset[:, 1:2] - trans_pos_floor[:, 1:2])) * \
@@ -214,66 +227,99 @@ def bilinear_splatting(
     clamped_exponent = torch.clamp(exponent, max=max_exponent)
     depth_weights = torch.exp(clamped_exponent) + 1e-7
 
-    weight_nw = torch.moveaxis(prox_weight_nw * mask1 * flow12_mask / depth_weights, [0, 1, 2, 3], [0, 3, 1, 2])
-    weight_sw = torch.moveaxis(prox_weight_sw * mask1 * flow12_mask / depth_weights, [0, 1, 2, 3], [0, 3, 1, 2])
-    weight_ne = torch.moveaxis(prox_weight_ne * mask1 * flow12_mask / depth_weights, [0, 1, 2, 3], [0, 3, 1, 2])
-    weight_se = torch.moveaxis(prox_weight_se * mask1 * flow12_mask / depth_weights, [0, 1, 2, 3], [0, 3, 1, 2])
+    weight_nw = torch.moveaxis(
+        prox_weight_nw * mask1 * flow12_mask / depth_weights, [0, 1, 2, 3],
+        [0, 3, 1, 2])
+    weight_sw = torch.moveaxis(
+        prox_weight_sw * mask1 * flow12_mask / depth_weights, [0, 1, 2, 3],
+        [0, 3, 1, 2])
+    weight_ne = torch.moveaxis(
+        prox_weight_ne * mask1 * flow12_mask / depth_weights, [0, 1, 2, 3],
+        [0, 3, 1, 2])
+    weight_se = torch.moveaxis(
+        prox_weight_se * mask1 * flow12_mask / depth_weights, [0, 1, 2, 3],
+        [0, 3, 1, 2])
 
-    warped_frame = torch.zeros(size=(b, h + 2, w + 2, c), dtype=dtype, device=device)
-    warped_weights = torch.zeros(size=(b, h + 2, w + 2, 1), dtype=dtype, device=device)
+    warped_frame = torch.zeros(size=(b, h + 2, w + 2, c),
+                               dtype=dtype,
+                               device=device)
+    warped_weights = torch.zeros(size=(b, h + 2, w + 2, 1),
+                                 dtype=dtype,
+                                 device=device)
 
     frame1_cl = torch.moveaxis(frame1, [0, 1, 2, 3], [0, 3, 1, 2])
-    batch_indices = torch.arange(b, device=device, dtype=torch.long)[:, None, None]
-    
-    warped_frame.index_put_(
-        (batch_indices, trans_pos_floor[:, 1], trans_pos_floor[:, 0]), frame1_cl * weight_nw, accumulate=True
-    )
-    warped_frame.index_put_(
-        (batch_indices, trans_pos_ceil[:, 1], trans_pos_floor[:, 0]), frame1_cl * weight_sw, accumulate=True
-    )
-    warped_frame.index_put_(
-        (batch_indices, trans_pos_floor[:, 1], trans_pos_ceil[:, 0]), frame1_cl * weight_ne, accumulate=True
-    )
-    warped_frame.index_put_(
-        (batch_indices, trans_pos_ceil[:, 1], trans_pos_ceil[:, 0]), frame1_cl * weight_se, accumulate=True
-    )
+    batch_indices = torch.arange(b, device=device, dtype=torch.long)[:, None,
+                                                                     None]
 
-    warped_weights.index_put_((batch_indices, trans_pos_floor[:, 1], trans_pos_floor[:, 0]), weight_nw, accumulate=True)
-    warped_weights.index_put_((batch_indices, trans_pos_ceil[:, 1], trans_pos_floor[:, 0]), weight_sw, accumulate=True)
-    warped_weights.index_put_((batch_indices, trans_pos_floor[:, 1], trans_pos_ceil[:, 0]), weight_ne, accumulate=True)
-    warped_weights.index_put_((batch_indices, trans_pos_ceil[:, 1], trans_pos_ceil[:, 0]), weight_se, accumulate=True)
+    warped_frame.index_put_(
+        (batch_indices, trans_pos_floor[:, 1], trans_pos_floor[:, 0]),
+        frame1_cl * weight_nw,
+        accumulate=True)
+    warped_frame.index_put_(
+        (batch_indices, trans_pos_ceil[:, 1], trans_pos_floor[:, 0]),
+        frame1_cl * weight_sw,
+        accumulate=True)
+    warped_frame.index_put_(
+        (batch_indices, trans_pos_floor[:, 1], trans_pos_ceil[:, 0]),
+        frame1_cl * weight_ne,
+        accumulate=True)
+    warped_frame.index_put_(
+        (batch_indices, trans_pos_ceil[:, 1], trans_pos_ceil[:, 0]),
+        frame1_cl * weight_se,
+        accumulate=True)
+
+    warped_weights.index_put_(
+        (batch_indices, trans_pos_floor[:, 1], trans_pos_floor[:, 0]),
+        weight_nw,
+        accumulate=True)
+    warped_weights.index_put_(
+        (batch_indices, trans_pos_ceil[:, 1], trans_pos_floor[:, 0]),
+        weight_sw,
+        accumulate=True)
+    warped_weights.index_put_(
+        (batch_indices, trans_pos_floor[:, 1], trans_pos_ceil[:, 0]),
+        weight_ne,
+        accumulate=True)
+    warped_weights.index_put_(
+        (batch_indices, trans_pos_ceil[:, 1], trans_pos_ceil[:, 0]),
+        weight_se,
+        accumulate=True)
 
     warped_frame_cf = torch.moveaxis(warped_frame, [0, 1, 2, 3], [0, 2, 3, 1])
-    warped_weights_cf = torch.moveaxis(warped_weights, [0, 1, 2, 3], [0, 2, 3, 1])
+    warped_weights_cf = torch.moveaxis(warped_weights, [0, 1, 2, 3],
+                                       [0, 2, 3, 1])
     cropped_warped_frame = warped_frame_cf[:, :, 1:-1, 1:-1]
     cropped_weights = warped_weights_cf[:, :, 1:-1, 1:-1]
     cropped_weights = torch.nan_to_num(cropped_weights, nan=1000.0)
 
     mask = cropped_weights > 0
     zero_value = -1 if is_image else 0
-    zero_tensor = torch.tensor(zero_value, dtype=frame1.dtype, device=frame1.device)
-    warped_frame2 = torch.where(mask, cropped_warped_frame / cropped_weights, zero_tensor)
+    zero_tensor = torch.tensor(zero_value,
+                               dtype=frame1.dtype,
+                               device=frame1.device)
+    warped_frame2 = torch.where(mask, cropped_warped_frame / cropped_weights,
+                                zero_tensor)
     mask2 = mask.to(frame1)
-    
+
     if is_image:
         warped_frame2 = torch.clamp(warped_frame2, min=-1, max=1)
-    
+
     return warped_frame2, mask2
 
 
 def forward_warp(
     frame1: torch.Tensor,
-    mask1: Optional[torch.Tensor],
-    depth1: Optional[torch.Tensor],
-    transformation1: Optional[torch.Tensor],
+    mask1: torch.Tensor | None,
+    depth1: torch.Tensor | None,
+    transformation1: torch.Tensor | None,
     transformation2: torch.Tensor,
-    intrinsic1: Optional[torch.Tensor],
-    intrinsic2: Optional[torch.Tensor],
+    intrinsic1: torch.Tensor | None,
+    intrinsic2: torch.Tensor | None,
     is_image: bool = True,
     is_depth: bool = True,
     render_depth: bool = False,
-    world_points1: Optional[torch.Tensor] = None,
-) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], torch.Tensor]:
+    world_points1: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor]:
     """
     Forward warp frame1 to a new view defined by transformation2.
     
@@ -299,7 +345,7 @@ def forward_warp(
     device = frame1.device
     b, c, h, w = frame1.shape
     dtype = frame1.dtype
-    
+
     if mask1 is None:
         mask1 = torch.ones(size=(b, 1, h, w), device=device, dtype=dtype)
     if intrinsic2 is None:
@@ -309,34 +355,50 @@ def forward_warp(
     if world_points1 is not None:
         # Use pre-computed world points
         assert world_points1.shape == (b, h, w, 3)
-        trans_points1 = project_points(world_points1, transformation2, intrinsic2)
+        trans_points1 = project_points(world_points1, transformation2,
+                                       intrinsic2)
     else:
         # Compute from depth
         assert depth1 is not None and transformation1 is not None
         assert depth1.shape == (b, 1, h, w)
-        
+
         depth1 = torch.nan_to_num(depth1, nan=1e4)
         depth1 = torch.clamp(depth1, min=0, max=1e4)
-        
+
         # Unproject to world, then project to target view
-        world_points1 = unproject_points(depth1, transformation1, intrinsic1, is_depth=is_depth)
-        trans_points1 = project_points(world_points1, transformation2, intrinsic2)
+        world_points1 = unproject_points(depth1,
+                                         transformation1,
+                                         intrinsic1,
+                                         is_depth=is_depth)
+        trans_points1 = project_points(world_points1, transformation2,
+                                       intrinsic2)
 
     # Filter points behind camera
     mask1 = mask1 * (trans_points1[:, :, :, 2, 0].unsqueeze(1) > 0)
-    trans_coordinates = trans_points1[:, :, :, :2, 0] / (trans_points1[:, :, :, 2:3, 0] + 1e-7)
+    trans_coordinates = trans_points1[:, :, :, :2, 0] / (
+        trans_points1[:, :, :, 2:3, 0] + 1e-7)
     trans_coordinates = trans_coordinates.permute(0, 3, 1, 2)  # b, 2, h, w
     trans_depth1 = trans_points1[:, :, :, 2, 0].unsqueeze(1)
 
     grid = create_grid(b, h, w, device=device, dtype=dtype)
     flow12 = trans_coordinates - grid
-    
-    warped_frame2, mask2 = bilinear_splatting(frame1, mask1, trans_depth1, flow12, None, is_image=is_image)
-    
+
+    warped_frame2, mask2 = bilinear_splatting(frame1,
+                                              mask1,
+                                              trans_depth1,
+                                              flow12,
+                                              None,
+                                              is_image=is_image)
+
     warped_depth2 = None
     if render_depth:
-        warped_depth2 = bilinear_splatting(trans_depth1, mask1, trans_depth1, flow12, None, is_image=False)[0][:, 0]
-    
+        warped_depth2 = bilinear_splatting(trans_depth1,
+                                           mask1,
+                                           trans_depth1,
+                                           flow12,
+                                           None,
+                                           is_image=False)[0][:, 0]
+
     return warped_frame2, mask2, warped_depth2, flow12
 
 
@@ -359,21 +421,31 @@ def reliable_depth_mask_range_batch(
         reliable_mask: Boolean mask where True indicates reliable depth
     """
     assert window_size % 2 == 1, "Window size must be odd."
-    
+
     if depth.dim() == 3:
         depth_unsq = depth.unsqueeze(1)
     elif depth.dim() == 4:
         depth_unsq = depth
     else:
-        raise ValueError("depth tensor must be of shape (b, h, w) or (b, 1, h, w)")
-    
-    local_max = F.max_pool2d(depth_unsq, kernel_size=window_size, stride=1, padding=window_size // 2)
-    local_min = -F.max_pool2d(-depth_unsq, kernel_size=window_size, stride=1, padding=window_size // 2)
-    local_mean = F.avg_pool2d(depth_unsq, kernel_size=window_size, stride=1, padding=window_size // 2)
-    
+        raise ValueError(
+            "depth tensor must be of shape (b, h, w) or (b, 1, h, w)")
+
+    local_max = F.max_pool2d(depth_unsq,
+                             kernel_size=window_size,
+                             stride=1,
+                             padding=window_size // 2)
+    local_min = -F.max_pool2d(-depth_unsq,
+                              kernel_size=window_size,
+                              stride=1,
+                              padding=window_size // 2)
+    local_mean = F.avg_pool2d(depth_unsq,
+                              kernel_size=window_size,
+                              stride=1,
+                              padding=window_size // 2)
+
     ratio = (local_max - local_min) / (local_mean + eps)
     reliable_mask = (ratio < ratio_thresh) & (depth_unsq > 0)
-    
+
     return reliable_mask
 
 
@@ -386,16 +458,16 @@ class Cache3DBase:
     - input_points: 3D world coordinates for each pixel
     - input_mask: Validity mask for each pixel
     """
-    
+
     def __init__(
         self,
         input_image: torch.Tensor,
         input_depth: torch.Tensor,
         input_w2c: torch.Tensor,
         input_intrinsics: torch.Tensor,
-        input_mask: Optional[torch.Tensor] = None,
-        input_format: Optional[list[str]] = None,
-        input_points: Optional[torch.Tensor] = None,
+        input_mask: torch.Tensor | None = None,
+        input_format: list[str] | None = None,
+        input_points: torch.Tensor | None = None,
         weight_dtype: torch.dtype = torch.float32,
         is_depth: bool = True,
         device: str = "cuda",
@@ -421,7 +493,7 @@ class Cache3DBase:
         self.is_depth = is_depth
         self.device = device
         self.filter_points_threshold = filter_points_threshold
-        
+
         if input_format is None:
             assert input_image.dim() == 4
             input_format = ["B", "C", "H", "W"]
@@ -429,27 +501,31 @@ class Cache3DBase:
         # Map dimension names to indices
         format_to_indices = {dim: idx for idx, dim in enumerate(input_format)}
         input_shape = input_image.shape
-        
+
         if input_mask is not None:
-            input_image = torch.cat([input_image, input_mask], dim=format_to_indices.get("C"))
+            input_image = torch.cat([input_image, input_mask],
+                                    dim=format_to_indices.get("C"))
 
         # Extract dimensions
-        B = input_shape[format_to_indices.get("B", 0)] if "B" in format_to_indices else 1
-        F = input_shape[format_to_indices.get("F", 0)] if "F" in format_to_indices else 1
-        N = input_shape[format_to_indices.get("N", 0)] if "N" in format_to_indices else 1
-        V = input_shape[format_to_indices.get("V", 0)] if "V" in format_to_indices else 1
-        H = input_shape[format_to_indices.get("H", 0)] if "H" in format_to_indices else None
-        W = input_shape[format_to_indices.get("W", 0)] if "W" in format_to_indices else None
+        B = input_shape[format_to_indices.get(
+            "B", 0)] if "B" in format_to_indices else 1
+        F = input_shape[format_to_indices.get(
+            "F", 0)] if "F" in format_to_indices else 1
+        N = input_shape[format_to_indices.get(
+            "N", 0)] if "N" in format_to_indices else 1
+        V = input_shape[format_to_indices.get(
+            "V", 0)] if "V" in format_to_indices else 1
+        H = input_shape[format_to_indices.get(
+            "H", 0)] if "H" in format_to_indices else None
+        W = input_shape[format_to_indices.get(
+            "W", 0)] if "W" in format_to_indices else None
 
         # Reorder dimensions to B x F x N x V x C x H x W
         desired_dims = ["B", "F", "N", "V", "C", "H", "W"]
-        permute_order = []
+        permute_order: list[int | None] = []
         for dim in desired_dims:
             idx = format_to_indices.get(dim)
-            if idx is not None:
-                permute_order.append(idx)
-            else:
-                permute_order.append(None)
+            permute_order.append(idx)
 
         permute_indices = [idx for idx in permute_order if idx is not None]
         input_image = input_image.permute(*permute_indices)
@@ -460,7 +536,9 @@ class Cache3DBase:
 
         # Now input_image has shape B x F x N x V x C x H x W
         if input_mask is not None:
-            self.input_image, self.input_mask = input_image[:, :, :, :, :3], input_image[:, :, :, :, 3:]
+            self.input_image, self.input_mask = input_image[:, :, :, :, :
+                                                            3], input_image[:, :, :, :,
+                                                                            3:]
             self.input_mask = self.input_mask.to("cpu")
         else:
             self.input_mask = None
@@ -469,37 +547,34 @@ class Cache3DBase:
 
         # Compute 3D world points
         if input_points is not None:
-            self.input_points = input_points.reshape(B, F, N, V, H, W, 3).to("cpu")
+            self.input_points = input_points.reshape(B, F, N, V, H, W,
+                                                     3).to("cpu")
             self.input_depth = None
         else:
             input_depth = torch.nan_to_num(input_depth, nan=100)
             input_depth = torch.clamp(input_depth, min=0, max=100)
             if weight_dtype == torch.float16:
                 input_depth = torch.clamp(input_depth, max=70)
-            
-            self.input_points = (
-                unproject_points(
-                    input_depth.reshape(-1, 1, H, W),
-                    input_w2c.reshape(-1, 4, 4),
-                    input_intrinsics.reshape(-1, 3, 3),
-                    is_depth=self.is_depth,
-                )
-                .to(weight_dtype)
-                .reshape(B, F, N, V, H, W, 3)
-                .to("cpu")
-            )
+
+            self.input_points = (unproject_points(
+                input_depth.reshape(-1, 1, H, W),
+                input_w2c.reshape(-1, 4, 4),
+                input_intrinsics.reshape(-1, 3, 3),
+                is_depth=self.is_depth,
+            ).to(weight_dtype).reshape(B, F, N, V, H, W, 3).to("cpu"))
             self.input_depth = input_depth
 
         # Filter unreliable depth
         if self.filter_points_threshold < 1.0 and input_depth is not None:
             input_depth = input_depth.reshape(-1, 1, H, W)
             depth_mask = reliable_depth_mask_range_batch(
-                input_depth, ratio_thresh=self.filter_points_threshold
-            ).reshape(B, F, N, V, 1, H, W)
+                input_depth, ratio_thresh=self.filter_points_threshold).reshape(
+                    B, F, N, V, 1, H, W)
             if self.input_mask is None:
                 self.input_mask = depth_mask.to("cpu")
             else:
-                self.input_mask = self.input_mask * depth_mask.to(self.input_mask.device)
+                self.input_mask = self.input_mask * depth_mask.to(
+                    self.input_mask.device)
 
     def update_cache(self, **kwargs):
         """Update the cache with new frames. To be implemented by subclasses."""
@@ -515,7 +590,7 @@ class Cache3DBase:
         target_intrinsics: torch.Tensor,
         render_depth: bool = False,
         start_frame_idx: int = 0,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Render the cached 3D points from new camera viewpoints.
         
@@ -533,20 +608,27 @@ class Cache3DBase:
         B, F, N, V, C, H, W = self.input_image.shape
         assert bs == B
 
-        target_w2cs = target_w2cs.reshape(B, F_target, 1, 4, 4).expand(B, F_target, N, 4, 4).reshape(-1, 4, 4)
-        target_intrinsics = target_intrinsics.reshape(B, F_target, 1, 3, 3).expand(B, F_target, N, 3, 3).reshape(-1, 3, 3)
+        target_w2cs = target_w2cs.reshape(B, F_target, 1, 4,
+                                          4).expand(B, F_target, N, 4,
+                                                    4).reshape(-1, 4, 4)
+        target_intrinsics = target_intrinsics.reshape(B, F_target, 1, 3,
+                                                      3).expand(
+                                                          B, F_target, N, 3,
+                                                          3).reshape(-1, 3, 3)
 
         # Prepare inputs
         first_images = rearrange(
-            self.input_image[:, start_frame_idx:start_frame_idx+F_target].expand(B, F_target, N, V, C, H, W),
-            "B F N V C H W -> (B F N) V C H W"
-        )
+            self.input_image[:,
+                             start_frame_idx:start_frame_idx + F_target].expand(
+                                 B, F_target, N, V, C, H, W),
+            "B F N V C H W -> (B F N) V C H W")
         first_points = rearrange(
-            self.input_points[:, start_frame_idx:start_frame_idx+F_target].expand(B, F_target, N, V, H, W, 3),
-            "B F N V H W C -> (B F N) V H W C"
-        )
+            self.input_points[:, start_frame_idx:start_frame_idx +
+                              F_target].expand(B, F_target, N, V, H, W, 3),
+            "B F N V H W C -> (B F N) V H W C")
         first_masks = rearrange(
-            self.input_mask[:, start_frame_idx:start_frame_idx+F_target].expand(B, F_target, N, V, 1, H, W),
+            self.input_mask[:, start_frame_idx:start_frame_idx +
+                            F_target].expand(B, F_target, N, V, 1, H, W),
             "B F N V C H W -> (B F N) V C H W"
         ) if self.input_mask is not None else None
 
@@ -559,17 +641,19 @@ class Cache3DBase:
 
             first_images = first_images.squeeze(1)
             first_points = first_points.squeeze(1)
-            first_masks = first_masks.squeeze(1) if first_masks is not None else None
-            
+            first_masks = first_masks.squeeze(
+                1) if first_masks is not None else None
+
             for i in range(0, first_images.shape[0], warp_chunk_size):
                 with torch.no_grad():
-                    imgs_chunk = first_images[i:i + warp_chunk_size].to(self.device, non_blocking=True)
-                    pts_chunk = first_points[i:i + warp_chunk_size].to(self.device, non_blocking=True)
-                    masks_chunk = (
-                        first_masks[i:i + warp_chunk_size].to(self.device, non_blocking=True)
-                        if first_masks is not None else None
-                    )
-                    
+                    imgs_chunk = first_images[i:i + warp_chunk_size].to(
+                        self.device, non_blocking=True)
+                    pts_chunk = first_points[i:i + warp_chunk_size].to(
+                        self.device, non_blocking=True)
+                    masks_chunk = (first_masks[i:i + warp_chunk_size].to(
+                        self.device, non_blocking=True)
+                                   if first_masks is not None else None)
+
                     (
                         rendered_warp_images_chunk,
                         rendered_warp_masks_chunk,
@@ -586,15 +670,18 @@ class Cache3DBase:
                         render_depth=render_depth,
                         world_points1=pts_chunk,
                     )
-                    
-                    rendered_warp_images.append(rendered_warp_images_chunk.to("cpu"))
-                    rendered_warp_masks.append(rendered_warp_masks_chunk.to("cpu"))
+
+                    rendered_warp_images.append(
+                        rendered_warp_images_chunk.to("cpu"))
+                    rendered_warp_masks.append(
+                        rendered_warp_masks_chunk.to("cpu"))
                     if render_depth:
-                        rendered_warp_depth.append(rendered_warp_depth_chunk.to("cpu"))
-                    
+                        rendered_warp_depth.append(
+                            rendered_warp_depth_chunk.to("cpu"))
+
                     del imgs_chunk, pts_chunk, masks_chunk
                     torch.cuda.empty_cache()
-            
+
             rendered_warp_images = torch.cat(rendered_warp_images, dim=0)
             rendered_warp_masks = torch.cat(rendered_warp_masks, dim=0)
             if render_depth:
@@ -602,12 +689,24 @@ class Cache3DBase:
         else:
             raise NotImplementedError("Multi-view rendering not yet supported")
 
-        pixels = rearrange(rendered_warp_images, "(b f n) c h w -> b f n c h w", b=bs, f=F_target, n=N)
-        masks = rearrange(rendered_warp_masks, "(b f n) c h w -> b f n c h w", b=bs, f=F_target, n=N)
-        
+        pixels = rearrange(rendered_warp_images,
+                           "(b f n) c h w -> b f n c h w",
+                           b=bs,
+                           f=F_target,
+                           n=N)
+        masks = rearrange(rendered_warp_masks,
+                          "(b f n) c h w -> b f n c h w",
+                          b=bs,
+                          f=F_target,
+                          n=N)
+
         if render_depth:
-            pixels = rearrange(rendered_warp_depth, "(b f n) h w -> b f n h w", b=bs, f=F_target, n=N)
-        
+            pixels = rearrange(rendered_warp_depth,
+                               "(b f n) h w -> b f n h w",
+                               b=bs,
+                               f=F_target,
+                               n=N)
+
         return pixels.to(self.device), masks.to(self.device)
 
 
@@ -618,12 +717,12 @@ class Cache3DBuffer(Cache3DBase):
     This class manages multiple frame buffers for temporal consistency
     and supports noise augmentation for training stability.
     """
-    
+
     def __init__(
         self,
         frame_buffer_max: int = 2,
         noise_aug_strength: float = 0.0,
-        generator: Optional[torch.Generator] = None,
+        generator: torch.Generator | None = None,
         **kwargs,
     ):
         """
@@ -645,8 +744,8 @@ class Cache3DBuffer(Cache3DBase):
         new_image: torch.Tensor,
         new_depth: torch.Tensor,
         new_w2c: torch.Tensor,
-        new_mask: Optional[torch.Tensor] = None,
-        new_intrinsics: Optional[torch.Tensor] = None,
+        new_mask: torch.Tensor | None = None,
+        new_intrinsics: torch.Tensor | None = None,
     ):
         """
         Update the cache with a new frame.
@@ -662,22 +761,26 @@ class Cache3DBuffer(Cache3DBase):
         new_depth = new_depth.to(self.weight_dtype).to(self.device)
         new_w2c = new_w2c.to(self.weight_dtype).to(self.device)
         if new_intrinsics is not None:
-            new_intrinsics = new_intrinsics.to(self.weight_dtype).to(self.device)
+            new_intrinsics = new_intrinsics.to(self.weight_dtype).to(
+                self.device)
 
         new_depth = torch.nan_to_num(new_depth, nan=1e4)
         new_depth = torch.clamp(new_depth, min=0, max=1e4)
 
         B, F, N, V, C, H, W = self.input_image.shape
-        
+
         # Compute new 3D points
-        new_points = unproject_points(new_depth, new_w2c, new_intrinsics, is_depth=self.is_depth).cpu()
+        new_points = unproject_points(new_depth,
+                                      new_w2c,
+                                      new_intrinsics,
+                                      is_depth=self.is_depth).cpu()
         new_image = new_image.cpu()
 
         if self.filter_points_threshold < 1.0:
             new_depth = new_depth.reshape(-1, 1, H, W)
             depth_mask = reliable_depth_mask_range_batch(
-                new_depth, ratio_thresh=self.filter_points_threshold
-            ).reshape(B, 1, H, W)
+                new_depth,
+                ratio_thresh=self.filter_points_threshold).reshape(B, 1, H, W)
             if new_mask is None:
                 new_mask = depth_mask.to("cpu")
             else:
@@ -688,10 +791,13 @@ class Cache3DBuffer(Cache3DBase):
         # Update buffer (newest frame first)
         if self.frame_buffer_max > 1:
             if self.input_image.shape[2] < self.frame_buffer_max:
-                self.input_image = torch.cat([new_image[:, None, None, None], self.input_image], 2)
-                self.input_points = torch.cat([new_points[:, None, None, None], self.input_points], 2)
+                self.input_image = torch.cat(
+                    [new_image[:, None, None, None], self.input_image], 2)
+                self.input_points = torch.cat(
+                    [new_points[:, None, None, None], self.input_points], 2)
                 if self.input_mask is not None:
-                    self.input_mask = torch.cat([new_mask[:, None, None, None], self.input_mask], 2)
+                    self.input_mask = torch.cat(
+                        [new_mask[:, None, None, None], self.input_mask], 2)
             else:
                 self.input_image[:, :, 0] = new_image[:, None, None]
                 self.input_points[:, :, 0] = new_points[:, None, None]
@@ -707,7 +813,7 @@ class Cache3DBuffer(Cache3DBase):
         target_intrinsics: torch.Tensor,
         render_depth: bool = False,
         start_frame_idx: int = 0,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Render the cache with optional noise augmentation.
         
@@ -725,25 +831,27 @@ class Cache3DBuffer(Cache3DBase):
 
         output_device = target_w2cs.device
         target_w2cs = target_w2cs.to(self.weight_dtype).to(self.device)
-        target_intrinsics = target_intrinsics.to(self.weight_dtype).to(self.device)
-        
-        pixels, masks = super().render_cache(target_w2cs, target_intrinsics, render_depth)
-        
+        target_intrinsics = target_intrinsics.to(self.weight_dtype).to(
+            self.device)
+
+        pixels, masks = super().render_cache(target_w2cs, target_intrinsics,
+                                             render_depth)
+
         pixels = pixels.to(output_device)
         masks = masks.to(output_device)
-        
+
         # Apply noise augmentation (stronger for older buffers)
         if not render_depth and self.noise_aug_strength > 0:
-            noise = torch.randn(
-                pixels.shape,
-                generator=self.generator,
-                device=pixels.device,
-                dtype=pixels.dtype
-            )
-            per_buffer_noise = (
-                torch.arange(start=pixels.shape[2] - 1, end=-1, step=-1, device=pixels.device)
-                * self.noise_aug_strength
-            )
-            pixels = pixels + noise * per_buffer_noise.reshape(1, 1, -1, 1, 1, 1)
-        
+            noise = torch.randn(pixels.shape,
+                                generator=self.generator,
+                                device=pixels.device,
+                                dtype=pixels.dtype)
+            per_buffer_noise = (torch.arange(start=pixels.shape[2] - 1,
+                                             end=-1,
+                                             step=-1,
+                                             device=pixels.device) *
+                                self.noise_aug_strength)
+            pixels = pixels + noise * per_buffer_noise.reshape(
+                1, 1, -1, 1, 1, 1)
+
         return pixels, masks

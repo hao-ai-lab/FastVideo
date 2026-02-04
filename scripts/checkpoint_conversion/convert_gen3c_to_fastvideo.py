@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """
-Convert GEN3C checkpoint (nvidia/GEN3C-Cosmos-7B) to FastVideo format.
-
-This script:
-1. Downloads the official GEN3C checkpoint from HuggingFace
-2. Applies param_names_mapping to convert weights to FastVideo naming conventions
-3. Saves the converted weights as safetensors in a diffusers-style layout
+Convert GEN3C checkpoint (nvidia/GEN3C-Cosmos-7B) to FastVideo (diffusers) format.
 
 Usage:
+    # Convert from local checkpoint (memory-efficient mode for limited RAM)
+    python convert_gen3c_to_fastvideo.py --source ./official_weights/GEN3C-Cosmos-7B/model.pt --output ./gen3c_fastvideo
+
     # Download and convert from HuggingFace
     python convert_gen3c_to_fastvideo.py --download nvidia/GEN3C-Cosmos-7B --output ./gen3c_fastvideo
 
-    # Convert from local checkpoint
-    python convert_gen3c_to_fastvideo.py --source ./model.pt --output ./gen3c_fastvideo
-
-    # Analyze checkpoint structure only
+    # Analyze checkpoint structure only (low memory)
     python convert_gen3c_to_fastvideo.py --source ./model.pt --analyze
+
+    # Convert with fp16 to reduce output size (and memory during save)
+    python convert_gen3c_to_fastvideo.py --source ./model.pt --output ./gen3c_fastvideo --dtype fp16
 """
 
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import os
 import re
 from collections import OrderedDict
 from pathlib import Path
+from typing import Iterator
 
 import torch
 from safetensors.torch import save_file
@@ -39,6 +39,7 @@ except ImportError:
 
 # Parameter name mapping from official GEN3C checkpoint to FastVideo format
 # Based on fastvideo/configs/models/dits/gen3c.py
+# The actual GEN3C checkpoint uses AdaLN-LoRA with decomposed projections (index 0 = base, 1 = LoRA)
 PARAM_NAMES_MAPPING: dict[str, str] = {
     # Patch embedding: net.x_embedder.proj.1.weight -> patch_embed.proj.weight
     r"^net\.x_embedder\.proj\.1\.(.*)$": r"patch_embed.proj.\1",
@@ -62,27 +63,39 @@ PARAM_NAMES_MAPPING: dict[str, str] = {
     r"^net\.extra_pos_embedder\.pos_emb_w$": r"learnable_pos_embed.pos_emb_w",
 
     # Transformer blocks: net.blocks.blockN -> transformer_blocks.N
-    # Self-attention (FA block, index 0)
-    r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.self_attn\.q_proj\.(.*)$": r"transformer_blocks.\1.attn1.to_q.\2",
-    r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.self_attn\.k_proj\.(.*)$": r"transformer_blocks.\1.attn1.to_k.\2",
-    r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.self_attn\.v_proj\.(.*)$": r"transformer_blocks.\1.attn1.to_v.\2",
-    r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.self_attn\.output_proj\.(.*)$": r"transformer_blocks.\1.attn1.to_out.\2",
-    r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.self_attn\.q_norm\.(.*)$": r"transformer_blocks.\1.attn1.norm_q.\2",
-    r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.self_attn\.k_norm\.(.*)$": r"transformer_blocks.\1.attn1.norm_k.\2",
+    # GEN3C uses attn.to_q.0/1 pattern (0=base weight, 1=LoRA weight)
+    
+    # Self-attention (block index 0)
+    # Q projection: to_q.0 is linear, to_q.1 is QK norm (RMSNorm applied per-head)
+    r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.attn\.to_q\.0\.(.*)$": r"transformer_blocks.\1.attn1.to_q.\2",
+    r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.attn\.to_q\.1\.(.*)$": r"transformer_blocks.\1.attn1.norm_q.\2",
+    # K projection: to_k.0 is linear, to_k.1 is QK norm
+    r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.attn\.to_k\.0\.(.*)$": r"transformer_blocks.\1.attn1.to_k.\2",
+    r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.attn\.to_k\.1\.(.*)$": r"transformer_blocks.\1.attn1.norm_k.\2",
+    # V projection
+    r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.attn\.to_v\.0\.(.*)$": r"transformer_blocks.\1.attn1.to_v.\2",
+    # Output projection
+    r"^net\.blocks\.block(\d+)\.blocks\.0\.block\.attn\.to_out\.0\.(.*)$": r"transformer_blocks.\1.attn1.to_out.\2",
+    # AdaLN modulation for self-attention
     r"^net\.blocks\.block(\d+)\.blocks\.0\.adaLN_modulation\.(.*)$": r"transformer_blocks.\1.adaln_modulation_self_attn.\2",
 
-    # Cross-attention (CA block, index 1)
-    r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.cross_attn\.q_proj\.(.*)$": r"transformer_blocks.\1.attn2.to_q.\2",
-    r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.cross_attn\.k_proj\.(.*)$": r"transformer_blocks.\1.attn2.to_k.\2",
-    r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.cross_attn\.v_proj\.(.*)$": r"transformer_blocks.\1.attn2.to_v.\2",
-    r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.cross_attn\.output_proj\.(.*)$": r"transformer_blocks.\1.attn2.to_out.\2",
-    r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.cross_attn\.q_norm\.(.*)$": r"transformer_blocks.\1.attn2.norm_q.\2",
-    r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.cross_attn\.k_norm\.(.*)$": r"transformer_blocks.\1.attn2.norm_k.\2",
+    # Cross-attention (block index 1)
+    # Q projection: to_q.0 is linear, to_q.1 is QK norm
+    r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.attn\.to_q\.0\.(.*)$": r"transformer_blocks.\1.attn2.to_q.\2",
+    r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.attn\.to_q\.1\.(.*)$": r"transformer_blocks.\1.attn2.norm_q.\2",
+    # K projection: to_k.0 is linear, to_k.1 is QK norm
+    r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.attn\.to_k\.0\.(.*)$": r"transformer_blocks.\1.attn2.to_k.\2",
+    r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.attn\.to_k\.1\.(.*)$": r"transformer_blocks.\1.attn2.norm_k.\2",
+    # V projection
+    r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.attn\.to_v\.0\.(.*)$": r"transformer_blocks.\1.attn2.to_v.\2",
+    # Output projection
+    r"^net\.blocks\.block(\d+)\.blocks\.1\.block\.attn\.to_out\.0\.(.*)$": r"transformer_blocks.\1.attn2.to_out.\2",
+    # AdaLN modulation for cross-attention
     r"^net\.blocks\.block(\d+)\.blocks\.1\.adaLN_modulation\.(.*)$": r"transformer_blocks.\1.adaln_modulation_cross_attn.\2",
 
-    # MLP (FF block, index 2)
-    r"^net\.blocks\.block(\d+)\.blocks\.2\.block\.mlp\.layer1\.(.*)$": r"transformer_blocks.\1.mlp.fc_in.\2",
-    r"^net\.blocks\.block(\d+)\.blocks\.2\.block\.mlp\.layer2\.(.*)$": r"transformer_blocks.\1.mlp.fc_out.\2",
+    # MLP (block index 2) - simpler naming: layer1, layer2 directly
+    r"^net\.blocks\.block(\d+)\.blocks\.2\.block\.layer1\.(.*)$": r"transformer_blocks.\1.mlp.fc_in.\2",
+    r"^net\.blocks\.block(\d+)\.blocks\.2\.block\.layer2\.(.*)$": r"transformer_blocks.\1.mlp.fc_out.\2",
     r"^net\.blocks\.block(\d+)\.blocks\.2\.adaLN_modulation\.(.*)$": r"transformer_blocks.\1.adaln_modulation_mlp.\2",
 
     # Final layer
@@ -113,9 +126,31 @@ def apply_mapping(key: str) -> str | None:
     return key
 
 
-def load_checkpoint(path: Path) -> dict[str, torch.Tensor]:
-    """Load checkpoint from .pt file."""
-    checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+def load_checkpoint(path: Path, mmap: bool = True) -> dict[str, torch.Tensor]:
+    """Load checkpoint from .pt file.
+    
+    Args:
+        path: Path to checkpoint file
+        mmap: Use memory-mapped loading (PyTorch 2.1+) for reduced RAM usage
+    """
+    # Try memory-mapped loading first (PyTorch 2.1+)
+    load_kwargs: dict = {"map_location": "cpu", "weights_only": False}
+    
+    if mmap:
+        # Check if PyTorch version supports mmap (2.1+)
+        try:
+            version_str = torch.__version__.split("+")[0]  # Remove +cu118 suffix etc.
+            major, minor = version_str.split(".")[:2]
+            torch_version = (int(major), int(minor))
+            if torch_version >= (2, 1):
+                load_kwargs["mmap"] = True
+                print("  Using memory-mapped loading for reduced RAM usage")
+            else:
+                print(f"  Note: PyTorch {torch.__version__} doesn't support mmap, using standard loading")
+        except (ValueError, IndexError):
+            print(f"  Warning: Could not parse PyTorch version {torch.__version__}, skipping mmap")
+    
+    checkpoint = torch.load(path, **load_kwargs)
     
     # Handle different checkpoint formats
     if isinstance(checkpoint, dict):
@@ -125,6 +160,25 @@ def load_checkpoint(path: Path) -> dict[str, torch.Tensor]:
         return checkpoint
     
     return checkpoint
+
+
+def iterate_checkpoint_keys(path: Path) -> Iterator[str]:
+    """Iterate over checkpoint keys without loading all tensors.
+    
+    This is useful for analysis when memory is limited.
+    """
+    # Load with weights_only=True to just get the structure
+    # Unfortunately PyTorch doesn't have a great way to do this
+    # So we load the full checkpoint but only keep keys
+    checkpoint = torch.load(path, map_location="meta", weights_only=False)
+    
+    if isinstance(checkpoint, dict):
+        for key in ("state_dict", "model_state_dict", "model", "ema"):
+            if key in checkpoint:
+                checkpoint = checkpoint[key]
+                break
+    
+    return checkpoint.keys()
 
 
 def analyze_checkpoint(state_dict: dict[str, torch.Tensor]) -> None:
@@ -176,8 +230,16 @@ def analyze_checkpoint(state_dict: dict[str, torch.Tensor]) -> None:
 def convert_weights(
     state_dict: dict[str, torch.Tensor],
     verbose: bool = False,
+    dtype: torch.dtype | None = None,
+    memory_efficient: bool = True,
 ) -> tuple[OrderedDict[str, torch.Tensor], list[str], list[str]]:
     """Convert weights from official format to FastVideo format.
+    
+    Args:
+        state_dict: Source state dict
+        verbose: Print detailed conversion info
+        dtype: Convert tensors to this dtype (e.g., torch.float16)
+        memory_efficient: Delete source tensors after processing to free memory
     
     Returns:
         converted: Converted state dict
@@ -188,7 +250,12 @@ def convert_weights(
     unmapped = []
     skipped = []
     
-    for key, value in state_dict.items():
+    # Get all keys first (so we can delete as we go)
+    keys = list(state_dict.keys())
+    total = len(keys)
+    
+    for i, key in enumerate(keys):
+        value = state_dict[key]
         new_key = apply_mapping(key)
         
         if new_key is None:
@@ -198,13 +265,33 @@ def convert_weights(
         elif new_key == key:
             # No mapping found, but not in skip list
             unmapped.append(key)
-            converted[key] = value
+            if dtype is not None and value.is_floating_point():
+                converted[key] = value.to(dtype).contiguous()
+            else:
+                converted[key] = value.contiguous() if memory_efficient else value
             if verbose:
                 print(f"  Unmapped: {key}")
         else:
-            converted[new_key] = value
+            if dtype is not None and value.is_floating_point():
+                converted[new_key] = value.to(dtype).contiguous()
+            else:
+                converted[new_key] = value.contiguous() if memory_efficient else value
             if verbose:
                 print(f"  {key} -> {new_key}")
+        
+        # Free memory by deleting processed tensor from source
+        if memory_efficient:
+            del state_dict[key]
+            if i % 100 == 0:
+                gc.collect()
+        
+        # Progress indicator
+        if (i + 1) % 200 == 0 or i == total - 1:
+            print(f"  Processed {i + 1}/{total} tensors...")
+    
+    # Final garbage collection
+    if memory_efficient:
+        gc.collect()
     
     return converted, unmapped, skipped
 
@@ -235,21 +322,28 @@ def write_component(
 
 
 def build_transformer_config() -> dict:
-    """Build transformer config for Gen3CTransformer3DModel."""
+    """Build transformer config for Gen3CTransformer3DModel.
+    
+    Architecture based on checkpoint analysis:
+    - hidden_size = 4096 (32 heads * 128 head_dim)
+    - num_layers = 28
+    - in_channels = 82 (16 VAE + 1 mask + 64 buffer + 1 padding)
+    - MLP ratio = 4.0
+    """
     return {
         "_class_name": "Gen3CTransformer3DModel",
-        "in_channels": 16,
+        "in_channels": 16,  # Base VAE channels (full input computed at runtime)
         "out_channels": 16,
-        "num_attention_heads": 16,
+        "num_attention_heads": 32,  # 4096 / 128 = 32
         "attention_head_dim": 128,
         "num_layers": 28,
         "mlp_ratio": 4.0,
-        "text_embed_dim": 1024,
+        "text_embed_dim": 1024,  # T5 embedding dim
         "adaln_lora_dim": 256,
         "use_adaln_lora": True,
-        "add_augment_sigma_embedding": True,
-        "frame_buffer_max": 2,
-        "max_size": [128, 240, 240],
+        "add_augment_sigma_embedding": False,  # Not present in this checkpoint
+        "frame_buffer_max": 2,  # 2 buffers for 3D cache
+        "max_size": [128, 240, 240],  # Max T, H, W for positional embeddings
         "patch_size": [1, 2, 2],
         "rope_scale": [2.0, 1.0, 1.0],
         "extra_pos_embed_type": "learnable",
@@ -300,14 +394,17 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+    # Convert from local checkpoint (recommended for limited RAM)
+    python convert_gen3c_to_fastvideo.py --source ./official_weights/GEN3C-Cosmos-7B/model.pt --output ./gen3c_fastvideo
+
     # Download and convert from HuggingFace
     python convert_gen3c_to_fastvideo.py --download nvidia/GEN3C-Cosmos-7B --output ./gen3c_fastvideo
 
-    # Convert from local checkpoint
-    python convert_gen3c_to_fastvideo.py --source ./model.pt --output ./gen3c_fastvideo
-
     # Analyze checkpoint structure only
     python convert_gen3c_to_fastvideo.py --source ./model.pt --analyze
+
+    # Convert to fp16 for smaller output (and lower memory during save)
+    python convert_gen3c_to_fastvideo.py --source ./model.pt --output ./gen3c_fastvideo --dtype fp16
         """,
     )
     
@@ -353,6 +450,18 @@ Examples:
         action="store_true",
         help="Overwrite output directory if it exists",
     )
+    parser.add_argument(
+        "--dtype",
+        type=str,
+        choices=["fp32", "fp16", "bf16"],
+        default="bf16",
+        help="Output dtype for weights (default: bf16, use fp16 for smaller output)",
+    )
+    parser.add_argument(
+        "--no-mmap",
+        action="store_true",
+        help="Disable memory-mapped loading (not recommended, uses more RAM)",
+    )
     
     args = parser.parse_args()
     
@@ -363,6 +472,14 @@ Examples:
         raise ValueError("Either --download or --source is required")
     if not args.analyze and not args.output:
         raise ValueError("--output is required when not using --analyze")
+    
+    # Parse dtype
+    dtype_map = {
+        "fp32": torch.float32,
+        "fp16": torch.float16,
+        "bf16": torch.bfloat16,
+    }
+    target_dtype = dtype_map[args.dtype]
     
     # Get checkpoint path
     if args.download:
@@ -376,21 +493,33 @@ Examples:
         if not checkpoint_path.exists():
             raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
     
-    # Load checkpoint
+    # Load checkpoint with memory-mapped loading
     print(f"Loading checkpoint from {checkpoint_path}...")
-    state_dict = load_checkpoint(checkpoint_path)
+    use_mmap = not args.no_mmap
+    state_dict = load_checkpoint(checkpoint_path, mmap=use_mmap)
     
     # Analyze if requested
     if args.analyze:
         analyze_checkpoint(state_dict)
         return
     
-    # Analyze before conversion
-    analyze_checkpoint(state_dict)
+    # Analyze before conversion (quick summary only to save memory)
+    print(f"\nCheckpoint has {len(state_dict)} tensors")
+    total_params = sum(p.numel() for p in state_dict.values())
+    print(f"Total parameters: {total_params:,} ({total_params / 1e9:.2f}B)")
     
-    # Convert weights
-    print("\nConverting weights...")
-    converted, unmapped, skipped = convert_weights(state_dict, verbose=args.verbose)
+    # Convert weights (memory-efficient mode)
+    print(f"\nConverting weights to {args.dtype}...")
+    converted, unmapped, skipped = convert_weights(
+        state_dict, 
+        verbose=args.verbose,
+        dtype=target_dtype,
+        memory_efficient=True,
+    )
+    
+    # Force garbage collection after conversion
+    del state_dict
+    gc.collect()
     
     print(f"\nConversion summary:")
     print(f"  Converted: {len(converted)} tensors")
@@ -412,8 +541,13 @@ Examples:
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Write transformer weights
+    print(f"\nSaving converted weights...")
     transformer_config = build_transformer_config()
     write_component(output_dir, "transformer", converted, transformer_config)
+    
+    # Free memory after saving
+    del converted
+    gc.collect()
     
     # Write model_index.json
     model_index = build_model_index()
