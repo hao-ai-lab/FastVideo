@@ -18,8 +18,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from fastvideo.attention import DistributedAttention, LocalAttention
-from fastvideo.attention.backends.sdpa import SDPAMetadata
-from fastvideo.forward_context import set_forward_context
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.logger import init_logger
@@ -263,7 +261,10 @@ class GateProj(nn.Module):
 
 
 class GatedSelfAttention(nn.Module):
-    """Gated self-attention with GQA support."""
+    """Gated self-attention with GQA support.
+    
+    Uses DistributedAttention for full self-attention (handles SP=1 case too).
+    """
     
     def __init__(
         self,
@@ -289,17 +290,8 @@ class GatedSelfAttention(nn.Module):
         self.v_proj = nn.Linear(d_model, n_kv_heads * self.head_dim, bias=False)
         self.out_proj = nn.Linear(d_model, d_model, bias=False)
 
-        # Prefer LocalAttention for correctness in unit tests (works without
-        # requiring FastVideo distributed/SP groups). If SP is initialized, we
-        # can optionally switch to DistributedAttention at runtime.
-        self.local_attn_layer = LocalAttention(
-            num_heads=n_heads,
-            head_size=self.head_dim,
-            num_kv_heads=n_kv_heads,
-            causal=causal,
-            supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA, ),
-        )
-        self.dist_attn_layer = DistributedAttention(
+        # Use DistributedAttention for self-attention (handles SP=1 case correctly)
+        self.attn = DistributedAttention(
             num_heads=n_heads,
             head_size=self.head_dim,
             num_kv_heads=n_kv_heads,
@@ -308,7 +300,6 @@ class GatedSelfAttention(nn.Module):
         )
         
         # Per-head gating: learnable [n_heads, n_heads] matrix
-        # Use a simple Linear-like wrapper to get gate_proj.weight naming
         if gated_attn:
             self.gate_proj = GateProj(n_heads)
         
@@ -323,50 +314,26 @@ class GatedSelfAttention(nn.Module):
         B, L, D = x.shape
         
         # Project Q, K, V
-        q = self.q_proj(x)
-        k = self.k_proj(x)
-        v = self.v_proj(x)
-        
-        # Reshape for attention: [B, L, n_heads, head_dim] -> [B, n_heads, L, head_dim]
-        q = q.view(B, L, self.n_heads, self.head_dim)
-        k = k.view(B, L, self.n_kv_heads, self.head_dim)
-        v = v.view(B, L, self.n_kv_heads, self.head_dim)
+        q = self.q_proj(x).view(B, L, self.n_heads, self.head_dim)
+        k = self.k_proj(x).view(B, L, self.n_kv_heads, self.head_dim)
+        v = self.v_proj(x).view(B, L, self.n_kv_heads, self.head_dim)
         
         # Apply RoPE if provided
         if pos_emb is not None:
             q = self._apply_rope(q, pos_emb)
             k = self._apply_rope(k, pos_emb)
         
-        # Attention via FastVideo DistributedAttention (SDPA backend).
-        # Note: forward_context is required; for now we only need a timestep
-        # and no explicit mask (causal handled by backend).
-        meta = SDPAMetadata(current_timestep=0, attn_mask=None)
-        use_dist = False
-        try:
-            import torch.distributed as dist
-            if dist.is_initialized():
-                from fastvideo.distributed.parallel_state import get_sp_world_size
-                use_dist = get_sp_world_size() > 1
-        except Exception:
-            use_dist = False
-
-        with set_forward_context(current_timestep=0, attn_metadata=meta):
-            if use_dist:
-                attn_out, _ = self.dist_attn_layer(q=q, k=k, v=v)
-            else:
-                attn_out = self.local_attn_layer(q=q, k=k, v=v)
+        # Attention via FastVideo DistributedAttention
+        # forward_context should be set by caller (pipeline/denoising stage)
+        attn_out, _ = self.attn(q=q, k=k, v=v)
         attn_out = attn_out.reshape(B, L, D)
         
         # Output projection with optional per-head gating
         out = self.out_proj(attn_out)
         
         if self.gated_attn:
-            # Per-head gate: apply gate_proj [n_heads, n_heads] to attention output
-            # Reshape to [B, L, n_heads, head_dim], apply gate, reshape back
             out_heads = out.view(B, L, self.n_heads, self.head_dim)
-            # gate_proj.weight is [n_heads, n_heads], apply sigmoid and einsum
-            gate = self.gate_proj()  # [n_heads, n_heads] with sigmoid
-            # Weight contribution from each head
+            gate = self.gate_proj()
             out_heads = torch.einsum('blhd,gh->blgd', out_heads, gate)
             out = out_heads.reshape(B, L, D)
         
@@ -383,6 +350,7 @@ class GatedSelfAttention(nn.Module):
 class CrossAttention(nn.Module):
     """Cross-attention for prompt conditioning.
     
+    Uses LocalAttention for cross-attention (no sequence parallelism needed).
     Uses context_dim as inner dimension (not d_model), matching checkpoint structure.
     Uses a fixed head_dim=64 and calculates n_heads from context_dim.
     """
@@ -404,7 +372,8 @@ class CrossAttention(nn.Module):
         # Out: project from context_dim back to d_model
         self.out_proj = nn.Linear(context_dim, d_model, bias=False)
 
-        self.attn_layer = LocalAttention(
+        # Use LocalAttention for cross-attention (local operation, no SP needed)
+        self.attn = LocalAttention(
             num_heads=self.n_heads,
             head_size=self.head_dim,
             num_kv_heads=self.n_heads,
@@ -425,17 +394,10 @@ class CrossAttention(nn.Module):
         k = self.k_proj(context).view(B, S, self.n_heads, self.head_dim)
         v = self.v_proj(context).view(B, S, self.n_heads, self.head_dim)
         
-        # Create attention mask from padding mask if provided
-        attn_mask = None
-        if context_pad_mask is not None:
-            # context_pad_mask: [B, S] where True = valid, False = pad
-            # SDPA expects broadcastable mask [B, 1, L, S] with -inf for masked.
-            attn_mask = context_pad_mask.unsqueeze(1).unsqueeze(2).expand(B, 1, L, S)
-            attn_mask = torch.where(attn_mask, 0.0, float("-inf")).to(q.dtype)
-
-        meta = SDPAMetadata(current_timestep=0, attn_mask=attn_mask)
-        with set_forward_context(current_timestep=0, attn_metadata=meta):
-            attn_out = self.attn_layer(q=q, k=k, v=v)
+        # Attention via FastVideo LocalAttention
+        # forward_context should be set by caller (pipeline/denoising stage)
+        # Note: attention masking for padding handled via attn_metadata set in context
+        attn_out = self.attn(q=q, k=k, v=v)
         attn_out = attn_out.reshape(B, L, self.context_dim)
         
         return self.out_proj(attn_out)
