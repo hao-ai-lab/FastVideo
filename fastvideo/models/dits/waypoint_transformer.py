@@ -17,10 +17,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from fastvideo.attention import DistributedAttention, LocalAttention
+from fastvideo.attention.backends.sdpa import SDPAMetadata
+from fastvideo.forward_context import set_forward_context
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
+from fastvideo.platforms import AttentionBackendEnum
 
 logger = init_logger(__name__)
 
@@ -284,6 +288,16 @@ class GatedSelfAttention(nn.Module):
         self.k_proj = nn.Linear(d_model, n_kv_heads * self.head_dim, bias=False)
         self.v_proj = nn.Linear(d_model, n_kv_heads * self.head_dim, bias=False)
         self.out_proj = nn.Linear(d_model, d_model, bias=False)
+
+        # Use FastVideo attention layer (backed by SDPA) for consistency with
+        # other models and to enable sequence-parallel when configured.
+        self.attn_layer = DistributedAttention(
+            num_heads=n_heads,
+            head_size=self.head_dim,
+            num_kv_heads=n_kv_heads,
+            causal=causal,
+            supported_attention_backends=(AttentionBackendEnum.SDPA, ),
+        )
         
         # Per-head gating: learnable [n_heads, n_heads] matrix
         # Use a simple Linear-like wrapper to get gate_proj.weight naming
@@ -306,29 +320,22 @@ class GatedSelfAttention(nn.Module):
         v = self.v_proj(x)
         
         # Reshape for attention: [B, L, n_heads, head_dim] -> [B, n_heads, L, head_dim]
-        q = q.view(B, L, self.n_heads, self.head_dim).transpose(1, 2)
-        k = k.view(B, L, self.n_kv_heads, self.head_dim).transpose(1, 2)
-        v = v.view(B, L, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        q = q.view(B, L, self.n_heads, self.head_dim)
+        k = k.view(B, L, self.n_kv_heads, self.head_dim)
+        v = v.view(B, L, self.n_kv_heads, self.head_dim)
         
         # Apply RoPE if provided
         if pos_emb is not None:
-            q = self._apply_rope(q.transpose(1, 2), pos_emb).transpose(1, 2)
-            k = self._apply_rope(k.transpose(1, 2), pos_emb).transpose(1, 2)
+            q = self._apply_rope(q, pos_emb)
+            k = self._apply_rope(k, pos_emb)
         
-        # GQA: repeat K, V heads if needed
-        if self.n_kv_heads < self.n_heads:
-            repeat_factor = self.n_heads // self.n_kv_heads
-            k = k.repeat_interleave(repeat_factor, dim=1)
-            v = v.repeat_interleave(repeat_factor, dim=1)
-        
-        # Attention using PyTorch SDPA
-        attn_out = F.scaled_dot_product_attention(
-            q, k, v,
-            is_causal=self.causal,
-            scale=self.scale,
-        )
-        # [B, n_heads, L, head_dim] -> [B, L, D]
-        attn_out = attn_out.transpose(1, 2).reshape(B, L, D)
+        # Attention via FastVideo DistributedAttention (SDPA backend).
+        # Note: forward_context is required; for now we only need a timestep
+        # and no explicit mask (causal handled by backend).
+        meta = SDPAMetadata(current_timestep=0, attn_mask=None)
+        with set_forward_context(current_timestep=0, attn_metadata=meta):
+            attn_out, _ = self.attn_layer(q=q, k=k, v=v)
+        attn_out = attn_out.reshape(B, L, D)
         
         # Output projection with optional per-head gating
         out = self.out_proj(attn_out)
@@ -376,8 +383,14 @@ class CrossAttention(nn.Module):
         self.v_proj = nn.Linear(context_dim, context_dim, bias=False)
         # Out: project from context_dim back to d_model
         self.out_proj = nn.Linear(context_dim, d_model, bias=False)
-        
-        self.scale = self.head_dim ** -0.5
+
+        self.attn_layer = LocalAttention(
+            num_heads=self.n_heads,
+            head_size=self.head_dim,
+            num_kv_heads=self.n_heads,
+            causal=False,
+            supported_attention_backends=(AttentionBackendEnum.SDPA, ),
+        )
     
     def forward(
         self,
@@ -388,29 +401,22 @@ class CrossAttention(nn.Module):
         B, L, _ = x.shape
         _, S, _ = context.shape
         
-        # [B, L, context_dim] -> [B, n_heads, L, head_dim]
-        q = self.q_proj(x).view(B, L, self.n_heads, self.head_dim).transpose(1, 2)
-        k = self.k_proj(context).view(B, S, self.n_heads, self.head_dim).transpose(1, 2)
-        v = self.v_proj(context).view(B, S, self.n_heads, self.head_dim).transpose(1, 2)
+        q = self.q_proj(x).view(B, L, self.n_heads, self.head_dim)
+        k = self.k_proj(context).view(B, S, self.n_heads, self.head_dim)
+        v = self.v_proj(context).view(B, S, self.n_heads, self.head_dim)
         
         # Create attention mask from padding mask if provided
         attn_mask = None
         if context_pad_mask is not None:
             # context_pad_mask: [B, S] where True = valid, False = pad
-            # SDPA expects: [B, 1, 1, S] where -inf = masked, same dtype as q
-            attn_mask = context_pad_mask.unsqueeze(1).unsqueeze(2)
-            attn_mask = attn_mask.expand(B, 1, L, S)
-            attn_mask = torch.where(attn_mask, 0.0, float('-inf')).to(q.dtype)
-        
-        # Attention using PyTorch SDPA
-        attn_out = F.scaled_dot_product_attention(
-            q, k, v,
-            attn_mask=attn_mask,
-            is_causal=False,
-            scale=self.scale,
-        )
-        # [B, n_heads, L, head_dim] -> [B, L, context_dim]
-        attn_out = attn_out.transpose(1, 2).reshape(B, L, self.context_dim)
+            # SDPA expects broadcastable mask [B, 1, L, S] with -inf for masked.
+            attn_mask = context_pad_mask.unsqueeze(1).unsqueeze(2).expand(B, 1, L, S)
+            attn_mask = torch.where(attn_mask, 0.0, float("-inf")).to(q.dtype)
+
+        meta = SDPAMetadata(current_timestep=0, attn_mask=attn_mask)
+        with set_forward_context(current_timestep=0, attn_metadata=meta):
+            attn_out = self.attn_layer(q=q, k=k, v=v)
+        attn_out = attn_out.reshape(B, L, self.context_dim)
         
         return self.out_proj(attn_out)
 

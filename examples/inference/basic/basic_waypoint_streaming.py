@@ -2,36 +2,25 @@
 """
 Basic streaming inference example for Waypoint-1-Small world model.
 
-Waypoint is an interactive world model that generates video frames in real-time
-based on text prompts and controller inputs (keyboard, mouse, scroll).
+This mirrors other FastVideo streaming examples and uses
+`StreamingVideoGenerator` so weights can be auto-downloaded from a HF repo
+that contains a FastVideo-compatible `model_index.json`.
 
 Usage:
     python examples/inference/basic/basic_waypoint_streaming.py
-
-Prerequisites:
-    1. Download Waypoint-1-Small weights from Hugging Face
-    2. Set WAYPOINT_MODEL_PATH environment variable (or use default path)
-
-This example demonstrates:
-    - Initializing the Waypoint pipeline
-    - Streaming generation with real-time control inputs
-    - Interactive keyboard/mouse control handling
 """
 
-import os
-import sys
 from dataclasses import dataclass, field
 from typing import Set, Tuple
 
 import torch
 
-# Default model path
-WAYPOINT_MODEL_PATH = os.getenv(
-    "WAYPOINT_MODEL_PATH",
-    "official_weights/Waypoint-1-Small"
-)
+from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
 
-# Output settings
+# A FastVideo-compatible model repo ID (needs `model_index.json`).
+# Suggested: create `FastVideo/Waypoint-1-Small-Diffusers` (stub repo is OK)
+# and point its components to Overworld + google/umt5-xl via modular entries.
+MODEL_ID = "FastVideo/Waypoint-1-Small-Diffusers"
 OUTPUT_PATH = "video_samples_waypoint"
 
 
@@ -106,141 +95,53 @@ def get_keyboard_input() -> CtrlInput:
 
 def main():
     """Main streaming generation loop."""
-    # Check if model path exists
-    if not os.path.exists(WAYPOINT_MODEL_PATH):
-        print(f"Error: Waypoint model not found at {WAYPOINT_MODEL_PATH}")
-        print("Please download from: https://huggingface.co/Overworld/Waypoint-1-Small")
-        sys.exit(1)
-    
-    print("=" * 60)
-    print("Waypoint-1-Small Streaming Inference")
-    print("=" * 60)
-    
-    # Import here to avoid import errors before CUDA check
-    try:
-        from fastvideo.pipelines.basic.waypoint import WaypointPipeline  # noqa: F401
-    except ImportError as e:
-        print(f"Error importing Waypoint pipeline: {e}")
-        print("Please ensure FastVideo is installed correctly.")
-        sys.exit(1)
-    
-    # Check CUDA availability
     if not torch.cuda.is_available():
-        print("Error: CUDA is required for Waypoint inference")
-        sys.exit(1)
-    
-    print(f"\nUsing model: {WAYPOINT_MODEL_PATH}")
-    print(f"Output path: {OUTPUT_PATH}")
-    
-    # Create output directory
-    os.makedirs(OUTPUT_PATH, exist_ok=True)
-    
-    # For now, demonstrate manual inference since full pipeline loading
-    # requires additional setup (VAE, text encoder, etc.)
-    print("\n" + "=" * 60)
-    print("Waypoint Streaming Demo")
-    print("=" * 60)
-    
-    # Load just the transformer for demonstration
-    from fastvideo.models.dits.waypoint_transformer import WaypointWorldModel
-    from fastvideo.configs.models.dits.waypoint_transformer import WaypointArchConfig
-    from safetensors.torch import load_file
-    
-    print("\nLoading Waypoint transformer...")
-    
-    config = WaypointArchConfig()
-    model = WaypointWorldModel(config)
-    
-    weights_path = os.path.join(WAYPOINT_MODEL_PATH, "transformer", "diffusion_pytorch_model.safetensors")
-    if os.path.exists(weights_path):
-        state_dict = load_file(weights_path)
-        model.load_state_dict(state_dict, strict=False)
-        print(f"✓ Loaded weights from {weights_path}")
-    else:
-        print(f"Warning: Weights not found at {weights_path}")
-    
-    device = torch.device("cuda:0")
-    dtype = torch.bfloat16
-    model = model.to(device=device, dtype=dtype)
-    model.eval()
-    
-    print("✓ Model loaded successfully!")
-    
-    # Demo parameters
-    batch_size = 1
-    n_frames = 1
-    prompt_len = 32
-    
-    # Create mock prompt embedding (in real usage, this would come from UMT5)
-    prompt_emb = torch.randn(batch_size, prompt_len, config.prompt_embedding_dim, device=device, dtype=dtype)
-    prompt_pad_mask = torch.ones(batch_size, prompt_len, device=device, dtype=torch.bool)
-    
-    # Scheduler sigmas (from config)
-    sigmas = [1.0, 0.8609585762023926, 0.729332447052002, 0.3205108940601349, 0.0]
-    
-    print("\nStarting interactive generation demo...")
-    print("(This demo shows the denoising loop without VAE decoding)")
-    
+        raise SystemExit("CUDA is required for Waypoint inference.")
+
+    generator = StreamingVideoGenerator.from_pretrained(
+        MODEL_ID,
+        num_gpus=1,
+        use_fsdp_inference=False,
+        dit_cpu_offload=False,
+        vae_cpu_offload=False,
+        text_encoder_cpu_offload=False,
+        pin_cpu_memory=True,
+    )
+
+    # Initialize streaming session.
+    generator.reset(
+        prompt="A first-person gameplay video exploring a stylized world.",
+        num_frames=120,
+        height=360,
+        width=640,
+        num_inference_steps=4,
+        output_path=OUTPUT_PATH,
+        save_video=True,
+    )
+
     frame_index = 0
-    max_frames = 10
+    max_steps = 50
     
-    while frame_index < max_frames:
+    while frame_index < max_steps:
         ctrl = get_keyboard_input()
         
         if ctrl is None:
             print("Exiting...")
             break
-        
-        print(f"\nGenerating frame {frame_index + 1}/{max_frames}...")
-        print(f"  Buttons: {ctrl.button}")
-        print(f"  Mouse: {ctrl.mouse}")
-        print(f"  Scroll: {ctrl.scroll}")
-        
-        # Convert control input to tensors
-        mouse = torch.tensor([[list(ctrl.mouse)]], device=device, dtype=dtype)
-        button = torch.zeros(1, 1, config.n_buttons, device=device, dtype=dtype)
+
+        # Build 1-frame actions for StreamingVideoGenerator.step().
+        keyboard_cond = torch.zeros((1, 256), dtype=torch.float32)
         for b in ctrl.button:
-            if 0 <= b < config.n_buttons:
-                button[0, 0, b] = 1.0
-        scroll = torch.tensor([[[float(ctrl.scroll > 0) - float(ctrl.scroll < 0)]]], device=device, dtype=dtype)
-        
-        # Initialize latent noise
-        x = torch.randn(batch_size, n_frames, config.channels, config.height, config.width, device=device, dtype=dtype)
-        frame_ts = torch.tensor([[frame_index]], device=device, dtype=torch.long)
-        
-        # Denoise through sigma schedule
-        with torch.no_grad():
-            for i in range(len(sigmas) - 1):
-                sigma_curr = sigmas[i]
-                sigma_next = sigmas[i + 1]
-                sigma = torch.tensor([[sigma_curr]], device=device, dtype=dtype)
-                
-                v_pred = model(
-                    x=x,
-                    sigma=sigma,
-                    frame_timestamp=frame_ts,
-                    prompt_emb=prompt_emb,
-                    prompt_pad_mask=prompt_pad_mask,
-                    mouse=mouse,
-                    button=button,
-                    scroll=scroll,
-                    kv_cache=None,
-                )
-                
-                # Euler step
-                x = x + (sigma_next - sigma_curr) * v_pred
-        
-        # Log latent stats (would normally decode with VAE)
-        latent_mean = x.float().mean().item()
-        latent_std = x.float().std().item()
-        print(f"  Latent stats: mean={latent_mean:.4f}, std={latent_std:.4f}")
-        
+            if 0 <= b < 256:
+                keyboard_cond[0, b] = 1.0
+        mouse_cond = torch.tensor([list(ctrl.mouse)], dtype=torch.float32)
+
+        _frames, _future = generator.step(keyboard_cond=keyboard_cond,
+                                          mouse_cond=mouse_cond)
         frame_index += 1
     
-    print("\n" + "=" * 60)
-    print("Demo complete!")
-    print(f"Generated {frame_index} frames")
-    print("=" * 60)
+    generator.finalize()
+    generator.shutdown()
 
 
 if __name__ == "__main__":

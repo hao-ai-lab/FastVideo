@@ -44,8 +44,7 @@ class WaypointT2VConfig(PipelineConfig):
     # DiT configuration
     dit_config: DiTConfig = field(default_factory=WaypointArchConfig)
     
-    # VAE configuration - loaded separately via Diffusers AutoModel
-    # vae_config is handled specially for Waypoint since it uses DCAE
+    # VAE is loaded from the model repo (WorldEngineVAE) via dynamic module import.
     vae_tiling: bool = False
     vae_sp: bool = False
     
