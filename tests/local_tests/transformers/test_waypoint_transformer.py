@@ -94,8 +94,11 @@ class TestWaypointTransformerParity:
             print(f"\n✗ Weight loading failed: {e}")
             pytest.fail(f"Weight loading failed: {e}")
     
-    def test_forward_pass(self, waypoint_config, device):
-        """Test that forward pass runs without errors."""
+    def test_forward_pass(self, waypoint_config, device, distributed_setup):
+        """Test that forward pass runs without errors.
+        
+        Uses distributed_setup fixture to initialize distributed environment (SP=1).
+        """
         import safetensors.torch as st
         from fastvideo.models.dits.waypoint_transformer import WaypointWorldModel
         from fastvideo.pipelines.basic.waypoint.waypoint_pipeline import CtrlInput
