@@ -16,7 +16,7 @@ from fastvideo.pipelines.stages import (DecodingStage, InputValidationStage,
                                         LTX2AudioDecodingStage,
                                         LTX2DenoisingStage,
                                         LTX2LatentPreparationStage,
-                                        TextEncodingStage)
+                                        LTX2TextEncodingStage)
 
 logger = init_logger(__name__)
 
@@ -40,7 +40,7 @@ class LTX2Pipeline(ComposedPipelineBase):
 
         self.add_stage(
             stage_name="prompt_encoding_stage",
-            stage=TextEncodingStage(
+            stage=LTX2TextEncodingStage(
                 text_encoders=[self.get_module("text_encoder")],
                 tokenizers=[self.get_module("tokenizer")],
             ),

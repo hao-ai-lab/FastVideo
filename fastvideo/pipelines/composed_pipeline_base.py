@@ -15,6 +15,8 @@ import torch
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.distributed import (
     maybe_init_distributed_environment_and_model_parallel, get_world_group)
+from fastvideo.distributed.communication_op import (
+    warmup_sequence_parallel_communication)
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.profiler import get_or_create_profiler
@@ -156,6 +158,10 @@ class ComposedPipelineBase(ABC):
         if not self.fastvideo_args.training_mode:
             logger.info("Creating pipeline stages...")
             self.create_pipeline_stages(self.fastvideo_args)
+
+            # Warmup NCCL communicators for sequence parallelism to avoid
+            # slow first forward pass due to lazy initialization
+            warmup_sequence_parallel_communication()
 
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         raise NotImplementedError(
