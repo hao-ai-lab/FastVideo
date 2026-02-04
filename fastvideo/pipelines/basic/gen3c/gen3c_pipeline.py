@@ -1,18 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-GEN3C video diffusion pipeline implementation.
-
-This module contains an implementation of the GEN3C video diffusion pipeline
-with 3D cache support for camera-controlled video generation.
+Implements GEN3C video diffusion pipeline with 3D cache support for camera-controlled video generation.
 """
 
 import torch
-from typing import Optional
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
-from fastvideo.models.loader import TransformerLoader
+from fastvideo.models.loader.component_loader import TransformerLoader
 from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
     FlowMatchEulerDiscreteScheduler)
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
@@ -32,10 +28,10 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
     
     This stage prepares latents and encodes 3D cache buffers through the VAE.
     """
-    
+
     def __init__(self, scheduler, transformer, vae) -> None:
         super().__init__(scheduler, transformer, vae)
-    
+
     def forward(
         self,
         batch: ForwardBatch,
@@ -44,19 +40,20 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
         """Prepare latents and encode 3D cache buffers."""
         # Get dimensions from pipeline config
         pipeline_config = fastvideo_args.pipeline_config
-        
+
         # Initialize latents
-        num_channels_latents = getattr(self.transformer, 'num_channels_latents', 16)
-        
+        num_channels_latents = getattr(self.transformer, 'num_channels_latents',
+                                       16)
+
         # Get latent dimensions from config or defaults
         latent_frames = getattr(pipeline_config, 'state_t', 16)
         height = getattr(batch, 'height', 720)
         width = getattr(batch, 'width', 1280)
-        
+
         # Calculate latent spatial dimensions (8x compression)
         latent_height = height // 8
         latent_width = width // 8
-        
+
         # Generate initial noise latents
         latents_shape = (
             batch.batch_size,
@@ -65,53 +62,61 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
             latent_height,
             latent_width,
         )
-        
+
         latents = torch.randn(
             latents_shape,
             generator=batch.generator,
             device=batch.device,
             dtype=torch.float32,
         )
-        
+
         # Scale latents by initial sigma
         if hasattr(self.scheduler, 'init_noise_sigma'):
             latents = latents * self.scheduler.init_noise_sigma
-        
+
         batch.latents = latents
         batch.height = height
         batch.width = width
         batch.latent_height = latent_height
         batch.latent_width = latent_width
         batch.latent_frames = latent_frames
-        
+
         # Prepare conditioning indicator (for video conditioning)
         # Default: no conditioning (will be set by conditioning stage if needed)
-        batch.cond_indicator = torch.zeros(
-            batch.batch_size, 1, latent_frames, latent_height, latent_width,
-            device=batch.device, dtype=torch.float32
-        )
-        
+        batch.cond_indicator = torch.zeros(batch.batch_size,
+                                           1,
+                                           latent_frames,
+                                           latent_height,
+                                           latent_width,
+                                           device=batch.device,
+                                           dtype=torch.float32)
+
         # Prepare condition_video_input_mask (binary mask for conditioning frames)
-        batch.condition_video_input_mask = torch.zeros(
-            batch.batch_size, 1, latent_frames, latent_height, latent_width,
-            device=batch.device, dtype=torch.float32
-        )
-        
+        batch.condition_video_input_mask = torch.zeros(batch.batch_size,
+                                                       1,
+                                                       latent_frames,
+                                                       latent_height,
+                                                       latent_width,
+                                                       device=batch.device,
+                                                       dtype=torch.float32)
+
         # Prepare condition_video_pose (3D cache buffers - to be filled by cache rendering)
         frame_buffer_max = getattr(pipeline_config, 'frame_buffer_max', 2)
         buffer_channels = frame_buffer_max * 32  # Each buffer: 16 (frame) + 16 (mask)
-        
-        batch.condition_video_pose = torch.zeros(
-            batch.batch_size, buffer_channels, latent_frames, latent_height, latent_width,
-            device=batch.device, dtype=torch.float32
-        )
-        
+
+        batch.condition_video_pose = torch.zeros(batch.batch_size,
+                                                 buffer_channels,
+                                                 latent_frames,
+                                                 latent_height,
+                                                 latent_width,
+                                                 device=batch.device,
+                                                 dtype=torch.float32)
+
         # Prepare augment sigma (for noise augmentation on condition frames)
-        batch.condition_video_augment_sigma = torch.zeros(
-            batch.batch_size,
-            device=batch.device, dtype=torch.float32
-        )
-        
+        batch.condition_video_augment_sigma = torch.zeros(batch.batch_size,
+                                                          device=batch.device,
+                                                          dtype=torch.float32)
+
         return batch
 
     def encode_warped_frames(
@@ -136,30 +141,31 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
             latent_condition: (B, buffer_channels, T_latent, H_latent, W_latent)
         """
         assert condition_state.dim() == 6
-        
+
         # Convert mask to [-1, 1] range and repeat to 3 channels
-        condition_state_mask = (condition_state_mask * 2 - 1).repeat(1, 1, 1, 3, 1, 1)
-        
+        condition_state_mask = (condition_state_mask * 2 - 1).repeat(
+            1, 1, 1, 3, 1, 1)
+
         latent_condition = []
         for i in range(condition_state.shape[2]):  # Iterate over buffers
             # Encode image buffer
-            current_video_latent = vae.encode(
-                condition_state[:, :, i].permute(0, 2, 1, 3, 4).to(dtype)
-            ).contiguous()
-            
+            current_video_latent = vae.encode(condition_state[:, :, i].permute(
+                0, 2, 1, 3, 4).to(dtype)).contiguous()
+
             # Encode mask buffer
             current_mask_latent = vae.encode(
-                condition_state_mask[:, :, i].permute(0, 2, 1, 3, 4).to(dtype)
-            ).contiguous()
-            
+                condition_state_mask[:, :,
+                                     i].permute(0, 2, 1, 3,
+                                                4).to(dtype)).contiguous()
+
             latent_condition.append(current_video_latent)
             latent_condition.append(current_mask_latent)
-        
+
         # Pad with zeros if fewer buffers than frame_buffer_max
         for _ in range(frame_buffer_max - condition_state.shape[2]):
             latent_condition.append(torch.zeros_like(current_video_latent))
             latent_condition.append(torch.zeros_like(current_mask_latent))
-        
+
         latent_condition = torch.cat(latent_condition, dim=1)
         return latent_condition
 
@@ -173,10 +179,10 @@ class Gen3CDenoisingStage(DenoisingStage):
     - condition_video_pose: VAE-encoded 3D cache buffers
     - condition_video_augment_sigma: Noise augmentation sigma
     """
-    
+
     def __init__(self, transformer, scheduler, pipeline=None) -> None:
         super().__init__(transformer, scheduler, pipeline)
-    
+
     def forward(
         self,
         batch: ForwardBatch,
@@ -205,7 +211,7 @@ class Gen3CDenoisingStage(DenoisingStage):
             transformer_dtype = next(self.transformer.parameters()).dtype
         target_dtype = transformer_dtype
         autocast_enabled = (target_dtype != torch.float32
-                           ) and not fastvideo_args.disable_autocast
+                            ) and not fastvideo_args.disable_autocast
 
         latents = batch.latents
         num_inference_steps = batch.num_inference_steps
@@ -233,11 +239,13 @@ class Gen3CDenoisingStage(DenoisingStage):
             self.scheduler.sigmas[-1] = self.scheduler.sigmas[-2]
 
         conditioning_latents = getattr(batch, 'conditioning_latents', None)
-        
+
         # Get GEN3C-specific inputs
-        condition_video_input_mask = getattr(batch, 'condition_video_input_mask', None)
+        condition_video_input_mask = getattr(batch,
+                                             'condition_video_input_mask', None)
         condition_video_pose = getattr(batch, 'condition_video_pose', None)
-        condition_video_augment_sigma = getattr(batch, 'condition_video_augment_sigma', None)
+        condition_video_augment_sigma = getattr(
+            batch, 'condition_video_augment_sigma', None)
 
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -265,24 +273,29 @@ class Gen3CDenoisingStage(DenoisingStage):
                             forward_batch=batch,
                     ):
                         # Prepare padding mask
-                        padding_mask = torch.ones(
-                            batch.batch_size,
-                            1,
-                            batch.height,
-                            batch.width,
-                            device=cond_latent.device,
-                            dtype=target_dtype
-                        )
+                        padding_mask = torch.ones(batch.batch_size,
+                                                  1,
+                                                  batch.height,
+                                                  batch.width,
+                                                  device=cond_latent.device,
+                                                  dtype=target_dtype)
 
                         # Call GEN3C transformer with 3D cache inputs
                         noise_pred = self.transformer(
                             hidden_states=cond_latent,
                             timestep=timestep.to(target_dtype),
-                            encoder_hidden_states=batch.prompt_embeds[0].to(target_dtype),
+                            encoder_hidden_states=batch.prompt_embeds[0].to(
+                                target_dtype),
                             fps=24,  # TODO: get fps from batch or config
-                            condition_video_input_mask=condition_video_input_mask.to(target_dtype) if condition_video_input_mask is not None else None,
-                            condition_video_pose=condition_video_pose.to(target_dtype) if condition_video_pose is not None else None,
-                            condition_video_augment_sigma=condition_video_augment_sigma if condition_video_augment_sigma is not None else None,
+                            condition_video_input_mask=condition_video_input_mask
+                            .to(target_dtype)
+                            if condition_video_input_mask is not None else None,
+                            condition_video_pose=condition_video_pose.to(
+                                target_dtype)
+                            if condition_video_pose is not None else None,
+                            condition_video_augment_sigma=
+                            condition_video_augment_sigma if
+                            condition_video_augment_sigma is not None else None,
                             padding_mask=padding_mask,
                         )
 
@@ -290,7 +303,8 @@ class Gen3CDenoisingStage(DenoisingStage):
                     if isinstance(noise_pred, tuple):
                         noise_pred = noise_pred[0]
 
-                    cond_pred = (c_skip * latents + c_out * noise_pred.float()).to(target_dtype)
+                    cond_pred = (c_skip * latents +
+                                 c_out * noise_pred.float()).to(target_dtype)
 
                     # Classifier-free guidance
                     if batch.do_classifier_free_guidance and batch.negative_prompt_embeds is not None:
@@ -303,26 +317,40 @@ class Gen3CDenoisingStage(DenoisingStage):
                                 forward_batch=batch,
                         ):
                             # For unconditioned prediction, zero out the pose buffers
-                            uncond_pose = torch.zeros_like(condition_video_pose) if condition_video_pose is not None else None
-                            
+                            uncond_pose = torch.zeros_like(
+                                condition_video_pose
+                            ) if condition_video_pose is not None else None
+
                             uncond_noise_pred = self.transformer(
                                 hidden_states=uncond_latent,
                                 timestep=timestep.to(target_dtype),
-                                encoder_hidden_states=batch.negative_prompt_embeds[0].to(target_dtype),
+                                encoder_hidden_states=batch.
+                                negative_prompt_embeds[0].to(target_dtype),
                                 fps=24,
-                                condition_video_input_mask=condition_video_input_mask.to(target_dtype) if condition_video_input_mask is not None else None,
-                                condition_video_pose=uncond_pose.to(target_dtype) if uncond_pose is not None else None,
-                                condition_video_augment_sigma=condition_video_augment_sigma if condition_video_augment_sigma is not None else None,
+                                condition_video_input_mask=
+                                condition_video_input_mask.to(target_dtype)
+                                if condition_video_input_mask is not None else
+                                None,
+                                condition_video_pose=uncond_pose.to(
+                                    target_dtype)
+                                if uncond_pose is not None else None,
+                                condition_video_augment_sigma=
+                                condition_video_augment_sigma
+                                if condition_video_augment_sigma is not None
+                                else None,
                                 padding_mask=padding_mask,
                             )
 
                         if isinstance(uncond_noise_pred, tuple):
                             uncond_noise_pred = uncond_noise_pred[0]
 
-                        uncond_pred = (c_skip * latents + c_out * uncond_noise_pred.float()).to(target_dtype)
+                        uncond_pred = (
+                            c_skip * latents +
+                            c_out * uncond_noise_pred.float()).to(target_dtype)
 
                         # Apply guidance
-                        pred = uncond_pred + guidance_scale * (cond_pred - uncond_pred)
+                        pred = uncond_pred + guidance_scale * (cond_pred -
+                                                               uncond_pred)
                     else:
                         pred = cond_pred
 
@@ -335,11 +363,13 @@ class Gen3CDenoisingStage(DenoisingStage):
                     )
                     latents = step_output.prev_sample
 
-                    if hasattr(self, "callback_on_step_end") and self.callback_on_step_end is not None:
+                    if hasattr(self, "callback_on_step_end"
+                               ) and self.callback_on_step_end is not None:
                         callback_kwargs = {}
                         for k in self.callback_on_step_end_tensor_inputs:
                             callback_kwargs[k] = locals()[k]
-                        callback_outputs = self.callback_on_step_end(self, i, t, callback_kwargs)
+                        callback_outputs = self.callback_on_step_end(
+                            self, i, t, callback_kwargs)
                         latents = callback_outputs.pop("latents", latents)
 
                     progress_bar.update()
