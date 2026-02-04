@@ -73,6 +73,10 @@ class WaypointArchConfig(DiTArchConfig):
         0.0,
     ])
     
+    # Gradient checkpointing
+    mlp_gradient_checkpointing: bool = True
+    block_gradient_checkpointing: bool = True
+    
     # Misc
     base_fps: int = 60
     rope_impl: str = "ortho"

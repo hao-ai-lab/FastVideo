@@ -10,7 +10,9 @@ from typing import Optional, Set, Tuple
 
 import torch
 
+from fastvideo.attention.backends.sdpa import SDPAMetadata
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, ForwardBatch
 
@@ -50,8 +52,9 @@ class CtrlInput:
             if 0 <= b < n_buttons:
                 button[0, 0, b] = 1.0
         
-        scroll = torch.tensor([[[float(self.scroll > 0) - float(self.scroll < 0)]]], 
-                              device=device, dtype=dtype)
+        scroll = torch.tensor(
+            [[[float(self.scroll > 0) - float(self.scroll < 0)]]],
+            device=device, dtype=dtype)
         
         return mouse, button, scroll
 
@@ -75,25 +78,42 @@ class WaypointPipeline(ComposedPipelineBase):
     - Controller inputs (mouse, keyboard, scroll)
     
     Usage:
-        1. Call `streaming_reset()` with initial prompt to set up
-        2. Call `streaming_step()` repeatedly with control inputs
-        3. Call `streaming_clear()` when done
+        1. Call ``streaming_reset()`` with initial prompt to set up
+        2. Call ``streaming_step()`` repeatedly with control inputs
+        3. Call ``streaming_clear()`` when done
     """
     
-    _required_config_modules = ["transformer", "vae", "text_encoder", "tokenizer"]
+    _required_config_modules = [
+        "transformer", "vae", "text_encoder", "tokenizer",
+    ]
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._streaming_ctx: Optional[StreamingContext] = None
         self._vae_cache = None
     
-    def create_pipeline_stages(self, fastvideo_args: FastVideoArgs) -> None:
+    def create_pipeline_stages(
+        self, fastvideo_args: FastVideoArgs,
+    ) -> None:
         """Create pipeline stages.
         
         Note: Waypoint uses a custom streaming interface rather than
         the standard stage-based pipeline due to its interactive nature.
         """
-        logger.info("WaypointPipeline initialized for interactive generation")
+        # Ensure consistent dtype across all model parameters.
+        # The safetensors checkpoint may store some biases in float32
+        # while the model was initialised in bfloat16; a single
+        # ``.to()`` call normalises everything.
+        transformer = self.get_module("transformer")
+        dit_dtype = next(transformer.parameters()).dtype
+        transformer.to(dtype=dit_dtype)
+
+        vae = self.get_module("vae", None)
+        if vae is not None:
+            vae.to(dtype=dit_dtype)
+
+        logger.info(
+            "WaypointPipeline initialized for interactive generation")
     
     @torch.no_grad()
     def streaming_reset(
@@ -118,10 +138,9 @@ class WaypointPipeline(ComposedPipelineBase):
         prompt_pad_mask = None
         
         if text_encoder is not None and tokenizer is not None:
-            # Prefer tokenizer defaults from encoder arch config if present.
-            max_length = getattr(getattr(text_encoder, "config", None),
-                                 "text_len", 512)
-            # Tokenize
+            max_length = getattr(
+                getattr(text_encoder, "config", None),
+                "text_len", 512)
             text_inputs = tokenizer(
                 batch.prompt,
                 padding="max_length",
@@ -130,15 +149,17 @@ class WaypointPipeline(ComposedPipelineBase):
                 return_tensors="pt",
             )
             
-            input_ids = text_inputs.input_ids.to(text_encoder.device)
-            attention_mask = text_inputs.attention_mask.to(text_encoder.device)
+            enc_device = next(text_encoder.parameters()).device
+            input_ids = text_inputs.input_ids.to(enc_device)
+            attention_mask = text_inputs.attention_mask.to(enc_device)
             
-            # Encode
-            outputs = text_encoder(input_ids=input_ids, attention_mask=attention_mask)
+            outputs = text_encoder(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+            )
             prompt_emb = outputs.last_hidden_state
             prompt_pad_mask = attention_mask.bool()
         
-        # Initialize streaming context
         self._streaming_ctx = StreamingContext(
             batch=batch,
             fastvideo_args=fastvideo_args,
@@ -149,7 +170,6 @@ class WaypointPipeline(ComposedPipelineBase):
         )
         
         self._vae_cache = None
-        
         logger.info("Waypoint streaming reset complete")
     
     @torch.no_grad()
@@ -161,15 +181,16 @@ class WaypointPipeline(ComposedPipelineBase):
         """Generate next frame(s) given control input.
         
         Args:
-            keyboard_action: Button conditioning, expected shape [T, 256] or
-                [B, T, 256]. Values are treated as one-hot / multi-hot buttons.
-            mouse_action: Mouse velocity conditioning, expected shape [T, 2] or
-                [B, T, 2].
+            keyboard_action: Button conditioning, expected shape
+                [T, 256] or [B, T, 256].
+            mouse_action: Mouse velocity conditioning, expected shape
+                [T, 2] or [B, T, 2].
             
         Returns:
             ForwardBatch with decoded frames in batch.output
         """
-        assert self._streaming_ctx is not None, "Call streaming_reset() first"
+        assert self._streaming_ctx is not None, \
+            "Call streaming_reset() first"
         
         ctx = self._streaming_ctx
         transformer = self.get_module("transformer")
@@ -185,82 +206,93 @@ class WaypointPipeline(ComposedPipelineBase):
             keyboard_action = keyboard_action.unsqueeze(0)
         if mouse_action.dim() == 2:
             mouse_action = mouse_action.unsqueeze(0)
-        assert keyboard_action.dim() == 3, "keyboard_action must be [B,T,256] or [T,256]"
-        assert mouse_action.dim() == 3, "mouse_action must be [B,T,2] or [T,2]"
+        assert keyboard_action.dim() == 3, \
+            "keyboard_action must be [B,T,256] or [T,256]"
+        assert mouse_action.dim() == 3, \
+            "mouse_action must be [B,T,2] or [T,2]"
 
         # Ensure same time length
         t = min(keyboard_action.shape[1], mouse_action.shape[1])
-        keyboard_action = keyboard_action[:, :t].to(device=device, dtype=dtype)
-        mouse_action = mouse_action[:, :t].to(device=device, dtype=dtype)
+        keyboard_action = keyboard_action[:, :t].to(
+            device=device, dtype=dtype)
+        mouse_action = mouse_action[:, :t].to(
+            device=device, dtype=dtype)
 
-        # Waypoint expects scroll too, but StreamingVideoGenerator does not
-        # currently provide it. Default to no-scroll.
         scroll_action = torch.zeros(
-            keyboard_action.shape[0], t, 1, device=device, dtype=dtype)
+            keyboard_action.shape[0], t, 1,
+            device=device, dtype=dtype)
 
-        # Button conditioning (already one/multi-hot)
         button = keyboard_action
         mouse = mouse_action
         scroll = scroll_action
         
-        # Get scheduler sigmas from config
+        # Scheduler sigma schedule
         sigmas = torch.tensor(
             pipeline_config.scheduler_sigmas,
-            device=device,
-            dtype=dtype,
+            device=device, dtype=dtype,
         )
         
         generated_frames: list[torch.Tensor] = []
 
         for _ in range(t):
-            # Initialize noise for this frame
-            # Shape: [B, T, C, H, W] where T=1 for single frame
-            latent_shape = (keyboard_action.shape[0], 1, dit_config.channels,
-                            dit_config.height, dit_config.width)
+            # Noise: [B, 1, C, H, W] (single frame)
+            latent_shape = (
+                keyboard_action.shape[0], 1, dit_config.channels,
+                dit_config.height, dit_config.width,
+            )
             x = torch.randn(latent_shape, device=device, dtype=dtype)
             
-            # Frame timestamp
-            frame_ts = torch.full((keyboard_action.shape[0], 1),
-                                  ctx.frame_index,
-                                  device=device,
-                                  dtype=torch.long)
+            frame_ts = torch.full(
+                (keyboard_action.shape[0], 1),
+                ctx.frame_index, device=device, dtype=torch.long,
+            )
             
             # Denoise through sigma schedule
             for i in range(len(sigmas) - 1):
                 sigma_curr = sigmas[i]
                 sigma_next = sigmas[i + 1]
-                
-                # Scale noise
                 sigma = sigma_curr.view(1, 1)
                 
-                # Forward pass through transformer
-                v_pred = transformer(
-                    x=x,
-                    sigma=sigma,
-                    frame_timestamp=frame_ts,
-                    prompt_emb=ctx.prompt_emb,
-                    prompt_pad_mask=ctx.prompt_pad_mask,
-                    mouse=mouse[:, :1],
-                    button=button[:, :1],
-                    scroll=scroll[:, :1],
-                    kv_cache=ctx.kv_cache,
-                )
+                attn_metadata = SDPAMetadata(
+                    current_timestep=i, attn_mask=None)
                 
-                # Simple Euler step
+                with set_forward_context(
+                    current_timestep=i,
+                    attn_metadata=attn_metadata,
+                    forward_batch=None,
+                ):
+                    v_pred = transformer(
+                        x=x,
+                        sigma=sigma,
+                        frame_timestamp=frame_ts,
+                        prompt_emb=ctx.prompt_emb.to(dtype=dtype),
+                        prompt_pad_mask=ctx.prompt_pad_mask,
+                        mouse=mouse[:, :1],
+                        button=button[:, :1],
+                        scroll=scroll[:, :1],
+                        kv_cache=ctx.kv_cache,
+                    )
+                
                 x = x + (sigma_next - sigma_curr) * v_pred
             
             # Decode latent to frame
             if vae is not None:
-                # VAE expects [B,C,H,W] or [B,C,T,H,W]
                 frame = vae.decode(x[:, 0])
+                # Ensure frame is [B, C, H, W]
+                if frame.dim() == 3:
+                    # [H, W, C] -> [1, C, H, W]
+                    frame = frame.permute(2, 0, 1).unsqueeze(0)
+                elif frame.dim() == 4 and frame.shape[-1] <= 4:
+                    # [B, H, W, C] -> [B, C, H, W]
+                    frame = frame.permute(0, 3, 1, 2)
                 generated_frames.append(frame)
             
             ctx.frame_index += 1
         
-        # Update batch with output
         if generated_frames:
-            # frames: list([B,3,H,W]) -> [B,3,T,H,W]
-            ctx.batch.output = torch.stack(generated_frames, dim=2)
+            # Stack to [B, C, T, H, W]
+            ctx.batch.output = torch.stack(
+                generated_frames, dim=2)
         
         return ctx.batch
     
@@ -272,4 +304,3 @@ class WaypointPipeline(ComposedPipelineBase):
 
 
 EntryClass = [WaypointPipeline]
-
