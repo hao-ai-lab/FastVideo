@@ -17,10 +17,13 @@ import torch
 
 from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
 
-# A FastVideo-compatible model repo ID (needs `model_index.json`).
-# Suggested: create `FastVideo/Waypoint-1-Small-Diffusers` (stub repo is OK)
-# and point its components to Overworld + google/umt5-xl via modular entries.
-MODEL_ID = "FastVideo/Waypoint-1-Small-Diffusers"
+# A FastVideo-compatible model repo ID / local path (needs `model_index.json`).
+# For local testing, create a stub repo via:
+#   python scripts/convert_waypoint_stub_repo.py --out converted/waypoint_diffusers_stub
+# Then run with:
+#   WAYPOINT_MODEL_ID=converted/waypoint_diffusers_stub python examples/inference/basic/basic_waypoint_streaming.py
+import os
+MODEL_ID = os.getenv("WAYPOINT_MODEL_ID", "FastVideo/Waypoint-1-Small-Diffusers")
 OUTPUT_PATH = "video_samples_waypoint"
 
 
