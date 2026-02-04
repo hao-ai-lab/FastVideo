@@ -4,13 +4,17 @@
   let ws = null;
   let connected = false;
   let connecting = false;
+  let sessionStarted = false;  // User has clicked "Join Session"
   let frameSrc = '';
   let frameCount = 0;
   let blockCount = 0;
   let maxBlocks = 50;
-  let reconnectTimer = null;
-  let connectionTimeout = null;
   let resetting = false;
+  let sessionTimeout = null;
+  let timeLeft = null;
+  let countdownInterval = null;
+  let queuePosition = 0;
+  let gpuAssigned = false;
   let pressedKeys = {
     up: false,
     down: false,
@@ -98,36 +102,48 @@
     }
   }
 
-  function scheduleReconnect() {
-    if (reconnectTimer) return; // Already scheduled
-    if (connectionTimeout) clearTimeout(connectionTimeout);
+  function joinSession() {
+    sessionStarted = true;
+    connectWebSocket();
+  }
 
+  function leaveSession() {
+    sessionStarted = false;
+    if (ws) {
+      ws.close();
+      ws = null;
+    }
     connected = false;
     connecting = false;
-    reconnectTimer = setTimeout(connectWebSocket, 2000);
+    gpuAssigned = false;
+    timeLeft = null;
+    queuePosition = 0;
+    if (countdownInterval) {
+      clearInterval(countdownInterval);
+      countdownInterval = null;
+    }
+    // Clear canvas
+    frameBuffer = [];
+    canvasInitialized = false;
   }
 
   function connectWebSocket() {
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    if (connectionTimeout) clearTimeout(connectionTimeout);
-    reconnectTimer = null;
-    connectionTimeout = null;
+    // Close any existing connection before creating a new one
+    if (ws) {
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.onmessage = null;
+      ws.close();
+      ws = null;
+    }
 
     connecting = true;
     connected = false;
-
-    // Timeout if not connected within 5s
-    connectionTimeout = setTimeout(() => {
-      if (!connected && connecting && ws) {
-        ws.close();
-      }
-    }, 5000);
 
     try {
       ws = new WebSocket('ws://localhost:8000/ws');
 
       ws.onopen = () => {
-        clearTimeout(connectionTimeout);
         connected = true;
         connecting = false;
       };
@@ -240,6 +256,31 @@
           console.log('Reset complete');
           resetting = false;
           frameCount = 0;
+        } else if (data.type === 'queue_status') {
+          queuePosition = data.position;
+          console.log(`Queue position: ${queuePosition}`);
+        } else if (data.type === 'gpu_assigned') {
+          gpuAssigned = true;
+          resetting = false;
+          queuePosition = 0;
+          sessionTimeout = data.session_timeout;
+          timeLeft = data.session_timeout;
+          console.log(`GPU ${data.gpu_id} assigned, session timeout: ${sessionTimeout}s`);
+
+          // Start countdown timer
+          if (countdownInterval) clearInterval(countdownInterval);
+          countdownInterval = setInterval(() => {
+            if (timeLeft > 0) {
+              timeLeft--;
+            } else {
+              clearInterval(countdownInterval);
+            }
+          }, 1000);
+        } else if (data.type === 'session_timeout') {
+          console.log('Session timed out');
+          timeLeft = 0;
+          gpuAssigned = false;
+          if (countdownInterval) clearInterval(countdownInterval);
         }
       };
 
@@ -248,11 +289,23 @@
       };
 
       ws.onclose = () => {
-        clearTimeout(connectionTimeout);
-        scheduleReconnect();
+        // Always reset to lobby state on close
+        sessionStarted = false;
+        connected = false;
+        connecting = false;
+        gpuAssigned = false;
+        timeLeft = null;
+        queuePosition = 0;
+        if (countdownInterval) {
+          clearInterval(countdownInterval);
+          countdownInterval = null;
+        }
       };
     } catch (error) {
-      scheduleReconnect();
+      // Connection failed - reset to lobby
+      sessionStarted = false;
+      connected = false;
+      connecting = false;
     }
   }
 
@@ -263,10 +316,31 @@
   }
 
   function handleReset() {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      resetting = true;
-      ws.send(JSON.stringify({ type: 'reset' }));
+    resetting = true;
+
+    // Close existing connection without triggering onclose handler
+    if (ws) {
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.onmessage = null;
+      ws.close();
+      ws = null;
     }
+
+    // Reset session state but stay in session view
+    connected = false;
+    connecting = false;
+    gpuAssigned = false;
+    timeLeft = null;
+    queuePosition = 0;
+    if (countdownInterval) {
+      clearInterval(countdownInterval);
+      countdownInterval = null;
+    }
+    frameBuffer = [];
+
+    // Reconnect
+    setTimeout(connectWebSocket, 100);
   }
 
   function handleKeyDown(event) {
@@ -301,18 +375,22 @@
   }
 
   onMount(() => {
-    connectWebSocket();
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
   });
 
   onDestroy(() => {
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    if (connectionTimeout) clearTimeout(connectionTimeout);
+    if (countdownInterval) clearInterval(countdownInterval);
     if (ws) ws.close();
     window.removeEventListener('keydown', handleKeyDown);
     window.removeEventListener('keyup', handleKeyUp);
   });
+
+  function formatTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }
 </script>
 
 <main>
@@ -363,24 +441,34 @@
   <div class="header-section">
     <h2>Matrix-Game 2.0</h2>
     <div class="status">
-      {#if connected}
-        <span class="status-connected">Connected</span>
-      {:else if connecting}
+      {#if connected && gpuAssigned && timeLeft !== null}
+        <span class="time-left" class:warning={timeLeft <= 30}>
+          Time left: {formatTime(timeLeft)}
+        </span>
+      {:else if sessionStarted && queuePosition > 0}
+        <span class="status-queue">Queue position: {queuePosition}</span>
+      {:else if sessionStarted && (connecting || resetting)}
         <span class="status-connecting">Connecting...</span>
-      {:else}
-        <span class="status-disconnected">Disconnected</span>
       {/if}
-      <!-- | Blocks: {blockCount} / {maxBlocks} -->
-      <!-- | Frames: {frameCount}
-      | Buffer: {frameBuffer.length} -->
     </div>
-    <button class="reset-btn" on:click={handleReset} disabled={!connected || resetting}>
-      {#if resetting}
-        <span class="spinner">⟳</span> Resetting...
+    <div class="header-buttons">
+      {#if !sessionStarted}
+        <button class="join-btn" on:click={joinSession}>
+          Join Session
+        </button>
       {:else}
-        Reset Model
+        <button class="reset-btn" on:click={handleReset} disabled={!connected || !gpuAssigned || resetting}>
+          {#if resetting}
+            <span class="spinner">⟳</span> Resetting...
+          {:else}
+            Reset
+          {/if}
+        </button>
+        <button class="leave-btn" on:click={leaveSession} disabled={resetting}>
+          Leave
+        </button>
       {/if}
-    </button>
+    </div>
   </div>
 
   <div class="game-container">
@@ -391,8 +479,10 @@
     </div> -->
 
     <div class="canvas">
-    <canvas bind:this={canvas} style="display: block; max-width: 100%; height: auto;"></canvas>
-    {#if !canvas || frameBuffer.length === 0 && !isPlayingBuffer}
+    <canvas bind:this={canvas} class:blurred={resetting} style="display: block; max-width: 100%; height: auto;"></canvas>
+    {#if !sessionStarted}
+      <div class="placeholder">Click "Join Session" to start</div>
+    {:else if !canvas || frameBuffer.length === 0 && !isPlayingBuffer}
       <div class="placeholder">Waiting for frame...</div>
     {/if}
 
@@ -402,6 +492,27 @@
           <h2>50 Blocks Reached!</h2>
           <p>The generator has completed 50 blocks.</p>
           <p>Click "Reset Model" to start a new session.</p>
+        </div>
+      </div>
+    {/if}
+
+    {#if timeLeft === 0 && gpuAssigned}
+      <div class="max-blocks-overlay">
+        <div class="overlay-content timeout-overlay">
+          <h2>Session Expired</h2>
+          <p>Your 90-second session has ended.</p>
+          <p>Reconnecting to get a new session...</p>
+        </div>
+      </div>
+    {/if}
+
+    {#if sessionStarted && connected && queuePosition > 0 && !gpuAssigned}
+      <div class="max-blocks-overlay">
+        <div class="overlay-content queue-overlay">
+          <h2>In Queue</h2>
+          <p>All GPUs are currently busy.</p>
+          <p>Your position: <strong>{queuePosition}</strong></p>
+          <p>Please wait for a GPU to become available.</p>
         </div>
       </div>
     {/if}
@@ -570,8 +681,10 @@
     justify-self: center;
   }
 
-  .header-section .reset-btn {
+  .header-buttons {
     justify-self: end;
+    display: flex;
+    gap: 0.5rem;
   }
 
   .game-container {
@@ -623,6 +736,44 @@
     opacity: 0.6;
   }
 
+  .join-btn {
+    padding: 0.5rem 1.5rem;
+    background: #10b981;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .join-btn:hover {
+    background: #059669;
+  }
+
+  .leave-btn {
+    padding: 0.5rem 1rem;
+    background: #6b7280;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .leave-btn:hover:not(:disabled) {
+    background: #4b5563;
+  }
+
+  .leave-btn:disabled {
+    background: #374151;
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
   .spinner {
     display: inline-block;
     animation: spin 1s linear infinite;
@@ -660,6 +811,34 @@
     color: #f87171;
   }
 
+  .status-idle {
+    color: #9ca3af;
+  }
+
+  .status-queue {
+    color: #facc15;
+  }
+
+  .time-left {
+    color: #4ade80;
+    font-family: monospace;
+    font-weight: 600;
+  }
+
+  .time-left.warning {
+    color: #f87171;
+    animation: pulse 1s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.6;
+    }
+  }
+
   .canvas {
     position: relative;
     width: 640px;
@@ -675,6 +854,11 @@
     width: 100%;
     height: 100%;
     object-fit: contain;
+  }
+
+  canvas.blurred {
+    filter: blur(8px);
+    transition: filter 0.3s ease;
   }
 
   .placeholder {
@@ -774,5 +958,26 @@
     margin: 0.5rem 0;
     color: #d1d5db;
     line-height: 1.5;
+  }
+
+  .timeout-overlay {
+    border-color: #f87171;
+  }
+
+  .timeout-overlay h2 {
+    color: #f87171;
+  }
+
+  .queue-overlay {
+    border-color: #60a5fa;
+  }
+
+  .queue-overlay h2 {
+    color: #60a5fa;
+  }
+
+  .queue-overlay strong {
+    color: #facc15;
+    font-size: 1.5rem;
   }
 </style>
