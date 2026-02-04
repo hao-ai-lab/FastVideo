@@ -2277,6 +2277,12 @@ class LTX2Transformer3DModel(CachableDiT):
             causal_fix=True,
         ).to(hidden_states.dtype)
 
+        # Pad positions to match padded sequence length for SP cross-attention
+        if sp_world_size > 1 and padded_seq_len > video_original_seq_len:
+            padding_needed = padded_seq_len - video_original_seq_len
+            last_pos = positions[:, :, -1:, :].expand(-1, -1, padding_needed, -1)
+            positions = torch.cat([positions, last_pos], dim=2)
+
         video_modality = Modality(
             enabled=True,
             latent=latents,
