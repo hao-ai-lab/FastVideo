@@ -57,8 +57,9 @@ class DistributedAutograd:
             ctx.dim = dim
             ctx.input_shape = input_.shape
 
-            # Ensure input is contiguous for all_gather_into_tensor
-            input_ = input_.contiguous()
+            # NCCL all_gather_into_tensor requires contiguous tensors.
+            if not input_.is_contiguous():
+                input_ = input_.contiguous()
             input_size = input_.size()
             output_size = (input_size[0] * world_size, ) + input_size[1:]
             output_tensor = torch.empty(output_size,

@@ -45,6 +45,7 @@ dependencies = [
     "wandb>=0.21.0",
     "loguru",
     "test-tube==0.7.5",
+    
     # Miscellaneous Utilities
     "tqdm",
     "pytest",
@@ -57,6 +58,7 @@ dependencies = [
     "aiohttp",
     "huggingface_hub",
     "cloudpickle",
+    "omegaconf",
 
     # System & Monitoring Tools
     "gpustat",
@@ -64,7 +66,7 @@ dependencies = [
     "remote-pdb",
 
     # Kernel & Packaging
-    "fastvideo-kernel==0.2.4",
+    "fastvideo-kernel==0.2.5",
     "wheel",
 
     # Training Dependencies

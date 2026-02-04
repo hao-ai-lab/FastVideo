@@ -26,6 +26,8 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
     "HunyuanVideo15Transformer3DModel":
     ("dits", "hunyuanvideo15", "HunyuanVideo15Transformer3DModel"),
+    "HYWorldTransformer3DModel":
+    ("dits", "hyworld", "HYWorldTransformer3DModel"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
     "StepVideoModel": ("dits", "stepvideo", "StepVideoModel"),
@@ -40,8 +42,8 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
     # "HunyuanVideoTransformer3DModel": ("dits", "hunyuanvideo", "HunyuanVideoDiT"),
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
-    "MatrixGameWanModel": ("dits", "matrix_game", "MatrixGameWanModel"),
-    "CausalMatrixGameWanModel": ("dits", "matrix_game", "CausalMatrixGameWanModel"),
+    "MatrixGameWanModel": ("dits", "matrixgame", "MatrixGameWanModel"),
+    "CausalMatrixGameWanModel": ("dits", "matrixgame", "CausalMatrixGameWanModel"),
 }
 
 _TEXT_ENCODER_MODELS = {
@@ -62,11 +64,13 @@ _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
     # "HunyuanVideoTransformer3DModel": ("image_encoder", "hunyuanvideo", "HunyuanVideoImageEncoder"),
     "CLIPVisionModelWithProjection": ("encoders", "clip", "CLIPVisionModel"),
     "CLIPVisionModel": ("encoders", "clip", "CLIPVisionModel"),
+    "SiglipVisionModel": ("encoders", "siglip", "SiglipVisionModel"),
 }
 
 _VAE_MODELS = {
     "AutoencoderKLHunyuanVideo":
     ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
+    "AutoencoderKLHYWorld": ("vaes", "hyworldvae", "AutoencoderKLHYWorld"),
     "AutoencoderKLHunyuanVideo15": ("vaes", "hunyuan15vae", "AutoencoderKLHunyuanVideo15"),
     "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
     "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo"),

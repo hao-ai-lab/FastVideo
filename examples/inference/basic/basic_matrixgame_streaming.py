@@ -1,5 +1,5 @@
 from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
-from fastvideo.models.dits.matrix_game.utils import get_current_action_async, expand_action_to_frames
+from fastvideo.models.dits.matrixgame.utils import get_current_action_async, expand_action_to_frames
 
 import torch
 import asyncio

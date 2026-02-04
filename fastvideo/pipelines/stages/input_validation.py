@@ -210,9 +210,9 @@ class InputValidationStage(PipelineStage):
                     f"keyboard_cond must have 3 dimensions (B, T, K), but got {batch.keyboard_cond.dim()}"
                 )
             keyboard_dim = batch.keyboard_cond.shape[-1]
-            if keyboard_dim not in {2, 4, 6, 7}:
+            if keyboard_dim not in {2, 3, 4, 6, 7}:
                 raise ValueError(
-                    f"keyboard_cond last dimension must be 2, 4, 6, or 7, but got {keyboard_dim}"
+                    f"keyboard_cond last dimension must be 2, 3, 4, 6, or 7, but got {keyboard_dim}"
                 )
             logger.info(
                 "Action control: keyboard_cond validated - shape %s (dim=%d)",
@@ -238,7 +238,8 @@ class InputValidationStage(PipelineStage):
                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify input validation stage inputs."""
         result = VerificationResult()
-        result.add_check("seed", batch.seed, [V.not_none, V.positive_int])
+        # Cosmos-Predict2.5 default seed is 0; allow non-negative seeds here.
+        result.add_check("seed", batch.seed, [V.not_none, V.non_negative_int])
         result.add_check("num_videos_per_prompt", batch.num_videos_per_prompt,
                          V.positive_int)
         result.add_check(

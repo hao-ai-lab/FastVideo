@@ -168,9 +168,15 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
-    def forward(self, residual: torch.Tensor, x: torch.Tensor,
-                gate: torch.Tensor | int, shift: torch.Tensor,
-                scale: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self,
+        residual: torch.Tensor,
+        x: torch.Tensor,
+        gate: torch.Tensor | int,
+        shift: torch.Tensor,
+        scale: torch.Tensor,
+        convert_modulation_dtype: bool = False
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Apply gated residual connection, followed by layernorm and 
         scale/shift in a single fused operation.
@@ -205,6 +211,11 @@ class ScaleResidualLayerNormScaleShift(nn.Module):
 
         # Apply normalization
         normalized = self.norm(residual_output)
+
+        if convert_modulation_dtype:
+            scale = scale.to(normalized.dtype)
+            shift = shift.to(normalized.dtype)
+
         # Apply scale and shift
         if isinstance(scale, torch.Tensor) and scale.dim() == 4:
             # scale.shape: [batch_size, num_frames, 1, inner_dim]
@@ -254,13 +265,20 @@ class LayerNormScaleShift(nn.Module):
         else:
             raise NotImplementedError(f"Norm type {norm_type} not implemented")
 
-    def forward(self, x: torch.Tensor, shift: torch.Tensor,
-                scale: torch.Tensor) -> torch.Tensor:
+    def forward(self,
+                x: torch.Tensor,
+                shift: torch.Tensor,
+                scale: torch.Tensor,
+                convert_modulation_dtype: bool = False) -> torch.Tensor:
         """Apply ln followed by scale and shift in a single fused operation."""
         # x.shape: [batch_size, seq_len, inner_dim]
         normalized = self.norm(x)
         if self.compute_dtype == torch.float32:
             normalized = normalized.float()
+
+        if convert_modulation_dtype:
+            scale = scale.to(normalized.dtype)
+            shift = shift.to(normalized.dtype)
 
         if scale.dim() == 4:
             # scale.shape: [batch_size, num_frames, 1, inner_dim]

@@ -87,10 +87,10 @@ class CLIPVisionConfig(ImageEncoderConfig):
     arch_config: ImageEncoderArchConfig = field(
         default_factory=CLIPVisionArchConfig)
 
-    num_hidden_layers_override: int | None = None
+    num_hidden_layers_override: int | None = 31
     require_post_norm: bool | None = None
-    enable_scale: bool = True
-    is_causal: bool = True
+    enable_scale: bool = False
+    is_causal: bool = False
     prefix: str = "clip"
 
 

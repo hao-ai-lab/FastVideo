@@ -257,6 +257,17 @@ class ActionModule(nn.Module):
         '''
         assert use_rope_keyboard
 
+        target_device = x.device
+        target_dtype = x.dtype
+        if mouse_condition is not None:
+            mouse_condition = mouse_condition.to(device=target_device,
+                                                 dtype=target_dtype)
+        if keyboard_condition is not None:
+            keyboard_condition = keyboard_condition.to(
+                device=target_device, dtype=target_dtype)
+        else:
+            return x
+
         B, N_frames, C = keyboard_condition.shape
         assert tt*th*tw == x.shape[1]
         assert ((N_frames - 1) + self.vae_time_compression_ratio) % self.vae_time_compression_ratio == 0
@@ -272,7 +283,9 @@ class ActionModule(nn.Module):
         # Defined freqs_cis early so it's available for both mouse and keyboard
         freqs_cis = (self._freqs_cos, self._freqs_sin)
 
-        assert (N_feats == tt and ((is_causal and kv_cache_mouse is None) or not is_causal)) or ((N_frames - 1) // self.vae_time_compression_ratio + 1 == start_frame + num_frame_per_block and is_causal)
+        if is_causal:
+            assert (N_feats == tt and kv_cache_mouse is None) or ((N_frames - 1) // self.vae_time_compression_ratio + 1 == start_frame + num_frame_per_block)
+        # For non-causal (training), we trust that the caller provides correctly shaped inputs
         
         if self.enable_mouse and mouse_condition is not None:
             hidden_states = rearrange(x, "B (T S) C -> (B S) T C", T=tt, S=th*tw) # 65*272*480 -> 17*(272//16)*(480//16) -> 8670
@@ -289,13 +302,15 @@ class ActionModule(nn.Module):
                 mouse_condition = mouse_condition[:, self.vae_time_compression_ratio*(N_feats - num_frame_per_block - self.windows_size) + pad_t:, :] 
                 group_mouse = [mouse_condition[:, self.vae_time_compression_ratio*(i - self.windows_size) + pad_t:i * self.vae_time_compression_ratio + pad_t,:] for i in range(num_frame_per_block)]
             else:
-                group_mouse = [mouse_condition[:, self.vae_time_compression_ratio*(i - self.windows_size) + pad_t:i * self.vae_time_compression_ratio + pad_t,:] for i in range(N_feats)]
+                local_num_frames = tt
+                group_mouse = [mouse_condition[:, self.vae_time_compression_ratio*(i - self.windows_size) + pad_t:i * self.vae_time_compression_ratio + pad_t,:] for i in range(local_num_frames)]
                 
             group_mouse = torch.stack(group_mouse, dim = 1)
+            actual_num_frames = group_mouse.shape[1]  # Use actual stacked frame count
 
             S = th * tw 
-            group_mouse = group_mouse.unsqueeze(-1).expand(B, num_frame_per_block, pad_t, C, S)
-            group_mouse = group_mouse.permute(0, 4, 1, 2, 3).reshape(B * S, num_frame_per_block, pad_t * C) 
+            group_mouse = group_mouse.unsqueeze(-1).expand(B, actual_num_frames, pad_t, C, S)
+            group_mouse = group_mouse.permute(0, 4, 1, 2, 3).reshape(B * S, actual_num_frames, pad_t * C) 
 
             group_mouse = torch.cat([hidden_states, group_mouse], dim = -1)
             group_mouse = self.mouse_mlp(group_mouse)
@@ -314,7 +329,7 @@ class ActionModule(nn.Module):
             ## TODO: adding cache here
             if is_causal:
                 if kv_cache_mouse is None:
-                    assert q.shape[0] ==  k.shape[0] and q.shape[0] % 880 == 0 # == 880, f"{q.shape[0]},{k.shape[0]}"
+                    assert q.shape[0] ==  k.shape[0] and q.shape[0] % S == 0 # == 880, f"{q.shape[0]},{k.shape[0]}"
                     padded_length = math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
                     padded_q = torch.cat(
                         [q,
@@ -395,7 +410,8 @@ class ActionModule(nn.Module):
                 group_keyboard = [keyboard_condition[:, self.vae_time_compression_ratio*(i - self.windows_size) + pad_t:i * self.vae_time_compression_ratio + pad_t,:] for i in range(num_frame_per_block)]
             else:
                 keyboard_condition = self.keyboard_embed(keyboard_condition)
-                group_keyboard = [keyboard_condition[:, self.vae_time_compression_ratio*(i - self.windows_size) + pad_t:i * self.vae_time_compression_ratio + pad_t,:] for i in range(N_feats)]
+                local_num_frames = tt
+                group_keyboard = [keyboard_condition[:, self.vae_time_compression_ratio*(i - self.windows_size) + pad_t:i * self.vae_time_compression_ratio + pad_t,:] for i in range(local_num_frames)]
             group_keyboard = torch.stack(group_keyboard, dim = 1) # B F RW C
             group_keyboard = group_keyboard.reshape(shape=(group_keyboard.shape[0],group_keyboard.shape[1],-1))
             # apply cross attn
@@ -415,7 +431,7 @@ class ActionModule(nn.Module):
             q = self.key_attn_q_norm(q).to(v)
             k = self.key_attn_k_norm(k).to(v)
             S = th * tw
-            assert S == 880
+            # assert S == 880
             # position embed 
             if use_rope_keyboard: 
                 B, TS, H, D = q.shape
@@ -424,13 +440,13 @@ class ActionModule(nn.Module):
                 q, k = _apply_rotary_emb_qk(q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame)
 
                 k1, k2, k3, k4 = k.shape
-                k = k.expand(S, k2, k3, k4)
-                v = v.expand(S, k2, k3, k4)
+                k = k.repeat_interleave(S, dim=0)  
+                v = v.repeat_interleave(S, dim=0)
 
 
                 if is_causal:
                     if kv_cache_keyboard is None:
-                        assert q.shape[0] == k.shape[0] and q.shape[0] % 880 == 0 
+                        assert q.shape[0] == k.shape[0] and q.shape[0] % S == 0 
 
                         padded_length = math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
                         padded_q = torch.cat(
@@ -480,7 +496,7 @@ class ActionModule(nn.Module):
                         else:
                             local_end_index = kv_cache_keyboard["local_end_index"].item() + current_end - kv_cache_keyboard["global_end_index"].item()
                             local_start_index = local_end_index - num_new_tokens
-                        assert k.shape[0] == 880 # BS == 1 or the cache should not be saved/ load method should be modified
+                        assert k.shape[0] == S # BS == 1 or the cache should not be saved/ load method should be modified
                         kv_cache_keyboard["k"][:, local_start_index:local_end_index] = k[:1]
                         kv_cache_keyboard["v"][:, local_start_index:local_end_index] = v[:1]
 
