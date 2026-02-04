@@ -10,7 +10,9 @@ from typing import Optional, Set, Tuple
 
 import torch
 
+from fastvideo.attention.backends.sdpa import SDPAMetadata
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.pipelines import ComposedPipelineBase, ForwardBatch
 
@@ -233,18 +235,26 @@ class WaypointPipeline(ComposedPipelineBase):
                 # Scale noise
                 sigma = sigma_curr.view(1, 1)
                 
-                # Forward pass through transformer
-                v_pred = transformer(
-                    x=x,
-                    sigma=sigma,
-                    frame_timestamp=frame_ts,
-                    prompt_emb=ctx.prompt_emb,
-                    prompt_pad_mask=ctx.prompt_pad_mask,
-                    mouse=mouse[:, :1],
-                    button=button[:, :1],
-                    scroll=scroll[:, :1],
-                    kv_cache=ctx.kv_cache,
-                )
+                # Set up attention metadata for forward context
+                attn_metadata = SDPAMetadata(current_timestep=i, attn_mask=None)
+                
+                # Forward pass through transformer with forward context
+                with set_forward_context(
+                    current_timestep=i,
+                    attn_metadata=attn_metadata,
+                    forward_batch=None,
+                ):
+                    v_pred = transformer(
+                        x=x,
+                        sigma=sigma,
+                        frame_timestamp=frame_ts,
+                        prompt_emb=ctx.prompt_emb,
+                        prompt_pad_mask=ctx.prompt_pad_mask,
+                        mouse=mouse[:, :1],
+                        button=button[:, :1],
+                        scroll=scroll[:, :1],
+                        kv_cache=ctx.kv_cache,
+                    )
                 
                 # Simple Euler step
                 x = x + (sigma_next - sigma_curr) * v_pred
