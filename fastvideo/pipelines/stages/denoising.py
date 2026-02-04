@@ -23,6 +23,7 @@ from fastvideo.models.schedulers.scheduling_flow_match_euler_discrete import (
 from fastvideo.models.utils import pred_noise_to_pred_video
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
+from fastvideo.pipelines.stages.utils import debug_nan_check
 from fastvideo.pipelines.stages.validators import StageValidators as V
 from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.platforms import AttentionBackendEnum
@@ -407,6 +408,8 @@ class DenoisingStage(PipelineStage):
                             **pos_cond_kwargs,
                             **action_kwargs,
                         )
+                    if i == 0:
+                        debug_nan_check(noise_pred, "2_after_model_forward")
 
                     if batch.do_classifier_free_guidance:
                         batch.is_cfg_negative = True
@@ -443,6 +446,8 @@ class DenoisingStage(PipelineStage):
                                                   latents,
                                                   **extra_step_kwargs,
                                                   return_dict=False)[0]
+                    if i == 0:
+                        debug_nan_check(latents, "4_after_scheduler_step")
                     if fastvideo_args.pipeline_config.ti2v_task and batch.pil_image is not None:
                         latents = latents.squeeze(0)
                         latents = (1. - mask2[0]) * z + mask2[0] * latents
