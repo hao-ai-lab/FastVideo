@@ -5,7 +5,7 @@ This pipeline supports streaming generation of video frames conditioned on
 text prompts and real-time controller inputs (mouse, keyboard, scroll).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Set, Tuple
 
 import torch
@@ -26,13 +26,9 @@ class CtrlInput:
         mouse: Tuple of (x, y) mouse velocity as floats.
         scroll: Scroll wheel value (-1, 0, or 1).
     """
-    button: Set[int] = None
+    button: Set[int] = field(default_factory=set)
     mouse: Tuple[float, float] = (0.0, 0.0)
     scroll: float = 0.0
-    
-    def __post_init__(self):
-        if self.button is None:
-            self.button = set()
     
     def to_tensors(
         self,
@@ -122,11 +118,14 @@ class WaypointPipeline(ComposedPipelineBase):
         prompt_pad_mask = None
         
         if text_encoder is not None and tokenizer is not None:
+            # Prefer tokenizer defaults from encoder arch config if present.
+            max_length = getattr(getattr(text_encoder, "config", None),
+                                 "text_len", 512)
             # Tokenize
             text_inputs = tokenizer(
                 batch.prompt,
                 padding="max_length",
-                max_length=512,
+                max_length=max_length,
                 truncation=True,
                 return_tensors="pt",
             )
@@ -156,16 +155,16 @@ class WaypointPipeline(ComposedPipelineBase):
     @torch.no_grad()
     def streaming_step(
         self,
-        ctrl_input: CtrlInput,
-        fastvideo_args: FastVideoArgs,
-        num_frames: int = 1,
+        keyboard_action: torch.Tensor,
+        mouse_action: torch.Tensor,
     ) -> ForwardBatch:
         """Generate next frame(s) given control input.
         
         Args:
-            ctrl_input: Controller input (mouse, keyboard, scroll)
-            fastvideo_args: FastVideo arguments containing pipeline config
-            num_frames: Number of frames to generate (default 1)
+            keyboard_action: Button conditioning, expected shape [T, 256] or
+                [B, T, 256]. Values are treated as one-hot / multi-hot buttons.
+            mouse_action: Mouse velocity conditioning, expected shape [T, 2] or
+                [B, T, 2].
             
         Returns:
             ForwardBatch with decoded frames in batch.output
@@ -175,16 +174,34 @@ class WaypointPipeline(ComposedPipelineBase):
         ctx = self._streaming_ctx
         transformer = self.get_module("transformer")
         vae = self.get_module("vae")
-        pipeline_config = fastvideo_args.pipeline_config
+        pipeline_config = ctx.fastvideo_args.pipeline_config
         dit_config = pipeline_config.dit_config
         
         device = next(transformer.parameters()).device
         dtype = next(transformer.parameters()).dtype
         
-        # Convert control input to tensors
-        mouse, button, scroll = ctrl_input.to_tensors(
-            device, dtype, n_buttons=pipeline_config.n_buttons
-        )
+        # Normalize action tensor shapes to [B, T, ...]
+        if keyboard_action.dim() == 2:
+            keyboard_action = keyboard_action.unsqueeze(0)
+        if mouse_action.dim() == 2:
+            mouse_action = mouse_action.unsqueeze(0)
+        assert keyboard_action.dim() == 3, "keyboard_action must be [B,T,256] or [T,256]"
+        assert mouse_action.dim() == 3, "mouse_action must be [B,T,2] or [T,2]"
+
+        # Ensure same time length
+        t = min(keyboard_action.shape[1], mouse_action.shape[1])
+        keyboard_action = keyboard_action[:, :t].to(device=device, dtype=dtype)
+        mouse_action = mouse_action[:, :t].to(device=device, dtype=dtype)
+
+        # Waypoint expects scroll too, but StreamingVideoGenerator does not
+        # currently provide it. Default to no-scroll.
+        scroll_action = torch.zeros(
+            keyboard_action.shape[0], t, 1, device=device, dtype=dtype)
+
+        # Button conditioning (already one/multi-hot)
+        button = keyboard_action
+        mouse = mouse_action
+        scroll = scroll_action
         
         # Get scheduler sigmas from config
         sigmas = torch.tensor(
@@ -193,16 +210,20 @@ class WaypointPipeline(ComposedPipelineBase):
             dtype=dtype,
         )
         
-        generated_frames = []
-        
-        for _ in range(num_frames):
+        generated_frames: list[torch.Tensor] = []
+
+        for _ in range(t):
             # Initialize noise for this frame
             # Shape: [B, T, C, H, W] where T=1 for single frame
-            latent_shape = (1, 1, dit_config.channels, dit_config.height, dit_config.width)
+            latent_shape = (keyboard_action.shape[0], 1, dit_config.channels,
+                            dit_config.height, dit_config.width)
             x = torch.randn(latent_shape, device=device, dtype=dtype)
             
             # Frame timestamp
-            frame_ts = torch.tensor([[ctx.frame_index]], device=device, dtype=torch.long)
+            frame_ts = torch.full((keyboard_action.shape[0], 1),
+                                  ctx.frame_index,
+                                  device=device,
+                                  dtype=torch.long)
             
             # Denoise through sigma schedule
             for i in range(len(sigmas) - 1):
@@ -219,9 +240,9 @@ class WaypointPipeline(ComposedPipelineBase):
                     frame_timestamp=frame_ts,
                     prompt_emb=ctx.prompt_emb,
                     prompt_pad_mask=ctx.prompt_pad_mask,
-                    mouse=mouse,
-                    button=button,
-                    scroll=scroll,
+                    mouse=mouse[:, :1],
+                    button=button[:, :1],
+                    scroll=scroll[:, :1],
                     kv_cache=ctx.kv_cache,
                 )
                 
@@ -230,13 +251,15 @@ class WaypointPipeline(ComposedPipelineBase):
             
             # Decode latent to frame
             if vae is not None:
-                frame = vae.decode(x.squeeze(1))
+                # VAE expects [B,C,H,W] or [B,C,T,H,W]
+                frame = vae.decode(x[:, 0])
                 generated_frames.append(frame)
             
             ctx.frame_index += 1
         
         # Update batch with output
         if generated_frames:
+            # frames: list([B,3,H,W]) -> [B,3,T,H,W]
             ctx.batch.output = torch.stack(generated_frames, dim=2)
         
         return ctx.batch
