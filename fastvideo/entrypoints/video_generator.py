@@ -376,11 +376,17 @@ class VideoGenerator:
 
         # Execute forward pass in a new thread for non-blocking tensor allocation
         result_container = {}
+
         def execute_forward_thread():
-            result_container['output_batch'] = self.executor.execute_forward(batch, fastvideo_args)
+            result_container['output_batch'] = self.executor.execute_forward(
+                batch, fastvideo_args)
+
         thread = threading.Thread(target=execute_forward_thread)
         thread.start()
-        samples = torch.empty((1, 3, sampling_param.num_frames, sampling_param.height, sampling_param.width), device='cpu', pin_memory=True)
+        samples = torch.empty((1, 3, sampling_param.num_frames,
+                               sampling_param.height, sampling_param.width),
+                              device='cpu',
+                              pin_memory=True)
         thread.join()
 
         output_batch = result_container['output_batch']
