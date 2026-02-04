@@ -46,6 +46,7 @@ def _ltx2_sigmas(
     stretch: bool = True,
     terminal: float = 0.1,
 ) -> torch.Tensor:
+    # Copied/following official LTX-2 scheduler (LTX2Scheduler.execute).
     tokens = math.prod(
         latent.shape[2:]) if latent is not None else MAX_SHIFT_ANCHOR
     sigmas = torch.linspace(1.0,
@@ -137,6 +138,7 @@ class LTX2DenoisingStage(PipelineStage):
                 latent=None,
                 device=latents.device,
             )
+            logger.info("[LTX2] Using computed sigma schedule")
         if hasattr(self.transformer, "patchifier"):
             video_shape = VideoLatentShape.from_torch_shape(latents.shape)
             token_count = self.transformer.patchifier.get_token_count(
