@@ -289,9 +289,17 @@ class GatedSelfAttention(nn.Module):
         self.v_proj = nn.Linear(d_model, n_kv_heads * self.head_dim, bias=False)
         self.out_proj = nn.Linear(d_model, d_model, bias=False)
 
-        # Use FastVideo attention layer (backed by SDPA) for consistency with
-        # other models and to enable sequence-parallel when configured.
-        self.attn_layer = DistributedAttention(
+        # Prefer LocalAttention for correctness in unit tests (works without
+        # requiring FastVideo distributed/SP groups). If SP is initialized, we
+        # can optionally switch to DistributedAttention at runtime.
+        self.local_attn_layer = LocalAttention(
+            num_heads=n_heads,
+            head_size=self.head_dim,
+            num_kv_heads=n_kv_heads,
+            causal=causal,
+            supported_attention_backends=(AttentionBackendEnum.SDPA, ),
+        )
+        self.dist_attn_layer = DistributedAttention(
             num_heads=n_heads,
             head_size=self.head_dim,
             num_kv_heads=n_kv_heads,
@@ -333,8 +341,20 @@ class GatedSelfAttention(nn.Module):
         # Note: forward_context is required; for now we only need a timestep
         # and no explicit mask (causal handled by backend).
         meta = SDPAMetadata(current_timestep=0, attn_mask=None)
+        use_dist = False
+        try:
+            import torch.distributed as dist
+            if dist.is_initialized():
+                from fastvideo.distributed.parallel_state import get_sp_world_size
+                use_dist = get_sp_world_size() > 1
+        except Exception:
+            use_dist = False
+
         with set_forward_context(current_timestep=0, attn_metadata=meta):
-            attn_out, _ = self.attn_layer(q=q, k=k, v=v)
+            if use_dist:
+                attn_out, _ = self.dist_attn_layer(q=q, k=k, v=v)
+            else:
+                attn_out = self.local_attn_layer(q=q, k=k, v=v)
         attn_out = attn_out.reshape(B, L, D)
         
         # Output projection with optional per-head gating
