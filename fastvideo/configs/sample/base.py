@@ -28,6 +28,9 @@ class SamplingParam:
     keyboard_cond: Any | None = None  # Shape: (B, T, K)
     grid_sizes: Any | None = None  # Shape: (3,) [F,H,W]
 
+    # Camera control inputs (HYWorld)
+    pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
+
     # Refine inputs (LongCat 480p->720p upscaling)
     # Path-based refine (load stage1 video from disk, e.g. MP4)
     refine_from: str | None = None  # Path to stage1 video (480p output from distill)
