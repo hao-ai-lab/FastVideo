@@ -72,6 +72,25 @@ def _apply_rotary_emb_qk(
     return xq_out, xk_out
 
 
+def _padding_q_k_v(tensor: torch.Tensor, padded_length: int) -> torch.Tensor:
+    return torch.cat(
+        [
+            tensor,
+            torch.zeros(
+                [
+                    tensor.shape[0],
+                    padded_length,
+                    tensor.shape[2],
+                    tensor.shape[3],
+                ],
+                device=tensor.device,
+                dtype=tensor.dtype,
+            ),
+        ],
+        dim=1,
+    )
+
+
 class ActionModule(nn.Module):
     """
     action module from https://arxiv.org/pdf/2501.08325
@@ -441,54 +460,9 @@ class ActionModule(nn.Module):
                         q.shape[0] == k.shape[0] and q.shape[0] % S == 0
                     )  # == 880, f"{q.shape[0]},{k.shape[0]}"
                     padded_length = math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
-                    padded_q = torch.cat(
-                        [
-                            q,
-                            torch.zeros(
-                                [
-                                    q.shape[0],
-                                    padded_length,
-                                    q.shape[2],
-                                    q.shape[3],
-                                ],
-                                device=q.device,
-                                dtype=v.dtype,
-                            ),
-                        ],
-                        dim=1,
-                    )
-                    padded_k = torch.cat(
-                        [
-                            k,
-                            torch.zeros(
-                                [
-                                    k.shape[0],
-                                    padded_length,
-                                    k.shape[2],
-                                    k.shape[3],
-                                ],
-                                device=k.device,
-                                dtype=v.dtype,
-                            ),
-                        ],
-                        dim=1,
-                    )
-                    padded_v = torch.cat(
-                        [
-                            v,
-                            torch.zeros(
-                                [
-                                    v.shape[0],
-                                    padded_length,
-                                    v.shape[2],
-                                    v.shape[3],
-                                ],
-                                device=v.device,
-                                dtype=v.dtype,
-                            ),
-                        ],
-                        dim=1,
-                    )
+                    padded_q = _padding_q_k_v(q, padded_length)
+                    padded_k = _padding_q_k_v(k, padded_length)
+                    padded_v = _padding_q_k_v(v, padded_length)
                     attn = flex_attention(
                         query=padded_q.transpose(2, 1),  # after: B, HW, F, C
                         key=padded_k.transpose(2, 1),
@@ -672,54 +646,9 @@ class ActionModule(nn.Module):
                         padded_length = (
                             math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
                         )
-                        padded_q = torch.cat(
-                            [
-                                q,
-                                torch.zeros(
-                                    [
-                                        q.shape[0],
-                                        padded_length,
-                                        q.shape[2],
-                                        q.shape[3],
-                                    ],
-                                    device=q.device,
-                                    dtype=v.dtype,
-                                ),
-                            ],
-                            dim=1,
-                        )
-                        padded_k = torch.cat(
-                            [
-                                k,
-                                torch.zeros(
-                                    [
-                                        k.shape[0],
-                                        padded_length,
-                                        k.shape[2],
-                                        k.shape[3],
-                                    ],
-                                    device=k.device,
-                                    dtype=v.dtype,
-                                ),
-                            ],
-                            dim=1,
-                        )
-                        padded_v = torch.cat(
-                            [
-                                v,
-                                torch.zeros(
-                                    [
-                                        v.shape[0],
-                                        padded_length,
-                                        v.shape[2],
-                                        v.shape[3],
-                                    ],
-                                    device=v.device,
-                                    dtype=v.dtype,
-                                ),
-                            ],
-                            dim=1,
-                        )
+                        padded_q = _padding_q_k_v(q, padded_length)
+                        padded_k = _padding_q_k_v(k, padded_length)
+                        padded_v = _padding_q_k_v(v, padded_length)
                         attn = flex_attention(
                             query=padded_q.transpose(
                                 2, 1
@@ -826,54 +755,9 @@ class ActionModule(nn.Module):
                         padded_length = (
                             math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
                         )
-                        padded_q = torch.cat(
-                            [
-                                q,
-                                torch.zeros(
-                                    [
-                                        q.shape[0],
-                                        padded_length,
-                                        q.shape[2],
-                                        q.shape[3],
-                                    ],
-                                    device=q.device,
-                                    dtype=v.dtype,
-                                ),
-                            ],
-                            dim=1,
-                        )
-                        padded_k = torch.cat(
-                            [
-                                k,
-                                torch.zeros(
-                                    [
-                                        k.shape[0],
-                                        padded_length,
-                                        k.shape[2],
-                                        k.shape[3],
-                                    ],
-                                    device=k.device,
-                                    dtype=v.dtype,
-                                ),
-                            ],
-                            dim=1,
-                        )
-                        padded_v = torch.cat(
-                            [
-                                v,
-                                torch.zeros(
-                                    [
-                                        v.shape[0],
-                                        padded_length,
-                                        v.shape[2],
-                                        v.shape[3],
-                                    ],
-                                    device=v.device,
-                                    dtype=v.dtype,
-                                ),
-                            ],
-                            dim=1,
-                        )
+                        padded_q = _padding_q_k_v(q, padded_length)
+                        padded_k = _padding_q_k_v(k, padded_length)
+                        padded_v = _padding_q_k_v(v, padded_length)
                         attn = flex_attention(
                             query=padded_q.transpose(
                                 2, 1
