@@ -44,6 +44,7 @@ from fastvideo.configs.pipelines.wan import (
     WanT2V480PConfig,
     WanT2V720PConfig,
 )
+from fastvideo.configs.pipelines.glm_image import GlmImageConfig
 from fastvideo.configs.sample.base import SamplingParam
 from fastvideo.configs.sample.cosmos import (
     Cosmos_Predict2_2B_Video2World_SamplingParam, )
@@ -496,6 +497,16 @@ def _register_configs() -> None:
             "rand0nmr/SFWan2.2-T2V-A14B-Diffusers",
             "FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers",
         ],
+    )
+
+    # GLM-Image (image generation)
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=GlmImageConfig,
+        hf_model_paths=[
+            "zai-org/GLM-Image",
+        ],
+        model_detectors=[lambda path: "glmimage" in path.lower() or "glm-image" in path.lower()],
     )
 
 
