@@ -21,7 +21,7 @@ dependencies = [
     "requests>=2.32.2",
 
     # Machine Learning & Transformers
-    "transformers>=5.0.0",
+    "transformers==5.0.0rc3",
     "tokenizers>=0.20.1",
     "sentencepiece==0.2.0",
     "timm==1.0.11",

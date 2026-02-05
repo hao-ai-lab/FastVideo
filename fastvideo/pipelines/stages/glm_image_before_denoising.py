@@ -127,7 +127,6 @@ class GlmImageBeforeDenoisingStage(PipelineStage):
             max_new = (th * tw) + (pth * ptw) + 1
             
             # Use sampling to match SGLang/creative generation quality
-            # top_p=0.7, top_k=50, temperature=1.0 are reasonable defaults for image generation
             outputs = self.vision_language_encoder.generate(
                 **inputs, 
                 max_new_tokens=max_new, 
