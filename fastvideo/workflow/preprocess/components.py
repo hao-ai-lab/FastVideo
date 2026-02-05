@@ -200,8 +200,14 @@ class ParquetDatasetSaver:
             value = getattr(batch, key.name)
             if isinstance(value, list):
                 for idx in range(len(value)):
-                    if isinstance(value[idx], torch.Tensor):
-                        value[idx] = value[idx].cpu().numpy()
+                    # if isinstance(value[idx], torch.Tensor):
+                    #     value[idx] = value[idx].cpu().numpy()
+                    t = value[idx]
+                    if isinstance(t, torch.Tensor):
+                        if t.dtype == torch.bfloat16:
+                            t = t.float()   # or t.to(torch.float16) if you want smaller
+                        value[idx] = t.cpu().numpy()
+
             elif isinstance(value, torch.Tensor):
                 value = value.cpu().numpy()
                 setattr(batch, key.name, value)
@@ -288,10 +294,17 @@ def build_dataset(preprocess_config: PreprocessConfig, split: str,
                                split=split)
         column_names = dataset.column_names
         # rename columns to match the schema
-        if "cap" in column_names:
+        if "cap" in column_names and "caption" not in column_names:
             dataset = dataset.rename_column("cap", "caption")
         if "path" in column_names:
             dataset = dataset.rename_column("path", "name")
+        
+        # Add num_frames column if it doesn't exist but fps and duration do
+        if 'num_frames' not in column_names and 'fps' in column_names and 'duration' in column_names:
+            def add_num_frames(item: dict[str, Any]) -> dict[str, Any]:
+                item['num_frames'] = int(item['fps'] * item['duration'])
+                return item
+            dataset = dataset.map(add_num_frames)
 
         dataset = dataset.filter(validator)
         dataset = dataset.shard(num_shards=get_world_size(),
