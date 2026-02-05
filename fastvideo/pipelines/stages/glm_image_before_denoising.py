@@ -10,7 +10,6 @@ This stage handles the preprocessing for GLM-Image generation, including:
 
 import re
 from math import sqrt
-from typing import List
 
 import torch
 from fastvideo.distributed import get_local_torch_device
@@ -88,20 +87,6 @@ class GlmImageBeforeDenoisingStage(PipelineStage):
                                                  mode="nearest").long()
         return tokens.view(1, -1)
 
-    def _get_glyph_texts(self, prompt: str) -> List[str]:
-        """Extract quoted text from prompt for glyph embeddings (SGLang-aligned).
-        
-        SGLang only encodes quoted text for T5 glyph embeddings, not the full prompt.
-        This ensures numerical alignment with SGLang's text encoding.
-        """
-        ocr_texts = (
-            re.findall(r"'([^']*)'" , prompt)  # single quotes
-            + re.findall(r'\u201c([^\u201c\u201d]*)\u201d', prompt)  # curly quotes
-            + re.findall(r'"([^"]*)"', prompt)  # double quotes
-            + re.findall(r'\u300c([^\u300c\u300d]*)\u300d', prompt)  # Japanese brackets
-        )
-        return ocr_texts
-
     @torch.no_grad()
     def forward(self, batch: ForwardBatch,
                 fastvideo_args: FastVideoArgs) -> ForwardBatch:
@@ -141,11 +126,14 @@ class GlmImageBeforeDenoisingStage(PipelineStage):
             # Total tokens: small_image + large_image
             max_new = (th * tw) + (pth * ptw) + 1
             
-            # Note: SGLang doesn't specify top_p/top_k/temp, uses model defaults
+            # Use sampling to match SGLang/creative generation quality
             outputs = self.vision_language_encoder.generate(
                 **inputs, 
                 max_new_tokens=max_new, 
-                do_sample=True  
+                do_sample=True,
+                top_p=0.7,
+                top_k=50,
+                temperature=1.0
             )
 
             # Extract large image tokens
@@ -190,12 +178,8 @@ class GlmImageBeforeDenoisingStage(PipelineStage):
                 batch.prior_token_id.shape, dtype=torch.bool,
                 device=device)  # Drop all priors
 
-        # 3. Encode prompts with T5 (SGLang-aligned: only encode quoted/glyph text)
-        glyph_texts = self._get_glyph_texts(batch.prompt)
-        # If no glyphs found, use empty string (matches SGLang behavior)
-        text_to_encode = glyph_texts if len(glyph_texts) > 0 else [""]
-        
-        text_inputs = self.tokenizer(text_to_encode,
+        # 3. Encode prompts with T5
+        text_inputs = self.tokenizer(batch.prompt,
                                      padding="max_length",
                                      max_length=512,
                                      truncation=True,
@@ -232,19 +216,16 @@ class GlmImageBeforeDenoisingStage(PipelineStage):
         # 4. Prepare Latents
         # GLM-Image uses 16 channels, VAE compression factor is 8
         # Add extra dimension for video compatibility: [B, C, T, H, W] with T=1
-        # NOTE: Using float32 matches SGLang numerically. Cast to bfloat16 happens later if needed.
-        
-        # Create generator for reproducible latent generation
-        generator = None
-        if batch.seed is not None:
-            generator = torch.Generator(device=device).manual_seed(batch.seed)
 
-        latents = torch.randn(
-            (1, 16, 1, batch.height // 8, batch.width // 8),
-            generator=generator,
-            device=device,
-            dtype=torch.float32 
-        )
+        # Set seed for deterministic latent generation
+        if batch.seed is not None:
+            torch.manual_seed(batch.seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed(batch.seed)
+
+        latents = torch.randn((1, 16, 1, batch.height // 8, batch.width // 8),
+                              device=device,
+                              dtype=dtype)
         # Flow matching doesn't use init_noise_sigma, just pure noise
         batch.latents = latents
 
