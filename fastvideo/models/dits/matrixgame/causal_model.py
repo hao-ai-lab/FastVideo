@@ -279,17 +279,14 @@ class CausalMatrixGameSelfAttention(nn.Module):
             kv_cache_size = kv_cache["k"].shape[1]
             num_new_tokens = roped_query.shape[1]
 
-            if (current_end > kv_cache["global_end_index"].item()) and (
-                num_new_tokens + kv_cache["local_end_index"].item()
-                > kv_cache_size
+            if (current_end > kv_cache["global_end_index"]) and (
+                num_new_tokens + kv_cache["local_end_index"] > kv_cache_size
             ):
                 num_evicted_tokens = (
-                    num_new_tokens
-                    + kv_cache["local_end_index"].item()
-                    - kv_cache_size
+                    num_new_tokens + kv_cache["local_end_index"] - kv_cache_size
                 )
                 num_rolled_tokens = (
-                    kv_cache["local_end_index"].item()
+                    kv_cache["local_end_index"]
                     - num_evicted_tokens
                     - sink_tokens
                 )
@@ -310,9 +307,9 @@ class CausalMatrixGameSelfAttention(nn.Module):
                     + num_rolled_tokens,
                 ].clone()
                 local_end_index = (
-                    kv_cache["local_end_index"].item()
+                    kv_cache["local_end_index"]
                     + current_end
-                    - kv_cache["global_end_index"].item()
+                    - kv_cache["global_end_index"]
                     - num_evicted_tokens
                 )
                 local_start_index = local_end_index - num_new_tokens
@@ -320,9 +317,9 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 kv_cache["v"][:, local_start_index:local_end_index] = v
             else:
                 local_end_index = (
-                    kv_cache["local_end_index"].item()
+                    kv_cache["local_end_index"]
                     + current_end
-                    - kv_cache["global_end_index"].item()
+                    - kv_cache["global_end_index"]
                 )
                 local_start_index = local_end_index - num_new_tokens
 
@@ -339,8 +336,8 @@ class CausalMatrixGameSelfAttention(nn.Module):
                 v_for_attn.transpose(1, 2),
             ).transpose(1, 2)
 
-            kv_cache["global_end_index"].fill_(current_end)
-            kv_cache["local_end_index"].fill_(local_end_index)
+            kv_cache["global_end_index"] = current_end
+            kv_cache["local_end_index"] = local_end_index
 
         return x
 
