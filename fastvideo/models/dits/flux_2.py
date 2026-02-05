@@ -244,12 +244,13 @@ class Flux2Attention(torch.nn.Module, AttentionModuleMixin):
             cos, sin = freqs_cis
             cos = cos.to(device=query.device, dtype=query.dtype)
             sin = sin.to(device=query.device, dtype=query.dtype)
+            # apply_rotary_emb expects [B, H, S, D]; we have [B, S, H, D]
             query = apply_rotary_emb(
-                query, (cos, sin), use_real=True, use_real_unbind_dim=-1
-            )
+                query.transpose(1, 2), (cos, sin), use_real=True, use_real_unbind_dim=-1
+            ).transpose(1, 2)
             key = apply_rotary_emb(
-                key, (cos, sin), use_real=True, use_real_unbind_dim=-1
-            )
+                key.transpose(1, 2), (cos, sin), use_real=True, use_real_unbind_dim=-1
+            ).transpose(1, 2)
 
         hidden_states = self.attn(query, key, value)
 
@@ -375,12 +376,13 @@ class Flux2ParallelSelfAttention(torch.nn.Module, AttentionModuleMixin):
             cos, sin = freqs_cis
             cos = cos.to(device=query.device, dtype=query.dtype)
             sin = sin.to(device=query.device, dtype=query.dtype)
+            # apply_rotary_emb expects [B, H, S, D]; we have [B, S, H, D]
             query = apply_rotary_emb(
-                query, (cos, sin), use_real=True, use_real_unbind_dim=-1
-            )
+                query.transpose(1, 2), (cos, sin), use_real=True, use_real_unbind_dim=-1
+            ).transpose(1, 2)
             key = apply_rotary_emb(
-                key, (cos, sin), use_real=True, use_real_unbind_dim=-1
-            )
+                key.transpose(1, 2), (cos, sin), use_real=True, use_real_unbind_dim=-1
+            ).transpose(1, 2)
         hidden_states = self.attn(query, key, value)
         hidden_states = hidden_states.flatten(2, 3)
         hidden_states = hidden_states.to(query.dtype)
