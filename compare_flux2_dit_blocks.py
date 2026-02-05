@@ -74,6 +74,85 @@ def _compute_freqs_cis(transformer, text_ids, latent_ids, device, dtype=None):
     return (cos, sin)
 
 
+def _capture_double0_inputs_fv(transformer, latent, prompt_embeds, timestep_scaled, device, freqs_cis):
+    """Run FastVideo transformer and capture (hidden_states, encoder_hidden_states) going into the first double block."""
+    captured = {}
+
+    def pre_hook(_module, args, kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        hs = kwargs.get("hidden_states")
+        enc = kwargs.get("encoder_hidden_states")
+        if hs is None and len(args) > 0:
+            hs = args[0]
+        if enc is None and len(args) > 1:
+            enc = args[1]
+        if hs is not None:
+            captured["hidden_states"] = hs.detach().clone().cpu().float()
+        if enc is not None:
+            captured["encoder_hidden_states"] = enc.detach().clone().cpu().float()
+
+    handle = transformer.transformer_blocks[0].register_forward_pre_hook(pre_hook, with_kwargs=True)
+    try:
+        with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
+            transformer(
+                latent,
+                prompt_embeds,
+                timestep_scaled,
+                guidance=None,
+                freqs_cis=freqs_cis,
+            )
+    finally:
+        handle.remove()
+    return captured
+
+
+def _capture_double0_inputs_official(pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device):
+    """Run official transformer and capture (hidden_states, encoder_hidden_states) going into the first double block."""
+    captured = {}
+    trans = pipe.transformer
+
+    def pre_hook(_module, args, kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        hs = kwargs.get("hidden_states")
+        enc = kwargs.get("encoder_hidden_states")
+        if hs is None and len(args) > 0:
+            hs = args[0]
+        if enc is None and len(args) > 1:
+            enc = args[1]
+        if hs is not None:
+            captured["hidden_states"] = hs.detach().clone().cpu().float()
+        if enc is not None:
+            captured["encoder_hidden_states"] = enc.detach().clone().cpu().float()
+
+    if not hasattr(trans, "transformer_blocks") or len(trans.transformer_blocks) == 0:
+        return captured
+    handle = trans.transformer_blocks[0].register_forward_pre_hook(pre_hook, with_kwargs=True)
+    dtype = next(trans.parameters()).dtype
+    latent_d = latent.to(device, dtype=dtype)
+    timestep = timestep_scaled.to(device)
+    prompt_embeds_d = prompt_embeds.to(device, dtype=dtype)
+    text_ids_d = text_ids.to(device)
+    latent_ids_d = latent_ids.to(device)
+    try:
+        with torch.no_grad():
+            with trans.cache_context("cond"):
+                trans(
+                    hidden_states=latent_d,
+                    timestep=timestep,
+                    guidance=None,
+                    encoder_hidden_states=prompt_embeds_d,
+                    txt_ids=text_ids_d,
+                    img_ids=latent_ids_d,
+                    joint_attention_kwargs=getattr(pipe, "attention_kwargs", None) or {},
+                    return_dict=False,
+                )
+    finally:
+        handle.remove()
+    return captured
+
+
 def _collect_fv_activations(transformer, latent, prompt_embeds, timestep_scaled, device, num_txt_tokens, freqs_cis=None):
     """Run FastVideo transformer with hooks; return list of (block_name, tensor) per block."""
     activations = []
@@ -253,6 +332,28 @@ def main():
     freqs_cis = _compute_freqs_cis(
         transformer, text_ids, latent_ids, device, dtype=model_dtype
     )
+
+    # Capture inputs to first double block to see where divergence starts
+    print("\n--- Inputs to double_0 (before first block) ---")
+    in_fv = _capture_double0_inputs_fv(
+        transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, freqs_cis
+    )
+    in_official = {}
+    if len(official_activations) > 0:
+        in_official = _capture_double0_inputs_official(
+            pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device
+        )
+    for key in ("hidden_states", "encoder_hidden_states"):
+        a_fv = in_fv.get(key)
+        a_o = in_official.get(key)
+        if a_fv is None or a_o is None:
+            print(f"  {key}: missing in one model (fv={a_fv is not None}, official={a_o is not None})")
+            continue
+        if a_fv.shape != a_o.shape:
+            print(f"  {key}: SHAPE MISMATCH {a_fv.shape} vs {a_o.shape}")
+            continue
+        diff = (a_fv - a_o).abs()
+        print(f"  {key}: shape={a_fv.shape} max_diff={diff.max().item():.4f} mean_diff={diff.mean().item():.4f}")
 
     fv_activations = _collect_fv_activations(
         transformer,
