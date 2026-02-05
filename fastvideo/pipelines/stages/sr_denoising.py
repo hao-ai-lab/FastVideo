@@ -84,7 +84,9 @@ class SRDenoisingStage(PipelineStage):
                 AttentionBackendEnum.SAGE_ATTN_THREE)  # hack
         )
 
-    def add_noise_to_lq(self, lq_latents, strength=0.7):
+    def add_noise_to_lq(self,
+                        lq_latents: torch.Tensor,
+                        strength: float = 0.7) -> torch.Tensor:
 
         def expand_dims(tensor: torch.Tensor, ndim: int):
             shape = tensor.shape + (1, ) * (ndim - tensor.ndim)
