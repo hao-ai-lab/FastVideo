@@ -60,6 +60,8 @@ def main():
     os.environ.setdefault("LOCAL_RANK", "0")
     os.environ.setdefault("RANK", "0")
     os.environ.setdefault("WORLD_SIZE", "1")
+    os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
+    os.environ.setdefault("MASTER_PORT", "29500")
     from fastvideo.distributed import maybe_init_distributed_environment_and_model_parallel
     maybe_init_distributed_environment_and_model_parallel(tp_size=1, sp_size=1)
 
