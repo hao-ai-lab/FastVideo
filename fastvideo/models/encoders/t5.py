@@ -719,3 +719,6 @@ class UMT5EncoderModel(TextEncoder):
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
         return loaded_params
+
+# Entry point for model registry
+EntryClass = [UMT5EncoderModel, T5EncoderModel]

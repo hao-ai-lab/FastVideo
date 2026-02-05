@@ -321,3 +321,6 @@ class RCMScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
     def __len__(self) -> int:
         return self.config.num_train_timesteps
+
+# Entry point for model registry
+EntryClass = RCMScheduler

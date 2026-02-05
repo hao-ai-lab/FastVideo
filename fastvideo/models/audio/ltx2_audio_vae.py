@@ -1325,3 +1325,6 @@ def decode_audio(
     decoded_audio = audio_decoder(latent)
     decoded_audio = vocoder(decoded_audio).squeeze(0).float()
     return decoded_audio
+
+# Entry point for model registry
+EntryClass = [LTX2AudioEncoder, LTX2AudioDecoder, LTX2Vocoder]

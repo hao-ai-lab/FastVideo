@@ -677,3 +677,6 @@ class CausalWanTransformer3DModel(BaseDiT):
             u = u.reshape(c, *[i * j for i, j in zip(v, self.patch_size)])
             out.append(u)
         return out
+
+# Entry point for model registry
+EntryClass = CausalWanTransformer3DModel
