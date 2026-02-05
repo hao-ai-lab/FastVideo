@@ -91,7 +91,7 @@ def main():
             encoder_hidden_states=prompt_embeds,
             txt_ids=text_ids,
             img_ids=latent_image_ids,
-            joint_attention_kwargs=pipe.attention_kwargs,
+            joint_attention_kwargs=getattr(pipe, "attention_kwargs", None) or {},
             return_dict=False,
         )[0]
     noise_pred = noise_pred[:, : latents.size(1)]
