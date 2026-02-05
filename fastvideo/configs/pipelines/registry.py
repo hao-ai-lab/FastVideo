@@ -7,6 +7,7 @@ from collections.abc import Callable
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.cosmos2_5 import Cosmos25Config
+from fastvideo.configs.pipelines.gen3c import Gen3CConfig
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
 from fastvideo.configs.pipelines.hunyuan15 import Hunyuan15T2V480PConfig, Hunyuan15T2V720PConfig
 from fastvideo.configs.pipelines.hyworld import HYWorldConfig
@@ -74,6 +75,8 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers": TurboDiffusionT2V_1_3B_Config,
     "loayrashid/TurboWan2.1-T2V-14B-Diffusers": TurboDiffusionT2V_14B_Config,
     "loayrashid/TurboWan2.2-I2V-A14B-Diffusers": TurboDiffusionI2V_A14B_Config,
+    # GEN3C models
+    "nvidia/GEN3C-Cosmos-7B": Gen3CConfig,
     # Add other specific weight variants
 }
 
@@ -112,6 +115,8 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "turbodiffusion" in id.lower() or "turbowan" in id.lower(),
     "ltx2":
     lambda id: "ltx2" in id.lower() or "ltx-2" in id.lower(),
+    "gen3c":
+    lambda id: "gen3c" in id.lower(),
     # Add other pipeline architecture detectors
 }
 
