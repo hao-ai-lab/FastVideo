@@ -701,3 +701,6 @@ class AutoencoderKLHunyuanVideo15(nn.Module, ParallelTiledVAE):
             z = posterior.mode()
         dec = self.decode(z)
         return dec
+
+# Entry point for model registry
+EntryClass = AutoencoderKLHunyuanVideo15

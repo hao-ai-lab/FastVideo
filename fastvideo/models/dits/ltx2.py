@@ -2403,3 +2403,6 @@ class LTX2Transformer3DModel(CachableDiT):
         audio_out = self.audio_patchifier.unpatchify(
             audio_out, output_shape=audio_shape)
         return video_out, audio_out
+
+# Entry point for model registry
+EntryClass = LTX2Transformer3DModel

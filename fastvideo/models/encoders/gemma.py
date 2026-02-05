@@ -561,3 +561,6 @@ def _norm_and_concat_padded_batch(
     mask_flattened = mask.reshape(b, t, 1).expand(-1, -1, d * l)
     normed = normed.masked_fill(~mask_flattened, 0.0)
     return normed
+
+# Entry point for model registry
+EntryClass = LTX2GemmaTextEncoderModel

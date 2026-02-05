@@ -986,3 +986,6 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
         dec = self.decode(z)
 
         return dec
+
+# Entry point for model registry
+EntryClass = AutoencoderKLHYWorld

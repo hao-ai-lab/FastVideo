@@ -95,8 +95,7 @@ class SamplingParam:
 
     @classmethod
     def from_pretrained(cls, model_path: str) -> "SamplingParam":
-        from fastvideo.configs.sample.registry import (
-            get_sampling_param_cls_for_name)
+        from fastvideo.registry import get_sampling_param_cls_for_name
         sampling_cls = get_sampling_param_cls_for_name(model_path)
         if sampling_cls is not None:
             sampling_param: SamplingParam = sampling_cls()
