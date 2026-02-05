@@ -256,7 +256,14 @@ def _register_configs() -> None:
         hf_model_paths=[
             "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
         ],
-        model_detectors=[lambda path: "hunyuan15" in path.lower()],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in (
+                "hunyuan15",
+                "hunyuanvideo15",
+                "hunyuanvideo-1.5",
+                "hunyuanvideo_1.5",
+            )),
+        ],
     )
     register_configs(
         sampling_param_cls=Hunyuan15_720P_SamplingParam,
@@ -341,7 +348,13 @@ def _register_configs() -> None:
         hf_model_paths=[
             "KyleShao/Cosmos-Predict2.5-2B-Diffusers",
         ],
-        model_detectors=[lambda path: "cosmos25" in path.lower()],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in (
+                "cosmos25",
+                "cosmos2_5",
+                "cosmos2.5",
+            )),
+        ],
     )
 
     # Cosmos 2
