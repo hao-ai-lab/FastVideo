@@ -13,7 +13,7 @@ from typing import cast
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from safetensors.torch import load_file as safetensors_load_file
+from safetensors.torch import load_file as safetensors_load_file, safe_open
 from torch.distributed import init_device_mesh
 from transformers import AutoImageProcessor, AutoProcessor, AutoTokenizer
 from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
@@ -758,6 +758,12 @@ class TransformerLoader(ComponentLoader):
         )
         if not safetensors_list:
             raise ValueError(f"No safetensors files found in {model_path}")
+
+        # Optional: arch_config can infer architecture from weight keys (e.g. Flux2 layer counts)
+        update_fn = getattr(dit_config.arch_config, "update_from_weight_keys", None)
+        if callable(update_fn):
+            weight_keys = _collect_safetensors_keys(safetensors_list)
+            update_fn(weight_keys)
 
         # Check if we should use custom initialization weights
         custom_weights_path = getattr(
