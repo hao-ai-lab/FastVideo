@@ -26,7 +26,7 @@ from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ColumnParallelLinear
 from fastvideo.layers.rotary_embedding import (
     get_1d_rotary_pos_embed,
-    _apply_rotary_emb,
+    apply_rotary_emb,
 )
 from fastvideo.models.dits.base import CachableDiT
 from fastvideo.platforms import AttentionBackendEnum, current_platform
@@ -50,25 +50,6 @@ def apply_qk_norm(
     q_out = q_norm(q.view(-1, head_dim)).view(q_shape)
     k_out = k_norm(k.view(-1, head_dim)).view(k_shape)
     return q_out, k_out
-
-
-# Helper function: apply_flashinfer_rope_qk_inplace replacement
-def apply_flashinfer_rope_qk_inplace(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    cos_sin_cache: torch.Tensor,
-    is_neox: bool = False,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Apply rotary embeddings to query and key tensors."""
-    # Split cos_sin_cache into cos and sin
-    cache_dim = cos_sin_cache.shape[-1] // 2
-    cos = cos_sin_cache[..., :cache_dim]
-    sin = cos_sin_cache[..., cache_dim:]
-    
-    # Apply rotary embedding
-    query = _apply_rotary_emb(query, cos, sin, is_neox_style=is_neox)
-    key = _apply_rotary_emb(key, cos, sin, is_neox_style=is_neox)
-    return query, key
 
 
 def _get_qkv_projections(
@@ -261,15 +242,13 @@ class Flux2Attention(torch.nn.Module, AttentionModuleMixin):
 
         if freqs_cis is not None:
             cos, sin = freqs_cis
-            cos_sin_cache = torch.cat(
-                [
-                    cos.to(dtype=torch.float32).contiguous(),
-                    sin.to(dtype=torch.float32).contiguous(),
-                ],
-                dim=-1,
+            cos = cos.to(device=query.device, dtype=query.dtype)
+            sin = sin.to(device=query.device, dtype=query.dtype)
+            query = apply_rotary_emb(
+                query, (cos, sin), use_real=True, use_real_unbind_dim=-1
             )
-            query, key = apply_flashinfer_rope_qk_inplace(
-                query, key, cos_sin_cache, is_neox=False
+            key = apply_rotary_emb(
+                key, (cos, sin), use_real=True, use_real_unbind_dim=-1
             )
 
         hidden_states = self.attn(query, key, value)
@@ -394,15 +373,13 @@ class Flux2ParallelSelfAttention(torch.nn.Module, AttentionModuleMixin):
 
         if freqs_cis is not None:
             cos, sin = freqs_cis
-            cos_sin_cache = torch.cat(
-                [
-                    cos.to(dtype=torch.float32).contiguous(),
-                    sin.to(dtype=torch.float32).contiguous(),
-                ],
-                dim=-1,
+            cos = cos.to(device=query.device, dtype=query.dtype)
+            sin = sin.to(device=query.device, dtype=query.dtype)
+            query = apply_rotary_emb(
+                query, (cos, sin), use_real=True, use_real_unbind_dim=-1
             )
-            query, key = apply_flashinfer_rope_qk_inplace(
-                query, key, cos_sin_cache, is_neox=False
+            key = apply_rotary_emb(
+                key, (cos, sin), use_real=True, use_real_unbind_dim=-1
             )
         hidden_states = self.attn(query, key, value)
         hidden_states = hidden_states.flatten(2, 3)
@@ -718,12 +695,15 @@ class Flux2PosEmbed(nn.Module):
                 theta=self.theta,
                 dtype=self.dtype,
             )
+            # Repeat each frequency to match diffusers repeat_interleave_real layout [S, axis_dim]
+            axis_cos = axis_cos.repeat_interleave(2, dim=-1)
+            axis_sin = axis_sin.repeat_interleave(2, dim=-1)
             cos_parts.append(axis_cos)
             sin_parts.append(axis_sin)
         
-        # Concatenate along the last dimension
-        cos = torch.cat(cos_parts, dim=-1)  # [num_tokens, sum(axes_dim)]
-        sin = torch.cat(sin_parts, dim=-1)  # [num_tokens, sum(axes_dim)]
+        # Concatenate along the last dimension -> [num_tokens, sum(axes_dim)]
+        cos = torch.cat(cos_parts, dim=-1)
+        sin = torch.cat(sin_parts, dim=-1)
         
         return cos.contiguous().float(), sin.contiguous().float()
 
