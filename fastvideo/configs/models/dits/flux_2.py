@@ -24,8 +24,8 @@ class Flux2ArchConfig(DiTArchConfig):
     joint_attention_dim: int = 4096  # Dimension for text encoder output
     timestep_guidance_channels: int = 256  # Dimension for timestep embedding
     mlp_ratio: float = 3.0
-    axes_dims_rope: Tuple[int, int, int] = (16, 56, 56)  # RoPE dimensions for each axis
-    rope_theta: int = 10000  # Base frequency for RoPE
+    axes_dims_rope: Tuple[int, ...] = (32, 32, 32, 32)  # RoPE dimensions per axis (match diffusers Flux2)
+    rope_theta: int = 2000  # Base frequency for RoPE (match diffusers Flux2)
     eps: float = 1e-6
     guidance_embeds: bool = True  # Whether to use guidance embeddings
     
