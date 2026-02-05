@@ -37,6 +37,7 @@
   let lastFrameTime = 0;
   let canvas;
   let ctx;
+  let loadingAnimation = false;
 
   let benchmarkStats = {
     decodeTime: 0,
@@ -80,6 +81,7 @@
           canvas.width = bitmap.width;
           canvas.height = bitmap.height;
           canvasInitialized = true;
+          loadingAnimation = false;
         }
 
         const renderStart = performance.now();
@@ -125,6 +127,7 @@
     // Clear canvas
     frameBuffer = [];
     canvasInitialized = false;
+    loadingAnimation = false;
   }
 
   function connectWebSocket() {
@@ -141,7 +144,8 @@
     connected = false;
 
     try {
-      ws = new WebSocket('ws://localhost:8000/ws');
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
 
       ws.onopen = () => {
         connected = true;
@@ -252,6 +256,7 @@
           nextFrameToAdd = 0;
           isPlayingBuffer = false;
           canvasInitialized = false;
+          loadingAnimation = false;
         } else if (data.type === 'reset_complete') {
           console.log('Reset complete');
           resetting = false;
@@ -266,6 +271,23 @@
           sessionTimeout = data.session_timeout;
           timeLeft = data.session_timeout;
           console.log(`GPU ${data.gpu_id} assigned, session timeout: ${sessionTimeout}s`);
+
+          // Load initial image onto canvas with animation
+          if (data.image_url && canvas) {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+              if (!canvasInitialized) {
+                canvas.width = img.width;
+                canvas.height = img.height;
+                if (ctx) {
+                  ctx.drawImage(img, 0, 0);
+                }
+                loadingAnimation = true;
+              }
+            };
+            img.src = data.image_url;
+          }
 
           // Start countdown timer
           if (countdownInterval) clearInterval(countdownInterval);
@@ -338,6 +360,8 @@
       countdownInterval = null;
     }
     frameBuffer = [];
+    canvasInitialized = false;
+    loadingAnimation = false;
 
     // Reconnect
     setTimeout(connectWebSocket, 100);
@@ -479,10 +503,10 @@
     </div> -->
 
     <div class="canvas">
-    <canvas bind:this={canvas} class:blurred={resetting} style="display: block; max-width: 100%; height: auto;"></canvas>
+    <canvas bind:this={canvas} class:blurred={resetting} class:loading-animation={loadingAnimation} style="display: block; max-width: 100%; height: auto;"></canvas>
     {#if !sessionStarted}
       <div class="placeholder">Click "Join Session" to start</div>
-    {:else if !canvas || frameBuffer.length === 0 && !isPlayingBuffer}
+    {:else if !loadingAnimation && (!canvas || (frameBuffer.length === 0 && !isPlayingBuffer && !canvasInitialized))}
       <div class="placeholder">Waiting for frame...</div>
     {/if}
 
@@ -859,6 +883,16 @@
   canvas.blurred {
     filter: blur(8px);
     transition: filter 0.3s ease;
+  }
+
+  @keyframes warp-in {
+    0%   { transform: scale(1.05); filter: blur(6px) brightness(0.5); }
+    50%  { transform: scale(1.02); filter: blur(3px) brightness(0.8); }
+    100% { transform: scale(1.0);  filter: blur(0px) brightness(1.0); }
+  }
+
+  canvas.loading-animation {
+    animation: warp-in 1.5s ease-out forwards;
   }
 
   .placeholder {

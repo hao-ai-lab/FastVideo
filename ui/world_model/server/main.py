@@ -1,15 +1,17 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import asyncio
 import base64
 import cv2
+import os
 import time
 import uuid
 
 from config import (
     KEYBOARD_MAP, CAMERA_MAP, MAX_BLOCKS, JPEG_QUALITY, BATCH_SIZE,
-    SESSION_TIMEOUT_SECONDS
+    SESSION_TIMEOUT_SECONDS, MODEL_CONFIG
 )
 from gpu_pool import GPUPool, GPUSlot, get_available_gpus
 
@@ -122,7 +124,8 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.send_json({
             "type": "gpu_assigned",
             "gpu_id": gpu_id,
-            "session_timeout": SESSION_TIMEOUT_SECONDS
+            "session_timeout": SESSION_TIMEOUT_SECONDS,
+            "image_url": MODEL_CONFIG.get("image_url")
         })
 
         # Generate and send initial frame (GPU is already reset and ready)
@@ -200,6 +203,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 pass
         if client_id:
             await gpu_pool.release(client_id)
+
+
+# Serve built frontend (must be after API/WebSocket routes)
+static_dir = os.path.join(os.path.dirname(__file__), "..", "client", "dist")
+if os.path.isdir(static_dir):
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 
 if __name__ == "__main__":

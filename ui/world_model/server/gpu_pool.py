@@ -45,6 +45,7 @@ class Response:
 
 def gpu_worker_process(
     gpu_id: int,
+    cuda_device: str,
     command_queue: Queue,
     response_queue: Queue,
 ):
@@ -54,7 +55,7 @@ def gpu_worker_process(
     This function runs in a subprocess with CUDA_VISIBLE_DEVICES set to a single GPU.
     """
     # Set CUDA_VISIBLE_DEVICES BEFORE importing torch or any CUDA code
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    os.environ["CUDA_VISIBLE_DEVICES"] = cuda_device
     os.environ["FASTVIDEO_ATTENTION_BACKEND"] = "FLASH_ATTN"
 
     # Now import the generator (this will initialize CUDA with the single visible GPU)
@@ -235,8 +236,9 @@ def gpu_worker_process(
 class GPUSlot:
     """Manages a single GPU worker subprocess."""
 
-    def __init__(self, gpu_id: int):
+    def __init__(self, gpu_id: int, cuda_device: str):
         self.gpu_id = gpu_id
+        self.cuda_device = cuda_device
         self.client_id: Optional[str] = None
         self.process: Optional[Process] = None
         self.command_queue: Optional[Queue] = None
@@ -256,7 +258,7 @@ class GPUSlot:
 
         self.process = ctx.Process(
             target=gpu_worker_process,
-            args=(self.gpu_id, self.command_queue, self.response_queue),
+            args=(self.gpu_id, self.cuda_device, self.command_queue, self.response_queue),
             daemon=False,  # Must be False so executor can spawn child workers
         )
         loop = asyncio.get_event_loop()
@@ -319,7 +321,9 @@ class GPUPool:
 
     def __init__(self, gpu_ids: list[int]):
         self.gpu_ids = gpu_ids
-        self.slots: dict[int, GPUSlot] = {gpu_id: GPUSlot(gpu_id) for gpu_id in gpu_ids}
+        self.slots: dict[int, GPUSlot] = {
+            gpu_id: GPUSlot(gpu_id, str(i)) for i, gpu_id in enumerate(gpu_ids)
+        }
         self.waiting_list: list[tuple[str, asyncio.Event, "WebSocket"]] = []
         self.client_gpu_map: dict[str, int] = {}
         self._pool_lock = asyncio.Lock()
