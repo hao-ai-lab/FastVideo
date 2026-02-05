@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Run official FLUX.2 Klein 4B via Diffusers for comparison with FastVideo.
-Uses base Flux2Pipeline (Flux2KleinPipeline not in diffusers 0.36).
 Use same prompt, seed, resolution, and steps as your FastVideo run.
 
 Usage:
@@ -9,14 +8,18 @@ Usage:
   python run_flux2_official.py
 """
 import torch
-from diffusers import Flux2Pipeline
+
+try:
+    from diffusers import Flux2KleinPipeline
+except ImportError:
+    from diffusers.pipelines.flux2 import Flux2KleinPipeline
 
 def main():
     device = "cuda"
     dtype = torch.bfloat16
 
-    print("Loading Flux2Pipeline from black-forest-labs/FLUX.2-klein-4B ...")
-    pipe = Flux2Pipeline.from_pretrained(
+    print("Loading Flux2KleinPipeline from black-forest-labs/FLUX.2-klein-4B ...")
+    pipe = Flux2KleinPipeline.from_pretrained(
         "black-forest-labs/FLUX.2-klein-4B",
         torch_dtype=dtype,
     )
