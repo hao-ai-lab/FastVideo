@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
 import os
+from contextlib import contextmanager
+from typing import Iterator
 
 import torch
 import pytest
@@ -11,6 +13,26 @@ from fastvideo.tests.utils import compute_video_ssim_torchvision, write_ssim_res
 from fastvideo.worker.multiproc_executor import MultiprocExecutor
 
 logger = init_logger(__name__)
+
+
+@contextmanager
+def _attention_backend(backend: str) -> Iterator[None]:
+    previous = os.environ.get("FASTVIDEO_ATTENTION_BACKEND")
+    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = backend
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("FASTVIDEO_ATTENTION_BACKEND", None)
+        else:
+            os.environ["FASTVIDEO_ATTENTION_BACKEND"] = previous
+
+
+def _shutdown_executor(generator: VideoGenerator | None) -> None:
+    if generator is None:
+        return
+    if isinstance(generator.executor, MultiprocExecutor):
+        generator.executor.shutdown()
 
 device_name = torch.cuda.get_device_name()
 device_reference_folder_suffix = '_reference_videos'
@@ -152,52 +174,54 @@ def test_i2v_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     to reference videos using SSIM.
     """
     assert len(I2V_TEST_PROMPTS) == len(I2V_IMAGE_PATHS), "Expect number of prompts equal to number of images"
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    with _attention_backend(ATTENTION_BACKEND):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+        base_output_dir = os.path.join(script_dir, 'generated_videos', model_id)
+        output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
+        output_video_name = f"{prompt[:100].strip()}.mp4"
 
-    base_output_dir = os.path.join(script_dir, 'generated_videos', model_id)
-    output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
-    output_video_name = f"{prompt[:100].strip()}.mp4"
+        os.makedirs(output_dir, exist_ok=True)
 
-    os.makedirs(output_dir, exist_ok=True)
+        BASE_PARAMS = I2V_MODEL_TO_PARAMS[model_id]
+        num_inference_steps = BASE_PARAMS["num_inference_steps"]
+        image_path = I2V_IMAGE_PATHS[I2V_TEST_PROMPTS.index(prompt)]
 
-    BASE_PARAMS = I2V_MODEL_TO_PARAMS[model_id]
-    num_inference_steps = BASE_PARAMS["num_inference_steps"]
-    image_path = I2V_IMAGE_PATHS[I2V_TEST_PROMPTS.index(prompt)]
+        init_kwargs = {
+            "num_gpus": BASE_PARAMS["num_gpus"],
+            "flow_shift": BASE_PARAMS["flow_shift"],
+            "sp_size": BASE_PARAMS["sp_size"],
+            "tp_size": BASE_PARAMS["tp_size"],
+        }
+        if BASE_PARAMS.get("vae_sp"):
+            init_kwargs["vae_sp"] = True
+            init_kwargs["vae_tiling"] = True
+        if "text-encoder-precision" in BASE_PARAMS:
+            init_kwargs["text_encoder_precisions"] = BASE_PARAMS[
+                "text-encoder-precision"]
 
-    init_kwargs = {
-        "num_gpus": BASE_PARAMS["num_gpus"],
-        "flow_shift": BASE_PARAMS["flow_shift"],
-        "sp_size": BASE_PARAMS["sp_size"],
-        "tp_size": BASE_PARAMS["tp_size"],
-    }
-    if BASE_PARAMS.get("vae_sp"):
-        init_kwargs["vae_sp"] = True
-        init_kwargs["vae_tiling"] = True
-    if "text-encoder-precision" in BASE_PARAMS:
-        init_kwargs["text_encoder_precisions"] = BASE_PARAMS["text-encoder-precision"]
+        generation_kwargs = {
+            "num_inference_steps": num_inference_steps,
+            "output_path": output_dir,
+            "image_path": image_path,
+            "height": BASE_PARAMS["height"],
+            "width": BASE_PARAMS["width"],
+            "num_frames": BASE_PARAMS["num_frames"],
+            "guidance_scale": BASE_PARAMS["guidance_scale"],
+            "embedded_cfg_scale": BASE_PARAMS["embedded_cfg_scale"],
+            "seed": BASE_PARAMS["seed"],
+            "fps": BASE_PARAMS["fps"],
+        }
+        if "neg_prompt" in BASE_PARAMS:
+            generation_kwargs["neg_prompt"] = BASE_PARAMS["neg_prompt"]
 
-    generation_kwargs = {
-        "num_inference_steps": num_inference_steps,
-        "output_path": output_dir,
-        "image_path": image_path,
-        "height": BASE_PARAMS["height"],
-        "width": BASE_PARAMS["width"],
-        "num_frames": BASE_PARAMS["num_frames"],
-        "guidance_scale": BASE_PARAMS["guidance_scale"],
-        "embedded_cfg_scale": BASE_PARAMS["embedded_cfg_scale"],
-        "seed": BASE_PARAMS["seed"],
-        "fps": BASE_PARAMS["fps"],
-    }
-    if "neg_prompt" in BASE_PARAMS:
-        generation_kwargs["neg_prompt"] = BASE_PARAMS["neg_prompt"]
-
-    generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
-    generator.generate_video(prompt, **generation_kwargs)
-    
-    if isinstance(generator.executor, MultiprocExecutor):
-        generator.executor.shutdown()
+        generator: VideoGenerator | None = None
+        try:
+            generator = VideoGenerator.from_pretrained(
+                model_path=BASE_PARAMS["model_path"], **init_kwargs)
+            generator.generate_video(prompt, **generation_kwargs)
+        finally:
+            _shutdown_executor(generator)
 
     assert os.path.exists(
         output_dir), f"Output video was not generated at {output_dir}"
@@ -253,61 +277,68 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
     Test that runs inference with different parameters and compares the output
     to reference videos using SSIM.
     """
-    os.environ["FASTVIDEO_ATTENTION_BACKEND"] = ATTENTION_BACKEND
+    with _attention_backend(ATTENTION_BACKEND):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+        base_output_dir = os.path.join(script_dir, 'generated_videos', model_id)
+        output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
+        output_video_name = f"{prompt[:100].strip()}.mp4"
 
-    base_output_dir = os.path.join(script_dir, 'generated_videos', model_id)
-    output_dir = os.path.join(base_output_dir, ATTENTION_BACKEND)
-    output_video_name = f"{prompt[:100].strip()}.mp4"
+        os.makedirs(output_dir, exist_ok=True)
 
-    os.makedirs(output_dir, exist_ok=True)
+        BASE_PARAMS = MODEL_TO_PARAMS[model_id]
+        num_inference_steps = BASE_PARAMS["num_inference_steps"]
 
-    BASE_PARAMS = MODEL_TO_PARAMS[model_id]
-    num_inference_steps = BASE_PARAMS["num_inference_steps"]
+        init_kwargs = {
+            "num_gpus": BASE_PARAMS["num_gpus"],
+            "sp_size": BASE_PARAMS["sp_size"],
+            "tp_size": BASE_PARAMS["tp_size"],
+            "use_fsdp_inference": True,
+            "dit_cpu_offload": False,
+            "dit_layerwise_offload": False,
+        }
+        if "flow_shift" in BASE_PARAMS:
+            init_kwargs["flow_shift"] = BASE_PARAMS["flow_shift"]
+        if BASE_PARAMS.get("vae_sp"):
+            init_kwargs["vae_sp"] = True
+            init_kwargs["vae_tiling"] = True
+        if "text-encoder-precision" in BASE_PARAMS:
+            init_kwargs["text_encoder_precisions"] = BASE_PARAMS[
+                "text-encoder-precision"]
+        # LTX2-specific VAE tiling parameters
+        if BASE_PARAMS.get("ltx2_vae_tiling"):
+            init_kwargs["ltx2_vae_tiling"] = True
+            init_kwargs["ltx2_vae_spatial_tile_size_in_pixels"] = BASE_PARAMS.get(
+                "ltx2_vae_spatial_tile_size_in_pixels", 512)
+            init_kwargs["ltx2_vae_spatial_tile_overlap_in_pixels"] = BASE_PARAMS.get(
+                "ltx2_vae_spatial_tile_overlap_in_pixels", 64)
+            init_kwargs["ltx2_vae_temporal_tile_size_in_frames"] = BASE_PARAMS.get(
+                "ltx2_vae_temporal_tile_size_in_frames", 64)
+            init_kwargs[
+                "ltx2_vae_temporal_tile_overlap_in_frames"] = BASE_PARAMS.get(
+                    "ltx2_vae_temporal_tile_overlap_in_frames", 24)
 
-    init_kwargs = {
-        "num_gpus": BASE_PARAMS["num_gpus"],
-        "sp_size": BASE_PARAMS["sp_size"],
-        "tp_size": BASE_PARAMS["tp_size"],
-        "use_fsdp_inference": True,
-        "dit_cpu_offload": False,
-        "dit_layerwise_offload": False,
-    }
-    if "flow_shift" in BASE_PARAMS:
-        init_kwargs["flow_shift"] = BASE_PARAMS["flow_shift"]
-    if BASE_PARAMS.get("vae_sp"):
-        init_kwargs["vae_sp"] = True
-        init_kwargs["vae_tiling"] = True
-    if "text-encoder-precision" in BASE_PARAMS:
-        init_kwargs["text_encoder_precisions"] = BASE_PARAMS["text-encoder-precision"]
-    # LTX2-specific VAE tiling parameters
-    if BASE_PARAMS.get("ltx2_vae_tiling"):
-        init_kwargs["ltx2_vae_tiling"] = True
-        init_kwargs["ltx2_vae_spatial_tile_size_in_pixels"] = BASE_PARAMS.get("ltx2_vae_spatial_tile_size_in_pixels", 512)
-        init_kwargs["ltx2_vae_spatial_tile_overlap_in_pixels"] = BASE_PARAMS.get("ltx2_vae_spatial_tile_overlap_in_pixels", 64)
-        init_kwargs["ltx2_vae_temporal_tile_size_in_frames"] = BASE_PARAMS.get("ltx2_vae_temporal_tile_size_in_frames", 64)
-        init_kwargs["ltx2_vae_temporal_tile_overlap_in_frames"] = BASE_PARAMS.get("ltx2_vae_temporal_tile_overlap_in_frames", 24)
+        generation_kwargs = {
+            "num_inference_steps": num_inference_steps,
+            "output_path": output_dir,
+            "height": BASE_PARAMS["height"],
+            "width": BASE_PARAMS["width"],
+            "num_frames": BASE_PARAMS["num_frames"],
+            "guidance_scale": BASE_PARAMS["guidance_scale"],
+            "embedded_cfg_scale": BASE_PARAMS["embedded_cfg_scale"],
+            "seed": BASE_PARAMS["seed"],
+            "fps": BASE_PARAMS["fps"],
+        }
+        if "neg_prompt" in BASE_PARAMS:
+            generation_kwargs["neg_prompt"] = BASE_PARAMS["neg_prompt"]
 
-    generation_kwargs = {
-        "num_inference_steps": num_inference_steps,
-        "output_path": output_dir,
-        "height": BASE_PARAMS["height"],
-        "width": BASE_PARAMS["width"],
-        "num_frames": BASE_PARAMS["num_frames"],
-        "guidance_scale": BASE_PARAMS["guidance_scale"],
-        "embedded_cfg_scale": BASE_PARAMS["embedded_cfg_scale"],
-        "seed": BASE_PARAMS["seed"],
-        "fps": BASE_PARAMS["fps"],
-    }
-    if "neg_prompt" in BASE_PARAMS:
-        generation_kwargs["neg_prompt"] = BASE_PARAMS["neg_prompt"]
-
-    generator = VideoGenerator.from_pretrained(model_path=BASE_PARAMS["model_path"], **init_kwargs)
-    generator.generate_video(prompt, **generation_kwargs)
-
-    if isinstance(generator.executor, MultiprocExecutor):
-        generator.executor.shutdown()
+        generator: VideoGenerator | None = None
+        try:
+            generator = VideoGenerator.from_pretrained(
+                model_path=BASE_PARAMS["model_path"], **init_kwargs)
+            generator.generate_video(prompt, **generation_kwargs)
+        finally:
+            _shutdown_executor(generator)
 
     assert os.path.exists(
         output_dir), f"Output video was not generated at {output_dir}"
