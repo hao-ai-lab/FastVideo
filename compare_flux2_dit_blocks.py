@@ -181,6 +181,81 @@ def _capture_double0_attn_output_official(pipe, latent, prompt_embeds, timestep_
     return captured
 
 
+def _capture_double0_qk_after_rope_fv(transformer, latent, prompt_embeds, timestep_scaled, device, freqs_cis):
+    """Capture Q, K passed to the attention op (after RoPE) in the first double block."""
+    captured = {}
+    block0 = transformer.transformer_blocks[0]
+    inner_attn = getattr(block0.attn, "attn", None)
+    if inner_attn is None:
+        return captured
+
+    def pre_hook(_module, args, kwargs=None):
+        try:
+            if args and len(args) >= 2:
+                captured["q"] = args[0].detach().clone().cpu().float()
+                captured["k"] = args[1].detach().clone().cpu().float()
+        except Exception:
+            pass
+
+    handle = inner_attn.register_forward_pre_hook(pre_hook, with_kwargs=True)
+    try:
+        with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
+            transformer(
+                latent,
+                prompt_embeds,
+                timestep_scaled,
+                guidance=None,
+                freqs_cis=freqs_cis,
+            )
+    finally:
+        handle.remove()
+    return captured
+
+
+def _capture_double0_qk_after_rope_official(pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device):
+    """Capture Q, K passed to the attention op (after RoPE) in the first double block."""
+    captured = {}
+    trans = pipe.transformer
+    if not hasattr(trans, "transformer_blocks") or len(trans.transformer_blocks) == 0:
+        return captured
+    block0 = trans.transformer_blocks[0]
+    inner_attn = getattr(block0.attn, "attn", None)
+    if inner_attn is None:
+        return captured
+
+    def pre_hook(_module, args, kwargs=None):
+        try:
+            if args and len(args) >= 2:
+                captured["q"] = args[0].detach().clone().cpu().float()
+                captured["k"] = args[1].detach().clone().cpu().float()
+        except Exception:
+            pass
+
+    handle = inner_attn.register_forward_pre_hook(pre_hook, with_kwargs=True)
+    dtype = next(trans.parameters()).dtype
+    latent_d = latent.to(device, dtype=dtype)
+    timestep = timestep_scaled.to(device)
+    prompt_embeds_d = prompt_embeds.to(device, dtype=dtype)
+    text_ids_d = text_ids.to(device)
+    latent_ids_d = latent_ids.to(device)
+    try:
+        with torch.no_grad():
+            with trans.cache_context("cond"):
+                trans(
+                    hidden_states=latent_d,
+                    timestep=timestep,
+                    guidance=None,
+                    encoder_hidden_states=prompt_embeds_d,
+                    txt_ids=text_ids_d,
+                    img_ids=latent_ids_d,
+                    joint_attention_kwargs=getattr(pipe, "attention_kwargs", None) or {},
+                    return_dict=False,
+                )
+    finally:
+        handle.remove()
+    return captured
+
+
 def _capture_double0_inputs_official(pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device):
     """Run official transformer and capture (hidden_states, encoder_hidden_states) going into the first double block."""
     captured = {}
@@ -442,6 +517,28 @@ def main():
     for key in ("attn_out_img", "attn_out_txt"):
         a_fv = attn_fv.get(key)
         a_o = attn_official.get(key)
+        if a_fv is None or a_o is None:
+            print(f"  {key}: missing (fv={a_fv is not None}, official={a_o is not None})")
+            continue
+        if a_fv.shape != a_o.shape:
+            print(f"  {key}: SHAPE MISMATCH {a_fv.shape} vs {a_o.shape}")
+            continue
+        diff = (a_fv - a_o).abs()
+        print(f"  {key}: shape={a_fv.shape} max_diff={diff.max().item():.4f} mean_diff={diff.mean().item():.4f}")
+
+    # Q,K after RoPE (inputs to attention op) — if these differ, bug is in RoPE or Q/K proj; if match, bug is in attn op or output proj
+    print("\n--- double_0 Q,K after RoPE (inputs to attention op) ---")
+    qk_fv = _capture_double0_qk_after_rope_fv(
+        transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, freqs_cis
+    )
+    qk_official = {}
+    if len(official_activations) > 0:
+        qk_official = _capture_double0_qk_after_rope_official(
+            pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device
+        )
+    for key in ("q", "k"):
+        a_fv = qk_fv.get(key)
+        a_o = qk_official.get(key)
         if a_fv is None or a_o is None:
             print(f"  {key}: missing (fv={a_fv is not None}, official={a_o is not None})")
             continue
