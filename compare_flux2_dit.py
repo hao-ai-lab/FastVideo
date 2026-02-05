@@ -56,6 +56,13 @@ def main():
         print(f"Missing dump file: {args.dump}. Run dump_flux2_step0.py first.")
         sys.exit(1)
 
+    # Initialize distributed + model parallel so ColumnParallelLinear in Flux2 DiT can use get_tp_world_size()
+    os.environ.setdefault("LOCAL_RANK", "0")
+    os.environ.setdefault("RANK", "0")
+    os.environ.setdefault("WORLD_SIZE", "1")
+    from fastvideo.distributed import maybe_init_distributed_environment_and_model_parallel
+    maybe_init_distributed_environment_and_model_parallel(tp_size=1, sp_size=1)
+
     data = torch.load(args.dump, map_location="cpu", weights_only=True)
     latent = data["latent_model_input"]
     timestep_scaled = data["timestep_scaled"]
