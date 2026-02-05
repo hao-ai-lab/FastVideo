@@ -2,18 +2,17 @@
 """
 Central registry for FastVideo pipelines and model configuration discovery.
 
-This module unifies pipeline config and sampling param resolution, and mirrors
-sglang's improved registry approach. It keeps the legacy behavior but provides
-one entrypoint to resolve all model metadata.
+This module mirrors the organization of sglang's registry while keeping
+FastVideo's legacy behavior and mappings intact.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import os
+from collections.abc import Callable
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
-from collections.abc import Callable
 
 from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.cosmos import CosmosConfig
@@ -102,6 +101,7 @@ def _discover_and_register_pipelines() -> None:
         return
 
     from fastvideo.pipelines.pipeline_registry import import_pipeline_classes
+
     pipeline_classes = import_pipeline_classes()
     for pipeline_type, pipeline_dict in pipeline_classes.items():
         _PIPELINE_REGISTRY[pipeline_type] = pipeline_dict
@@ -125,292 +125,360 @@ def get_pipeline_config_classes(
 
 # --- Part 2: Config Registration ---
 
-PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
-    "FastVideo/FastHunyuan-diffusers": FastHunyuanConfig,
-    "hunyuanvideo-community/HunyuanVideo": HunyuanConfig,
-    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v":
-    Hunyuan15T2V480PConfig,
-    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v":
-    Hunyuan15T2V720PConfig,
-    "FastVideo/HY-WorldPlay-Bidirectional-Diffusers": HYWorldConfig,
-    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V480PConfig,
-    "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers": WanI2V480PConfig,
-    "IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers": WANV2VConfig,
-    "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V480PConfig,
-    "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V720PConfig,
-    "Wan-AI/Wan2.1-T2V-14B-Diffusers": WanT2V720PConfig,
-    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": FastWan2_1_T2V_480P_Config,
-    "FastVideo/FastWan2.1-T2V-14B-480P-Diffusers": FastWan2_1_T2V_480P_Config,
-    "FastVideo/FastWan2.2-TI2V-5B-Diffusers": FastWan2_2_TI2V_5B_Config,
-    "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VConfig,
-    "FastVideo/Wan2.1-VSA-T2V-14B-720P-Diffusers": WanT2V720PConfig,
-    "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers": SelfForcingWanT2V480PConfig,
-    "rand0nmr/SFWan2.2-T2V-A14B-Diffusers": SelfForcingWan2_2_T2V480PConfig,
-    "FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers":
-    SelfForcingWan2_2_T2V480PConfig,
-    "Wan-AI/Wan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_Config,
-    "Wan-AI/Wan2.2-T2V-A14B-Diffusers": Wan2_2_T2V_A14B_Config,
-    "Wan-AI/Wan2.2-I2V-A14B-Diffusers": Wan2_2_I2V_A14B_Config,
-    "nvidia/Cosmos-Predict2-2B-Video2World": CosmosConfig,
-    "KyleShao/Cosmos-Predict2.5-2B-Diffusers": Cosmos25Config,
-    "FastVideo/Matrix-Game-2.0-Base-Diffusers": MatrixGameI2V480PConfig,
-    "FastVideo/Matrix-Game-2.0-GTA-Diffusers": MatrixGameI2V480PConfig,
-    "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers": MatrixGameI2V480PConfig,
-    # LongCat Video models
-    "FastVideo/LongCat-Video-T2V-Diffusers": LongCatT2V480PConfig,
-    "FastVideo/LongCat-Video-I2V-Diffusers": LongCatT2V480PConfig,
-    "FastVideo/LongCat-Video-VC-Diffusers": LongCatT2V480PConfig,
-    # LTX-2 models
-    "Lightricks/LTX-2": LTX2T2VConfig,
-    "converted/ltx2_diffusers": LTX2T2VConfig,
-    # TurboDiffusion models
-    "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers": TurboDiffusionT2V_1_3B_Config,
-    "loayrashid/TurboWan2.1-T2V-14B-Diffusers": TurboDiffusionT2V_14B_Config,
-    "loayrashid/TurboWan2.2-I2V-A14B-Diffusers": TurboDiffusionI2V_A14B_Config,
-}
-
-PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
-    "longcatimagetovideo":
-    lambda id: "longcatimagetovideo" in id.lower(),
-    "longcatvideocontinuation":
-    lambda id: "longcatvideocontinuation" in id.lower(),
-    "longcat":
-    lambda id: "longcat" in id.lower(),
-    "hunyuan":
-    lambda id: "hunyuan" in id.lower(),
-    "hunyuan15":
-    lambda id: "hunyuan15" in id.lower(),
-    "hyworld":
-    lambda id: "hyworld" in id.lower(),
-    "matrixgame":
-    lambda id: "matrix-game" in id.lower() or "matrixgame" in id.lower(),
-    "wanpipeline":
-    lambda id: "wanpipeline" in id.lower(),
-    "wanimagetovideo":
-    lambda id: "wanimagetovideo" in id.lower(),
-    "wandmdpipeline":
-    lambda id: "wandmdpipeline" in id.lower(),
-    "wancausaldmdpipeline":
-    lambda id: "wancausaldmdpipeline" in id.lower(),
-    "stepvideo":
-    lambda id: "stepvideo" in id.lower(),
-    "cosmos":
-    lambda id: "cosmos" in id.lower() and ("2.5" not in id.lower(
-    ) and "2_5" not in id.lower() and "25" not in id.lower()),
-    "cosmos25":
-    lambda id: "cosmos25" in id.lower(),
-    "turbodiffusion":
-    lambda id: "turbodiffusion" in id.lower() or "turbowan" in id.lower(),
-    "ltx2":
-    lambda id: "ltx2" in id.lower() or "ltx-2" in id.lower(),
-}
-
-PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
-    "longcatimagetovideo": LongCatT2V480PConfig,
-    "longcatvideocontinuation": LongCatT2V480PConfig,
-    "longcat": LongCatT2V480PConfig,
-    "cosmos25": Cosmos25Config,
-    "hunyuan": HunyuanConfig,
-    "matrixgame": MatrixGameI2V480PConfig,
-    "hunyuan15": Hunyuan15T2V480PConfig,
-    "hyworld": HYWorldConfig,
-    "wanpipeline": WanT2V480PConfig,
-    "wanimagetovideo": WanI2V480PConfig,
-    "wandmdpipeline": FastWan2_1_T2V_480P_Config,
-    "wancausaldmdpipeline": SelfForcingWanT2V480PConfig,
-    "stepvideo": StepVideoT2VConfig,
-    "turbodiffusion": TurboDiffusionT2V_1_3B_Config,
-    "ltx2": LTX2T2VConfig,
-}
-
-SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
-    "FastVideo/FastHunyuan-diffusers": FastHunyuanSamplingParam,
-    "hunyuanvideo-community/HunyuanVideo": HunyuanSamplingParam,
-    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v":
-    Hunyuan15_480P_SamplingParam,
-    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v":
-    Hunyuan15_720P_SamplingParam,
-    "FastVideo/HY-WorldPlay-Bidirectional-Diffusers": HYWorld_SamplingParam,
-    "FastVideo/stepvideo-t2v-diffusers": StepVideoT2VSamplingParam,
-    # Wan2.1
-    "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V_1_3B_SamplingParam,
-    "Wan-AI/Wan2.1-T2V-14B-Diffusers": WanT2V_14B_SamplingParam,
-    "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V_14B_480P_SamplingParam,
-    "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V_14B_720P_SamplingParam,
-    "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers":
-    Wan2_1_Fun_1_3B_InP_SamplingParam,
-    "IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers":
-    Wan2_1_Fun_1_3B_Control_SamplingParam,
-    # Wan2.2
-    "Wan-AI/Wan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_SamplingParam,
-    "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers":
-    Wan2_2_TI2V_5B_SamplingParam,
-    "Wan-AI/Wan2.2-T2V-A14B-Diffusers": Wan2_2_T2V_A14B_SamplingParam,
-    "Wan-AI/Wan2.2-I2V-A14B-Diffusers": Wan2_2_I2V_A14B_SamplingParam,
-    # FastWan2.1
-    "FastVideo/FastWan2.1-T2V-1.3B-Diffusers": FastWanT2V480P_SamplingParam,
-    # FastWan2.2
-    "FastVideo/FastWan2.2-TI2V-5B-Diffusers": Wan2_2_TI2V_5B_SamplingParam,
-    # Causal Self-Forcing Wan2.1
-    "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers":
-    SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam,
-    # Causal Self-Forcing Wan2.2
-    "rand0nmr/SFWan2.2-T2V-A14B-Diffusers":
-    SelfForcingWan2_2_T2V_A14B_480P_SamplingParam,
-    "FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers":
-    SelfForcingWan2_2_T2V_A14B_480P_SamplingParam,
-    # Cosmos2
-    "nvidia/Cosmos-Predict2-2B-Video2World":
-    Cosmos_Predict2_2B_Video2World_SamplingParam,
-    # Cosmos2.5
-    "KyleShao/Cosmos-Predict2.5-2B-Diffusers": Cosmos25SamplingParamBase,
-    # MatrixGame2.0 models
-    "FastVideo/Matrix-Game-2.0-Base-Diffusers": MatrixGame2_SamplingParam,
-    "FastVideo/Matrix-Game-2.0-GTA-Diffusers": MatrixGame2_SamplingParam,
-    "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers": MatrixGame2_SamplingParam,
-    # TurboDiffusion models
-    "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers":
-    TurboDiffusionT2V_1_3B_SamplingParam,
-    "loayrashid/TurboWan2.1-T2V-14B-Diffusers":
-    TurboDiffusionT2V_14B_SamplingParam,
-    "loayrashid/TurboWan2.2-I2V-A14B-Diffusers":
-    TurboDiffusionI2V_A14B_SamplingParam,
-    # LTX-2 models
-    "Lightricks/LTX-2": LTX2SamplingParam,
-    "FastVideo/LTX2-Distilled-Diffusers": LTX2SamplingParam,
-}
-
-SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
-    "hunyuan":
-    lambda id: "hunyuan" in id.lower(),
-    "hunyuan15":
-    lambda id: "hunyuan15" in id.lower(),
-    "hyworld":
-    lambda id: "hyworld" in id.lower(),
-    "wanpipeline":
-    lambda id: "wanpipeline" in id.lower(),
-    "wanimagetovideo":
-    lambda id: "wanimagetovideo" in id.lower(),
-    "stepvideo":
-    lambda id: "stepvideo" in id.lower(),
-    "wandmdpipeline":
-    lambda id: "wandmdpipeline" in id.lower(),
-    "wancausaldmdpipeline":
-    lambda id: "wancausaldmdpipeline" in id.lower(),
-    "matrixgame":
-    lambda id: "matrixgame" in id.lower() or "matrix-game" in id.lower(),
-    "turbodiffusion":
-    lambda id: "turbodiffusion" in id.lower() or "turbowan" in id.lower(),
-    "cosmos25":
-    lambda id: "cosmos2_5" in id.lower(),
-    "cosmos":
-    lambda id: "cosmos" in id.lower() and "2_5" not in id.lower(),
-    "ltx2":
-    lambda id: "ltx2" in id.lower() or "ltx-2" in id.lower(),
-}
-
-SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
-    "hunyuan": HunyuanSamplingParam,
-    "hunyuan15": Hunyuan15_480P_SamplingParam,
-    "hyworld": HYWorld_SamplingParam,
-    "wanpipeline": WanT2V_1_3B_SamplingParam,
-    "wanimagetovideo": WanI2V_14B_480P_SamplingParam,
-    "wandmdpipeline": FastWanT2V480P_SamplingParam,
-    "wancausaldmdpipeline": SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam,
-    "stepvideo": StepVideoT2VSamplingParam,
-    "matrixgame": MatrixGame2_SamplingParam,
-    "turbodiffusion": TurboDiffusionT2V_1_3B_SamplingParam,
-    "cosmos25": Cosmos25SamplingParamBase,
-    "cosmos": Cosmos_Predict2_2B_Video2World_SamplingParam,
-    "ltx2": LTX2SamplingParam,
-}
-
-
-def get_pipeline_config_cls_from_name(
-        pipeline_name_or_path: str) -> type[PipelineConfig]:
-    pipeline_config_cls: type[PipelineConfig] | None = None
-
-    if pipeline_name_or_path in PIPE_NAME_TO_CONFIG:
-        return PIPE_NAME_TO_CONFIG[pipeline_name_or_path]
-
-    for registered_id, config_class in PIPE_NAME_TO_CONFIG.items():
-        if registered_id in pipeline_name_or_path:
-            pipeline_config_cls = config_class
-            break
-
-    if pipeline_config_cls is None:
-        if os.path.exists(pipeline_name_or_path):
-            config = verify_model_config_and_directory(pipeline_name_or_path)
-        else:
-            config = maybe_download_model_index(pipeline_name_or_path)
-        logger.warning(
-            "Trying to use the config from the model_index.json. FastVideo may not correctly identify the optimal config for this model in this situation."
-        )
-
-        pipeline_name = config["_class_name"]
-        for pipeline_type, detector in PIPELINE_DETECTOR.items():
-            if detector(pipeline_name.lower()):
-                pipeline_config_cls = PIPELINE_FALLBACK_CONFIG.get(
-                    pipeline_type)
-                break
-
-        if pipeline_config_cls is not None:
-            logger.warning(
-                "No match found for pipeline %s, using fallback config %s.",
-                pipeline_name_or_path, pipeline_config_cls)
-
-    if pipeline_config_cls is None:
-        raise ValueError(
-            f"No match found for pipeline {pipeline_name_or_path}, please check the pipeline name or path."
-        )
-
-    return pipeline_config_cls
-
-
-def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
-    if pipeline_name_or_path in SAMPLING_PARAM_REGISTRY:
-        return SAMPLING_PARAM_REGISTRY[pipeline_name_or_path]
-
-    for registered_id, config_class in SAMPLING_PARAM_REGISTRY.items():
-        if registered_id in pipeline_name_or_path:
-            return config_class
-
-    matrixgame_patterns = ["Matrix-Game", "Skywork--Matrix-Game", "matrixgame"]
-    for pattern in matrixgame_patterns:
-        if pattern.lower() in pipeline_name_or_path.lower():
-            return MatrixGame2_SamplingParam
-
-    if os.path.exists(pipeline_name_or_path):
-        config = verify_model_config_and_directory(pipeline_name_or_path)
-    else:
-        config = maybe_download_model_index(pipeline_name_or_path)
-
-    pipeline_name = config["_class_name"]
-
-    fallback_config = None
-    for pipeline_type, detector in SAMPLING_PARAM_DETECTOR.items():
-        if detector(pipeline_name.lower()):
-            fallback_config = SAMPLING_FALLBACK_PARAM.get(pipeline_type)
-            break
-
-    logger.warning(
-        "No match found for pipeline %s, using fallback sampling param %s.",
-        pipeline_name_or_path, fallback_config)
-    return fallback_config
-
 
 @dataclasses.dataclass
 class ConfigInfo:
-    pipeline_config_cls: type[PipelineConfig]
+    """Encapsulates sampling + pipeline config classes for a model family."""
+
     sampling_param_cls: type[SamplingParam] | None
+    pipeline_config_cls: type[PipelineConfig]
 
 
-def get_config_info(model_path: str) -> ConfigInfo:
-    pipeline_config_cls = get_pipeline_config_cls_from_name(model_path)
-    sampling_param_cls = get_sampling_param_cls_for_name(model_path)
-    return ConfigInfo(
-        pipeline_config_cls=pipeline_config_cls,
+# The central registry mapping a model name to its configuration information
+_CONFIG_REGISTRY: dict[str, ConfigInfo] = {}
+
+# Mappings from Hugging Face model paths to our internal model names
+_MODEL_HF_PATH_TO_NAME: dict[str, str] = {}
+
+# Detectors to identify model families from paths or class names
+_MODEL_NAME_DETECTORS: list[tuple[str, Callable[[str], bool]]] = []
+
+
+def register_configs(
+    sampling_param_cls: type[SamplingParam] | None,
+    pipeline_config_cls: type[PipelineConfig],
+    hf_model_paths: list[str] | None = None,
+    model_detectors: list[Callable[[str], bool]] | None = None,
+) -> None:
+    """Register config classes for a model family."""
+    model_id = str(len(_CONFIG_REGISTRY))
+
+    _CONFIG_REGISTRY[model_id] = ConfigInfo(
         sampling_param_cls=sampling_param_cls,
+        pipeline_config_cls=pipeline_config_cls,
+    )
+
+    if hf_model_paths:
+        for path in hf_model_paths:
+            if path in _MODEL_HF_PATH_TO_NAME:
+                logger.warning(
+                    "Model path '%s' is already mapped to '%s' and will be overwritten by '%s'.",
+                    path, _MODEL_HF_PATH_TO_NAME[path], model_id)
+            _MODEL_HF_PATH_TO_NAME[path] = model_id
+
+    if model_detectors:
+        for detector in model_detectors:
+            _MODEL_NAME_DETECTORS.append((model_id, detector))
+
+
+def get_model_short_name(model_id: str) -> str:
+    if "/" in model_id:
+        return model_id.split("/")[-1]
+    return model_id
+
+
+def _get_config_info(
+    model_path: str,
+    *,
+    raise_on_missing: bool = True,
+) -> ConfigInfo | None:
+    # 1. Exact match
+    if model_path in _MODEL_HF_PATH_TO_NAME:
+        model_id = _MODEL_HF_PATH_TO_NAME[model_path]
+        logger.debug("Resolved model path '%s' from exact path match.",
+                     model_path)
+        return _CONFIG_REGISTRY.get(model_id)
+
+    # 2. Partial match: use short model name.
+    model_name = get_model_short_name(model_path.lower())
+    all_model_hf_paths = sorted(_MODEL_HF_PATH_TO_NAME.keys(),
+                                key=len,
+                                reverse=True)
+    for registered_model_hf_id in all_model_hf_paths:
+        registered_model_name = get_model_short_name(
+            registered_model_hf_id.lower())
+        if registered_model_name == model_name:
+            logger.debug("Resolved model name '%s' from partial path match.",
+                         registered_model_hf_id)
+            model_id = _MODEL_HF_PATH_TO_NAME[registered_model_hf_id]
+            return _CONFIG_REGISTRY.get(model_id)
+
+    # 3. Use detectors (path or model_index pipeline name).
+    if os.path.exists(model_path):
+        config = verify_model_config_and_directory(model_path)
+    else:
+        config = maybe_download_model_index(model_path)
+
+    pipeline_name = config.get("_class_name", "").lower()
+
+    matched_model_names: list[str] = []
+    for model_id, detector in _MODEL_NAME_DETECTORS:
+        if detector(model_path.lower()) or detector(pipeline_name):
+            logger.debug("Matched model name '%s' using a registered detector.",
+                         model_id)
+            matched_model_names.append(model_id)
+
+    if matched_model_names:
+        if len(matched_model_names) > 1:
+            logger.warning(
+                "More than one model name is matched, using the first matched")
+        model_id = matched_model_names[0]
+        return _CONFIG_REGISTRY.get(model_id)
+
+    if raise_on_missing:
+        raise RuntimeError(f"No model info found for model path: {model_path}")
+    return None
+
+
+def _register_configs() -> None:
+    # LTX-2
+    register_configs(
+        sampling_param_cls=LTX2SamplingParam,
+        pipeline_config_cls=LTX2T2VConfig,
+        hf_model_paths=[
+            "Lightricks/LTX-2",
+            "converted/ltx2_diffusers",
+            "FastVideo/LTX2-Distilled-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: "ltx2" in path.lower() or "ltx-2" in path.lower(),
+        ],
+    )
+
+    # Hunyuan 1.5 (specific)
+    register_configs(
+        sampling_param_cls=Hunyuan15_480P_SamplingParam,
+        pipeline_config_cls=Hunyuan15T2V480PConfig,
+        hf_model_paths=[
+            "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+        ],
+        model_detectors=[lambda path: "hunyuan15" in path.lower()],
+    )
+    register_configs(
+        sampling_param_cls=Hunyuan15_720P_SamplingParam,
+        pipeline_config_cls=Hunyuan15T2V720PConfig,
+        hf_model_paths=[
+            "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v",
+        ],
+    )
+
+    # Hunyuan
+    register_configs(
+        sampling_param_cls=HunyuanSamplingParam,
+        pipeline_config_cls=HunyuanConfig,
+        hf_model_paths=[
+            "hunyuanvideo-community/HunyuanVideo",
+        ],
+        model_detectors=[lambda path: "hunyuan" in path.lower()],
+    )
+    register_configs(
+        sampling_param_cls=FastHunyuanSamplingParam,
+        pipeline_config_cls=FastHunyuanConfig,
+        hf_model_paths=[
+            "FastVideo/FastHunyuan-diffusers",
+        ],
+    )
+
+    # HYWorld
+    register_configs(
+        sampling_param_cls=HYWorld_SamplingParam,
+        pipeline_config_cls=HYWorldConfig,
+        hf_model_paths=[
+            "FastVideo/HY-WorldPlay-Bidirectional-Diffusers",
+        ],
+        model_detectors=[lambda path: "hyworld" in path.lower()],
+    )
+
+    # LongCat
+    register_configs(
+        sampling_param_cls=None,
+        pipeline_config_cls=LongCatT2V480PConfig,
+        hf_model_paths=[
+            "FastVideo/LongCat-Video-T2V-Diffusers",
+            "FastVideo/LongCat-Video-I2V-Diffusers",
+            "FastVideo/LongCat-Video-VC-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: "longcatimagetovideo" in path.lower(),
+            lambda path: "longcatvideocontinuation" in path.lower(),
+            lambda path: "longcat" in path.lower(),
+        ],
+    )
+
+    # StepVideo
+    register_configs(
+        sampling_param_cls=StepVideoT2VSamplingParam,
+        pipeline_config_cls=StepVideoT2VConfig,
+        hf_model_paths=[
+            "FastVideo/stepvideo-t2v-diffusers",
+        ],
+        model_detectors=[lambda path: "stepvideo" in path.lower()],
+    )
+
+    # MatrixGame
+    register_configs(
+        sampling_param_cls=MatrixGame2_SamplingParam,
+        pipeline_config_cls=MatrixGameI2V480PConfig,
+        hf_model_paths=[
+            "FastVideo/Matrix-Game-2.0-Base-Diffusers",
+            "FastVideo/Matrix-Game-2.0-GTA-Diffusers",
+            "FastVideo/Matrix-Game-2.0-TempleRun-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: "matrix-game" in path.lower() or "matrixgame" in path.
+            lower(),
+        ],
+    )
+
+    # Cosmos 2.5
+    register_configs(
+        sampling_param_cls=Cosmos25SamplingParamBase,
+        pipeline_config_cls=Cosmos25Config,
+        hf_model_paths=[
+            "KyleShao/Cosmos-Predict2.5-2B-Diffusers",
+        ],
+        model_detectors=[lambda path: "cosmos25" in path.lower()],
+    )
+
+    # Cosmos 2
+    register_configs(
+        sampling_param_cls=Cosmos_Predict2_2B_Video2World_SamplingParam,
+        pipeline_config_cls=CosmosConfig,
+        hf_model_paths=[
+            "nvidia/Cosmos-Predict2-2B-Video2World",
+        ],
+        model_detectors=[
+            lambda path: "cosmos" in path.lower() and ("2.5" not in path.lower(
+            ) and "2_5" not in path.lower() and "25" not in path.lower()),
+        ],
+    )
+
+    # TurboDiffusion
+    register_configs(
+        sampling_param_cls=TurboDiffusionT2V_1_3B_SamplingParam,
+        pipeline_config_cls=TurboDiffusionT2V_1_3B_Config,
+        hf_model_paths=[
+            "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: "turbodiffusion" in path.lower() or "turbowan" in path.
+            lower()
+        ],
+    )
+    register_configs(
+        sampling_param_cls=TurboDiffusionT2V_14B_SamplingParam,
+        pipeline_config_cls=TurboDiffusionT2V_14B_Config,
+        hf_model_paths=[
+            "loayrashid/TurboWan2.1-T2V-14B-Diffusers",
+        ],
+    )
+    register_configs(
+        sampling_param_cls=TurboDiffusionI2V_A14B_SamplingParam,
+        pipeline_config_cls=TurboDiffusionI2V_A14B_Config,
+        hf_model_paths=[
+            "loayrashid/TurboWan2.2-I2V-A14B-Diffusers",
+        ],
+    )
+
+    # Wan
+    register_configs(
+        sampling_param_cls=WanT2V_1_3B_SamplingParam,
+        pipeline_config_cls=WanT2V480PConfig,
+        hf_model_paths=[
+            "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        ],
+        model_detectors=[lambda path: "wanpipeline" in path.lower()],
+    )
+    register_configs(
+        sampling_param_cls=WanT2V_14B_SamplingParam,
+        pipeline_config_cls=WanT2V720PConfig,
+        hf_model_paths=[
+            "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+            "FastVideo/Wan2.1-VSA-T2V-14B-720P-Diffusers",
+        ],
+    )
+    register_configs(
+        sampling_param_cls=WanI2V_14B_480P_SamplingParam,
+        pipeline_config_cls=WanI2V480PConfig,
+        hf_model_paths=[
+            "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
+        ],
+        model_detectors=[lambda path: "wanimagetovideo" in path.lower()],
+    )
+    register_configs(
+        sampling_param_cls=WanI2V_14B_720P_SamplingParam,
+        pipeline_config_cls=WanI2V720PConfig,
+        hf_model_paths=[
+            "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers",
+        ],
+    )
+    register_configs(
+        sampling_param_cls=Wan2_1_Fun_1_3B_InP_SamplingParam,
+        pipeline_config_cls=WanI2V480PConfig,
+        hf_model_paths=[
+            "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers",
+        ],
+    )
+    register_configs(
+        sampling_param_cls=Wan2_1_Fun_1_3B_Control_SamplingParam,
+        pipeline_config_cls=WANV2VConfig,
+        hf_model_paths=[
+            "IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers",
+        ],
+    )
+    register_configs(
+        sampling_param_cls=FastWanT2V480P_SamplingParam,
+        pipeline_config_cls=FastWan2_1_T2V_480P_Config,
+        hf_model_paths=[
+            "FastVideo/FastWan2.1-T2V-1.3B-Diffusers",
+            "FastVideo/FastWan2.1-T2V-14B-480P-Diffusers",
+        ],
+        model_detectors=[lambda path: "wandmdpipeline" in path.lower()],
+    )
+    register_configs(
+        sampling_param_cls=Wan2_2_TI2V_5B_SamplingParam,
+        pipeline_config_cls=Wan2_2_TI2V_5B_Config,
+        hf_model_paths=[
+            "Wan-AI/Wan2.2-TI2V-5B-Diffusers",
+        ],
+    )
+    register_configs(
+        sampling_param_cls=Wan2_2_TI2V_5B_SamplingParam,
+        pipeline_config_cls=FastWan2_2_TI2V_5B_Config,
+        hf_model_paths=[
+            "FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers",
+            "FastVideo/FastWan2.2-TI2V-5B-Diffusers",
+        ],
+    )
+    register_configs(
+        sampling_param_cls=Wan2_2_T2V_A14B_SamplingParam,
+        pipeline_config_cls=Wan2_2_T2V_A14B_Config,
+        hf_model_paths=[
+            "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+        ],
+    )
+    register_configs(
+        sampling_param_cls=Wan2_2_I2V_A14B_SamplingParam,
+        pipeline_config_cls=Wan2_2_I2V_A14B_Config,
+        hf_model_paths=[
+            "Wan-AI/Wan2.2-I2V-A14B-Diffusers",
+        ],
+    )
+    register_configs(
+        sampling_param_cls=SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam,
+        pipeline_config_cls=SelfForcingWanT2V480PConfig,
+        hf_model_paths=[
+            "wlsaidhi/SFWan2.1-T2V-1.3B-Diffusers",
+        ],
+        model_detectors=[lambda path: "wancausaldmdpipeline" in path.lower()],
+    )
+    register_configs(
+        sampling_param_cls=SelfForcingWan2_2_T2V_A14B_480P_SamplingParam,
+        pipeline_config_cls=SelfForcingWan2_2_T2V480PConfig,
+        hf_model_paths=[
+            "rand0nmr/SFWan2.2-T2V-A14B-Diffusers",
+            "FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers",
+        ],
     )
 
 
@@ -462,7 +530,9 @@ def get_model_info(
     pipeline_cls = pipeline_registry.resolve_pipeline_cls(
         pipeline_name, pipeline_type, workload_type)
 
-    config_info = get_config_info(model_path)
+    config_info = _get_config_info(model_path, raise_on_missing=True)
+    assert config_info is not None, "config_info must be resolved"
+
     sampling_param_cls = config_info.sampling_param_cls or SamplingParam
 
     return ModelInfo(
@@ -472,11 +542,35 @@ def get_model_info(
     )
 
 
+def get_pipeline_config_cls_from_name(
+        pipeline_name_or_path: str) -> type[PipelineConfig]:
+    config_info = _get_config_info(pipeline_name_or_path,
+                                   raise_on_missing=False)
+    if config_info is None:
+        raise ValueError(
+            f"No match found for pipeline {pipeline_name_or_path}, please check the pipeline name or path."
+        )
+    return config_info.pipeline_config_cls
+
+
+def get_sampling_param_cls_for_name(pipeline_name_or_path: str) -> Any | None:
+    config_info = _get_config_info(pipeline_name_or_path,
+                                   raise_on_missing=False)
+    if config_info is None:
+        logger.warning(
+            "No match found for pipeline %s, using default sampling param.",
+            pipeline_name_or_path)
+        return None
+    return config_info.sampling_param_cls
+
+
+_register_configs()
+
 __all__ = [
     "ConfigInfo",
     "ModelInfo",
     "get_model_info",
-    "get_config_info",
     "get_pipeline_config_cls_from_name",
     "get_sampling_param_cls_for_name",
+    "get_pipeline_config_classes",
 ]
