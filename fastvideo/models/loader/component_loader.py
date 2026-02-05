@@ -725,6 +725,18 @@ class VocoderLoader(ComponentLoader):
         return vocoder.eval()
 
 
+def _collect_safetensors_keys(safetensors_list: list) -> set:
+    """Collect all weight keys from safetensors files (generic, no model-specific logic)."""
+    all_keys = set()
+    for path in safetensors_list:
+        try:
+            with safe_open(path, framework="pt") as f:
+                all_keys.update(f.keys())
+        except Exception as e:
+            logger.warning("Could not read keys from %s: %s", path, e)
+    return all_keys
+
+
 class TransformerLoader(ComponentLoader):
     """Loader for transformer."""
 
