@@ -64,10 +64,11 @@ def _compute_freqs_cis(transformer, text_ids, latent_ids, device, dtype=None):
             combined = torch.cat([combined, combined[..., -1:].expand(-1, -1, need)], dim=-1)
         else:
             combined = combined[..., : len(n_axes)]
-    # [num_tokens, n_axes]
-    pos = combined.reshape(-1, combined.shape[-1]).to(device=device, dtype=torch.float32)
+    # [num_tokens, n_axes] — keep on CPU so get_1d_rotary_pos_embed (no device arg) doesn't mix devices
+    pos = combined.reshape(-1, combined.shape[-1]).float()
     with torch.no_grad():
         cos, sin = transformer.rotary_emb.forward_uncached(pos=pos)
+    cos, sin = cos.to(device=device), sin.to(device)
     if dtype is not None:
         cos, sin = cos.to(dtype), sin.to(dtype)
     return (cos, sin)
