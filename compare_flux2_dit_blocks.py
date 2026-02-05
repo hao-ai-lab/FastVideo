@@ -56,9 +56,17 @@ def _collect_fv_activations(transformer, latent, prompt_embeds, timestep_scaled,
 
     def make_single_hook(name, ntxt):
         def hook(_module, _inputs, outputs):
-            # Flux2SingleTransformerBlock returns full hidden_states; keep image part only
-            out = outputs[0][:, ntxt:, :].detach().clone()
-            activations.append((name, out))
+            try:
+                out = outputs[0]
+                if out.dim() == 3 and out.shape[1] > ntxt:
+                    out = out[:, ntxt:, :].detach().clone()
+                elif out.dim() == 2:
+                    out = out.unsqueeze(0).detach().clone()
+                else:
+                    out = out.detach().clone()
+                activations.append((name, out))
+            except Exception:
+                activations.append((name, None))
         return hook
 
     for i, block in enumerate(transformer.transformer_blocks):
