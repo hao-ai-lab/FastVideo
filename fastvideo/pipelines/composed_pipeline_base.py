@@ -207,8 +207,6 @@ class ComposedPipelineBase(ABC):
             # fwd, bwd, and other operations' precision.
             assert fastvideo_args.pipeline_config.dit_precision == 'fp32', 'only fp32 is supported for training'
 
-        logger.info("fastvideo_args in from_pretrained: %s", fastvideo_args)
-
         pipe = cls(model_path,
                    fastvideo_args,
                    required_config_modules=required_config_modules,

@@ -153,6 +153,7 @@ def maybe_load_fsdp_model(
                 f"Unexpected param or buffer {n} on meta device.")
         # Avoid unintended computation graph accumulation during inference
         if isinstance(p, torch.nn.Parameter):
+            
             p.requires_grad = False
 
     compile_in_loader = enable_torch_compile and training_mode

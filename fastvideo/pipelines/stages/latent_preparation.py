@@ -138,12 +138,36 @@ class LatentPreparationStage(PipelineStage):
             )
         # Generate or use provided latents
         if latents is None:
-            latents = randn_tensor(
-                shape,
-                generator=generator,
-                device=device,
-                dtype=dtype,
-            )
+            # If doing RL training, latents should be generated without seed
+            if batch.rl_data is not None:
+                generator = [None] * len(generator) if isinstance(generator, list) else None
+            
+            # Handle batch processing: if generator is a list, generate latents for each item separately
+            # This ensures each batch item gets unique randomness from its own generator
+            if isinstance(generator, list) and len(generator) > 1:
+                # Generate latents for each batch item with its own generator
+                latents_list = []
+                for b in range(batch_size):
+                    # Generate latents for single item: [1, C, T, H, W] or [1, T, C, H, W] depending on layout
+                    single_shape = (1,) + shape[1:]
+                    single_latents = randn_tensor(
+                        single_shape,
+                        generator=generator[b],
+                        device=device,
+                        dtype=dtype,
+                    )
+                    latents_list.append(single_latents)
+                # Concatenate along batch dimension
+                latents = torch.cat(latents_list, dim=0)
+            else:
+                # Single generator or None - use standard path
+                gen = generator[0] if isinstance(generator, list) and len(generator) > 0 else generator
+                latents = randn_tensor(
+                    shape,
+                    generator=gen,
+                    device=device,
+                    dtype=dtype,
+                )
             if hasattr(self.scheduler, "init_noise_sigma"):
                 latents = latents * self.scheduler.init_noise_sigma
         else:

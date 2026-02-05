@@ -67,6 +67,26 @@ class ForwardBatch:
     execution, allowing methods to update specific components without needing
     to manage numerous individual parameters.
     """
+
+    @dataclass
+    class RLData:
+        """RL-specific data collection options and outputs."""
+        enabled: bool = False
+        collect_log_probs: bool = True
+        collect_kl: bool = False
+        kl_reward: float = 0.0
+        store_trajectory: bool = True
+        keep_trajectory_on_cpu: bool = False
+        log_probs: torch.Tensor | None = None
+        kl: torch.Tensor | None = None
+        trajectory_latents: torch.Tensor | None = None
+        trajectory_timesteps: torch.Tensor | None = None
+        # Saved transformer forward args from DenoisingStage for matching GRPO loss forward pass.
+        # transformer_forward_contexts: one dict per timestep with keys current_timestep (int), attn_metadata (optional).
+        transformer_forward_contexts: list[dict[str, Any]] | None = None
+        # transformer_forward_kwargs: batch-level kwargs passed to transformer (image_kwargs, pos_cond_kwargs, neg_cond_kwargs, action_kwargs, guidance_expand).
+        transformer_forward_kwargs: dict[str, Any] | None = None
+
     # TODO(will): double check that args are separate from fastvideo_args
     # properly. Also maybe think about providing an abstraction for pipeline
     # specific arguments.
@@ -200,6 +220,9 @@ class ForwardBatch:
     logging_info: PipelineLoggingInfo = field(
         default_factory=PipelineLoggingInfo)
 
+    # RL data collection
+    rl_data: "ForwardBatch.RLData" = field(default_factory=RLData)
+
     def __post_init__(self):
         """Initialize dependent fields after dataclass initialization."""
 
@@ -269,6 +292,43 @@ class TrainingBatch:
     dmd_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     latent_vis_dict: dict[str, Any] = field(default_factory=dict)
     fake_score_latent_vis_dict: dict[str, Any] = field(default_factory=dict)
+
+    # RL/GRPO-specific attributes
+    reward_scores: torch.Tensor | None = None  # Computed rewards from reward models
+    log_probs: torch.Tensor | None = None  # Current policy log probabilities [B, num_steps] or [B]
+    old_log_probs: torch.Tensor | None = None  # Old policy log probs (for importance ratio) [B, num_steps] or [B]
+    advantages: torch.Tensor | None = None  # GAE advantages [B, num_steps] or [B]
+    returns: torch.Tensor | None = None  # TD returns (advantages + values) [B, num_steps] or [B]
+    values: torch.Tensor | None = None  # Value function predictions [B]
+    old_values: torch.Tensor | None = None  # Old value predictions (for clipping) [B]
+
+    # GRPO sampling-specific attributes
+    kl: torch.Tensor | None = None  # KL divergences from sampling [B, num_steps] (if kl_reward > 0)
+    prompt_ids: torch.Tensor | None = None  # Prompt token IDs for stat tracking [B, seq_len]
+    prompt_embeds: torch.Tensor | None = None  # Prompt embeddings used in sampling [B, seq_len, hidden_dim]
+    negative_prompt_embeds: torch.Tensor | None = None  # Negative prompt embeddings for CFG [B, seq_len, hidden_dim]
+    # Saved from trajectory collection: same transformer forward context used in DenoisingStage (for GRPO loss).
+    rl_transformer_forward_contexts: list[dict[
+        str,
+        Any]] | None = None  # Per-timestep: current_timestep, attn_metadata
+    rl_transformer_forward_kwargs: dict[
+        str,
+        Any] | None = None  # image_kwargs, pos_cond_kwargs, neg_cond_kwargs, action_kwargs, guidance_expand
+
+    # RL loss components
+    policy_loss: float = 0.0  # GRPO/PPO policy loss
+    value_loss: float = 0.0  # Value function loss
+    kl_divergence: float = 0.0  # KL(new_policy || old_policy)
+    importance_ratio: float = 1.0  # exp(log_prob - old_log_prob)
+    clip_fraction: float = 0.0  # Fraction of ratios that were clipped
+
+    # RL metrics
+    advantage_mean: float = 0.0  # Mean advantage (should be ~0 after normalization)
+    advantage_std: float = 1.0  # Std of advantages
+    reward_mean: float = 0.0  # Mean reward across batch
+    reward_std: float = 0.0  # Std of rewards
+    value_mean: float = 0.0  # Mean value prediction
+    entropy: float = 0.0  # Policy entropy (for exploration)
 
 
 @dataclass
