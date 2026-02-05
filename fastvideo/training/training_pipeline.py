@@ -2,6 +2,8 @@
 from dataclasses import asdict
 import math
 import os
+import shutil
+import tempfile
 import time
 from abc import ABC, abstractmethod
 from collections import deque
@@ -680,7 +682,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
                 metrics["hidden_dim"] = arch_config.hidden_size
                 metrics["num_layers"] = arch_config.num_layers
-                metrics["ffn_dim"] = arch_config.ffn_dim
 
                 self.tracker.log(metrics, step)
             if step % self.training_args.training_state_checkpointing_steps == 0:
@@ -818,7 +819,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         validation_dataloader = DataLoader(validation_dataset,
                                            batch_size=None,
                                            num_workers=0)
-        # return
+
         self.transformer.eval()
         if getattr(self, "transformer_2", None) is not None:
             self.transformer_2.eval()
@@ -896,6 +897,16 @@ class TrainingPipeline(LoRAPipeline, ABC):
                             f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
                         )
                         imageio.mimsave(filename, video, fps=sampling_param.fps)
+                        # Mux audio if available
+                        audio = output_batch.extra.get("audio")
+                        audio_sample_rate = output_batch.extra.get(
+                            "audio_sample_rate")
+                        if audio is not None and audio_sample_rate is not None:
+                            if not self._mux_audio(filename, audio,
+                                                   audio_sample_rate):
+                                logger.warning(
+                                    "Audio mux failed for validation video %s; saved video without audio.",
+                                    filename)
                         video_filenames.append(filename)
 
                     artifacts = []
@@ -922,6 +933,98 @@ class TrainingPipeline(LoRAPipeline, ABC):
         self.transformer.train()
         if getattr(self, "transformer_2", None) is not None:
             self.transformer_2.train()
+
+    @staticmethod
+    def _mux_audio(
+        video_path: str,
+        audio: torch.Tensor | np.ndarray,
+        sample_rate: int,
+    ) -> bool:
+        """Mux audio into video using PyAV."""
+        try:
+            import av
+        except ImportError:
+            logger.warning("PyAV not installed; cannot mux audio. "
+                           "Install with: pip install av")
+            return False
+
+        if torch.is_tensor(audio):
+            audio_np = audio.detach().cpu().float().numpy()
+        else:
+            audio_np = np.asarray(audio, dtype=np.float32)
+
+        if audio_np.ndim == 1:
+            audio_np = audio_np[:, None]
+        elif audio_np.ndim == 2:
+            if audio_np.shape[0] <= 8 and audio_np.shape[1] > audio_np.shape[0]:
+                audio_np = audio_np.T
+        else:
+            logger.warning("Unexpected audio shape %s; skipping mux.",
+                           audio_np.shape)
+            return False
+
+        audio_np = np.clip(audio_np, -1.0, 1.0)
+        audio_int16 = (audio_np * 32767.0).astype(np.int16)
+        num_channels = audio_int16.shape[1]
+        layout = "stereo" if num_channels == 2 else "mono"
+
+        try:
+            import wave
+            with tempfile.TemporaryDirectory() as tmpdir:
+                out_path = os.path.join(tmpdir, "muxed.mp4")
+                wav_path = os.path.join(tmpdir, "audio.wav")
+
+                # Write audio to WAV file
+                with wave.open(wav_path, "wb") as wav_file:
+                    wav_file.setnchannels(num_channels)
+                    wav_file.setsampwidth(2)
+                    wav_file.setframerate(sample_rate)
+                    wav_file.writeframes(audio_int16.tobytes())
+
+                # Open input video and audio
+                input_video = av.open(video_path)
+                input_audio = av.open(wav_path)
+
+                # Create output with both streams
+                output = av.open(out_path, mode="w")
+
+                # Add video stream (copy codec from input)
+                in_video_stream = input_video.streams.video[0]
+                out_video_stream = output.add_stream(
+                    codec_name=in_video_stream.codec_context.name,
+                    rate=in_video_stream.average_rate,
+                )
+                out_video_stream.width = in_video_stream.width
+                out_video_stream.height = in_video_stream.height
+                out_video_stream.pix_fmt = in_video_stream.pix_fmt
+
+                # Add audio stream (AAC)
+                out_audio_stream = output.add_stream("aac", rate=sample_rate)
+                out_audio_stream.layout = layout
+
+                # Remux video (decode and re-encode to be safe)
+                for frame in input_video.decode(video=0):
+                    for packet in out_video_stream.encode(frame):
+                        output.mux(packet)
+                for packet in out_video_stream.encode():
+                    output.mux(packet)
+
+                # Encode audio
+                for frame in input_audio.decode(audio=0):
+                    frame.pts = None  # Let encoder assign PTS
+                    for packet in out_audio_stream.encode(frame):
+                        output.mux(packet)
+                for packet in out_audio_stream.encode():
+                    output.mux(packet)
+
+                input_video.close()
+                input_audio.close()
+                output.close()
+                shutil.move(out_path, video_path)
+            return True
+        except Exception as e:
+            logger.warning("Audio mux failed: %s", e)
+            return False
 
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,
                                        training_args: TrainingArgs, step: int):
