@@ -239,6 +239,10 @@ def main():
             if first_diverged is None:
                 first_diverged = i
             continue
+        t_o = t_o.cpu() if t_o.is_cuda else t_o
+        t_fv = t_fv.cpu() if t_fv.is_cuda else t_fv
+        t_o = t_o.cpu() if t_o.is_cuda else t_o
+        t_fv = t_fv.cpu() if t_fv.is_cuda else t_fv
         diff = (t_fv - t_o).abs()
         max_d = diff.max().item()
         mean_d = diff.mean().item()
