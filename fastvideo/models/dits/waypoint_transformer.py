@@ -323,6 +323,12 @@ class GatedSelfAttention(nn.Module):
             q = self._apply_rope(q, pos_emb)
             k = self._apply_rope(k, pos_emb)
         
+        # Expand K/V heads to match Q heads for GQA (DistributedAttention expects matching heads)
+        if self.n_kv_heads != self.n_heads:
+            n_rep = self.n_heads // self.n_kv_heads
+            k = k.repeat_interleave(n_rep, dim=2)
+            v = v.repeat_interleave(n_rep, dim=2)
+        
         # Attention via DistributedAttention
         attn_out, _ = self.attn(q=q, k=k, v=v)
         attn_out = attn_out.reshape(B, L, D)
