@@ -26,6 +26,9 @@ class HunyuanVideo15ArchConfig(DiTArchConfig):
 
     param_names_mapping: dict = field(
         default_factory=lambda: {
+            r"^cond_type_embed\.(.*)$":
+            r"cond_type_embed.\1",
+
             # 1. context_embedder.time_text_embed submodules (specific rules, applied first):
             r"^context_embedder\.time_text_embed\.timestep_embedder\.linear_1\.(.*)$":
             r"txt_in.t_embedder.mlp.fc_in.\1",
@@ -55,6 +58,16 @@ class HunyuanVideo15ArchConfig(DiTArchConfig):
             r"txt_in.refiner_blocks.\1.mlp.fc_out.\2",
             r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.norm_out\.linear\.(.*)$":
             r"txt_in.refiner_blocks.\1.adaLN_modulation.linear.\2",
+            r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.self_attn_qkv\.(.*)$":
+            r"txt_in.refiner_blocks.\1.self_attn_qkv.\2",
+            r"^image_embedder\.linear_1\.(.*)$":
+            r"image_embedder.linear_1.\1",
+            r"^image_embedder\.linear_2\.(.*)$":
+            r"image_embedder.linear_2.\1",
+            r"^image_embedder\.norm_in\.(.*)$":
+            r"image_embedder.norm_in.\1",
+            r"^image_embedder\.norm_out\.(.*)$":
+            r"image_embedder.norm_out.\1",
 
             # 2. txt_in_2 mapping:
             r"^context_embedder_2\.(.*)$":
@@ -143,6 +156,12 @@ class HunyuanVideo15ArchConfig(DiTArchConfig):
     use_meanflow: bool = False
     exclude_lora_layers: list[str] = field(
         default_factory=lambda: ["img_in", "txt_in", "time_in", "vector_in"])
+
+    # Causal HunyuanVideo1.5
+    local_attn_size: int = -1  # Window size for temporal local attention (-1 indicates global attention)
+    sink_size: int = 0  # Size of the attention sink, we keep the first `sink_size` frames unchanged when rolling the KV cache
+    num_frames_per_block: int = 3
+    sliding_window_num_frames: int = 31
 
     def __post_init__(self):
         super().__post_init__()

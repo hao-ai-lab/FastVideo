@@ -45,12 +45,12 @@ class CausalDMDDenosingStage(DenoisingStage):
         self.transformer_2 = transformer_2
         self.vae = vae
         # Model-dependent constants (aligned with causal_inference.py assumptions)
-        self.num_transformer_blocks = len(self.transformer.blocks)
-        self.num_frames_per_block = self.transformer.config.arch_config.num_frames_per_block
-        self.sliding_window_num_frames = self.transformer.config.arch_config.sliding_window_num_frames
+        self.num_transformer_blocks = self.transformer.config.num_layers
+        self.num_frames_per_block = self.transformer.config.num_frames_per_block
+        self.sliding_window_num_frames = self.transformer.config.sliding_window_num_frames
 
         try:
-            self.local_attn_size = getattr(self.transformer.model,
+            self.local_attn_size = getattr(self.transformer.config,
                                            "local_attn_size",
                                            -1)  # type: ignore
         except Exception:
@@ -412,8 +412,8 @@ class CausalDMDDenosingStage(DenoisingStage):
         Initialize a Per-GPU KV cache aligned with the Wan model assumptions.
         """
         kv_cache1 = []
-        num_attention_heads = self.transformer.num_attention_heads
-        attention_head_dim = self.transformer.attention_head_dim
+        num_attention_heads = self.transformer.config.num_attention_heads
+        attention_head_dim = self.transformer.config.attention_head_dim
         if self.local_attn_size != -1:
             kv_cache_size = self.local_attn_size * self.frame_seq_length
         else:

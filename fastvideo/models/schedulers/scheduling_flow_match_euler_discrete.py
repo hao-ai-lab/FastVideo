@@ -155,8 +155,8 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
 
         self.sigmas = sigmas.to(
             "cpu")  # to avoid too much CPU/GPU communication
-        self.sigma_min = self.sigmas[-1].item()
-        self.sigma_max = self.sigmas[0].item()
+        self.sigma_min = sigma_min if sigma_min is not None else self.sigmas[-1].item()
+        self.sigma_max = sigma_max if sigma_max is not None else self.sigmas[0].item()
 
         BaseScheduler.__init__(self)
 
@@ -289,6 +289,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
         sigmas: list[float] | None = None,
         mu: float | None = None,
         timesteps: list[float] | None = None,
+        extra_one_step: bool = False,
     ) -> None:
         """
         Sets the discrete timesteps used for the diffusion chain (to be run before inference).
@@ -350,7 +351,10 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
             if timesteps_array is None:
                 t_max = self._sigma_to_t(self.sigma_max)
                 t_min = self._sigma_to_t(self.sigma_min)
-                timesteps_array = np.linspace(t_max, t_min, num_inference_steps)
+                if extra_one_step:
+                    timesteps_array = np.linspace(t_max, t_min, num_inference_steps + 1)[:-1]
+                else:
+                    timesteps_array = np.linspace(t_max, t_min, num_inference_steps)
             sigmas_array = timesteps_array / self.config.num_train_timesteps
         else:
             sigmas_array = np.array(sigmas).astype(np.float32)
@@ -644,7 +648,7 @@ class FlowMatchEulerDiscreteScheduler(SchedulerMixin, ConfigMixin,
         self,
         clean_latent: torch.Tensor,
         noise: torch.Tensor,
-        timestep: torch.IntTensor,
+        timestep: torch.Tensor,
     ) -> torch.Tensor:
 
         """

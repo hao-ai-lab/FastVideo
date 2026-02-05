@@ -830,6 +830,7 @@ class TrainingArgs(FastVideoArgs):
     precedence.
     """
     data_path: str = ""
+    data_path_2: str | None = None
     dataloader_num_workers: int = 0
     num_height: int = 0
     num_width: int = 0
@@ -859,6 +860,7 @@ class TrainingArgs(FastVideoArgs):
     validation_sampling_steps: str = ""
     validation_guidance_scale: str = ""
     validation_steps: float = 0.0
+    visualization_steps: float = 0.0
     log_validation: bool = False
     trackers: list[str] = dataclasses.field(default_factory=list)
     tracker_project_name: str = ""
@@ -874,6 +876,7 @@ class TrainingArgs(FastVideoArgs):
     num_train_epochs: int = 0
     max_train_steps: int = 0
     gradient_accumulation_steps: int = 0
+    optimizer_type: str = "adamw"
     learning_rate: float = 0.0
     scale_lr: bool = False
     lr_scheduler: str = "constant"
@@ -943,6 +946,8 @@ class TrainingArgs(FastVideoArgs):
     same_step_across_blocks: bool = False  # Use same exit timestep for all blocks
     last_step_only: bool = False  # Only use the last timestep for training
     context_noise: int = 0  # Context noise level for cache updates
+    use_context_forcing: bool = False
+    use_ode_init: bool = False
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -997,6 +1002,10 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--data-path",
                             type=str,
                             required=True,
+                            help="Path to parquet files")
+        parser.add_argument("--data-path-2",
+                            type=str,
+                            required=False,
                             help="Path to parquet files")
         parser.add_argument("--dataloader-num-workers",
                             type=int,
@@ -1091,6 +1100,9 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--validation-steps",
                             type=float,
                             help="Number of validation steps")
+        parser.add_argument("--visualization-steps",
+                            type=float,
+                            help="Number of visualization steps")
         parser.add_argument("--log-validation",
                             action=StoreBoolean,
                             help="Whether to log validation results")
@@ -1139,6 +1151,10 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--gradient-accumulation-steps",
                             type=int,
                             help="Number of steps to accumulate gradients")
+        parser.add_argument("--optimizer-type",
+                            type=str,
+                            choices=["adamw", "muon"],
+                            help="Optimizer type")
         parser.add_argument("--learning-rate",
                             type=float,
                             required=True,
@@ -1365,6 +1381,12 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             default=TrainingArgs.context_noise,
                             help="Context noise level for cache updates")
+        parser.add_argument("--use-context-forcing",
+                            action=StoreBoolean,
+                            help="Whether to use context forcing")
+        parser.add_argument("--use-ode-init",
+                            action=StoreBoolean,
+                            help="Whether to use ODE init")
 
         return parser
 

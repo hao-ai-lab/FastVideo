@@ -8,9 +8,9 @@ from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.cosmos2_5 import Cosmos25Config
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
-from fastvideo.configs.pipelines.hunyuan15 import Hunyuan15T2V480PConfig, Hunyuan15T2V720PConfig
 from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.ltx2 import LTX2T2VConfig
+from fastvideo.configs.pipelines.hunyuan15 import Hunyuan15T2V480PConfig, Hunyuan15T2V720PConfig, SelfForcingHunyuan15T2V480PConfig, Hunyuan15DistilledI2V480PConfig
 from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.configs.pipelines.turbodiffusion import (
@@ -35,6 +35,10 @@ logger = init_logger(__name__)
 PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "FastVideo/FastHunyuan-diffusers": FastHunyuanConfig,
     "hunyuanvideo-community/HunyuanVideo": HunyuanConfig,
+    "weizhou03/SFHunyuanVideo-1.5-Diffusers-480p_t2v":
+    SelfForcingHunyuan15T2V480PConfig,
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v_step_distilled":
+    Hunyuan15DistilledI2V480PConfig,
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v":
     Hunyuan15T2V480PConfig,
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v":

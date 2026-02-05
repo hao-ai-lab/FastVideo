@@ -293,6 +293,7 @@ class ComposedPipelineBase(ABC):
         # remove keys that are not pipeline modules
         model_index.pop("_class_name")
         model_index.pop("_diffusers_version")
+        model_index.pop("_name_or_path", None)
         model_index.pop("workload_type", None)
         if "boundary_ratio" in model_index and model_index[
                 "boundary_ratio"] is not None:

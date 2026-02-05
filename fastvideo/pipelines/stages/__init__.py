@@ -8,6 +8,7 @@ complete diffusion pipelines.
 
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.causal_denoising import CausalDMDDenosingStage
+from fastvideo.pipelines.stages.hy15_causal_denoising import Hy15CausalDMDDenosingStage
 from fastvideo.pipelines.stages.conditioning import ConditioningStage
 from fastvideo.pipelines.stages.decoding import DecodingStage
 from fastvideo.pipelines.stages.denoising import (
@@ -57,6 +58,7 @@ __all__ = [
     "Cosmos25AutoLatentPreparationStage",
     "LTX2LatentPreparationStage",
     "LTX2AudioDecodingStage",
+    "Hy15CausalDMDDenosingStage",
     "ConditioningStage",
     "DenoisingStage",
     "DmdDenoisingStage",

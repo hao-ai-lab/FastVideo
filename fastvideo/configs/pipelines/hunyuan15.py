@@ -127,8 +127,13 @@ class Hunyuan15T2V480PConfig(PipelineConfig):
     vae_tiling: bool = True
 
     def __post_init__(self):
-        self.vae_config.load_encoder = False
+        self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
+
+
+@dataclass
+class Hunyuan15DistilledI2V480PConfig(Hunyuan15T2V480PConfig):
+    flow_shift: int = 7
 
 
 @dataclass
@@ -137,3 +142,14 @@ class Hunyuan15T2V720PConfig(Hunyuan15T2V480PConfig):
 
     # HunyuanConfig-specific parameters with defaults
     flow_shift: int = 9
+
+
+@dataclass
+class SelfForcingHunyuan15T2V480PConfig(Hunyuan15T2V480PConfig):
+    flow_shift: int = 5
+    is_causal: bool = True
+    # dmd_denoising_steps: list[int] | None = field(
+    #     default_factory=lambda: [1000, 750, 500, 250])
+    dmd_denoising_steps: list[int] | None = field(
+        default_factory=lambda: [1000, 875, 750, 625, 500, 375, 250, 125])
+    warp_denoising_step: bool = True

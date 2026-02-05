@@ -127,8 +127,9 @@ class HunyuanVideo15TimeEmbedding(nn.Module):
         self,
         timestep: torch.Tensor,
         timestep_r: Optional[torch.Tensor] = None,
+        timestep_seq_len: int | None = None,
     ) -> torch.Tensor:
-        timesteps_emb = self.timestep_embedder(timestep)
+        timesteps_emb = self.timestep_embedder(timestep, timestep_seq_len)
 
         if timestep_r is not None:
             timesteps_emb_r = self.timestep_embedder_r(timestep_r)
@@ -473,6 +474,7 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
         guidance: Optional[torch.Tensor] = None,
         timestep_r: Optional[torch.LongTensor] = None,
         attention_kwargs: Optional[Dict[str, Any]] = None,
+        **kwargs
     ):
         encoder_hidden_states_image = encoder_hidden_states_image[0]
         encoder_hidden_states, encoder_hidden_states_2 = encoder_hidden_states
@@ -494,7 +496,12 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
 
         # 2. Conditional embeddings
-        temb = self.time_in(timestep, timestep_r=timestep_r)
+        if timestep.dim() == 2:
+            ts_seq_len = timestep.shape[1]
+            temb = self.time_in(timestep.flatten(), timestep_r=timestep_r, timestep_seq_len=ts_seq_len)
+        else:
+            temb = self.time_in(timestep, timestep_r=timestep_r)
+        # temb is [bs, seq_len, inner_dim] if ts_seq_len is not None, otherwise [bs, inner_dim]
 
         hidden_states = self.img_in(hidden_states)
         hidden_states, original_seq_len = sequence_model_parallel_shard(hidden_states, dim=1)
@@ -698,6 +705,7 @@ class SingleTokenRefiner(nn.Module):
         else:
             mask_float = mask.float().unsqueeze(-1)  # [B, L, 1]
             context_aware_representations = (x * mask_float).sum(dim=1) / mask_float.sum(dim=1)
+        context_aware_representations = context_aware_representations.to(original_dtype)
 
         context_aware_representations = self.c_embedder(
             context_aware_representations)
@@ -850,6 +858,13 @@ class FinalLayer(nn.Module):
     def forward(self, x, c):
         # What the heck HF? Why you change the scale and shift order here???
         scale, shift = self.adaLN_modulation(c).chunk(2, dim=-1)
-        x = self.norm_final(x) * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+        if c.dim() == 3:
+            # [bs, seq_len, inner_dim]
+            num_frames = scale.shape[1]
+            frame_seqlen = x.shape[1] // num_frames
+            x = (self.norm_final(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1.0 + scale.unsqueeze(2)) + shift.unsqueeze(2)).flatten(1, 2)
+        else:
+            # [bs, inner_dim]
+            x = self.norm_final(x) * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
         x, _ = self.linear(x)
         return x

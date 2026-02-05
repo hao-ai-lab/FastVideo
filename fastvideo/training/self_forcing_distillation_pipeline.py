@@ -8,7 +8,6 @@ from typing import Any
 import numpy as np
 import torch
 import torch.distributed as dist
-from einops import rearrange
 from tqdm.auto import tqdm
 
 import fastvideo.envs as envs
@@ -19,8 +18,8 @@ from fastvideo.fastvideo_args import TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 
-from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import SelfForcingFlowMatchScheduler
 from fastvideo.models.utils import pred_noise_to_pred_video
+from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import SelfForcingFlowMatchScheduler
 from fastvideo.pipelines import TrainingBatch
 from fastvideo.training.distillation_pipeline import DistillationPipeline
 from fastvideo.training.training_utils import (EMA_FSDP,
@@ -68,7 +67,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         self.noise_scheduler = SelfForcingFlowMatchScheduler(
             num_inference_steps=1000,
-            shift=5.0,
+            shift=self.timestep_shift,
             sigma_min=0.0,
             extra_one_step=True,
             training=True)
@@ -84,35 +83,23 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         self.last_step_only = getattr(training_args, 'last_step_only', False)
         self.context_noise = getattr(training_args, 'context_noise', 0)
 
-        self.kv_cache1: list[dict[str, Any]] | None = None
-        self.crossattn_cache: list[dict[str, Any]] | None = None
-
         logger.info("Self-forcing generator update ratio: %s",
                     self.dfake_gen_update_ratio)
-        logger.info("RANK: %s, exiting initialize_training_pipeline",
-                    self.global_rank,
-                    local_main_process_only=False)
 
-    def generate_and_sync_list(self, num_blocks: int, num_denoising_steps: int,
+    def generate_and_sync_list(self, num_blocks: int, start_timestep_index: int,
+                               end_timestep_index: int,
                                device: torch.device) -> list[int]:
         """Generate and synchronize random exit flags across distributed processes."""
-        logger.info(
-            "RANK: %s, enter generate_and_sync_list blocks=%s steps=%s device=%s",
-            self.global_rank,
-            num_blocks,
-            num_denoising_steps,
-            str(device),
-            local_main_process_only=False)
         rank = dist.get_rank() if dist.is_initialized() else 0
 
         if rank == 0:
             # Generate random indices
-            indices = torch.randint(low=0,
-                                    high=num_denoising_steps,
+            indices = torch.randint(low=start_timestep_index,
+                                    high=end_timestep_index,
                                     size=(num_blocks, ),
                                     device=device)
             if self.last_step_only:
-                indices = torch.ones_like(indices) * (num_denoising_steps - 1)
+                indices = torch.ones_like(indices) * (end_timestep_index - 1)
         else:
             indices = torch.empty(num_blocks, dtype=torch.long, device=device)
 
@@ -120,12 +107,6 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             dist.broadcast(indices,
                            src=0)  # Broadcast the random indices to all ranks
         flags = indices.tolist()
-        logger.info(
-            "RANK: %s, exit generate_and_sync_list flags_len=%s first=%s",
-            self.global_rank,
-            len(flags),
-            flags[0] if len(flags) > 0 else None,
-            local_main_process_only=False)
         return flags
 
     def generator_loss(
@@ -186,7 +167,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         # During training, the number of generated frames should be uniformly sampled from
         # [21, self.num_training_frames], but still being a multiple of self.num_frame_per_block
-        min_num_frames = 20 if self.independent_first_frame else 21
+        min_num_frames = num_training_frames - 1 if self.independent_first_frame else num_training_frames
         max_num_frames = num_training_frames - 1 if self.independent_first_frame else num_training_frames
         assert max_num_frames % self.num_frame_per_block == 0
         assert min_num_frames % self.num_frame_per_block == 0
@@ -205,23 +186,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             num_generated_frames += 1
             min_num_frames += 1
 
-        # Create noise with dynamic shape
-        if initial_latent is not None:
-            noise_shape = [
-                batch_size, num_generated_frames - 1,
-                *self.video_latent_shape[2:]
-            ]
+        if training_batch.use_gt_trajectory and training_batch.trajectory_latents is not None:
+            noise = training_batch.trajectory_latents.to(self.device,
+                                                         dtype=dtype)
         else:
-            noise_shape = [
-                batch_size, num_generated_frames, *self.video_latent_shape[2:]
-            ]
-
-        noise = torch.randn(noise_shape, device=self.device, dtype=dtype)
-        if self.sp_world_size > 1:
-            noise = rearrange(noise,
-                              "b (n t) c h w -> b n t c h w",
-                              n=self.sp_world_size).contiguous()
-            noise = noise[:, self.rank_in_sp_group, :, :, :, :]
+            noise = training_batch.latents.to(self.device, dtype=dtype)
 
         batch_size, num_frames, num_channels, height, width = noise.shape
 
@@ -252,7 +221,7 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         # Step 1: Initialize KV cache to all zeros
         cache_frames = num_generated_frames + num_input_frames
-        self.kv_cache1, self.crossattn_cache = self._initialize_simulation_caches(
+        kv_cache1, crossattn_cache = self._initialize_simulation_caches(
             batch_size, dtype, self.device, max_num_frames=cache_frames)
 
         # Step 2: Cache context feature
@@ -286,19 +255,33 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         all_num_frames = [self.num_frame_per_block] * num_blocks
         if self.independent_first_frame and initial_latent is None:
             all_num_frames = [1] + all_num_frames
-        num_denoising_steps = len(self.denoising_step_list)
+
+        if training_batch.use_gt_trajectory and training_batch.trajectory_latents is not None:
+            start_timestep_index = training_batch.start_timestep_index
+            end_timestep_index = len(self.denoising_step_list)
+        else:
+            start_timestep_index = 0
+            end_timestep_index = len(self.denoising_step_list)
         exit_flags = self.generate_and_sync_list(len(all_num_frames),
-                                                 num_denoising_steps,
+                                                 start_timestep_index,
+                                                 end_timestep_index,
                                                  device=noise.device)
-        start_gradient_frame_index = max(0, num_output_frames - 21)
+        start_gradient_frame_index = max(
+            0, num_output_frames - num_training_frames)
 
         for block_index, current_num_frames in enumerate(all_num_frames):
             noisy_input = noise[:, current_start_frame -
                                 num_input_frames:current_start_frame +
                                 current_num_frames - num_input_frames]
 
+            index = start_timestep_index
+            current_timestep = self.denoising_step_list[index]
+
+            assert index < len(
+                self.denoising_step_list
+            ), "Index is greater than the number of denoising steps"
             # Step 3.1: Spatial denoising loop
-            for index, current_timestep in enumerate(self.denoising_step_list):
+            while index < len(self.denoising_step_list):
                 if self.same_step_across_blocks:
                     exit_flag = (index == exit_flags[0])
                 else:
@@ -329,8 +312,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             input_kwargs['timestep'],
                             encoder_hidden_states_image=training_batch_temp.
                             input_kwargs.get('encoder_hidden_states_image'),
-                            kv_cache=self.kv_cache1,
-                            crossattn_cache=self.crossattn_cache,
+                            kv_cache=kv_cache1,
+                            crossattn_cache=crossattn_cache,
                             current_start=current_start_frame *
                             self.frame_seq_length,
                             start_frame=current_start_frame).permute(
@@ -369,8 +352,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                                 input_kwargs['timestep'],
                                 encoder_hidden_states_image=training_batch_temp.
                                 input_kwargs.get('encoder_hidden_states_image'),
-                                kv_cache=self.kv_cache1,
-                                crossattn_cache=self.crossattn_cache,
+                                kv_cache=kv_cache1,
+                                crossattn_cache=crossattn_cache,
                                 current_start=current_start_frame *
                                 self.frame_seq_length,
                                 start_frame=current_start_frame).permute(
@@ -389,8 +372,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             input_kwargs['timestep'],
                             encoder_hidden_states_image=training_batch_temp.
                             input_kwargs.get('encoder_hidden_states_image'),
-                            kv_cache=self.kv_cache1,
-                            crossattn_cache=self.crossattn_cache,
+                            kv_cache=kv_cache1,
+                            crossattn_cache=crossattn_cache,
                             current_start=current_start_frame *
                             self.frame_seq_length,
                             start_frame=current_start_frame).permute(
@@ -404,6 +387,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             0, pred_flow.shape[:2])
                     break
 
+                index += 1
+                current_timestep = self.denoising_step_list[index]
+
             # Step 3.2: record the model's output
             output[:, current_start_frame:current_start_frame +
                    current_num_frames] = denoised_pred
@@ -416,6 +402,17 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 context_timestep).unflatten(0, denoised_pred.shape[:2])
 
             with torch.no_grad():
+                if training_batch.video_latent is not None:
+                    denoised_pred = torch.cat([
+                        denoised_pred,
+                        training_batch.
+                        video_latent[:,
+                                     current_start_frame:current_start_frame +
+                                     current_num_frames],
+                        torch.zeros_like(denoised_pred),
+                    ],
+                                              dim=2)
+
                 training_batch_temp = self._build_distill_input_kwargs(
                     denoised_pred, context_timestep,
                     training_batch.conditional_dict, training_batch)
@@ -430,8 +427,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                     timestep=training_batch_temp.input_kwargs['timestep'],
                     encoder_hidden_states_image=training_batch_temp.
                     input_kwargs.get('encoder_hidden_states_image'),
-                    kv_cache=self.kv_cache1,
-                    crossattn_cache=self.crossattn_cache,
+                    kv_cache=kv_cache1,
+                    crossattn_cache=crossattn_cache,
                     current_start=current_start_frame * self.frame_seq_length,
                     start_frame=current_start_frame)
 
@@ -445,10 +442,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
 
         # Slice last 21 frames if we generated more
         gradient_mask = None
-        if pred_image_or_video.shape[1] > 21:
+        if pred_image_or_video.shape[1] > num_training_frames:
             with torch.no_grad():
                 # Re-encode to get image latent
-                latent_to_decode = pred_image_or_video[:, :-20, ...]
+                latent_to_decode = pred_image_or_video[:, :-(
+                    num_training_frames - 1), ...]
                 # Decode to video
                 latent_to_decode = latent_to_decode.permute(
                     0, 2, 1, 3, 4)  # [B, C, F, H, W]
@@ -479,8 +477,11 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 image_latent = image_latent.permute(0, 2, 1, 3,
                                                     4)  # [B, F, C, H, W]
 
-            pred_image_or_video_last_21 = torch.cat(
-                [image_latent, pred_image_or_video[:, -20:, ...]], dim=1)
+            pred_image_or_video_last_21 = torch.cat([
+                image_latent,
+                pred_image_or_video[:, -(num_training_frames - 1):, ...]
+            ],
+                                                    dim=1)
         else:
             pred_image_or_video_last_21 = pred_image_or_video
 
@@ -523,9 +524,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                 min_num_frames, dtype=torch.float32, device=self.device)
 
         # Clean up caches
-        assert self.kv_cache1 is not None
-        assert self.crossattn_cache is not None
-        self._reset_simulation_caches(self.kv_cache1, self.crossattn_cache)
+        assert kv_cache1 is not None
+        assert crossattn_cache is not None
+        self._reset_simulation_caches(kv_cache1, crossattn_cache)
 
         return final_output if gradient_mask is not None else pred_image_or_video
 
@@ -538,28 +539,36 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         max_num_frames: int | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Initialize KV cache and cross-attention cache for multi-step simulation."""
-        num_transformer_blocks = len(self.transformer.blocks)
+        num_transformer_blocks = self.transformer.config.num_layers
         latent_shape = self.video_latent_shape_sp
         _, num_frames, _, height, width = latent_shape
 
-        _, p_h, p_w = self.transformer.patch_size
-        post_patch_height = height // p_h
-        post_patch_width = width // p_w
+        if isinstance(self.transformer.config.patch_size, tuple):
+            ph, pw = self.transformer.config.patch_size[
+                1], self.transformer.config.patch_size[2]
+        elif isinstance(self.transformer.config.patch_size, int):
+            ph, pw = self.transformer.config.patch_size, self.transformer.config.patch_size
+        else:
+            raise ValueError(
+                f"Unsupported patch size type: {type(self.transformer.config.patch_size)}"
+            )
+        post_patch_height = height // ph
+        post_patch_width = width // pw
 
         frame_seq_length = post_patch_height * post_patch_width
         self.frame_seq_length = frame_seq_length
 
         # Get model configuration parameters - handle FSDP wrapping
-        num_attention_heads = getattr(self.transformer, 'num_attention_heads',
-                                      None)
-        attention_head_dim = getattr(self.transformer, 'attention_head_dim',
-                                     None)
-        text_len = getattr(self.transformer, 'text_len', None)
+        num_attention_heads = self.transformer.config.num_attention_heads
+        attention_head_dim = self.transformer.config.attention_head_dim
+        text_len = getattr(self.transformer.config, 'text_len', None)
 
         if max_num_frames is None:
             max_num_frames = num_frames
         num_max_frames = max(max_num_frames, num_frames)
-        kv_cache_size = num_max_frames * frame_seq_length
+        local_attn_size = getattr(self.transformer.config, 'local_attn_size',
+                                  -1)
+        kv_cache_size = num_max_frames * frame_seq_length if local_attn_size == -1 else local_attn_size * frame_seq_length
 
         kv_cache = []
         for _ in range(num_transformer_blocks):
@@ -979,6 +988,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
             logger.info("Starting training from scratch")
 
         self.train_loader_iter = iter(self.train_dataloader)
+        if getattr(self, "train_dataloader_2", None) is not None:
+            self.train_loader_iter_2 = iter(self.train_dataloader_2)
 
         step_times: deque[float] = deque(maxlen=100)
 

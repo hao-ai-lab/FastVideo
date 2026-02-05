@@ -663,7 +663,7 @@ class AutoencoderKLHunyuanVideo15(nn.Module, ParallelTiledVAE):
         # When decoding spatially large video latents, the memory requirement is very high. By breaking the video latent
         # frames spatially into smaller tiles and performing multiple forward passes for decoding, and then blending the
         # intermediate tiles together, the memory requirement can be lowered.
-        self.use_tiling = False
+        self.use_tiling = True
 
         # The minimal tile height and width for spatial tiling to be used
         self.tile_sample_min_height = 256

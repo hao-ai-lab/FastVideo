@@ -17,8 +17,8 @@ class Hunyuan15_480P_SamplingParam(SamplingParam):
     guidance_scale: float = 6.0
     prompt_attention_mask: list = field(default_factory=list)
     negative_attention_mask: list = field(default_factory=list)
-    sigmas: list[float] | None = field(
-        default_factory=lambda: list(np.linspace(1.0, 0.0, 50 + 1)[:-1]))
+    # sigmas: list[float] | None = field(
+    #     default_factory=lambda: list(np.linspace(1.0, 0.0, 50 + 1)[:-1]))
 
     negative_prompt: str = ""
 
@@ -26,6 +26,14 @@ class Hunyuan15_480P_SamplingParam(SamplingParam):
         super().__post_init__()
         self.sigmas = list(
             np.linspace(1.0, 0.0, self.num_inference_steps + 1)[:-1])
+
+
+@dataclass
+class Hunyuan15_480P_Distilled_SamplingParam(Hunyuan15_480P_SamplingParam):
+    num_inference_steps: int = 8
+    fps: int = 24
+
+    guidance_scale: float = 1.0
 
 
 @dataclass
