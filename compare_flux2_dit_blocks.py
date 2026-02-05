@@ -78,13 +78,30 @@ def _collect_official_activations(pipe, latent, prompt_embeds, timestep_scaled, 
 
     def make_double_hook(name):
         def hook(_module, _inputs, outputs):
-            activations.append((name, outputs[1].detach().clone().float()))
+            try:
+                t = outputs[1] if len(outputs) >= 2 else outputs[0]
+                if t.dim() == 3:
+                    activations.append((name, t.detach().clone().float()))
+                elif t.dim() == 2:
+                    activations.append((name, t.unsqueeze(0).detach().clone().float()))
+                else:
+                    activations.append((name, None))
+            except Exception:
+                activations.append((name, None))
         return hook
 
     def make_single_hook(name, ntxt):
         def hook(_module, _inputs, outputs):
-            out = outputs[0][:, ntxt:, :].detach().clone().float()
-            activations.append((name, out))
+            try:
+                out = outputs[0]
+                if out.dim() == 3 and out.shape[1] > ntxt:
+                    activations.append((name, out[:, ntxt:, :].detach().clone().float()))
+                elif out.dim() == 2:
+                    activations.append((name, out.unsqueeze(0).detach().clone().float()))
+                else:
+                    activations.append((name, None))
+            except Exception:
+                activations.append((name, None))
         return hook
 
     trans = pipe.transformer
@@ -169,7 +186,6 @@ def main():
 
     # 2. Load FastVideo transformer and collect activations
     print("Loading FastVideo transformer and running forward with hooks ...")
-    pipeline_config_cls = get_pipeline_config_cls_from_name(MODEL_ID)
     fastvideo_args = FastVideoArgs.from_kwargs(
         model_path=MODEL_ID,
         hsdp_shard_dim=1,
@@ -205,6 +221,11 @@ def main():
     print("\n--- Block-by-block comparison ---")
     first_diverged = None
     for i, ((name_o, t_o), (name_fv, t_fv)) in enumerate(zip(official_activations, fv_activations)):
+        if t_o is None or t_fv is None:
+            print(f"  {i} {name_o}: N/A (missing activation from one model)")
+            if first_diverged is None:
+                first_diverged = i
+            continue
         if t_o.shape != t_fv.shape:
             print(f"  {i} {name_o} vs {name_fv}: SHAPE MISMATCH {t_o.shape} vs {t_fv.shape}")
             if first_diverged is None:
