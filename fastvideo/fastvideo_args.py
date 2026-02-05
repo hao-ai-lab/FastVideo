@@ -118,6 +118,9 @@ class FastVideoArgs:
     hsdp_shard_dim: int = -1
     dist_timeout: int | None = None  # timeout for torch.distributed
 
+    ring_degree: int = 1  # Ring attention degree
+    ulysses_degree: int = 1  # Ulysses attention degree
+
     pipeline_config: PipelineConfig = field(default_factory=PipelineConfig)
     preprocess_config: PreprocessConfig | None = None
 
@@ -328,17 +331,32 @@ class FastVideoArgs:
             help="The tensor parallelism size.",
         )
         parser.add_argument(
+            "--ring-degree",
+            type=int,
+            default=FastVideoArgs.ring_degree,
+            help="Ring attention degree (number of GPUs in ring topology). "
+            "Must satisfy: ring_degree * ulysses_degree == world_size.",
+        )
+        parser.add_argument(
+            "--ulysses-degree",
+            type=int,
+            default=FastVideoArgs.ulysses_degree,
+            help="Ulysses attention degree (number of GPUs for all-to-all). "
+            "Must satisfy: ring_degree * ulysses_degree == world_size.",
+        )
+        parser.add_argument(
             "--sp-size",
             type=int,
             default=FastVideoArgs.sp_size,
-            help="The sequence parallelism size.",
+            help="[DEPRECATED] Use --ring-degree and --ulysses-degree instead. "
+            "The sequence parallelism size.",
         )
         parser.add_argument(
             "--ring-size",
             type=int,
             default=FastVideoArgs.ring_size,
-            help="Ring attention size (number of GPUs in ring topology). "
-            "If > 1, enables ring attention.",
+            help="[DEPRECATED] Use --ring-degree instead. "
+            "Ring attention size.",
         )
         parser.add_argument(
             "--hsdp-replicate-dim",
