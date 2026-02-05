@@ -8,11 +8,7 @@ Usage:
   python run_flux2_official.py
 """
 import torch
-
-try:
-    from diffusers import Flux2KleinPipeline
-except ImportError:
-    from diffusers.pipelines.flux2 import Flux2KleinPipeline
+from diffusers import Flux2KleinPipeline
 
 def main():
     device = "cuda"
@@ -31,7 +27,7 @@ def main():
     # Klein is 4-step distilled; guidance_scale 1.0
     print("Generating: prompt=%r, seed=0, 1024x1024, 4 steps" % (prompt,))
     image = pipe(
-        prompt,
+        prompt=prompt,
         height=1024,
         width=1024,
         guidance_scale=1.0,
