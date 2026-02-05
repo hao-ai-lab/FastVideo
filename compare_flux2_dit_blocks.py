@@ -302,6 +302,67 @@ def _capture_double0_inputs_official(pipe, latent, prompt_embeds, timestep_scale
     return captured
 
 
+def _capture_single_block_input_fv(transformer, latent, prompt_embeds, timestep_scaled, device, single_block_index, freqs_cis):
+    """Capture input (hidden_states) to the given single-stream block = output of previous block."""
+    captured = {}
+    if single_block_index >= len(transformer.single_transformer_blocks):
+        return captured
+
+    def pre_hook(_module, args, kwargs=None):
+        if args and len(args) > 0:
+            captured["input"] = args[0].detach().clone().cpu().float()
+
+    handle = transformer.single_transformer_blocks[single_block_index].register_forward_pre_hook(pre_hook)
+    try:
+        with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
+            transformer(
+                latent,
+                prompt_embeds,
+                timestep_scaled,
+                guidance=None,
+                freqs_cis=freqs_cis,
+            )
+    finally:
+        handle.remove()
+    return captured
+
+
+def _capture_single_block_input_official(pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device, single_block_index):
+    """Capture input (hidden_states) to the given single-stream block = output of previous block."""
+    captured = {}
+    trans = pipe.transformer
+    if not hasattr(trans, "single_transformer_blocks") or single_block_index >= len(trans.single_transformer_blocks):
+        return captured
+
+    def pre_hook(_module, args, kwargs=None):
+        if args and len(args) > 0:
+            captured["input"] = args[0].detach().clone().cpu().float()
+
+    handle = trans.single_transformer_blocks[single_block_index].register_forward_pre_hook(pre_hook)
+    dtype = next(trans.parameters()).dtype
+    latent_d = latent.to(device, dtype=dtype)
+    timestep = timestep_scaled.to(device)
+    prompt_embeds_d = prompt_embeds.to(device, dtype=dtype)
+    text_ids_d = text_ids.to(device)
+    latent_ids_d = latent_ids.to(device)
+    try:
+        with torch.no_grad():
+            with trans.cache_context("cond"):
+                trans(
+                    hidden_states=latent_d,
+                    timestep=timestep,
+                    guidance=None,
+                    encoder_hidden_states=prompt_embeds_d,
+                    txt_ids=text_ids_d,
+                    img_ids=latent_ids_d,
+                    joint_attention_kwargs=getattr(pipe, "attention_kwargs", None) or {},
+                    return_dict=False,
+                )
+    finally:
+        handle.remove()
+    return captured
+
+
 def _collect_fv_activations(transformer, latent, prompt_embeds, timestep_scaled, device, num_txt_tokens, freqs_cis=None):
     """Run FastVideo transformer with hooks; return list of (block_name, tensor) per block."""
     activations = []
@@ -597,6 +658,33 @@ def main():
     if first_diverged is not None:
         print(f"\n-> First diverged block index: {first_diverged} ({official_activations[first_diverged][0]})")
         print("  Debug that block (and inputs to it) in FastVideo vs official.")
+        # If first diverged is a single block, capture and compare INPUT to that block ( = output of previous block)
+        num_double = len(transformer.transformer_blocks)
+        if first_diverged >= num_double:
+            single_idx = first_diverged - num_double  # e.g. first_diverged=8 -> single_3 -> index 3
+            print(f"\n--- Input to first-diverged block (single_{single_idx} = output of single_{single_idx - 1}) ---")
+            in_fv = _capture_single_block_input_fv(
+                transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, single_idx, freqs_cis
+            )
+            in_official = {}
+            if len(official_activations) > 0:
+                in_official = _capture_single_block_input_official(
+                    pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device, single_idx
+                )
+            a_fv = in_fv.get("input")
+            a_o = in_official.get("input")
+            if a_fv is not None and a_o is not None:
+                if a_fv.shape != a_o.shape:
+                    print(f"  input: SHAPE MISMATCH {a_fv.shape} vs {a_o.shape}")
+                else:
+                    diff = (a_fv - a_o).abs()
+                    print(f"  input: shape={a_fv.shape} max_diff={diff.max().item():.4f} mean_diff={diff.mean().item():.4f}")
+                    if diff.mean().item() > THRESHOLD_MEAN:
+                        print("  -> Input to this block already diverged (drift from earlier blocks).")
+                    else:
+                        print("  -> Input is close; divergence happens inside this block.")
+            else:
+                print(f"  input: missing (fv={a_fv is not None}, official={a_o is not None})")
     else:
         print("\n-> All block outputs within threshold (mean diff <= %s)." % THRESHOLD_MEAN)
 
