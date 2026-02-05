@@ -81,6 +81,11 @@ class ForwardBatch:
         kl: torch.Tensor | None = None
         trajectory_latents: torch.Tensor | None = None
         trajectory_timesteps: torch.Tensor | None = None
+        # Saved transformer forward args from DenoisingStage for matching GRPO loss forward pass.
+        # transformer_forward_contexts: one dict per timestep with keys current_timestep (int), attn_metadata (optional).
+        transformer_forward_contexts: list[dict[str, Any]] | None = None
+        # transformer_forward_kwargs: batch-level kwargs passed to transformer (image_kwargs, pos_cond_kwargs, neg_cond_kwargs, action_kwargs, guidance_expand).
+        transformer_forward_kwargs: dict[str, Any] | None = None
 
     # TODO(will): double check that args are separate from fastvideo_args
     # properly. Also maybe think about providing an abstraction for pipeline
@@ -299,6 +304,13 @@ class TrainingBatch:
     prompt_ids: torch.Tensor | None = None  # Prompt token IDs for stat tracking [B, seq_len]
     prompt_embeds: torch.Tensor | None = None  # Prompt embeddings used in sampling [B, seq_len, hidden_dim]
     negative_prompt_embeds: torch.Tensor | None = None  # Negative prompt embeddings for CFG [B, seq_len, hidden_dim]
+    # Saved from trajectory collection: same transformer forward context used in DenoisingStage (for GRPO loss).
+    rl_transformer_forward_contexts: list[dict[
+        str,
+        Any]] | None = None  # Per-timestep: current_timestep, attn_metadata
+    rl_transformer_forward_kwargs: dict[
+        str,
+        Any] | None = None  # image_kwargs, pos_cond_kwargs, neg_cond_kwargs, action_kwargs, guidance_expand
 
     # RL loss components
     policy_loss: float = 0.0  # GRPO/PPO policy loss

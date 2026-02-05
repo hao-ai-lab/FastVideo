@@ -106,7 +106,8 @@ def sde_step_with_logprob(
         # is incorrect for GRPO training where we need independent randomness at each step.
         variance_noise = randn_tensor(
             model_output.shape,
-            generator=None,  # Always None for GRPO - each timestep gets independent random noise
+            generator=
+            None,  # Always None for GRPO - each timestep gets independent random noise
             device=model_output.device,
             dtype=model_output.dtype,
         )
@@ -337,6 +338,27 @@ class DenoisingStage(PipelineStage):
         if rl_data is not None and rl_data.store_trajectory:
             rl_latents.append(latents)
 
+        # RL: save transformer forward args so GRPO can replay same forward in _compute_log_prob_for_timestep
+        rl_transformer_forward_kwargs: dict[str, Any] | None = None
+        rl_per_step_contexts: list[dict[str, Any]] = []
+        if rl_data is not None and rl_data.enabled:
+            embedded_cfg = fastvideo_args.pipeline_config.embedded_cfg_scale
+            rl_guidance_expand = (torch.tensor(
+                [embedded_cfg] * latents.shape[0],
+                dtype=torch.float32,
+                device=get_local_torch_device(),
+            ).to(target_dtype) * 1000.0 if embedded_cfg is not None else None)
+            rl_transformer_forward_kwargs = {
+                "image_kwargs": dict(image_kwargs),
+                "pos_cond_kwargs": dict(pos_cond_kwargs),
+                "neg_cond_kwargs": dict(neg_cond_kwargs),
+                "action_kwargs": dict(action_kwargs),
+                "guidance_expand": rl_guidance_expand,
+                "video_latent": batch.video_latent,
+                "image_latent": batch.image_latent,
+            }
+            rl_per_step_contexts = []
+
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -497,6 +519,14 @@ class DenoisingStage(PipelineStage):
                             attn_metadata = None
                     else:
                         attn_metadata = None
+                    # Save per-step context for RL so _compute_log_prob_for_timestep can replay same forward
+                    if rl_data is not None and rl_transformer_forward_kwargs is not None:
+                        rl_per_step_contexts.append({
+                            "current_timestep":
+                            i,
+                            "attn_metadata":
+                            attn_metadata,
+                        })
                     # TODO(will): finalize the interface. vLLM uses this to
                     # support torch dynamo compilation. They pass in
                     # attn_metadata, vllm_config, and num_tokens. We can pass in
@@ -508,7 +538,9 @@ class DenoisingStage(PipelineStage):
                         noise_pred_uncond = run_transformer(
                             current_model, neg_prompt_embeds, neg_cond_kwargs,
                             True)
-
+                        if i == 0:
+                            logger.info(
+                                f"guidance_scale: {current_guidance_scale}")
                         noise_pred_text = noise_pred
                         noise_pred = noise_pred_uncond + current_guidance_scale * (
                             noise_pred_text - noise_pred_uncond)
@@ -535,8 +567,10 @@ class DenoisingStage(PipelineStage):
                             t,
                             prev_latents.float(),
                             prev_sample=None,  # None means generate random noise
-                            generator=None,  # Always None for GRPO - each timestep needs independent randomness
-                            deterministic=False,  # Add random noise for RL training
+                            generator=
+                            None,  # Always None for GRPO - each timestep needs independent randomness
+                            deterministic=
+                            False,  # Add random noise for RL training
                             return_dt_and_std_dev_t=True,
                         )
                         rl_log_probs.append(log_prob)
@@ -547,7 +581,7 @@ class DenoisingStage(PipelineStage):
                                                       latents,
                                                       **extra_step_kwargs,
                                                       return_dict=False)[0]
-                    
+
                     # KL computation (runs when RL is enabled and collect_kl is True)
                     # Note: KL computation requires prev_latents_mean and std_dev_t from log_prob computation
                     if rl_data is not None and rl_data.collect_kl and rl_data.kl_reward > 0:
@@ -561,16 +595,15 @@ class DenoisingStage(PipelineStage):
                             adapter_ctx = current_model.disable_adapter()
                         with adapter_ctx:
                             noise_pred_ref = run_transformer(
-                                current_model, prompt_embeds,
-                                pos_cond_kwargs, False)
+                                current_model, prompt_embeds, pos_cond_kwargs,
+                                False)
                             if batch.do_classifier_free_guidance:
                                 noise_pred_uncond_ref = run_transformer(
                                     current_model, neg_prompt_embeds,
                                     neg_cond_kwargs, True)
                                 noise_pred_text_ref = noise_pred_ref
                                 noise_pred_ref = noise_pred_uncond_ref + current_guidance_scale * (
-                                    noise_pred_text_ref -
-                                    noise_pred_uncond_ref)
+                                    noise_pred_text_ref - noise_pred_uncond_ref)
                         # For KL computation, use the same latents that were generated above
                         # prev_sample should be the latents from the current policy (with noise)
                         _, _, prev_latents_mean_ref, std_dev_t_ref, _ = sde_step_with_logprob(
@@ -578,8 +611,10 @@ class DenoisingStage(PipelineStage):
                             noise_pred_ref.float(),
                             t,
                             prev_latents.float(),
-                            prev_sample=latents.float(),  # Use latents from current policy
-                            deterministic=False,  # Match the deterministic setting used above
+                            prev_sample=latents.float(
+                            ),  # Use latents from current policy
+                            deterministic=
+                            False,  # Match the deterministic setting used above
                             return_dt_and_std_dev_t=True,
                         )
                         if not torch.allclose(std_dev_t, std_dev_t_ref):
@@ -647,6 +682,9 @@ class DenoisingStage(PipelineStage):
                 rl_data.kl = torch.stack(rl_kl, dim=1)
                 if rl_data.keep_trajectory_on_cpu:
                     rl_data.kl = rl_data.kl.cpu()
+            if rl_transformer_forward_kwargs is not None and rl_per_step_contexts:
+                rl_data.transformer_forward_contexts = rl_per_step_contexts
+                rl_data.transformer_forward_kwargs = rl_transformer_forward_kwargs
 
         # Update batch with final latents
         batch.latents = latents

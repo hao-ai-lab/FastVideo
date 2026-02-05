@@ -2,23 +2,22 @@
 
 GRPO training for Wan2.1 1.3B: we generate **rollouts** with the inference pipeline (inference mode), then train the policy on those rollouts (reward + advantage + GRPO loss). Currently we use the **OCR reward** and the **text-prompt dataset** only.
 
-
 ## How to run
 
-
 **Single-GPU:**
+
 ```bash
 # From repo root
 bash examples/training/rl/finetune_t2v_grpo.sh
 ```
 
 **Multi-GPU (e.g. 4 GPUs):**
+
 ```bash
 bash examples/training/rl/finetune_t2v_grpo_4gpu.sh
 ```
 
 Scripts call `fastvideo/training/wan_rl_training_pipeline.py` (Wan RL entry point).
-
 
 ## Code structure
 
@@ -88,8 +87,10 @@ On our machine, use the conda environment **fastvideo_shijie**. Activate it befo
 
 **Rollout generation.** Video rollouts and their log-probabilities are produced in the inference path of the denoising stage. In `fastvideo/pipelines/stages/denoising.py`, `sde_step_with_logprob` performs the SDE step and returns the log-probability of the transition; the denoising stage calls it for both policy and reference (for KL) when running in RL mode, so the pipeline can compute GRPO loss.
 
+**Transformer forward args (log_prob replay).** To ensure the first log_prob after trajectory collection matches the log_prob from the trajectory collection process, the transformer forward in `_compute_log_prob_for_timestep` (GRPO loss) must use the same inputs and `set_forward_context` as the DenoisingStage. The DenoisingStage therefore saves, when RL is enabled, the transformer forward args (per-step context: `current_timestep`, `attn_metadata`; trajectory-scope: `image_kwargs`, `pos_cond_kwargs`, `neg_cond_kwargs`, `action_kwargs`, `guidance_expand`, `video_latent`, `image_latent`, `forward_batch_snapshot`) into `ForwardBatch.RLData.transformer_forward_args`. These are copied to `TrainingBatch.transformer_forward_args` in `collect_trajectories` and used in `_compute_log_prob_for_timestep` to replay the same forward. Data structures live in `fastvideo/pipelines/pipeline_batch_info.py`: `RLTransformerForwardArgs`, `TrajectoryScopeForwardArgs`, `PerStepForwardContext`.
+
 # Debugging message rules
 
-Debugging messages should be printed using the logger.info function 
+Debugging messages should be printed using the logger.info function
 Newly added debugging messages should preceed with "RL_METRIC: " before its content
 Debugging messages should be wrapped in myregion comments; the debug code snippet should start with "# myregion debug", and end with "# endregion"
