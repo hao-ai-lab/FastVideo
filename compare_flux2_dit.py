@@ -71,7 +71,6 @@ def main():
         hsdp_replicate_dim=1,
         num_gpus=1,
         inference_mode=True,
-        training_mode=False,
         use_fsdp_inference=False,
         dit_cpu_offload=False,
         pin_cpu_memory=False,
