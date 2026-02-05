@@ -227,7 +227,7 @@ class MatrixGameTransformerBlock(nn.Module):
         temb: torch.Tensor,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         # Action Module specific args
-        grid_sizes: torch.Tensor | None = None,
+        grid_sizes: torch.Tensor,
         mouse_cond: torch.Tensor | None = None,
         keyboard_cond: torch.Tensor | None = None,
     ) -> torch.Tensor:
@@ -324,12 +324,12 @@ class MatrixGameTransformerBlock(nn.Module):
                 # ActionModule implementation takes hidden_states directly
                 hidden_states = self.action_model(
                     hidden_states,
-                    grid_sizes[0],
-                    grid_sizes[1],
-                    grid_sizes[2],
+                    int(grid_sizes[0]),
+                    int(grid_sizes[1]),
+                    int(grid_sizes[2]),
                     mouse_cond,
                     keyboard_cond,
-                    num_frame_per_block=grid_sizes[0],
+                    num_frame_per_block=int(grid_sizes[0]),
                 )
         # =================================================
 

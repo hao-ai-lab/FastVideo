@@ -460,7 +460,7 @@ class CausalMatrixGameTransformerBlock(nn.Module):
         temb: torch.Tensor,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         block_mask: BlockMask,
-        grid_sizes: torch.Tensor | None = None,
+        grid_sizes: torch.Tensor,
         mouse_cond: torch.Tensor | None = None,
         keyboard_cond: torch.Tensor | None = None,
         block_mask_mouse: BlockMask | None = None,
@@ -542,17 +542,13 @@ class CausalMatrixGameTransformerBlock(nn.Module):
 
         if self.action_model is not None:
             if mouse_cond is not None or keyboard_cond is not None:
-                start_frame = (
-                    current_start // frame_seqlen
-                    if grid_sizes is not None
-                    else 0
-                )
+                start_frame = current_start // frame_seqlen
 
                 hidden_states = self.action_model(
                     hidden_states,
-                    grid_sizes[0],
-                    grid_sizes[1],
-                    grid_sizes[2],
+                    int(grid_sizes[0]),
+                    int(grid_sizes[1]),
+                    int(grid_sizes[2]),
                     mouse_cond,
                     keyboard_cond,
                     block_mask_mouse,

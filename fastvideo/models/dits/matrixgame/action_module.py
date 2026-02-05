@@ -5,7 +5,7 @@ from einops import rearrange
 import torch
 import torch.nn as nn
 import math
-from torch.nn.attention.flex_attention import flex_attention
+from torch.nn.attention.flex_attention import flex_attention, BlockMask
 
 from fastvideo.attention import LocalAttention
 from fastvideo.layers.linear import ReplicatedLinear
@@ -317,20 +317,20 @@ class ActionModule(nn.Module):
 
     def forward(
         self,
-        x,
-        tt,
-        th,
-        tw,
-        mouse_condition=None,
-        keyboard_condition=None,
-        block_mask_mouse=None,
-        block_mask_keyboard=None,
-        is_causal=False,
-        kv_cache_mouse=None,
-        kv_cache_keyboard=None,
-        start_frame=0,
-        use_rope_keyboard=True,
-        num_frame_per_block=3,
+        x: torch.Tensor,
+        tt: int,
+        th: int,
+        tw: int,
+        mouse_condition: torch.Tensor | None = None,
+        keyboard_condition: torch.Tensor | None = None,
+        block_mask_mouse: BlockMask | None = None,
+        block_mask_keyboard: BlockMask | None = None,
+        is_causal: bool = False,
+        kv_cache_mouse: dict[str, torch.Tensor] | None = None,
+        kv_cache_keyboard: dict[str, torch.Tensor] | None = None,
+        start_frame: int = 0,
+        use_rope_keyboard: bool = True,
+        num_frame_per_block: int = 3,
     ):
         """
         hidden_states: B, tt*th*tw, C
