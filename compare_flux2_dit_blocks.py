@@ -44,7 +44,36 @@ def _get_transformer_path(model_id: str) -> str:
     )
 
 
-def _collect_fv_activations(transformer, latent, prompt_embeds, timestep_scaled, device, num_txt_tokens):
+def _compute_freqs_cis(transformer, text_ids, latent_ids, device, dtype=None):
+    """Build RoPE (cos, sin) from text and image position IDs using the model's rotary_emb.
+    Position IDs are concatenated along sequence: [text_tokens; image_tokens].
+    Returns (cos, sin) for use as freqs_cis in transformer forward.
+    """
+    # Concat along sequence dim: [B, T+L, ...]
+    if text_ids.dim() == 2:
+        # [B, T] -> treat as 1 axis, expand to n_axes
+        text_ids = text_ids.unsqueeze(-1)  # [B, T, 1]
+    if latent_ids.dim() == 2:
+        latent_ids = latent_ids.unsqueeze(-1)  # [B, L, 1]
+    combined = torch.cat([text_ids, latent_ids], dim=1)  # [B, T+L, n_axes]
+    n_axes = transformer.rotary_emb.axes_dim
+    if combined.shape[-1] != len(n_axes):
+        # Pad or repeat last axis to match expected n_axes
+        need = len(n_axes) - combined.shape[-1]
+        if need > 0:
+            combined = torch.cat([combined, combined[..., -1:].expand(-1, -1, need)], dim=-1)
+        else:
+            combined = combined[..., : len(n_axes)]
+    # [num_tokens, n_axes]
+    pos = combined.reshape(-1, combined.shape[-1]).to(device=device, dtype=torch.float32)
+    with torch.no_grad():
+        cos, sin = transformer.rotary_emb.forward_uncached(pos=pos)
+    if dtype is not None:
+        cos, sin = cos.to(dtype), sin.to(dtype)
+    return (cos, sin)
+
+
+def _collect_fv_activations(transformer, latent, prompt_embeds, timestep_scaled, device, num_txt_tokens, freqs_cis=None):
     """Run FastVideo transformer with hooks; return list of (block_name, tensor) per block."""
     activations = []
 
@@ -75,7 +104,13 @@ def _collect_fv_activations(transformer, latent, prompt_embeds, timestep_scaled,
         block.register_forward_hook(make_single_hook(f"single_{i}", num_txt_tokens))
 
     with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
-        transformer(latent, prompt_embeds, timestep_scaled, guidance=None)
+        transformer(
+            latent,
+            prompt_embeds,
+            timestep_scaled,
+            guidance=None,
+            freqs_cis=freqs_cis,
+        )
 
     return activations
 
@@ -213,8 +248,19 @@ def main():
     prompt_embeds_fv = prompt_embeds.to(device, dtype=model_dtype)
     timestep_fv = timestep_scaled.to(device)
 
+    # RoPE: compute freqs_cis from text + image position IDs (same as official pipeline)
+    freqs_cis = _compute_freqs_cis(
+        transformer, text_ids, latent_ids, device, dtype=model_dtype
+    )
+
     fv_activations = _collect_fv_activations(
-        transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, num_txt_tokens,
+        transformer,
+        latent_fv,
+        prompt_embeds_fv,
+        timestep_fv,
+        device,
+        num_txt_tokens,
+        freqs_cis=freqs_cis,
     )
     # Cast to float for comparison
     fv_activations = [(n, t.cpu().float()) for n, t in fv_activations]
@@ -239,8 +285,6 @@ def main():
             if first_diverged is None:
                 first_diverged = i
             continue
-        t_o = t_o.cpu() if t_o.is_cuda else t_o
-        t_fv = t_fv.cpu() if t_fv.is_cuda else t_fv
         t_o = t_o.cpu() if t_o.is_cuda else t_o
         t_fv = t_fv.cpu() if t_fv.is_cuda else t_fv
         diff = (t_fv - t_o).abs()
