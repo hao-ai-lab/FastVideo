@@ -90,9 +90,10 @@ def main():
     transformer = transformer.to(args.device)
 
     # Forward: same inputs as official (3D latent, scaled timestep)
-    latent = latent.to(args.device, dtype=transformer.dtype)
+    model_dtype = next(transformer.parameters()).dtype
+    latent = latent.to(args.device, dtype=model_dtype)
     timestep_scaled = timestep_scaled.to(args.device)
-    prompt_embeds = prompt_embeds.to(args.device, dtype=transformer.dtype)
+    prompt_embeds = prompt_embeds.to(args.device, dtype=model_dtype)
 
     with torch.no_grad():
         noise_pred_fv = transformer(
