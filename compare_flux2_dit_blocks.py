@@ -107,6 +107,80 @@ def _capture_double0_inputs_fv(transformer, latent, prompt_embeds, timestep_scal
     return captured
 
 
+def _capture_double0_attn_output_fv(transformer, latent, prompt_embeds, timestep_scaled, device, freqs_cis):
+    """Capture (attn_out_img, attn_out_txt) from the first double block's attention."""
+    captured = {}
+
+    def hook(_module, _inputs, outputs):
+        try:
+            if isinstance(outputs, (list, tuple)) and len(outputs) >= 2:
+                # Flux2Attention returns (hidden_states img, encoder_hidden_states txt)
+                captured["attn_out_img"] = outputs[0].detach().clone().cpu().float()
+                captured["attn_out_txt"] = outputs[1].detach().clone().cpu().float()
+        except Exception:
+            pass
+
+    block0 = transformer.transformer_blocks[0]
+    if not hasattr(block0, "attn"):
+        return captured
+    handle = block0.attn.register_forward_hook(hook)
+    try:
+        with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
+            transformer(
+                latent,
+                prompt_embeds,
+                timestep_scaled,
+                guidance=None,
+                freqs_cis=freqs_cis,
+            )
+    finally:
+        handle.remove()
+    return captured
+
+
+def _capture_double0_attn_output_official(pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device):
+    """Capture (attn_out_img, attn_out_txt) from the first double block's attention."""
+    captured = {}
+    trans = pipe.transformer
+
+    def hook(_module, _inputs, outputs):
+        try:
+            if isinstance(outputs, (list, tuple)) and len(outputs) >= 2:
+                captured["attn_out_img"] = outputs[0].detach().clone().cpu().float()
+                captured["attn_out_txt"] = outputs[1].detach().clone().cpu().float()
+        except Exception:
+            pass
+
+    if not hasattr(trans, "transformer_blocks") or len(trans.transformer_blocks) == 0:
+        return captured
+    block0 = trans.transformer_blocks[0]
+    if not hasattr(block0, "attn"):
+        return captured
+    handle = block0.attn.register_forward_hook(hook)
+    dtype = next(trans.parameters()).dtype
+    latent_d = latent.to(device, dtype=dtype)
+    timestep = timestep_scaled.to(device)
+    prompt_embeds_d = prompt_embeds.to(device, dtype=dtype)
+    text_ids_d = text_ids.to(device)
+    latent_ids_d = latent_ids.to(device)
+    try:
+        with torch.no_grad():
+            with trans.cache_context("cond"):
+                trans(
+                    hidden_states=latent_d,
+                    timestep=timestep,
+                    guidance=None,
+                    encoder_hidden_states=prompt_embeds_d,
+                    txt_ids=text_ids_d,
+                    img_ids=latent_ids_d,
+                    joint_attention_kwargs=getattr(pipe, "attention_kwargs", None) or {},
+                    return_dict=False,
+                )
+    finally:
+        handle.remove()
+    return captured
+
+
 def _capture_double0_inputs_official(pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device):
     """Run official transformer and capture (hidden_states, encoder_hidden_states) going into the first double block."""
     captured = {}
@@ -355,6 +429,28 @@ def main():
         diff = (a_fv - a_o).abs()
         print(f"  {key}: shape={a_fv.shape} max_diff={diff.max().item():.4f} mean_diff={diff.mean().item():.4f}")
 
+    # Sub-layer: attention output of double_0 (narrows down where divergence is)
+    print("\n--- double_0 attention output (inside first block) ---")
+    attn_fv = _capture_double0_attn_output_fv(
+        transformer, latent_fv, prompt_embeds_fv, timestep_fv, device, freqs_cis
+    )
+    attn_official = {}
+    if len(official_activations) > 0:
+        attn_official = _capture_double0_attn_output_official(
+            pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device
+        )
+    for key in ("attn_out_img", "attn_out_txt"):
+        a_fv = attn_fv.get(key)
+        a_o = attn_official.get(key)
+        if a_fv is None or a_o is None:
+            print(f"  {key}: missing (fv={a_fv is not None}, official={a_o is not None})")
+            continue
+        if a_fv.shape != a_o.shape:
+            print(f"  {key}: SHAPE MISMATCH {a_fv.shape} vs {a_o.shape}")
+            continue
+        diff = (a_fv - a_o).abs()
+        print(f"  {key}: shape={a_fv.shape} max_diff={diff.max().item():.4f} mean_diff={diff.mean().item():.4f}")
+
     fv_activations = _collect_fv_activations(
         transformer,
         latent_fv,
@@ -367,16 +463,19 @@ def main():
     # Cast to float for comparison
     fv_activations = [(n, t.cpu().float()) for n, t in fv_activations]
 
-    # 3. Compare block-by-block
-    if len(official_activations) == 0 or len(fv_activations) != len(official_activations):
-        print(f"Block count mismatch: official={len(official_activations)}, FastVideo={len(fv_activations)}")
-        if len(fv_activations) > 0:
-            print("FastVideo block names:", [a[0] for a in fv_activations])
+    # 3. Compare block-by-block (compare first N blocks where N = min of the two)
+    if len(official_activations) == 0 or len(fv_activations) == 0:
+        print("No block activations to compare.")
         return
+    n_compare = min(len(official_activations), len(fv_activations))
+    if n_compare < len(official_activations) or n_compare < len(fv_activations):
+        print(f"Block count: official={len(official_activations)}, FastVideo={len(fv_activations)} -> comparing first {n_compare} blocks")
 
     print("\n--- Block-by-block comparison ---")
     first_diverged = None
-    for i, ((name_o, t_o), (name_fv, t_fv)) in enumerate(zip(official_activations, fv_activations)):
+    for i in range(n_compare):
+        name_o, t_o = official_activations[i]
+        name_fv, t_fv = fv_activations[i]
         if t_o is None or t_fv is None:
             print(f"  {i} {name_o}: N/A (missing activation from one model)")
             if first_diverged is None:
