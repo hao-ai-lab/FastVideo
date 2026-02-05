@@ -515,12 +515,12 @@ class VisionLanguageEncoderLoader(ComponentLoader):
         logger.info(f"Loading model with trust_remote_code={fastvideo_args.trust_remote_code}")
 
         try:
-            # Use AutoModelForCausalLM to get model with generate() method
-            from transformers import AutoModelForCausalLM
+            # Use GlmImageForConditionalGeneration directly
+            from transformers import GlmImageForConditionalGeneration
             from fastvideo.distributed.parallel_state import get_local_torch_device
             
             target_device = get_local_torch_device()
-            model = AutoModelForCausalLM.from_pretrained(
+            model = GlmImageForConditionalGeneration.from_pretrained(
                 model_path,
                 trust_remote_code=fastvideo_args.trust_remote_code,
                 torch_dtype=torch.bfloat16,
