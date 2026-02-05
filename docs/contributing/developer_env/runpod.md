@@ -17,7 +17,7 @@ You can easily use the FastVideo Pod Template on [RunPod](https://www.runpod.io)
 - Select the "FastVideo" or "fastvideo-dev" Pod Template.
 ![RunPod Pod Template Selection](../../assets/images/runpod_create.png)
 
-- Set the Pod name to "<name>-<FastVideo>-<date>".
+- Set the Pod name to "\<name\>-\<FastVideo\>-\<date\>".
 
 - Finally, once the pod is deployed (will take a few minutes as the image is being pulled), you can SSH into it using "SSH exposed over TCP". You'll need to use the matching private ssh key you provided.
 ![RunPod SSH](../../assets/images/runpod_ssh.png)
