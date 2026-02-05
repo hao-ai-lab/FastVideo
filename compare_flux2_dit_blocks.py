@@ -309,10 +309,13 @@ def _capture_single_block_input_fv(transformer, latent, prompt_embeds, timestep_
         return captured
 
     def pre_hook(_module, args, kwargs=None):
-        if args and len(args) > 0:
-            captured["input"] = args[0].detach().clone().cpu().float()
+        hs = (kwargs or {}).get("hidden_states")
+        if hs is None and args and len(args) > 0:
+            hs = args[0]
+        if hs is not None:
+            captured["input"] = hs.detach().clone().cpu().float()
 
-    handle = transformer.single_transformer_blocks[single_block_index].register_forward_pre_hook(pre_hook)
+    handle = transformer.single_transformer_blocks[single_block_index].register_forward_pre_hook(pre_hook, with_kwargs=True)
     try:
         with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
             transformer(
@@ -335,10 +338,13 @@ def _capture_single_block_input_official(pipe, latent, prompt_embeds, timestep_s
         return captured
 
     def pre_hook(_module, args, kwargs=None):
-        if args and len(args) > 0:
-            captured["input"] = args[0].detach().clone().cpu().float()
+        hs = (kwargs or {}).get("hidden_states")
+        if hs is None and args and len(args) > 0:
+            hs = args[0]
+        if hs is not None:
+            captured["input"] = hs.detach().clone().cpu().float()
 
-    handle = trans.single_transformer_blocks[single_block_index].register_forward_pre_hook(pre_hook)
+    handle = trans.single_transformer_blocks[single_block_index].register_forward_pre_hook(pre_hook, with_kwargs=True)
     dtype = next(trans.parameters()).dtype
     latent_d = latent.to(device, dtype=dtype)
     timestep = timestep_scaled.to(device)
