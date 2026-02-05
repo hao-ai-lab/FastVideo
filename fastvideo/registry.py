@@ -221,7 +221,11 @@ def _get_config_info(
     if matched_model_names:
         if len(matched_model_names) > 1:
             logger.warning(
-                "More than one model name is matched, using the first matched")
+                "Multiple models matched for path '%s': %s. Using the first matched: '%s'.",
+                model_path,
+                matched_model_names,
+                matched_model_names[0],
+            )
         model_id = matched_model_names[0]
         return _CONFIG_REGISTRY.get(model_id)
 
