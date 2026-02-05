@@ -315,6 +315,187 @@ class ActionModule(nn.Module):
             // self.patch_size[0] :
         ]
 
+    def _forward_mouse(
+        self,
+        hidden_states: torch.Tensor,
+        mouse_condition: torch.Tensor,
+        *,
+        is_causal: bool,
+        kv_cache_mouse: dict[str, torch.Tensor] | None,
+        pad_t: int,
+        num_frame_per_block: int,
+        block_mask_mouse: BlockMask | None,
+        start_frame: int,
+        freqs_cis: tuple[torch.Tensor, torch.Tensor],
+        N_feats: int,
+        B: int,
+        C: int,
+        tt: int,
+        th: int,
+        tw: int,
+    ) -> torch.Tensor:
+        pad = mouse_condition[:, 0:1, :].expand(-1, pad_t, -1)
+        mouse_condition = torch.cat([pad, mouse_condition], dim=1)
+        if is_causal and kv_cache_mouse is not None:
+            mouse_condition = mouse_condition[
+                :,
+                self.vae_time_compression_ratio
+                * (N_feats - num_frame_per_block - self.windows_size)
+                + pad_t :,
+                :,
+            ]
+            group_mouse = [
+                mouse_condition[
+                    :,
+                    self.vae_time_compression_ratio * (i - self.windows_size)
+                    + pad_t : i * self.vae_time_compression_ratio + pad_t,
+                    :,
+                ]
+                for i in range(num_frame_per_block)
+            ]
+        else:
+            local_num_frames = tt
+            group_mouse = [
+                mouse_condition[
+                    :,
+                    self.vae_time_compression_ratio * (i - self.windows_size)
+                    + pad_t : i * self.vae_time_compression_ratio + pad_t,
+                    :,
+                ]
+                for i in range(local_num_frames)
+            ]
+
+        group_mouse = torch.stack(group_mouse, dim=1)
+        actual_num_frames = group_mouse.shape[
+            1
+        ]  # Use actual stacked frame count
+
+        S = th * tw
+        group_mouse = group_mouse.unsqueeze(-1).expand(
+            B, actual_num_frames, pad_t, C, S
+        )
+        group_mouse = group_mouse.permute(0, 4, 1, 2, 3).reshape(
+            B * S, actual_num_frames, pad_t * C
+        )
+
+        group_mouse = torch.cat([hidden_states, group_mouse], dim=-1)
+        group_mouse = self.mouse_mlp(group_mouse)
+        # qkv
+        mouse_qkv, _ = self.t_qkv(group_mouse)
+        q, k, v = rearrange(
+            mouse_qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num
+        )  # BHW F H C
+        q = self.img_attn_q_norm(q).to(v)
+        k = self.img_attn_k_norm(k).to(v)
+        # rope embd
+
+        # freqs_cis = (self.freqs_cos, self.freqs_sin)
+
+        q, k = _apply_rotary_emb_qk(
+            q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame
+        )
+        ## TODO: adding cache here
+        if is_causal:
+            if kv_cache_mouse is None:
+                assert (
+                    q.shape[0] == k.shape[0] and q.shape[0] % S == 0
+                )  # == 880, f"{q.shape[0]},{k.shape[0]}"
+                padded_length = math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
+                padded_q = _padding_q_k_v(q, padded_length)
+                padded_k = _padding_q_k_v(k, padded_length)
+                padded_v = _padding_q_k_v(v, padded_length)
+                attn = flex_attention(
+                    query=padded_q.transpose(2, 1),  # after: B, HW, F, C
+                    key=padded_k.transpose(2, 1),
+                    value=padded_v.transpose(2, 1),
+                    block_mask=block_mask_mouse,
+                )[:, :, :-padded_length].transpose(2, 1)
+            else:
+                current_start = start_frame
+                current_end = current_start + q.shape[1]
+
+                assert q.shape[1] == num_frame_per_block
+                sink_size = 0
+                max_attention_size = self.local_attn_size
+                sink_tokens = sink_size * 1
+                kv_cache_size = kv_cache_mouse["k"].shape[1]
+                num_new_tokens = q.shape[1]
+
+                if (
+                    current_end > kv_cache_mouse["global_end_index"].item()
+                ) and (
+                    num_new_tokens + kv_cache_mouse["local_end_index"].item()
+                    > kv_cache_size
+                ):
+                    num_evicted_tokens = (
+                        num_new_tokens
+                        + kv_cache_mouse["local_end_index"].item()
+                        - kv_cache_size
+                    )
+                    num_rolled_tokens = (
+                        kv_cache_mouse["local_end_index"].item()
+                        - num_evicted_tokens
+                        - sink_tokens
+                    )
+                    kv_cache_mouse["k"][
+                        :, sink_tokens : sink_tokens + num_rolled_tokens
+                    ] = kv_cache_mouse["k"][
+                        :,
+                        sink_tokens + num_evicted_tokens : sink_tokens
+                        + num_evicted_tokens
+                        + num_rolled_tokens,
+                    ].clone()
+                    kv_cache_mouse["v"][
+                        :, sink_tokens : sink_tokens + num_rolled_tokens
+                    ] = kv_cache_mouse["v"][
+                        :,
+                        sink_tokens + num_evicted_tokens : sink_tokens
+                        + num_evicted_tokens
+                        + num_rolled_tokens,
+                    ].clone()
+                    # Insert the new keys/values at the end
+                    local_end_index = (
+                        kv_cache_mouse["local_end_index"].item()
+                        + current_end
+                        - kv_cache_mouse["global_end_index"].item()
+                        - num_evicted_tokens
+                    )
+                    local_start_index = local_end_index - num_new_tokens
+                else:
+                    local_end_index = (
+                        kv_cache_mouse["local_end_index"].item()
+                        + current_end
+                        - kv_cache_mouse["global_end_index"].item()
+                    )
+                    local_start_index = local_end_index - num_new_tokens
+                kv_cache_mouse["k"][:, local_start_index:local_end_index] = k
+                kv_cache_mouse["v"][:, local_start_index:local_end_index] = v
+
+                attn = self.mouse_attn_layer(
+                    q,
+                    kv_cache_mouse["k"][
+                        :,
+                        max(
+                            0, local_end_index - max_attention_size
+                        ) : local_end_index,
+                    ],
+                    kv_cache_mouse["v"][
+                        :,
+                        max(
+                            0, local_end_index - max_attention_size
+                        ) : local_end_index,
+                    ],
+                )
+                kv_cache_mouse["global_end_index"].fill_(current_end)
+                kv_cache_mouse["local_end_index"].fill_(local_end_index)
+        else:
+            attn = self.mouse_attn_layer(q, k, v)
+        # Compute cu_squlens and max_seqlen for flash attention
+        # qk norm
+        attn = rearrange(attn, "(b S) T h d -> b (T S) (h d)", b=B)
+        attn, _ = self.proj_mouse(attn)
+        return attn
+
     def forward(
         self,
         x: torch.Tensor,
@@ -391,175 +572,24 @@ class ActionModule(nn.Module):
 
         pad_t = self.vae_time_compression_ratio * self.windows_size
         if self.enable_mouse and mouse_condition is not None:
-            pad = mouse_condition[:, 0:1, :].expand(-1, pad_t, -1)
-            mouse_condition = torch.cat([pad, mouse_condition], dim=1)
-            if is_causal and kv_cache_mouse is not None:
-                mouse_condition = mouse_condition[
-                    :,
-                    self.vae_time_compression_ratio
-                    * (N_feats - num_frame_per_block - self.windows_size)
-                    + pad_t :,
-                    :,
-                ]
-                group_mouse = [
-                    mouse_condition[
-                        :,
-                        self.vae_time_compression_ratio
-                        * (i - self.windows_size)
-                        + pad_t : i * self.vae_time_compression_ratio + pad_t,
-                        :,
-                    ]
-                    for i in range(num_frame_per_block)
-                ]
-            else:
-                local_num_frames = tt
-                group_mouse = [
-                    mouse_condition[
-                        :,
-                        self.vae_time_compression_ratio
-                        * (i - self.windows_size)
-                        + pad_t : i * self.vae_time_compression_ratio + pad_t,
-                        :,
-                    ]
-                    for i in range(local_num_frames)
-                ]
-
-            group_mouse = torch.stack(group_mouse, dim=1)
-            actual_num_frames = group_mouse.shape[
-                1
-            ]  # Use actual stacked frame count
-
-            S = th * tw
-            group_mouse = group_mouse.unsqueeze(-1).expand(
-                B, actual_num_frames, pad_t, C, S
+            attn = self._forward_mouse(
+                hidden_states,
+                mouse_condition,
+                is_causal=is_causal,
+                kv_cache_mouse=kv_cache_mouse,
+                pad_t=pad_t,
+                num_frame_per_block=num_frame_per_block,
+                block_mask_mouse=block_mask_mouse,
+                start_frame=start_frame,
+                freqs_cis=freqs_cis,
+                N_feats=N_feats,
+                B=B,
+                C=C,
+                tt=tt,
+                th=th,
+                tw=tw,
             )
-            group_mouse = group_mouse.permute(0, 4, 1, 2, 3).reshape(
-                B * S, actual_num_frames, pad_t * C
-            )
-
-            group_mouse = torch.cat([hidden_states, group_mouse], dim=-1)
-            group_mouse = self.mouse_mlp(group_mouse)
-            # qkv
-            mouse_qkv, _ = self.t_qkv(group_mouse)
-            q, k, v = rearrange(
-                mouse_qkv, "B L (K H D) -> K B L H D", K=3, H=self.heads_num
-            )  # BHW F H C
-            q = self.img_attn_q_norm(q).to(v)
-            k = self.img_attn_k_norm(k).to(v)
-            # rope embd
-
-            # freqs_cis = (self.freqs_cos, self.freqs_sin)
-
-            q, k = _apply_rotary_emb_qk(
-                q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame
-            )
-            ## TODO: adding cache here
-            if is_causal:
-                if kv_cache_mouse is None:
-                    assert (
-                        q.shape[0] == k.shape[0] and q.shape[0] % S == 0
-                    )  # == 880, f"{q.shape[0]},{k.shape[0]}"
-                    padded_length = math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
-                    padded_q = _padding_q_k_v(q, padded_length)
-                    padded_k = _padding_q_k_v(k, padded_length)
-                    padded_v = _padding_q_k_v(v, padded_length)
-                    attn = flex_attention(
-                        query=padded_q.transpose(2, 1),  # after: B, HW, F, C
-                        key=padded_k.transpose(2, 1),
-                        value=padded_v.transpose(2, 1),
-                        block_mask=block_mask_mouse,
-                    )[:, :, :-padded_length].transpose(2, 1)
-                else:
-                    current_start = start_frame
-                    current_end = current_start + q.shape[1]
-
-                    assert q.shape[1] == num_frame_per_block
-                    sink_size = 0
-                    max_attention_size = self.local_attn_size
-                    sink_tokens = sink_size * 1
-                    kv_cache_size = kv_cache_mouse["k"].shape[1]
-                    num_new_tokens = q.shape[1]
-
-                    if (
-                        current_end > kv_cache_mouse["global_end_index"].item()
-                    ) and (
-                        num_new_tokens
-                        + kv_cache_mouse["local_end_index"].item()
-                        > kv_cache_size
-                    ):
-                        num_evicted_tokens = (
-                            num_new_tokens
-                            + kv_cache_mouse["local_end_index"].item()
-                            - kv_cache_size
-                        )
-                        num_rolled_tokens = (
-                            kv_cache_mouse["local_end_index"].item()
-                            - num_evicted_tokens
-                            - sink_tokens
-                        )
-                        kv_cache_mouse["k"][
-                            :, sink_tokens : sink_tokens + num_rolled_tokens
-                        ] = kv_cache_mouse["k"][
-                            :,
-                            sink_tokens + num_evicted_tokens : sink_tokens
-                            + num_evicted_tokens
-                            + num_rolled_tokens,
-                        ].clone()
-                        kv_cache_mouse["v"][
-                            :, sink_tokens : sink_tokens + num_rolled_tokens
-                        ] = kv_cache_mouse["v"][
-                            :,
-                            sink_tokens + num_evicted_tokens : sink_tokens
-                            + num_evicted_tokens
-                            + num_rolled_tokens,
-                        ].clone()
-                        # Insert the new keys/values at the end
-                        local_end_index = (
-                            kv_cache_mouse["local_end_index"].item()
-                            + current_end
-                            - kv_cache_mouse["global_end_index"].item()
-                            - num_evicted_tokens
-                        )
-                        local_start_index = local_end_index - num_new_tokens
-                    else:
-                        local_end_index = (
-                            kv_cache_mouse["local_end_index"].item()
-                            + current_end
-                            - kv_cache_mouse["global_end_index"].item()
-                        )
-                        local_start_index = local_end_index - num_new_tokens
-                    kv_cache_mouse["k"][
-                        :, local_start_index:local_end_index
-                    ] = k
-                    kv_cache_mouse["v"][
-                        :, local_start_index:local_end_index
-                    ] = v
-
-                    attn = self.mouse_attn_layer(
-                        q,
-                        kv_cache_mouse["k"][
-                            :,
-                            max(
-                                0, local_end_index - max_attention_size
-                            ) : local_end_index,
-                        ],
-                        kv_cache_mouse["v"][
-                            :,
-                            max(
-                                0, local_end_index - max_attention_size
-                            ) : local_end_index,
-                        ],
-                    )
-                    kv_cache_mouse["global_end_index"].fill_(current_end)
-                    kv_cache_mouse["local_end_index"].fill_(local_end_index)
-            else:
-                attn = self.mouse_attn_layer(q, k, v)
-            # Compute cu_squlens and max_seqlen for flash attention
-            # qk norm
-            attn = rearrange(attn, "(b S) T h d -> b (T S) (h d)", b=B)
-
             hidden_states = rearrange(x, "(B S) T C -> B (T S) C", B=B)
-            attn, _ = self.proj_mouse(attn)
 
             hidden_states = hidden_states + attn
 
@@ -635,7 +665,6 @@ class ActionModule(nn.Module):
                     q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame
                 )
 
-                k1, k2, k3, k4 = k.shape
                 k = k.repeat_interleave(S, dim=0)
                 v = v.repeat_interleave(S, dim=0)
 
