@@ -18,8 +18,8 @@ torchrun --nproc_per_node=$GPU_NUM --master_port=29513 \
     --preprocess.dataloader_num_workers 0 \
     --preprocess.max_height 480 \
     --preprocess.max_width 832 \
-    --preprocess.num_frames 61 \
-    --preprocess.train_fps 15 \
+    --preprocess.num_frames 77 \
+    --preprocess.train_fps 16 \
     --preprocess.samples_per_file 8 \
     --preprocess.flush_frequency 8 \
     --preprocess.video_length_tolerance_range 5

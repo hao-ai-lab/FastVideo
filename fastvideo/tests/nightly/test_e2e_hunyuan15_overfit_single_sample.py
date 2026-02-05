@@ -106,7 +106,7 @@ def run_training():
         "--validation_dataset_file", LOCAL_VALIDATION_DATASET_FILE,
 
         "--train_batch_size", "1",
-        "--num_latent_t", "8", #"16",  # (61-1)//4 + 1 = 16 for 61 frames with temporal_compression=4
+        "--num_latent_t", "8", #"16",  # (61-1)//43 + 1 = 16 for 61 frames with temporal_compression=4
         "--max_train_steps", "901",
         "--learning_rate", "1e-5",
         "--gradient_accumulation_steps", "1",  # Required: default 0 causes empty training loop
