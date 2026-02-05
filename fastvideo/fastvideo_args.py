@@ -110,7 +110,6 @@ class FastVideoArgs:
     num_gpus: int = 1
     tp_size: int = -1
     sp_size: int = -1
-    ring_size: int = 1
     hsdp_replicate_dim: int = 1
     hsdp_shard_dim: int = -1
     dist_timeout: int | None = None  # timeout for torch.distributed
@@ -221,17 +220,6 @@ class FastVideoArgs:
             # Map sp_size to ulysses_degree for backward compatibility
             if self.ulysses_degree == 1 and self.ring_degree == 1:
                 self.ulysses_degree = self.sp_size
-
-        # Handle deprecated ring_size
-        if self.ring_size != 1:
-            warnings.warn(
-                "WARNING: --ring-size is deprecated and will be removed in a future version. "
-                "Please use --ring-degree instead.",
-                DeprecationWarning,
-                stacklevel=2)
-            # Map ring_size to ring_degree for backward compatibility
-            if self.ring_degree == 1:
-                self.ring_degree = self.ring_size
 
     def _apply_ltx2_vae_overrides(self) -> None:
         if self.pipeline_config is None:
@@ -360,13 +348,6 @@ class FastVideoArgs:
             default=FastVideoArgs.sp_size,
             help="[DEPRECATED] Use --ring-degree and --ulysses-degree instead. "
             "The sequence parallelism size.",
-        )
-        parser.add_argument(
-            "--ring-size",
-            type=int,
-            default=FastVideoArgs.ring_size,
-            help="[DEPRECATED] Use --ring-degree instead. "
-            "Ring attention size.",
         )
         parser.add_argument(
             "--hsdp-replicate-dim",
