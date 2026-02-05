@@ -4,6 +4,7 @@
 import argparse
 import dataclasses
 import json
+import warnings
 from contextlib import contextmanager
 from dataclasses import field
 from enum import Enum
@@ -217,6 +218,28 @@ class FastVideoArgs:
                 raise
         self._apply_ltx2_vae_overrides()
         self.check_fastvideo_args()
+
+        # Handle deprecated sp_size
+        if self.sp_size != -1:
+            warnings.warn(
+                "WARNING: --sp-size is deprecated and will be removed in a future version. "
+                "Please use --ring-degree and --ulysses-degree instead.",
+                DeprecationWarning,
+                stacklevel=2)
+            # Map sp_size to ulysses_degree for backward compatibility
+            if self.ulysses_degree == 1 and self.ring_degree == 1:
+                self.ulysses_degree = self.sp_size
+
+        # Handle deprecated ring_size
+        if self.ring_size != 1:
+            warnings.warn(
+                "WARNING: --ring-size is deprecated and will be removed in a future version. "
+                "Please use --ring-degree instead.",
+                DeprecationWarning,
+                stacklevel=2)
+            # Map ring_size to ring_degree for backward compatibility
+            if self.ring_degree == 1:
+                self.ring_degree = self.ring_size
 
     def _apply_ltx2_vae_overrides(self) -> None:
         if self.pipeline_config is None:
