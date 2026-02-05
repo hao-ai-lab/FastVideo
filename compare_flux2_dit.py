@@ -16,6 +16,7 @@ import torch
 
 # FastVideo imports
 from fastvideo.configs.pipelines.registry import get_pipeline_config_cls_from_name
+from fastvideo.forward_context import set_forward_context
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.models.loader.component_loader import TransformerLoader
 
@@ -95,7 +96,7 @@ def main():
     timestep_scaled = timestep_scaled.to(args.device)
     prompt_embeds = prompt_embeds.to(args.device, dtype=model_dtype)
 
-    with torch.no_grad():
+    with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
         noise_pred_fv = transformer(
             latent,
             prompt_embeds,
