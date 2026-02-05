@@ -303,19 +303,28 @@ def _capture_double0_inputs_official(pipe, latent, prompt_embeds, timestep_scale
 
 
 def _capture_single_block_input_fv(transformer, latent, prompt_embeds, timestep_scaled, device, single_block_index, freqs_cis):
-    """Capture input (hidden_states) to the given single-stream block = output of previous block."""
+    """Capture input and after norm+mod to the given single-stream block (one forward pass)."""
     captured = {}
     if single_block_index >= len(transformer.single_transformer_blocks):
         return captured
 
-    def pre_hook(_module, args, kwargs=None):
+    def block_pre_hook(_module, args, kwargs=None):
         hs = (kwargs or {}).get("hidden_states")
         if hs is None and args and len(args) > 0:
             hs = args[0]
         if hs is not None:
             captured["input"] = hs.detach().clone().cpu().float()
 
-    handle = transformer.single_transformer_blocks[single_block_index].register_forward_pre_hook(pre_hook, with_kwargs=True)
+    def attn_pre_hook(_module, args, kwargs=None):
+        hs = (kwargs or {}).get("hidden_states")
+        if hs is None and args and len(args) > 0:
+            hs = args[0]
+        if hs is not None:
+            captured["after_norm_mod"] = hs.detach().clone().cpu().float()
+
+    block = transformer.single_transformer_blocks[single_block_index]
+    h_block = block.register_forward_pre_hook(block_pre_hook, with_kwargs=True)
+    h_attn = block.attn.register_forward_pre_hook(attn_pre_hook, with_kwargs=True)
     try:
         with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
             transformer(
@@ -326,25 +335,35 @@ def _capture_single_block_input_fv(transformer, latent, prompt_embeds, timestep_
                 freqs_cis=freqs_cis,
             )
     finally:
-        handle.remove()
+        h_block.remove()
+        h_attn.remove()
     return captured
 
 
 def _capture_single_block_input_official(pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device, single_block_index):
-    """Capture input (hidden_states) to the given single-stream block = output of previous block."""
+    """Capture input and after norm+mod to the given single-stream block (one forward pass)."""
     captured = {}
     trans = pipe.transformer
     if not hasattr(trans, "single_transformer_blocks") or single_block_index >= len(trans.single_transformer_blocks):
         return captured
 
-    def pre_hook(_module, args, kwargs=None):
+    def block_pre_hook(_module, args, kwargs=None):
         hs = (kwargs or {}).get("hidden_states")
         if hs is None and args and len(args) > 0:
             hs = args[0]
         if hs is not None:
             captured["input"] = hs.detach().clone().cpu().float()
 
-    handle = trans.single_transformer_blocks[single_block_index].register_forward_pre_hook(pre_hook, with_kwargs=True)
+    def attn_pre_hook(_module, args, kwargs=None):
+        hs = (kwargs or {}).get("hidden_states")
+        if hs is None and args and len(args) > 0:
+            hs = args[0]
+        if hs is not None:
+            captured["after_norm_mod"] = hs.detach().clone().cpu().float()
+
+    block = trans.single_transformer_blocks[single_block_index]
+    h_block = block.register_forward_pre_hook(block_pre_hook, with_kwargs=True)
+    h_attn = block.attn.register_forward_pre_hook(attn_pre_hook, with_kwargs=True)
     dtype = next(trans.parameters()).dtype
     latent_d = latent.to(device, dtype=dtype)
     timestep = timestep_scaled.to(device)
@@ -365,7 +384,8 @@ def _capture_single_block_input_official(pipe, latent, prompt_embeds, timestep_s
                     return_dict=False,
                 )
     finally:
-        handle.remove()
+        h_block.remove()
+        h_attn.remove()
     return captured
 
 
@@ -677,20 +697,47 @@ def main():
                 in_official = _capture_single_block_input_official(
                     pipe, latent, prompt_embeds, timestep_scaled, text_ids, latent_ids, device, single_idx
                 )
-            a_fv = in_fv.get("input")
-            a_o = in_official.get("input")
-            if a_fv is not None and a_o is not None:
+            for stage in ("input", "after_norm_mod"):
+                a_fv = in_fv.get(stage)
+                a_o = in_official.get(stage)
+                if a_fv is None or a_o is None:
+                    print(f"  {stage}: missing (fv={a_fv is not None}, official={a_o is not None})")
+                    continue
                 if a_fv.shape != a_o.shape:
-                    print(f"  input: SHAPE MISMATCH {a_fv.shape} vs {a_o.shape}")
+                    print(f"  {stage}: SHAPE MISMATCH {a_fv.shape} vs {a_o.shape}")
                 else:
                     diff = (a_fv - a_o).abs()
-                    print(f"  input: shape={a_fv.shape} max_diff={diff.max().item():.4f} mean_diff={diff.mean().item():.4f}")
-                    if diff.mean().item() > THRESHOLD_MEAN:
-                        print("  -> Input to this block already diverged (drift from earlier blocks).")
-                    else:
-                        print("  -> Input is close; divergence happens inside this block.")
+                    print(f"  {stage}: shape={a_fv.shape} max_diff={diff.max().item():.4f} mean_diff={diff.mean().item():.4f}")
+            # Output of this block (from main activation collection)
+            t_fv = fv_activations[first_diverged][1]
+            t_o = official_activations[first_diverged][1]
+            if t_fv is not None and t_o is not None and t_fv.shape == t_o.shape:
+                t_fv = t_fv.cpu().float() if t_fv.is_cuda else t_fv.float()
+                t_o = t_o.cpu().float() if t_o.is_cuda else t_o.float()
+                diff = (t_fv - t_o).abs()
+                print(f"  output: shape={t_fv.shape} max_diff={diff.max().item():.4f} mean_diff={diff.mean().item():.4f}")
             else:
-                print(f"  input: missing (fv={a_fv is not None}, official={a_o is not None})")
+                print(f"  output: missing or shape mismatch")
+            # Interpret: where does the diff jump?
+            in_fv_a = in_fv.get("input")
+            in_o_a = in_official.get("input")
+            anm_fv = in_fv.get("after_norm_mod")
+            anm_o = in_official.get("after_norm_mod")
+            if (in_fv_a is not None and in_o_a is not None and anm_fv is not None and anm_o is not None
+                    and t_fv is not None and t_o is not None and t_fv.shape == t_o.shape):
+                d_in = (in_fv_a - in_o_a).abs().mean().item()
+                d_anm = (anm_fv - anm_o).abs().mean().item()
+                d_out = (t_fv.cpu().float() - t_o.cpu().float()).abs().mean().item()
+                if d_anm > d_in * 1.5:
+                    print("  -> Diff jumps at after_norm_mod: check norm / modulation (scale, shift).")
+                elif d_out > d_anm * 1.2:
+                    print("  -> Diff jumps at output: check attention + residual path (attn, gate, clip).")
+                else:
+                    print("  -> Diff grows gradually across the block.")
+            if in_fv_a is not None and in_o_a is not None and (in_fv_a - in_o_a).abs().mean().item() > THRESHOLD_MEAN:
+                print("  -> Input already diverged (drift from earlier blocks).")
+            elif in_fv_a is not None and in_o_a is not None:
+                print("  -> Input is close; divergence happens inside this block.")
     else:
         print("\n-> All block outputs within threshold (mean diff <= %s)." % THRESHOLD_MEAN)
 
