@@ -551,6 +551,158 @@ class ActionModule(nn.Module):
         attn, _ = self.proj_mouse(attn)
         return attn
 
+    def _forward_keyboard(
+        self,
+        hidden_states: torch.Tensor,
+        keyboard_condition: torch.Tensor,
+        *,
+        is_causal: bool,
+        use_rope_keyboard: bool,
+        kv_cache_keyboard: dict[str, torch.Tensor] | None,
+        pad_t: int,
+        num_frame_per_block: int,
+        block_mask_keyboard: BlockMask | None,
+        start_frame: int,
+        freqs_cis: tuple[torch.Tensor, torch.Tensor],
+        N_feats: int,
+        B: int,
+        tt: int,
+        th: int,
+        tw: int,
+    ) -> torch.Tensor:
+        pad = keyboard_condition[:, 0:1, :].expand(-1, pad_t, -1)
+        keyboard_condition = torch.cat([pad, keyboard_condition], dim=1)
+        if is_causal and kv_cache_keyboard is not None:
+            keyboard_condition = keyboard_condition[
+                :,
+                self.vae_time_compression_ratio
+                * (N_feats - num_frame_per_block - self.windows_size)
+                + pad_t :,
+                :,
+            ]  # keyboard_condition[:, self.vae_time_compression_ratio*(start_frame - self.windows_size) + pad_t:start_frame * self.vae_time_compression_ratio + pad_t,:]
+            keyboard_condition = self.keyboard_embed(keyboard_condition)
+            group_keyboard = [
+                keyboard_condition[
+                    :,
+                    self.vae_time_compression_ratio * (i - self.windows_size)
+                    + pad_t : i * self.vae_time_compression_ratio + pad_t,
+                    :,
+                ]
+                for i in range(num_frame_per_block)
+            ]
+        else:
+            keyboard_condition = self.keyboard_embed(keyboard_condition)
+            local_num_frames = tt
+            group_keyboard = [
+                keyboard_condition[
+                    :,
+                    self.vae_time_compression_ratio * (i - self.windows_size)
+                    + pad_t : i * self.vae_time_compression_ratio + pad_t,
+                    :,
+                ]
+                for i in range(local_num_frames)
+            ]
+        group_keyboard = torch.stack(group_keyboard, dim=1)  # B F RW C
+        group_keyboard = group_keyboard.reshape(
+            shape=(group_keyboard.shape[0], group_keyboard.shape[1], -1)
+        )
+        # apply cross attn
+        mouse_q, _ = self.mouse_attn_q(hidden_states)
+        keyboard_kv, _ = self.keyboard_attn_kv(group_keyboard)
+
+        B, L, HD = mouse_q.shape
+        D = HD // self.heads_num
+        q = mouse_q.view(B, L, self.heads_num, D)
+
+        B, L, KHD = keyboard_kv.shape
+        k, v = keyboard_kv.view(B, L, 2, self.heads_num, D).permute(
+            2, 0, 1, 3, 4
+        )
+
+        # Compute cu_squlens and max_seqlen for flash attention
+        # qk norm
+
+        q = self.key_attn_q_norm(q).to(v)
+        k = self.key_attn_k_norm(k).to(v)
+        S = th * tw
+        # assert S == 880
+        # position embed
+        if use_rope_keyboard:
+            B, TS, H, D = q.shape
+            T_ = TS // S
+            q = q.view(B, T_, S, H, D).transpose(1, 2).reshape(B * S, T_, H, D)
+            q, k = _apply_rotary_emb_qk(
+                q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame
+            )
+
+            k = k.repeat_interleave(S, dim=0)
+            v = v.repeat_interleave(S, dim=0)
+
+            if is_causal:
+                if kv_cache_keyboard is None:
+                    assert q.shape[0] == k.shape[0] and q.shape[0] % S == 0
+
+                    padded_length = math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
+                    padded_q = _padding_q_k_v(q, padded_length)
+                    padded_k = _padding_q_k_v(k, padded_length)
+                    padded_v = _padding_q_k_v(v, padded_length)
+                    attn = flex_attention(
+                        query=padded_q.transpose(2, 1),  # after: B, HW, F, C
+                        key=padded_k.transpose(2, 1),
+                        value=padded_v.transpose(2, 1),
+                        block_mask=block_mask_keyboard,
+                    )[:, :, :-padded_length].transpose(2, 1)
+                else:
+                    assert (
+                        k.shape[0] == S
+                    )  # BS == 1 or the cache should not be saved/ load method should be modified
+                    attn = _update_kv_cache_and_attend(
+                        q,
+                        k,
+                        v,
+                        kv_cache_keyboard,
+                        self.keyboard_attn_layer,
+                        start_frame,
+                        num_frame_per_block,
+                        self.local_attn_size,
+                        use_k_for_num_tokens=True,
+                        store_first_only=True,
+                        repeat_factor=S,
+                    )
+            else:
+                attn = self.keyboard_attn_layer(q, k, v)
+            attn = rearrange(attn, "(B S) T H D -> B (T S) (H D)", S=S)
+        else:
+            if is_causal:
+                if kv_cache_keyboard is None:
+                    padded_length = math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
+                    padded_q = _padding_q_k_v(q, padded_length)
+                    padded_k = _padding_q_k_v(k, padded_length)
+                    padded_v = _padding_q_k_v(v, padded_length)
+                    attn = flex_attention(
+                        query=padded_q.transpose(2, 1),  # after: B, HW, F, C
+                        key=padded_k.transpose(2, 1),
+                        value=padded_v.transpose(2, 1),
+                        block_mask=block_mask_keyboard,
+                    )[:, :, :-padded_length].transpose(2, 1)
+                else:
+                    attn = _update_kv_cache_and_attend(
+                        q,
+                        k,
+                        v,
+                        kv_cache_keyboard,
+                        self.keyboard_attn_layer,
+                        start_frame,
+                        num_frame_per_block,
+                        self.local_attn_size,
+                        use_k_for_num_tokens=True,
+                    )
+            else:
+                attn = self.keyboard_attn_layer(q, k, v)
+            attn = rearrange(attn, "B L H D -> B L (H D)")
+        attn, _ = self.proj_keyboard(attn)
+        return attn
+
     def forward(
         self,
         x: torch.Tensor,
@@ -649,150 +801,22 @@ class ActionModule(nn.Module):
             hidden_states = hidden_states + attn
 
         if self.enable_keyboard and keyboard_condition is not None:
-            pad = keyboard_condition[:, 0:1, :].expand(-1, pad_t, -1)
-            keyboard_condition = torch.cat([pad, keyboard_condition], dim=1)
-            if is_causal and kv_cache_keyboard is not None:
-                keyboard_condition = keyboard_condition[
-                    :,
-                    self.vae_time_compression_ratio
-                    * (N_feats - num_frame_per_block - self.windows_size)
-                    + pad_t :,
-                    :,
-                ]  # keyboard_condition[:, self.vae_time_compression_ratio*(start_frame - self.windows_size) + pad_t:start_frame * self.vae_time_compression_ratio + pad_t,:]
-                keyboard_condition = self.keyboard_embed(keyboard_condition)
-                group_keyboard = [
-                    keyboard_condition[
-                        :,
-                        self.vae_time_compression_ratio
-                        * (i - self.windows_size)
-                        + pad_t : i * self.vae_time_compression_ratio + pad_t,
-                        :,
-                    ]
-                    for i in range(num_frame_per_block)
-                ]
-            else:
-                keyboard_condition = self.keyboard_embed(keyboard_condition)
-                local_num_frames = tt
-                group_keyboard = [
-                    keyboard_condition[
-                        :,
-                        self.vae_time_compression_ratio
-                        * (i - self.windows_size)
-                        + pad_t : i * self.vae_time_compression_ratio + pad_t,
-                        :,
-                    ]
-                    for i in range(local_num_frames)
-                ]
-            group_keyboard = torch.stack(group_keyboard, dim=1)  # B F RW C
-            group_keyboard = group_keyboard.reshape(
-                shape=(group_keyboard.shape[0], group_keyboard.shape[1], -1)
+            attn = self._forward_keyboard(
+                hidden_states,
+                keyboard_condition,
+                is_causal=is_causal,
+                use_rope_keyboard=use_rope_keyboard,
+                kv_cache_keyboard=kv_cache_keyboard,
+                pad_t=pad_t,
+                num_frame_per_block=num_frame_per_block,
+                block_mask_keyboard=block_mask_keyboard,
+                start_frame=start_frame,
+                freqs_cis=freqs_cis,
+                N_feats=N_feats,
+                B=B,
+                tt=tt,
+                th=th,
+                tw=tw,
             )
-            # apply cross attn
-            mouse_q, _ = self.mouse_attn_q(hidden_states)
-            keyboard_kv, _ = self.keyboard_attn_kv(group_keyboard)
-
-            B, L, HD = mouse_q.shape
-            D = HD // self.heads_num
-            q = mouse_q.view(B, L, self.heads_num, D)
-
-            B, L, KHD = keyboard_kv.shape
-            k, v = keyboard_kv.view(B, L, 2, self.heads_num, D).permute(
-                2, 0, 1, 3, 4
-            )
-
-            # Compute cu_squlens and max_seqlen for flash attention
-            # qk norm
-
-            q = self.key_attn_q_norm(q).to(v)
-            k = self.key_attn_k_norm(k).to(v)
-            S = th * tw
-            # assert S == 880
-            # position embed
-            if use_rope_keyboard:
-                B, TS, H, D = q.shape
-                T_ = TS // S
-                q = (
-                    q.view(B, T_, S, H, D)
-                    .transpose(1, 2)
-                    .reshape(B * S, T_, H, D)
-                )
-                q, k = _apply_rotary_emb_qk(
-                    q, k, freqs_cis[0], freqs_cis[1], start_offset=start_frame
-                )
-
-                k = k.repeat_interleave(S, dim=0)
-                v = v.repeat_interleave(S, dim=0)
-
-                if is_causal:
-                    if kv_cache_keyboard is None:
-                        assert q.shape[0] == k.shape[0] and q.shape[0] % S == 0
-
-                        padded_length = (
-                            math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
-                        )
-                        padded_q = _padding_q_k_v(q, padded_length)
-                        padded_k = _padding_q_k_v(k, padded_length)
-                        padded_v = _padding_q_k_v(v, padded_length)
-                        attn = flex_attention(
-                            query=padded_q.transpose(
-                                2, 1
-                            ),  # after: B, HW, F, C
-                            key=padded_k.transpose(2, 1),
-                            value=padded_v.transpose(2, 1),
-                            block_mask=block_mask_keyboard,
-                        )[:, :, :-padded_length].transpose(2, 1)
-                    else:
-                        assert (
-                            k.shape[0] == S
-                        )  # BS == 1 or the cache should not be saved/ load method should be modified
-                        attn = _update_kv_cache_and_attend(
-                            q,
-                            k,
-                            v,
-                            kv_cache_keyboard,
-                            self.keyboard_attn_layer,
-                            start_frame,
-                            num_frame_per_block,
-                            self.local_attn_size,
-                            use_k_for_num_tokens=True,
-                            store_first_only=True,
-                            repeat_factor=S,
-                        )
-                else:
-                    attn = self.keyboard_attn_layer(q, k, v)
-                attn = rearrange(attn, "(B S) T H D -> B (T S) (H D)", S=S)
-            else:
-                if is_causal:
-                    if kv_cache_keyboard is None:
-                        padded_length = (
-                            math.ceil(q.shape[1] / 32) * 32 - q.shape[1]
-                        )
-                        padded_q = _padding_q_k_v(q, padded_length)
-                        padded_k = _padding_q_k_v(k, padded_length)
-                        padded_v = _padding_q_k_v(v, padded_length)
-                        attn = flex_attention(
-                            query=padded_q.transpose(
-                                2, 1
-                            ),  # after: B, HW, F, C
-                            key=padded_k.transpose(2, 1),
-                            value=padded_v.transpose(2, 1),
-                            block_mask=block_mask_keyboard,
-                        )[:, :, :-padded_length].transpose(2, 1)
-                    else:
-                        attn = _update_kv_cache_and_attend(
-                            q,
-                            k,
-                            v,
-                            kv_cache_keyboard,
-                            self.keyboard_attn_layer,
-                            start_frame,
-                            num_frame_per_block,
-                            self.local_attn_size,
-                            use_k_for_num_tokens=True,
-                        )
-                else:
-                    attn = self.keyboard_attn_layer(q, k, v)
-                attn = rearrange(attn, "B L H D -> B L (H D)")
-            attn, _ = self.proj_keyboard(attn)
             hidden_states = hidden_states + attn
         return hidden_states
