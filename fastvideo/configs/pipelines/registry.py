@@ -12,6 +12,7 @@ from fastvideo.configs.pipelines.hunyuan15 import Hunyuan15T2V480PConfig, Hunyua
 from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.ltx2 import LTX2T2VConfig
 from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
+from fastvideo.configs.pipelines.waypoint import WaypointT2VConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionT2V_1_3B_Config, TurboDiffusionT2V_14B_Config,
@@ -70,6 +71,8 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     # LTX-2 models
     "Lightricks/LTX-2": LTX2T2VConfig,
     "converted/ltx2_diffusers": LTX2T2VConfig,
+    # Waypoint models
+    "Overworld/Waypoint-1-Small": WaypointT2VConfig,
     # TurboDiffusion models
     "loayrashid/TurboWan2.1-T2V-1.3B-Diffusers": TurboDiffusionT2V_1_3B_Config,
     "loayrashid/TurboWan2.1-T2V-14B-Diffusers": TurboDiffusionT2V_14B_Config,
@@ -112,6 +115,8 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "turbodiffusion" in id.lower() or "turbowan" in id.lower(),
     "ltx2":
     lambda id: "ltx2" in id.lower() or "ltx-2" in id.lower(),
+    "waypoint":
+    lambda id: "waypoint" in id.lower() or "worldengine" in id.lower(),
     # Add other pipeline architecture detectors
 }
 
@@ -136,6 +141,7 @@ PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "stepvideo": StepVideoT2VConfig,
     "turbodiffusion": TurboDiffusionT2V_1_3B_Config,
     "ltx2": LTX2T2VConfig,
+    "waypoint": WaypointT2VConfig,
     # Other fallbacks by architecture
 }
 
