@@ -24,7 +24,7 @@ OUTPUT_PATH = "outputs_video/ltx2_upscale/ltx2_two_stage.mp4"
 def main() -> None:
     generator = VideoGenerator.from_pretrained(
         MODEL_ID,
-        num_gpus=1,
+        num_gpus=8,
         ltx2_refine_enabled=True,
         ltx2_refine_num_inference_steps=3,
         ltx2_refine_guidance_scale=1.0,
@@ -34,8 +34,8 @@ def main() -> None:
     generator.generate_video(
         prompt=PROMPT,
         output_path=OUTPUT_PATH,
-        height=1080,
-        width=1920,
+        height=1024,
+        width=1792,
         num_frames=81,
         fps=24,
         seed=10,

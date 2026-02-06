@@ -34,6 +34,7 @@ from fastvideo.models.loader.weight_utils import (
     safetensors_weights_iterator,
 )
 from fastvideo.models.registry import ModelRegistry
+from fastvideo.models.upsamplers.config_adapters import get_upsampler_config
 from fastvideo.utils import PRECISION_TO_TYPE, is_pin_memory_available
 from fastvideo.hooks.layerwise_offload import enable_layerwise_offload
 
@@ -926,14 +927,10 @@ class UpsamplerLoader(ComponentLoader):
                 "Only diffusers format is supported."
             )
 
-        try:
-            upsampler_cfg = deepcopy(fastvideo_args.pipeline_config.upsampler_config[0])
-            upsampler_cfg.update_model_config(config_dict)
-        except Exception as e:
-            upsampler_cfg = deepcopy(fastvideo_args.pipeline_config.upsampler_config[1])
-            upsampler_cfg.update_model_config(config_dict)
-
         model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+        upsampler_cfg = get_upsampler_config(
+            class_name, config_dict, fastvideo_args.pipeline_config
+        )
         model = model_cls(upsampler_cfg)
 
         target_device = get_local_torch_device()
@@ -944,15 +941,21 @@ class UpsamplerLoader(ComponentLoader):
             os.path.join(str(model_path), "*.safetensors"))
         if not safetensors_list:
             raise ValueError(f"No safetensors files found in {model_path}")
-        
+
         if len(safetensors_list) == 1:
             loaded = safetensors_load_file(safetensors_list[0])
         else:
             loaded = {}
             for sf_file in safetensors_list:
                 loaded.update(safetensors_load_file(sf_file))
-        
-        model.load_state_dict(loaded, strict=True)
+
+        # LTX2 latent upsamplers typically store weights without "model." prefix.
+        target_module = getattr(model, "model", model)
+        if loaded and all(k.startswith("model.") for k in loaded.keys()):
+            stripped = {k[len("model.") :]: v for k, v in loaded.items()}
+            target_module.load_state_dict(stripped, strict=True)
+        else:
+            target_module.load_state_dict(loaded, strict=True)
 
         return model.eval()
 
