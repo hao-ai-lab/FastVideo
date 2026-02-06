@@ -304,6 +304,9 @@ class GameCraftDenoisingStage(PipelineStage):
                 # noise_pred is [B, 16, T, H, W], latents is [B, 16, T, H, W]
                 num_frames = latents.shape[2]
                 
+                # Store pre-step latents for debugging
+                pre_step_latents = latents.clone() if i == 0 else None
+                
                 if history_latents is not None and num_frames > 1:
                     # Video continuation mode: only update second half of frames
                     num_history = num_frames // 2
@@ -324,9 +327,18 @@ class GameCraftDenoisingStage(PipelineStage):
                         return_dict=False
                     )[0]
                 
+                # Debug: show change in latents
+                if pre_step_latents is not None:
+                    diff = (latents - pre_step_latents).abs().mean().item()
+                    logger.info(f"[DEBUG] Step 0 - Latent change (mean abs diff): {diff:.6f}")
+                
                 # Debug: print latent stats after scheduler step
                 if i == 0 or i == len(timesteps) - 1:
                     logger.info(f"[DEBUG] Step {i} - Latents after step: mean: {latents.mean().item():.4f}, std: {latents.std().item():.4f}")
+                    if i == 0:
+                        # Print scheduler info
+                        logger.info(f"[DEBUG] Scheduler sigmas: {self.scheduler.sigmas[:5].tolist()}...{self.scheduler.sigmas[-5:].tolist()}")
+                        logger.info(f"[DEBUG] Scheduler step_index: {self.scheduler.step_index}")
                 
                 # Update progress bar
                 if i == len(timesteps) - 1 or (
