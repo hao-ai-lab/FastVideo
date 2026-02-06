@@ -102,7 +102,7 @@ def _info(logger: Logger,
         - When both are False, the message will be logged from all processes
         - By default, only logs from processes with LOCAL_RANK=0
     """
-    is_distributed = "LOCAL_RANK" in os.environ or "RANK" in os.environ
+    is_distributed = int(os.environ.get("WORLD_SIZE", 1)) > 1
     try:
         local_rank = int(os.environ["LOCAL_RANK"])
         rank = int(os.environ["RANK"])
