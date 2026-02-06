@@ -32,19 +32,6 @@ PARAM_NAME_MAPPING = [
     # ==================== SingleTokenRefiner / txt_in ====================
     # Note: Official has individual_token_refiner.blocks, FastVideo has refiner_blocks
     
-    # Individual token refiner blocks (in txt_in)
-    (r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.norm1\.(.*)$",
-     r"txt_in.refiner_blocks.\1.norm1.\2"),
-    (r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.norm2\.(.*)$",
-     r"txt_in.refiner_blocks.\1.norm2.\2"),
-    (r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.self_attn_qkv\.(.*)$",
-     r"txt_in.refiner_blocks.\1.self_attn_qkv.\2"),
-    (r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.self_attn_proj\.(.*)$",
-     r"txt_in.refiner_blocks.\1.self_attn_proj.\2"),
-    (r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.self_attn_q_norm\.(.*)$",
-     r"txt_in.refiner_blocks.\1.self_attn_q_norm.\2"),
-    (r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.self_attn_k_norm\.(.*)$",
-     r"txt_in.refiner_blocks.\1.self_attn_k_norm.\2"),
     # MLP in refiner blocks: official uses mlp.fc1, mlp.fc2; FastVideo uses mlp.fc_in, mlp.fc_out
     (r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.mlp\.fc1\.(.*)$",
      r"txt_in.refiner_blocks.\1.mlp.fc_in.\2"),
@@ -53,6 +40,10 @@ PARAM_NAME_MAPPING = [
     # adaLN_modulation: official uses Sequential (0, 1), FastVideo uses direct linear
     (r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.adaLN_modulation\.1\.(.*)$",
      r"txt_in.refiner_blocks.\1.adaLN_modulation.linear.\2"),
+    
+    # Individual token refiner blocks (in txt_in) - general patterns after specific ones
+    (r"^txt_in\.individual_token_refiner\.blocks\.(\d+)\.(.*)$",
+     r"txt_in.refiner_blocks.\1.\2"),
     
     # t_embedder in txt_in: official uses mlp.0, mlp.2; FastVideo uses mlp.fc_in, mlp.fc_out
     (r"^txt_in\.t_embedder\.mlp\.0\.(.*)$", r"txt_in.t_embedder.mlp.fc_in.\1"),
@@ -76,9 +67,9 @@ PARAM_NAME_MAPPING = [
     (r"^guidance_in\.mlp\.2\.(.*)$", r"guidance_in.mlp.fc_out.\1"),
     
     # ==================== Vector embedder ====================
-    # vector_in: official uses linear_1, linear_2 (MLPEmbedder); FastVideo uses fc_in, fc_out
-    (r"^vector_in\.linear_1\.(.*)$", r"vector_in.fc_in.\1"),
-    (r"^vector_in\.linear_2\.(.*)$", r"vector_in.fc_out.\1"),
+    # vector_in: official uses in_layer, out_layer; FastVideo uses fc_in, fc_out
+    (r"^vector_in\.in_layer\.(.*)$", r"vector_in.fc_in.\1"),
+    (r"^vector_in\.out_layer\.(.*)$", r"vector_in.fc_out.\1"),
     
     # ==================== Double stream blocks ====================
     # img_mod: official uses ModulateDiT with linear; FastVideo uses ModulateProjection with linear
@@ -225,9 +216,9 @@ def create_transformer_config(hidden_size: int = 3072,
         "_class_name": "HunyuanGameCraftTransformer3DModel",
         "_diffusers_version": "0.33.0.dev0",
         "attention_head_dim": hidden_size // num_attention_heads,
-        "guidance_embeds": True,
+        "guidance_embeds": False,  # Official checkpoint doesn't have guidance_in
         "hidden_size": hidden_size,
-        "in_channels": 16,
+        "in_channels": 33,  # 16 latent + 16 cond + 1 mask (multitask_mask_training)
         "mlp_ratio": 4.0,
         "num_attention_heads": num_attention_heads,
         "num_layers": num_layers,
