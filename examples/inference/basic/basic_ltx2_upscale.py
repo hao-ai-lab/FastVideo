@@ -34,12 +34,12 @@ def main() -> None:
     generator.generate_video(
         prompt=PROMPT,
         output_path=OUTPUT_PATH,
-        height=1024,
-        width=1792,
+        height=960,
+        width=1664,
         num_frames=81,
         fps=24,
         seed=10,
-        # Distilled schedule in LTX-2 uses 8 steps; setting this keeps parity.
+        # DistilledPipeline uses the 8-step distilled schedule without CFG.
         num_inference_steps=8,
         guidance_scale=1.0,
         save_video=True,
