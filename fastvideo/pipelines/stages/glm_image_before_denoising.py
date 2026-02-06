@@ -178,37 +178,115 @@ class GlmImageBeforeDenoisingStage(PipelineStage):
                 batch.prior_token_id.shape, dtype=torch.bool,
                 device=device)  # Drop all priors
 
-        # 3. Encode prompts with T5
-        text_inputs = self.tokenizer(batch.prompt,
-                                     padding="max_length",
-                                     max_length=512,
-                                     truncation=True,
-                                     return_tensors="pt").to(device)
+        # 3. Encode prompts with T5 (Glyphs ONLY)
+        # SGLang logic: Only encode text inside quotes for rendering.
+        def get_glyph_texts(text):
+            text = text[0] if isinstance(text, list) else text
+            ocr_texts = (
+                re.findall(r"'([^']*)'", text)
+                + re.findall(r"“([^“”]*)”", text)
+                + re.findall(r'"([^"]*)"', text)
+                + re.findall(r"「([^「」]*)」", text)
+            )
+            return ocr_texts
 
-        prompt_embeds = self.text_encoder(
+        glyph_texts = get_glyph_texts(batch.prompt)
+        # If no glyphs, use empty string (or pad token)
+        texts_to_encode = glyph_texts if len(glyph_texts) > 0 else [""]
+        
+        # Helper to encode list of texts and get embeddings matching SGLang style
+        # SGLang pads to max_length among the batch of glyphs, and masks rest.
+        # But here 'batch.prompt' is 1 string (BS=1 usually).
+        # We need to return [1, L, D] or [1, max_glyph_len, D]?
+        # SGLang: glyph_embeds = outputs.last_hidden_state[attention_mask.bool()].unsqueeze(0)
+        # It flattens valid tokens?
+        
+        # Let's inspect SGLang `_get_glyph_embeds` (Step 627, lines 434-473)
+        # It creates a batch of glyphs. Encodes them.
+        # Then `outputs.last_hidden_state[attention_mask.bool()]` -> Selects ONLY valid tokens from all glyphs.
+        # .unsqueeze(0) -> [1, Total_Valid_Tokens, D]
+        
+        text_inputs = self.tokenizer(
+            texts_to_encode,
+            padding="longest", # Pad to longest in this micro-batch
+            max_length=512,
+            truncation=True,
+            return_tensors="pt"
+        ).to(device)
+        
+        # Add padding for processing if needed (SGLang adds pad token buffering?)
+        # SGLang line 450: `[pad] * ... + input_ids` (Left/Right pad?)
+        # It seems extensive padding logic.
+        # For now, standard encoding + mask selection should approximate it.
+        
+        prompt_outputs = self.text_encoder(
             input_ids=text_inputs.input_ids,
-            attention_mask=text_inputs.attention_mask).last_hidden_state.to(
-                dtype)
-
-        # Prepare for CFG - concatenate [neg, pos] embeddings for batched processing
+            attention_mask=text_inputs.attention_mask
+        )
+        
+        # Flatten valid tokens from all glyphs into one sequence
+        # inputs.attention_mask identifies valid tokens (excluding pad)
+        valid_mask = text_inputs.attention_mask.bool()
+        prompt_embeds = prompt_outputs.last_hidden_state[valid_mask].unsqueeze(0).to(dtype)
+        
+        # SGLang returns [1, Seq, D].
+        batch.attention_mask = None # Attention mask handled by packing? 
+        # Actually SGLang `GlmImageAttention` uses `context_len` logic.
+        # FastVideo `GlmImageTransformerBlock` expects `encoder_hidden_states` [B, L, D].
+        # If L varies, it's fine.
+        
+        # Handle Negatives (CFG)
         if batch.do_classifier_free_guidance:
-            neg_text_inputs = self.tokenizer(batch.negative_prompt or "",
-                                             padding="max_length",
-                                             max_length=512,
-                                             truncation=True,
-                                             return_tensors="pt").to(device)
+             neg_prompt = batch.negative_prompt or ""
+             neg_glyph_texts = get_glyph_texts(neg_prompt)
+             neg_texts_to_encode = neg_glyph_texts if len(neg_glyph_texts) > 0 else [""]
+             
+             neg_inputs = self.tokenizer(
+                 neg_texts_to_encode,
+                 padding="longest",
+                 max_length=512,
+                 truncation=True,
+                 return_tensors="pt"
+             ).to(device)
+             
+             neg_outputs = self.text_encoder(
+                 input_ids=neg_inputs.input_ids,
+                 attention_mask=neg_inputs.attention_mask
+             )
+             neg_valid_mask = neg_inputs.attention_mask.bool()
+             neg_prompt_embeds = neg_outputs.last_hidden_state[neg_valid_mask].unsqueeze(0).to(dtype)
+             
+             # Pad to match length for concatenation?
+             # Or use list? FastVideo handles lists?
+             # `glm_image.py` (Model) handles `encoder_hidden_states` as Tensor. I need to PAD.
+             
+             L_pos = prompt_embeds.shape[1]
+             L_neg = neg_prompt_embeds.shape[1]
+             max_L = max(L_pos, L_neg)
+             
+             # Pad with zeros
+             if L_pos < max_L:
+                 pad = torch.zeros((1, max_L - L_pos, prompt_embeds.shape[2]), device=device, dtype=dtype)
+                 prompt_embeds = torch.cat([prompt_embeds, pad], dim=1)
+             if L_neg < max_L:
+                 pad = torch.zeros((1, max_L - L_neg, neg_prompt_embeds.shape[2]), device=device, dtype=dtype)
+                 neg_prompt_embeds = torch.cat([neg_prompt_embeds, pad], dim=1)
+                 
+             prompt_embeds = torch.cat([neg_prompt_embeds, prompt_embeds], dim=0)
+             # Attention mask for transformer? 
+             # We should provide explicit mask if we padded.
+             # SGLang: `text_attn_mask`.
+             # Here we construct mask: [1, max_L]
+             att_mask_pos = torch.ones((1, max_L), device=device)
+             if L_pos < max_L: att_mask_pos[:, L_pos:] = 0
+             
+             att_mask_neg = torch.ones((1, max_L), device=device)
+             if L_neg < max_L: att_mask_neg[:, L_neg:] = 0
+             
+             attention_mask = torch.cat([att_mask_neg, att_mask_pos], dim=0)
 
-            neg_prompt_embeds = self.text_encoder(
-                input_ids=neg_text_inputs.input_ids,
-                attention_mask=neg_text_inputs.attention_mask
-            ).last_hidden_state.to(dtype)
-
-            # Concatenate for CFG batching: [uncond, cond] - shape (2, L, D)
-            prompt_embeds = torch.cat([neg_prompt_embeds, prompt_embeds])
-            attention_mask = torch.cat(
-                [neg_text_inputs.attention_mask, text_inputs.attention_mask])
         else:
-            attention_mask = text_inputs.attention_mask
+             attention_mask = torch.ones((1, prompt_embeds.shape[1]), device=device)
 
         batch.prompt_embeds = [prompt_embeds]
         batch.attention_mask = attention_mask
