@@ -57,7 +57,7 @@ validation_args=(
 )
 
 optimizer_args=(
-  --learning_rate 1e-4
+  --learning_rate 1e-5
   --mixed_precision "bf16"
   --weight_only_checkpointing_steps 1000
   --training_state_checkpointing_steps 1000
