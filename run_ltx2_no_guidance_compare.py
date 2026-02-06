@@ -138,9 +138,6 @@ PROMPT = (
     "The woman covers her face, on the verge of tears. The tone is deadpan, "
     "absurd, and quietly tragic.")
 
-PROMPT = (
-    "A curious raccoon peeks through a vibrant field of yellow sunflowers.")
-
 official_negative_prompt = (
     "blurry, out of focus, overexposed, underexposed, low contrast, washed out colors, excessive noise, "
     "grainy texture, poor lighting, flickering, motion blur, distorted proportions, unnatural skin tones, "
@@ -154,7 +151,6 @@ official_negative_prompt = (
     "pauses, incorrect timing, unnatural transitions, inconsistent framing, tilted camera, flat lighting, "
     "inconsistent tone, cinematic oversaturation, stylized filters, or AI artifacts."
 )
-
 
 @dataclass
 class Setting:
