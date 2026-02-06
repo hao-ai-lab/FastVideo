@@ -17,8 +17,9 @@ logger = init_logger(__name__)
 
 class ValidationDataset(IterableDataset):
 
-    def __init__(self, filename: str):
+    def __init__(self, filename: str, num_samples: int | None = None):
         super().__init__()
+        self.num_samples = num_samples
 
         self.filename = pathlib.Path(filename)
         # get directory of filename
@@ -59,6 +60,12 @@ class ValidationDataset(IterableDataset):
 
         # Convert to list to get total samples
         self.all_samples = list(data)
+        
+        # Limit number of samples if specified
+        if self.num_samples is not None and self.num_samples < len(self.all_samples):
+            self.all_samples = self.all_samples[:self.num_samples]
+            logger.info("Limiting validation samples to %s", self.num_samples)
+        
         self.original_total_samples = len(self.all_samples)
 
         # Extend samples to be a multiple of DP degree (num_sp_groups)
