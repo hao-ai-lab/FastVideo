@@ -135,6 +135,10 @@ class ForwardBatch:
     # Camera control inputs (HYWorld)
     pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
 
+    # Camera control inputs (HunyuanGameCraft)
+    # Plücker coordinates for camera pose conditioning [B, F, 6, H, W]
+    camera_states: torch.Tensor | None = None
+
     # Latent dimensions
     height_latents: list[int] | int | None = None
     width_latents: list[int] | int | None = None

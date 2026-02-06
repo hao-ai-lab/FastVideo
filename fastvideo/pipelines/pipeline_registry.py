@@ -37,6 +37,7 @@ _PIPELINE_NAME_TO_ARCHITECTURE_NAME: dict[str, str] = {
     "LongCatImageToVideoPipeline": "longcat",
     "LongCatVideoContinuationPipeline": "longcat",
     "LTX2Pipeline": "ltx2",
+    "HunyuanGameCraftPipeline": "hunyuangamecraft",
 }
 
 _PREPROCESS_WORKLOAD_TYPE_TO_PIPELINE_NAME: dict[WorkloadType, str] = {

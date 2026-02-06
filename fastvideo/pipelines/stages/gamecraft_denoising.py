@@ -90,20 +90,16 @@ class GameCraftDenoisingStage(PipelineStage):
         
         if history_latents is None:
             # Text-to-video mode: no history conditioning
-            # The model was trained with first half as "history" (mask=1) and second half as "generate" (mask=0)
-            # For T2V, we use zeros for conditioning but still use the expected mask pattern
+            # For pure T2V: all zeros conditioning, all zeros mask (generate everything)
             conditioning_latents = torch.zeros(
                 batch_size, channels, num_frames, height, width,
                 device=device, dtype=dtype
             )
-            # Create mask: first half = 1 (history placeholder), second half = 0 (generate)
-            # This matches the training format even for T2V
+            # All zeros mask = generate all frames
             mask = torch.zeros(
                 batch_size, 1, num_frames, height, width,
                 device=device, dtype=dtype
             )
-            num_history = num_frames // 2
-            mask[:, :, :num_history, :, :] = 1.0  # First half marked as "history"
         else:
             # Video continuation mode: use history as conditioning
             conditioning_latents = history_latents.clone()
@@ -304,14 +300,13 @@ class GameCraftDenoisingStage(PipelineStage):
                 if i == 0:
                     logger.info(f"[DEBUG] After CFG - Noise pred mean: {noise_pred.mean().item():.4f}, std: {noise_pred.std().item():.4f}")
                 
-                # Scheduler step - only update non-history frames (second half)
-                # The model was trained to always keep first half fixed and generate second half
+                # Scheduler step
                 # noise_pred is [B, 16, T, H, W], latents is [B, 16, T, H, W]
                 num_frames = latents.shape[2]
-                num_history = num_frames // 2
                 
-                if num_frames > 1 and num_history > 0:
-                    # Only update second half of frames (the generated portion)
+                if history_latents is not None and num_frames > 1:
+                    # Video continuation mode: only update second half of frames
+                    num_history = num_frames // 2
                     latents[:, :, num_history:, :, :] = self.scheduler.step(
                         noise_pred[:, :, num_history:, :, :],
                         t,
@@ -320,7 +315,7 @@ class GameCraftDenoisingStage(PipelineStage):
                         return_dict=False
                     )[0]
                 else:
-                    # Single frame or edge case: update all
+                    # T2V mode: update all frames
                     latents = self.scheduler.step(
                         noise_pred,
                         t,
