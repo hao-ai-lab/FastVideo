@@ -167,6 +167,51 @@ class LTX2Pipeline(LoRAPipeline):
         model_index = self._load_config(self.model_path)
         logger.info("Loading pipeline modules from config: %s", model_index)
 
+        # Apply optional FastVideo-specific refine defaults embedded in model_index.json.
+        def _resolve_refine_path(value: str | None) -> str | None:
+            if value is None:
+                return None
+            if os.path.isabs(value):
+                return value
+            candidate = os.path.join(self.model_path, value)
+            if os.path.exists(candidate):
+                return candidate
+            return value
+
+        if model_index.get("fastvideo_refine_enabled") is True:
+            if fastvideo_args.refine_enabled is None:
+                fastvideo_args.ltx2_refine_enabled = True
+        if fastvideo_args.refine_upsampler_path is None and fastvideo_args.ltx2_refine_upsampler_path is None:
+            fastvideo_args.ltx2_refine_upsampler_path = _resolve_refine_path(
+                model_index.get("fastvideo_refine_upsampler_path"))
+            if fastvideo_args.ltx2_refine_upsampler_path is None and "spatial_upsampler" in model_index:
+                fastvideo_args.ltx2_refine_upsampler_path = _resolve_refine_path(
+                    "spatial_upsampler")
+        if fastvideo_args.refine_transformer_path is None and fastvideo_args.ltx2_refine_transformer_path is None:
+            fastvideo_args.ltx2_refine_transformer_path = _resolve_refine_path(
+                model_index.get("fastvideo_refine_transformer_path"))
+        if fastvideo_args.refine_lora_path is None and fastvideo_args.ltx2_refine_lora_path is None:
+            fastvideo_args.ltx2_refine_lora_path = _resolve_refine_path(
+                model_index.get("fastvideo_refine_lora_path"))
+        if fastvideo_args.refine_num_inference_steps is None and model_index.get(
+                "fastvideo_refine_num_inference_steps") is not None:
+            fastvideo_args.ltx2_refine_num_inference_steps = int(
+                model_index["fastvideo_refine_num_inference_steps"])
+        if fastvideo_args.refine_guidance_scale is None and model_index.get(
+                "fastvideo_refine_guidance_scale") is not None:
+            fastvideo_args.ltx2_refine_guidance_scale = float(
+                model_index["fastvideo_refine_guidance_scale"])
+        if fastvideo_args.refine_add_noise is None and model_index.get(
+                "fastvideo_refine_add_noise") is not None:
+            fastvideo_args.ltx2_refine_add_noise = bool(
+                model_index["fastvideo_refine_add_noise"])
+        if fastvideo_args.refine_noise_path is None and fastvideo_args.ltx2_refine_noise_path is None:
+            fastvideo_args.ltx2_refine_noise_path = _resolve_refine_path(
+                model_index.get("fastvideo_refine_noise_path"))
+        if fastvideo_args.refine_audio_noise_path is None and fastvideo_args.ltx2_refine_audio_noise_path is None:
+            fastvideo_args.ltx2_refine_audio_noise_path = _resolve_refine_path(
+                model_index.get("fastvideo_refine_audio_noise_path"))
+
         model_index.pop("_class_name")
         model_index.pop("_diffusers_version")
         model_index.pop("workload_type", None)
@@ -231,6 +276,15 @@ class LTX2Pipeline(LoRAPipeline):
                 raise ValueError(
                     "ltx2_refine_enabled is True but ltx2_refine_upsampler_path was not provided."
                 )
+            if not os.path.isdir(upsampler_path):
+                raise ValueError(
+                    "ltx2_refine_upsampler_path must be a directory containing Diffusers-style "
+                    f"upsampler weights; got {upsampler_path}")
+            config_path = os.path.join(upsampler_path, "config.json")
+            if not os.path.exists(config_path):
+                raise ValueError(
+                    "ltx2_refine_upsampler_path must contain a Diffusers config.json; "
+                    f"missing {config_path}")
             if loaded_modules is not None and "spatial_upsampler" in loaded_modules:
                 modules["spatial_upsampler"] = loaded_modules[
                     "spatial_upsampler"]

@@ -15,19 +15,17 @@ PROMPT = (
     "absurd, and quietly tragic."
 )
 
-# FastVideo-converted weights (align settings to the official distilled pipeline).
-MODEL_PATH = "converted/ltx2_diffusers"
-UPSAMPLER_PATH = "converted/ltx2_spatial_upscaler"
+# HF model ID (downloaded automatically). Distilled repos include upsamplers + refine LoRA reference.
+MODEL_ID = "FastVideo/LTX2-Distilled-Diffusers"
 
-OUTPUT_PATH = "outputs_video/ltx2_upscale/ltx2_official_two_stage2222.mp4"
+OUTPUT_PATH = "outputs_video/ltx2_upscale/ltx2_two_stage.mp4"
 
 
 def main() -> None:
     generator = VideoGenerator.from_pretrained(
-        MODEL_PATH,
+        MODEL_ID,
         num_gpus=1,
         ltx2_refine_enabled=True,
-        ltx2_refine_upsampler_path=UPSAMPLER_PATH,
         ltx2_refine_num_inference_steps=3,
         ltx2_refine_guidance_scale=1.0,
         ltx2_refine_add_noise=True,
@@ -36,8 +34,8 @@ def main() -> None:
     generator.generate_video(
         prompt=PROMPT,
         output_path=OUTPUT_PATH,
-        height=960,
-        width=1664,
+        height=1080,
+        width=1920,
         num_frames=81,
         fps=24,
         seed=10,

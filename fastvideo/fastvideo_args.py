@@ -172,6 +172,17 @@ class FastVideoArgs:
     ltx2_vae_temporal_tile_overlap_in_frames: int | None = None
     ltx2_initial_latent_path: str | None = None
     ltx2_audio_latent_path: str | None = None
+    # Generic stage-2 refine args (preferred API). These map to LTX-2 refine args
+    # for now, but keep the user-facing API model-agnostic.
+    refine_enabled: bool | None = None
+    refine_upsampler_path: str | None = None
+    refine_transformer_path: str | None = None
+    refine_lora_path: str | None = None
+    refine_num_inference_steps: int | None = None
+    refine_guidance_scale: float | None = None
+    refine_add_noise: bool | None = None
+    refine_noise_path: str | None = None
+    refine_audio_noise_path: str | None = None
     ltx2_refine_enabled: bool = False
     ltx2_refine_upsampler_path: str | None = None
     ltx2_refine_transformer_path: str | None = None
@@ -233,6 +244,7 @@ class FastVideoArgs:
                              self.moba_config_path, e)
                 raise
         self._apply_ltx2_vae_overrides()
+        self._resolve_refine_args()
         self.check_fastvideo_args()
 
     def _apply_ltx2_vae_overrides(self) -> None:
@@ -269,6 +281,27 @@ class FastVideoArgs:
         ) and self.ltx2_vae_temporal_tile_overlap_in_frames is not None:
             vae_config.ltx2_temporal_tile_overlap_in_frames = (
                 self.ltx2_vae_temporal_tile_overlap_in_frames)
+
+    def _resolve_refine_args(self) -> None:
+        """Map generic refine_* args to LTX-2-specific refine fields."""
+        if self.refine_enabled is not None:
+            self.ltx2_refine_enabled = self.refine_enabled
+        if self.refine_upsampler_path is not None:
+            self.ltx2_refine_upsampler_path = self.refine_upsampler_path
+        if self.refine_transformer_path is not None:
+            self.ltx2_refine_transformer_path = self.refine_transformer_path
+        if self.refine_lora_path is not None:
+            self.ltx2_refine_lora_path = self.refine_lora_path
+        if self.refine_num_inference_steps is not None:
+            self.ltx2_refine_num_inference_steps = self.refine_num_inference_steps
+        if self.refine_guidance_scale is not None:
+            self.ltx2_refine_guidance_scale = self.refine_guidance_scale
+        if self.refine_add_noise is not None:
+            self.ltx2_refine_add_noise = self.refine_add_noise
+        if self.refine_noise_path is not None:
+            self.ltx2_refine_noise_path = self.refine_noise_path
+        if self.refine_audio_noise_path is not None:
+            self.ltx2_refine_audio_noise_path = self.refine_audio_noise_path
 
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
