@@ -324,8 +324,8 @@ Purpose:
 Action:
 
 - Add a new pipeline config + sampling params.
-- Register them in `fastvideo/configs/pipelines/registry.py` and
-  `fastvideo/configs/sample/registry.py`.
+- Register them in `fastvideo/registry.py` using explicit
+  `register_configs(...)` blocks (this file is the single source of truth now).
 
 ### 5) Wire pipeline stages
 

@@ -26,6 +26,11 @@ class StageValidators:
         return isinstance(value, int) and value > 0
 
     @staticmethod
+    def non_negative_int(value: Any) -> bool:
+        """Check if value is a non-negative integer (allows 0)."""
+        return isinstance(value, int) and value >= 0
+
+    @staticmethod
     def positive_float(value: Any) -> bool:
         """Check if value is a positive float."""
         return isinstance(value, int | float) and value > 0
@@ -405,6 +410,8 @@ class VerificationResult:
                 error_msg = f"tensor contains {torch.isnan(value).sum().item()} NaN values"
         elif validator_name == 'positive_int':
             expected = "positive integer"
+        elif validator_name == 'non_negative_int':
+            expected = "non-negative integer"
         elif validator_name == 'not_none':
             expected = "non-None value"
         elif validator_name == 'list_not_empty':

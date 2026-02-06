@@ -724,3 +724,6 @@ class CosmosTransformer3DModel(BaseDiT):
         hidden_states = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
 
         return hidden_states
+
+# Entry point for model registry
+EntryClass = CosmosTransformer3DModel

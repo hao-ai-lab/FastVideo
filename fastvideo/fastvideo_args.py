@@ -179,6 +179,7 @@ class FastVideoArgs:
     model_loaded: dict[str, bool] = field(default_factory=lambda: {
         "transformer": True,
         "vae": True,
+        "upsampler": True,
     })
 
     override_text_encoder_safetensors: str | None = None  # path to safetensors file for text encoder override

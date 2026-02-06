@@ -1802,3 +1802,6 @@ class LTX2CausalVideoAutoencoder(nn.Module):
         if previous_chunk is not None:
             previous_weights = previous_weights.clamp(min=1e-8)
             yield previous_chunk / previous_weights
+
+# Entry point for model registry
+EntryClass = LTX2CausalVideoAutoencoder

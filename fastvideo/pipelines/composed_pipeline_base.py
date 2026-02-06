@@ -15,6 +15,8 @@ import torch
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.distributed import (
     maybe_init_distributed_environment_and_model_parallel, get_world_group)
+from fastvideo.distributed.communication_op import (
+    warmup_sequence_parallel_communication)
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
 from fastvideo.profiler import get_or_create_profiler
@@ -157,6 +159,10 @@ class ComposedPipelineBase(ABC):
             logger.info("Creating pipeline stages...")
             self.create_pipeline_stages(self.fastvideo_args)
 
+            # Warmup NCCL communicators for sequence parallelism to avoid
+            # slow first forward pass due to lazy initialization
+            warmup_sequence_parallel_communication()
+
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         raise NotImplementedError(
             "if training_mode is True, the pipeline must implement this method")
@@ -287,6 +293,7 @@ class ComposedPipelineBase(ABC):
         # remove keys that are not pipeline modules
         model_index.pop("_class_name")
         model_index.pop("_diffusers_version")
+        model_index.pop("_name_or_path", None)
         model_index.pop("workload_type", None)
         if "boundary_ratio" in model_index and model_index[
                 "boundary_ratio"] is not None:

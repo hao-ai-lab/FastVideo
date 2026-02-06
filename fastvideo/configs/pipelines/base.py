@@ -8,7 +8,7 @@ from typing import Any, cast
 import torch
 
 from fastvideo.configs.models import (DiTConfig, EncoderConfig, ModelConfig,
-                                      VAEConfig)
+                                      VAEConfig, UpsamplerConfig)
 from fastvideo.configs.models.encoders import BaseEncoderOutput
 from fastvideo.configs.utils import update_config_from_args
 from fastvideo.logger import init_logger
@@ -44,12 +44,15 @@ class PipelineConfig:
     # Video generation parameters
     embedded_cfg_scale: float = 6.0
     flow_shift: float | None = None
+    flow_shift_sr: float | None = None
     disable_autocast: bool = False
     is_causal: bool = False
 
     # Model configuration
     dit_config: DiTConfig = field(default_factory=DiTConfig)
     dit_precision: str = "bf16"
+    upsampler_config: UpsamplerConfig = field(default_factory=UpsamplerConfig)
+    upsampler_precision: str = "fp32"
 
     # VAE configuration
     vae_config: VAEConfig = field(default_factory=VAEConfig)
@@ -245,8 +248,7 @@ class PipelineConfig:
         """
         use the pipeline class setting from model_path to match the pipeline config
         """
-        from fastvideo.configs.pipelines.registry import (
-            get_pipeline_config_cls_from_name)
+        from fastvideo.registry import get_pipeline_config_cls_from_name
         pipeline_config_cls = get_pipeline_config_cls_from_name(model_path)
 
         return cast(PipelineConfig, pipeline_config_cls(model_path=model_path))
@@ -260,8 +262,7 @@ class PipelineConfig:
         kwargs: dictionary of kwargs
         config_cli_prefix: prefix of CLI arguments for this PipelineConfig instance
         """
-        from fastvideo.configs.pipelines.registry import (
-            get_pipeline_config_cls_from_name)
+        from fastvideo.registry import get_pipeline_config_cls_from_name
 
         prefix_with_dot = f"{config_cli_prefix}." if (config_cli_prefix.strip()
                                                       != "") else ""

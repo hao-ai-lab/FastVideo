@@ -417,3 +417,6 @@ class SiglipVisionModel(ImageEncoder):
             loaded_params.add(name)
             
         return loaded_params
+
+# Entry point for model registry
+EntryClass = SiglipVisionModel

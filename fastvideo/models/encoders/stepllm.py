@@ -583,3 +583,6 @@ class STEP1TextEncoder(torch.nn.Module):
                                       self.device) if with_mask else None)
             y_mask = txt_tokens.attention_mask
         return y.transpose(0, 1), y_mask
+
+# Entry point for model registry
+EntryClass = STEP1TextEncoder

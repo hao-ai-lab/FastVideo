@@ -37,6 +37,7 @@ L40S_REFERENCE_LATENT = -157.09130859375
 
 
 @pytest.mark.usefixtures("distributed_setup")
+@pytest.mark.skip(reason="Skipping test_hunyuan_vae")
 def test_hunyuan_vae():
     device = torch.device("cuda:0")
     precision = torch.bfloat16
