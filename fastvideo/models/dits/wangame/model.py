@@ -367,16 +367,13 @@ class WanGameActionTransformer3DModel(BaseDiT):
 
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
             timestep, action, encoder_hidden_states, encoder_hidden_states_image=encoder_hidden_states_image)
-        # Reshape timestep_proj: [T, 6*dim] -> [B, T, 6, dim]
-        # For training: batch_size=1, T=num_frames (diffusion forcing)
-        # For inference: batch_size can vary
-        timestep_proj = timestep_proj.unflatten(1, (6, self.hidden_size))
-        if timestep_proj.shape[0] == post_patch_num_frames and batch_size == 1:
-            # Training mode: timestep_proj is [T, 6, dim], add batch dim -> [1, T, 6, dim]
-            timestep_proj = timestep_proj.unsqueeze(0)
-        else:
-            # Inference mode: reshape based on timestep shape
-            timestep_proj = timestep_proj.unflatten(dim=0, sizes=timestep.shape)
+        
+        # condition_embedder returns:
+        # - temb: [B*T, dim] where T = post_patch_num_frames
+        # - timestep_proj: [B*T, 6*dim]
+        # Reshape to [B, T, 6, dim] for transformer blocks
+        timestep_proj = timestep_proj.unflatten(1, (6, self.hidden_size))  # [B*T, 6, dim]
+        timestep_proj = timestep_proj.view(batch_size, post_patch_num_frames, 6, self.hidden_size)  # [B, T, 6, dim]
 
         encoder_hidden_states = encoder_hidden_states_image
 
@@ -402,13 +399,8 @@ class WanGameActionTransformer3DModel(BaseDiT):
             return kv_cache
 
         # Output norm, projection & unpatchify
-        # Reshape temb to match timestep_proj shape: [T, dim] -> [B, T, 1, dim]
-        if temb.shape[0] == post_patch_num_frames and batch_size == 1:
-            # Training mode: temb is [T, dim] -> [1, T, 1, dim]
-            temb = temb.unsqueeze(0).unsqueeze(2)
-        else:
-            # Inference mode: reshape based on timestep shape
-            temb = temb.unflatten(dim=0, sizes=timestep.shape).unsqueeze(2)
+        # temb is [B*T, dim], reshape to [B, T, 1, dim]
+        temb = temb.view(batch_size, post_patch_num_frames, -1).unsqueeze(2)  # [B, T, 1, dim]
         
         shift, scale = (self.scale_shift_table.unsqueeze(1) + temb).chunk(2, dim=2)
         hidden_states = self.norm_out(hidden_states, shift, scale)

@@ -3,6 +3,7 @@ import sys
 from copy import deepcopy
 from typing import Any
 
+import numpy as np
 import torch
 
 from fastvideo.configs.sample import SamplingParam
@@ -40,6 +41,48 @@ class WanGameTrainingPipeline(TrainingPipeline):
 
     def set_schemas(self):
         self.train_dataset_schema = pyarrow_schema_wangame
+
+    def set_trainable(self) -> None:
+        """
+        Override to only train newly added action-related parameters:
+        - condition_embedder.action_embedder: embeds action into timestep
+        - blocks.*.to_out_prope: projects PRoPE attention output
+        
+        This freezes the base model (q/k/v projections, FFN, etc.) while
+        allowing the action-conditioning path to be trained.
+        """
+        train_action_only = getattr(self.fastvideo_args, "train_action_only", False)
+        
+        if not train_action_only:
+            # Default behavior: train all parameters
+            super().set_trainable()
+            return
+        
+        # Freeze all transformer parameters first
+        transformer = self.get_module("transformer")
+        transformer.train()
+        transformer.requires_grad_(False)
+        
+        # Define which parameter name patterns to train
+        action_param_patterns = [
+            "condition_embedder.action_embedder",  # Action embedding MLP
+            "to_out_prope",  # PRoPE output projections in each block
+        ]
+        
+        # Enable gradients for action-related parameters only
+        trainable_count = 0
+        frozen_count = 0
+        for name, param in transformer.named_parameters():
+            should_train = any(pattern in name for pattern in action_param_patterns)
+            if should_train:
+                param.requires_grad_(True)
+                trainable_count += 1
+                logger.info(f"Trainable: {name} ({param.numel()} params)")
+            else:
+                frozen_count += 1
+        
+        logger.info(f"Action-only training: {trainable_count} trainable param groups, "
+                    f"{frozen_count} frozen param groups")
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing validation pipeline...")
@@ -152,10 +195,19 @@ class WanGameTrainingPipeline(TrainingPipeline):
         encoder_hidden_states_image = image_embeds
 
         from fastvideo.models.dits.hyworld.pose import process_custom_actions
-        viewmats, intrinsics, action_labels = process_custom_actions(training_batch.keyboard_cond, training_batch.mouse_cond)
-        viewmats = viewmats.unsqueeze(0).to(get_local_torch_device(), dtype=torch.bfloat16)
-        intrinsics = intrinsics.unsqueeze(0).to(get_local_torch_device(), dtype=torch.bfloat16)
-        action_labels = action_labels.unsqueeze(0).to(get_local_torch_device(), dtype=torch.bfloat16)
+        
+        # Process actions for each batch sample
+        batch_size = training_batch.noisy_model_input.shape[0]
+        viewmats_list, intrinsics_list, action_labels_list = [], [], []
+        for b in range(batch_size):
+            v, i, a = process_custom_actions(
+                training_batch.keyboard_cond[b], training_batch.mouse_cond[b])
+            viewmats_list.append(v)
+            intrinsics_list.append(i)
+            action_labels_list.append(a)
+        viewmats = torch.stack(viewmats_list, dim=0).to(get_local_torch_device(), dtype=torch.bfloat16)
+        intrinsics = torch.stack(intrinsics_list, dim=0).to(get_local_torch_device(), dtype=torch.bfloat16)
+        action_labels = torch.stack(action_labels_list, dim=0).to(get_local_torch_device(), dtype=torch.bfloat16)
 
         # NOTE: noisy_model_input already contains concatenated image_latents from _prepare_dit_inputs
         training_batch.input_kwargs = {
@@ -226,6 +278,52 @@ class WanGameTrainingPipeline(TrainingPipeline):
             batch.mouse_cond = mouse_cond
 
         return batch
+
+    def _post_process_validation_frames(self, frames: list[np.ndarray],
+                                        batch: ForwardBatch) -> list[np.ndarray]:
+        """Apply action overlay to validation frames for WanGame.
+        
+        Draws keyboard (WASD) and mouse (pitch/yaw) indicators on the video frames.
+        """
+        # Check if action data is available
+        keyboard_cond = getattr(batch, 'keyboard_cond', None)
+        mouse_cond = getattr(batch, 'mouse_cond', None)
+        
+        if keyboard_cond is None and mouse_cond is None:
+            return frames
+        
+        # Import overlay functions
+        from fastvideo.models.dits.matrixgame.utils import (
+            draw_keys_on_frame, draw_mouse_on_frame)
+        
+        # Convert tensors to numpy if needed (bfloat16 -> float32 -> numpy)
+        if keyboard_cond is not None:
+            keyboard_cond = keyboard_cond.squeeze(0).cpu().float().numpy()  # (T, 6)
+        if mouse_cond is not None:
+            mouse_cond = mouse_cond.squeeze(0).cpu().float().numpy()  # (T, 2)
+        
+        # MatrixGame convention: keyboard [W, S, A, D, left, right], mouse [Pitch, Yaw]
+        key_names = ["W", "S", "A", "D", "left", "right"]
+        
+        processed_frames = []
+        for frame_idx, frame in enumerate(frames):
+            frame = np.ascontiguousarray(frame.copy())
+            
+            # Draw keyboard overlay
+            if keyboard_cond is not None and frame_idx < len(keyboard_cond):
+                keys = {key_names[i]: bool(keyboard_cond[frame_idx, i]) 
+                        for i in range(min(len(key_names), keyboard_cond.shape[1]))}
+                draw_keys_on_frame(frame, keys, mode='universal')
+            
+            # Draw mouse overlay
+            if mouse_cond is not None and frame_idx < len(mouse_cond):
+                pitch = float(mouse_cond[frame_idx, 0])
+                yaw = float(mouse_cond[frame_idx, 1])
+                draw_mouse_on_frame(frame, pitch, yaw)
+            
+            processed_frames.append(frame)
+        
+        return processed_frames
 
 
 def main(args) -> None:

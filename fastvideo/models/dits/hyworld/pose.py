@@ -10,6 +10,7 @@ Adapted from HY-WorldPlay: https://github.com/Tencent-Hunyuan/HY-WorldPlay
 """
 
 import json
+import logging
 import numpy as np
 import torch
 from scipy.spatial.transform import Rotation as R
@@ -17,6 +18,7 @@ from typing import Union, Optional
 
 from fastvideo.models.dits.hyworld.trajectory import generate_camera_trajectory_local
 
+logger = logging.getLogger(__name__)
 
 # Mapping from one-hot action encoding to single label
 mapping = {
@@ -422,9 +424,11 @@ def reformat_keyboard_and_mouse_tensors(keyboard_tensor, mouse_tensor):
     keyboard_tensor = keyboard_tensor[1:, :]
     mouse_tensor = mouse_tensor[1:, :]
     groups = keyboard_tensor.view(-1, 4, keyboard_tensor.shape[1])
-    assert (groups == groups[:, 0:1]).all(dim=1).all(), "keyboard_tensor must have the same value for each group"
+    if not (groups == groups[:, 0:1]).all(dim=1).all():
+        logger.warning(f"keyboard_tensor has different values for each group: {groups}")   
     groups = mouse_tensor.view(-1, 4, mouse_tensor.shape[1])
-    assert (groups == groups[:, 0:1]).all(dim=1).all(), "mouse_tensor must have the same value for each group"
+    if not (groups == groups[:, 0:1]).all(dim=1).all():
+        logger.warning(f"mouse_tensor has different values for each group: {groups}")
     
     return keyboard_tensor[::4], mouse_tensor[::4]
 

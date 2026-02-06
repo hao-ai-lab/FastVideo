@@ -301,119 +301,238 @@ def parse_config(config, mode="universal"):
 
 # NOTE: drawing functions are commented out to avoid cv2/libGL dependency.
 #
-# def draw_rounded_rectangle(image, top_left, bottom_right, color, radius=10, alpha=0.5):
-#     overlay = image.copy()
-#     x1, y1 = top_left
-#     x2, y2 = bottom_right
-#
-#     cv2.rectangle(overlay, (x1 + radius, y1), (x2 - radius, y2), color, -1)
-#     cv2.rectangle(overlay, (x1, y1 + radius), (x2, y2 - radius), color, -1)
-#     cv2.ellipse(overlay, (x1 + radius, y1 + radius), (radius, radius), 180, 0, 90, color, -1)
-#     cv2.ellipse(overlay, (x2 - radius, y1 + radius), (radius, radius), 270, 0, 90, color, -1)
-#     cv2.ellipse(overlay, (x1 + radius, y2 - radius), (radius, radius), 90, 0, 90, color, -1)
-#     cv2.ellipse(overlay, (x2 - radius, y2 - radius), (radius, radius), 0, 0, 90, color, -1)
-#     cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0, image)
-#
-# def draw_keys_on_frame(frame, keys, key_size=(80, 50), spacing=20, bottom_margin=30, mode='universal'):
-#     h, w, _ = frame.shape
-#     horison_shift = 90
-#     vertical_shift = -20
-#     horizon_shift_all = 50
-#     key_positions = {
-#         "W": (w // 2 - key_size[0] // 2 - horison_shift - horizon_shift_all, 
-#               h - bottom_margin - key_size[1] * 2 + vertical_shift - 20),
-#         "A": (w // 2 - key_size[0] * 2 + 5 - horison_shift - horizon_shift_all, 
-#               h - bottom_margin - key_size[1] + vertical_shift),
-#         "S": (w // 2 - key_size[0] // 2 - horison_shift - horizon_shift_all, 
-#               h - bottom_margin - key_size[1] + vertical_shift),
-#         "D": (w // 2 + key_size[0] - 5 - horison_shift - horizon_shift_all, 
-#               h - bottom_margin - key_size[1] + vertical_shift),
-#     }
-#     key_icon = {"W": "W", "A": "A", "S": "S", "D": "D", "left": "left", "right": "right"}
-#     if mode == 'templerun':
-#         key_positions.update({
-#             "left": (w // 2 + key_size[0] * 2 + spacing * 2 - horison_shift - horizon_shift_all, 
-#                      h - bottom_margin - key_size[1] + vertical_shift),
-#             "right": (w // 2 + key_size[0] * 3 + spacing * 7 - horison_shift - horizon_shift_all, 
-#                       h - bottom_margin - key_size[1] + vertical_shift)
-#         })
-#
-#     for key, (x, y) in key_positions.items():
-#         is_pressed = keys.get(key, False)
-#         top_left = (x, y)
-#         if key in ["left", "right"]:
-#             bottom_right = (x + key_size[0] + 40, y + key_size[1])
-#         else:
-#             bottom_right = (x + key_size[0], y + key_size[1])
-#
-#         color = (0, 255, 0) if is_pressed else (200, 200, 200)
-#         alpha = 0.8 if is_pressed else 0.5
-#         draw_rounded_rectangle(frame, top_left, bottom_right, color, radius=10, alpha=alpha)
-#
-#         text_size = cv2.getTextSize(key, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-#         if key in ["left", "right"]:
-#             text_x = x + (key_size[0] + 40 - text_size[0]) // 2
-#         else:
-#             text_x = x + (key_size[0] - text_size[0]) // 2
-#         text_y = y + (key_size[1] + text_size[1]) // 2
-#         cv2.putText(frame, key_icon[key], (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
-#
-# def overlay_icon(frame, icon, position, scale=1.0, rotation=0):
-#     x, y = position
-#     h, w, _ = icon.shape
-#
-#     scaled_width = int(w * scale)
-#     scaled_height = int(h * scale)
-#     icon_resized = cv2.resize(icon, (scaled_width, scaled_height), interpolation=cv2.INTER_AREA)
-#
-#     center = (scaled_width // 2, scaled_height // 2)
-#     rotation_matrix = cv2.getRotationMatrix2D(center, rotation, 1.0)
-#     icon_rotated = cv2.warpAffine(
-#         icon_resized, rotation_matrix, (scaled_width, scaled_height),
-#         flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0)
-#     )
-#
-#     h, w, _ = icon_rotated.shape
-#     frame_h, frame_w, _ = frame.shape
-#
-#     top_left_x = max(0, int(x - w // 2))
-#     top_left_y = max(0, int(y - h // 2))
-#     bottom_right_x = min(frame_w, int(x + w // 2))
-#     bottom_right_y = min(frame_h, int(y + h // 2))
-#
-#     icon_x_start = max(0, int(-x + w // 2))
-#     icon_y_start = max(0, int(-y + h // 2))
-#     icon_x_end = icon_x_start + (bottom_right_x - top_left_x)
-#     icon_y_end = icon_y_start + (bottom_right_y - top_left_y)
-#
-#     icon_region = icon_rotated[icon_y_start:icon_y_end, icon_x_start:icon_x_end]
-#     alpha = icon_region[:, :, 3] / 255.0
-#     icon_rgb = icon_region[:, :, :3]
-#
-#     frame_region = frame[top_left_y:bottom_right_y, top_left_x:bottom_right_x]
-#     for c in range(3):
-#         frame_region[:, :, c] = (1 - alpha) * frame_region[:, :, c] + alpha * icon_rgb[:, :, c]
-#     frame[top_left_y:bottom_right_y, top_left_x:bottom_right_x] = frame_region
-#
-# def process_video(input_video, output_video, config, mouse_icon_path, 
-#                   mouse_scale=1.0, mouse_rotation=0, process_icon=True, mode='universal'):
-#     key_data, mouse_data = parse_config(config, mode=mode)
-#     fps = 12
-#
-#     mouse_icon = cv2.imread(mouse_icon_path, cv2.IMREAD_UNCHANGED)
-#
-#     out_video = []
-#     for frame_idx, frame in enumerate(input_video):
-#         frame = np.ascontiguousarray(frame)
-#         if process_icon:
-#             keys = key_data.get(frame_idx, {"W": False, "A": False, "S": False, "D": False, "left": False, "right": False})
-#             draw_keys_on_frame(frame, keys, key_size=(50, 50), spacing=10, bottom_margin=20, mode=mode)
-#             if mode == 'universal':
-#                 frame_width = frame.shape[1]
-#                 frame_height = frame.shape[0]
-#                 mouse_position = mouse_data.get(frame_idx, (frame_width // 2, frame_height // 2))
-#                 overlay_icon(frame, mouse_icon, mouse_position, scale=mouse_scale, rotation=mouse_rotation)
-#         out_video.append(frame / 255)
-#     
-#     export_to_video(out_video, output_video, fps=fps)
-#     logger.info(f"Video saved to {output_video}")
+import cv2
+import numpy as np
+from diffusers.utils import export_to_video
+
+def draw_rounded_rectangle(image, top_left, bottom_right, color, radius=10, alpha=0.5):
+    overlay = image.copy()
+    x1, y1 = top_left
+    x2, y2 = bottom_right
+
+    cv2.rectangle(overlay, (x1 + radius, y1), (x2 - radius, y2), color, -1)
+    cv2.rectangle(overlay, (x1, y1 + radius), (x2, y2 - radius), color, -1)
+    cv2.ellipse(overlay, (x1 + radius, y1 + radius), (radius, radius), 180, 0, 90, color, -1)
+    cv2.ellipse(overlay, (x2 - radius, y1 + radius), (radius, radius), 270, 0, 90, color, -1)
+    cv2.ellipse(overlay, (x1 + radius, y2 - radius), (radius, radius), 90, 0, 90, color, -1)
+    cv2.ellipse(overlay, (x2 - radius, y2 - radius), (radius, radius), 0, 0, 90, color, -1)
+    cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0, image)
+
+def draw_keys_on_frame(frame, keys, key_size=(30, 30), spacing=5, top_margin=15, mode='universal'):
+    """Draw WASD keys on the left top of the frame."""
+    h, w, _ = frame.shape
+    
+    # Left top positioning
+    left_margin = 15
+    gap = 3  # Gap between keys
+    
+    key_positions = {
+        "W": (left_margin + key_size[0] + gap, 
+              top_margin),
+        "A": (left_margin, 
+              top_margin + key_size[1] + gap),
+        "S": (left_margin + key_size[0] + gap, 
+              top_margin + key_size[1] + gap),
+        "D": (left_margin + (key_size[0] + gap) * 2, 
+              top_margin + key_size[1] + gap),
+    }
+    key_icon = {"W": "W", "A": "A", "S": "S", "D": "D", "left": "L", "right": "R"}
+    if mode == 'templerun':
+        key_positions.update({
+            "left": (left_margin + (key_size[0] + gap) * 3 + 10, 
+                     top_margin + key_size[1] + gap),
+            "right": (left_margin + (key_size[0] + gap) * 4 + 15, 
+                      top_margin + key_size[1] + gap)
+        })
+
+    for key, (x, y) in key_positions.items():
+        is_pressed = keys.get(key, False)
+        top_left = (x, y)
+        bottom_right = (x + key_size[0], y + key_size[1])
+
+        color = (0, 255, 0) if is_pressed else (200, 200, 200)
+        alpha = 0.8 if is_pressed else 0.5
+        draw_rounded_rectangle(frame, top_left, bottom_right, color, radius=5, alpha=alpha)
+
+        text_size = cv2.getTextSize(key_icon[key], cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
+        text_x = x + (key_size[0] - text_size[0]) // 2
+        text_y = y + (key_size[1] + text_size[1]) // 2
+        cv2.putText(frame, key_icon[key], (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+
+def overlay_icon(frame, icon, position, scale=1.0, rotation=0):
+    x, y = position
+    h, w, _ = icon.shape
+
+    scaled_width = int(w * scale)
+    scaled_height = int(h * scale)
+    icon_resized = cv2.resize(icon, (scaled_width, scaled_height), interpolation=cv2.INTER_AREA)
+
+    center = (scaled_width // 2, scaled_height // 2)
+    rotation_matrix = cv2.getRotationMatrix2D(center, rotation, 1.0)
+    icon_rotated = cv2.warpAffine(
+        icon_resized, rotation_matrix, (scaled_width, scaled_height),
+        flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0)
+    )
+
+    h, w, _ = icon_rotated.shape
+    frame_h, frame_w, _ = frame.shape
+
+    top_left_x = max(0, int(x - w // 2))
+    top_left_y = max(0, int(y - h // 2))
+    bottom_right_x = min(frame_w, int(x + w // 2))
+    bottom_right_y = min(frame_h, int(y + h // 2))
+
+    icon_x_start = max(0, int(-x + w // 2))
+    icon_y_start = max(0, int(-y + h // 2))
+    icon_x_end = icon_x_start + (bottom_right_x - top_left_x)
+    icon_y_end = icon_y_start + (bottom_right_y - top_left_y)
+
+    icon_region = icon_rotated[icon_y_start:icon_y_end, icon_x_start:icon_x_end]
+    alpha = icon_region[:, :, 3] / 255.0
+    icon_rgb = icon_region[:, :, :3]
+
+    frame_region = frame[top_left_y:bottom_right_y, top_left_x:bottom_right_x]
+    for c in range(3):
+        frame_region[:, :, c] = (1 - alpha) * frame_region[:, :, c] + alpha * icon_rgb[:, :, c]
+    frame[top_left_y:bottom_right_y, top_left_x:bottom_right_x] = frame_region
+
+def process_video(input_video, output_video, config, mouse_icon_path, 
+                  mouse_scale=1.0, mouse_rotation=0, process_icon=True, mode='universal'):
+    key_data, mouse_data = parse_config(config, mode=mode)
+    fps = 12
+
+    mouse_icon = cv2.imread(mouse_icon_path, cv2.IMREAD_UNCHANGED)
+
+    out_video = []
+    for frame_idx, frame in enumerate(input_video):
+        frame = np.ascontiguousarray(frame)
+        if process_icon:
+            keys = key_data.get(frame_idx, {"W": False, "A": False, "S": False, "D": False, "left": False, "right": False})
+            draw_keys_on_frame(frame, keys, key_size=(50, 50), spacing=10, bottom_margin=20, mode=mode)
+            if mode == 'universal':
+                frame_width = frame.shape[1]
+                frame_height = frame.shape[0]
+                mouse_position = mouse_data.get(frame_idx, (frame_width // 2, frame_height // 2))
+                overlay_icon(frame, mouse_icon, mouse_position, scale=mouse_scale, rotation=mouse_rotation)
+        out_video.append(frame / 255)
+    
+    export_to_video(out_video, output_video, fps=fps)
+    logger.info(f"Video saved to {output_video}")
+
+
+def parse_npy_action(action_path):
+    """Convert npy action file to key_data and mouse_data dict format."""
+    action_data = np.load(action_path, allow_pickle=True).item()
+    keyboard_data = action_data['keyboard']  # shape: (num_frames, 6) -> [W, S, A, D, left, right]
+    mouse_data = action_data.get('mouse', None)  # shape: (num_frames, 2) -> [Pitch, Yaw]
+    
+    # MatrixGame convention: 0:W, 1:S, 2:A, 3:D, 4:left, 5:right
+    key_names = ["W", "S", "A", "D", "left", "right"]
+    key_data = {}
+    for frame_idx, keys in enumerate(keyboard_data):
+        key_data[frame_idx] = {key_names[i]: bool(keys[i]) for i in range(len(key_names))}
+    
+    # MatrixGame convention: mouse is [Pitch, Yaw]
+    mouse_dict = {}
+    if mouse_data is not None:
+        for frame_idx, (pitch, yaw) in enumerate(mouse_data):
+            mouse_dict[frame_idx] = {"pitch": float(pitch), "yaw": float(yaw)}
+    
+    return key_data, mouse_dict
+
+
+def draw_mouse_on_frame(frame, pitch, yaw, top_margin=15):
+    """Draw crosshair with direction arrow on the right top of the frame."""
+    h, w, _ = frame.shape
+    
+    # Right top positioning
+    right_margin = 15
+    crosshair_radius = 25
+    
+    # Position crosshair on the right top
+    crosshair_x = w - right_margin - crosshair_radius
+    crosshair_y = top_margin + crosshair_radius
+    
+    # Yaw affects horizontal direction, pitch affects vertical
+    dx = int(yaw * crosshair_radius * 8)  # Scale for visibility
+    dy = int(-pitch * crosshair_radius * 8)  # Negative because y increases downward
+    
+    # Clamp arrow length
+    max_arrow = crosshair_radius - 5
+    dx = max(-max_arrow, min(max_arrow, dx))
+    dy = max(-max_arrow, min(max_arrow, dy))
+    
+    # Draw crosshair background
+    cv2.circle(frame, (crosshair_x, crosshair_y), crosshair_radius, (50, 50, 50), -1)
+    cv2.circle(frame, (crosshair_x, crosshair_y), crosshair_radius, (200, 200, 200), 1)
+    cv2.line(frame, (crosshair_x - crosshair_radius + 5, crosshair_y), 
+             (crosshair_x + crosshair_radius - 5, crosshair_y), (100, 100, 100), 1)
+    cv2.line(frame, (crosshair_x, crosshair_y - crosshair_radius + 5), 
+             (crosshair_x, crosshair_y + crosshair_radius - 5), (100, 100, 100), 1)
+    
+    # Draw direction arrow
+    if abs(dx) > 1 or abs(dy) > 1:
+        cv2.arrowedLine(frame, (crosshair_x, crosshair_y), (crosshair_x + dx, crosshair_y + dy), 
+                       (0, 255, 0), 2, tipLength=0.3)
+
+
+def process_video_with_npy(input_video, output_video, action_path, fps=12, mode='universal'):
+    """Process video with overlay using npy action file.
+    
+    Uses existing draw_keys_on_frame function.
+    """
+    key_data, mouse_data = parse_npy_action(action_path)
+    
+    out_video = []
+    for frame_idx, frame in enumerate(input_video):
+        frame = np.ascontiguousarray(frame)
+        keys = key_data.get(frame_idx, {"W": False, "A": False, "S": False, "D": False, "left": False, "right": False})
+        draw_keys_on_frame(frame, keys, mode=mode)
+        
+        # Draw pitch and yaw
+        mouse = mouse_data.get(frame_idx, {"pitch": 0.0, "yaw": 0.0})
+        draw_mouse_on_frame(frame, mouse["pitch"], mouse["yaw"])
+        
+        out_video.append(frame / 255.0)
+    
+    export_to_video(out_video, output_video, fps=fps)
+    logger.info(f"Video saved to {output_video}")
+
+
+if __name__ == "__main__":
+    import argparse
+    import cv2
+    
+    parser = argparse.ArgumentParser(description="Overlay keyboard actions on video")
+    parser.add_argument("--video", type=str, required=True, help="Path to input video (.mp4)")
+    parser.add_argument("--action", type=str, required=True, help="Path to action file (.npy)")
+    parser.add_argument("--output", type=str, default=None, help="Path to output video (default: input_with_overlay.mp4)")
+    parser.add_argument("--fps", type=int, default=12, help="Output video FPS")
+    args = parser.parse_args()
+    
+    # Load video frames using cv2
+    cap = cv2.VideoCapture(args.video)
+    if not cap.isOpened():
+        raise ValueError(f"Cannot open video: {args.video}")
+    
+    frames = []
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frames.append(frame)
+    cap.release()
+    
+    print(f"Loaded {len(frames)} frames from video")
+    
+    # Set output path
+    if args.output is None:
+        base_name = args.video.rsplit('.', 1)[0]
+        output_path = f"{base_name}_with_overlay.mp4"
+    else:
+        output_path = args.output
+    
+    # Process video with overlay using existing functions
+    process_video_with_npy(frames, output_path, args.action, fps=args.fps)
+    print(f"Video with overlay saved to: {output_path}")

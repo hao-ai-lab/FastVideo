@@ -793,6 +793,22 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         return batch
 
+    def _post_process_validation_frames(self, frames: list[np.ndarray],
+                                        batch: ForwardBatch) -> list[np.ndarray]:
+        """Post-process validation frames before saving.
+        
+        Override this method in subclasses to add custom processing,
+        e.g., overlay action indicators for action-conditioned models.
+        
+        Args:
+            frames: List of numpy arrays (H, W, C) representing video frames
+            batch: The ForwardBatch containing input data (may include action data)
+            
+        Returns:
+            Processed frames (same format as input)
+        """
+        return frames
+
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
         """
@@ -871,6 +887,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     x = torchvision.utils.make_grid(x, nrow=6)
                     x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
                     frames.append((x * 255).numpy().astype(np.uint8))
+                
+                # Apply optional post-processing (e.g., overlay for action-conditioned models)
+                frames = self._post_process_validation_frames(frames, batch)
                 step_videos.append(frames)
 
             # Only sp_group leaders (rank_in_sp_group == 0) need to send their
