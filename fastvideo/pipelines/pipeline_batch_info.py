@@ -123,6 +123,7 @@ class ForwardBatch:
 
     # Latent tensors
     latents: torch.Tensor | None = None
+    lq_latents: torch.Tensor | None = None
     raw_latent_shape: tuple[int, ...] | None = None
     noise_pred: torch.Tensor | None = None
     image_latent: torch.Tensor | None = None
@@ -144,6 +145,8 @@ class ForwardBatch:
     # Original dimensions (before VAE scaling)
     height: list[int] | int | None = None
     width: list[int] | int | None = None
+    height_sr: list[int] | int | None = None
+    width_sr: list[int] | int | None = None
     fps: list[int] | int | None = None
 
     # Timesteps
@@ -154,6 +157,7 @@ class ForwardBatch:
 
     # Scheduler parameters
     num_inference_steps: int = 50
+    num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
     guidance_scale_2: float | None = None
     guidance_rescale: float = 0.0

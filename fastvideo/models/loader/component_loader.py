@@ -79,6 +79,7 @@ class ComponentLoader(ABC):
             "scheduler": (SchedulerLoader, "diffusers"),
             "transformer": (TransformerLoader, "diffusers"),
             "transformer_2": (TransformerLoader, "diffusers"),
+            "transformer_3": (TransformerLoader, "diffusers"),
             "vae": (VAELoader, "diffusers"),
             "audio_vae": (AudioDecoderLoader, "diffusers"),
             "audio_decoder": (AudioDecoderLoader, "diffusers"),
@@ -90,6 +91,8 @@ class ComponentLoader(ABC):
             "image_processor": (ImageProcessorLoader, "transformers"),
             "feature_extractor": (ImageProcessorLoader, "transformers"),
             "image_encoder": (ImageEncoderLoader, "transformers"),
+            "upsampler": (UpsamplerLoader, "diffusers"),
+            "upsampler_2": (UpsamplerLoader, "diffusers"),
         }
 
         if module_type in module_loaders:
@@ -558,7 +561,8 @@ class VAELoader(ComponentLoader):
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the VAE based on the model path, and inference args."""
         config = get_diffusers_config(model=model_path)
-        class_name = config.get("_class_name")
+        class_name = config.pop("_class_name")
+        config.pop("_name_or_path", None)
         assert class_name is not None, (
             "Model config does not contain a _class_name attribute. Only diffusers format is supported."
         )
@@ -731,6 +735,7 @@ class TransformerLoader(ComponentLoader):
         config = get_diffusers_config(model=model_path)
         hf_config = deepcopy(config)
         cls_name = config.pop("_class_name")
+        config.pop("_name_or_path", None)
         if cls_name is None:
             raise ValueError(
                 "Model config does not contain a _class_name attribute. "
@@ -745,7 +750,7 @@ class TransformerLoader(ComponentLoader):
         fastvideo_args.model_paths["transformer"] = model_path
 
         # Config from Diffusers supersedes fastvideo's model config
-        dit_config = fastvideo_args.pipeline_config.dit_config
+        dit_config = deepcopy(fastvideo_args.pipeline_config.dit_config)
         dit_config.update_model_arch(config)
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
@@ -876,6 +881,50 @@ class SchedulerLoader(ComponentLoader):
             )
         return scheduler
 
+
+class UpsamplerLoader(ComponentLoader):
+    """Loader for upsamplers."""
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        """Load the upsampler based on the model path, and inference args."""
+        config_dict = get_diffusers_config(model=model_path)
+        class_name = config_dict.pop("_class_name", None)
+
+        if class_name is None:
+            raise ValueError(
+                "Model config does not contain a _class_name attribute. "
+                "Only diffusers format is supported."
+            )
+
+        try:
+            upsampler_cfg = deepcopy(fastvideo_args.pipeline_config.upsampler_config[0])
+            upsampler_cfg.update_model_config(config_dict)
+        except Exception as e:
+            upsampler_cfg = deepcopy(fastvideo_args.pipeline_config.upsampler_config[1])
+            upsampler_cfg.update_model_config(config_dict)
+
+        model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+        model = model_cls(upsampler_cfg)
+
+        target_device = get_local_torch_device()
+        model = model.to(target_device, dtype=PRECISION_TO_TYPE[fastvideo_args.pipeline_config.upsampler_precision])
+
+        # Find all safetensors files
+        safetensors_list = glob.glob(
+            os.path.join(str(model_path), "*.safetensors"))
+        if not safetensors_list:
+            raise ValueError(f"No safetensors files found in {model_path}")
+        
+        if len(safetensors_list) == 1:
+            loaded = safetensors_load_file(safetensors_list[0])
+        else:
+            loaded = {}
+            for sf_file in safetensors_list:
+                loaded.update(safetensors_load_file(sf_file))
+        
+        model.load_state_dict(loaded, strict=True)
+
+        return model.eval()
 
 class GenericComponentLoader(ComponentLoader):
     """Generic loader for components that don't have a specific loader."""

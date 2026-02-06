@@ -58,10 +58,13 @@ class SamplingParam:
     num_frames_round_down: bool = False  # Whether to round down num_frames if it's not divisible by num_gpus
     height: int = 720
     width: int = 1280
+    height_sr: int = 1072
+    width_sr: int = 1920
     fps: int = 24
 
     # Denoising parameters
     num_inference_steps: int = 50
+    num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
     guidance_rescale: float = 0.0
     boundary_ratio: float | None = None
