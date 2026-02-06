@@ -139,10 +139,12 @@ class HunyuanGameCraftTransformer3DModel(CachableDiT):
         )
         
         # CameraNet for Plücker coordinate camera conditioning
+        # Note: CameraNet outputs to VAE latent channels (16), not in_channels (33)
+        camera_out_channels = 16  # VAE latent channels, same as out_channels
         self.camera_net = CameraNet(
             in_channels=config.camera_in_channels,
             downscale_coef=config.camera_downscale_coef,
-            out_channels=self.in_channels,
+            out_channels=camera_out_channels,
             patch_size=self.patch_size,
             hidden_size=self.hidden_size,
             dtype=config.dtype,
@@ -261,7 +263,7 @@ class HunyuanGameCraftTransformer3DModel(CachableDiT):
         # Embed image
         img = self.img_in(img)
         
-        # Add camera conditioning if provided
+        # Add camera conditioning if provided (BEFORE sequence parallel sharding)
         if camera_states is not None:
             latent_len = ot  # Number of frames in latent space
             
@@ -286,9 +288,10 @@ class HunyuanGameCraftTransformer3DModel(CachableDiT):
                 camera_latents = self.camera_net(camera_states)
             
             # Add camera latents to image embeddings
+            # Note: Both img and camera_latents should have shape [B, seq_len, hidden_size]
             img = img + camera_latents
         
-        # Apply sequence parallel sharding
+        # Apply sequence parallel sharding (AFTER camera conditioning)
         img, _ = sequence_model_parallel_shard(img, dim=1)
         
         # Embed text

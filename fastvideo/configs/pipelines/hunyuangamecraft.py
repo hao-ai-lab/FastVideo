@@ -91,8 +91,9 @@ class HunyuanGameCraftPipelineConfig(PipelineConfig):
     vae_config: VAEConfig = field(default_factory=HunyuanVAEConfig)
     
     # Denoising parameters
+    # Note: Official HunyuanGameCraft uses flow_shift=5.0 and guidance_scale=6.0
     embedded_cfg_scale: int = 6
-    flow_shift: int = 7
+    flow_shift: float = 5.0
     
     # Text encoder configurations (LLaMA + CLIP)
     text_encoder_configs: tuple[EncoderConfig, ...] = field(
@@ -120,8 +121,9 @@ class HunyuanGameCraftPipelineConfig(PipelineConfig):
     
     def __post_init__(self):
         """Post-initialization configuration."""
-        # Only load VAE decoder by default (encoder not needed for inference)
-        self.vae_config.load_encoder = False
+        # Load both encoder and decoder for I2V support
+        # The encoder is needed to encode the reference image to latents
+        self.vae_config.load_encoder = True
         self.vae_config.load_decoder = True
 
 
