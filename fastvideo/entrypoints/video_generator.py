@@ -402,7 +402,7 @@ class VideoGenerator:
         samples = torch.empty((latent_batch_size, 3, sampling_param.num_frames,
                                sampling_param.height, sampling_param.width),
                               device='cpu',
-                              pin_memory=True)
+                              pin_memory=fastvideo_args.pin_cpu_memory)
         thread.join()
 
         output_batch = result_container['output_batch']
