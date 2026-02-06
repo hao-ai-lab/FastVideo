@@ -92,6 +92,11 @@ class HunyuanVAEAttention(nn.Module):
         value = value.view(batch_size, -1, self.heads, head_dim).transpose(1, 2)
 
         # Perform scaled dot-product attention
+        # If attention_mask is provided, it needs to be expanded for multi-head attention
+        if attention_mask is not None:
+            # Expand mask from [batch_size, seq_len, seq_len] to [batch_size, num_heads, seq_len, seq_len]
+            attention_mask = attention_mask.unsqueeze(1).expand(-1, self.heads, -1, -1)
+        
         hidden_states = F.scaled_dot_product_attention(query,
                                                        key,
                                                        value,
