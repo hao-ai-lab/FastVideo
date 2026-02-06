@@ -125,12 +125,10 @@ class WanGameActionTransformerBlock(nn.Module):
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
 
         # PRoPE output projection (initialized via add_discrete_action_parameters on the model)
-        self.to_out_prope = nn.ModuleList([
-            nn.Linear(dim, dim, bias=True),
-        ])
-        nn.init.zeros_(self.to_out_prope[0].weight)
-        if self.to_out_prope[0].bias is not None:
-            nn.init.zeros_(self.to_out_prope[0].bias)
+        self.to_out_prope = ReplicatedLinear(dim, dim, bias=True)
+        nn.init.zeros_(self.to_out_prope.weight)
+        if self.to_out_prope.bias is not None:
+            nn.init.zeros_(self.to_out_prope.bias)
 
     def forward(
         self,
@@ -186,7 +184,15 @@ class WanGameActionTransformerBlock(nn.Module):
         attn_output_rope = attn_output_rope.flatten(2)
         attn_output_rope, _ = self.to_out(attn_output_rope)
         attn_output_prope = attn_output_prope.flatten(2)
-        attn_output_prope = self.to_out_prope[0](attn_output_prope)
+        
+        # # DEBUG: Check if prope input is zero
+        # if self.training and torch.distributed.get_rank() == 0:
+        #     prope_nonzero = (attn_output_prope != 0).sum().item()
+        #     prope_total = attn_output_prope.numel()
+        #     if prope_nonzero == 0:
+        #         print(f"[DEBUG] to_out_prope INPUT is ALL ZEROS! shape={attn_output_prope.shape}", flush=True)
+        
+        attn_output_prope, _ = self.to_out_prope(attn_output_prope)
         attn_output = attn_output_rope.squeeze(1) + attn_output_prope.squeeze(1)
 
         # Self-attention residual + norm in float32

@@ -342,8 +342,12 @@ def load_model_from_full_model_state_dict(
         logger.warning("Found unloaded parameters in meta state dict: %s",
                        unused_keys)
 
-    # List of allowed parameter name patterns
-    ALLOWED_NEW_PARAM_PATTERNS = ["gate_compress", "proj_l", "to_out_prope", "action_embedder"]  # Can be extended as needed
+    # List of allowed parameter name patterns (whitelist for new params not in checkpoint)
+    ALLOWED_NEW_PARAM_PATTERNS = ["gate_compress", "proj_l", "to_out_prope", "action_embedder"]
+    
+    # Patterns for params that need kaiming_uniform init (input projections need non-zero for gradient flow)
+    KAIMING_INIT_PATTERNS = ["fc_in.weight"]
+    
     for new_param_name in unused_keys:
         if not any(pattern in new_param_name
                    for pattern in ALLOWED_NEW_PARAM_PATTERNS):
@@ -353,17 +357,31 @@ def load_model_from_full_model_state_dict(
                 f"New parameter '{new_param_name}' is not supported. "
                 f"Currently only parameters containing {ALLOWED_NEW_PARAM_PATTERNS} are allowed."
             )
+        
+        # Check if this param needs kaiming init (non-zero) for gradient flow
+        use_kaiming = any(pattern in new_param_name for pattern in KAIMING_INIT_PATTERNS)
+        
         meta_sharded_param = meta_sd.get(new_param_name)
         if not hasattr(meta_sharded_param, "device_mesh"):
-            # Initialize with zeros
-            sharded_tensor = torch.zeros_like(meta_sharded_param,
-                                              device=device,
-                                              dtype=param_dtype)
+            # Non-sharded tensor
+            if use_kaiming:
+                import math
+                sharded_tensor = torch.empty_like(meta_sharded_param, device=device, dtype=param_dtype)
+                nn.init.kaiming_uniform_(sharded_tensor, a=math.sqrt(5))
+                logger.info(f"Initialized {new_param_name} with kaiming_uniform_")
+            else:
+                # Initialize with zeros (output projections for residual behavior)
+                sharded_tensor = torch.zeros_like(meta_sharded_param, device=device, dtype=param_dtype)
         else:
-            # Initialize with zeros and distribute
-            full_tensor = torch.zeros_like(meta_sharded_param,
-                                           device=device,
-                                           dtype=param_dtype)
+            # Sharded tensor (DTensor)
+            if use_kaiming:
+                import math
+                full_tensor = torch.empty_like(meta_sharded_param, device=device, dtype=param_dtype)
+                nn.init.kaiming_uniform_(full_tensor, a=math.sqrt(5))
+                logger.info(f"Initialized {new_param_name} with kaiming_uniform_")
+            else:
+                # Initialize with zeros and distribute
+                full_tensor = torch.zeros_like(meta_sharded_param, device=device, dtype=param_dtype)
             sharded_tensor = distribute_tensor(
                 full_tensor,
                 meta_sharded_param.device_mesh,
