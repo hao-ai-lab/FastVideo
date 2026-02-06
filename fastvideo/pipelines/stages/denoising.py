@@ -176,6 +176,13 @@ class DenoisingStage(PipelineStage):
             },
         )
 
+        camera_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {
+                "camera_states": batch.camera_states,
+            },
+        )
+
         # Prepare STA parameters
         if st_attn_available and self.attn_backend == SlidingTileAttentionBackend:
             self.prepare_sta_param(batch, fastvideo_args)
@@ -406,6 +413,7 @@ class DenoisingStage(PipelineStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                             **action_kwargs,
+                            **camera_kwargs,
                         )
 
                     if batch.do_classifier_free_guidance:
@@ -423,6 +431,7 @@ class DenoisingStage(PipelineStage):
                                 **image_kwargs,
                                 **neg_cond_kwargs,
                                 **action_kwargs,
+                                **camera_kwargs,
                             )
 
                         noise_pred_text = noise_pred
