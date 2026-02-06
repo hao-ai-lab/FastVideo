@@ -349,6 +349,32 @@ def maybe_download(repo_id: str, target_dir: Path, token: str | None, allow_patt
     return target_dir
 
 
+def copy_gemma_tokenizer(gemma_src: Path, tokenizer_dest: Path) -> None:
+    tokenizer_dest.mkdir(parents=True, exist_ok=True)
+    tokenizer_file_names = [
+        "tokenizer.json",
+        "tokenizer.model",
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+        "added_tokens.json",
+        "chat_template.json",
+        "chat_template.jinja",
+        "preprocessor_config.json",
+        "processor_config.json",
+    ]
+    copied = 0
+    for file_name in tokenizer_file_names:
+        src_path = gemma_src / file_name
+        if src_path.is_file():
+            shutil.copy2(src_path, tokenizer_dest / file_name)
+            copied += 1
+    if copied == 0:
+        raise FileNotFoundError(
+            f"No tokenizer files found in {gemma_src}. Expected at least one tokenizer file."
+        )
+    print(f"Copied {copied} tokenizer files to {tokenizer_dest}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Convert LTX-2 weights to FastVideo format")
     parser.add_argument("--source", type=str, help="Path to transformer weights directory")
@@ -434,6 +460,7 @@ def main() -> None:
             shutil.rmtree(gemma_dest)
         gemma_dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(gemma_src, gemma_dest)
+        copy_gemma_tokenizer(gemma_src, output_dir / "tokenizer")
         gemma_model_path = "gemma"
 
     convert_components(
