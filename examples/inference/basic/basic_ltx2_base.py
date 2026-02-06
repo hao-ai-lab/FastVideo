@@ -38,15 +38,15 @@ def main() -> None:
     output_path = "outputs_video/ltx2_basic/output_ltx2_base_t2v_1088_1920_1.0.mp4"
     generator.generate_video(
         prompt=PROMPT,
-            output_path=output_path,
-            save_video=True,
-            num_frames=121,
-            height=1088,
-            width=1920,
-            fps=24,
-            negative_prompt=official_negative_prompt,
-            guidance_scale=3.0,
-        )
+        output_path=output_path,
+        save_video=True,
+        num_frames=121,
+        height=1088,
+        width=1920,
+        fps=24,
+        negative_prompt=official_negative_prompt,
+        guidance_scale=3.0,
+    )
     generator.shutdown()
 
 

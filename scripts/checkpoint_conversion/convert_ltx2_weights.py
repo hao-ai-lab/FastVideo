@@ -1,6 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 Convert LTX-2 weights to FastVideo naming conventions and split by component.
+
+LTX 2 conversion requires two huggingface models:
+- LTX 2 model
+- Gemma model
+
+Example usage:
+    python scripts/checkpoint_conversion/convert_ltx2_weights.py \\
+        --source "<PATH_TO_LOCAL_REPO>/Lightricks/LTX-2/ltx-2-19b-dev.safetensors" \\
+        --output "converted_weights/ltx2-base" \\
+        --class-name "LTX2Transformer3DModel" \\
+        --pipeline-class-name "LTX2Pipeline" \\
+        --diffusers-version "0.33.0.dev0" \\
+        --gemma-path "<PATH_TO_LOCAL_REPO>/google/gemma-3-12b-it"
 """
 
 from __future__ import annotations
