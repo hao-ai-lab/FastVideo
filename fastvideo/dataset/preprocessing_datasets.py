@@ -328,11 +328,6 @@ class VideoTransformStage(DatasetStage):
         video = rearrange(video, "t c h w -> c t h w")
         video = video.to(torch.uint8)
 
-        h, w = video.shape[-2:]
-        assert (
-            h / w <= 17 / 16 and h / w >= 8 / 16
-        ), f"Only videos with a ratio (h/w) less than 17/16 and more than 8/16 are supported. But video ({batch.path}) found ratio is {round(h / w, 2)} with the shape of {video.shape}"
-
         video = video.float() / 127.5 - 1.0
         batch.pixel_values = video
         return batch
