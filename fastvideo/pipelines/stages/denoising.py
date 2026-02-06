@@ -102,7 +102,6 @@ class DenoisingStage(PipelineStage):
         """
         pipeline = self.pipeline() if self.pipeline else None
         if not fastvideo_args.model_loaded["transformer"]:
-            raise RuntimeError("Transformer is not loaded")
             loader = TransformerLoader()
             self.transformer = loader.load(
                 fastvideo_args.model_paths["transformer"], fastvideo_args)

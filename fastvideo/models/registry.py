@@ -104,7 +104,7 @@ _UPSAMPLERS = {
     "SRTo1080pUpsampler": ("upsamplers", "hunyuan15", "SRTo1080pUpsampler"),
 }
 
-_FAST_VIDEO_MODELS = {
+_LEGACY_FAST_VIDEO_MODELS = {
     **_TEXT_TO_VIDEO_DIT_MODELS,
     **_IMAGE_TO_VIDEO_DIT_MODELS,
     **_TEXT_ENCODER_MODELS,
