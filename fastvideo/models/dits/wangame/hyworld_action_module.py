@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 
@@ -50,8 +52,10 @@ class WanGameActionTimeTextImageEmbedding(nn.Module):
             bias=True,
             act_type="silu"
         )
-        # Initialize with small values for residual-like behavior (allows gradients to flow)
-        nn.init.normal_(self.action_embedder.fc_out.weight, std=0.01)
+        # Initialize fc_in with kaiming_uniform (same as nn.Linear default)
+        nn.init.kaiming_uniform_(self.action_embedder.fc_in.weight, a=math.sqrt(5))
+        # Initialize fc_out with zeros for residual-like behavior
+        nn.init.zeros_(self.action_embedder.fc_out.weight)
         if self.action_embedder.fc_out.bias is not None:
             nn.init.zeros_(self.action_embedder.fc_out.bias)
 
@@ -112,7 +116,6 @@ class WanGameActionTimeTextImageEmbedding(nn.Module):
                                                 device=temb.device,
                                                 dtype=temb.dtype)
         
-        if encoder_hidden_states_image is not None:
             assert self.image_embedder is not None
             encoder_hidden_states_image = self.image_embedder(
                 encoder_hidden_states_image)
@@ -189,6 +192,14 @@ class WanGameActionSelfAttention(nn.Module):
         key_rope = _apply_rotary_emb(k, cos, sin, is_neox_style=False).type_as(v)
         value_rope = v
 
+        # # DEBUG: Check camera matrices
+        # if self.training and torch.distributed.get_rank() == 0:
+        #     vm_info = f"viewmats={viewmats.shape if viewmats is not None else None}"
+        #     ks_info = f"Ks={Ks.shape if Ks is not None else None}"
+        #     vm_nonzero = (viewmats != 0).sum().item() if viewmats is not None else 0
+        #     ks_nonzero = (Ks != 0).sum().item() if Ks is not None else 0
+        #     print(f"[DEBUG] PRoPE input: {vm_info} nonzero={vm_nonzero}, {ks_info} nonzero={ks_nonzero}", flush=True)
+        
         # Get PRoPE transformed q, k, v
         query_prope, key_prope, value_prope, apply_fn_o = prope_qkv(
             q.transpose(1, 2),  # [B, num_heads, L, head_dim]
@@ -203,6 +214,13 @@ class WanGameActionSelfAttention(nn.Module):
         query_prope = query_prope.transpose(1, 2)
         key_prope = key_prope.transpose(1, 2)
         value_prope = value_prope.transpose(1, 2)
+        
+        # # DEBUG: Check prope_qkv output
+        # if self.training and torch.distributed.get_rank() == 0:
+        #     q_nz = (query_prope != 0).sum().item()
+        #     k_nz = (key_prope != 0).sum().item()
+        #     v_nz = (value_prope != 0).sum().item()
+        #     print(f"[DEBUG] prope_qkv output: q_nonzero={q_nz}, k_nonzero={k_nz}, v_nonzero={v_nz}", flush=True)
 
         # KV cache handling
         if kv_cache is not None:
@@ -249,9 +267,10 @@ class WanGameActionSelfAttention(nn.Module):
         else:
             # Same sequence length: use DistributedAttention (supports SP)
             # Create default attention mask if not provided
+            # NOTE: query_all has shape [2*B, L, ...] (rope+prope concatenated), so mask needs 2*B
             if attention_mask is None:
                 batch_size, seq_len = q.shape[0], q.shape[1]
-                attention_mask = torch.ones(batch_size, seq_len, device=q.device, dtype=q.dtype)
+                attention_mask = torch.ones(batch_size * 2, seq_len, device=q.device, dtype=q.dtype)
         
             if q.dtype == torch.float32:
                 from fastvideo.attention.backends.sdpa import SDPAMetadataBuilder
@@ -267,6 +286,19 @@ class WanGameActionSelfAttention(nn.Module):
                 hidden_states_all, _ = self.attn(query_all, key_all, value_all, attention_mask=attention_mask)
 
         hidden_states_rope, hidden_states_prope = hidden_states_all.chunk(2, dim=0)
+        
+        # # DEBUG: Check attention output and apply_fn_o
+        # if self.training and torch.distributed.get_rank() == 0:
+        #     attn_all_nz = (hidden_states_all != 0).sum().item()
+        #     rope_nz = (hidden_states_rope != 0).sum().item()
+        #     prope_before = (hidden_states_prope != 0).sum().item()
+        #     print(f"[DEBUG] attn output: all_nonzero={attn_all_nz}, rope_nonzero={rope_nz}, prope_before_apply={prope_before}", flush=True)
+        
         hidden_states_prope = apply_fn_o(hidden_states_prope.transpose(1, 2)).transpose(1, 2)
+        
+        # # DEBUG: Check after apply_fn_o
+        # if self.training and torch.distributed.get_rank() == 0:
+        #     prope_after = (hidden_states_prope != 0).sum().item()
+        #     print(f"[DEBUG] prope_after_apply_fn_o={prope_after}", flush=True)
 
         return hidden_states_rope, hidden_states_prope

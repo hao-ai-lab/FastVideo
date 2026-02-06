@@ -130,6 +130,74 @@ class WanGameTrainingPipeline(TrainingPipeline):
         logger.info(f"Action-only training: {trainable_count} trainable param groups, "
                     f"{frozen_count} frozen param groups")
 
+    # def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
+    #     """Override to add debug logging after first step."""
+    #     current_step = training_batch.current_timestep
+    #     
+    #     # Call parent's train_one_step
+    #     training_batch = super().train_one_step(training_batch)
+    #     
+    #     # === DEBUG: Print weights after optimizer step ===
+    #     if current_step == 2:  # After second step (so fc_out is non-zero)
+    #         transformer = self.get_module("transformer")
+    #         rank = self.global_rank
+    #         
+    #         print(f"\n{'='*60}", flush=True)
+    #         print(f"[Rank {rank}] DEBUG: Weights after step {current_step}", flush=True)
+    #         print(f"{'='*60}", flush=True)
+    #         
+    #         # First, list all to_out_prope params to debug
+    #         prope_params = [n for n, _ in transformer.named_parameters() if "to_out_prope" in n]
+    #         print(f"[Rank {rank}] to_out_prope params found: {prope_params[:5]}...")  # Show first 5
+    #         
+    #         for name, param in transformer.named_parameters():
+    #             # Check action_embedder
+    #             if "action_embedder" in name:
+    #                 data = param.data
+    #                 if hasattr(data, 'full_tensor'):
+    #                     data = data.full_tensor()
+    #                 nonzero = (data != 0).sum().item()
+    #                 print(f"[Rank {rank}] {name}:")
+    #                 print(f"  shape={tuple(data.shape)}, requires_grad={param.requires_grad}")
+    #                 print(f"  nonzero={nonzero}/{data.numel()}")
+    #                 print(f"  min={data.min().item():.6f}, max={data.max().item():.6f}")
+    #                 if param.grad is not None:
+    #                     grad = param.grad
+    #                     if hasattr(grad, 'full_tensor'):
+    #                         grad = grad.full_tensor()
+    #                     grad_nonzero = (grad != 0).sum().item()
+    #                     print(f"  grad_nonzero={grad_nonzero}/{grad.numel()}, grad_sum={grad.sum().item():.6f}")
+    #                 else:
+    #                     print(f"  grad=None")
+    #             
+    #             # Check to_out_prope (just block 0) - should match blocks.0.to_out_prope.weight/bias
+    #             if "to_out_prope" in name and "blocks.0" in name:
+    #                 data = param.data
+    #                 if hasattr(data, 'full_tensor'):
+    #                     data = data.full_tensor()
+    #                 nonzero = (data != 0).sum().item()
+    #                 print(f"[Rank {rank}] {name}:")
+    #                 print(f"  shape={tuple(data.shape)}, requires_grad={param.requires_grad}")
+    #                 print(f"  nonzero={nonzero}/{data.numel()}")
+    #                 print(f"  min={data.min().item():.6f}, max={data.max().item():.6f}")
+    #                 if param.grad is not None:
+    #                     grad = param.grad
+    #                     if hasattr(grad, 'full_tensor'):
+    #                         grad = grad.full_tensor()
+    #                     grad_nonzero = (grad != 0).sum().item()
+    #                     print(f"  grad_nonzero={grad_nonzero}/{grad.numel()}, grad_sum={grad.sum().item():.6f}")
+    #                 else:
+    #                     print(f"  grad=None")
+    #         
+    #         print(f"{'='*60}")
+    #         print(f"[Rank {rank}] DEBUG COMPLETE - Exiting after step 1")
+    #         print(f"{'='*60}\n")
+    #         
+    #         import sys
+    #         sys.exit(0)
+    #     
+    #     return training_batch
+
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing validation pipeline...")
         # args_copy.pipeline_config.vae_config.load_encoder = False
