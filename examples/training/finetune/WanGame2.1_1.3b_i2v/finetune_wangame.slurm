@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=wangame_1.3b
 #SBATCH --partition=main
-#SBATCH --nodes=8
-#SBATCH --ntasks=8
+#SBATCH --nodes=2
+#SBATCH --ntasks=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -33,34 +33,36 @@ export HOME="/mnt/weka/home/hao.zhang/mhuo"
 
 # Configs
 NUM_GPUS=8
-NUM_NODES=8
+NUM_NODES=2
 NUM_TOTAL_GPUS=$((NUM_GPUS * NUM_NODES))
-BS_PER_GPU=4
+BS_PER_GPU=2
 GRADIENT_ACCUMULATION_STEPS=1
-WANDB_RUN_NAME="bs256"
+WANDB_RUN_NAME="MC_WASD_bs32_with_warmup_lr_1e-4"
 FREEZE_DIT=False
+RUN_DIR="wangame_1.3b_with_warmup_lr_1e-4"
+CHECKPOINTING_STEPS=1000
+SCENE_PROMPT=""
+ACTION_WARMUP_STEPS=200
+LEARNING_RATE=1e-4
 
 MODEL_PATH="weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers"
-DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0204_2130/preprocessed"
-VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_mc.json"
+# MC w only 
+DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed"
+VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_wsad.json"
+
+# DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0204_2130/preprocessed"
+# VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_mc.json"
 # DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0204_1600/preprocessed"
 # VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_doom.json"
 # DATA_DIR="mc_wasd_10/preprocessed/combined_parquet_dataset"
 # VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_overfit.json"
 
-if [[ "$DATA_DIR" == *"mc_wasd_10"* ]]; then
-  RUN_DIR="wangame_1.3b_overfit"
-  CHECKPOINTING_STEPS=100000
-else
-  RUN_DIR="wangame_1.3b"
-  CHECKPOINTING_STEPS=1000
-fi
 
 # Training arguments
 training_args=(
-  --tracker_project_name $RUN_DIR
+  --tracker_project_name "wangame_1.3b"
   --output_dir $RUN_DIR
-  --wandb_run_name $WANDB_RUN_NAME
+  --wandb_run_name "$WANDB_RUN_NAME"
   --max_train_steps 10000
   --train_batch_size $BS_PER_GPU
   --train_sp_batch_size $BS_PER_GPU
@@ -71,6 +73,7 @@ training_args=(
   --num_frames 77
   --enable_gradient_checkpointing_type "full"
   --train_action_only $FREEZE_DIT
+  --action_warmup_steps $ACTION_WARMUP_STEPS
 )
 
 # Parallel arguments
@@ -106,7 +109,7 @@ validation_args=(
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 2e-5
+  --learning_rate $LEARNING_RATE
   --mixed_precision "bf16"
   --weight_only_checkpointing_steps 100000
   --training_state_checkpointing_steps $CHECKPOINTING_STEPS
@@ -127,15 +130,11 @@ miscellaneous_args=(
 )
 
 # If you do not have 32 GPUs and to fit in memory, you can: 1. increase sp_size. 2. reduce num_latent_t
-# torchrun \
-#   --nnodes 1 \
-#   --nproc_per_node $NUM_GPUS \
-srun torchrun \
-  --nnodes $NUM_NODES \
-  --nproc_per_node $NUM_GPUS \
-  --rdzv_backend c10d \
-  --rdzv_endpoint $MASTER_ADDR:$MASTER_PORT \
-  --node_rank $SLURM_PROCID \
+
+if [ $NUM_NODES -eq 1 ]; then
+  torchrun \
+    --nnodes $NUM_NODES \
+    --nproc_per_node $NUM_GPUS \
     fastvideo/training/wangame_training_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
@@ -144,3 +143,19 @@ srun torchrun \
     "${optimizer_args[@]}" \
     "${validation_args[@]}" \
     "${miscellaneous_args[@]}"
+else
+  srun torchrun \
+    --nnodes $NUM_NODES \
+    --nproc_per_node $NUM_GPUS \
+    --rdzv_backend c10d \
+    --rdzv_endpoint $MASTER_ADDR:$MASTER_PORT \
+    --node_rank $SLURM_PROCID \
+    fastvideo/training/wangame_training_pipeline.py \
+    "${parallel_args[@]}" \
+    "${model_args[@]}" \
+    "${dataset_args[@]}" \
+    "${training_args[@]}" \
+    "${optimizer_args[@]}" \
+    "${validation_args[@]}" \
+    "${miscellaneous_args[@]}"
+fi

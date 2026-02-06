@@ -923,6 +923,10 @@ class TrainingArgs(FastVideoArgs):
     # Action-only training (freeze base model, only train action params)
     train_action_only: bool = False
 
+    # Action warmup: keep action modules (action_embedder, to_out_prope) at zero
+    # for this many steps to let the base model stabilize first, then enable them.
+    action_warmup_steps: int = 0
+
     # distillation args
     generator_update_interval: int = 5
     dfake_gen_update_ratio: int = 5  # self-forcing: how often to train generator vs critic
@@ -1281,6 +1285,14 @@ class TrainingArgs(FastVideoArgs):
                             action=StoreBoolean,
                             help="Whether to only train action-related parameters "
                                  "(action_embedder and to_out_prope) while freezing base model")
+
+        # Action warmup: keep action modules frozen for N steps
+        parser.add_argument("--action-warmup-steps",
+                            type=int,
+                            default=0,
+                            help="Number of steps to keep action modules "
+                                 "(action_embedder, to_out_prope) frozen to let "
+                                 "the base model stabilize first")
 
         # V-MoBA parameters
         parser.add_argument(

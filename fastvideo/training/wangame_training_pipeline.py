@@ -85,73 +85,46 @@ class WanGameTrainingPipeline(TrainingPipeline):
         logger.info(f"Action-only training: {trainable_count} trainable param groups, "
                     f"{frozen_count} frozen param groups")
 
-    # def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
-    #     """Override to add debug logging after first step."""
-    #     current_step = training_batch.current_timestep
-    #     
-    #     # Call parent's train_one_step
-    #     training_batch = super().train_one_step(training_batch)
-    #     
-    #     # === DEBUG: Print weights after optimizer step ===
-    #     if current_step == 2:  # After second step (so fc_out is non-zero)
-    #         transformer = self.get_module("transformer")
-    #         rank = self.global_rank
-    #         
-    #         print(f"\n{'='*60}", flush=True)
-    #         print(f"[Rank {rank}] DEBUG: Weights after step {current_step}", flush=True)
-    #         print(f"{'='*60}", flush=True)
-    #         
-    #         # First, list all to_out_prope params to debug
-    #         prope_params = [n for n, _ in transformer.named_parameters() if "to_out_prope" in n]
-    #         print(f"[Rank {rank}] to_out_prope params found: {prope_params[:5]}...")  # Show first 5
-    #         
-    #         for name, param in transformer.named_parameters():
-    #             # Check action_embedder
-    #             if "action_embedder" in name:
-    #                 data = param.data
-    #                 if hasattr(data, 'full_tensor'):
-    #                     data = data.full_tensor()
-    #                 nonzero = (data != 0).sum().item()
-    #                 print(f"[Rank {rank}] {name}:")
-    #                 print(f"  shape={tuple(data.shape)}, requires_grad={param.requires_grad}")
-    #                 print(f"  nonzero={nonzero}/{data.numel()}")
-    #                 print(f"  min={data.min().item():.6f}, max={data.max().item():.6f}")
-    #                 if param.grad is not None:
-    #                     grad = param.grad
-    #                     if hasattr(grad, 'full_tensor'):
-    #                         grad = grad.full_tensor()
-    #                     grad_nonzero = (grad != 0).sum().item()
-    #                     print(f"  grad_nonzero={grad_nonzero}/{grad.numel()}, grad_sum={grad.sum().item():.6f}")
-    #                 else:
-    #                     print(f"  grad=None")
-    #             
-    #             # Check to_out_prope (just block 0) - should match blocks.0.to_out_prope.weight/bias
-    #             if "to_out_prope" in name and "blocks.0" in name:
-    #                 data = param.data
-    #                 if hasattr(data, 'full_tensor'):
-    #                     data = data.full_tensor()
-    #                 nonzero = (data != 0).sum().item()
-    #                 print(f"[Rank {rank}] {name}:")
-    #                 print(f"  shape={tuple(data.shape)}, requires_grad={param.requires_grad}")
-    #                 print(f"  nonzero={nonzero}/{data.numel()}")
-    #                 print(f"  min={data.min().item():.6f}, max={data.max().item():.6f}")
-    #                 if param.grad is not None:
-    #                     grad = param.grad
-    #                     if hasattr(grad, 'full_tensor'):
-    #                         grad = grad.full_tensor()
-    #                     grad_nonzero = (grad != 0).sum().item()
-    #                     print(f"  grad_nonzero={grad_nonzero}/{grad.numel()}, grad_sum={grad.sum().item():.6f}")
-    #                 else:
-    #                     print(f"  grad=None")
-    #         
-    #         print(f"{'='*60}")
-    #         print(f"[Rank {rank}] DEBUG COMPLETE - Exiting after step 1")
-    #         print(f"{'='*60}\n")
-    #         
-    #         import sys
-    #         sys.exit(0)
-    #     
-    #     return training_batch
+    # ── Action module warmup ──────────────────────────────────────────────
+    # For the first `action_warmup_steps`, action modules (action_embedder,
+    # to_out_prope) have requires_grad=False so the base model stabilizes
+    # first.  After warmup the gradients are re-enabled.
+
+    _ACTION_PARAM_PATTERNS = [
+        "condition_embedder.action_embedder",
+        "to_out_prope",
+    ]
+
+    def _set_action_params_grad(self, requires_grad: bool) -> None:
+        """Toggle requires_grad for action-related parameters."""
+        transformer = self.get_module("transformer")
+        count = 0
+        for name, param in transformer.named_parameters():
+            if any(p in name for p in self._ACTION_PARAM_PATTERNS):
+                param.requires_grad_(requires_grad)
+                count += 1
+        state = "enabled" if requires_grad else "disabled"
+        logger.info("Gradients %s for %d action parameter groups", state, count)
+
+    def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
+        step = training_batch.current_timestep
+        warmup_steps = self.training_args.action_warmup_steps
+
+        if warmup_steps > 0:
+            if step == 1:
+                # Freeze action params at the very first step
+                self._set_action_params_grad(False)
+                logger.info(
+                    "Action warmup: freezing action modules for the first "
+                    "%d steps to stabilize base model", warmup_steps)
+            elif step == warmup_steps + 1:
+                # Unfreeze action params once warmup is done
+                self._set_action_params_grad(True)
+                logger.info(
+                    "Action warmup complete — action modules unfrozen at "
+                    "step %d", step)
+
+        return super().train_one_step(training_batch)
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing validation pipeline...")
@@ -212,6 +185,19 @@ class WanGameTrainingPipeline(TrainingPipeline):
                 get_local_torch_device(), dtype=torch.bfloat16)
         else:
             training_batch.keyboard_cond = None
+
+        # Validate action temporal dimensions match video num_frames
+        expected_num_frames = (self.training_args.num_latent_t - 1) * 4 + 1
+        if training_batch.keyboard_cond is not None:
+            assert training_batch.keyboard_cond.shape[1] == expected_num_frames, (
+                f"keyboard_cond temporal dim {training_batch.keyboard_cond.shape[1]} "
+                f"!= expected {expected_num_frames} "
+                f"(num_latent_t={self.training_args.num_latent_t})")
+        if training_batch.mouse_cond is not None:
+            assert training_batch.mouse_cond.shape[1] == expected_num_frames, (
+                f"mouse_cond temporal dim {training_batch.mouse_cond.shape[1]} "
+                f"!= expected {expected_num_frames} "
+                f"(num_latent_t={self.training_args.num_latent_t})")
 
         return training_batch
 
@@ -276,6 +262,15 @@ class WanGameTrainingPipeline(TrainingPipeline):
         viewmats = torch.stack(viewmats_list, dim=0).to(get_local_torch_device(), dtype=torch.bfloat16)
         intrinsics = torch.stack(intrinsics_list, dim=0).to(get_local_torch_device(), dtype=torch.bfloat16)
         action_labels = torch.stack(action_labels_list, dim=0).to(get_local_torch_device(), dtype=torch.bfloat16)
+
+        # Validate processed action latent dim matches video latent dim
+        num_latent_t = training_batch.noisy_model_input.shape[2]
+        assert action_labels.shape[1] == num_latent_t, (
+            f"action_labels temporal dim {action_labels.shape[1]} != "
+            f"video latent temporal dim {num_latent_t}")
+        assert viewmats.shape[1] == num_latent_t, (
+            f"viewmats temporal dim {viewmats.shape[1]} != "
+            f"video latent temporal dim {num_latent_t}")
 
         # NOTE: noisy_model_input already contains concatenated image_latents from _prepare_dit_inputs
         training_batch.input_kwargs = {
