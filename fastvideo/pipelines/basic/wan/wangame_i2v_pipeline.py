@@ -15,7 +15,7 @@ from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 from fastvideo.pipelines.stages import (
     ImageEncodingStage, ConditioningStage, DecodingStage, DenoisingStage,
     ImageVAEEncodingStage, InputValidationStage, LatentPreparationStage,
-    TimestepPreparationStage, TextEncodingStage)
+    TimestepPreparationStage)
 # isort: on
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler)
@@ -27,7 +27,7 @@ class WanGameActionImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
 
     _required_config_modules = [
         "vae", "transformer", "scheduler", \
-        "image_encoder", "image_processor", "text_encoder", "tokenizer"
+        "image_encoder", "image_processor"
     ]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
@@ -39,12 +39,6 @@ class WanGameActionImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
 
         self.add_stage(stage_name="input_validation_stage",
                        stage=InputValidationStage())
-
-        self.add_stage(stage_name="prompt_encoding_stage",
-                       stage=TextEncodingStage(
-                           text_encoders=[self.get_module("text_encoder")],
-                           tokenizers=[self.get_module("tokenizer")],
-                       ))
 
         self.add_stage(
             stage_name="image_encoding_stage",

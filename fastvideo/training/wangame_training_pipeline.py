@@ -28,57 +28,12 @@ class WanGameTrainingPipeline(TrainingPipeline):
     """
     A training pipeline for WanGame-2.1-Fun-1.3B-InP.
     """
-    _required_config_modules = ["scheduler", "transformer", "vae", "text_encoder", "tokenizer"]
-    
-    # Cached empty string embedding (computed once at initialization)
-    _empty_string_embedding: torch.Tensor | None = None
+    _required_config_modules = ["scheduler", "transformer", "vae"]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         self.modules["scheduler"] = FlowUniPCMultistepScheduler(
             shift=fastvideo_args.pipeline_config.flow_shift)
         
-        # Compute and cache the empty string embedding
-        self._compute_empty_string_embedding(fastvideo_args)
-
-    @torch.no_grad()
-    def _compute_empty_string_embedding(self, fastvideo_args: FastVideoArgs):
-        """
-        Compute the true empty string embedding using the text encoder.
-        This is called once during initialization and cached for training.
-        """
-        logger.info("Computing empty string embedding using text encoder...")
-        
-        tokenizer = self.get_module("tokenizer")
-        text_encoder = self.get_module("text_encoder")
-        
-        # Get encoder config for tokenizer settings
-        encoder_config = fastvideo_args.pipeline_config.text_encoder_configs[0]
-        tok_kwargs = dict(encoder_config.tokenizer_kwargs)
-        
-        # Tokenize empty string
-        text_inputs = tokenizer([""], **tok_kwargs).to(get_local_torch_device())
-        input_ids = text_inputs["input_ids"]
-        attention_mask = text_inputs["attention_mask"]
-        
-        # Encode empty string
-        with set_forward_context(current_timestep=0, attn_metadata=None):
-            outputs = text_encoder(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                output_hidden_states=True,
-            )
-        
-        # Apply postprocess function (same as used in inference)
-        postprocess_func = fastvideo_args.pipeline_config.postprocess_text_funcs[0]
-        try:
-            prompt_embeds = postprocess_func(outputs)
-        except Exception:
-            prompt_embeds, _ = postprocess_func(outputs, attention_mask)
-        
-        # Cache the embedding (shape: [1, seq_len, hidden_dim])
-        self._empty_string_embedding = prompt_embeds.to(dtype=torch.bfloat16)
-        logger.info(f"Empty string embedding shape: {self._empty_string_embedding.shape}")
-
     def create_training_stages(self, training_args: TrainingArgs):
         """
         May be used in future refactors.
@@ -236,12 +191,7 @@ class WanGameTrainingPipeline(TrainingPipeline):
 
         training_batch.latents = latents.to(get_local_torch_device(),
                                             dtype=torch.bfloat16)
-        # Use the pre-computed empty string embedding (true BOS token embedding)
-        # Expand to batch size: [1, seq_len, hidden_dim] -> [batch_size, seq_len, hidden_dim]
-        batch_size = latents.shape[0]
-        assert self._empty_string_embedding is not None, "Empty string embedding not initialized"
-        training_batch.encoder_hidden_states = self._empty_string_embedding.expand(
-            batch_size, -1, -1).to(get_local_torch_device())
+        training_batch.encoder_hidden_states = None
         training_batch.encoder_attention_mask = None
         training_batch.preprocessed_image = pil_image.to(
             get_local_torch_device())
@@ -332,7 +282,7 @@ class WanGameTrainingPipeline(TrainingPipeline):
             "hidden_states":
             training_batch.noisy_model_input,
             "encoder_hidden_states":
-            training_batch.encoder_hidden_states,  # Zero embedding (empty prompt)
+            training_batch.encoder_hidden_states,  # None (no text conditioning)
             "timestep":
             training_batch.timesteps.to(get_local_torch_device(),
                                         dtype=torch.bfloat16),

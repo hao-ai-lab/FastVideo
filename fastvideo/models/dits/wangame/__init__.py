@@ -1,8 +1,8 @@
 from .model import WanGameActionTransformer3DModel
-from .hyworld_action_module import WanGameActionTimeTextImageEmbedding, WanGameActionSelfAttention
+from .hyworld_action_module import WanGameActionTimeImageEmbedding, WanGameActionSelfAttention
 
 __all__ = [
     "WanGameActionTransformer3DModel",
-    "WanGameActionTimeTextImageEmbedding",
+    "WanGameActionTimeImageEmbedding",
     "WanGameActionSelfAttention",
 ]

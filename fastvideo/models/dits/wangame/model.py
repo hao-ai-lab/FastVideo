@@ -22,7 +22,7 @@ from fastvideo.models.dits.wanvideo import WanI2VCrossAttention
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 # Import ActionModule
-from fastvideo.models.dits.wangame.hyworld_action_module import WanGameActionTimeTextImageEmbedding, WanGameActionSelfAttention
+from fastvideo.models.dits.wangame.hyworld_action_module import WanGameActionTimeImageEmbedding, WanGameActionSelfAttention
 
 logger = init_logger(__name__)
 
@@ -248,7 +248,6 @@ class WanGameActionTransformer3DModel(BaseDiT):
         self.out_channels = config.out_channels
         self.num_channels_latents = config.num_channels_latents
         self.patch_size = config.patch_size
-        self.text_len = config.text_len
         self.local_attn_size = config.local_attn_size
         self.inner_dim = inner_dim
 
@@ -258,11 +257,10 @@ class WanGameActionTransformer3DModel(BaseDiT):
                                           patch_size=config.patch_size,
                                           flatten=False)
 
-        # 2. Condition embeddings (with action and text support)
-        self.condition_embedder = WanGameActionTimeTextImageEmbedding(
+        # 2. Condition embeddings (with action support)
+        self.condition_embedder = WanGameActionTimeImageEmbedding(
             dim=inner_dim,
             time_freq_dim=config.freq_dim,
-            text_embed_dim=config.text_dim,
             image_embed_dim=config.image_dim,
         )
 
@@ -338,16 +336,12 @@ class WanGameActionTransformer3DModel(BaseDiT):
             is_cache: If True, populate KV cache and return early (cache-only mode)
         """
         orig_dtype = hidden_states.dtype
-        # Handle encoder_hidden_states (text embeddings) - can be None, list, or tensor
-        if encoder_hidden_states is None:
-            pass  # Will be handled by condition_embedder (returns zeros)
-        elif isinstance(encoder_hidden_states, list):
-            encoder_hidden_states = encoder_hidden_states[0] if len(encoder_hidden_states) > 0 else None
-        # Handle encoder_hidden_states_image
+        # if not isinstance(encoder_hidden_states, torch.Tensor):
+        #     encoder_hidden_states = encoder_hidden_states[0]
         if isinstance(encoder_hidden_states_image, list) and len(encoder_hidden_states_image) > 0:
             encoder_hidden_states_image = encoder_hidden_states_image[0]
-        else:
-            encoder_hidden_states_image = None
+        # else:
+        #     encoder_hidden_states_image = None
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
@@ -377,13 +371,6 @@ class WanGameActionTransformer3DModel(BaseDiT):
         if timestep.dim() == 2:
             timestep = timestep.flatten()
 
-        # Pad text embeddings to text_len if provided
-        if encoder_hidden_states is not None and encoder_hidden_states.size(1) > 0:
-            encoder_hidden_states = torch.cat([
-                encoder_hidden_states,
-                encoder_hidden_states.new_zeros(batch_size, self.text_len - encoder_hidden_states.size(1), encoder_hidden_states.size(2))
-            ], dim=1)
-
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
             timestep, action, encoder_hidden_states, encoder_hidden_states_image=encoder_hidden_states_image)
         
@@ -394,11 +381,7 @@ class WanGameActionTransformer3DModel(BaseDiT):
         timestep_proj = timestep_proj.unflatten(1, (6, self.hidden_size))  # [B*T, 6, dim]
         timestep_proj = timestep_proj.view(batch_size, post_patch_num_frames, 6, self.hidden_size)  # [B, T, 6, dim]
 
-        # Concatenate text and image embeddings for cross-attention
-        if encoder_hidden_states_image is not None:
-            encoder_hidden_states = torch.concat([encoder_hidden_states_image, encoder_hidden_states], dim=1)
-        
-        encoder_hidden_states = encoder_hidden_states.to(orig_dtype) if current_platform.is_mps() else encoder_hidden_states
+        encoder_hidden_states = encoder_hidden_states_image
 
         # Transformer blocks
         for block_idx, block in enumerate(self.blocks):
