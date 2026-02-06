@@ -32,6 +32,21 @@ from fastvideo.worker.executor import Executor
 logger = init_logger(__name__)
 
 
+def _infer_latent_batch_size(batch: ForwardBatch) -> int:
+    if isinstance(batch.prompt, list):
+        latent_batch_size = len(batch.prompt)
+    elif batch.prompt is not None:
+        latent_batch_size = 1
+    elif batch.prompt_embeds is not None and len(batch.prompt_embeds) > 0:
+        latent_batch_size = batch.prompt_embeds[0].shape[0]
+    else:
+        raise ValueError(
+            "Cannot infer batch size from batch; no prompt or prompt_embeds found"
+        )
+    latent_batch_size *= batch.num_videos_per_prompt
+    return latent_batch_size
+
+
 class VideoGenerator:
     """
     A unified class for generating videos using diffusion models.
@@ -383,14 +398,21 @@ class VideoGenerator:
 
         thread = threading.Thread(target=execute_forward_thread)
         thread.start()
-        samples = torch.empty((1, 3, sampling_param.num_frames,
+        latent_batch_size = _infer_latent_batch_size(batch)
+        samples = torch.empty((latent_batch_size, 3, sampling_param.num_frames,
                                sampling_param.height, sampling_param.width),
                               device='cpu',
                               pin_memory=True)
         thread.join()
 
         output_batch = result_container['output_batch']
-        samples.copy_(output_batch.output)
+        if output_batch.output.shape == samples.shape:
+            samples.copy_(output_batch.output)
+        else:
+            logger.warning(
+                "Output shape %s does not match expected shape %s; use slow path",
+                output_batch.output.shape, samples.shape)
+            samples = output_batch.output.cpu()
         logging_info = output_batch.logging_info
 
         gen_time = time.perf_counter() - start_time
