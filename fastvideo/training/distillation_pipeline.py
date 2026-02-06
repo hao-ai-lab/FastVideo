@@ -1181,7 +1181,8 @@ class DistillationPipeline(TrainingPipeline):
                     training_args.validation_dataset_file,
                     local_main_process_only=False)
         validation_dataset = ValidationDataset(
-            training_args.validation_dataset_file)
+            training_args.validation_dataset_file,
+            num_samples=training_args.validation_num_samples)
         validation_dataloader = DataLoader(validation_dataset,
                                            batch_size=None,
                                            num_workers=0)

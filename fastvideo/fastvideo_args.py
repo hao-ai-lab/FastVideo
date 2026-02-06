@@ -859,6 +859,7 @@ class TrainingArgs(FastVideoArgs):
     validation_sampling_steps: str = ""
     validation_guidance_scale: str = ""
     validation_steps: float = 0.0
+    validation_num_samples: int | None = None  # Limit number of validation samples (None = use all)
     log_validation: bool = False
     trackers: list[str] = dataclasses.field(default_factory=list)
     tracker_project_name: str = ""
@@ -1094,6 +1095,9 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--validation-steps",
                             type=float,
                             help="Number of validation steps")
+        parser.add_argument("--validation-num-samples",
+                            type=int,
+                            help="Limit number of validation samples (default: use all)")
         parser.add_argument("--log-validation",
                             action=StoreBoolean,
                             help="Whether to log validation results")
