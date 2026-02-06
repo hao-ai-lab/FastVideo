@@ -183,10 +183,12 @@ class HunyuanGameCraftArchConfig(HunyuanVideoArchConfig):
     camera_in_channels: int = 6  # Plücker coordinates: 6D
     camera_downscale_coef: int = 8
     
-    # HunyuanVideo architecture defaults (same as base HunyuanVideo)
+    # HunyuanVideo architecture defaults
+    # Note: in_channels=33 because official uses multitask_mask_training_type="concat"
+    # which expands 16 latent channels to 16*2+1=33 (latent + conditioning + mask)
     patch_size: int = 2
     patch_size_t: int = 1
-    in_channels: int = 16
+    in_channels: int = 33  # 16 latent + 16 cond + 1 mask
     out_channels: int = 16
     num_attention_heads: int = 24
     attention_head_dim: int = 128
@@ -195,7 +197,7 @@ class HunyuanGameCraftArchConfig(HunyuanVideoArchConfig):
     num_single_layers: int = 40  # single stream blocks
     num_refiner_layers: int = 2
     rope_axes_dim: tuple[int, int, int] = (16, 56, 56)
-    guidance_embeds: bool = True  # GameCraft uses guidance embeddings
+    guidance_embeds: bool = False  # Official GameCraft checkpoint doesn't have guidance_in
     dtype: torch.dtype | None = None
     text_embed_dim: int = 4096
     pooled_projection_dim: int = 768
@@ -204,11 +206,16 @@ class HunyuanGameCraftArchConfig(HunyuanVideoArchConfig):
     
     exclude_lora_layers: list[str] = field(
         default_factory=lambda: ["img_in", "txt_in", "time_in", "vector_in", "camera_net"])
+    
+    prefix: str = "HunyuanGameCraft"
 
     def __post_init__(self):
         super().__post_init__()
         self.hidden_size: int = self.attention_head_dim * self.num_attention_heads
-        self.num_channels_latents: int = self.in_channels
+        # num_channels_latents is the VAE output channels (16), not in_channels (33)
+        # in_channels = 16 (latent) + 16 (conditioning) + 1 (mask) = 33
+        # out_channels = 16 (latent channels only)
+        self.num_channels_latents: int = self.out_channels
 
 
 @dataclass
