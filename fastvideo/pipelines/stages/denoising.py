@@ -509,7 +509,7 @@ class DenoisingStage(PipelineStage):
                     mgr2.release_all()
 
         # Save STA mask search results if needed
-        if st_attn_available and self.attn_backend == SlidingTileAttentionBackend and fastvideo_args.STA_mode == STA_Mode.STA_SEARCHING:
+        if st_attn_available and self.attn_backend == SlidingTileAttentionBackend and fastvideo_args.pipeline_config.STA_mode == STA_Mode.STA_SEARCHING:
             self.save_sta_search_results(batch)
 
         # deallocate transformer if on mps
@@ -602,8 +602,8 @@ class DenoisingStage(PipelineStage):
         """
         # TODO(kevin): STA mask search, currently only support Wan2.1 with 69x768x1280
         from fastvideo.attention.backends.STA_configuration import configure_sta
-        STA_mode = fastvideo_args.STA_mode
-        skip_time_steps = fastvideo_args.skip_time_steps
+        STA_mode = fastvideo_args.pipeline_config.STA_mode
+        skip_time_steps = fastvideo_args.pipeline_config.skip_time_steps
         if batch.timesteps is None:
             raise ValueError("Timesteps must be provided")
         timesteps_num = batch.timesteps.shape[0]

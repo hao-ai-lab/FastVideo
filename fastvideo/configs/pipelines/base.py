@@ -219,6 +219,24 @@ class PipelineConfig:
             "Comma-separated list of denoising steps (e.g., '1000,757,522')",
         )
 
+        # STA (Sliding Tile Attention) parameters
+        parser.add_argument(
+            f"--{prefix_with_dot}STA-mode",
+            type=str,
+            dest=f"{prefix_with_dot.replace('-', '_')}STA_mode",
+            default=PipelineConfig.STA_mode.value,
+            choices=[mode.value for mode in STA_Mode],
+            help=
+            "STA mode: STA_inference, STA_searching, STA_tuning, STA_tuning_cfg, None",
+        )
+        parser.add_argument(
+            f"--{prefix_with_dot}skip-time-steps",
+            type=int,
+            dest=f"{prefix_with_dot.replace('-', '_')}skip_time_steps",
+            default=PipelineConfig.skip_time_steps,
+            help="Number of time steps to warmup (full attention) for STA",
+        )
+
         # Add VAE configuration arguments
         from fastvideo.configs.models.vaes.base import VAEConfig
         VAEConfig.add_cli_args(parser, prefix=f"{prefix_with_dot}vae-config")
@@ -299,6 +317,12 @@ class PipelineConfig:
         # 4. Update PipelineConfig from CLI arguments if provided
         kwargs[prefix_with_dot + 'model_path'] = model_path
         pipeline_config.update_config_from_dict(kwargs, config_cli_prefix)
+
+        # Convert STA_mode string to enum if necessary
+        if isinstance(pipeline_config.STA_mode, str) and not isinstance(
+                pipeline_config.STA_mode, STA_Mode):
+            pipeline_config.STA_mode = STA_Mode(pipeline_config.STA_mode)
+
         return pipeline_config
 
     def check_pipeline_config(self) -> None:
