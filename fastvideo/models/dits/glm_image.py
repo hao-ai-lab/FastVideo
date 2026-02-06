@@ -42,8 +42,8 @@ class GlmImageLayerKVCache:
             self.k_cache = k
             self.v_cache = v
         else:
-            self.k_cache = torch.cat([self.k_cache, k], dim=1)
-            self.v_cache = torch.cat([self.v_cache, v], dim=1)
+            self.k_cache = torch.cat([self.k_cache, k], dim=2)
+            self.v_cache = torch.cat([self.v_cache, v], dim=2)
 
     def get(self):
         return self.k_cache, self.v_cache
@@ -401,9 +401,9 @@ class GlmImageAttention(nn.Module):
                 kv_cache.store(key, value)
             elif kv_cache.mode == "read":
                 k_cache, v_cache = kv_cache.get()
-                key = torch.cat([k_cache, key], dim=1) if k_cache is not None else key
+                key = torch.cat([k_cache, key], dim=2) if k_cache is not None else key
                 value = (
-                    torch.cat([v_cache, value], dim=1) if v_cache is not None else value
+                    torch.cat([v_cache, value], dim=2) if v_cache is not None else value
                 )
             elif kv_cache.mode == "skip":
                 pass
