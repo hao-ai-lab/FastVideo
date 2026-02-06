@@ -29,8 +29,8 @@ def flash_attn_no_pad(qkv,
     seqlen = qkv.shape[1]
     nheads = qkv.shape[-2]
     x = rearrange(qkv, "b s three h d -> b s (three h d)")
-    x_unpad, indices, cu_seqlens, max_s, used_seqlens_in_batch = unpad_input(
-        x, key_padding_mask)
+
+    x_unpad, indices, cu_seqlens, max_s, _ = unpad_input(x, key_padding_mask)
 
     x_unpad = rearrange(x_unpad,
                         "nnz (three h d) -> nnz three h d",

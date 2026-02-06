@@ -309,6 +309,7 @@ class LocalAttention(nn.Module):
             q (torch.Tensor): Query tensor of shape [batch_size, seq_len, num_heads, head_dim]
             k (torch.Tensor): Key tensor of shape [batch_size, seq_len, num_heads, head_dim] 
             v (torch.Tensor): Value tensor of shape [batch_size, seq_len, num_heads, head_dim]
+            freqs_cis (Optional[tuple[torch.Tensor, torch.Tensor]]): Rotary embedding frequencies
             
         Returns:
             torch.Tensor: Output tensor after local attention

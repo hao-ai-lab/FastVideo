@@ -293,6 +293,7 @@ class ComposedPipelineBase(ABC):
         # remove keys that are not pipeline modules
         model_index.pop("_class_name")
         model_index.pop("_diffusers_version")
+        model_index.pop("_name_or_path", None)
         model_index.pop("workload_type", None)
         if "boundary_ratio" in model_index and model_index[
                 "boundary_ratio"] is not None:
@@ -335,8 +336,8 @@ class ComposedPipelineBase(ABC):
         logger.info("Loading required modules: %s", required_modules)
 
         modules = {}
-        for module_name, (transformers_or_diffusers,
-                          architecture) in model_index.items():
+        for module_name, value in model_index.items():
+            transformers_or_diffusers, architecture = value
             if transformers_or_diffusers is None:
                 logger.warning(
                     "Module %s in model_index.json has null value, removing from required_config_modules",

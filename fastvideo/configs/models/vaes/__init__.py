@@ -1,5 +1,6 @@
 from fastvideo.configs.models.vaes.cosmosvae import CosmosVAEConfig
 from fastvideo.configs.models.vaes.cosmos2_5vae import Cosmos25VAEConfig
+from fastvideo.configs.models.vaes.glm_image import GlmImageVAEConfig
 from fastvideo.configs.models.vaes.hunyuanvae import HunyuanVAEConfig
 from fastvideo.configs.models.vaes.hunyuan15vae import Hunyuan15VAEConfig
 from fastvideo.configs.models.vaes.ltx2vae import LTX2VAEConfig
@@ -14,4 +15,5 @@ __all__ = [
     "Cosmos25VAEConfig",
     "Hunyuan15VAEConfig",
     "LTX2VAEConfig",
+    "GlmImageVAEConfig",
 ]
