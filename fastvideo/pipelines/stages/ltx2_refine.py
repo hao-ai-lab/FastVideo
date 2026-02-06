@@ -115,6 +115,21 @@ class LTX2UpsampleStage(PipelineStage):
             raise ValueError(
                 "Latents must be available before LTX-2 upsample stage.")
 
+        # Ensure upsampler matches latent dtype/device to avoid conv mismatch.
+        if isinstance(self.upsampler, torch.nn.Module):
+            target_dtype = batch.latents.dtype
+            target_device = batch.latents.device
+            first_param = next(self.upsampler.parameters(), None)
+            if first_param is not None and (first_param.dtype != target_dtype
+                                            or first_param.device
+                                            != target_device):
+                self.upsampler.to(device=target_device, dtype=target_dtype)
+                logger.info(
+                    "[LTX2] Cast upsampler to %s on %s to match latents.",
+                    target_dtype,
+                    target_device,
+                )
+
         target_height = batch.extra.get("ltx2_refine_target_height")
         target_width = batch.extra.get("ltx2_refine_target_width")
         if target_height is None or target_width is None:
