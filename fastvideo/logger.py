@@ -102,6 +102,7 @@ def _info(logger: Logger,
         - When both are False, the message will be logged from all processes
         - By default, only logs from processes with LOCAL_RANK=0
     """
+    is_distributed = "LOCAL_RANK" in os.environ or "RANK" in os.environ
     try:
         local_rank = int(os.environ["LOCAL_RANK"])
         rank = int(os.environ["RANK"])
@@ -118,20 +119,22 @@ def _info(logger: Logger,
 
     global _warned_local_main_process, _warned_main_process
 
-    if not _warned_local_main_process and local_main_process_only:
-        logger.warning(
-            '%s By default, logger.info(..) will only log from the local main process. Set logger.info(..., is_local_main_process=False) to log from all processes.%s',
-            GREEN,
-            RESET,
-        )
-        _warned_local_main_process = True
-    if not _warned_main_process and main_process_only:
-        logger.warning(
-            '%s is_main_process_only is set to True, logging only from the main (RANK==0) process.%s',
-            GREEN,
-            RESET,
-        )
-        _warned_main_process = True
+    # Only show process-awareness warnings when actually running distributed
+    if is_distributed:
+        if not _warned_local_main_process and local_main_process_only:
+            logger.warning(
+                '%s By default, logger.info(..) will only log from the local main process. Set logger.info(..., is_local_main_process=False) to log from all processes.%s',
+                GREEN,
+                RESET,
+            )
+            _warned_local_main_process = True
+        if not _warned_main_process and main_process_only:
+            logger.warning(
+                '%s is_main_process_only is set to True, logging only from the main (RANK==0) process.%s',
+                GREEN,
+                RESET,
+            )
+            _warned_main_process = True
 
     if not main_process_only and not local_main_process_only:
         logger.log(logging.INFO, msg, *args, stacklevel=2, **kwargs)
