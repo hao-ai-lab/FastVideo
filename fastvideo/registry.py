@@ -57,7 +57,8 @@ from fastvideo.configs.sample.hunyuan15 import (
     Hunyuan15_720P_SamplingParam, Hunyuan15_720P_Distilled_I2V_SamplingParam,
     Hunyuan15_SR_1080P_SamplingParam)
 from fastvideo.configs.sample.hyworld import HYWorld_SamplingParam
-from fastvideo.configs.sample.ltx2 import LTX2SamplingParam
+from fastvideo.configs.sample.ltx2 import (LTX2BaseSamplingParam,
+                                           LTX2DistilledSamplingParam)
 from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
 from fastvideo.configs.sample.turbodiffusion import (
     TurboDiffusionI2V_A14B_SamplingParam,
@@ -239,17 +240,28 @@ def _get_config_info(
 
 
 def _register_configs() -> None:
-    # LTX-2
+    # LTX-2 (base)
     register_configs(
-        sampling_param_cls=LTX2SamplingParam,
+        sampling_param_cls=LTX2BaseSamplingParam,
         pipeline_config_cls=LTX2T2VConfig,
         hf_model_paths=[
             "Lightricks/LTX-2",
-            "converted/ltx2_diffusers",
+            "FastVideo/LTX2-base",
+        ],
+        model_detectors=[
+            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower())
+            and "distilled" not in path.lower(),
+        ],
+    )
+    # LTX-2 (distilled)
+    register_configs(
+        sampling_param_cls=LTX2DistilledSamplingParam,
+        pipeline_config_cls=LTX2T2VConfig,
+        hf_model_paths=[
             "FastVideo/LTX2-Distilled-Diffusers",
         ],
         model_detectors=[
-            lambda path: "ltx2" in path.lower() or "ltx-2" in path.lower(),
+            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" in path.lower(),
         ],
     )
 

@@ -814,6 +814,8 @@ class TransformerArgsPreprocessor:
         batch_size = x.shape[0]
         if context.device != x.device:
             context = context.to(x.device)
+        if context.dtype != x.dtype:
+            context = context.to(x.dtype)
         if attention_mask is not None and attention_mask.device != x.device:
             attention_mask = attention_mask.to(x.device)
         context = self.caption_projection(context)
@@ -2075,6 +2077,7 @@ class LTX2Transformer3DModel(CachableDiT):
     param_names_mapping = LTX2VideoConfig().param_names_mapping
     reverse_param_names_mapping = LTX2VideoConfig().reverse_param_names_mapping
     lora_param_names_mapping = LTX2VideoConfig().lora_param_names_mapping
+    _fsdp_shard_conditions = LTX2VideoConfig()._fsdp_shard_conditions
 
     def __init__(self, config: LTX2VideoConfig, hf_config: dict[str, Any]):
         super().__init__(config=config, hf_config=hf_config)
