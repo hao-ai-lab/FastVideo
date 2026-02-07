@@ -1,11 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Pipeline configuration for Hunyuan-GameCraft.
+Pipeline configuration for HunyuanGameCraft.
 
-This extends the HunyuanVideo pipeline with support for camera pose conditioning
-via CameraNet using Plücker coordinate representation.
+HunyuanGameCraft extends HunyuanVideo with:
+1. CameraNet for camera/action conditioning (Plücker coordinates)
+2. Mask-based conditioning for autoregressive generation
+3. 33 input channels (16 latent + 16 gt_latent + 1 mask)
+
+Text encoders are the same as HunyuanVideo:
+- LLaVA-LLaMA-3-8B for primary text encoding (4096 dim)
+- CLIP ViT-L/14 for secondary pooled embeddings (768 dim)
 """
-
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TypedDict
@@ -13,15 +18,18 @@ from typing import TypedDict
 import torch
 
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
-from fastvideo.configs.models.dits.hunyuangamecraft import HunyuanGameCraftConfig
-from fastvideo.configs.models.encoders import (BaseEncoderOutput,
-                                               CLIPTextConfig, LlamaConfig)
+from fastvideo.configs.models.dits import HunyuanGameCraftConfig
+from fastvideo.configs.models.encoders import (
+    BaseEncoderOutput,
+    CLIPTextConfig,
+    LlamaConfig,
+)
 from fastvideo.configs.models.vaes import HunyuanVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 
 
-# Prompt template for game video generation
-PROMPT_TEMPLATE_GAMECRAFT = (
+# GameCraft uses the same prompt template as HunyuanVideo
+PROMPT_TEMPLATE_ENCODE_VIDEO = (
     "<|start_header_id|>system<|end_header_id|>\n\nDescribe the video by detailing the following aspects: "
     "1. The main content and theme of the video."
     "2. The color, shape, size, texture, quantity, text, and spatial relationships of the objects."
@@ -37,82 +45,74 @@ class PromptTemplate(TypedDict):
     crop_start: int
 
 
-prompt_template_gamecraft: PromptTemplate = {
-    "template": PROMPT_TEMPLATE_GAMECRAFT,
+prompt_template_video: PromptTemplate = {
+    "template": PROMPT_TEMPLATE_ENCODE_VIDEO,
     "crop_start": 95,
 }
 
 
 def llama_preprocess_text(prompt: str) -> str:
-    """Preprocess text prompt for LLaMA encoder."""
-    return prompt_template_gamecraft["template"].format(prompt)
+    """Apply prompt template for LLaMA encoder."""
+    return prompt_template_video["template"].format(prompt)
 
 
 def llama_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
-    """Postprocess LLaMA encoder outputs."""
+    """Extract hidden states from LLaMA output, skipping instruction tokens."""
     hidden_state_skip_layer = 2
     assert outputs.hidden_states is not None
     hidden_states: tuple[torch.Tensor, ...] = outputs.hidden_states
     last_hidden_state: torch.Tensor = hidden_states[-(hidden_state_skip_layer + 1)]
-    crop_start = prompt_template_gamecraft.get("crop_start", -1)
+    crop_start = prompt_template_video.get("crop_start", -1)
     last_hidden_state = last_hidden_state[:, crop_start:]
     return last_hidden_state
 
 
 def clip_preprocess_text(prompt: str) -> str:
-    """Preprocess text prompt for CLIP encoder."""
+    """No preprocessing for CLIP encoder."""
     return prompt
 
 
 def clip_postprocess_text(outputs: BaseEncoderOutput) -> torch.Tensor:
-    """Postprocess CLIP encoder outputs."""
+    """Extract pooled output from CLIP encoder."""
     pooler_output: torch.Tensor = outputs.pooler_output
     return pooler_output
 
 
 @dataclass
 class HunyuanGameCraftPipelineConfig(PipelineConfig):
-    """
-    Pipeline configuration for Hunyuan-GameCraft.
+    """Configuration for HunyuanGameCraft pipeline.
     
-    This configures the full video generation pipeline including:
-    - HunyuanGameCraft DiT transformer with CameraNet
-    - HunyuanVideo VAE for latent encoding/decoding
-    - LLaMA + CLIP text encoders (same as HunyuanVideo)
-    
-    The camera conditioning uses Plücker coordinates (6D ray representation)
-    which are processed through CameraNet and added to the image embeddings.
+    Inherits text encoding from HunyuanVideo but uses:
+    - GameCraft DiT with CameraNet
+    - Same VAE (HunyuanVAE)
+    - Same text encoders (LLaMA + CLIP)
     """
     
-    # DiT configuration (HunyuanGameCraft with CameraNet)
+    # DiT config - uses GameCraft config (33 input channels)
     dit_config: DiTConfig = field(default_factory=HunyuanGameCraftConfig)
     
-    # VAE configuration (same as HunyuanVideo - causal 3D VAE)
+    # VAE config - same as HunyuanVideo
     vae_config: VAEConfig = field(default_factory=HunyuanVAEConfig)
     
     # Denoising parameters
-    # Note: Official HunyuanGameCraft uses flow_shift=5.0 and guidance_scale=6.0
     embedded_cfg_scale: int = 6
-    flow_shift: float = 5.0
+    flow_shift: int = 7
     
-    # Text encoder configurations (LLaMA + CLIP)
+    # Text encoding stage - same as HunyuanVideo
+    # Uses LLaMA-3-8B (via LLaVA) + CLIP
     text_encoder_configs: tuple[EncoderConfig, ...] = field(
         default_factory=lambda: (LlamaConfig(), CLIPTextConfig())
     )
-    
-    # Text preprocessing functions
     preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
         default_factory=lambda: (llama_preprocess_text, clip_preprocess_text)
     )
-    
-    # Text postprocessing functions
     postprocess_text_funcs: tuple[
         Callable[[BaseEncoderOutput], torch.Tensor], ...
     ] = field(
         default_factory=lambda: (llama_postprocess_text, clip_postprocess_text)
     )
     
-    # Precision settings for each component
+    # Precision for each component
     dit_precision: str = "bf16"
     vae_precision: str = "fp16"
     text_encoder_precisions: tuple[str, ...] = field(
@@ -120,34 +120,6 @@ class HunyuanGameCraftPipelineConfig(PipelineConfig):
     )
     
     def __post_init__(self):
-        """Post-initialization configuration."""
-        # Load both encoder and decoder for I2V support
-        # The encoder is needed to encode the reference image to latents
-        self.vae_config.load_encoder = True
+        # VAE only needs decoder for inference
+        self.vae_config.load_encoder = False
         self.vae_config.load_decoder = True
-
-
-@dataclass
-class HunyuanGameCraftT2VConfig(HunyuanGameCraftPipelineConfig):
-    """
-    Text-to-Video configuration for Hunyuan-GameCraft.
-    
-    Standard T2V generation with camera pose conditioning.
-    """
-    pass
-
-
-@dataclass
-class HunyuanGameCraftI2VConfig(HunyuanGameCraftPipelineConfig):
-    """
-    Image-to-Video configuration for Hunyuan-GameCraft.
-    
-    I2V generation with camera pose conditioning.
-    This configuration would typically include an image encoder
-    for processing the initial frame.
-    """
-    
-    def __post_init__(self):
-        super().__post_init__()
-        # Enable VAE encoder for encoding the initial image
-        self.vae_config.load_encoder = True
