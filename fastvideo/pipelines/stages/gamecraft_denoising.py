@@ -1,47 +1,38 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-GameCraft-specific denoising stage for hybrid history conditioning.
+GameCraft denoising stage for camera/action-conditioned video generation.
 
-HunyuanGameCraft uses a 33-channel input format:
-- 16 channels: noisy latents
-- 16 channels: conditioning/history latents  
-- 1 channel: mask indicating history vs predicted frames
-
-The model outputs 16-channel noise predictions which are used to update
-only the non-history portion of the latents.
+This stage implements the denoising loop for HunyuanGameCraft, which generates
+game-like videos with camera and action conditioning via:
+1. CameraNet - Encodes Plücker coordinates into features added to image embeddings
+2. Concatenated input - 33 channels (16 latent + 16 gt_latent + 1 mask)
+3. Mask-based conditioning for autoregressive generation
 """
 
-import inspect
-import weakref
-
 import torch
-from tqdm.auto import tqdm
 
-from fastvideo.attention import get_attn_backend
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
+from fastvideo.models.loader.component_loader import TransformerLoader
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
-from fastvideo.pipelines.stages.base import PipelineStage
-from fastvideo.platforms import AttentionBackendEnum
+from fastvideo.pipelines.stages.denoising import DenoisingStage
+from fastvideo.pipelines.stages.validators import StageValidators as V
+from fastvideo.pipelines.stages.validators import VerificationResult
 
 logger = init_logger(__name__)
 
 
-class GameCraftDenoisingStage(PipelineStage):
+class GameCraftDenoisingStage(DenoisingStage):
     """
-    Denoising stage for HunyuanGameCraft with hybrid history conditioning.
+    Denoising stage for HunyuanGameCraft with camera/action conditioning.
     
-    This stage handles the special 33-channel input format required by GameCraft:
-    - Concatenates latents (16ch) + conditioning (16ch) + mask (1ch)
-    - Passes 33-channel tensor to transformer
-    - Gets 16-channel noise prediction
-    - Updates latents via scheduler step
-    
-    For text-to-video (no history), conditioning is zeros and mask is ones.
-    For video continuation, conditioning contains history frames and mask
-    indicates which frames are history (0) vs predicted (1).
+    This stage handles:
+    - Camera state encoding via CameraNet (Plücker coordinates)
+    - Concatenation of latents with gt_latents and mask (33 channels)
+    - Flow matching denoising with camera conditioning
+    - Support for autoregressive generation with history frames
     """
 
     def __init__(
@@ -49,88 +40,10 @@ class GameCraftDenoisingStage(PipelineStage):
         transformer,
         scheduler,
         pipeline=None,
+        transformer_2=None,
         vae=None,
     ) -> None:
-        super().__init__()
-        self.transformer = transformer
-        self.scheduler = scheduler
-        self.vae = vae
-        self.pipeline = weakref.ref(pipeline) if pipeline else None
-        
-        # Get attention backend
-        attn_head_size = self.transformer.hidden_size // self.transformer.num_attention_heads
-        self.attn_backend = get_attn_backend(
-            head_size=attn_head_size,
-            dtype=torch.float16,
-            supported_attention_backends=(
-                AttentionBackendEnum.FLASH_ATTN,
-                AttentionBackendEnum.TORCH_SDPA,
-            )
-        )
-
-    def _prepare_conditioning_latents(
-        self,
-        latents: torch.Tensor,
-        history_latents: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Prepare conditioning latents and mask for GameCraft.
-        
-        Args:
-            latents: Current noisy latents [B, 16, T, H, W]
-            history_latents: Optional history latents for video continuation
-            
-        Returns:
-            conditioning_latents: [B, 16, T, H, W] - zeros for t2v, history for continuation
-            mask: [B, 1, T, H, W] - ones for t2v, mixed for continuation
-        """
-        batch_size, channels, num_frames, height, width = latents.shape
-        device = latents.device
-        dtype = latents.dtype
-        
-        if history_latents is None:
-            # Text-to-video mode: no history conditioning
-            # For pure T2V: all zeros conditioning, all zeros mask (generate everything)
-            conditioning_latents = torch.zeros(
-                batch_size, channels, num_frames, height, width,
-                device=device, dtype=dtype
-            )
-            # All zeros mask = generate all frames
-            mask = torch.zeros(
-                batch_size, 1, num_frames, height, width,
-                device=device, dtype=dtype
-            )
-        else:
-            # Video continuation mode: use history as conditioning
-            conditioning_latents = history_latents.clone()
-            
-            # Create mask: 0 for history frames, 1 for frames to generate
-            # Typically first half are history, second half are generated
-            mask = torch.ones(
-                batch_size, 1, num_frames, height, width,
-                device=device, dtype=dtype
-            )
-            
-            # For continuation, first frame(s) come from history
-            if num_frames > 1:
-                # First half is history (mask=0), second half is predicted (mask=1)
-                num_history = num_frames // 2
-                mask[:, :, :num_history, :, :] = 0.0
-                conditioning_latents[:, :, num_history:, :, :] = 0.0
-            else:
-                # Single frame: use first frame from history
-                mask[:, :, 0, :, :] = 0.0
-        
-        return conditioning_latents, mask
-
-    def prepare_extra_func_kwargs(self, func, kwargs):
-        """Filter kwargs to only include parameters the function accepts."""
-        # Get the function's signature
-        sig = inspect.signature(func)
-        valid_keys = set(sig.parameters.keys())
-        
-        # Filter to only valid kwargs
-        return {k: v for k, v in kwargs.items() if k in valid_keys and v is not None}
+        super().__init__(transformer, scheduler, pipeline, transformer_2, vae)
 
     def forward(
         self,
@@ -138,216 +51,249 @@ class GameCraftDenoisingStage(PipelineStage):
         fastvideo_args: FastVideoArgs,
     ) -> ForwardBatch:
         """
-        Run the GameCraft denoising loop with hybrid conditioning.
+        Run the denoising loop with camera/action conditioning.
         
         Args:
-            batch: The current batch information
-            fastvideo_args: The inference arguments
+            batch: The current batch information. Must contain:
+                - latents: Noise latents [B, 16, T, H, W]
+                - camera_states: Plücker coordinates [B, T_video, 6, H_video, W_video]
+                - gt_latents (optional): Ground truth latents for conditioning [B, 16, T, H, W]
+                - conditioning_mask (optional): Mask for conditioning [B, 1, T, H, W]
+            fastvideo_args: The inference arguments.
             
         Returns:
-            batch: Updated batch with denoised latents
+            The batch with denoised latents.
         """
-        device = get_local_torch_device()
-        target_dtype = torch.bfloat16
-        
-        # Get batch data
-        latents = batch.latents  # [B, 16, T, H, W]
-        timesteps = batch.timesteps
-        
-        # Get prompt embeddings from batch (it's a list for multiple encoders)
-        # Convert to target dtype
-        prompt_embeds = [
-            emb.to(target_dtype) if emb is not None else None 
-            for emb in batch.prompt_embeds
-        ]
-        neg_prompt_embeds = [
-            emb.to(target_dtype) if emb is not None else None 
-            for emb in (batch.negative_prompt_embeds or [])
-        ]
-        
-        # Get CLIP pooled embeddings if available
-        clip_embedding_pos = getattr(batch, 'clip_embedding_pos', None)
-        if clip_embedding_pos is not None:
-            clip_embedding_pos = clip_embedding_pos.to(target_dtype)
-        clip_embedding_neg = getattr(batch, 'clip_embedding_neg', None)
-        if clip_embedding_neg is not None:
-            clip_embedding_neg = clip_embedding_neg.to(target_dtype)
-        
-        # Get history latents if available (for video continuation)
-        history_latents = getattr(batch, 'history_latents', None)
-        
-        # Prepare conditioning latents and mask
-        conditioning_latents, mask = self._prepare_conditioning_latents(
-            latents, history_latents
+        pipeline = self.pipeline() if self.pipeline else None
+        if not fastvideo_args.model_loaded["transformer"]:
+            loader = TransformerLoader()
+            self.transformer = loader.load(
+                fastvideo_args.model_paths["transformer"], fastvideo_args
+            )
+            if pipeline:
+                pipeline.add_module("transformer", self.transformer)
+            fastvideo_args.model_loaded["transformer"] = True
+
+        # Extract GameCraft-specific parameters
+        camera_states = getattr(batch, "camera_states", None) or batch.extra.get(
+            "camera_states", None
         )
-        
-        # Keep a copy of conditioning for each step
-        gt_latents_concat = conditioning_latents.clone()
-        mask_concat = mask
-        
+        gt_latents = getattr(batch, "gt_latents", None) or batch.extra.get(
+            "gt_latents", None
+        )
+        conditioning_mask = getattr(batch, "conditioning_mask", None) or batch.extra.get(
+            "conditioning_mask", None
+        )
+
         # Prepare extra step kwargs for scheduler
-        extra_step_kwargs = {}
-        if "generator" in set(
-            inspect.signature(self.scheduler.step).parameters.keys()
-        ):
-            extra_step_kwargs["generator"] = batch.generator
-        
-        # Get camera states for CameraNet conditioning
-        # Convert camera_states to target dtype and device
-        camera_states = batch.camera_states
-        if camera_states is not None:
-            camera_states = camera_states.to(device=device, dtype=target_dtype)
-        camera_kwargs = self.prepare_extra_func_kwargs(
-            self.transformer.forward,
-            {"camera_states": camera_states},
+        extra_step_kwargs = self.prepare_extra_func_kwargs(
+            self.scheduler.step,
+            {
+                "generator": batch.generator,
+                "eta": batch.eta,
+            },
         )
-        
-        # Prepare positional conditioning kwargs
+
+        # Setup precision and autocast settings
+        target_dtype = torch.bfloat16
+        autocast_enabled = (
+            target_dtype != torch.float32
+        ) and not fastvideo_args.disable_autocast
+
+        # Get timesteps
+        timesteps = batch.timesteps
+        if timesteps is None:
+            raise ValueError("Timesteps must be provided")
+        num_inference_steps = batch.num_inference_steps
+        num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
+
+        # Prepare image embeddings for I2V generation (if any)
+        image_embeds = batch.image_embeds
+        if len(image_embeds) > 0:
+            assert not torch.isnan(image_embeds[0]).any(), "image_embeds contains nan"
+            image_embeds = [
+                image_embed.to(target_dtype) for image_embed in image_embeds
+            ]
+
+        image_kwargs = self.prepare_extra_func_kwargs(
+            self.transformer.forward,
+            {"encoder_hidden_states_image": image_embeds},
+        )
+
         pos_cond_kwargs = self.prepare_extra_func_kwargs(
             self.transformer.forward,
             {
-                "encoder_hidden_states_2": clip_embedding_pos,
+                "encoder_hidden_states_2": batch.clip_embedding_pos,
                 "encoder_attention_mask": batch.prompt_attention_mask,
             },
         )
-        
+
         neg_cond_kwargs = self.prepare_extra_func_kwargs(
             self.transformer.forward,
             {
-                "encoder_hidden_states_2": clip_embedding_neg,
+                "encoder_hidden_states_2": batch.clip_embedding_neg,
                 "encoder_attention_mask": batch.negative_attention_mask,
             },
         )
-        
-        # Denoising loop
-        num_inference_steps = len(timesteps)
-        num_warmup_steps = max(
-            len(timesteps) - num_inference_steps * self.scheduler.order, 0
-        )
-        
-        with tqdm(total=num_inference_steps, desc="Denoising") as progress_bar:
+
+        # Get latents and embeddings
+        latents = batch.latents
+        prompt_embeds = batch.prompt_embeds
+        assert not torch.isnan(prompt_embeds[0]).any(), "prompt_embeds contains nan"
+
+        if batch.do_classifier_free_guidance:
+            neg_prompt_embeds = batch.negative_prompt_embeds
+            assert neg_prompt_embeds is not None
+            assert not torch.isnan(
+                neg_prompt_embeds[0]
+            ).any(), "neg_prompt_embeds contains nan"
+
+        # Prepare gt_latents and mask for concatenation
+        # If not provided, use zeros (for unconditional generation)
+        if gt_latents is None:
+            gt_latents = torch.zeros_like(latents)
+        else:
+            gt_latents = gt_latents.to(target_dtype)
+
+        if conditioning_mask is None:
+            # Default mask: all zeros (generate everything)
+            conditioning_mask = torch.zeros(
+                latents.shape[0], 1, *latents.shape[2:],
+                device=latents.device,
+                dtype=target_dtype,
+            )
+        else:
+            conditioning_mask = conditioning_mask.to(target_dtype)
+
+        # Move camera states to device if provided
+        if camera_states is not None:
+            camera_states = camera_states.to(device=latents.device, dtype=target_dtype)
+
+        # Initialize lists for trajectory
+        trajectory_timesteps: list[torch.Tensor] = []
+        trajectory_latents: list[torch.Tensor] = []
+
+        # Run denoising loop
+        with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
-                # Debug: print timestep and latent stats on first step
-                if i == 0:
-                    logger.info(f"[DEBUG] Timestep 0: t={t.item() if hasattr(t, 'item') else t}")
-                    logger.info(f"[DEBUG] Latents shape: {latents.shape}, mean: {latents.mean().item():.4f}, std: {latents.std().item():.4f}")
-                    logger.info(f"[DEBUG] Mask shape: {mask_concat.shape}, unique values: {mask_concat.unique().tolist()}")
-                
-                # Concatenate latents with conditioning for 33-channel input
-                # [B, 16, T, H, W] + [B, 16, T, H, W] + [B, 1, T, H, W] = [B, 33, T, H, W]
-                latents_concat = torch.cat(
-                    [latents, gt_latents_concat, mask_concat], dim=1
+                # Skip if interrupted
+                if hasattr(self, "interrupt") and self.interrupt:
+                    continue
+
+                current_model = self.transformer
+                current_guidance_scale = batch.guidance_scale
+
+                # Prepare model input: concatenate latents, gt_latents, and mask
+                # [B, 33, T, H, W] = [B, 16, T, H, W] + [B, 16, T, H, W] + [B, 1, T, H, W]
+                latent_model_input = torch.cat(
+                    [latents.to(target_dtype), gt_latents, conditioning_mask],
+                    dim=1,
                 )
-                
-                latent_model_input = latents_concat.to(target_dtype)
-                
-                # Scale model input
+
+                assert not torch.isnan(
+                    latent_model_input
+                ).any(), "latent_model_input contains nan"
+
+                t_expand = t.repeat(latent_model_input.shape[0])
+
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t
                 )
-                
-                # Expand timestep
-                t_expand = t.unsqueeze(0) if t.dim() == 0 else t
-                
-                # Get primary text embeddings (LLaMA)
-                current_prompt_embeds = prompt_embeds[0] if len(prompt_embeds) > 0 else None
-                
-                # Run transformer forward pass with positive conditioning
-                batch.is_cfg_negative = False
-                with set_forward_context(
-                    current_timestep=i,
-                    attn_metadata=None,
-                    forward_batch=batch,
+
+                # Prepare guidance embedding
+                guidance_expand = (
+                    torch.tensor(
+                        [fastvideo_args.pipeline_config.embedded_cfg_scale]
+                        * latent_model_input.shape[0],
+                        dtype=torch.float32,
+                        device=get_local_torch_device(),
+                    ).to(target_dtype)
+                    * 1000.0
+                    if fastvideo_args.pipeline_config.embedded_cfg_scale is not None
+                    else None
+                )
+
+                # Run transformer with camera conditioning
+                with torch.autocast(
+                    device_type="cuda",
+                    dtype=target_dtype,
+                    enabled=autocast_enabled,
                 ):
-                    noise_pred = self.transformer(
-                        latent_model_input,
-                        current_prompt_embeds,
-                        t_expand,
-                        guidance=None,
-                        **pos_cond_kwargs,
-                        **camera_kwargs,
-                    )
-                
-                # Debug: print noise prediction stats on first step
-                if i == 0:
-                    logger.info(f"[DEBUG] Noise pred shape: {noise_pred.shape}, mean: {noise_pred.mean().item():.4f}, std: {noise_pred.std().item():.4f}")
-                
-                # Apply classifier-free guidance if enabled
-                if batch.do_classifier_free_guidance:
-                    # Get negative embeddings
-                    current_neg_embeds = neg_prompt_embeds[0] if neg_prompt_embeds and len(neg_prompt_embeds) > 0 else None
-                    
-                    batch.is_cfg_negative = True
+                    batch.is_cfg_negative = False
                     with set_forward_context(
                         current_timestep=i,
                         attn_metadata=None,
                         forward_batch=batch,
                     ):
-                        noise_pred_uncond = self.transformer(
+                        noise_pred = current_model(
                             latent_model_input,
-                            current_neg_embeds,
+                            prompt_embeds,
                             t_expand,
-                            guidance=None,
-                            **neg_cond_kwargs,
-                            **camera_kwargs,
+                            camera_states=camera_states,
+                            guidance=guidance_expand,
+                            **image_kwargs,
+                            **pos_cond_kwargs,
                         )
-                    
-                    noise_pred = noise_pred_uncond + batch.guidance_scale * (
-                        noise_pred - noise_pred_uncond
-                    )
-                
-                # Debug: print noise prediction after CFG on first step
-                if i == 0:
-                    logger.info(f"[DEBUG] After CFG - Noise pred mean: {noise_pred.mean().item():.4f}, std: {noise_pred.std().item():.4f}")
-                
-                # Scheduler step
-                # noise_pred is [B, 16, T, H, W], latents is [B, 16, T, H, W]
-                num_frames = latents.shape[2]
-                
-                # Store pre-step latents for debugging
-                pre_step_latents = latents.clone() if i == 0 else None
-                
-                if history_latents is not None and num_frames > 1:
-                    # Video continuation mode: only update second half of frames
-                    num_history = num_frames // 2
-                    latents[:, :, num_history:, :, :] = self.scheduler.step(
-                        noise_pred[:, :, num_history:, :, :],
-                        t,
-                        latents[:, :, num_history:, :, :],
-                        **extra_step_kwargs,
-                        return_dict=False
-                    )[0]
-                else:
-                    # T2V mode: update all frames
-                    latents = self.scheduler.step(
-                        noise_pred,
-                        t,
-                        latents,
-                        **extra_step_kwargs,
-                        return_dict=False
-                    )[0]
-                
-                # Debug: show change in latents
-                if pre_step_latents is not None:
-                    diff = (latents - pre_step_latents).abs().mean().item()
-                    logger.info(f"[DEBUG] Step 0 - Latent change (mean abs diff): {diff:.6f}")
-                
-                # Debug: print latent stats after scheduler step
-                if i == 0 or i == len(timesteps) - 1:
-                    logger.info(f"[DEBUG] Step {i} - Latents after step: mean: {latents.mean().item():.4f}, std: {latents.std().item():.4f}")
-                    if i == 0:
-                        # Print scheduler info
-                        logger.info(f"[DEBUG] Scheduler sigmas: {self.scheduler.sigmas[:5].tolist()}...{self.scheduler.sigmas[-5:].tolist()}")
-                        logger.info(f"[DEBUG] Scheduler step_index: {self.scheduler.step_index}")
-                
+
+                    # Classifier-free guidance
+                    if batch.do_classifier_free_guidance:
+                        batch.is_cfg_negative = True
+                        with set_forward_context(
+                            current_timestep=i,
+                            attn_metadata=None,
+                            forward_batch=batch,
+                        ):
+                            noise_pred_uncond = current_model(
+                                latent_model_input,
+                                neg_prompt_embeds,
+                                t_expand,
+                                camera_states=camera_states,
+                                guidance=guidance_expand,
+                                **image_kwargs,
+                                **neg_cond_kwargs,
+                            )
+                        
+                        noise_pred = noise_pred_uncond + current_guidance_scale * (
+                            noise_pred - noise_pred_uncond
+                        )
+
+                # Compute the previous noisy sample
+                latents = self.scheduler.step(
+                    noise_pred,
+                    t,
+                    latents,
+                    **extra_step_kwargs,
+                    return_dict=False,
+                )[0]
+
+                # Store trajectory if requested
+                if batch.return_trajectory_latents:
+                    trajectory_timesteps.append(t.clone())
+                    trajectory_latents.append(latents.clone())
+
                 # Update progress bar
                 if i == len(timesteps) - 1 or (
-                    (i + 1) > num_warmup_steps and
-                    (i + 1) % self.scheduler.order == 0
+                    (i + 1) > num_warmup_steps
+                    and (i + 1) % self.scheduler.order == 0
                 ):
                     progress_bar.update()
-        
-        # Update batch with final latents
+
+        # Store final latents and trajectory
         batch.latents = latents
-        
+        if batch.return_trajectory_latents:
+            batch.trajectory_timesteps = trajectory_timesteps
+            batch.trajectory_latents = torch.stack(trajectory_latents, dim=0)
+
         return batch
+
+    def verify_input(self, batch: ForwardBatch) -> VerificationResult:
+        """Verify that required inputs are present."""
+        return V.all_(
+            V.has_latents(batch),
+            V.has_prompt_embeds(batch),
+            V.has_timesteps(batch),
+        )
+
+    def verify_output(self, batch: ForwardBatch) -> VerificationResult:
+        """Verify that outputs are properly set."""
+        return V.has_latents(batch)

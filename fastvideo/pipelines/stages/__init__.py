@@ -33,6 +33,7 @@ from fastvideo.pipelines.stages.ltx2_text_encoding import LTX2TextEncodingStage
 from fastvideo.pipelines.stages.matrixgame_denoising import (
     MatrixGameCausalDenoisingStage)
 from fastvideo.pipelines.stages.hyworld_denoising import HYWorldDenoisingStage
+from fastvideo.pipelines.stages.gamecraft_denoising import GameCraftDenoisingStage
 from fastvideo.pipelines.stages.stepvideo_encoding import (
     StepvideoPromptEncodingStage)
 from fastvideo.pipelines.stages.text_encoding import (Cosmos25TextEncodingStage,
@@ -64,6 +65,7 @@ __all__ = [
     "CausalDMDDenosingStage",
     "MatrixGameCausalDenoisingStage",
     "HYWorldDenoisingStage",
+    "GameCraftDenoisingStage",
     "CosmosDenoisingStage",
     "Cosmos25DenoisingStage",
     "Cosmos25T2WDenoisingStage",
