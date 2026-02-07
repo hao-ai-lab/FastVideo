@@ -253,11 +253,17 @@ class TextEncodingStage(PipelineStage):
             input_ids = text_inputs["input_ids"]
             attention_mask = text_inputs["attention_mask"]
 
+            want_hidden_states = bool(
+                getattr(getattr(encoder_config, "arch_config", None),
+                        "output_hidden_states", False))
+            if is_ltx2:
+                want_hidden_states = True
+
             with set_forward_context(current_timestep=0, attn_metadata=None):
                 outputs = text_encoder(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
-                    output_hidden_states=True,
+                    output_hidden_states=want_hidden_states,
                 )
 
             try:
