@@ -37,6 +37,8 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"),  # Wrapper (Phase 1)
     "LongCatTransformer3DModel": ("dits", "longcat", "LongCatTransformer3DModel"),  # Native (Phase 2)
     "LTX2Transformer3DModel": ("dits", "ltx2", "LTX2Transformer3DModel"),
+    "Kandinsky5Transformer3DModel":
+    ("dits", "kandinsky5", "Kandinsky5Transformer3DModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
