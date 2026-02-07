@@ -27,7 +27,8 @@ class SD35LatentPreparationStage(PipelineStage):
     def forward(self, batch: ForwardBatch,
                 fastvideo_args: FastVideoArgs) -> ForwardBatch:
         if batch.height is None or batch.width is None:
-            raise ValueError("height/width must be set for SD35LatentPreparationStage")
+            raise ValueError(
+                "height/width must be set for SD35LatentPreparationStage")
 
         if isinstance(batch.prompt, list):
             batch_size = len(batch.prompt)
@@ -43,13 +44,16 @@ class SD35LatentPreparationStage(PipelineStage):
         dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.dit_precision]
         device = get_local_torch_device()
 
-        if isinstance(batch.generator, list) and len(batch.generator) != batch_size:
+        if isinstance(batch.generator, list) and len(
+                batch.generator) != batch_size:
             raise ValueError(
                 f"generator list length {len(batch.generator)} does not match batch_size {batch_size}"
             )
 
-        in_channels = int(fastvideo_args.pipeline_config.dit_config.arch_config.in_channels)
-        spatial_ratio = int(fastvideo_args.pipeline_config.vae_config.arch_config.spatial_compression_ratio)
+        in_channels = int(
+            fastvideo_args.pipeline_config.dit_config.arch_config.in_channels)
+        spatial_ratio = int(fastvideo_args.pipeline_config.vae_config.
+                            arch_config.spatial_compression_ratio)
         h_lat = int(batch.height) // spatial_ratio
         w_lat = int(batch.width) // spatial_ratio
         shape = (batch_size, in_channels, 1, h_lat, w_lat)
@@ -104,7 +108,8 @@ class SD35ConditioningStage(PipelineStage):
         device: torch.device,
         dtype: torch.dtype,
     ) -> torch.Tensor:
-        input_ids, attention_mask = self._tokenize(tokenizer, prompts, tok_kwargs, device)
+        input_ids, attention_mask = self._tokenize(tokenizer, prompts,
+                                                   tok_kwargs, device)
         with set_forward_context(current_timestep=0, attn_metadata=None):
             out = text_encoder(
                 input_ids=input_ids,
@@ -113,7 +118,8 @@ class SD35ConditioningStage(PipelineStage):
             )
         pooled = getattr(out, "pooler_output", None)
         if pooled is None:
-            raise RuntimeError("CLIP pooled output is required for SD3.5 conditioning")
+            raise RuntimeError(
+                "CLIP pooled output is required for SD3.5 conditioning")
         return pooled.to(dtype=dtype)
 
     @torch.no_grad()
@@ -125,7 +131,8 @@ class SD35ConditioningStage(PipelineStage):
             )
 
         device = get_local_torch_device()
-        target_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.dit_precision]
+        target_dtype = PRECISION_TO_TYPE[
+            fastvideo_args.pipeline_config.dit_precision]
 
         clip_1 = batch.prompt_embeds[0].to(device=device, dtype=target_dtype)
         clip_2 = batch.prompt_embeds[1].to(device=device, dtype=target_dtype)
@@ -136,7 +143,8 @@ class SD35ConditioningStage(PipelineStage):
             raise ValueError(
                 f"CLIP prompt dim {clip_prompt.shape[-1]} exceeds T5 dim {t5.shape[-1]}"
             )
-        clip_prompt = F.pad(clip_prompt, (0, t5.shape[-1] - clip_prompt.shape[-1]))
+        clip_prompt = F.pad(clip_prompt,
+                            (0, t5.shape[-1] - clip_prompt.shape[-1]))
         prompt_embeds = torch.cat([clip_prompt, t5], dim=-2)
 
         te_cfgs = fastvideo_args.pipeline_config.text_encoder_configs
@@ -151,33 +159,42 @@ class SD35ConditioningStage(PipelineStage):
         clip_tok_kwargs_1.setdefault("return_tensors", "pt")
         clip_tok_kwargs_2.setdefault("return_tensors", "pt")
 
-        pooled_1 = self._clip_pooled(
-            self.text_encoders[0], self.tokenizers[0], batch.prompt, clip_tok_kwargs_1, device, target_dtype
-        )
-        pooled_2 = self._clip_pooled(
-            self.text_encoders[1], self.tokenizers[1], batch.prompt, clip_tok_kwargs_2, device, target_dtype
-        )
+        pooled_1 = self._clip_pooled(self.text_encoders[0], self.tokenizers[0],
+                                     batch.prompt, clip_tok_kwargs_1, device,
+                                     target_dtype)
+        pooled_2 = self._clip_pooled(self.text_encoders[1], self.tokenizers[1],
+                                     batch.prompt, clip_tok_kwargs_2, device,
+                                     target_dtype)
         pooled = torch.cat([pooled_1, pooled_2], dim=-1)
 
         batch.extra["sd35_encoder_hidden_states"] = prompt_embeds
         batch.extra["sd35_pooled_projections"] = pooled
 
         if batch.do_classifier_free_guidance:
-            if batch.negative_prompt_embeds is None or len(batch.negative_prompt_embeds) < 3:
-                raise ValueError("negative_prompt_embeds must contain 3 entries when CFG is enabled")
+            if batch.negative_prompt_embeds is None or len(
+                    batch.negative_prompt_embeds) < 3:
+                raise ValueError(
+                    "negative_prompt_embeds must contain 3 entries when CFG is enabled"
+                )
 
-            neg_clip_1 = batch.negative_prompt_embeds[0].to(device=device, dtype=target_dtype)
-            neg_clip_2 = batch.negative_prompt_embeds[1].to(device=device, dtype=target_dtype)
-            neg_t5 = batch.negative_prompt_embeds[2].to(device=device, dtype=target_dtype)
+            neg_clip_1 = batch.negative_prompt_embeds[0].to(device=device,
+                                                            dtype=target_dtype)
+            neg_clip_2 = batch.negative_prompt_embeds[1].to(device=device,
+                                                            dtype=target_dtype)
+            neg_t5 = batch.negative_prompt_embeds[2].to(device=device,
+                                                        dtype=target_dtype)
 
             neg_clip_prompt = torch.cat([neg_clip_1, neg_clip_2], dim=-1)
-            neg_clip_prompt = F.pad(neg_clip_prompt, (0, neg_t5.shape[-1] - neg_clip_prompt.shape[-1]))
+            neg_clip_prompt = F.pad(
+                neg_clip_prompt,
+                (0, neg_t5.shape[-1] - neg_clip_prompt.shape[-1]))
             neg_prompt_embeds = torch.cat([neg_clip_prompt, neg_t5], dim=-2)
 
             negative_pooled_1 = self._clip_pooled(
                 self.text_encoders[0],
                 self.tokenizers[0],
-                batch.negative_prompt if isinstance(batch.negative_prompt, (str, list)) else "",
+                batch.negative_prompt if isinstance(batch.negative_prompt, str
+                                                    | list) else "",
                 clip_tok_kwargs_1,
                 device,
                 target_dtype,
@@ -185,14 +202,17 @@ class SD35ConditioningStage(PipelineStage):
             negative_pooled_2 = self._clip_pooled(
                 self.text_encoders[1],
                 self.tokenizers[1],
-                batch.negative_prompt if isinstance(batch.negative_prompt, (str, list)) else "",
+                batch.negative_prompt if isinstance(batch.negative_prompt, str
+                                                    | list) else "",
                 clip_tok_kwargs_2,
                 device,
                 target_dtype,
             )
-            neg_pooled = torch.cat([negative_pooled_1, negative_pooled_2], dim=-1)
+            neg_pooled = torch.cat([negative_pooled_1, negative_pooled_2],
+                                   dim=-1)
 
-            batch.extra["sd35_negative_encoder_hidden_states"] = neg_prompt_embeds
+            batch.extra[
+                "sd35_negative_encoder_hidden_states"] = neg_prompt_embeds
             batch.extra["sd35_negative_pooled_projections"] = neg_pooled
 
         return batch
@@ -227,44 +247,51 @@ class SD35DenoisingStage(PipelineStage):
         pooled: torch.Tensor = batch.extra["sd35_pooled_projections"]
 
         neg_prompt_embeds: torch.Tensor | None = batch.extra.get(
-            "sd35_negative_encoder_hidden_states"
-        )
+            "sd35_negative_encoder_hidden_states")
         neg_pooled: torch.Tensor | None = batch.extra.get(
-            "sd35_negative_pooled_projections"
-        )
+            "sd35_negative_pooled_projections")
 
         timesteps = batch.timesteps
         latents = batch.latents
         guidance_scale = float(batch.guidance_scale)
 
-        target_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.dit_precision]
-        autocast_enabled = (target_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        target_dtype = PRECISION_TO_TYPE[
+            fastvideo_args.pipeline_config.dit_precision]
+        autocast_enabled = (target_dtype != torch.float32
+                            ) and not fastvideo_args.disable_autocast
 
         extra_step_kwargs = self._prepare_extra_func_kwargs(
-            self.scheduler.step, {"generator": batch.generator[0] if isinstance(batch.generator, list) else batch.generator}
-        )
+            self.scheduler.step, {
+                "generator":
+                batch.generator[0]
+                if isinstance(batch.generator, list) else batch.generator
+            })
 
         for t in timesteps:
             latents_4d = latents.squeeze(2)
 
             if batch.do_classifier_free_guidance:
                 if neg_prompt_embeds is None or neg_pooled is None:
-                    raise ValueError("Missing negative conditioning tensors for CFG")
+                    raise ValueError(
+                        "Missing negative conditioning tensors for CFG")
                 latent_model_input = torch.cat([latents_4d] * 2, dim=0)
-                cond_embeds = torch.cat([neg_prompt_embeds, prompt_embeds], dim=0)
+                cond_embeds = torch.cat([neg_prompt_embeds, prompt_embeds],
+                                        dim=0)
                 cond_pooled = torch.cat([neg_pooled, pooled], dim=0)
             else:
                 latent_model_input = latents_4d
                 cond_embeds = prompt_embeds
                 cond_pooled = pooled
 
-            latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+            latent_model_input = self.scheduler.scale_model_input(
+                latent_model_input, t)
             timestep = t.expand(latent_model_input.shape[0])
 
             with torch.autocast(
-                device_type="cuda",
-                dtype=target_dtype,
-                enabled=autocast_enabled and (get_local_torch_device().type == "cuda"),
+                    device_type="cuda",
+                    dtype=target_dtype,
+                    enabled=autocast_enabled
+                    and (get_local_torch_device().type == "cuda"),
             ):
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
@@ -276,10 +303,15 @@ class SD35DenoisingStage(PipelineStage):
 
             if batch.do_classifier_free_guidance:
                 noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+                noise_pred = noise_pred_uncond + guidance_scale * (
+                    noise_pred_text - noise_pred_uncond)
 
             noise_pred_5d = noise_pred.unsqueeze(2)
-            latents = self.scheduler.step(noise_pred_5d, t, latents, return_dict=False, **extra_step_kwargs)[0]
+            latents = self.scheduler.step(noise_pred_5d,
+                                          t,
+                                          latents,
+                                          return_dict=False,
+                                          **extra_step_kwargs)[0]
 
         batch.latents = latents
         return batch
@@ -300,20 +332,16 @@ class SD35DecodingStage(PipelineStage):
         sh = getattr(cfg, "shift_factor", None) if cfg is not None else None
 
         if sf is None and hasattr(vae, "scaling_factor"):
-            sf = getattr(vae, "scaling_factor")
+            sf = vae.scaling_factor
         if sh is None and hasattr(vae, "shift_factor"):
-            sh = getattr(vae, "shift_factor")
+            sh = vae.shift_factor
 
         if sf is not None:
-            latents = latents / (
-                sf.to(latents.device, latents.dtype) if isinstance(sf, torch.Tensor) else sf
-            )
+            latents = latents / (sf.to(latents.device, latents.dtype)
+                                 if isinstance(sf, torch.Tensor) else sf)
             if sh is not None:
-                latents = latents + (
-                    sh.to(latents.device, latents.dtype)
-                    if isinstance(sh, torch.Tensor)
-                    else sh
-                )
+                latents = latents + (sh.to(latents.device, latents.dtype)
+                                     if isinstance(sh, torch.Tensor) else sh)
         return latents
 
     @torch.no_grad()
@@ -326,15 +354,17 @@ class SD35DecodingStage(PipelineStage):
         latents_5d = batch.latents.to(device)
         latents_4d = latents_5d.squeeze(2)
 
-        vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
-        autocast_enabled = (vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
+        vae_dtype = PRECISION_TO_TYPE[
+            fastvideo_args.pipeline_config.vae_precision]
+        autocast_enabled = (
+            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
         latents_4d = self._denormalize_latents(latents_4d, self.vae)
 
         with torch.autocast(
-            device_type="cuda",
-            dtype=vae_dtype,
-            enabled=autocast_enabled and (device.type == "cuda"),
+                device_type="cuda",
+                dtype=vae_dtype,
+                enabled=autocast_enabled and (device.type == "cuda"),
         ):
             if not autocast_enabled:
                 latents_4d = latents_4d.to(dtype=vae_dtype)

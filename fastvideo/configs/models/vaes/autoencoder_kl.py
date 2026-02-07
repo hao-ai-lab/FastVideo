@@ -6,11 +6,13 @@ import torch
 
 from fastvideo.configs.models.vaes.base import VAEArchConfig, VAEConfig
 
+
 @dataclass
 class AutoencoderKLArchConfig(VAEArchConfig):
     _name_or_path: str = ""
     act_fn: str = "silu"
-    block_out_channels: tuple[int, ...] | list[int] = field(default_factory=list)
+    block_out_channels: tuple[int, ...] | list[int] = field(
+        default_factory=list)
     down_block_types: tuple[str, ...] | list[str] = field(default_factory=list)
     up_block_types: tuple[str, ...] | list[str] = field(default_factory=list)
     force_upcast: bool = True
@@ -35,4 +37,3 @@ class AutoencoderKLArchConfig(VAEArchConfig):
 @dataclass
 class AutoencoderKLVAEConfig(VAEConfig):
     arch_config: VAEArchConfig = field(default_factory=AutoencoderKLArchConfig)
-

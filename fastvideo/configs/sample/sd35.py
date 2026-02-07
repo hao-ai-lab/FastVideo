@@ -23,4 +23,3 @@ class SD35SamplingParam(SamplingParam):
 
     num_inference_steps: int = 28
     guidance_scale: float = 6.0
-

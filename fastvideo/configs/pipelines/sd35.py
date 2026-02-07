@@ -41,23 +41,25 @@ class SD35Config(PipelineConfig):
     )
 
     dit_config: SD3DiTConfig = field(default_factory=SD3DiTConfig)
-    vae_config: AutoencoderKLVAEConfig = field(default_factory=AutoencoderKLVAEConfig)
+    vae_config: AutoencoderKLVAEConfig = field(
+        default_factory=AutoencoderKLVAEConfig)
 
     embedded_cfg_scale: float = 0.0
     flow_shift: float | None = None
 
     text_encoder_configs: tuple[EncoderConfig, ...] = field(
-        default_factory=lambda: (CLIPTextConfig(), CLIPTextConfig(), T5Config())
-    )
+        default_factory=lambda:
+        (CLIPTextConfig(), CLIPTextConfig(), T5Config()))
     preprocess_text_funcs: tuple[Callable[[str], str], ...] = field(
-        default_factory=lambda: (preprocess_text, preprocess_text, preprocess_text)
-    )
-    postprocess_text_funcs: tuple[Callable[[BaseEncoderOutput], torch.Tensor], ...] = field(
-        default_factory=lambda: (_sd35_text_postprocess, _sd35_text_postprocess, _sd35_text_postprocess)
-    )
+        default_factory=lambda:
+        (preprocess_text, preprocess_text, preprocess_text))
+    postprocess_text_funcs: tuple[
+        Callable[[BaseEncoderOutput], torch.Tensor],
+        ...] = field(default_factory=lambda:
+                     (_sd35_text_postprocess, _sd35_text_postprocess,
+                      _sd35_text_postprocess))
 
     dit_precision: str = "bf16"
     vae_precision: str = "fp32"
     text_encoder_precisions: tuple[str, ...] = field(
-        default_factory=lambda: ("fp32", "fp32", "bf16")
-    )
+        default_factory=lambda: ("fp32", "fp32", "bf16"))

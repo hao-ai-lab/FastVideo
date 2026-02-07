@@ -22,6 +22,6 @@ class SD3Transformer2DArchConfig(DiTArchConfig):
 
 @dataclass
 class SD3DiTConfig(DiTConfig):
-    arch_config: DiTArchConfig = field(default_factory=SD3Transformer2DArchConfig)
+    arch_config: DiTArchConfig = field(
+        default_factory=SD3Transformer2DArchConfig)
     prefix: str = "sd3"
-
