@@ -857,7 +857,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 # Run validation inference
                 output_batch = self.validation_pipeline.forward(
                     batch, training_args)
-                samples = output_batch.output
+                samples = output_batch.output.cpu()
 
                 if self.rank_in_sp_group != 0:
                     continue
