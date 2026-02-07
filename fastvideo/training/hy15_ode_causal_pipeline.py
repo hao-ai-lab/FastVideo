@@ -432,7 +432,106 @@ class Hy15ODEInitTrainingPipeline(TrainingPipeline):
         with set_forward_context(current_timestep=timestep,
                                  attn_metadata=None,
                                  forward_batch=None):
-            noise_pred = self.transformer(**vision_input_kwargs).permute(
+            noise_pred, _ = self.transformer(**vision_input_kwargs)
+            noise_pred = noise_pred.permute(
+                0, 2, 1, 3, 4)
+
+        from fastvideo.models.utils import pred_noise_to_pred_video
+        pred_video = pred_noise_to_pred_video(
+            pred_noise=noise_pred.flatten(0, 1),
+            noise_input_latent=latents.flatten(0, 1),
+            timestep=timestep.to(dtype=torch.bfloat16).flatten(0, 1),
+            scheduler=self.noise_scheduler).unflatten(0, noise_pred.shape[:2])
+        latent_vis_dict["pred_video"] = pred_video.permute(
+            0, 2, 1, 3, 4).detach().clone().cpu()
+
+        return pred_video, target_latent, timestep, latent_vis_dict
+
+    def _tf_step_predict_next_latent(
+        self, traj_latents: torch.Tensor, traj_timesteps: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        encoder_attention_mask: torch.Tensor,
+        encoder_hidden_states_image: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str,
+                                                              torch.Tensor]]:
+        latent_vis_dict: dict[str, torch.Tensor] = {}
+        device = get_local_torch_device()
+        target_latent = traj_latents[:, -1]
+        del traj_latents
+
+        # Shapes: traj_latents [B, S, C, T, H, W], traj_timesteps [B, S]
+        B, num_frames, num_channels, height, width = target_latent.shape
+
+        indexes = self._get_timestep(  # [B, num_frames]
+            0,
+            1000,
+            B,
+            num_frames,
+            3,
+            uniform_timestep=False)
+        timestep = self.noise_scheduler.timesteps[indexes.cpu()].to(device)
+
+        latents = self.noise_scheduler.add_noise(
+            target_latent.flatten(0, 1),
+            torch.randn_like(target_latent.flatten(0, 1)),
+            timestep.flatten(0, 1)).unflatten(0, (B, num_frames))
+        noisy_input = torch.cat([
+            latents,
+            torch.zeros_like(latents),
+            torch.zeros_like(latents[:, :, 0:1])
+        ],
+                                dim=2)
+        clean_input = torch.cat([
+            target_latent,
+            torch.zeros_like(latents),
+            torch.zeros_like(latents[:, :, 0:1])
+        ],
+                                dim=2)
+
+        # Prepare inputs for transformer
+        latent_vis_dict["noisy_input"] = latents.permute(
+            0, 2, 1, 3, 4).detach().clone().cpu()
+        latent_vis_dict["x0"] = target_latent.permute(0, 2, 1, 3,
+                                                      4).detach().clone().cpu()
+
+        logger.info("timestep: %s", timestep)
+        txt_input_kwargs = {
+            "txt_inference":
+            True,
+            "vision_inference":
+            False,
+            "encoder_hidden_states":
+            encoder_hidden_states,
+            "encoder_hidden_states_image":
+            encoder_hidden_states_image,
+            "encoder_attention_mask":
+            encoder_attention_mask,
+            "timestep":
+            torch.zeros([latents.shape[0]],
+                        device=latents.device,
+                        dtype=torch.bfloat16),
+            "cache_txt":
+            True,
+        }
+        with set_forward_context(current_timestep=timestep,
+                                 attn_metadata=None,
+                                 forward_batch=None):
+            txt_kv_cache = self.transformer(**txt_input_kwargs)
+
+        vision_input_kwargs = {
+            "txt_inference": False,
+            "vision_inference": True,
+            "hidden_states": noisy_input.permute(0, 2, 1, 3, 4),
+            "timestep": timestep.to(device, dtype=torch.bfloat16),
+            "txt_kv_cache": txt_kv_cache,
+            "clean_hidden_states": clean_input.permute(0, 2, 1, 3, 4),
+        }
+        # Predict noise and step the scheduler to obtain next latent
+        with set_forward_context(current_timestep=timestep,
+                                 attn_metadata=None,
+                                 forward_batch=None):
+            noise_pred, _ = self.transformer(**vision_input_kwargs)
+            noise_pred = noise_pred.permute(
                 0, 2, 1, 3, 4)
 
         from fastvideo.models.utils import pred_noise_to_pred_video
@@ -468,7 +567,7 @@ class Hy15ODEInitTrainingPipeline(TrainingPipeline):
                 raise ValueError("Trajectory must contain at least 2 steps")
 
             # Forward to predict next latent by stepping scheduler with predicted noise
-            noise_pred, target_latent, t, latent_vis_dict = self._step_predict_next_latent(
+            noise_pred, target_latent, t, latent_vis_dict = self._tf_step_predict_next_latent(
                 traj_latents, traj_timesteps, text_embeds, text_attention_mask,
                 image_embeds)
 

@@ -127,7 +127,10 @@ def i2v_record_creator(batch: PreprocessBatch) -> list[dict[str, Any]]:
 def ode_text_only_record_creator(
         video_name: str, text_embedding: np.ndarray, caption: str,
         trajectory_latents: np.ndarray,
-        trajectory_timesteps: np.ndarray) -> dict[str, Any]:
+        trajectory_timesteps: np.ndarray,
+        text_mask: np.ndarray | None = None,
+        text_embedding_2: np.ndarray | None = None,
+        text_mask_2: np.ndarray | None = None) -> dict[str, Any]:
     """Create a text-only ODE trajectory record matching pyarrow_schema_ode_trajectory_text_only.
 
     Args:
@@ -165,6 +168,25 @@ def ode_text_only_record_creator(
         "trajectory_timesteps_dtype": str(trajectory_timesteps.dtype),
     })
 
+    if text_embedding_2 is not None:
+        record.update({
+            "text_embedding_2_bytes": text_embedding_2.tobytes(),
+            "text_embedding_2_shape": list(text_embedding_2.shape),
+            "text_embedding_2_dtype": str(text_embedding_2.dtype),
+        })
+    if text_mask is not None:
+        record.update({
+            "text_mask_bytes": text_mask.tobytes(),
+            "text_mask_shape": list(text_mask.shape),
+            "text_mask_dtype": str(text_mask.dtype),
+        })
+    if text_mask_2 is not None:
+        record.update({
+            "text_mask_2_bytes": text_mask_2.tobytes(),
+            "text_mask_2_shape": list(text_mask_2.shape),
+            "text_mask_2_dtype": str(text_mask_2.dtype),
+        })
+        
     return record
 
 

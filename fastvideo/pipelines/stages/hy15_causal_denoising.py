@@ -101,6 +101,7 @@ class Hy15CausalDMDDenosingStage(CausalDMDDenosingStage):
         pos_start_base = 0
         num_blocks = math.ceil(t / self.num_frames_per_block)
         block_sizes = [self.num_frames_per_block] * num_blocks
+        # block_sizes[0] = 1
         start_index = 0
 
         # Initialize txt kv cache

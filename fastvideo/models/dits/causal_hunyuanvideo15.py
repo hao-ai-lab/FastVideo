@@ -275,12 +275,27 @@ class MMDoubleStreamBlock(nn.Module):
 
         # Apply rotary embeddings
         cos, sin = freqs_cis
-        img_q = _apply_rotary_emb(img_q, cos, sin, is_neox_style=False)
-        img_k = _apply_rotary_emb(img_k, cos, sin, is_neox_style=False)
 
         # Apply flex_attention
         # Does not support SP padding for now
         if kv_cache is None:
+            is_tf = (img_q.shape[1] == cos.shape[0] * 2)
+            if is_tf:
+                q_chunk = torch.chunk(img_q, 2, dim=1)
+                k_chunk = torch.chunk(img_k, 2, dim=1)
+                roped_query = []
+                roped_key = []
+                for ii in range(2):
+                    rq = _apply_rotary_emb(q_chunk[ii], cos, sin, is_neox_style=False)
+                    rk = _apply_rotary_emb(k_chunk[ii], cos, sin, is_neox_style=False)
+                    roped_query.append(rq)
+                    roped_key.append(rk)
+                img_q = torch.cat(roped_query, dim=1)
+                img_k = torch.cat(roped_key, dim=1)
+            else:
+                img_q = _apply_rotary_emb(img_q, cos, sin, is_neox_style=False)
+                img_k = _apply_rotary_emb(img_k, cos, sin, is_neox_style=False)
+
             q = img_q
             k = torch.cat([img_k, txt_kv_cache["k_txt"]], dim=1)
             v = torch.cat([img_v, txt_kv_cache["v_txt"]], dim=1)
@@ -316,6 +331,9 @@ class MMDoubleStreamBlock(nn.Module):
             assert img_attn.shape[1] == image_seq_len
             updated_kv_cache = None
         else:
+            img_q = _apply_rotary_emb(img_q, cos, sin, is_neox_style=False)
+            img_k = _apply_rotary_emb(img_k, cos, sin, is_neox_style=False)
+
             current_end = current_start + img_q.shape[1]
             num_new_tokens = img_q.shape[1]
             sink_tokens = self.sink_size * 1590
@@ -569,6 +587,101 @@ class CausalHunyuanVideo15Transformer3DModel(CachableDiT):
         assert encoder_hidden_states.shape[0] == 1
         return encoder_hidden_states, encoder_attention_mask
 
+
+    @staticmethod
+    def _prepare_teacher_forcing_mask(
+        device: torch.device | str, num_frames: int = 21,
+        frame_seqlen: int = 1560, num_frame_per_block=1,
+        text_seq_len: int = 0
+    ) -> BlockMask:
+        """
+        we will divide the token sequence into the following format
+        [1 latent frame] [1 latent frame] ... [1 latent frame]
+        We use flexattention to construct the attention mask
+        """
+        # debug
+        DEBUG = False
+        if DEBUG:
+            num_frames = 9
+            frame_seqlen = 256
+
+        total_length = num_frames * frame_seqlen * 2
+        total_kv_length = total_length + text_seq_len
+
+        # we do right padding to get to a multiple of 128
+        padded_length = math.ceil(total_length / 128) * 128 - total_length
+        kv_padded_length = math.ceil(total_kv_length / 128) * 128 - total_kv_length
+
+        total_length_tensor = torch.tensor(total_length, device=device)
+        total_kv_length_tensor = torch.tensor(total_kv_length, device=device)
+
+        clean_ends = num_frames * frame_seqlen
+        # for clean context frames, we can construct their flex attention mask based on a [start, end] interval
+        context_ends = torch.zeros(total_length + padded_length, device=device, dtype=torch.long)
+        # for noisy frames, we need two intervals to construct the flex attention mask [context_start, context_end] [noisy_start, noisy_end]
+        noise_context_starts = torch.zeros(total_length + padded_length, device=device, dtype=torch.long)
+        noise_context_ends = torch.zeros(total_length + padded_length, device=device, dtype=torch.long)
+        noise_noise_starts = torch.zeros(total_length + padded_length, device=device, dtype=torch.long)
+        noise_noise_ends = torch.zeros(total_length + padded_length, device=device, dtype=torch.long)
+
+        # Block-wise causal mask will attend to all elements that are before the end of the current chunk
+        attention_block_size = frame_seqlen * num_frame_per_block
+        frame_indices = torch.arange(
+            start=0,
+            end=num_frames * frame_seqlen,
+            step=attention_block_size,
+            device=device, dtype=torch.long
+        )
+
+        # attention for clean context frames
+        for start in frame_indices:
+            context_ends[start:start + attention_block_size] = start + attention_block_size
+
+        noisy_image_start_list = torch.arange(
+            num_frames * frame_seqlen, total_length,
+            step=attention_block_size,
+            device=device, dtype=torch.long
+        )
+        noisy_image_end_list = noisy_image_start_list + attention_block_size
+
+        # attention for noisy frames
+        for block_index, (start, end) in enumerate(zip(noisy_image_start_list, noisy_image_end_list)):
+            # attend to noisy tokens within the same block
+            noise_noise_starts[start:end] = start
+            noise_noise_ends[start:end] = end
+            # attend to context tokens in previous blocks
+            # noise_context_starts[start:end] = 0
+            noise_context_ends[start:end] = block_index * attention_block_size
+
+        def attention_mask(b, h, q_idx, kv_idx):
+            # first design the mask for clean frames
+            clean_mask = (q_idx < clean_ends) & (kv_idx < context_ends[q_idx])
+            # then design the mask for noisy frames
+            # noisy frames will attend to all clean preceeding clean frames + itself
+            C1 = (kv_idx < noise_noise_ends[q_idx]) & (kv_idx >= noise_noise_starts[q_idx])
+            C2 = (kv_idx < noise_context_ends[q_idx]) & (kv_idx >= noise_context_starts[q_idx])
+            noise_mask = (q_idx >= clean_ends) & (C1 | C2)
+
+            eye_mask = q_idx == kv_idx
+            text_mask = (kv_idx >= total_length_tensor) & (kv_idx < total_kv_length_tensor)
+            return eye_mask | clean_mask | noise_mask | text_mask
+
+        block_mask = create_block_mask(attention_mask, B=None, H=None, Q_LEN=total_length + padded_length,
+                                       KV_LEN=total_kv_length + kv_padded_length, _compile=False, device=device)
+
+        if DEBUG:
+            print(block_mask)
+            import imageio
+            import numpy as np
+            from torch.nn.attention.flex_attention import create_mask
+
+            mask = create_mask(attention_mask, B=None, H=None, Q_LEN=total_length +
+                                padded_length, KV_LEN=total_kv_length + kv_padded_length, device=device)
+            import cv2
+            mask = cv2.resize(mask[0, 0].cpu().float().numpy(), (1024, 1024))
+            imageio.imwrite("mask_%d.jpg" % (0), np.uint8(255. * mask))
+
+        return block_mask
     
     @staticmethod
     def _prepare_blockwise_causal_attn_mask(
@@ -712,6 +825,8 @@ class CausalHunyuanVideo15Transformer3DModel(CachableDiT):
         txt_kv_cache: list | None = None,
         current_start: int = 0,
         rope_start_idx: int = 0,
+        clean_hidden_states: Optional[torch.Tensor] = None,
+        aug_timestep: Optional[torch.Tensor] = None,
     ):
         assert txt_kv_cache is not None, "txt_kv_cache must be provided"
 
@@ -740,16 +855,38 @@ class CausalHunyuanVideo15Transformer3DModel(CachableDiT):
 
         hidden_states = self.img_in(hidden_states)
 
+        if clean_hidden_states is not None:
+            clean_hidden_states = self.img_in(clean_hidden_states)
+            hidden_states = torch.cat([clean_hidden_states, hidden_states], dim=1)
+
+            if aug_timestep is None:
+                aug_timestep = torch.zeros_like(timestep)
+            if aug_timestep.dim() == 2:
+                ts_seq_len = aug_timestep.shape[1]
+                aug_temb = self.time_in(aug_timestep.flatten(), timestep_r=timestep_r, timestep_seq_len=ts_seq_len)
+            else:
+                aug_temb = self.time_in(aug_timestep, timestep_r=timestep_r)
+            temb = torch.cat([aug_temb, temb], dim=1)
+
         # Prepare block-wise causal attention mask
         if kv_cache is None:
-            self.block_mask = self._prepare_blockwise_causal_attn_mask(
-                device=hidden_states.device,
-                num_frames=num_frames,
-                frame_seqlen=post_patch_height * post_patch_width,
-                num_frame_per_block=self.num_frame_per_block,
-                local_attn_size=self.local_attn_size,
-                text_seq_len=txt_kv_cache[0]["k_txt"].shape[1]
-            )
+            if clean_hidden_states is not None:
+                self.block_mask = self._prepare_teacher_forcing_mask(
+                    device=hidden_states.device,
+                    num_frames=num_frames,
+                    frame_seqlen=post_patch_height * post_patch_width,
+                    num_frame_per_block=self.num_frame_per_block,
+                    text_seq_len=txt_kv_cache[0]["k_txt"].shape[1]
+                )
+            else:
+                self.block_mask = self._prepare_blockwise_causal_attn_mask(
+                    device=hidden_states.device,
+                    num_frames=num_frames,
+                    frame_seqlen=post_patch_height * post_patch_width,
+                    num_frame_per_block=self.num_frame_per_block,
+                    local_attn_size=self.local_attn_size,
+                    text_seq_len=txt_kv_cache[0]["k_txt"].shape[1]
+                )
 
         # 4. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
@@ -786,6 +923,9 @@ class CausalHunyuanVideo15Transformer3DModel(CachableDiT):
                 if new_cache is not None and kv_cache is not None:
                     for k in new_cache.keys():
                         kv_cache[block_index][k] = new_cache[k].clone()
+
+        if clean_hidden_states is not None:
+            hidden_states = hidden_states[:, hidden_states.shape[1] // 2:]
 
         # Final layer processing
         hidden_states = self.final_layer(hidden_states, temb)

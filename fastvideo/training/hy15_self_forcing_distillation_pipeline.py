@@ -134,8 +134,7 @@ class Hy15SelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
             dist.broadcast(start_timestep_index, src=0)
         start_timestep_index = start_timestep_index.cpu().item()
 
-        trajectory_latents = trajectory_latents[:, -1, :self.training_args.
-                                                num_latent_t]
+        trajectory_latents = trajectory_latents[:, -1, :self.training_args.num_latent_t]
         training_batch.trajectory_latents = self.noise_scheduler.add_noise(
             trajectory_latents.flatten(0, 1),
             torch.randn_like(trajectory_latents.flatten(0, 1)),
@@ -153,9 +152,7 @@ class Hy15SelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
             self, training_batch: TrainingBatch) -> TrainingBatch:
         trajectory_latents = training_batch.trajectory_latents
 
-        training_batch.trajectory_latents = trajectory_latents[:, -1, :self.
-                                                               training_args.
-                                                               num_latent_t]
+        training_batch.trajectory_latents = trajectory_latents[:, -1, :self.training_args.num_latent_t]
         # _cached_closest_idx_per_dmd = torch.tensor([0, 12, 24, 36, 50],
         #                                            dtype=torch.long).cpu()
         # training_batch.trajectory_latents = torch.index_select(
@@ -242,7 +239,7 @@ class Hy15SelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
 
         # Step 2: Temporal denoising loop
         all_num_frames = [self.num_frame_per_block] * num_blocks
-        # all_num_frames[0] = 1
+        all_num_frames[0] = 1
         if self.independent_first_frame and initial_latent is None:
             all_num_frames = [1] + all_num_frames
 
