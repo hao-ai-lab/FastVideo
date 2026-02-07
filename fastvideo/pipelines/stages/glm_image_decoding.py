@@ -39,7 +39,10 @@ class GlmImageDecodingStage(DecodingStage):
         vae_autocast_enabled = (
             vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
+        print(f"DEBUG: Latents shape: {latents.shape}, dtype: {latents.dtype}, device: {latents.device}")
+        print(f"DEBUG: Latents stats: mean={latents.mean().item():.6f}, std={latents.std().item():.6f}, min={latents.min().item():.6f}, max={latents.max().item():.6f}")
         latents = self._denormalize_latents(latents)
+        print(f"DEBUG: Denormalized latents stats: mean={latents.mean().item():.6f}, std={latents.std().item():.6f}, min={latents.min().item():.6f}, max={latents.max().item():.6f}")
 
         if latents.dim() == 5:
             latents = latents.squeeze(2)
