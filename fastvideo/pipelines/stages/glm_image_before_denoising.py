@@ -8,6 +8,7 @@ This stage handles the preprocessing for GLM-Image generation, including:
 - Latent preparation for the denoising process
 """
 
+import os
 import re
 from math import sqrt
 
@@ -105,64 +106,78 @@ class GlmImageBeforeDenoisingStage(PipelineStage):
 
         # 2. Generate AR tokens
         if self.vision_language_encoder is not None:
-            # Expand prompt for AR model (SGLang style)
-            expanded_prompt = batch.prompt.replace(
-                f"<sop>{th} {tw}<eop>",
-                f"<sop>{th} {tw}<eop><sop>{pth} {ptw}<eop>")
-
-            content = [{"type": "text", "text": expanded_prompt}]
-            if hasattr(batch, 'image') and batch.image is not None:
-                content.insert(0, {"type": "image", "image": batch.image})
-
-            messages = [{"role": "user", "content": content}]
-            inputs = self.vl_processor.apply_chat_template(
-                messages,
-                tokenize=True,
-                target_h=batch.height,
-                target_w=batch.width,
-                return_dict=True,
-                return_tensors="pt").to(device)
-
-            # Total tokens: small_image + large_image
-            max_new = (th * tw) + (pth * ptw) + 1
-            
-            # Use sampling to match SGLang/creative generation quality
-            outputs = self.vision_language_encoder.generate(
-                **inputs, 
-                max_new_tokens=max_new, 
-                do_sample=True,
-                top_p=0.7,
-                top_k=50,
-                temperature=1.0
-            )
-
-            # Extract large image tokens
-            gen_tokens = outputs[0][inputs.input_ids.shape[-1]:]
-            expected_start = pth * ptw
-            expected_count = th * tw
-
-            # Handle variable-length output: take what we can, pad if needed
-            if len(gen_tokens) >= expected_start + expected_count:
-                large_tokens = gen_tokens[expected_start:expected_start +
-                                          expected_count]
-            else:
-                # Fallback: pad with zeros if not enough tokens
-                available = gen_tokens[expected_start:] if len(
-                    gen_tokens) > expected_start else gen_tokens
-                large_tokens = torch.zeros(expected_count,
-                                           dtype=gen_tokens.dtype,
-                                           device=gen_tokens.device)
-                large_tokens[:min(len(available), expected_count
-                                  )] = available[:expected_count]
+            # Deterministic comparison hook
+            if os.environ.get("FV_USE_SGL_PRIORS") == "1":
                 logger.warning(
-                    "AR generated %d tokens, expected %d. Padding with zeros.",
-                    len(gen_tokens), expected_start + expected_count)
+                    "Injecting SGLang prior tokens for deterministic run")
+                # Load dumped priors from SGLang run
+                sgl_priors = torch.load(
+                    "/workspace/debug_dumps/sgl/dit_input_prior_token_id_cond.pt",
+                    map_location="cpu").to(device)
+                # These are already upsampled in SGLang dumps
+                batch.prior_token_id = sgl_priors
+                batch.prior_token_drop = torch.zeros(
+                    batch.prior_token_id.shape, dtype=torch.bool, device=device)
+            else:
+                # Expand prompt for AR model (SGLang style)
+                expanded_prompt = batch.prompt.replace(
+                    f"<sop>{th} {tw}<eop>",
+                    f"<sop>{th} {tw}<eop><sop>{pth} {ptw}<eop>")
 
-            # Upsample to d16
-            batch.prior_token_id = self._upsample_tokens(large_tokens, th, tw)
-            batch.prior_token_drop = torch.zeros(batch.prior_token_id.shape,
-                                                 dtype=torch.bool,
-                                                 device=device)
+                content = [{"type": "text", "text": expanded_prompt}]
+                if hasattr(batch, 'image') and batch.image is not None:
+                    content.insert(0, {"type": "image", "image": batch.image})
+
+                messages = [{"role": "user", "content": content}]
+                inputs = self.vl_processor.apply_chat_template(
+                    messages,
+                    tokenize=True,
+                    target_h=batch.height,
+                    target_w=batch.width,
+                    return_dict=True,
+                    return_tensors="pt").to(device)
+
+                # Total tokens: small_image + large_image
+                max_new = (th * tw) + (pth * ptw) + 1
+
+                # Use sampling to match SGLang/creative generation quality
+                outputs = self.vision_language_encoder.generate(
+                    **inputs,
+                    max_new_tokens=max_new,
+                    do_sample=True,
+                    top_p=0.7,
+                    top_k=50,
+                    temperature=1.0)
+
+                # Extract large image tokens
+                gen_tokens = outputs[0][inputs.input_ids.shape[-1]:]
+                expected_start = pth * ptw
+                expected_count = th * tw
+
+                # Handle variable-length output: take what we can, pad if needed
+                if len(gen_tokens) >= expected_start + expected_count:
+                    large_tokens = gen_tokens[expected_start:expected_start +
+                                              expected_count]
+                else:
+                    # Fallback: pad with zeros if not enough tokens
+                    available = gen_tokens[expected_start:] if len(
+                        gen_tokens) > expected_start else gen_tokens
+                    large_tokens = torch.zeros(expected_count,
+                                               dtype=gen_tokens.dtype,
+                                               device=gen_tokens.device)
+                    large_tokens[:min(len(available), expected_count
+                                      )] = available[:expected_count]
+                    logger.warning(
+                        "AR generated %d tokens, expected %d. Padding with zeros.",
+                        len(gen_tokens), expected_start + expected_count)
+
+                # Upsample to d16
+                batch.prior_token_id = self._upsample_tokens(
+                    large_tokens, th, tw)
+                batch.prior_token_drop = torch.zeros(
+                    batch.prior_token_id.shape,
+                    dtype=torch.bool,
+                    device=device)
 
         else:
             # No AR model - use random prior tokens (unconditional generation fallback)
