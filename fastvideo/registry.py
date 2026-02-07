@@ -248,6 +248,10 @@ def _register_configs() -> None:
             "Lightricks/LTX-2",
             "FastVideo/LTX2-base",
         ],
+        model_detectors=[
+            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower())
+            and "distilled" not in path.lower(),
+        ],
     )
     # LTX-2 (distilled)
     register_configs(
@@ -255,6 +259,9 @@ def _register_configs() -> None:
         pipeline_config_cls=LTX2T2VConfig,
         hf_model_paths=[
             "FastVideo/LTX2-Distilled-Diffusers",
+        ],
+        model_detectors=[
+            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" in path.lower(),
         ],
     )
 
