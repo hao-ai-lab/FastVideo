@@ -1,29 +1,3 @@
-# import os
-
-# from fastvideo import VideoGenerator
-
-# PROMPT = (
-#     "A cinematic portrait of a fox, 35mm film, soft light, gentle grain."
-# )
-
-
-# def main() -> None:
-#     generator = VideoGenerator.from_pretrained(
-#         os.environ.get("FLUX_MODEL_PATH", "black-forest-labs/FLUX.1-dev"),
-#         num_gpus=1,
-#     )
-
-#     output_path = "outputs_image/flux_basic/output_flux_t2i.mp4"
-#     generator.generate_video(
-#         prompt=PROMPT,
-#         output_path=output_path,
-#         save_video=True,
-#     )
-#     generator.shutdown()
-
-
-# if __name__ == "__main__":
-#     main()
 
 from fastvideo import VideoGenerator
 
@@ -47,15 +21,6 @@ def main():
         # image_encoder_cpu_offload=False,
     )
 
-    # sampling_param = SamplingParam.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
-    # sampling_param.num_frames = 45
-    # sampling_param.image_path = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/astronaut.jpg"
-    # Generate videos with the same simple API, regardless of GPU count
-    # prompt = (
-    #     "A curious raccoon peers through a vibrant field of yellow sunflowers, its eyes "
-    #     "wide with interest. The playful yet serene atmosphere is complemented by soft "
-    #     "natural light filtering through the petals. Mid-shot, warm and cheerful tones."
-    # )
     prompt = (
     "A cinematic portrait of a fox, 35mm film, soft light, gentle grain."
 )
