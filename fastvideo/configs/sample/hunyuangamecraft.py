@@ -1,14 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Sampling parameters for Hunyuan-GameCraft.
+Sampling parameters for HunyuanGameCraft video generation.
 
-HunyuanGameCraft is a camera-controllable video generation model
-built on HunyuanVideo with CameraNet for pose conditioning.
+GameCraft generates game-like videos with camera/action control.
+Default parameters are based on the official implementation.
 """
 from dataclasses import dataclass, field
 from typing import Any
-
-import torch
 
 from fastvideo.configs.sample.base import SamplingParam
 from fastvideo.configs.sample.teacache import TeaCacheParams
@@ -16,66 +14,87 @@ from fastvideo.configs.sample.teacache import TeaCacheParams
 
 @dataclass
 class HunyuanGameCraftSamplingParam(SamplingParam):
+    """Sampling parameters for HunyuanGameCraft video generation.
+    
+    Supports camera/action conditioning via:
+    - camera_trajectory: Plücker coordinates for camera motion
+    - action_list: List of actions (e.g., ["forward", "left", "right"])
+    - action_speed_list: Speed multipliers for each action
+    
+    Default resolution is 704x1280 (same as HunyuanVideo).
+    Default frame count is 33 video frames -> 9 latent frames.
     """
-    Default sampling parameters for Hunyuan-GameCraft.
     
-    The model generates videos at 704x1280 resolution with 34 frames (~1.4s at 24fps).
-    Camera poses are provided as 6D Plücker coordinates for controllable camera motion.
-    
-    NOTE: The official implementation uses target_length=34 for single-image I2V mode,
-    which produces 10 latent frames with their VAE formula (34-2)//4+2=10.
-    FastVideo's VAE uses a different formula: (n-1)//4+1. To get the same
-    10 latent frames, we need num_frames=37: (37-1)//4+1=10.
-    
-    Getting exactly 10 latent frames is critical because:
-    - The transformer has specific camera conditioning for latent_len=10
-    - At latent_len=9 it takes a completely different (wrong) code path
-    - RoPE positional encodings depend on the temporal dimension
-    """
+    # Number of denoising steps
     num_inference_steps: int = 50
     
-    # Video dimensions (GameCraft default resolution)
-    # Must be 37 to get 10 latent frames: (37-1)//4+1 = 10
-    # (official uses 34 with their formula (34-2)//4+2 = 10)
-    num_frames: int = 37
+    # Video dimensions
+    # 33 video frames -> 9 latent frames (4x temporal compression)
+    num_frames: int = 33
     height: int = 704
     width: int = 1280
     fps: int = 24
     
-    # Guidance scale for classifier-free guidance
-    guidance_scale: float = 6.0
+    # Guidance scale (typically 1.0 for flow matching)
+    guidance_scale: float = 1.0
     
-    # Camera states for CameraNet conditioning
-    # Shape: [num_frames, 6, height, width] - Plücker coordinates
-    camera_states: torch.Tensor | None = None
+    # Camera/Action conditioning
+    # Camera trajectory as Plücker coordinates [B, T_video, 6, H, W]
+    camera_trajectory: Any | None = None
     
-    # TeaCache parameters for faster inference
+    # Action list for camera motion (e.g., ["forward", "left"])
+    action_list: list[str] | None = None
+    
+    # Speed multipliers for each action
+    action_speed_list: list[float] | None = None
+    
+    # History frame conditioning (for autoregressive generation)
+    # Ground truth latents for conditioning [B, 16, T, H, W]
+    gt_latents: Any | None = None
+    
+    # Mask for conditioning (1=use gt, 0=generate) [B, 1, T, H, W]
+    conditioning_mask: Any | None = None
+    
+    # Number of history frames to condition on (for autoregressive)
+    num_history_frames: int = 0
+    
+    # TeaCache parameters (if enabled)
     teacache_params: TeaCacheParams = field(
         default_factory=lambda: TeaCacheParams(
             teacache_thresh=0.15,
             coefficients=[
                 7.33226126e+02, -4.01131952e+02, 6.75869174e+01,
                 -3.14987800e+00, 9.61237896e-02
-            ]
+            ],
         )
     )
+    
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        # Validate action lists
+        if self.action_list is not None and self.action_speed_list is not None:
+            if len(self.action_list) != len(self.action_speed_list):
+                raise ValueError(
+                    f"action_list length ({len(self.action_list)}) must match "
+                    f"action_speed_list length ({len(self.action_speed_list)})"
+                )
 
 
 @dataclass
-class HunyuanGameCraftI2VSamplingParam(HunyuanGameCraftSamplingParam):
-    """
-    Sampling parameters for Hunyuan-GameCraft Image-to-Video.
+class HunyuanGameCraft65FrameSamplingParam(HunyuanGameCraftSamplingParam):
+    """Sampling parameters for 65-frame GameCraft generation.
     
-    Same as T2V but with image conditioning for the first frame.
+    65 video frames -> 17 latent frames (with first frame as key frame).
+    This is useful for longer video generation.
     """
-    pass
+    num_frames: int = 65
 
 
-@dataclass
-class FastHunyuanGameCraftSamplingParam(HunyuanGameCraftSamplingParam):
-    """
-    Fast sampling parameters for distilled Hunyuan-GameCraft models.
+@dataclass  
+class HunyuanGameCraft129FrameSamplingParam(HunyuanGameCraftSamplingParam):
+    """Sampling parameters for 129-frame GameCraft generation.
     
-    Uses fewer inference steps for faster generation.
+    129 video frames -> 33 latent frames.
+    This is the maximum supported by the official implementation.
     """
-    num_inference_steps: int = 6
+    num_frames: int = 129
