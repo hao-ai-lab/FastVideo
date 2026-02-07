@@ -193,6 +193,8 @@ class ComposedPipelineBase(ABC):
                 )
                 logger.info("Torch Compile enabled for DiT")
 
+        self._maybe_attach_module_sum_hooks()
+
         if not self.fastvideo_args.training_mode:
             logger.info("Creating pipeline stages...")
             self.create_pipeline_stages(self.fastvideo_args)
@@ -261,6 +263,100 @@ class ComposedPipelineBase(ABC):
 
     def add_module(self, module_name: str, module: Any):
         self.modules[module_name] = module
+
+    def _maybe_attach_module_sum_hooks(self) -> None:
+        args = self.fastvideo_args
+        if args is None or not getattr(args, "debug_module_sums", False):
+            return
+        if getattr(self, "_debug_module_sums_attached", False):
+            return
+
+        log_path = getattr(args, "debug_module_sums_path", None)
+        if not log_path:
+            log_path = os.path.join("outputs", "debug", "module_sums.log")
+            logger.warning(
+                "debug_module_sums is enabled but debug_module_sums_path is not set; "
+                "defaulting to %s",
+                log_path,
+            )
+
+        include = getattr(args, "debug_module_sums_include", None) or []
+        exclude = getattr(args, "debug_module_sums_exclude", None) or []
+
+        def _matches(name: str) -> bool:
+            include_ok = (not include) or any(key in name for key in include)
+            exclude_ok = (not exclude) or not any(key in name
+                                                  for key in exclude)
+            return include_ok and exclude_ok
+
+        def _sum_output(value: object) -> float | None:
+            if isinstance(value, torch.Tensor):
+                return float(value.detach().sum(dtype=torch.float32).item())
+            if isinstance(value, dict):
+                total = 0.0
+                found = False
+                for item in value.values():
+                    summed = _sum_output(item)
+                    if summed is not None:
+                        total += summed
+                        found = True
+                return total if found else None
+            if isinstance(value, list | tuple):
+                total = 0.0
+                found = False
+                for item in value:
+                    summed = _sum_output(item)
+                    if summed is not None:
+                        total += summed
+                        found = True
+                return total if found else None
+            return None
+
+        def _write_line(line: str) -> None:
+            log_dir = os.path.dirname(log_path)
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+
+        handles: list[torch.utils.hooks.RemovableHandle] = []
+
+        for root_name, module in self.modules.items():
+            if module is None or not isinstance(module, torch.nn.Module):
+                continue
+            for name, submodule in module.named_modules():
+                full_name = root_name if not name else f"{root_name}.{name}"
+                if not _matches(full_name):
+                    continue
+                if getattr(submodule, "_fastvideo_module_sum_hooked", False):
+                    continue
+                # Only hook modules with direct parameters to avoid excessive noise.
+                is_root = name == ""
+                if not is_root and not any(
+                        True for _ in submodule.parameters(recurse=False)):
+                    continue
+
+                def _hook_factory(module_name: str, module_type: str):
+
+                    def _hook(_module, _inputs, outputs):  # noqa: ANN001
+                        summed = _sum_output(outputs)
+                        if summed is None:
+                            return
+                        line = (f"fastvideo:module={module_name} "
+                                f"class={module_type} out_sum={summed:.6f}")
+                        _write_line(line)
+
+                    return _hook
+
+                handle = submodule.register_forward_hook(
+                    _hook_factory(full_name, submodule.__class__.__name__))
+                handles.append(handle)
+                submodule._fastvideo_module_sum_hooked = True
+
+        self._debug_module_sums_attached = True
+        self._debug_module_sum_handles = handles
+        logger.info("Attached %s module sum hooks for recursive logging",
+                    len(handles))
 
     def _load_config(self, model_path: str) -> dict[str, Any]:
         model_path = maybe_download_model(self.model_path)

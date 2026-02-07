@@ -3,6 +3,7 @@
 Latent preparation stage for LTX-2 pipelines.
 """
 
+import math
 from pathlib import Path
 
 import torch
@@ -11,6 +12,7 @@ from diffusers.utils.torch_utils import randn_tensor
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
+from fastvideo.models.dits.ltx2 import VideoLatentShape
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.base import PipelineStage
 from fastvideo.pipelines.stages.validators import StageValidators as V
@@ -61,6 +63,26 @@ class LTX2LatentPreparationStage(PipelineStage):
         dtype = batch.prompt_embeds[0].dtype
         device = get_local_torch_device()
         generator = batch.generator
+        if generator is not None:
+            if isinstance(generator, list):
+                if generator and generator[0].device.type != device.type:
+                    seeds = batch.seeds
+                    if seeds is None and batch.seed is not None:
+                        seeds = [batch.seed + i for i in range(len(generator))]
+                    if seeds is not None:
+                        generator = [
+                            torch.Generator(device=device).manual_seed(seed)
+                            for seed in seeds
+                        ]
+                        batch.generator = generator
+            else:
+                if generator.device.type != device.type:
+                    if batch.seed is not None:
+                        generator = torch.Generator(device=device).manual_seed(
+                            batch.seed)
+                    else:
+                        generator = torch.Generator(device=device)
+                    batch.generator = generator
         latents = batch.latents
         num_frames = latent_num_frames if latent_num_frames is not None else batch.num_frames
         height = batch.height
@@ -95,16 +117,16 @@ class LTX2LatentPreparationStage(PipelineStage):
                 if loaded_latents is not None:
                     latents = loaded_latents
                 else:
-                    latents = randn_tensor(
-                        shape,
+                    latents = self._generate_initial_latents(
+                        shape=shape,
                         generator=generator,
                         device=device,
                         dtype=dtype,
                     )
                     self._save_initial_latent(latent_path, latents)
             else:
-                latents = randn_tensor(
-                    shape,
+                latents = self._generate_initial_latents(
+                    shape=shape,
                     generator=generator,
                     device=device,
                     dtype=dtype,
@@ -115,6 +137,39 @@ class LTX2LatentPreparationStage(PipelineStage):
         batch.latents = latents
         batch.raw_latent_shape = shape
         return batch
+
+    def _generate_initial_latents(
+        self,
+        shape: tuple[int, int, int, int, int],
+        *,
+        generator: torch.Generator | list[torch.Generator] | None,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        patchifier = getattr(self.transformer, "patchifier", None)
+        if patchifier is None:
+            return randn_tensor(
+                shape,
+                generator=generator,
+                device=device,
+                dtype=dtype,
+            )
+
+        video_shape = VideoLatentShape.from_torch_shape(shape)
+        patch_volume = math.prod(patchifier.patch_size)
+        token_count = patchifier.get_token_count(video_shape)
+        patch_shape = (
+            shape[0],
+            token_count,
+            shape[1] * patch_volume,
+        )
+        patch_noise = randn_tensor(
+            patch_shape,
+            generator=generator,
+            device=device,
+            dtype=dtype,
+        )
+        return patchifier.unpatchify(patch_noise, video_shape)
 
     def _adjust_video_length(self, batch: ForwardBatch,
                              fastvideo_args: FastVideoArgs) -> int | None:

@@ -17,7 +17,9 @@ import torch.nn.functional as F
 from einops import rearrange
 
 from fastvideo.models.vaes.common import DiagonalGaussianDistribution
+from fastvideo.logger import init_logger
 
+logger = init_logger(__name__)
 
 # =============================================================================
 # Enums
@@ -1285,6 +1287,7 @@ class VideoEncoder(nn.Module):
 
     def forward(self, sample: torch.Tensor) -> torch.Tensor:
         frames_count = sample.shape[2]
+        logger.info(f"Frames count: {frames_count}")
         if ((frames_count - 1) % 8) != 0:
             raise ValueError(
                 "Invalid number of frames: Encode input must have 1 + 8 * x frames "

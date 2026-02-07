@@ -84,6 +84,10 @@ _AUDIO_MODELS = {
     "LTX2Vocoder": ("audio", "ltx2_audio_vae", "LTX2Vocoder"),
 }
 
+_UPSAMPLER_MODELS = {
+    "LTX2LatentUpsampler": ("upsamplers", "ltx2_upsampler", "LTX2LatentUpsampler"),
+}
+
 _SCHEDULERS = {
     "FlowMatchEulerDiscreteScheduler":
     ("schedulers", "scheduling_flow_match_euler_discrete",
@@ -111,6 +115,7 @@ _LEGACY_FAST_VIDEO_MODELS = {
     **_IMAGE_ENCODER_MODELS,
     **_VAE_MODELS,
     **_AUDIO_MODELS,
+    **_UPSAMPLER_MODELS,
     **_SCHEDULERS,
     **_UPSAMPLERS,
 }

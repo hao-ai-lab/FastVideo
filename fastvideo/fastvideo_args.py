@@ -171,6 +171,39 @@ class FastVideoArgs:
     ltx2_vae_temporal_tile_size_in_frames: int | None = None
     ltx2_vae_temporal_tile_overlap_in_frames: int | None = None
     ltx2_initial_latent_path: str | None = None
+    ltx2_audio_latent_path: str | None = None
+    # Generic stage-2 refine args (preferred API). These map to LTX-2 refine args
+    # for now, but keep the user-facing API model-agnostic.
+    refine_enabled: bool | None = None
+    refine_upsampler_path: str | None = None
+    refine_transformer_path: str | None = None
+    refine_lora_path: str | None = None
+    refine_num_inference_steps: int | None = None
+    refine_guidance_scale: float | None = None
+    refine_add_noise: bool | None = None
+    refine_noise_path: str | None = None
+    refine_audio_noise_path: str | None = None
+    ltx2_refine_enabled: bool = False
+    ltx2_refine_upsampler_path: str | None = None
+    ltx2_refine_transformer_path: str | None = None
+    ltx2_refine_lora_path: str | None = None
+    ltx2_refine_num_inference_steps: int = 3
+    ltx2_refine_guidance_scale: float = 1.0
+    ltx2_refine_add_noise: bool = True
+    ltx2_refine_noise_path: str | None = None
+    ltx2_refine_audio_noise_path: str | None = None
+
+    # Debugging (opt-in, minimal overhead when disabled)
+    debug_stage_sums: bool = False
+    debug_stage_sums_path: str | None = None
+    debug_model_sums: bool = False
+    debug_model_sums_path: str | None = None
+    debug_model_detail: bool = False
+    debug_model_detail_path: str | None = None
+    debug_module_sums: bool = False
+    debug_module_sums_path: str | None = None
+    debug_module_sums_include: list[str] | None = None
+    debug_module_sums_exclude: list[str] | None = None
 
     # model paths for correct deallocation
     model_paths: dict[str, str] = field(default_factory=dict)
@@ -211,6 +244,7 @@ class FastVideoArgs:
                              self.moba_config_path, e)
                 raise
         self._apply_ltx2_vae_overrides()
+        self._resolve_refine_args()
         self.check_fastvideo_args()
 
     def _apply_ltx2_vae_overrides(self) -> None:
@@ -247,6 +281,27 @@ class FastVideoArgs:
         ) and self.ltx2_vae_temporal_tile_overlap_in_frames is not None:
             vae_config.ltx2_temporal_tile_overlap_in_frames = (
                 self.ltx2_vae_temporal_tile_overlap_in_frames)
+
+    def _resolve_refine_args(self) -> None:
+        """Map generic refine_* args to LTX-2-specific refine fields."""
+        if self.refine_enabled is not None:
+            self.ltx2_refine_enabled = self.refine_enabled
+        if self.refine_upsampler_path is not None:
+            self.ltx2_refine_upsampler_path = self.refine_upsampler_path
+        if self.refine_transformer_path is not None:
+            self.ltx2_refine_transformer_path = self.refine_transformer_path
+        if self.refine_lora_path is not None:
+            self.ltx2_refine_lora_path = self.refine_lora_path
+        if self.refine_num_inference_steps is not None:
+            self.ltx2_refine_num_inference_steps = self.refine_num_inference_steps
+        if self.refine_guidance_scale is not None:
+            self.ltx2_refine_guidance_scale = self.refine_guidance_scale
+        if self.refine_add_noise is not None:
+            self.ltx2_refine_add_noise = self.refine_add_noise
+        if self.refine_noise_path is not None:
+            self.ltx2_refine_noise_path = self.refine_noise_path
+        if self.refine_audio_noise_path is not None:
+            self.ltx2_refine_audio_noise_path = self.refine_audio_noise_path
 
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
@@ -404,6 +459,136 @@ class FastVideoArgs:
             type=str,
             default=FastVideoArgs.ltx2_initial_latent_path,
             help="Path to load/save a precomputed LTX-2 initial latent.",
+        )
+        parser.add_argument(
+            "--ltx2-audio-latent-path",
+            type=str,
+            default=FastVideoArgs.ltx2_audio_latent_path,
+            help="Path to load/save a precomputed LTX-2 initial audio latent.",
+        )
+        parser.add_argument(
+            "--ltx2-refine-enabled",
+            action=StoreBoolean,
+            default=FastVideoArgs.ltx2_refine_enabled,
+            help=
+            "Enable LTX-2 stage2 refinement (2x spatial upsample + distilled denoising).",
+        )
+        parser.add_argument(
+            "--ltx2-refine-upsampler-path",
+            type=str,
+            default=FastVideoArgs.ltx2_refine_upsampler_path,
+            help=
+            "Path to the LTX-2 spatial upsampler weights (diffusers format).",
+        )
+        parser.add_argument(
+            "--ltx2-refine-transformer-path",
+            type=str,
+            default=FastVideoArgs.ltx2_refine_transformer_path,
+            help=
+            "Optional path to a dedicated stage2 transformer (e.g., distilled LoRA weights).",
+        )
+        parser.add_argument(
+            "--ltx2-refine-lora-path",
+            type=str,
+            default=FastVideoArgs.ltx2_refine_lora_path,
+            help=
+            "Optional LoRA path to apply only during LTX-2 refinement stage2.",
+        )
+        parser.add_argument(
+            "--ltx2-refine-num-inference-steps",
+            type=int,
+            default=FastVideoArgs.ltx2_refine_num_inference_steps,
+            help="Number of refinement steps for stage2 denoising (default: 3).",
+        )
+        parser.add_argument(
+            "--ltx2-refine-guidance-scale",
+            type=float,
+            default=FastVideoArgs.ltx2_refine_guidance_scale,
+            help="CFG guidance scale for refinement (1.0 disables CFG).",
+        )
+        parser.add_argument(
+            "--ltx2-refine-add-noise",
+            action=StoreBoolean,
+            default=FastVideoArgs.ltx2_refine_add_noise,
+            help="Add noise at sigma0 before stage2 denoising.",
+        )
+        parser.add_argument(
+            "--ltx2-refine-noise-path",
+            type=str,
+            default=FastVideoArgs.ltx2_refine_noise_path,
+            help="Path to load/save stage2 video noise before refinement.",
+        )
+        parser.add_argument(
+            "--ltx2-refine-audio-noise-path",
+            type=str,
+            default=FastVideoArgs.ltx2_refine_audio_noise_path,
+            help="Path to load/save stage2 audio noise before refinement.",
+        )
+
+        # Debugging (opt-in)
+        parser.add_argument(
+            "--debug-stage-sums",
+            action=StoreBoolean,
+            default=FastVideoArgs.debug_stage_sums,
+            help="Log tensor sums after each pipeline stage (debug only).",
+        )
+        parser.add_argument(
+            "--debug-stage-sums-path",
+            type=str,
+            default=FastVideoArgs.debug_stage_sums_path,
+            help="Path to write stage-level sum logs (appended).",
+        )
+        parser.add_argument(
+            "--debug-model-sums",
+            action=StoreBoolean,
+            default=FastVideoArgs.debug_model_sums,
+            help="Enable model-level sum logging (e.g., LTX-2 transformer).",
+        )
+        parser.add_argument(
+            "--debug-model-sums-path",
+            type=str,
+            default=FastVideoArgs.debug_model_sums_path,
+            help="Path to write model-level sum logs.",
+        )
+        parser.add_argument(
+            "--debug-model-detail",
+            action=StoreBoolean,
+            default=FastVideoArgs.debug_model_detail,
+            help="Enable detailed model hooks for activation sums (debug only).",
+        )
+        parser.add_argument(
+            "--debug-model-detail-path",
+            type=str,
+            default=FastVideoArgs.debug_model_detail_path,
+            help="Path to write detailed model hook logs.",
+        )
+        parser.add_argument(
+            "--debug-module-sums",
+            action=StoreBoolean,
+            default=FastVideoArgs.debug_module_sums,
+            help="Enable recursive module-level output sum logging.",
+        )
+        parser.add_argument(
+            "--debug-module-sums-path",
+            type=str,
+            default=FastVideoArgs.debug_module_sums_path,
+            help="Path to write recursive module-level sum logs.",
+        )
+        parser.add_argument(
+            "--debug-module-sums-include",
+            nargs="+",
+            type=str,
+            default=FastVideoArgs.debug_module_sums_include,
+            help=
+            "Optional list of substrings; only module names containing these will be logged.",
+        )
+        parser.add_argument(
+            "--debug-module-sums-exclude",
+            nargs="+",
+            type=str,
+            default=FastVideoArgs.debug_module_sums_exclude,
+            help=
+            "Optional list of substrings; module names containing these will be skipped.",
         )
 
         # LoRA parameters (inference-time adapter loading)

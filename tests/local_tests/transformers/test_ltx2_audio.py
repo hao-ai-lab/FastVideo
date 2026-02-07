@@ -14,6 +14,8 @@ os.environ.setdefault("MASTER_PORT", "29513")
 os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
 repo_root = Path(__file__).resolve().parents[3]
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 ltx_core_path = repo_root / "LTX-2" / "packages" / "ltx-core" / "src"
 if ltx_core_path.exists() and str(ltx_core_path) not in sys.path:
     sys.path.insert(0, str(ltx_core_path))
@@ -55,16 +57,32 @@ def test_ltx2_transformer_audio_parity():
         pytest.skip(f"FastVideo converted weights not found at {fastvideo_path}")
 
     try:
-        from ltx_core.components.patchifiers import AudioPatchifier, VideoLatentPatchifier
+        from ltx_core.components.patchifiers import (
+            AudioPatchifier,
+            VideoLatentPatchifier,
+            get_pixel_coords,
+        )
         from ltx_core.guidance.perturbations import BatchedPerturbationConfig
         from ltx_core.loader.sft_loader import SafetensorsModelStateDictLoader
         from ltx_core.loader.single_gpu_model_builder import SingleGPUModelBuilder
         from ltx_core.model.transformer import (LTXModelConfigurator,
                                                 LTXV_MODEL_COMFY_RENAMING_MAP)
         from ltx_core.model.transformer.modality import Modality
-        from ltx_core.types import AudioLatentShape, VideoLatentShape
+        from ltx_core.types import (
+            AudioLatentShape,
+            VideoLatentShape,
+            VIDEO_SCALE_FACTORS,
+        )
     except ImportError as exc:
         pytest.skip(f"LTX-2 import failed: {exc}")
+
+    # Force reference attention to use PyTorch SDPA for parity with FastVideo.
+    try:
+        from ltx_core.model.transformer import attention as ltx_attention
+        ltx_attention.memory_efficient_attention = None
+        ltx_attention.flash_attn_interface = None
+    except Exception:
+        pass
 
     # Load config from metadata using same approach as test_ltx2.py
     config_loader = SafetensorsModelStateDictLoader()
@@ -201,11 +219,22 @@ def test_ltx2_transformer_audio_parity():
         device=device,
         dtype=precision,
     )
-    timestep = torch.tensor([500], device=device, dtype=precision)
+    timestep = None
 
     video_shape = VideoLatentShape.from_torch_shape(hidden_states.shape)
-    positions = patchifier.get_patch_grid_bounds(video_shape, device=hidden_states.device)
+    latent_coords = patchifier.get_patch_grid_bounds(video_shape, device=hidden_states.device)
+    positions = get_pixel_coords(
+        latent_coords=latent_coords,
+        scale_factors=VIDEO_SCALE_FACTORS,
+        causal_fix=True,
+    )
     latents = patchifier.patchify(hidden_states)
+    timestep = torch.full(
+        (batch_size, latents.shape[1], 1),
+        500,
+        device=device,
+        dtype=precision,
+    )
 
     audio_frames = 16
     audio_channels = 8
@@ -221,6 +250,12 @@ def test_ltx2_transformer_audio_parity():
     audio_shape = AudioLatentShape.from_torch_shape(audio_latents.shape)
     audio_positions = audio_patchifier.get_patch_grid_bounds(audio_shape, device=audio_latents.device)
     audio_tokens = audio_patchifier.patchify(audio_latents)
+    audio_timestep = torch.full(
+        (batch_size, audio_tokens.shape[1], 1),
+        500,
+        device=device,
+        dtype=precision,
+    )
 
     video = Modality(
         enabled=True,
@@ -233,7 +268,7 @@ def test_ltx2_transformer_audio_parity():
     audio = Modality(
         enabled=True,
         latent=audio_tokens,
-        timesteps=timestep,
+        timesteps=audio_timestep,
         positions=audio_positions,
         context=encoder_hidden_states,
         context_mask=None,
@@ -250,7 +285,7 @@ def test_ltx2_transformer_audio_parity():
     fastvideo_audio = FastVideoModality(
         enabled=True,
         latent=audio_tokens,
-        timesteps=timestep,
+        timesteps=audio_timestep,
         positions=audio_positions,
         context=encoder_hidden_states,
         context_mask=None,

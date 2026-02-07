@@ -8,6 +8,8 @@ import torch
 from torch.testing import assert_close
 
 repo_root = Path(__file__).resolve().parents[3]
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 ltx_core_path = repo_root / "LTX-2" / "packages" / "ltx-core" / "src"
 if ltx_core_path.exists() and str(ltx_core_path) not in sys.path:
     sys.path.insert(0, str(ltx_core_path))

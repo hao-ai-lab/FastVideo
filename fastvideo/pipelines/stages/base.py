@@ -6,6 +6,7 @@ This module defines the abstract base classes for pipeline stages that can be
 composed to create complete diffusion pipelines.
 """
 
+import os
 import time
 import traceback
 from abc import ABC, abstractmethod
@@ -19,6 +20,28 @@ from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages.validators import VerificationResult
 
 logger = init_logger(__name__)
+
+
+def _sum_tensor(value: object) -> float | None:
+    if isinstance(value, torch.Tensor):
+        return float(value.detach().sum(dtype=torch.float32).item())
+    if isinstance(value, list | tuple):
+        total = 0.0
+        found = False
+        for item in value:
+            if isinstance(item, torch.Tensor):
+                total += item.detach().sum(dtype=torch.float32).item()
+                found = True
+        return total if found else None
+    return None
+
+
+def _write_debug_line(path: str, line: str) -> None:
+    log_dir = os.path.dirname(path)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
 
 
 class StageVerificationError(Exception):
@@ -152,6 +175,7 @@ class PipelineStage(ABC):
 
             try:
                 result = self.forward(batch, fastvideo_args)
+                self._maybe_log_stage_sums(stage_name, result, fastvideo_args)
                 execution_time = time.perf_counter() - start_time
                 logger.info("[%s] Execution completed in %s ms", stage_name,
                             execution_time * 1000)
@@ -167,6 +191,7 @@ class PipelineStage(ABC):
         else:
             # Direct execution (current behavior)
             result = self.forward(batch, fastvideo_args)
+            self._maybe_log_stage_sums(stage_name, result, fastvideo_args)
 
         if enable_verification:
             # Post-execution output verification
@@ -179,6 +204,49 @@ class PipelineStage(ABC):
                 raise
 
         return result
+
+    def _maybe_log_stage_sums(
+        self,
+        stage_name: str,
+        batch: ForwardBatch,
+        fastvideo_args: FastVideoArgs,
+    ) -> None:
+        if not getattr(fastvideo_args, "debug_stage_sums", False):
+            return
+
+        entries: dict[str, float] = {}
+
+        def _add(name: str, value: object) -> None:
+            summed = _sum_tensor(value)
+            if summed is not None:
+                entries[name] = summed
+
+        _add("latents", batch.latents)
+        _add("image_latent", batch.image_latent)
+        _add("video_latent", batch.video_latent)
+        _add("noise_pred", batch.noise_pred)
+        _add("output", batch.output)
+        _add("prompt_embeds", batch.prompt_embeds)
+        _add("negative_prompt_embeds", batch.negative_prompt_embeds)
+
+        if isinstance(batch.extra, dict):
+            for key, value in batch.extra.items():
+                summed = _sum_tensor(value)
+                if summed is not None:
+                    entries[f"extra.{key}"] = summed
+
+        if not entries:
+            return
+
+        batch.logging_info.add_stage_metric(stage_name, "sums", entries)
+        line = "fastvideo:stage={}".format(stage_name) + " " + " ".join(
+            f"{key}={value:.6f}" for key, value in entries.items())
+
+        path = getattr(fastvideo_args, "debug_stage_sums_path", None)
+        if path:
+            _write_debug_line(path, line)
+        else:
+            logger.info("%s", line)
 
     @abstractmethod
     def forward(
