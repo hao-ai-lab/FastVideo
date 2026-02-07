@@ -18,6 +18,7 @@ from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.cosmos2_5 import Cosmos25Config
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
+from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
 from fastvideo.configs.pipelines.hunyuan15 import (
     Hunyuan15T2V480PConfig, Hunyuan15I2V480PStepDistilledConfig,
     Hunyuan15T2V720PConfig, Hunyuan15I2V720PConfig, Hunyuan15SR1080PConfig)
@@ -57,6 +58,7 @@ from fastvideo.configs.sample.hunyuan15 import (
     Hunyuan15_720P_SamplingParam, Hunyuan15_720P_Distilled_I2V_SamplingParam,
     Hunyuan15_SR_1080P_SamplingParam)
 from fastvideo.configs.sample.hyworld import HYWorld_SamplingParam
+from fastvideo.configs.sample.hunyuangamecraft import HunyuanGameCraftSamplingParam
 from fastvideo.configs.sample.ltx2 import LTX2SamplingParam
 from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
 from fastvideo.configs.sample.turbodiffusion import (
@@ -324,6 +326,16 @@ def _register_configs() -> None:
             "FastVideo/HY-WorldPlay-Bidirectional-Diffusers",
         ],
         model_detectors=[lambda path: "hyworld" in path.lower()],
+    )
+
+    # HunyuanGameCraft
+    register_configs(
+        sampling_param_cls=HunyuanGameCraftSamplingParam,
+        pipeline_config_cls=HunyuanGameCraftPipelineConfig,
+        hf_model_paths=[
+            "tencent/Hunyuan-GameCraft-1.0",
+        ],
+        model_detectors=[lambda path: "gamecraft" in path.lower()],
     )
 
     # LongCat
