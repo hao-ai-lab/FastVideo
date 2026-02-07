@@ -1,225 +1,361 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Configuration for Hunyuan-GameCraft DiT model.
+HunyuanGameCraft Transformer model for FastVideo.
 
-This extends the HunyuanVideo config with CameraNet support for 
-camera pose conditioning via Plücker coordinates.
+Ported from official Hunyuan-GameCraft-1.0 implementation.
 """
+from typing import Any, List, Optional
 
-from dataclasses import dataclass, field
-
+import numpy as np
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from einops import rearrange
 
-from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
-from fastvideo.configs.models.dits.hunyuanvideo import (
-    HunyuanVideoArchConfig,
-    is_double_block,
-    is_single_block,
-    is_refiner_block,
+from fastvideo.configs.models.dits.hunyuangamecraft import (
+    HunyuanGameCraftArchConfig,
+    HunyuanGameCraftConfig,
+)
+from fastvideo.layers.linear import ReplicatedLinear
+from fastvideo.layers.mlp import MLP
+from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
+from fastvideo.layers.visual_embedding import ModulateProjection, PatchEmbed, TimestepEmbedder, unpatchify
+from fastvideo.models.dits.base import CachableDiT
+from fastvideo.models.dits.hunyuanvideo import (
+    MMDoubleStreamBlock,
+    MMSingleStreamBlock,
+    SingleTokenRefiner,
 )
 
 
-def is_camera_net(n: str, m) -> bool:
-    """Check if module is part of CameraNet."""
-    return "camera_net" in n
-
-
-@dataclass
-class HunyuanGameCraftArchConfig(HunyuanVideoArchConfig):
+class GameCraftFinalLayer(nn.Module):
     """
-    Architecture config for Hunyuan-GameCraft.
+    GameCraft-specific FinalLayer with correct shift/scale order.
     
-    Extends HunyuanVideo with CameraNet for camera pose conditioning.
-    The model uses Plücker coordinate representation (6D) for camera poses.
+    The official GameCraft implementation uses shift, scale order (not scale, shift).
+    This differs from the HunyuanVideo FinalLayer.
+    """
+
+    def __init__(self,
+                 hidden_size,
+                 patch_size,
+                 out_channels,
+                 dtype=None,
+                 prefix: str = "") -> None:
+        super().__init__()
+
+        self.norm_final = nn.LayerNorm(hidden_size,
+                                       eps=1e-6,
+                                       elementwise_affine=False,
+                                       dtype=dtype)
+
+        output_dim = patch_size[0] * patch_size[1] * patch_size[2] * out_channels
+
+        self.linear = ReplicatedLinear(hidden_size,
+                                       output_dim,
+                                       bias=True,
+                                       params_dtype=dtype,
+                                       prefix=f"{prefix}.linear")
+
+        self.adaLN_modulation = ModulateProjection(
+            hidden_size,
+            factor=2,
+            act_layer="silu",
+            dtype=dtype,
+            prefix=f"{prefix}.adaLN_modulation")
+
+    def forward(self, x, c):
+        # GameCraft uses shift, scale order (verified against official implementation)
+        shift, scale = self.adaLN_modulation(c).chunk(2, dim=-1)
+        x = self.norm_final(x) * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+        x, _ = self.linear(x)
+        return x
+
+
+class CameraNet(nn.Module):
+    """
+    Camera state encoding network - ported from official GameCraft.
+    
+    Processes camera parameters (Plücker coordinates) into feature embeddings.
     """
     
-    _fsdp_shard_conditions: list = field(
-        default_factory=lambda: [is_double_block, is_single_block, is_refiner_block])
+    def __init__(
+        self,
+        in_channels: int = 6,
+        downscale_coef: int = 8,
+        out_channels: int = 16,
+        patch_size: List[int] = [1, 2, 2],
+        hidden_size: int = 3072,
+        dtype: Optional[torch.dtype] = None,
+        prefix: str = "",
+    ):
+        super().__init__()
+        _ = prefix  # Unused
+        
+        start_channels = in_channels * (downscale_coef ** 2)
+        input_channels = [start_channels, start_channels // 2, start_channels // 4]
+        self.input_channels = input_channels
+        
+        self.unshuffle = nn.PixelUnshuffle(downscale_coef)
+        
+        self.encode_first = nn.Sequential(
+            nn.Conv2d(input_channels[0], input_channels[1], kernel_size=1, stride=1, padding=0),
+            nn.GroupNorm(2, input_channels[1]),
+            nn.ReLU(),
+        )
+        self._initialize_weights(self.encode_first)
+        
+        self.encode_second = nn.Sequential(
+            nn.Conv2d(input_channels[1], input_channels[2], kernel_size=1, stride=1, padding=0),
+            nn.GroupNorm(2, input_channels[2]),
+            nn.ReLU(),
+        )
+        self._initialize_weights(self.encode_second)
+        
+        self.final_proj = nn.Conv2d(input_channels[2], out_channels, kernel_size=1)
+        self._zeros_init_linear(self.final_proj)
+        
+        self.scale = nn.Parameter(torch.ones(1))
+        
+        self.camera_in = PatchEmbed(
+            patch_size=patch_size,
+            in_chans=out_channels,
+            embed_dim=hidden_size,
+        )
     
-    _compile_conditions: list = field(
-        default_factory=lambda: [is_double_block, is_single_block])
+    def _zeros_init_linear(self, linear):
+        if hasattr(linear, "weight"):
+            nn.init.zeros_(linear.weight)
+        if hasattr(linear, "bias") and linear.bias is not None:
+            nn.init.zeros_(linear.bias)
     
-    # Extend parent mapping with CameraNet-specific mappings
-    param_names_mapping: dict = field(
-        default_factory=lambda: {
-            # ==================== CameraNet mappings ====================
-            # Unshuffle is a built-in module with no learned parameters
-            
-            # encode_first
-            r"^camera_net\.encode_first\.0\.(.*)$": r"camera_net.encode_first.0.\1",
-            r"^camera_net\.encode_first\.1\.(.*)$": r"camera_net.encode_first.1.\1",
-            
-            # encode_second  
-            r"^camera_net\.encode_second\.0\.(.*)$": r"camera_net.encode_second.0.\1",
-            r"^camera_net\.encode_second\.1\.(.*)$": r"camera_net.encode_second.1.\1",
-            
-            # final_proj
-            r"^camera_net\.final_proj\.(.*)$": r"camera_net.final_proj.\1",
-            
-            # scale parameter
-            r"^camera_net\.scale$": r"camera_net.scale",
-            
-            # camera_in (PatchEmbed)
-            r"^camera_net\.camera_in\.proj\.(.*)$": r"camera_net.camera_in.proj.\1",
-            
-            # ==================== HunyuanVideo base mappings ====================
-            # These are inherited from the base config but we define them here
-            # to ensure proper ordering (CameraNet patterns should be tried first)
-            
-            # 1. context_embedder.time_text_embed submodules:
-            r"^context_embedder\.time_text_embed\.timestep_embedder\.linear_1\.(.*)$":
-            r"txt_in.t_embedder.mlp.fc_in.\1",
-            r"^context_embedder\.time_text_embed\.timestep_embedder\.linear_2\.(.*)$":
-            r"txt_in.t_embedder.mlp.fc_out.\1",
-            r"^context_embedder\.proj_in\.(.*)$":
-            r"txt_in.input_embedder.\1",
-            r"^context_embedder\.time_text_embed\.text_embedder\.linear_1\.(.*)$":
-            r"txt_in.c_embedder.fc_in.\1",
-            r"^context_embedder\.time_text_embed\.text_embedder\.linear_2\.(.*)$":
-            r"txt_in.c_embedder.fc_out.\1",
-            r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.norm1\.(.*)$":
-            r"txt_in.refiner_blocks.\1.norm1.\2",
-            r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.norm2\.(.*)$":
-            r"txt_in.refiner_blocks.\1.norm2.\2",
-            r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_q\.(.*)$":
-            (r"txt_in.refiner_blocks.\1.self_attn_qkv.\2", 0, 3),
-            r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_k\.(.*)$":
-            (r"txt_in.refiner_blocks.\1.self_attn_qkv.\2", 1, 3),
-            r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_v\.(.*)$":
-            (r"txt_in.refiner_blocks.\1.self_attn_qkv.\2", 2, 3),
-            r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.attn\.to_out\.0\.(.*)$":
-            r"txt_in.refiner_blocks.\1.self_attn_proj.\2",
-            r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.ff\.net\.0(?:\.proj)?\.(.*)$":
-            r"txt_in.refiner_blocks.\1.mlp.fc_in.\2",
-            r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.ff\.net\.2(?:\.proj)?\.(.*)$":
-            r"txt_in.refiner_blocks.\1.mlp.fc_out.\2",
-            r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.norm_out\.linear\.(.*)$":
-            r"txt_in.refiner_blocks.\1.adaLN_modulation.linear.\2",
-
-            # 3. x_embedder mapping:
-            r"^x_embedder\.proj\.(.*)$":
-            r"img_in.proj.\1",
-
-            # 4. Top-level time_text_embed mappings:
-            r"^time_text_embed\.timestep_embedder\.linear_1\.(.*)$":
-            r"time_in.mlp.fc_in.\1",
-            r"^time_text_embed\.timestep_embedder\.linear_2\.(.*)$":
-            r"time_in.mlp.fc_out.\1",
-            r"^time_text_embed\.guidance_embedder\.linear_1\.(.*)$":
-            r"guidance_in.mlp.fc_in.\1",
-            r"^time_text_embed\.guidance_embedder\.linear_2\.(.*)$":
-            r"guidance_in.mlp.fc_out.\1",
-            r"^time_text_embed\.text_embedder\.linear_1\.(.*)$":
-            r"vector_in.fc_in.\1",
-            r"^time_text_embed\.text_embedder\.linear_2\.(.*)$":
-            r"vector_in.fc_out.\1",
-
-            # 5. transformer_blocks (double stream) mapping:
-            r"^transformer_blocks\.(\d+)\.norm1\.linear\.(.*)$":
-            r"double_blocks.\1.img_mod.linear.\2",
-            r"^transformer_blocks\.(\d+)\.norm1_context\.linear\.(.*)$":
-            r"double_blocks.\1.txt_mod.linear.\2",
-            r"^transformer_blocks\.(\d+)\.attn\.norm_q\.(.*)$":
-            r"double_blocks.\1.img_attn_q_norm.\2",
-            r"^transformer_blocks\.(\d+)\.attn\.norm_k\.(.*)$":
-            r"double_blocks.\1.img_attn_k_norm.\2",
-            r"^transformer_blocks\.(\d+)\.attn\.to_q\.(.*)$":
-            (r"double_blocks.\1.img_attn_qkv.\2", 0, 3),
-            r"^transformer_blocks\.(\d+)\.attn\.to_k\.(.*)$":
-            (r"double_blocks.\1.img_attn_qkv.\2", 1, 3),
-            r"^transformer_blocks\.(\d+)\.attn\.to_v\.(.*)$":
-            (r"double_blocks.\1.img_attn_qkv.\2", 2, 3),
-            r"^transformer_blocks\.(\d+)\.attn\.add_q_proj\.(.*)$":
-            (r"double_blocks.\1.txt_attn_qkv.\2", 0, 3),
-            r"^transformer_blocks\.(\d+)\.attn\.add_k_proj\.(.*)$":
-            (r"double_blocks.\1.txt_attn_qkv.\2", 1, 3),
-            r"^transformer_blocks\.(\d+)\.attn\.add_v_proj\.(.*)$":
-            (r"double_blocks.\1.txt_attn_qkv.\2", 2, 3),
-            r"^transformer_blocks\.(\d+)\.attn\.to_out\.0\.(.*)$":
-            r"double_blocks.\1.img_attn_proj.\2",
-            r"^transformer_blocks\.(\d+)\.attn\.to_add_out\.(.*)$":
-            r"double_blocks.\1.txt_attn_proj.\2",
-            r"^transformer_blocks\.(\d+)\.attn\.norm_added_q\.(.*)$":
-            r"double_blocks.\1.txt_attn_q_norm.\2",
-            r"^transformer_blocks\.(\d+)\.attn\.norm_added_k\.(.*)$":
-            r"double_blocks.\1.txt_attn_k_norm.\2",
-            r"^transformer_blocks\.(\d+)\.ff\.net\.0(?:\.proj)?\.(.*)$":
-            r"double_blocks.\1.img_mlp.fc_in.\2",
-            r"^transformer_blocks\.(\d+)\.ff\.net\.2(?:\.proj)?\.(.*)$":
-            r"double_blocks.\1.img_mlp.fc_out.\2",
-            r"^transformer_blocks\.(\d+)\.ff_context\.net\.0(?:\.proj)?\.(.*)$":
-            r"double_blocks.\1.txt_mlp.fc_in.\2",
-            r"^transformer_blocks\.(\d+)\.ff_context\.net\.2(?:\.proj)?\.(.*)$":
-            r"double_blocks.\1.txt_mlp.fc_out.\2",
-
-            # 6. single_transformer_blocks (single stream) mapping:
-            r"^single_transformer_blocks\.(\d+)\.attn\.norm_q\.(.*)$":
-            r"single_blocks.\1.q_norm.\2",
-            r"^single_transformer_blocks\.(\d+)\.attn\.norm_k\.(.*)$":
-            r"single_blocks.\1.k_norm.\2",
-            r"^single_transformer_blocks\.(\d+)\.attn\.to_q\.(.*)$":
-            (r"single_blocks.\1.linear1.\2", 0, 4),
-            r"^single_transformer_blocks\.(\d+)\.attn\.to_k\.(.*)$":
-            (r"single_blocks.\1.linear1.\2", 1, 4),
-            r"^single_transformer_blocks\.(\d+)\.attn\.to_v\.(.*)$":
-            (r"single_blocks.\1.linear1.\2", 2, 4),
-            r"^single_transformer_blocks\.(\d+)\.proj_mlp\.(.*)$":
-            (r"single_blocks.\1.linear1.\2", 3, 4),
-            r"^single_transformer_blocks\.(\d+)\.proj_out\.(.*)$":
-            r"single_blocks.\1.linear2.\2",
-            r"^single_transformer_blocks\.(\d+)\.norm\.linear\.(.*)$":
-            r"single_blocks.\1.modulation.linear.\2",
-
-            # 7. Final layers mapping:
-            r"^norm_out\.linear\.(.*)$":
-            r"final_layer.adaLN_modulation.linear.\1",
-            r"^proj_out\.(.*)$":
-            r"final_layer.linear.\1",
-        })
+    def _initialize_weights(self, block):
+        for m in block:
+            if isinstance(m, nn.Conv2d):
+                n = m.kernel_size[0] * m.kernel_size[1] * m.in_channels
+                nn.init.normal_(m.weight, mean=0.0, std=np.sqrt(2.0 / n))
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
     
-    reverse_param_names_mapping: dict = field(default_factory=lambda: {})
+    def compress_time(self, x: torch.Tensor, num_frames: int) -> torch.Tensor:
+        x = rearrange(x, '(b f) c h w -> b f c h w', f=num_frames)
+        batch_size, frames, channels, height, width = x.shape
+        x = rearrange(x, 'b f c h w -> (b h w) c f')
+        
+        if x.shape[-1] == 66 or x.shape[-1] == 34:
+            x_len = x.shape[-1]
+            x_clip1 = x[..., :x_len // 2]
+            x_clip1_first = x_clip1[..., 0].unsqueeze(-1)
+            x_clip1_rest = F.avg_pool1d(x_clip1[..., 1:], kernel_size=2, stride=2)
+            x_clip2 = x[..., x_len // 2:]
+            x_clip2_first = x_clip2[..., 0].unsqueeze(-1)
+            x_clip2_rest = F.avg_pool1d(x_clip2[..., 1:], kernel_size=2, stride=2)
+            x = torch.cat([x_clip1_first, x_clip1_rest, x_clip2_first, x_clip2_rest], dim=-1)
+        elif x.shape[-1] % 2 == 1:
+            x_first = x[..., 0]
+            x_rest = x[..., 1:]
+            if x_rest.shape[-1] > 0:
+                x_rest = F.avg_pool1d(x_rest, kernel_size=2, stride=2)
+            x = torch.cat([x_first[..., None], x_rest], dim=-1)
+        else:
+            x = F.avg_pool1d(x, kernel_size=2, stride=2)
+        
+        x = rearrange(x, '(b h w) c f -> (b f) c h w', b=batch_size, h=height, w=width)
+        return x
     
-    # GameCraft-specific parameters
-    camera_in_channels: int = 6  # Plücker coordinates: 6D
-    camera_downscale_coef: int = 8
-    
-    # HunyuanVideo architecture defaults
-    # Note: in_channels=33 because official uses multitask_mask_training_type="concat"
-    # which expands 16 latent channels to 16*2+1=33 (latent + conditioning + mask)
-    patch_size: int = 2
-    patch_size_t: int = 1
-    in_channels: int = 33  # 16 latent + 16 cond + 1 mask
-    out_channels: int = 16
-    num_attention_heads: int = 24
-    attention_head_dim: int = 128
-    mlp_ratio: float = 4.0
-    num_layers: int = 20  # double stream blocks
-    num_single_layers: int = 40  # single stream blocks
-    num_refiner_layers: int = 2
-    rope_axes_dim: tuple[int, int, int] = (16, 56, 56)
-    guidance_embeds: bool = False  # Official GameCraft checkpoint doesn't have guidance_in
-    dtype: torch.dtype | None = None
-    text_embed_dim: int = 4096
-    pooled_projection_dim: int = 768
-    rope_theta: int = 256
-    qk_norm: str = "rms_norm"
-    
-    exclude_lora_layers: list[str] = field(
-        default_factory=lambda: ["img_in", "txt_in", "time_in", "vector_in", "camera_net"])
-    
-    prefix: str = "HunyuanGameCraft"
+    def forward(self, camera_states: torch.Tensor) -> torch.Tensor:
+        batch_size, num_frames, channels, height, width = camera_states.shape
+        camera_states = rearrange(camera_states, 'b f c h w -> (b f) c h w')
+        camera_states = self.unshuffle(camera_states)
+        camera_states = self.encode_first(camera_states)
+        camera_states = self.compress_time(camera_states, num_frames=num_frames)
+        num_frames = camera_states.shape[0] // batch_size
+        camera_states = self.encode_second(camera_states)
+        camera_states = self.compress_time(camera_states, num_frames=num_frames)
+        camera_states = self.final_proj(camera_states)
+        camera_states = rearrange(camera_states, "(b f) c h w -> b c f h w", b=batch_size)
+        camera_states = self.camera_in(camera_states)
+        return camera_states * self.scale
 
-    def __post_init__(self):
-        super().__post_init__()
-        self.hidden_size: int = self.attention_head_dim * self.num_attention_heads
-        # num_channels_latents is the VAE output channels (16), not in_channels (33)
-        # in_channels = 16 (latent) + 16 (conditioning) + 1 (mask) = 33
-        # out_channels = 16 (latent channels only)
-        self.num_channels_latents: int = self.out_channels
 
-
-@dataclass
-class HunyuanGameCraftConfig(DiTConfig):
-    """Top-level config for Hunyuan-GameCraft DiT."""
-    arch_config: DiTArchConfig = field(default_factory=HunyuanGameCraftArchConfig)
-    prefix: str = "HunyuanGameCraft"
+class HunyuanGameCraftTransformer3DModel(CachableDiT):
+    """
+    HunyuanGameCraft Transformer - ported from official implementation.
+    """
+    
+    _fsdp_shard_conditions = HunyuanGameCraftArchConfig()._fsdp_shard_conditions
+    _compile_conditions = HunyuanGameCraftArchConfig()._compile_conditions
+    _supported_attention_backends = HunyuanGameCraftArchConfig()._supported_attention_backends
+    param_names_mapping = HunyuanGameCraftConfig().param_names_mapping
+    reverse_param_names_mapping = HunyuanGameCraftConfig().reverse_param_names_mapping
+    
+    def __init__(self, config: HunyuanGameCraftConfig, hf_config: dict[str, Any]):
+        super().__init__(config=config, hf_config=hf_config)
+        
+        arch = config.arch_config
+        
+        if isinstance(arch.patch_size, (list, tuple)):
+            self.patch_size = list(arch.patch_size)
+        else:
+            self.patch_size = [arch.patch_size_t, arch.patch_size, arch.patch_size]
+        
+        self.in_channels = arch.in_channels
+        self.out_channels = arch.out_channels
+        self.unpatchify_channels = self.out_channels
+        self.hidden_size = arch.hidden_size
+        self.num_heads = arch.num_attention_heads
+        self.guidance_embeds = arch.guidance_embeds
+        self.rope_dim_list = list(arch.rope_axes_dim)
+        self.rope_theta = arch.rope_theta
+        self.text_states_dim = arch.text_embed_dim
+        self.text_states_dim_2 = arch.pooled_projection_dim
+        self.dtype = arch.dtype
+        
+        pe_dim = self.hidden_size // self.num_heads
+        if sum(self.rope_dim_list) != pe_dim:
+            raise ValueError(f"rope_axes_dim sum {sum(self.rope_dim_list)} != {pe_dim}")
+        
+        factory_kwargs = {'dtype': self.dtype}
+        
+        self.img_in = PatchEmbed(
+            patch_size=self.patch_size,
+            in_chans=self.in_channels,
+            embed_dim=self.hidden_size,
+            **factory_kwargs,
+        )
+        
+        self.txt_in = SingleTokenRefiner(
+            self.text_states_dim,
+            self.hidden_size,
+            self.num_heads,
+            depth=arch.num_refiner_layers,
+            **factory_kwargs,
+        )
+        
+        self.time_in = TimestepEmbedder(self.hidden_size, **factory_kwargs)
+        
+        self.vector_in = MLP(
+            self.text_states_dim_2,
+            self.hidden_size,
+            self.hidden_size,
+            act_type="silu",
+            **factory_kwargs,
+        )
+        
+        self.guidance_in = (
+            TimestepEmbedder(self.hidden_size, **factory_kwargs)
+            if self.guidance_embeds else None
+        )
+        
+        self.double_blocks = nn.ModuleList([
+            MMDoubleStreamBlock(
+                hidden_size=self.hidden_size,
+                num_attention_heads=self.num_heads,
+                mlp_ratio=arch.mlp_ratio,
+                supported_attention_backends=self._supported_attention_backends,
+                **factory_kwargs,
+            )
+            for _ in range(arch.num_layers)
+        ])
+        
+        self.single_blocks = nn.ModuleList([
+            MMSingleStreamBlock(
+                hidden_size=self.hidden_size,
+                num_attention_heads=self.num_heads,
+                mlp_ratio=arch.mlp_ratio,
+                supported_attention_backends=self._supported_attention_backends,
+                **factory_kwargs,
+            )
+            for _ in range(arch.num_single_layers)
+        ])
+        
+        self.final_layer = GameCraftFinalLayer(
+            self.hidden_size,
+            self.patch_size,
+            self.out_channels,
+            **factory_kwargs,
+        )
+        
+        self.camera_net = CameraNet(
+            in_channels=arch.camera_in_channels,
+            out_channels=16,
+            downscale_coef=arch.camera_downscale_coef,
+            patch_size=self.patch_size,
+            hidden_size=self.hidden_size,
+        )
+    
+    def forward(
+        self,
+        x: torch.Tensor,
+        encoder_hidden_states: List[torch.Tensor],
+        timestep: torch.Tensor,
+        camera_states: Optional[torch.Tensor] = None,
+        encoder_attention_mask: Optional[List[torch.Tensor]] = None,
+        guidance: Optional[torch.Tensor] = None,
+        return_dict: bool = False,
+    ) -> torch.Tensor:
+        img = x
+        _, _, ot, oh, ow = x.shape
+        tt = ot // self.patch_size[0]
+        th = oh // self.patch_size[1]
+        tw = ow // self.patch_size[2]
+        
+        text_states = encoder_hidden_states[0]
+        text_states_2 = encoder_hidden_states[1] if len(encoder_hidden_states) > 1 else None
+        text_mask = encoder_attention_mask[0] if encoder_attention_mask else None
+        
+        vec = self.time_in(timestep)
+        
+        if text_states_2 is not None:
+            vec = vec + self.vector_in(text_states_2)
+        
+        if self.guidance_in is not None and guidance is not None:
+            vec = vec + self.guidance_in(guidance)
+        
+        img = self.img_in(img)
+        
+        if camera_states is not None:
+            latent_len = ot
+            if latent_len == 18:
+                camera_latents = torch.cat([
+                    self.camera_net(torch.zeros_like(camera_states)),
+                    self.camera_net(camera_states)
+                ], dim=1)
+            elif latent_len == 9:
+                camera_latents = self.camera_net(camera_states)
+            elif latent_len == 10:
+                camera_latents = torch.cat([
+                    self.camera_net(torch.zeros_like(camera_states[:, 0:4, :, :, :])),
+                    self.camera_net(camera_states)
+                ], dim=1)
+            else:
+                camera_latents = self.camera_net(camera_states)
+            img = img + camera_latents
+        
+        txt = self.txt_in(text_states, timestep)
+        txt_seq_len = txt.shape[1]
+        
+        freqs_cos, freqs_sin = get_rotary_pos_embed(
+            (tt, th, tw),
+            self.hidden_size,
+            self.num_heads,
+            self.rope_dim_list,
+            self.rope_theta,
+        )
+        freqs_cos = freqs_cos.to(device=img.device, dtype=img.dtype)
+        freqs_sin = freqs_sin.to(device=img.device, dtype=img.dtype)
+        freqs_cis = (freqs_cos, freqs_sin)
+        
+        for block in self.double_blocks:
+            img, txt = block(img, txt, vec, freqs_cis)
+        
+        x = torch.cat([img, txt], dim=1)
+        
+        for block in self.single_blocks:
+            x = block(x, vec, txt_seq_len, freqs_cis)
+        
+        img = x[:, :-txt_seq_len, ...]
+        img = self.final_layer(img, vec)
+        img = unpatchify(img, tt, th, tw, self.patch_size, self.out_channels)
+        
+        return img
