@@ -1091,6 +1091,57 @@ class RLPipeline(TrainingPipeline):
         logger.info("==== RL pipeline: compute_advantages FINISH ====")
         return training_batch
 
+    def _filter_training_batch_by_advantage_mask(
+        self, training_batch: TrainingBatch, mask: torch.Tensor
+    ) -> None:
+        """
+        In-place filter of training_batch to keep only samples where mask is True.
+        Aligned with flow_grpo (train_wan2_1.py lines 846-873): drop zero-advantage
+        samples so they don't contribute no gradient.
+        """
+        if mask.all():
+            return
+        indices = mask.nonzero(as_tuple=True)[0]
+        # Tensors with batch dim in first axis
+        for key in (
+            "latents", "timesteps", "old_log_probs", "advantages",
+            "log_probs", "encoder_hidden_states", "reward_scores",
+            "returns", "values",
+        ):
+            t = getattr(training_batch, key, None)
+            if t is not None and isinstance(t, torch.Tensor) and t.shape[0] == mask.shape[0]:
+                setattr(training_batch, key, t[indices].contiguous())
+        if training_batch.kl is not None and training_batch.kl.shape[0] == mask.shape[0]:
+            training_batch.kl = training_batch.kl[indices].contiguous()
+        if training_batch.prompt_embeds is not None and training_batch.prompt_embeds.shape[0] == mask.shape[0]:
+            training_batch.prompt_embeds = training_batch.prompt_embeds[indices].contiguous()
+        if training_batch.negative_prompt_embeds is not None and training_batch.negative_prompt_embeds.shape[0] == mask.shape[0]:
+            training_batch.negative_prompt_embeds = training_batch.negative_prompt_embeds[indices].contiguous()
+        # input_kwargs: filter list/dict and decoded_videos tensor
+        if training_batch.input_kwargs is not None:
+            idx_list = indices.cpu().tolist()
+            if "prompts" in training_batch.input_kwargs:
+                prompts = training_batch.input_kwargs["prompts"]
+                if isinstance(prompts, (list, tuple)):
+                    training_batch.input_kwargs["prompts"] = [prompts[i] for i in idx_list]
+            if "decoded_videos" in training_batch.input_kwargs:
+                dv = training_batch.input_kwargs["decoded_videos"]
+                if isinstance(dv, torch.Tensor) and dv.shape[0] == mask.shape[0]:
+                    training_batch.input_kwargs["decoded_videos"] = dv[indices].contiguous()
+        # RL forward context/kwargs: filter any tensor with batch dim
+        if training_batch.rl_transformer_forward_contexts is not None and mask.shape[0] > 0:
+            # Per-step list; each step may have batched tensors in the dict
+            for ctx in training_batch.rl_transformer_forward_contexts:
+                if not isinstance(ctx, dict):
+                    continue
+                for k, v in list(ctx.items()):
+                    if isinstance(v, torch.Tensor) and v.shape[0] == mask.shape[0]:
+                        ctx[k] = v[indices].contiguous()
+        if training_batch.rl_transformer_forward_kwargs is not None:
+            for k, v in list(training_batch.rl_transformer_forward_kwargs.items()):
+                if isinstance(v, torch.Tensor) and v.shape[0] == mask.shape[0]:
+                    training_batch.rl_transformer_forward_kwargs[k] = v[indices].contiguous()
+
     def _compute_log_prob_for_timestep(
         self,
         latents: torch.Tensor,
@@ -1601,6 +1652,30 @@ class RLPipeline(TrainingPipeline):
 
             # 4. Compute advantages
             training_batch = self.compute_advantages(training_batch)
+
+            # 4b. Zero-advantage handling (flow_grpo train_wan2_1.py lines 846-873):
+            #     mask out samples with all-zero advantages; if all zero, add 1e-6 so we still train
+            adv = training_batch.advantages
+            if adv.dim() == 2:
+                mask = (adv.abs().sum(dim=1) != 0)
+            else:
+                mask = (adv.abs() != 0)
+            if mask.sum() == 0:
+                logger.warning(
+                    "All advantages zero in this batch; adding 1e-6 to avoid no-op (flow_grpo fallback)"
+                )
+                training_batch.advantages = training_batch.advantages + 1e-6
+                if training_batch.advantages.dim() == 2:
+                    mask = (training_batch.advantages.abs().sum(dim=1) != 0)
+                else:
+                    mask = (training_batch.advantages.abs() != 0)
+            kept = mask.sum().item()
+            if kept < mask.shape[0]:
+                logger.info(
+                    "RL zero-advantage filter: keeping %d / %d samples (dropped %d with zero advantage)",
+                    kept, mask.shape[0], mask.shape[0] - kept,
+                )
+            self._filter_training_batch_by_advantage_mask(training_batch, mask)
 
             # 5. Compute GRPO loss
             # Note: _compute_grpo_loss now does backward() internally after each timestep
