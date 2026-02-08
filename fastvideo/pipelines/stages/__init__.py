@@ -32,6 +32,16 @@ from fastvideo.pipelines.stages.ltx2_latent_preparation import (
 from fastvideo.pipelines.stages.ltx2_text_encoding import LTX2TextEncodingStage
 from fastvideo.pipelines.stages.matrixgame_denoising import (
     MatrixGameCausalDenoisingStage)
+from fastvideo.pipelines.stages.stable_audio_conditioning import (
+    StableAudioConditioningStage)
+from fastvideo.pipelines.stages.stable_audio_decoding import (
+    StableAudioDecodingStage)
+from fastvideo.pipelines.stages.stable_audio_denoising import (
+    StableAudioDenoisingStage)
+from fastvideo.pipelines.stages.stable_audio_input_validation import (
+    StableAudioInputValidationStage)
+from fastvideo.pipelines.stages.stable_audio_latent_preparation import (
+    StableAudioLatentPreparationStage)
 from fastvideo.pipelines.stages.hyworld_denoising import HYWorldDenoisingStage
 from fastvideo.pipelines.stages.stepvideo_encoding import (
     StepvideoPromptEncodingStage)
@@ -88,4 +98,10 @@ __all__ = [
     "LongCatVideoVAEEncodingStage",
     "LongCatKVCacheInitStage",
     "LongCatVCDenoisingStage",
+    # Stable Audio stages
+    "StableAudioConditioningStage",
+    "StableAudioDecodingStage",
+    "StableAudioDenoisingStage",
+    "StableAudioInputValidationStage",
+    "StableAudioLatentPreparationStage",
 ]

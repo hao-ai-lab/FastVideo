@@ -67,6 +67,8 @@ More inference example scripts can be found in `scripts/inference/`
 
 Please see the [support matrix](support_matrix.md) for the list of supported models and their available optimizations.
 
+For **text-to-audio** generation (Stable Audio), see [Stable Audio](stable_audio.md).
+
 ## Image-to-Video Generation
 
 You can generate a video starting from an initial image:

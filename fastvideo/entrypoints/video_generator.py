@@ -230,6 +230,75 @@ class VideoGenerator:
             return False
         return args.workload_type.value.endswith("2i")
 
+    def generate_audio(
+        self,
+        prompt: str,
+        sampling_param: SamplingParam | None = None,
+        **kwargs,
+    ) -> dict[str, Any]:
+        """
+        Generate audio from a text prompt (Stable Audio pipeline).
+
+        Args:
+            prompt: Text description of the audio to generate.
+            sampling_param: Sampling parameters. If None, loaded from model.
+            **kwargs: Override sampling params (duration_seconds, num_inference_steps,
+                guidance_scale, seed, etc.).
+
+        Returns:
+            Dict with "audio" (torch.Tensor), "sample_rate" (int), "prompt", etc.
+        """
+        if sampling_param is None:
+            sampling_param = SamplingParam.from_pretrained(
+                self.fastvideo_args.model_path)
+        sampling_param = deepcopy(sampling_param)
+        sampling_param.update(kwargs)
+        sampling_param.prompt = prompt.strip()
+
+        pipeline_config = self.fastvideo_args.pipeline_config
+        sample_rate = getattr(pipeline_config, "sample_rate", 44100)
+        duration = sampling_param.duration_seconds or 10.0
+
+        batch = ForwardBatch(
+            **shallow_asdict(sampling_param),
+            eta=0.0,
+            n_tokens=1,
+            VSA_sparsity=self.fastvideo_args.VSA_sparsity,
+        )
+        batch.sample_rate = sample_rate
+        batch.duration_seconds = duration
+        batch.seconds_total = duration
+        if batch.seconds_start is None:
+            batch.seconds_start = 0.0
+        batch.do_classifier_free_guidance = (batch.guidance_scale or 1.0) > 1.0
+
+        result_container: dict[str, Any] = {}
+
+        def execute_forward_thread():
+            result_container["output_batch"] = self.executor.execute_forward(
+                batch, self.fastvideo_args)
+
+        start_time = time.perf_counter()
+        thread = threading.Thread(target=execute_forward_thread)
+        thread.start()
+        thread.join()
+        gen_time = time.perf_counter() - start_time
+
+        output_batch = result_container["output_batch"]
+        audio = output_batch.output.cpu()
+        if torch.is_tensor(audio) and audio.ndim == 3:
+            pass
+        elif torch.is_tensor(audio) and audio.ndim == 2:
+            audio = audio.unsqueeze(0)
+
+        return {
+            "audio": audio,
+            "sample_rate": sample_rate,
+            "prompt": prompt,
+            "duration_seconds": duration,
+            "generation_time": gen_time,
+        }
+
     def _prepare_output_path(
         self,
         output_path: str,
