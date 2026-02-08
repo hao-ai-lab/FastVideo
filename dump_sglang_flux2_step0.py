@@ -136,7 +136,6 @@ def main():
         "scheduler",
         "diffusers",
     )
-    scheduler = scheduler.to(device)
 
     image_seq_len = latents.shape[1]
     batch_for_mu = type("Batch", (), {"num_inference_steps": NUM_STEPS, "raw_latent_shape": latents.shape})()
