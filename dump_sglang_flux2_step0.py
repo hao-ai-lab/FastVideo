@@ -59,7 +59,7 @@ def main():
         _prepare_text_ids,
         flux2_pack_latents,
     )
-    from sglang.multimodal_gen.runtime.loader.component_loader import PipelineComponentLoader
+    from sglang.multimodal_gen.runtime.loader.component_loader import ComponentLoader
     from sglang.multimodal_gen.runtime.server_args import ServerArgs
     from diffusers.utils.torch_utils import randn_tensor
 
@@ -80,17 +80,17 @@ def main():
 
     # 1. Encode prompt (SGLang text encoder)
     print("Loading SGLang text encoder and encoding prompt ...")
-    tokenizer, _ = PipelineComponentLoader.load_module(
-        module_name="tokenizer",
-        component_model_path=server_args.model_paths["tokenizer"],
-        transformers_or_diffusers="transformers",
-        server_args=server_args,
+    tokenizer, _ = ComponentLoader.for_module_type("tokenizer", "transformers").load(
+        server_args.model_paths["tokenizer"],
+        server_args,
+        "tokenizer",
+        "transformers",
     )
-    text_encoder, _ = PipelineComponentLoader.load_module(
-        module_name="text_encoder",
-        component_model_path=server_args.model_paths["text_encoder"],
-        transformers_or_diffusers="transformers",
-        server_args=server_args,
+    text_encoder, _ = ComponentLoader.for_module_type("text_encoder", "transformers").load(
+        server_args.model_paths["text_encoder"],
+        server_args,
+        "text_encoder",
+        "transformers",
     )
     text_encoder = text_encoder.to(device).to(dtype).eval()
 
@@ -123,11 +123,11 @@ def main():
         compute_empirical_mu,
     )
 
-    scheduler, _ = PipelineComponentLoader.load_module(
-        module_name="scheduler",
-        component_model_path=server_args.model_paths["scheduler"],
-        transformers_or_diffusers="diffusers",
-        server_args=server_args,
+    scheduler, _ = ComponentLoader.for_module_type("scheduler", "diffusers").load(
+        server_args.model_paths["scheduler"],
+        server_args,
+        "scheduler",
+        "diffusers",
     )
     scheduler = scheduler.to(device)
 
@@ -153,11 +153,11 @@ def main():
 
     # 5. Load SGLang transformer and run step 0
     print("Loading SGLang transformer ...")
-    transformer, _ = PipelineComponentLoader.load_module(
-        module_name="transformer",
-        component_model_path=server_args.model_paths["transformer"],
-        transformers_or_diffusers="diffusers",
-        server_args=server_args,
+    transformer, _ = ComponentLoader.for_module_type("transformer", "diffusers").load(
+        server_args.model_paths["transformer"],
+        server_args,
+        "transformer",
+        "diffusers",
     )
     transformer = transformer.to(device).eval()
 
