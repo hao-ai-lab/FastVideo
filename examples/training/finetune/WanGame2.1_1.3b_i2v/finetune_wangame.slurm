@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=wangame_1.3b
 #SBATCH --partition=main
-#SBATCH --nodes=2
-#SBATCH --ntasks=2
+#SBATCH --nodes=4
+#SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -33,25 +33,27 @@ export HOME="/mnt/weka/home/hao.zhang/mhuo"
 
 # Configs
 NUM_GPUS=8
-NUM_NODES=2
+NUM_NODES=4
 NUM_TOTAL_GPUS=$((NUM_GPUS * NUM_NODES))
-BS_PER_GPU=2
+BS_PER_GPU=1
 GRADIENT_ACCUMULATION_STEPS=1
-WANDB_RUN_NAME="MC_WASD_bs32_with_warmup_lr_1e-4"
+WANDB_RUN_NAME="MC_wsad_random_lr_1e-5"
 FREEZE_DIT=False
-RUN_DIR="wangame_1.3b_with_warmup_lr_1e-4"
+RUN_DIR="wangame_1.3b_wsad_random_lr_1e-5"
 CHECKPOINTING_STEPS=1000
-SCENE_PROMPT=""
-ACTION_WARMUP_STEPS=200
-LEARNING_RATE=1e-4
+ACTION_WARMUP_STEPS=0
+LEARNING_RATE=1e-5
 
 MODEL_PATH="weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers"
-# MC w only 
-DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed"
-VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_wsad.json"
+CKPT_SAFETENSOR="wangame_1.3b_with_warmup_lr_1e-5/checkpoint-7000/transformer/diffusion_pytorch_model.safetensors"
+# MC wasd only 
+# DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed"
+# VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_wsad.json"
 
-# DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0204_2130/preprocessed"
-# VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_mc.json"
+# MC random
+DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/preprocessed"
+VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_mc.json"
+
 # DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0204_1600/preprocessed"
 # VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_doom.json"
 # DATA_DIR="mc_wasd_10/preprocessed/combined_parquet_dataset"
@@ -74,6 +76,7 @@ training_args=(
   --enable_gradient_checkpointing_type "full"
   --train_action_only $FREEZE_DIT
   --action_warmup_steps $ACTION_WARMUP_STEPS
+  --init_weights_from_safetensors $CKPT_SAFETENSOR
 )
 
 # Parallel arguments

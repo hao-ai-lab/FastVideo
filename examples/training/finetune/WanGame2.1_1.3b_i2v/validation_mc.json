@@ -1,0 +1,924 @@
+{
+    "data": [
+        {
+            "caption": "Validation 00 - W",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000002.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/w.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 00 - A => D",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000002.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/ad.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 00 - Random",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000002.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/first_frame/000003_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 00 - Random",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000002.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/first_frame/000500_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 01 - S",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000003.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/s.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 01 - S => A",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000003.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/sa.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 01 - Random",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000003.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/first_frame/000003_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 01 - Random",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000003.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/first_frame/000500_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 02 - A",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000004.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/a.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 02 - S => W",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000004.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/sw.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 02 - Random",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000004.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/first_frame/001000_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 02 - Random",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000004.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/first_frame/001500_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 03 - D",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000005.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/d.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 03 - W => D",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000005.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/wd.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 03 - Random",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000005.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/first_frame/001000_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 03 - Random",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000005.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/first_frame/001500_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 00 - Still",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000002.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/still.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 01 - Still",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000003.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/still.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 02 - Still",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000004.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/still.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 03 - Still",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000005.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/still.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Train 00",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/first_frame/000003.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/first_frame/000003_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Train 01",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/first_frame/000500.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/first_frame/000500_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Train 02",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/first_frame/001000.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/first_frame/001000_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Train 03",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/first_frame/001500.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/first_frame/001500_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Doom 00 - W",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/doom/000000.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/w.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Doom 01 - S",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/doom/000000.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/s.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Doom 02 - A",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/doom/000000.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/a.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Doom 03 - D",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/doom/000000.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/d.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Doom 00 - W => S",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/doom/000001.jpg",
+            "action_path": "action/000016_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Doom 01 - A => D",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/doom/000001.jpg",
+            "action_path": "action/000018_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Doom 02 - W => A",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/doom/000001.jpg",
+            "action_path": "action/000020_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Doom 03 - S => A",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/doom/000001.jpg",
+            "action_path": "action/000022_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Train 00 - W",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/doom/000001.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/w.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Train 01 - S",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/doom/000001.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/s.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Train 02 - A",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/doom/000001.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/a.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Train 03 - D",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/doom/000001.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/d.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 00",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000002.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/w.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 01",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000002.jpg",
+            "action_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/actions/s.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 02",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000002.jpg",
+            "action_path": "action/000018_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 03",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000002.jpg",
+            "action_path": "action/000019_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 04",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000003.jpg",
+            "action_path": "action/000020_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 05",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000003.jpg",
+            "action_path": "action/000021_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 06",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000003.jpg",
+            "action_path": "action/000022_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 07",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000003.jpg",
+            "action_path": "action/000023_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 08",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000004.jpg",
+            "action_path": "action/000016_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 09",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000004.jpg",
+            "action_path": "action/000017_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 10",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000004.jpg",
+            "action_path": "action/000018_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 11",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000004.jpg",
+            "action_path": "action/000019_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 12",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000005.jpg",
+            "action_path": "action/000020_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 13",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000005.jpg",
+            "action_path": "action/000021_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 14",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000005.jpg",
+            "action_path": "action/000022_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 15",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000005.jpg",
+            "action_path": "action/000023_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 16",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000006.jpg",
+            "action_path": "action/000020_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 17",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000006.jpg",
+            "action_path": "action/000021_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 18",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000006.jpg",
+            "action_path": "action/000022_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 19",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000006.jpg",
+            "action_path": "action/000023_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 20",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000007.jpg",
+            "action_path": "action/000024_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 21",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000007.jpg",
+            "action_path": "action/000025_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 22",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000007.jpg",
+            "action_path": "action/000026_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "Validation 23",
+            "image_path": "/mnt/weka/home/hao.zhang/mhuo/FastVideo/mc_wasd_10/validate/000007.jpg",
+            "action_path": "action/000027_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "32",
+            "image_path": "humanplay/000000.jpg",
+            "action_path": "humanplay/000000_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "33",
+            "image_path": "humanplay/000001.jpg",
+            "action_path": "humanplay/000001_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "34",
+            "image_path": "humanplay/000002.jpg",
+            "action_path": "humanplay/000002_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "35",
+            "image_path": "humanplay/000003.jpg",
+            "action_path": "humanplay/000003_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "36",
+            "image_path": "humanplay/000004.jpg",
+            "action_path": "action/000004_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "37",
+            "image_path": "humanplay/000005.jpg",
+            "action_path": "action/000005_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "38",
+            "image_path": "humanplay/000006.jpg",
+            "action_path": "action/000006_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "39",
+            "image_path": "humanplay/000007.jpg",
+            "action_path": "action/000007_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "40",
+            "image_path": "humanplay/000008.jpg",
+            "action_path": "action/000008_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "41",
+            "image_path": "humanplay/000009.jpg",
+            "action_path": "action/000009_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "42",
+            "image_path": "humanplay/000010.jpg",
+            "action_path": "action/000010_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "43",
+            "image_path": "humanplay/000011.jpg",
+            "action_path": "action/000011_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "44",
+            "image_path": "humanplay/000012.jpg",
+            "action_path": "action/000012_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "45",
+            "image_path": "humanplay/000013.jpg",
+            "action_path": "action/000013_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "46",
+            "image_path": "humanplay/000014.jpg",
+            "action_path": "action/000014_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "47",
+            "image_path": "humanplay/000015.jpg",
+            "action_path": "action/000015_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "48",
+            "image_path": "humanplay/000016.jpg",
+            "action_path": "action/000016_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "49",
+            "image_path": "humanplay/000017.jpg",
+            "action_path": "action/000017_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "50",
+            "image_path": "humanplay/000018.jpg",
+            "action_path": "action/000018_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "51",
+            "image_path": "humanplay/000019.jpg",
+            "action_path": "action/000019_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "52",
+            "image_path": "humanplay/000020.jpg",
+            "action_path": "action/000020_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "53",
+            "image_path": "humanplay/000021.jpg",
+            "action_path": "action/000021_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "54",
+            "image_path": "humanplay/000022.jpg",
+            "action_path": "action/000022_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "55",
+            "image_path": "humanplay/000023.jpg",
+            "action_path": "action/000023_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "56",
+            "image_path": "humanplay/000024.jpg",
+            "action_path": "action/000024_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "57",
+            "image_path": "humanplay/000025.jpg",
+            "action_path": "action/000025_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "58",
+            "image_path": "humanplay/000026.jpg",
+            "action_path": "action/000026_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "59",
+            "image_path": "humanplay/000027.jpg",
+            "action_path": "action/000027_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "60",
+            "image_path": "humanplay/000028.jpg",
+            "action_path": "action/000028_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "61",
+            "image_path": "humanplay/000029.jpg",
+            "action_path": "action/000029_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "62",
+            "image_path": "humanplay/000030.jpg",
+            "action_path": "action/000030_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        },
+        {
+            "caption": "63",
+            "image_path": "humanplay/000031.jpg",
+            "action_path": "action/000031_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 352,
+            "width": 640,
+            "num_frames": 77
+        }
+    ]
+}
