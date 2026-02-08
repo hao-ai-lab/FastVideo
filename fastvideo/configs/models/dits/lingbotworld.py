@@ -9,7 +9,7 @@ def is_blocks(n: str, m) -> bool:
 
 
 @dataclass
-class WanVideoArchConfig(DiTArchConfig):
+class LingBotWorldArchConfig(DiTArchConfig):
     _fsdp_shard_conditions: list = field(default_factory=lambda: [is_blocks])
 
     param_names_mapping: dict = field(
@@ -109,7 +109,7 @@ class WanVideoArchConfig(DiTArchConfig):
 
 
 @dataclass
-class WanVideoConfig(DiTConfig):
-    arch_config: DiTArchConfig = field(default_factory=WanVideoArchConfig)
+class LingBotWorldVideoConfig(DiTConfig):
+    arch_config: DiTArchConfig = field(default_factory=LingBotWorldArchConfig)
 
     prefix: str = "Wan"

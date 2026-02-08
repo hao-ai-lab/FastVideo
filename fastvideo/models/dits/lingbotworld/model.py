@@ -43,7 +43,7 @@ from fastvideo.distributed.utils import create_attention_mask_for_padding
 logger = init_logger(__name__)
 
 
-class LingBotWorldCamEmbedding(nn.Module):
+class LingBotWorldCamConditioner(nn.Module):
 
     def __init__(self, dim: int) -> None:
         super().__init__()
@@ -145,6 +145,7 @@ class WanTransformerBlock(nn.Module):
         self.mlp_residual = ScaleResidual()
 
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
+        self.cam_conditioner = LingBotWorldCamConditioner(dim)
 
     def forward(
         self,
@@ -153,6 +154,7 @@ class WanTransformerBlock(nn.Module):
         temb: torch.Tensor,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         attention_mask: torch.Tensor | None = None,
+        c2ws_plucker_emb: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if hidden_states.dim() == 4:
             hidden_states = hidden_states.squeeze(1)
@@ -205,6 +207,8 @@ class WanTransformerBlock(nn.Module):
             hidden_states, attn_output, gate_msa, null_shift, null_scale)
         norm_hidden_states, hidden_states = norm_hidden_states.to(
             orig_dtype), hidden_states.to(orig_dtype)
+        # Inject camera condition
+        norm_hidden_states = self.cam_conditioner(norm_hidden_states, c2ws_plucker_emb)
 
         # 2. Cross-attention
         attn_output = self.attn2(norm_hidden_states,
@@ -315,6 +319,7 @@ class LingBotWorldTransformer3DModel(CachableDiT):
                 encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
                 | None = None,
                 guidance=None,
+                c2ws_plucker_emb: torch.Tensor | None = None,
                 **kwargs) -> torch.Tensor:
         forward_batch = get_forward_context().forward_batch
         enable_teacache = forward_batch is not None and forward_batch.enable_teacache
@@ -350,6 +355,11 @@ class LingBotWorldTransformer3DModel(CachableDiT):
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
+        c2ws_hidden_states = None
+        if c2ws_plucker_emb is not None:
+            c2ws_hidden_states = self.patch_embedding_wancamctrl(
+                c2ws_plucker_emb.to(device=hidden_states.device,
+                                    dtype=hidden_states.dtype))
 
         # Shard with padding support - returns (sharded_tensor, original_seq_len)
         hidden_states, original_seq_len = sequence_model_parallel_shard(hidden_states, dim=1)
@@ -422,11 +432,11 @@ class LingBotWorldTransformer3DModel(CachableDiT):
                 for block in self.blocks:
                     hidden_states = self._gradient_checkpointing_func(
                         block, hidden_states, encoder_hidden_states,
-                        timestep_proj, freqs_cis, attention_mask)
+                        timestep_proj, freqs_cis, attention_mask, c2ws_plucker_emb)
             else:
                 for block in self.blocks:
                     hidden_states = block(hidden_states, encoder_hidden_states,
-                                              timestep_proj, freqs_cis, attention_mask)
+                                              timestep_proj, freqs_cis, attention_mask, c2ws_plucker_emb)
             # if teacache is enabled, we need to cache the original hidden states
 
             if enable_teacache:
