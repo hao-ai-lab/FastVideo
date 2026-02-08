@@ -78,7 +78,7 @@ miscellaneous_args=(
   --vae_cpu_offload False
 )
 
-# NOTE: Setting this environment variable to TORCH_SDPA to avoid the issue of 
+# NOTE: Setting this environment variable to TORCH_SDPA to avoid the issue of stacking that failed in flash attn. 
 export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
 
