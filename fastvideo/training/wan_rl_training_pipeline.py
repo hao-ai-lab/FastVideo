@@ -24,9 +24,6 @@ class WanRLTrainingPipeline(RLPipeline):
     ]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
-        # self.modules["scheduler"] = UniPCMultistepScheduler.from_pretrained(
-        #     fastvideo_args.model_path, subfolder="scheduler"
-        # )
         pass
 
     def create_training_stages(self, training_args: TrainingArgs):
