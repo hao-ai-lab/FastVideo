@@ -184,7 +184,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
             text_padding_length=training_args.pipeline_config.
             text_encoder_configs[0].arch_config.
             text_len,  # type: ignore[attr-defined]
-            seed=self.seed)
+            seed=self.seed,
+            reshuffle_each_epoch=training_args.reshuffle_each_epoch)
 
         self.noise_scheduler = noise_scheduler
         if self.training_args.boundary_ratio is not None:
@@ -248,6 +249,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
             if batch is None:
                 self.current_epoch += 1
                 logger.info("Starting epoch %s", self.current_epoch)
+                # Reshuffle dataset order each epoch
+                self.train_dataset.sampler.set_epoch(self.current_epoch)
                 # Reset iterator for next epoch
                 self.train_loader_iter = iter(self.train_dataloader)
                 # Get first batch of new epoch
