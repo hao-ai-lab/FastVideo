@@ -117,9 +117,41 @@ def filter_files_not_needed_for_inference(
 _BAR_FORMAT = "{desc}: {percentage:3.0f}% Completed | {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]\n"  # noqa: E501
 
 
+def unified_checkpoint_weights_iterator(
+    checkpoint_path: str,
+    to_cpu: bool = True,
+    key_prefix: str | None = None,
+) -> Generator[tuple[str, torch.Tensor], None, None]:
+    """
+    Iterate over weights in a unified checkpoint (model.safetensors or model.ckpt).
+    Supports Stable Audio and similar checkpoints.
+    """
+    if checkpoint_path.endswith(".safetensors"):
+        yield from safetensors_weights_iterator(
+            [checkpoint_path], to_cpu=to_cpu, key_prefix=key_prefix
+        )
+    else:
+        # .ckpt or .pt: state_dict may be nested under "state_dict"
+        state = torch.load(
+            checkpoint_path, map_location="cpu" if to_cpu else None, weights_only=True
+        )
+        if isinstance(state, dict) and "state_dict" in state:
+            state = state["state_dict"]
+        for full_name, param in state.items():
+            if key_prefix is not None:
+                if not full_name.startswith(key_prefix):
+                    continue
+                yield_name = full_name[len(key_prefix):]
+            else:
+                yield_name = full_name
+            yield yield_name, param
+        del state
+
+
 def safetensors_weights_iterator(
     hf_weights_files: list[str],
     to_cpu: bool = True,
+    key_prefix: str | None = None,
 ) -> Generator[tuple[str, torch.Tensor], None, None]:
     """Iterate over the weights in the model safetensor files."""
     enable_tqdm = not torch.distributed.is_initialized(
@@ -132,9 +164,15 @@ def safetensors_weights_iterator(
             bar_format=_BAR_FORMAT,
     ):
         with safe_open(st_file, framework="pt", device=device) as f:
-            for name in f.keys():  # noqa: SIM118
-                param = f.get_tensor(name)
-                yield name, param
+            for full_name in f.keys():  # noqa: SIM118
+                if key_prefix is not None:
+                    if not full_name.startswith(key_prefix):
+                        continue
+                    yield_name = full_name[len(key_prefix):]
+                else:
+                    yield_name = full_name
+                param = f.get_tensor(full_name)
+                yield yield_name, param
 
 
 def pt_weights_iterator(

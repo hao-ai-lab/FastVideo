@@ -136,6 +136,12 @@ class ForwardBatch:
     # Camera control inputs (HYWorld)
     pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
 
+    # Audio inputs (Stable Audio)
+    sample_rate: int | None = None
+    duration_seconds: float | None = None
+    seconds_start: float | None = None
+    seconds_total: float | None = None
+
     # Latent dimensions
     height_latents: list[int] | int | None = None
     width_latents: list[int] | int | None = None
