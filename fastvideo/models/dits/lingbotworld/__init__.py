@@ -1,14 +1,8 @@
-from .model import MatrixGameWanModel, MatrixGameTransformerBlock
-from .causal_model import CausalMatrixGameWanModel, CausalMatrixGameTransformerBlock
-from .action_module import ActionModule
+from .model import LingBotWorldTransformer3DModel
 
 __all__ = [
-    "MatrixGameWanModel",
-    "MatrixGameTransformerBlock",
-    "CausalMatrixGameWanModel",
-    "CausalMatrixGameTransformerBlock",
-    "ActionModule",
+    "LingBotWorldTransformer3DModel",
 ]
 
 # Entry point for model registry
-EntryClass = [MatrixGameWanModel, CausalMatrixGameWanModel]
+EntryClass = [LingBotWorldTransformer3DModel]

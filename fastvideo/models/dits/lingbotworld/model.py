@@ -259,6 +259,7 @@ class LingBotWorldTransformer3DModel(CachableDiT):
         self.patch_embedding_wancamctrl = WanCamControlPatchEmbedding(in_chans=6 * 64,
                                                                       embed_dim=inner_dim,
                                                                       patch_size=config.patch_size)
+        self.c2ws_mlp = MLP(inner_dim, inner_dim, inner_dim, bias=True, act_type="silu")
 
         # 2. Condition embeddings
         self.condition_embedder = WanTimeTextImageEmbedding(
@@ -357,9 +358,14 @@ class LingBotWorldTransformer3DModel(CachableDiT):
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
         c2ws_hidden_states = None
         if c2ws_plucker_emb is not None:
-            c2ws_hidden_states = self.patch_embedding_wancamctrl(
-                c2ws_plucker_emb.to(device=hidden_states.device,
-                                    dtype=hidden_states.dtype))
+            c2ws_plucker_emb = [
+                self.patch_embedding_wancamctrl(
+                    i.to(device=hidden_states.device, dtype=hidden_states.dtype)
+                ) for i in c2ws_plucker_emb
+            ]
+            c2ws_plucker_emb = torch.cat(c2ws_plucker_emb, dim=1)
+            c2ws_hidden_states = self.c2ws_mlp(c2ws_plucker_emb)
+            c2ws_plucker_emb = c2ws_plucker_emb + c2ws_hidden_states
 
         # Shard with padding support - returns (sharded_tensor, original_seq_len)
         hidden_states, original_seq_len = sequence_model_parallel_shard(hidden_states, dim=1)
