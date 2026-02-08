@@ -70,8 +70,9 @@ def main():
     os.environ.setdefault("MASTER_PORT", "29500")
 
     model_path = args.model_path or _get_text_encoder_path(MODEL_ID)
-    # Tokenizer is at repo root or in tokenizer/ subdir, not in text_encoder/
+    # Repo root: FastVideoArgs expects model_index.json; tokenizer is at root or tokenizer/
     root = os.path.dirname(model_path) if os.path.basename(model_path) == "text_encoder" else model_path
+    text_encoder_path = model_path if os.path.basename(model_path) == "text_encoder" else os.path.join(root, "text_encoder")
     tokenizer_dir = os.path.join(root, "tokenizer")
     tokenizer_path = tokenizer_dir if os.path.isdir(tokenizer_dir) else root
     device = args.device
@@ -111,12 +112,12 @@ def main():
     from fastvideo.models.loader.component_loader import TextEncoderLoader
 
     fv_args = FastVideoArgs.from_kwargs(
-        model_path=model_path,
+        model_path=root,
         pipeline_config=Flux2KleinPipelineConfig(),
     )
     fv_args.pipeline_config.text_encoder_precisions = ("bf16",)
     loader = TextEncoderLoader()
-    fv_encoder = loader.load(model_path, fv_args)
+    fv_encoder = loader.load(text_encoder_path, fv_args)
     fv_encoder = fv_encoder.to(device).to(dtype).eval()
 
     with torch.no_grad():
@@ -166,8 +167,7 @@ def main():
             from diffusers import Flux2KleinPipeline
         except ImportError:
             from diffusers.pipelines.flux2 import Flux2KleinPipeline
-        base_path = os.path.dirname(model_path) if os.path.basename(model_path) == "text_encoder" else model_path
-        load_path = base_path if os.path.isdir(base_path) else MODEL_ID
+        load_path = root if os.path.isdir(root) else MODEL_ID
         print("Loading diffusers Flux2KleinPipeline for reference ...")
         pipe = Flux2KleinPipeline.from_pretrained(
             load_path,
