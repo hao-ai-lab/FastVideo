@@ -113,7 +113,9 @@ def main():
         "text_encoder",
         "transformers",
     )
-    text_encoder = text_encoder.to(device).to(dtype).eval()
+    # Don't call .to(device).to(dtype) on FSDP/TP models - loader handles placement
+    if "FSDP" not in type(text_encoder).__name__:
+        text_encoder = text_encoder.to(device).to(dtype).eval()
 
     tok_out = pipeline_config.tokenize_prompt([[PROMPT]], tokenizer, {})
     input_ids = tok_out["input_ids"].to(device)
