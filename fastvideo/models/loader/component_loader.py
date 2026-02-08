@@ -28,6 +28,7 @@ from fastvideo.models.hf_transformer_utils import get_diffusers_config
 from fastvideo.models.loader.fsdp_load import maybe_load_fsdp_model, shard_model
 from fastvideo.models.loader.utils import set_default_torch_dtype
 from fastvideo.models.loader.weight_utils import (
+    extract_tensor_state_dict,
     filter_duplicate_safetensors_files,
     filter_files_not_needed_for_inference,
     pt_weights_iterator,
@@ -152,7 +153,7 @@ class TextEncoderLoader(ComponentLoader):
 
         use_safetensors = False
         index_file = SAFE_WEIGHTS_INDEX_NAME
-        allow_patterns = ["*.safetensors", "*.bin"]
+        allow_patterns = ["*.safetensors", "*.bin", "*.pth"]
 
         if fall_back_to_pt:
             allow_patterns += ["*.pt"]
@@ -244,11 +245,13 @@ class TextEncoderLoader(ComponentLoader):
         #     model_override_args=None,
         # )
         model_config = get_diffusers_config(model=model_path)
+        model_config.pop("_class_name", None)
         model_config.pop("_name_or_path", None)
         model_config.pop("transformers_version", None)
         model_config.pop("model_type", None)
         model_config.pop("tokenizer_class", None)
         model_config.pop("torch_dtype", None)
+        model_config.pop("architectures", None)
         repo_root = os.path.dirname(model_path)
         index_path = os.path.join(repo_root, "model_index.json")
         gemma_path = ""
@@ -625,16 +628,44 @@ class VAELoader(ComponentLoader):
                 vae_cls, _ = ModelRegistry.resolve_model_cls(class_name)
                 vae = vae_cls(vae_config).to(target_device)
 
-        # Find all safetensors files
+        # Load weights from safetensors first, then fallback to pt/pth/bin.
         safetensors_list = glob.glob(
             os.path.join(str(model_path), "*.safetensors"))
-        if not safetensors_list:
-            raise ValueError(f"No safetensors files found in {model_path}")
-        # Common case: a single `.safetensors` checkpoint file.
-        # Some models may be sharded into multiple files; in that case we merge.
         loaded = {}
-        for sf_file in safetensors_list:
-            loaded.update(safetensors_load_file(sf_file))
+        if safetensors_list:
+            for sf_file in safetensors_list:
+                loaded.update(safetensors_load_file(sf_file))
+        else:
+            pt_files: list[str] = []
+            for pattern in ("*.pt", "*.pth", "*.bin"):
+                pt_files = glob.glob(os.path.join(str(model_path), pattern))
+                if pt_files:
+                    break
+            if not pt_files:
+                raise ValueError(
+                    f"No VAE weight files found in {model_path}. "
+                    "Expected *.safetensors, *.pt, *.pth, or *.bin."
+                )
+            for pt_file in pt_files:
+                try:
+                    state = torch.load(pt_file, map_location="cpu", weights_only=True)
+                except Exception:
+                    state = torch.load(pt_file, map_location="cpu", weights_only=False)
+                loaded.update(extract_tensor_state_dict(state))
+
+        # Some legacy checkpoints store VAE weights with an extra top-level prefix.
+        # Strip known prefixes only when there is no direct key overlap.
+        model_keys = set(vae.state_dict().keys())
+        if model_keys and not (model_keys & set(loaded.keys())):
+            for prefix in ("vae.", "module.", "model.", "generator.",
+                           "generator_ema."):
+                stripped = {
+                    (k[len(prefix):] if k.startswith(prefix) else k): v
+                    for k, v in loaded.items()
+                }
+                if model_keys & set(stripped.keys()):
+                    loaded = stripped
+                    break
 
         # LTX-2 CausalVideoAutoencoder needs per_channel_statistics remapping
         if class_name == "CausalVideoAutoencoder" and "vae" in config:
@@ -810,6 +841,7 @@ class TransformerLoader(ComponentLoader):
         strict_load = not (
             cls_name.startswith("Cosmos25")
             or cls_name == "Cosmos25Transformer3DModel"
+            or cls_name == "WanModel"
             or getattr(fastvideo_args.pipeline_config, "prefix", "") == "Cosmos25"
         )
         model = maybe_load_fsdp_model(
