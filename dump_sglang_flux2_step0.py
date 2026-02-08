@@ -64,12 +64,12 @@ def main():
     from diffusers.utils.torch_utils import randn_tensor
 
     pipeline_config = Flux2KleinPipelineConfig()
+    pipeline_config.dit_precision = "bf16"
     server_args = ServerArgs(
         model_path=model_path,
         pipeline_config=pipeline_config,
         hsdp_shard_dim=1,
         hsdp_replicate_dim=1,
-        dit_precision="bf16",
     )
     server_args.model_paths = {
         "text_encoder": os.path.join(model_path, "text_encoder"),
