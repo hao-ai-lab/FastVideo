@@ -8,13 +8,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-import fastvideo.envs as envs
-from fastvideo.attention import (DistributedAttention, DistributedAttention_VSA,
-                                 LocalAttention)
+from fastvideo.attention import DistributedAttention
 from fastvideo.configs.models.dits.lingbotworld import LingBotWorldVideoConfig
 from fastvideo.configs.sample.wan import WanTeaCacheParams
 from fastvideo.distributed.communication_op import (
-    sequence_model_parallel_all_gather,
     sequence_model_parallel_all_gather_with_unpad,
     sequence_model_parallel_shard)
 from fastvideo.forward_context import get_forward_context
@@ -26,8 +23,7 @@ from fastvideo.layers.linear import ReplicatedLinear
 # TODO: RMSNorm ....
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import get_rotary_pos_embed
-from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed, WanCamControlPatchEmbedding,
-                                               TimestepEmbedder)
+from fastvideo.layers.visual_embedding import (PatchEmbed, WanCamControlPatchEmbedding)
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import CachableDiT
 from fastvideo.models.dits.wanvideo import (

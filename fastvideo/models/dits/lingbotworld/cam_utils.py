@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Adapted from LingBot World: https://github.com/Robbyant/lingbot-world/blob/main/wan/utils/cam_utils.py
+
 import numpy as np
 import os
 import torch
@@ -5,6 +8,8 @@ from scipy.interpolate import interp1d
 from scipy.spatial.transform import Rotation, Slerp
 
 
+# --- Official Code (Leave Unchanged) ---
+ 
 def interpolate_camera_poses(
     src_indices: np.ndarray, 
     src_rot_mat: np.ndarray, 
@@ -146,6 +151,8 @@ def get_Ks_transformed(
 
     return Ks_transformed
 
+
+# --- Custom ---
 
 def prepare_camera_embedding(
     action_path: str,
