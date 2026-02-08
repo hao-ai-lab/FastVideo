@@ -33,4 +33,6 @@ if __name__ == "__main__":
             repo_type=args.repo_type,
             local_dir_use_symlinks=False,
             resume_download=True,
+            allow_patterns="*.safetensors",
+            ignore_patterns=["audio_vae/*", "vocoder/*", "latent_upsampler/*", "vaes/*", "schedulers/*", "upsamplers/*", "text_encoder/*", "tokenizer/*", "transformer/*", "connectors/*"]
         )

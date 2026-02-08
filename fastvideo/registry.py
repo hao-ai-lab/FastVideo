@@ -250,6 +250,11 @@ def _register_configs() -> None:
         hf_model_paths=[
             "Lightricks/LTX-2",
             "FastVideo/LTX2-base",
+            "FastVideo/LTX2-Diffusers",
+        ],
+        model_detectors=[
+            lambda path:
+            ("ltx2" in path.lower() and "distilled" not in path.lower()),
         ],
         model_detectors=[
             lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and
