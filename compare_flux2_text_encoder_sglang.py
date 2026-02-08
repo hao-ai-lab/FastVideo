@@ -118,7 +118,7 @@ def main():
     fv_args.pipeline_config.text_encoder_precisions = ("bf16",)
     loader = TextEncoderLoader()
     fv_encoder = loader.load(text_encoder_path, fv_args)
-    fv_encoder = fv_encoder.to(device).to(dtype).eval()
+    fv_encoder = fv_encoder.eval()
 
     with torch.no_grad():
         fv_outputs = fv_encoder(
