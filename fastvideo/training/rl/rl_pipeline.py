@@ -111,70 +111,6 @@ class RLPipeline(TrainingPipeline):
         logger.info("Initialized RLPipeline with algorithm: %s",
                     fastvideo_args.rl_args.rl_algorithm)
 
-    def _prepare_validation_batch(self, sampling_param: SamplingParam,
-                                  training_args: TrainingArgs,
-                                  validation_batch: dict[str, Any],
-                                  num_inference_steps: int) -> ForwardBatch:
-        sampling_param.prompt = validation_batch['prompt']
-        sampling_param.height = training_args.num_height
-        sampling_param.width = training_args.num_width
-        sampling_param.num_inference_steps = num_inference_steps
-        sampling_param.data_type = "video"
-        if training_args.validation_guidance_scale:
-            sampling_param.guidance_scale = float(
-                training_args.validation_guidance_scale)
-        assert self.seed is not None
-        sampling_param.seed = self.seed
-
-        # Compute num_frames using same formula as validation pipeline
-        # This ensures correct video duration (matches validation)
-        temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-        num_frames = (training_args.num_latent_t -
-                      1) * temporal_compression_factor + 1
-        sampling_param.num_frames = num_frames
-
-        # Calculate n_tokens AFTER updating num_frames (aligns with sampling pipeline)
-        latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
-                        sampling_param.height // 8, sampling_param.width // 8]
-        n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
-
-        # Prepare ForwardBatch initialization parameters for logging
-        sampling_param_dict = shallow_asdict(sampling_param)
-        batch_init_params = {
-            **sampling_param_dict,
-            "latents":
-            None,
-            "generator":
-            str(type(self.validation_random_generator).__name__)
-            if self.validation_random_generator else None,
-            "n_tokens":
-            n_tokens,
-            "eta":
-            0.0,
-            "VSA_sparsity":
-            training_args.VSA_sparsity,
-        }
-
-        # Log ForwardBatch initialization parameters
-        os.makedirs("/mnt/fast-disks/hao_lab/shijie/mylogs", exist_ok=True)
-        log_file = "/mnt/fast-disks/hao_lab/shijie/mylogs/validation_forward_batch_params.json"
-        with open(log_file, "w") as f:
-            json.dump(batch_init_params, f, indent=2, default=str)
-        logger.info(
-            f"Validation ForwardBatch initialization parameters logged to {log_file}"
-        )
-
-        batch = ForwardBatch(
-            **shallow_asdict(sampling_param),
-            latents=None,
-            generator=self.validation_random_generator,
-            n_tokens=n_tokens,
-            eta=0.0,
-            VSA_sparsity=training_args.VSA_sparsity,
-        )
-
-        return batch
-
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         """Initialize the RL training pipeline with algorithm, reward and value models."""
         logger.info("==== RL pipeline: initialize_training_pipeline START ====")
@@ -281,9 +217,9 @@ class RLPipeline(TrainingPipeline):
             num_gpus=training_args.num_gpus,
             pin_cpu_memory=training_args.pin_cpu_memory,
             dit_cpu_offload=dit_cpu_offload)
-        # Override scheduler to use UniPCMultistepScheduler
-        if scheduler is not None:
-            pipeline.modules["scheduler"] = scheduler
+        # # Override scheduler to use UniPCMultistepScheduler
+        # if scheduler is not None:
+        #     pipeline.modules["scheduler"] = scheduler
         return pipeline
 
     def _initialize_value_model(self, training_args: TrainingArgs) -> None:
@@ -369,6 +305,41 @@ class RLPipeline(TrainingPipeline):
                 } for prompt in prompts]
 
         return training_batch
+
+    def _prepare_validation_batch(self, sampling_param: SamplingParam,
+                                  training_args: TrainingArgs,
+                                  validation_batch: dict[str, Any],
+                                  num_inference_steps: int) -> ForwardBatch:
+        sampling_param.prompt = validation_batch['prompt']
+        sampling_param.height = 480 #training_args.num_height
+        sampling_param.width = 832 #training_args.num_width
+        sampling_param.num_inference_steps = num_inference_steps
+        sampling_param.data_type = "video"
+        if training_args.validation_guidance_scale:
+            sampling_param.guidance_scale = float(
+                training_args.validation_guidance_scale)
+        assert self.seed is not None
+        sampling_param.seed = self.seed
+
+        # temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        # num_frames = (training_args.num_latent_t - 1) * temporal_compression_factor + 1
+        sampling_param.num_frames = training_args.num_frames
+
+        # Calculate n_tokens AFTER updating num_frames (aligns with sampling pipeline)
+        # latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
+        #                 sampling_param.height // 8, sampling_param.width // 8]
+        # n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
+
+        batch = ForwardBatch(
+            **shallow_asdict(sampling_param),
+            latents=None,
+            generator=self.validation_random_generator,
+            # n_tokens=n_tokens,
+            eta=0.0,
+            VSA_sparsity=training_args.VSA_sparsity,
+        )
+
+        return batch
 
     @torch.no_grad()
     def _log_validation(self, transformer, training_args, global_step) -> None:
@@ -609,10 +580,9 @@ class RLPipeline(TrainingPipeline):
         #                 height // 8, width // 8]
         # n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
 
-        # Compute num_frames using same formula as validation pipeline
-        # This ensures correct video duration (matches validation)
-        temporal_compression_factor = self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-        num_frames = (num_inference_steps - 1) * temporal_compression_factor + 1
+        # temporal_compression_factor = self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        # num_frames = (num_inference_steps - 1) * temporal_compression_factor + 1
+        num_frames = self.training_args.num_frames
 
         # Set sampling_param fields to match validation pipeline pattern
         sampling_param.prompt = prompts  # Will be set per-batch in loop
@@ -803,56 +773,56 @@ class RLPipeline(TrainingPipeline):
         # Store decoded videos in input_kwargs (same pattern as validation)
         training_batch.input_kwargs["decoded_videos"] = decoded_videos
 
-        # # myregion: Debug: Save decoded video for visual verification (rank 0 only).
-        #         # decoded_videos is already gathered along temporal dim above when sp_world_size > 1.
-        #         if self.global_rank == 0:
-        #             from contextlib import nullcontext
-        #             import numpy as np
-        #             import imageio
-        #             controller = getattr(self, "profiler_controller", None)
-        #             region_cm = (controller.region("my region") if controller is not None
-        #                         and getattr(controller, "has_profiler", False) else
-        #                         nullcontext())
-        #             with region_cm:
-        #                 out_dir = "/mnt/fast-disks/hao_lab/shijie/mylogs"
-        #                 os.makedirs(out_dir, exist_ok=True)
-        #                 batch_size = decoded_videos.shape[0]
-        #                 logger.info(f"Debug region: Saving {batch_size} videos from batch")
-        #                 fps = 24
-        #                 videos_np_list = []
-        #                 for batch_idx in range(batch_size):
-        #                     vid = decoded_videos[batch_idx].detach().to(torch.float32).cpu()
-        #                     vid = vid.permute(1, 2, 3, 0).contiguous()
-        #                     vid_np = vid.numpy()
-        #                     if vid_np.min() < 0.0:
-        #                         vid_np = (vid_np + 1.0) / 2.0
-        #                     vid_np = np.clip(vid_np, 0.0, 1.0)
-        #                     vid_np = (vid_np * 255.0).round().astype(np.uint8)
-        #                     vid_fp64 = vid.detach().to(torch.float64).cpu().numpy()
-        #                     if vid_fp64.min() < 0.0:
-        #                         vid_fp64 = (vid_fp64 + 1.0) / 2.0
-        #                     vid_fp64 = np.clip(vid_fp64, 0.0, 1.0)
-        #                     videos_np_list.append(vid_fp64)
-        #                     out_path = os.path.join(out_dir, f"debug_step0_batch_{batch_idx}.mp4")
-        #                     frames = [vid_np[t] for t in range(vid_np.shape[0])]
-        #                     imageio.mimsave(out_path, frames, fps=fps)
-        #                     logger.info(f"Saved debug video batch_{batch_idx} with {vid_np.shape[0]} frames at {fps} fps (duration: {vid_np.shape[0]/fps:.2f}s) to {out_path}")
-        #                 if batch_size >= 2:
-        #                     logger.info("=" * 80)
-        #                     logger.info("Video Difference Statistics (calculated in float64 for precision):")
-        #                     logger.info("=" * 80)
-        #                     for i in range(batch_size - 1):
-        #                         vid_i, vid_j = videos_np_list[i], videos_np_list[i + 1]
-        #                         diff = np.abs(vid_i.astype(np.float64) - vid_j.astype(np.float64))
-        #                         avg_diff, max_diff = np.mean(diff), np.max(diff)
-        #                         min_diff, sum_diff = np.min(diff), np.sum(diff)
-        #                         total_elements = diff.size
-        #                         logger.info(f"Difference between video {i} and {i+1}:")
-        #                         logger.info(f"  Total elements: {total_elements:,}, Average: {avg_diff:.10f}, Max: {max_diff:.10f}, Min: {min_diff:.10f}, Sum: {sum_diff:.10f}")
-        #                         logger.info("-" * 80)
-        #                     logger.info("=" * 80)
-        #             raise KeyboardInterrupt("Debug stop after saving decoded video (my region).")
-        # # endregion
+        # myregion: Debug: Save decoded video for visual verification (rank 0 only).
+        # decoded_videos is already gathered along temporal dim above when sp_world_size > 1.
+        # if self.global_rank == 0:
+        #     from contextlib import nullcontext
+        #     import numpy as np
+        #     import imageio
+        #     controller = getattr(self, "profiler_controller", None)
+        #     region_cm = (controller.region("my region") if controller is not None
+        #                 and getattr(controller, "has_profiler", False) else
+        #                 nullcontext())
+        #     with region_cm:
+        #         out_dir = "/mnt/fast-disks/hao_lab/shijie/mylogs"
+        #         os.makedirs(out_dir, exist_ok=True)
+        #         batch_size = decoded_videos.shape[0]
+        #         logger.info(f"Debug region: Saving {batch_size} videos from batch")
+        #         fps = 24
+        #         videos_np_list = []
+        #         for batch_idx in range(batch_size):
+        #             vid = decoded_videos[batch_idx].detach().to(torch.float32).cpu()
+        #             vid = vid.permute(1, 2, 3, 0).contiguous()
+        #             vid_np = vid.numpy()
+        #             if vid_np.min() < 0.0:
+        #                 vid_np = (vid_np + 1.0) / 2.0
+        #             vid_np = np.clip(vid_np, 0.0, 1.0)
+        #             vid_np = (vid_np * 255.0).round().astype(np.uint8)
+        #             vid_fp64 = vid.detach().to(torch.float64).cpu().numpy()
+        #             if vid_fp64.min() < 0.0:
+        #                 vid_fp64 = (vid_fp64 + 1.0) / 2.0
+        #             vid_fp64 = np.clip(vid_fp64, 0.0, 1.0)
+        #             videos_np_list.append(vid_fp64)
+        #             out_path = os.path.join(out_dir, f"debug_step0_batch_{batch_idx}.mp4")
+        #             frames = [vid_np[t] for t in range(vid_np.shape[0])]
+        #             imageio.mimsave(out_path, frames, fps=fps)
+        #             logger.info(f"Saved debug video batch_{batch_idx} with {vid_np.shape[0]} frames at {fps} fps (duration: {vid_np.shape[0]/fps:.2f}s) to {out_path}")
+        #         if batch_size >= 2:
+        #             logger.info("=" * 80)
+        #             logger.info("Video Difference Statistics (calculated in float64 for precision):")
+        #             logger.info("=" * 80)
+        #             for i in range(batch_size - 1):
+        #                 vid_i, vid_j = videos_np_list[i], videos_np_list[i + 1]
+        #                 diff = np.abs(vid_i.astype(np.float64) - vid_j.astype(np.float64))
+        #                 avg_diff, max_diff = np.mean(diff), np.max(diff)
+        #                 min_diff, sum_diff = np.min(diff), np.sum(diff)
+        #                 total_elements = diff.size
+        #                 logger.info(f"Difference between video {i} and {i+1}:")
+        #                 logger.info(f"  Total elements: {total_elements:,}, Average: {avg_diff:.10f}, Max: {max_diff:.10f}, Min: {min_diff:.10f}, Sum: {sum_diff:.10f}")
+        #                 logger.info("-" * 80)
+        #             logger.info("=" * 80)
+        #     raise KeyboardInterrupt("Debug stop after saving decoded video (my region).")
+        # endregion
 
         logger.info("==== RL pipeline: collect_trajectories FINISH ====")
         return training_batch
@@ -1394,7 +1364,7 @@ class RLPipeline(TrainingPipeline):
         world_size = max(1, getattr(self, "world_size", 1))
         # Loop over timesteps - do backward() after each timestep to free activations
         # This matches flow_grpo's approach and prevents OOM from accumulating activations
-        for j in range(num_steps):
+        for j in range(int(num_steps*0.99)):
             # Get latents and next_latents for this timestep
             latents_j = latents[:, j]  # [B, C, T, H, W]
             next_latents_j = latents[:, j + 1]  # [B, C, T, H, W]
@@ -1548,6 +1518,10 @@ class RLPipeline(TrainingPipeline):
         if kl_beta == 0:
             kl_loss = torch.tensor(0.0, device=policy_loss.device)
         total_loss = torch.stack(total_losses).mean()
+
+        # myregion debug
+        logger.info(f"importance_ratios: {importance_ratios}")
+        # endregion
 
         # Compute metrics
         metrics = {
