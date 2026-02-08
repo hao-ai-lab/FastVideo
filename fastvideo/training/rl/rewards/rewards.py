@@ -260,6 +260,7 @@ def create_reward_models(
         - "video_text_alignment": CLIP-based video-text similarity - TODO
         - "temporal_coherence": Frame-to-frame consistency - TODO
         - "motion_quality": Motion smoothness and realism - TODO
+        - "video_science": VideoScience / science-related video quality - TODO
         - "dummy": Random rewards for testing (VIDEO-aware)
 
     NOT Supported (Image-Only):
@@ -319,6 +320,12 @@ def create_reward_models(
             # TODO: Implement MotionQuality reward model (Phase 2)
             logger.warning(
                 "MotionQuality reward not implemented yet, using DummyRewardModel"
+            )
+            model = DummyRewardModel()
+        elif reward_type == "videoscience":
+            # TODO: Implement VideoScience reward model (Phase 2)
+            logger.warning(
+                "VideoScience reward not implemented yet, using DummyRewardModel"
             )
             model = DummyRewardModel()
         else:
