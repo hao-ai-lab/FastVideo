@@ -86,13 +86,13 @@ def main():
 
     # 1. Encode prompt (SGLang text encoder)
     print("Loading SGLang text encoder and encoding prompt ...")
-    tokenizer, _ = ComponentLoader.for_module_type("tokenizer", "transformers").load(
+    tokenizer, _ = ComponentLoader.for_component_type("tokenizer", "transformers").load(
         server_args.model_paths["tokenizer"],
         server_args,
         "tokenizer",
         "transformers",
     )
-    text_encoder, _ = ComponentLoader.for_module_type("text_encoder", "transformers").load(
+    text_encoder, _ = ComponentLoader.for_component_type("text_encoder", "transformers").load(
         server_args.model_paths["text_encoder"],
         server_args,
         "text_encoder",
@@ -129,7 +129,7 @@ def main():
         compute_empirical_mu,
     )
 
-    scheduler, _ = ComponentLoader.for_module_type("scheduler", "diffusers").load(
+    scheduler, _ = ComponentLoader.for_component_type("scheduler", "diffusers").load(
         server_args.model_paths["scheduler"],
         server_args,
         "scheduler",
@@ -159,7 +159,7 @@ def main():
 
     # 5. Load SGLang transformer and run step 0
     print("Loading SGLang transformer ...")
-    transformer, _ = ComponentLoader.for_module_type("transformer", "diffusers").load(
+    transformer, _ = ComponentLoader.for_component_type("transformer", "diffusers").load(
         server_args.model_paths["transformer"],
         server_args,
         "transformer",
