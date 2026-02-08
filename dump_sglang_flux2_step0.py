@@ -79,7 +79,7 @@ def main():
         flux2_pack_latents,
     )
     from sglang.multimodal_gen.runtime.loader.component_loader import ComponentLoader
-    from sglang.multimodal_gen.runtime.server_args import ServerArgs
+    from sglang.multimodal_gen.runtime.server_args import ServerArgs, set_global_server_args
     from diffusers.utils.torch_utils import randn_tensor
 
     pipeline_config = Flux2KleinPipelineConfig()
@@ -97,6 +97,7 @@ def main():
         "transformer": os.path.join(model_path, "transformer"),
         "scheduler": os.path.join(model_path, "scheduler"),
     }
+    set_global_server_args(server_args)
 
     # 1. Encode prompt (SGLang text encoder)
     print("Loading SGLang text encoder and encoding prompt ...")
