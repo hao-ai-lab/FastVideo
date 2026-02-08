@@ -1,7 +1,7 @@
 #!/bin/bash
 
 GPU_NUM=1
-MODEL_PATH="/home/d1su/codes/FastVideo/converted_weights/ltx2-base"
+MODEL_PATH="Davids048/LTX2-Base-Diffusers"
 # DATASET_PATH="data/overfit"
 DATASET_PATH="data/crush-smol"
 OUTPUT_DIR="$DATASET_PATH"
