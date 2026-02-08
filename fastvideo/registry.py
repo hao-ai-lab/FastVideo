@@ -301,14 +301,20 @@ def _register_configs() -> None:
         ],
     )
 
-    # Hunyuan
+    # Hunyuan (excludes gamecraft, hyworld, and versioned models)
     register_configs(
         sampling_param_cls=HunyuanSamplingParam,
         pipeline_config_cls=HunyuanConfig,
         hf_model_paths=[
             "hunyuanvideo-community/HunyuanVideo",
         ],
-        model_detectors=[lambda path: "hunyuan" in path.lower()],
+        model_detectors=[
+            lambda path: "hunyuan" in path.lower() 
+            and "gamecraft" not in path.lower()
+            and "hyworld" not in path.lower()
+            and "1.5" not in path.lower()
+            and "1-5" not in path.lower()
+        ],
     )
     register_configs(
         sampling_param_cls=FastHunyuanSamplingParam,
