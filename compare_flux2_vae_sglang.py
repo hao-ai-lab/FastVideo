@@ -59,6 +59,9 @@ def main():
     os.environ.setdefault("MASTER_PORT", "29501")
 
     model_path = args.model_path or _get_vae_path(MODEL_ID)
+    # FastVideoArgs expects repo root (model_index.json); VAELoader expects vae component path
+    root = os.path.dirname(model_path) if os.path.basename(model_path) == "vae" else model_path
+    vae_path = model_path if os.path.basename(model_path) == "vae" else os.path.join(root, "vae")
     device = args.device
     dtype = torch.float32  # VAE typically fp32 for parity
     h, w = args.height, args.width
@@ -78,13 +81,13 @@ def main():
     from fastvideo.utils import PRECISION_TO_TYPE
 
     fv_args = FastVideoArgs.from_kwargs(
-        model_path=model_path,
+        model_path=root,
         pipeline_config=Flux2KleinPipelineConfig(),
     )
     fv_args.pipeline_config.vae_precision = "fp32"
     fv_args.pipeline_config.vae_tiling = False
     loader = VAELoader()
-    fv_vae = loader.load(model_path, fv_args)
+    fv_vae = loader.load(vae_path, fv_args)
     fv_vae = fv_vae.to(device).eval()
 
     # Flux2 VAE expects normalized latent; scale by config
@@ -119,11 +122,11 @@ def main():
 
             print("Loading SGLang Flux2 VAE ...")
             sgl_args = ServerArgs(
-                model_path=model_path,
+                model_path=root,
                 pipeline_config=SGLangFlux2KleinConfig(),
             )
             sgl_loader = SGLangVAELoader()
-            sgl_vae = sgl_loader.load(model_path, sgl_args)
+            sgl_vae = sgl_loader.load(vae_path, sgl_args)
             sgl_vae = sgl_vae.to(device).eval()
 
             with torch.no_grad():
@@ -140,8 +143,7 @@ def main():
             from diffusers import Flux2KleinPipeline
         except ImportError:
             from diffusers.pipelines.flux2 import Flux2KleinPipeline
-        base_path = os.path.dirname(model_path) if os.path.basename(model_path) == "vae" else model_path
-        load_path = base_path if os.path.isdir(base_path) else MODEL_ID
+        load_path = root if os.path.isdir(root) else MODEL_ID
         print("Loading diffusers Flux2 VAE (via pipeline) for reference ...")
         pipe = Flux2KleinPipeline.from_pretrained(load_path, torch_dtype=dtype)
         ref_vae = pipe.vae.to(device).eval()
