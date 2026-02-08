@@ -123,7 +123,9 @@ def main():
     if attention_mask is not None:
         attention_mask = attention_mask.to(device)
 
-    with torch.no_grad():
+    from sglang.multimodal_gen.runtime.managers.forward_context import set_forward_context
+
+    with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
         enc_out = text_encoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
