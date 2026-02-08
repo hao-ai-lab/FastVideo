@@ -70,7 +70,10 @@ def main():
     os.environ.setdefault("MASTER_PORT", "29500")
 
     model_path = args.model_path or _get_text_encoder_path(MODEL_ID)
-    tokenizer_path = model_path  # same dir for HF layout
+    # Tokenizer is at repo root or in tokenizer/ subdir, not in text_encoder/
+    root = os.path.dirname(model_path) if os.path.basename(model_path) == "text_encoder" else model_path
+    tokenizer_dir = os.path.join(root, "tokenizer")
+    tokenizer_path = tokenizer_dir if os.path.isdir(tokenizer_dir) else root
     device = args.device
     prompt = args.prompt
     dtype = torch.bfloat16
