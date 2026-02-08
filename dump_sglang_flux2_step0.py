@@ -59,11 +59,7 @@ def main():
         _prepare_text_ids,
         flux2_pack_latents,
     )
-    from sglang.multimodal_gen.runtime.loader.component_loader import (
-        TextEncoderLoader,
-        TokenizerLoader,
-        TransformerLoader,
-    )
+    from sglang.multimodal_gen.runtime.loader.component_loader import PipelineComponentLoader
     from sglang.multimodal_gen.runtime.server_args import ServerArgs
     from diffusers.utils.torch_utils import randn_tensor
 
@@ -84,20 +80,18 @@ def main():
 
     # 1. Encode prompt (SGLang text encoder)
     print("Loading SGLang text encoder and encoding prompt ...")
-    tokenizer_loader = TokenizerLoader()
-    tokenizer = tokenizer_loader.load(
-        server_args.model_paths["tokenizer"],
-        server_args,
-        "tokenizer",
-        "transformers",
-    )[0]
-    text_encoder_loader = TextEncoderLoader()
-    text_encoder = text_encoder_loader.load(
-        server_args.model_paths["text_encoder"],
-        server_args,
-        "text_encoder",
-        "transformers",
-    )[0]
+    tokenizer, _ = PipelineComponentLoader.load_module(
+        module_name="tokenizer",
+        component_model_path=server_args.model_paths["tokenizer"],
+        transformers_or_diffusers="transformers",
+        server_args=server_args,
+    )
+    text_encoder, _ = PipelineComponentLoader.load_module(
+        module_name="text_encoder",
+        component_model_path=server_args.model_paths["text_encoder"],
+        transformers_or_diffusers="transformers",
+        server_args=server_args,
+    )
     text_encoder = text_encoder.to(device).to(dtype).eval()
 
     tok_out = pipeline_config.tokenize_prompt([[PROMPT]], tokenizer, {})
@@ -128,17 +122,13 @@ def main():
     from sglang.multimodal_gen.runtime.pipelines.flux_2 import (
         compute_empirical_mu,
     )
-    from sglang.multimodal_gen.runtime.loader.component_loader import (
-        get_component_loader_for_module_type,
-    )
 
-    sched_loader = get_component_loader_for_module_type("scheduler", "diffusers")
-    scheduler = sched_loader.load(
-        server_args.model_paths["scheduler"],
-        server_args,
-        "scheduler",
-        "diffusers",
-    )[0]
+    scheduler, _ = PipelineComponentLoader.load_module(
+        module_name="scheduler",
+        component_model_path=server_args.model_paths["scheduler"],
+        transformers_or_diffusers="diffusers",
+        server_args=server_args,
+    )
     scheduler = scheduler.to(device)
 
     image_seq_len = latents.shape[1]
@@ -163,13 +153,12 @@ def main():
 
     # 5. Load SGLang transformer and run step 0
     print("Loading SGLang transformer ...")
-    transformer_loader = TransformerLoader()
-    transformer = transformer_loader.load(
-        server_args.model_paths["transformer"],
-        server_args,
-        "transformer",
-        "diffusers",
-    )[0]
+    transformer, _ = PipelineComponentLoader.load_module(
+        module_name="transformer",
+        component_model_path=server_args.model_paths["transformer"],
+        transformers_or_diffusers="diffusers",
+        server_args=server_args,
+    )
     transformer = transformer.to(device).eval()
 
     # Compute freqs_cis
