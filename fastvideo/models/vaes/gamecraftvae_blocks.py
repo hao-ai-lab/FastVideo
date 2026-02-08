@@ -191,7 +191,8 @@ class GameCraftVAEAttention(nn.Module):
         attn = torch.matmul(q, k.transpose(-2, -1)) * scale
         if attention_mask is not None:
             attn = attn + attention_mask
-        attn = F.softmax(attn, dim=-1)
+        # Official uses upcast_softmax=True: compute softmax in fp32 for numerical stability
+        attn = F.softmax(attn.float(), dim=-1).to(q.dtype)
         hidden_states = torch.matmul(attn, v)
         hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, seq_len, -1)
         hidden_states = self.to_out(hidden_states) + residual

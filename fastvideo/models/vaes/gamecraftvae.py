@@ -289,6 +289,21 @@ class GameCraftVAE(nn.Module):
         self.post_quant_conv = nn.Conv3d(
             arch.latent_channels, arch.latent_channels, kernel_size=1
         )
+        
+        # Scaling factor for latent normalization (required for decoding stage)
+        self.scaling_factor = arch.scaling_factor
+        
+        # Tiling support - matches official GameCraft VAE settings
+        self._tiling_enabled = False
+        self.tile_overlap_factor = 0.25
+        
+        # Temporal tiling params (for >64 output frames)
+        self.tile_sample_min_tsize = 64  # Minimum sample temporal size (video frames)
+        self.tile_latent_min_tsize = 16  # = 64 // 4 (time_compression_ratio)
+        
+        # Spatial tiling params - use small tiles to reduce memory
+        self.tile_sample_min_size = 256  # Minimum spatial tile size in pixel space
+        self.tile_latent_min_size = 32   # = 256 // 8 (spatial_compression_ratio)
 
     def encode(self, x: torch.Tensor) -> AutoencoderKLOutput:
         """Encode to latent distribution."""
@@ -297,11 +312,151 @@ class GameCraftVAE(nn.Module):
         posterior = DiagonalGaussianDistribution(moments)
         return AutoencoderKLOutput(latent_dist=posterior)
 
-    def decode(self, z: torch.Tensor) -> DecoderOutput:
-        """Decode from latents."""
+    def decode(self, z: torch.Tensor) -> torch.Tensor:
+        """Decode from latents.
+        
+        Args:
+            z: Latent tensor [B, C, T, H, W]
+            
+        Returns:
+            Decoded tensor [B, C, T_out, H_out, W_out]
+        """
+        # Use tiled decode for memory efficiency when enabled
+        if self._tiling_enabled:
+            # Check if temporal tiling needed (>64 output frames)
+            if z.shape[2] > self.tile_latent_min_tsize:
+                return self._temporal_tiled_decode(z)
+            # Check if spatial tiling needed (large H or W)
+            if z.shape[-1] > self.tile_latent_min_size or z.shape[-2] > self.tile_latent_min_size:
+                return self._spatial_tiled_decode(z)
+        
         z = self.post_quant_conv(z)
         dec = self.decoder(z, latent_embeds=None)
-        return DecoderOutput(sample=dec)
+        return dec
+
+    def _temporal_tiled_decode(self, z: torch.Tensor) -> torch.Tensor:
+        """Decode latents in temporal tiles with overlapping and blending.
+        
+        Based on official GameCraft temporal_tiled_decode implementation.
+        Only used when T > tile_latent_min_tsize (16).
+        """
+        B, C, T, H, W = z.shape
+        
+        # Use the pre-configured tiling parameters
+        overlap_size = int(self.tile_latent_min_tsize * (1 - self.tile_overlap_factor))
+        blend_extent = int(self.tile_sample_min_tsize * self.tile_overlap_factor)
+        t_limit = self.tile_sample_min_tsize - blend_extent
+        
+        row = []
+        for i in range(0, T, overlap_size):
+            tile = z[:, :, i : i + self.tile_latent_min_tsize + 1, :, :]
+            tile = self.post_quant_conv(tile)
+            decoded = self.decoder(tile, latent_embeds=None)
+            if i > 0:
+                decoded = decoded[:, :, 1:, :, :]  # Skip first frame for non-first tiles
+            row.append(decoded)
+        
+        # Blend overlapping regions
+        result_row = []
+        for i, tile in enumerate(row):
+            if i > 0:
+                tile = self._blend_t(row[i - 1], tile, blend_extent)
+                result_row.append(tile[:, :, :t_limit, :, :])
+            else:
+                result_row.append(tile[:, :, :t_limit+1, :, :])
+        
+        return torch.cat(result_row, dim=2)
+    
+    def _spatial_tiled_decode(self, z: torch.Tensor) -> torch.Tensor:
+        """Decode latents in spatial tiles with overlapping and blending.
+        
+        Based on official GameCraft spatial_tiled_decode implementation.
+        """
+        overlap_size = int(self.tile_latent_min_size * (1 - self.tile_overlap_factor))
+        blend_extent = int(self.tile_sample_min_size * self.tile_overlap_factor)
+        row_limit = self.tile_sample_min_size - blend_extent
+        
+        # Split z into overlapping tiles and decode them separately
+        rows = []
+        for i in range(0, z.shape[-2], overlap_size):
+            row = []
+            for j in range(0, z.shape[-1], overlap_size):
+                tile = z[:, :, :, i: i + self.tile_latent_min_size, j: j + self.tile_latent_min_size]
+                tile = self.post_quant_conv(tile)
+                decoded = self.decoder(tile, latent_embeds=None)
+                row.append(decoded)
+            rows.append(row)
+        
+        # Blend overlapping regions
+        result_rows = []
+        for i, row in enumerate(rows):
+            result_row = []
+            for j, tile in enumerate(row):
+                # Blend with above tile and left tile
+                if i > 0:
+                    tile = self._blend_v(rows[i - 1][j], tile, blend_extent)
+                if j > 0:
+                    tile = self._blend_h(row[j - 1], tile, blend_extent)
+                result_row.append(tile[:, :, :, :row_limit, :row_limit])
+            result_rows.append(torch.cat(result_row, dim=-1))
+        
+        return torch.cat(result_rows, dim=-2)
+    
+    def _blend_t(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
+        """Blend two tensors along temporal dimension."""
+        blend_extent = min(a.shape[-3], b.shape[-3], blend_extent)
+        if blend_extent == 0:
+            return b
+        
+        a_region = a[..., -blend_extent:, :, :]
+        b_region = b[..., :blend_extent, :, :]
+        
+        weights = torch.arange(blend_extent, device=a.device, dtype=a.dtype) / blend_extent
+        weights = weights.view(1, 1, blend_extent, 1, 1)
+        
+        blended = a_region * (1 - weights) + b_region * weights
+        b[..., :blend_extent, :, :] = blended
+        return b
+    
+    def _blend_v(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
+        """Blend two tensors along vertical (height) dimension."""
+        blend_extent = min(a.shape[-2], b.shape[-2], blend_extent)
+        if blend_extent == 0:
+            return b
+        
+        a_region = a[..., -blend_extent:, :]
+        b_region = b[..., :blend_extent, :]
+        
+        weights = torch.arange(blend_extent, device=a.device, dtype=a.dtype) / blend_extent
+        weights = weights.view(1, 1, 1, blend_extent, 1)
+        
+        blended = a_region * (1 - weights) + b_region * weights
+        b[..., :blend_extent, :] = blended
+        return b
+    
+    def _blend_h(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
+        """Blend two tensors along horizontal (width) dimension."""
+        blend_extent = min(a.shape[-1], b.shape[-1], blend_extent)
+        if blend_extent == 0:
+            return b
+        
+        a_region = a[..., -blend_extent:]
+        b_region = b[..., :blend_extent]
+        
+        weights = torch.arange(blend_extent, device=a.device, dtype=a.dtype) / blend_extent
+        weights = weights.view(1, 1, 1, 1, blend_extent)
+        
+        blended = a_region * (1 - weights) + b_region * weights
+        b[..., :blend_extent] = blended
+        return b
+
+    def enable_tiling(self) -> None:
+        """Enable tiling for large inputs."""
+        self._tiling_enabled = True
+
+    def disable_tiling(self) -> None:
+        """Disable tiling."""
+        self._tiling_enabled = False
 
 
 EntryClass = GameCraftVAE
