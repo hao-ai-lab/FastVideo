@@ -176,6 +176,8 @@ def main():
         txt_ids = txt_ids[0]
 
     # 5. Load SGLang transformer and run step 0
+    # Ensure Flux2 packed in_channels=128 (override any default that could cause x_embedder shape mismatch)
+    server_args.pipeline_config.dit_config.arch_config.in_channels = 128
     print("Loading SGLang transformer ...")
     transformer, _ = ComponentLoader.for_component_type("transformer", "diffusers").load(
         server_args.model_paths["transformer"],
