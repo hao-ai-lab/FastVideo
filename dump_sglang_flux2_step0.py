@@ -71,9 +71,8 @@ def main():
 
     model_path = _get_model_path(MODEL_ID)
 
-    # Minimal ServerArgs for loading components
+    # Use ServerArgs.from_kwargs so we get the same pipeline config as sglang generate
     from sglang.multimodal_gen.configs.pipeline_configs.flux import (
-        Flux2KleinPipelineConfig,
         _prepare_latent_ids,
         _prepare_text_ids,
         flux2_pack_latents,
@@ -82,15 +81,17 @@ def main():
     from sglang.multimodal_gen.runtime.server_args import ServerArgs, set_global_server_args
     from diffusers.utils.torch_utils import randn_tensor
 
-    pipeline_config = Flux2KleinPipelineConfig()
-    pipeline_config.dit_precision = "bf16"
-    pipeline_config.vae_config.post_init()
-    server_args = ServerArgs(
+    server_args = ServerArgs.from_kwargs(
         model_path=model_path,
-        pipeline_config=pipeline_config,
+        dit_precision="bf16",
         hsdp_shard_dim=1,
         hsdp_replicate_dim=1,
     )
+    pipeline_config = server_args.pipeline_config
+    pipeline_config.dit_precision = "bf16"
+    pipeline_config.vae_config.post_init()
+    # Flux2 Klein uses 128-channel packed latents; ensure dit_config knows before latent prep
+    pipeline_config.dit_config.arch_config.in_channels = 128
     server_args.model_paths = {
         "text_encoder": os.path.join(model_path, "text_encoder"),
         "tokenizer": os.path.join(model_path, "tokenizer"),
@@ -176,8 +177,6 @@ def main():
         txt_ids = txt_ids[0]
 
     # 5. Load SGLang transformer and run step 0
-    # Ensure Flux2 packed in_channels=128 (override any default that could cause x_embedder shape mismatch)
-    server_args.pipeline_config.dit_config.arch_config.in_channels = 128
     print("Loading SGLang transformer ...")
     transformer, _ = ComponentLoader.for_component_type("transformer", "diffusers").load(
         server_args.model_paths["transformer"],
