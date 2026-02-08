@@ -75,15 +75,17 @@ class GameCraftDenoisingStage(DenoisingStage):
             fastvideo_args.model_loaded["transformer"] = True
 
         # Extract GameCraft-specific parameters
-        camera_states = getattr(batch, "camera_states", None) or batch.extra.get(
-            "camera_states", None
-        )
-        gt_latents = getattr(batch, "gt_latents", None) or batch.extra.get(
-            "gt_latents", None
-        )
-        conditioning_mask = getattr(batch, "conditioning_mask", None) or batch.extra.get(
-            "conditioning_mask", None
-        )
+        camera_states = getattr(batch, "camera_states", None)
+        if camera_states is None:
+            camera_states = batch.extra.get("camera_states", None)
+        
+        gt_latents = getattr(batch, "gt_latents", None)
+        if gt_latents is None:
+            gt_latents = batch.extra.get("gt_latents", None)
+        
+        conditioning_mask = getattr(batch, "conditioning_mask", None)
+        if conditioning_mask is None:
+            conditioning_mask = batch.extra.get("conditioning_mask", None)
 
         # Prepare extra step kwargs for scheduler
         extra_step_kwargs = self.prepare_extra_func_kwargs(
@@ -168,6 +170,11 @@ class GameCraftDenoisingStage(DenoisingStage):
         # Move camera states to device if provided
         if camera_states is not None:
             camera_states = camera_states.to(device=latents.device, dtype=target_dtype)
+            
+        # Debug logging
+        logger.info(f"[GameCraft DEBUG] latents shape: {latents.shape}, min/max: {latents.min():.4f}/{latents.max():.4f}")
+        logger.info(f"[GameCraft DEBUG] camera_states: {camera_states.shape if camera_states is not None else None}")
+        logger.info(f"[GameCraft DEBUG] prompt_embeds[0] shape: {prompt_embeds[0].shape}")
 
         # Initialize lists for trajectory
         trajectory_timesteps: list[torch.Tensor] = []
@@ -200,18 +207,9 @@ class GameCraftDenoisingStage(DenoisingStage):
                     latent_model_input, t
                 )
 
-                # Prepare guidance embedding
-                guidance_expand = (
-                    torch.tensor(
-                        [fastvideo_args.pipeline_config.embedded_cfg_scale]
-                        * latent_model_input.shape[0],
-                        dtype=torch.float32,
-                        device=get_local_torch_device(),
-                    ).to(target_dtype)
-                    * 1000.0
-                    if fastvideo_args.pipeline_config.embedded_cfg_scale is not None
-                    else None
-                )
+                # Official GameCraft does NOT use embedded guidance (guidance=None)
+                # It uses standard CFG with guidance_scale instead
+                guidance_expand = None
 
                 # Run transformer with camera conditioning
                 with torch.autocast(
@@ -234,6 +232,10 @@ class GameCraftDenoisingStage(DenoisingStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                         )
+                        
+                        # Debug: log first step output
+                        if i == 0:
+                            logger.info(f"[GameCraft DEBUG] Step 0 noise_pred: shape={noise_pred.shape}, min/max={noise_pred.min():.4f}/{noise_pred.max():.4f}")
 
                     # Classifier-free guidance
                     if batch.do_classifier_free_guidance:
@@ -278,6 +280,9 @@ class GameCraftDenoisingStage(DenoisingStage):
                 ):
                     progress_bar.update()
 
+        # Debug: log final latents
+        logger.info(f"[GameCraft DEBUG] Final latents: shape={latents.shape}, min/max={latents.min():.4f}/{latents.max():.4f}")
+        
         # Store final latents and trajectory
         batch.latents = latents
         if batch.return_trajectory_latents:
@@ -286,14 +291,17 @@ class GameCraftDenoisingStage(DenoisingStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify that required inputs are present."""
-        return V.all_(
-            V.has_latents(batch),
-            V.has_prompt_embeds(batch),
-            V.has_timesteps(batch),
-        )
+        result = VerificationResult()
+        result.add_check("timesteps", batch.timesteps, [V.is_tensor, V.min_dims(1)])
+        result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
+        result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
+        result.add_check("num_inference_steps", batch.num_inference_steps, V.positive_int)
+        return result
 
-    def verify_output(self, batch: ForwardBatch) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify that outputs are properly set."""
-        return V.has_latents(batch)
+        result = VerificationResult()
+        result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
+        return result

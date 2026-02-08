@@ -20,6 +20,8 @@ from fastvideo.pipelines.stages.image_encoding import (
     ImageEncodingStage, MatrixGameImageEncodingStage, RefImageEncodingStage,
     ImageVAEEncodingStage, VideoVAEEncodingStage, Hy15ImageEncodingStage,
     HYWorldImageEncodingStage)
+from fastvideo.pipelines.stages.gamecraft_image_encoding import (
+    GameCraftImageVAEEncodingStage)
 from fastvideo.pipelines.stages.input_validation import InputValidationStage
 from fastvideo.pipelines.stages.latent_preparation import (
     Cosmos25LatentPreparationStage, CosmosLatentPreparationStage,
@@ -83,6 +85,7 @@ __all__ = [
     "RefImageEncodingStage",
     "ImageVAEEncodingStage",
     "VideoVAEEncodingStage",
+    "GameCraftImageVAEEncodingStage",
     "TextEncodingStage",
     "Cosmos25TextEncodingStage",
     "StepvideoPromptEncodingStage",
