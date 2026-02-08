@@ -2,14 +2,14 @@
 """
 Compare FastVideo vs reference (diffusers or SGLang) Flux2 Klein text encoder outputs.
 
-Uses same prompt; compares prompt_embeds (layers 9, 18, 27 stacked).
-Reference: diffusers Flux2KleinPipeline.encode_prompt (official).
-Optionally uses SGLang if PYTHONPATH includes sglang and --use-sglang is passed.
+Uses same tokenized input (chat template) for both; compares prompt_embeds (layers 9, 18, 27 stacked).
+Reference: diffusers text_encoder with same input_ids/attention_mask (optionally SGLang with --use-sglang).
 
   python compare_flux2_text_encoder_sglang.py
   python compare_flux2_text_encoder_sglang.py --use-sglang  # requires SGLang
 """
 import argparse
+import inspect
 import os
 import sys
 
@@ -163,7 +163,8 @@ def main():
             args.use_sglang = False
 
     if ref_prompt_embeds is None:
-        # Use diffusers Flux2KleinPipeline.encode_prompt
+        # Use diffusers text_encoder with same input_ids/attention_mask as FastVideo
+        # (so we compare same input -> encoder output, not different tokenization)
         try:
             from diffusers import Flux2KleinPipeline
         except ImportError:
@@ -175,13 +176,17 @@ def main():
             torch_dtype=dtype,
         )
         pipe = pipe.to(device)
-        ref_prompt_embeds, _ = pipe.encode_prompt(
-            prompt=prompt,
-            device=device,
-            num_images_per_prompt=1,
-            max_sequence_length=512,
-            text_encoder_out_layers=(9, 18, 27),
-        )
+        enc = pipe.text_encoder
+        enc_kwargs = {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "output_hidden_states": True,
+        }
+        if "use_cache" in inspect.signature(enc.forward).parameters:
+            enc_kwargs["use_cache"] = False
+        with torch.no_grad():
+            ref_outputs = enc(**enc_kwargs)
+        ref_prompt_embeds = flux2_klein_postprocess(ref_outputs)
         ref_prompt_embeds = ref_prompt_embeds.detach().cpu().float()
         ref_name = "diffusers"
 
