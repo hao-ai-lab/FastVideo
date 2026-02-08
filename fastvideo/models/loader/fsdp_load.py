@@ -22,7 +22,10 @@ from torch.nn.modules.module import _IncompatibleKeys
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.utils import (get_param_names_mapping,
                                            hf_to_custom_state_dict)
-from fastvideo.models.loader.weight_utils import safetensors_weights_iterator
+from fastvideo.models.loader.weight_utils import (
+    safetensors_weights_iterator,
+    unified_checkpoint_weights_iterator,
+)
 from fastvideo.utils import set_mixed_precision_policy, is_pin_memory_available
 
 logger = init_logger(__name__)
@@ -75,6 +78,7 @@ def maybe_load_fsdp_model(
     pin_cpu_memory: bool = True,
     enable_torch_compile: bool = False,
     torch_compile_kwargs: dict[str, Any] | None = None,
+    weight_key_prefix: str | None = None,
 ) -> torch.nn.Module:
     """
     Load the model with FSDP if is training, else load the model without FSDP.
@@ -136,7 +140,15 @@ def maybe_load_fsdp_model(
                     fsdp_shard_conditions=model._fsdp_shard_conditions,
                     pin_cpu_memory=pin_cpu_memory)
 
-    weight_iterator = safetensors_weights_iterator(weight_dir_list)
+    # Support unified checkpoints (model.safetensors or model.ckpt)
+    if len(weight_dir_list) == 1 and weight_dir_list[0].endswith(".ckpt"):
+        weight_iterator = unified_checkpoint_weights_iterator(
+            weight_dir_list[0], to_cpu=not cpu_offload, key_prefix=weight_key_prefix
+        )
+    else:
+        weight_iterator = safetensors_weights_iterator(
+            weight_dir_list, key_prefix=weight_key_prefix
+        )
     param_names_mapping_fn = get_param_names_mapping(model.param_names_mapping)
     load_model_from_full_model_state_dict(
         model,

@@ -125,6 +125,17 @@ rocm = [
     "amdsmi",
 ]
 
+# Stable Audio: run "pip install stable-audio-tools --no-deps" first (full deps fail on Py3.12),
+# then "pip install .[stable-audio]" for inference deps.
+stable-audio = [
+    "k-diffusion>=0.1.1",
+    "v-diffusion-pytorch>=0.0.2",
+    "prefigure>=0.0.9",
+    "ema-pytorch>=0.2.3",
+    "local-attention>=1.8.6",
+    "alias-free-torch>=0.0.6",
+]
+
 [project.scripts]
 fastvideo = "fastvideo.entrypoints.cli.main:main"
 
