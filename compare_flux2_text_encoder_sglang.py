@@ -78,29 +78,74 @@ def main():
     device = args.device
     prompt = args.prompt
     dtype = torch.bfloat16
+    load_path = root if os.path.isdir(root) else MODEL_ID
 
-    # Tokenize once (identical input for both)
-    from transformers import AutoTokenizer
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
-    # Use chat template to match typical Flux2 Klein usage
     messages = [{"role": "user", "content": prompt}]
-    try:
-        text = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
+    max_length = 512
+    diffusers_pipe = None
+
+    if args.use_sglang:
+        # SGLang path: tokenize with AutoTokenizer (same as FastVideo's usual tokenizer)
+        from transformers import AutoTokenizer
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
+        try:
+            text = tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
+            )
+        except TypeError:
+            text = tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+        inputs = tokenizer(
+            text,
+            padding="max_length",
+            truncation=True,
+            max_length=max_length,
+            return_tensors="pt",
         )
-    except TypeError:
-        text = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
+        input_ids = inputs["input_ids"].to(device)
+        attention_mask = inputs["attention_mask"].to(device)
+    else:
+        # Diffusers path: load pipeline first and tokenize with pipeline's tokenizer
+        # so both encoders see token IDs from the same tokenizer as the pipeline's text_encoder
+        try:
+            from diffusers import Flux2KleinPipeline
+        except ImportError:
+            from diffusers.pipelines.flux2 import Flux2KleinPipeline
+        print("Loading diffusers Flux2KleinPipeline (for tokenizer + reference encoder) ...")
+        pipe = Flux2KleinPipeline.from_pretrained(
+            load_path,
+            torch_dtype=dtype,
         )
-    inputs = tokenizer(
-        text,
-        padding="max_length",
-        truncation=True,
-        max_length=512,
-        return_tensors="pt",
-    )
-    input_ids = inputs["input_ids"].to(device)
-    attention_mask = inputs["attention_mask"].to(device)
+        pipe = pipe.to(device)
+        diffusers_pipe = pipe
+        pipe_tok = pipe.tokenizer
+        # apply_chat_template: batch of conversations; single prompt -> one conversation
+        messages_batch = [messages]
+        try:
+            inputs = pipe_tok.apply_chat_template(
+                messages_batch,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_dict=True,
+                return_tensors="pt",
+                padding="max_length",
+                truncation=True,
+                max_length=max_length,
+            )
+        except TypeError:
+            inputs = pipe_tok.apply_chat_template(
+                messages_batch,
+                tokenize=True,
+                add_generation_prompt=True,
+                return_dict=True,
+                return_tensors="pt",
+                padding="max_length",
+                truncation=True,
+                max_length=max_length,
+            )
+        input_ids = inputs["input_ids"].to(device)
+        attention_mask = inputs["attention_mask"].to(device)
 
     # 1. FastVideo text encoder
     print("Loading FastVideo text encoder ...")
@@ -163,20 +208,58 @@ def main():
             args.use_sglang = False
 
     if ref_prompt_embeds is None:
-        # Use diffusers text_encoder with same input_ids/attention_mask as FastVideo
-        # (so we compare same input -> encoder output, not different tokenization)
-        try:
-            from diffusers import Flux2KleinPipeline
-        except ImportError:
-            from diffusers.pipelines.flux2 import Flux2KleinPipeline
-        load_path = root if os.path.isdir(root) else MODEL_ID
-        print("Loading diffusers Flux2KleinPipeline for reference ...")
-        pipe = Flux2KleinPipeline.from_pretrained(
-            load_path,
-            torch_dtype=dtype,
-        )
-        pipe = pipe.to(device)
+        # Diffusers reference: use pipeline (already loaded in diffusers path) or load and re-tokenize on SGLang fallback
+        if diffusers_pipe is not None:
+            pipe = diffusers_pipe
+        else:
+            # Fallback from SGLang: load pipeline and re-tokenize so both encoders use same tokenizer
+            try:
+                from diffusers import Flux2KleinPipeline
+            except ImportError:
+                from diffusers.pipelines.flux2 import Flux2KleinPipeline
+            print("Loading diffusers Flux2KleinPipeline for reference ...")
+            pipe = Flux2KleinPipeline.from_pretrained(
+                load_path,
+                torch_dtype=dtype,
+            )
+            pipe = pipe.to(device)
+            messages_batch = [messages]
+            try:
+                inputs = pipe.tokenizer.apply_chat_template(
+                    messages_batch,
+                    tokenize=True,
+                    add_generation_prompt=True,
+                    return_dict=True,
+                    return_tensors="pt",
+                    padding="max_length",
+                    truncation=True,
+                    max_length=max_length,
+                )
+            except TypeError:
+                inputs = pipe.tokenizer.apply_chat_template(
+                    messages_batch,
+                    tokenize=True,
+                    add_generation_prompt=True,
+                    return_dict=True,
+                    return_tensors="pt",
+                    padding="max_length",
+                    truncation=True,
+                    max_length=max_length,
+                )
+            input_ids = inputs["input_ids"].to(device)
+            attention_mask = inputs["attention_mask"].to(device)
+            # Re-run FastVideo with pipeline tokenizer's input so both encoders see same tokens
+            print("Re-running FastVideo text encoder with pipeline tokenizer input ...")
+            with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
+                fv_outputs = fv_encoder(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    output_hidden_states=True,
+                )
+            fv_prompt_embeds = flux2_klein_postprocess(fv_outputs)
+            fv_prompt_embeds = fv_prompt_embeds.cpu().float()
         enc = pipe.text_encoder
+        print(f"  Encoder types: FastVideo={type(fv_encoder).__name__}, ref={type(enc).__name__}")
         enc_kwargs = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
