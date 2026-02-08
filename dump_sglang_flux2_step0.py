@@ -56,6 +56,19 @@ def main():
     dtype = torch.bfloat16
     generator = torch.Generator(device=device).manual_seed(SEED)
 
+    # Initialize SGLang distributed + TP so custom Flux2Transformer2DModel can load (ColumnParallelLinear)
+    os.environ.setdefault("LOCAL_RANK", "0")
+    os.environ.setdefault("RANK", "0")
+    os.environ.setdefault("WORLD_SIZE", "1")
+    os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
+    os.environ.setdefault("MASTER_PORT", "29500")
+    from sglang.multimodal_gen.runtime.distributed import (
+        maybe_init_distributed_environment_and_model_parallel,
+    )
+    maybe_init_distributed_environment_and_model_parallel(
+        tp_size=1, sp_size=1, enable_cfg_parallel=False
+    )
+
     model_path = _get_model_path(MODEL_ID)
 
     # Minimal ServerArgs for loading components
