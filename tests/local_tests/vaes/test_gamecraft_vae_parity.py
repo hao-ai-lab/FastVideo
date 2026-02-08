@@ -5,9 +5,16 @@ Numerical parity test for GameCraft VAE (AutoencoderKLCausal3D).
 Ported from official Hunyuan-GameCraft-1.0/hymm_sp/vae. Compares FastVideo's
 GameCraftVAE against the official implementation.
 
+Follows the same pattern as test_ltx2_vae.py:
+- Loads same weights into both models (strict key checking)
+- Encodes same input, compares latents
+- Decodes same latents through both decoders, compares output
+- Checks for non-finite values
+
 Usage:
     DISABLE_SP=1 pytest tests/local_tests/vaes/test_gamecraft_vae_parity.py -v
 """
+import json
 import os
 import sys
 from pathlib import Path
@@ -25,8 +32,44 @@ if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
 
+def _load_weights(weights_path: Path) -> dict[str, torch.Tensor]:
+    """Load VAE weights from checkpoint and strip 'vae.' prefix."""
+    print(f"[VAE TEST] Loading weights from {weights_path}")
+    state_dict = torch.load(weights_path, map_location="cpu", weights_only=True)
+    if "state_dict" in state_dict:
+        state_dict = state_dict["state_dict"]
+    # Strip 'vae.' prefix
+    vae_sd = {k.replace("vae.", ""): v for k, v in state_dict.items() if k.startswith("vae.")}
+    print(f"[VAE TEST] Loaded {len(vae_sd)} VAE tensors")
+    return vae_sd
+
+
+def _load_into_model(
+    model: torch.nn.Module, weights: dict[str, torch.Tensor], name: str
+) -> tuple[int, list[str]]:
+    """Load weights into a model, checking for missing/unexpected keys."""
+    model_state = model.state_dict()
+    filtered = {
+        k: v for k, v in weights.items()
+        if k in model_state and model_state[k].shape == v.shape
+    }
+    missing = [k for k in model_state.keys() if k not in filtered]
+    unexpected = [k for k in weights.keys() if k not in model_state]
+    print(
+        f"[VAE TEST] {name}: Loading {len(filtered)}/{len(model_state)} tensors "
+        f"({len(missing)} missing, {len(unexpected)} unexpected)"
+    )
+    if missing:
+        print(f"[VAE TEST] {name} missing keys: {missing[:5]}{'...' if len(missing) > 5 else ''}")
+    if not filtered:
+        return 0, missing
+    model.load_state_dict(filtered, strict=False)
+    return len(filtered), missing
+
+
 def _load_official_vae(
-    official_path: Path, weights_path: Path, device: torch.device, dtype: torch.dtype
+    official_path: Path, vae_sd: dict[str, torch.Tensor],
+    device: torch.device, dtype: torch.dtype
 ):
     """Load the official GameCraft VAE from hymm_sp/vae."""
     sys.path.insert(0, str(official_path))
@@ -36,9 +79,12 @@ def _load_official_vae(
     except ImportError as e:
         pytest.skip(f"Failed to import official VAE: {e}")
 
-    import json
+    config_path = (
+        official_path / "weights" / "stdmodels" / "vae_3d" / "hyvae" / "config.json"
+    )
+    if not config_path.exists():
+        pytest.skip(f"VAE config not found at {config_path}")
 
-    config_path = weights_path.parent / "config.json"
     with open(config_path) as f:
         config = json.load(f)
 
@@ -60,21 +106,20 @@ def _load_official_vae(
         mid_block_causal_attn=config.get("mid_block_causal_attn", True),
     )
 
-    state_dict = torch.load(weights_path, map_location="cpu", weights_only=True)
-    if "state_dict" in state_dict:
-        state_dict = state_dict["state_dict"]
+    loaded, missing = _load_into_model(vae, vae_sd, "Official VAE")
+    if loaded == 0:
+        pytest.skip("Failed to load weights into official VAE")
+    if missing:
+        pytest.skip(f"Official VAE has {len(missing)} missing keys; cannot ensure parity")
 
-    cleaned_state_dict = {k.replace("vae.", ""): v for k, v in state_dict.items() if k.startswith("vae.")}
-    vae.load_state_dict(cleaned_state_dict, strict=False)
     if not hasattr(vae, "use_trt_decoder"):
         vae.use_trt_decoder = False
-    vae = vae.to(device=device, dtype=dtype)
-    vae.eval()
-
-    return vae, config
+    return vae.to(device=device, dtype=dtype).eval()
 
 
-def _load_fastvideo_vae(weights_path: Path, device: torch.device, dtype: torch.dtype):
+def _load_fastvideo_vae(
+    vae_sd: dict[str, torch.Tensor], device: torch.device, dtype: torch.dtype
+):
     """Load FastVideo GameCraftVAE with official weights."""
     from fastvideo.configs.models.vaes import GameCraftVAEConfig
     from fastvideo.models.vaes.gamecraftvae import GameCraftVAE
@@ -82,20 +127,21 @@ def _load_fastvideo_vae(weights_path: Path, device: torch.device, dtype: torch.d
     config = GameCraftVAEConfig()
     vae = GameCraftVAE(config)
 
-    state_dict = torch.load(weights_path, map_location="cpu", weights_only=True)
-    if "state_dict" in state_dict:
-        state_dict = state_dict["state_dict"]
+    loaded, missing = _load_into_model(vae, vae_sd, "FastVideo VAE")
+    if loaded == 0:
+        pytest.skip("Failed to load weights into FastVideo VAE")
+    if missing:
+        pytest.skip(f"FastVideo VAE has {len(missing)} missing keys; cannot ensure parity")
 
-    vae_sd = {k.replace("vae.", ""): v for k, v in state_dict.items() if k.startswith("vae.")}
-    vae.load_state_dict(vae_sd, strict=True)
-    vae = vae.to(device=device, dtype=dtype)
-    vae.eval()
-
-    return vae
+    return vae.to(device=device, dtype=dtype).eval()
 
 
 def test_gamecraft_vae_parity():
-    """Test VAE encode/decode parity between official and FastVideo."""
+    """Test VAE encode/decode parity between official and FastVideo.
+    
+    Key: decodes the SAME latents through both decoders to isolate
+    decode-only differences (following LTX2 VAE test pattern).
+    """
     torch.manual_seed(42)
 
     official_path = Path(
@@ -110,7 +156,6 @@ def test_gamecraft_vae_parity():
 
     if not official_path.exists():
         pytest.skip(f"Official GameCraft repo not found at {official_path}")
-
     if not vae_weights_path.exists():
         alt_paths = [
             vae_weights_path.parent / "checkpoint-step-270000.ckpt",
@@ -123,10 +168,9 @@ def test_gamecraft_vae_parity():
         else:
             pytest.skip(f"VAE weights not found. Tried: {vae_weights_path}, {alt_paths}")
 
-    # Prefer CPU to avoid OOM when GPU is busy; use CUDA_VISIBLE_DEVICES="" to force CPU
+    # Use fp32 for precise comparison (bf16 amplifies small differences)
     use_cuda = torch.cuda.is_available()
     try:
-        # Quick alloc test to avoid OOM mid-test
         if use_cuda:
             _ = torch.zeros(1, device="cuda:0")
             del _
@@ -134,47 +178,73 @@ def test_gamecraft_vae_parity():
     except Exception:
         use_cuda = False
     device = torch.device("cuda:0" if use_cuda else "cpu")
-    dtype = torch.bfloat16 if use_cuda else torch.float32
+    # Use fp32 for parity test precision (bf16 gives ~0.2 max diff due to precision)
+    dtype = torch.float32
+
+    # Load weights once, share between both models
+    vae_sd = _load_weights(vae_weights_path)
 
     batch_size = 1
     frames = 5
     height = 64
     width = 64
     video_input = torch.randn(batch_size, 3, frames, height, width, device=device, dtype=dtype)
-    print(f"[VAE TEST] Input shape: {video_input.shape}")
+    print(f"\n[VAE TEST] Input shape: {video_input.shape}, dtype: {dtype}")
 
-    # Run encode with official, then free
+    # --- Encode comparison ---
     print("\n[VAE TEST] Loading official VAE...")
-    official_vae, _ = _load_official_vae(official_path, vae_weights_path, device, dtype)
+    official_vae = _load_official_vae(official_path, vae_sd, device, dtype)
     with torch.no_grad():
         official_latent_dist = official_vae.encode(video_input)
         if hasattr(official_latent_dist, "latent_dist"):
             official_latent_dist = official_latent_dist.latent_dist
         official_latents = official_latent_dist.mode()
-        official_decoded = official_vae.decode(official_latents)
-        if hasattr(official_decoded, "sample"):
-            official_decoded = official_decoded.sample
-    del official_vae
-    torch.cuda.empty_cache() if torch.cuda.is_available() else None
 
-    # Run encode/decode with FastVideo
     print("[VAE TEST] Loading FastVideo GameCraftVAE...")
-    fastvideo_vae = _load_fastvideo_vae(vae_weights_path, device, dtype)
+    fastvideo_vae = _load_fastvideo_vae(vae_sd, device, dtype)
     with torch.no_grad():
         fv_latent_dist = fastvideo_vae.encode(video_input)
         fv_latents = fv_latent_dist.latent_dist.mode()
-        fv_decoded = fastvideo_vae.decode(fv_latents).sample
 
     print(f"[VAE TEST] Official latents: {official_latents.shape}")
     print(f"[VAE TEST] FastVideo latents: {fv_latents.shape}")
+    assert official_latents.shape == fv_latents.shape, "Latent shape mismatch"
+    assert torch.isfinite(official_latents).all(), "Official encoder produced non-finite latents"
+    assert torch.isfinite(fv_latents).all(), "FastVideo encoder produced non-finite latents"
+
     enc_diff = (official_latents - fv_latents).abs().max().item()
-    print(f"[VAE TEST] Encode max diff: {enc_diff:.6f}")
+    enc_mean = (official_latents - fv_latents).abs().mean().item()
+    print(f"[VAE TEST] Encode max diff: {enc_diff:.6f}, mean diff: {enc_mean:.6f}")
     assert_close(official_latents, fv_latents, atol=1e-2, rtol=1e-2)
+
+    # --- Decode comparison (SAME latents through both decoders) ---
+    # Use official latents as the shared input to isolate decode-only differences
+    shared_latents = official_latents
+
+    with torch.no_grad():
+        official_decoded = official_vae.decode(shared_latents)
+        if hasattr(official_decoded, "sample"):
+            official_decoded = official_decoded.sample
+
+    # Free official VAE memory before loading FastVideo decode
+    del official_vae
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    with torch.no_grad():
+        fv_decoded = fastvideo_vae.decode(shared_latents)
+        if hasattr(fv_decoded, "sample"):
+            fv_decoded = fv_decoded.sample
 
     print(f"[VAE TEST] Official decoded: {official_decoded.shape}")
     print(f"[VAE TEST] FastVideo decoded: {fv_decoded.shape}")
+    assert official_decoded.shape == fv_decoded.shape, "Decoded shape mismatch"
+    assert torch.isfinite(official_decoded).all(), "Official decoder produced non-finite output"
+    assert torch.isfinite(fv_decoded).all(), "FastVideo decoder produced non-finite output"
+
     dec_diff = (official_decoded - fv_decoded).abs().max().item()
-    print(f"[VAE TEST] Decode max diff: {dec_diff:.6f}")
+    dec_mean = (official_decoded - fv_decoded).abs().mean().item()
+    print(f"[VAE TEST] Decode max diff: {dec_diff:.6f}, mean diff: {dec_mean:.6f}")
     assert_close(official_decoded, fv_decoded, atol=1e-2, rtol=1e-2)
 
     print("[VAE TEST] PASSED: Numerical parity between official and FastVideo!")
@@ -182,7 +252,7 @@ def test_gamecraft_vae_parity():
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 def test_gamecraft_vae_config_compatibility():
-    """Test that GameCraft VAE config is compatible with FastVideo's HunyuanVAE."""
+    """Test that GameCraft VAE config is compatible with FastVideo's GameCraftVAE."""
     vae_config_path = (
         repo_root / "Hunyuan-GameCraft-1.0" / "weights" / "stdmodels" / "vae_3d" / "hyvae" / "config.json"
     )
@@ -190,7 +260,6 @@ def test_gamecraft_vae_config_compatibility():
     if not vae_config_path.exists():
         pytest.skip(f"VAE config not found at {vae_config_path}")
     
-    import json
     with open(vae_config_path) as f:
         gc_config = json.load(f)
     

@@ -174,6 +174,7 @@ def test_gamecraft_clip_encoder():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+@pytest.mark.skip(reason="Official TextEncoder wrapper incompatible with installed transformers version (language_model attribute removed from LlavaForConditionalGeneration)")
 def test_gamecraft_text_encoder_wrapper():
     """Test the official GameCraft TextEncoder wrapper."""
     torch.manual_seed(42)
