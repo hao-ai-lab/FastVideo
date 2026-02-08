@@ -1,15 +1,15 @@
 from fastvideo import VideoGenerator
+from fastvideo.models.dits.lingbotworld.cam_utils import prepare_camera_embedding
 
 # from fastvideo.configs.sample import SamplingParam
-
-OUTPUT_PATH = "video_samples_wan2_2_14B_i2v"
+OUTPUT_PATH = "video_samples_lingbotworld"
 def main():
     # FastVideo will automatically use the optimal default arguments for the
     # model.
     # If a local path is provided, FastVideo will make a best effort
     # attempt to identify the optimal arguments.
     generator = VideoGenerator.from_pretrained(
-        "Wan-AI/Wan2.2-I2V-A14B-Diffusers",
+         "H1yori233/LingBot-World-Base-Cam-Diffusers",
         # FastVideo will automatically handle distributed setup
         num_gpus=1,
         use_fsdp_inference=False, # set to True if GPU is out of memory
@@ -21,10 +21,29 @@ def main():
         # image_encoder_cpu_offload=False,
     )
 
-    prompt = "Summer beach vacation style, a white cat wearing sunglasses sits on a surfboard. The fluffy-furred feline gazes directly at the camera with a relaxed expression. Blurred beach scenery forms the background featuring crystal-clear waters, distant green hills, and a blue sky dotted with white clouds. The cat assumes a naturally relaxed posture, as if savoring the sea breeze and warm sunlight. A close-up shot highlights the feline's intricate details and the refreshing atmosphere of the seaside."
-    image_path = "https://huggingface.co/datasets/YiYiXu/testing-images/resolve/main/wan_i2v_input.JPG"
+    num_frames = 81
+    prompt = "The video presents a soaring journey through a fantasy jungle. The wind whips past the rider's blue hands gripping the reins, causing the leather straps to vibrate. The ancient gothic castle approaches steadily, its stone details becoming clearer against the backdrop of floating islands and distant waterfalls."
+    image_path = "https://raw.githubusercontent.com/Robbyant/lingbot-world/main/examples/01/image.jpg"
+    action_path = "examples/inference/basic/lingbotworld_examples/01"
+    c2ws_plucker_emb, num_frames = prepare_camera_embedding(
+        action_path=action_path,
+        num_frames=num_frames,
+        height=480,
+        width=832,
+        spatial_scale=8,
+    )
 
-    video = generator.generate_video(prompt, image_path=image_path, output_path=OUTPUT_PATH, save_video=True, height=832, width=480, num_frames=81)
+    generator.generate_video(
+        prompt,
+        image_path=image_path,
+        output_path=OUTPUT_PATH,
+        save_video=True,
+        num_frames=num_frames,
+        height=480,
+        width=832,
+        c2ws_plucker_emb=c2ws_plucker_emb,
+    )
+
 
 if __name__ == "__main__":
     main()
