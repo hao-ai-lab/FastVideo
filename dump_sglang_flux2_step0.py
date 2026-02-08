@@ -71,6 +71,7 @@ def main():
 
     pipeline_config = Flux2KleinPipelineConfig()
     pipeline_config.dit_precision = "bf16"
+    pipeline_config.vae_config.post_init()
     server_args = ServerArgs(
         model_path=model_path,
         pipeline_config=pipeline_config,
