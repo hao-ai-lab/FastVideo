@@ -108,6 +108,7 @@ def main():
     maybe_init_distributed_environment_and_model_parallel(tp_size=1, sp_size=1)
 
     from fastvideo.configs.pipelines.flux_2 import Flux2KleinPipelineConfig
+    from fastvideo.forward_context import set_forward_context
     from fastvideo.fastvideo_args import FastVideoArgs
     from fastvideo.models.loader.component_loader import TextEncoderLoader
 
@@ -120,7 +121,7 @@ def main():
     fv_encoder = loader.load(text_encoder_path, fv_args)
     fv_encoder = fv_encoder.eval()
 
-    with torch.no_grad():
+    with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
         fv_outputs = fv_encoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
