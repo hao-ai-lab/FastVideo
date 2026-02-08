@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from fastvideo import VideoGenerator
 
 PROMPT = (
@@ -14,17 +15,22 @@ PROMPT = (
     "absurd, and quietly tragic."
 )
 
+# HF model ID (base LTX-2, 40-step schedule).
+MODEL_ID = "FastVideo/LTX2-Diffusers"
+
+OUTPUT_PATH = "outputs_video/ltx2_basic/output_ltx2_base_t2v.mp4"
+
 
 def main() -> None:
     generator = VideoGenerator.from_pretrained(
-        "FastVideo/LTX2-Distilled-Diffusers",
-        num_gpus=1,
+        MODEL_ID,
+        num_gpus=8,
     )
 
-    output_path = "outputs_video/ltx2_basic/output_ltx2_distilled_t2v.mp4"
     generator.generate_video(
         prompt=PROMPT,
-        output_path=output_path,
+        output_path=OUTPUT_PATH,
+        num_inference_steps=40,
         save_video=True,
     )
     generator.shutdown()
