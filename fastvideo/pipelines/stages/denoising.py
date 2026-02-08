@@ -173,6 +173,7 @@ class DenoisingStage(PipelineStage):
             {
                 "mouse_cond": batch.mouse_cond,
                 "keyboard_cond": batch.keyboard_cond,
+                "c2ws_plucker_emb": batch.c2ws_plucker_emb,
             },
         )
 

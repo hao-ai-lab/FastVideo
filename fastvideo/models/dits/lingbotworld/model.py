@@ -11,7 +11,7 @@ import torch.nn as nn
 import fastvideo.envs as envs
 from fastvideo.attention import (DistributedAttention, DistributedAttention_VSA,
                                  LocalAttention)
-from fastvideo.configs.models.dits import WanVideoConfig
+from fastvideo.configs.models.dits.lingbotworld import LingBotWorldVideoConfig
 from fastvideo.configs.sample.wan import WanTeaCacheParams
 from fastvideo.distributed.communication_op import (
     sequence_model_parallel_all_gather,
@@ -69,7 +69,7 @@ class LingBotWorldCamConditioner(nn.Module):
         return (1.0 + cam_scale) * hidden_states + cam_shift
 
 
-class WanTransformerBlock(nn.Module):
+class LingBotWorldTransformerBlock(nn.Module):
 
     def __init__(self,
                  dim: int,
@@ -228,15 +228,15 @@ class WanTransformerBlock(nn.Module):
 
 
 class LingBotWorldTransformer3DModel(CachableDiT):
-    _fsdp_shard_conditions = WanVideoConfig()._fsdp_shard_conditions
-    _compile_conditions = WanVideoConfig()._compile_conditions
-    _supported_attention_backends = WanVideoConfig(
+    _fsdp_shard_conditions = LingBotWorldVideoConfig()._fsdp_shard_conditions
+    _compile_conditions = LingBotWorldVideoConfig()._compile_conditions
+    _supported_attention_backends = LingBotWorldVideoConfig(
     )._supported_attention_backends
-    param_names_mapping = WanVideoConfig().param_names_mapping
-    reverse_param_names_mapping = WanVideoConfig().reverse_param_names_mapping
-    lora_param_names_mapping = WanVideoConfig().lora_param_names_mapping
+    param_names_mapping = LingBotWorldVideoConfig().param_names_mapping
+    reverse_param_names_mapping = LingBotWorldVideoConfig().reverse_param_names_mapping
+    lora_param_names_mapping = LingBotWorldVideoConfig().lora_param_names_mapping
 
-    def __init__(self, config: WanVideoConfig, hf_config: dict[str,
+    def __init__(self, config: LingBotWorldVideoConfig, hf_config: dict[str,
                                                                Any]) -> None:
         super().__init__(config=config, hf_config=hf_config)
 
@@ -270,8 +270,7 @@ class LingBotWorldTransformer3DModel(CachableDiT):
         )
 
         # 3. Transformer blocks
-        attn_backend = envs.FASTVIDEO_ATTENTION_BACKEND
-        transformer_block = WanTransformerBlock_VSA if attn_backend == "VIDEO_SPARSE_ATTN" else WanTransformerBlock
+        transformer_block = LingBotWorldTransformerBlock
         self.blocks = nn.ModuleList([
             transformer_block(inner_dim,
                               config.ffn_dim,
