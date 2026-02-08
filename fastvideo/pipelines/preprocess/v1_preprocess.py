@@ -12,6 +12,8 @@ from fastvideo.pipelines.preprocess.preprocess_pipeline_i2v import (
     PreprocessPipeline_I2V)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_ode_trajectory import (
     PreprocessPipeline_ODE_Trajectory)
+from fastvideo.pipelines.preprocess.hy15.hy15_ode_preprocess_pipeline import (
+    Hy15ODEPreprocessPipeline)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_t2v import (
     PreprocessPipeline_T2V)
 from fastvideo.pipelines.preprocess.preprocess_pipeline_text import (
@@ -24,7 +26,7 @@ logger = init_logger(__name__)
 
 
 def main(args) -> None:
-    args.model_path = maybe_download_model(args.model_path)
+    # args.model_path = maybe_download_model(args.model_path)
     maybe_init_distributed_environment_and_model_parallel(1, 1)
     num_gpus = int(os.environ["WORLD_SIZE"])
     assert num_gpus == 1, "Only support 1 GPU"
@@ -32,17 +34,17 @@ def main(args) -> None:
     pipeline_config = PipelineConfig.from_pretrained(args.model_path)
 
     kwargs: dict[str, Any] = {}
-    if args.preprocess_task == "text_only":
-        kwargs = {
-            "text_encoder_cpu_offload": False,
-        }
-    else:
-        # Full config for video/image processing
-        kwargs = {
-            "vae_precision": "fp32",
-            "vae_config": WanVAEConfig(load_encoder=True, load_decoder=True),
-        }
-    pipeline_config.update_config_from_dict(kwargs)
+    # if args.preprocess_task == "text_only":
+    #     kwargs = {
+    #         "text_encoder_cpu_offload": False,
+    #     }
+    # else:
+    #     # Full config for video/image processing
+    #     kwargs = {
+    #         "vae_precision": "fp32",
+    #         "vae_config": WanVAEConfig(load_encoder=True, load_decoder=True),
+    #     }
+    # pipeline_config.update_config_from_dict(kwargs)
 
     fastvideo_args = FastVideoArgs(
         model_path=args.model_path,
@@ -62,12 +64,16 @@ def main(args) -> None:
         assert args.flow_shift is not None, "flow_shift is required for ode_trajectory"
         fastvideo_args.pipeline_config.flow_shift = args.flow_shift
         PreprocessPipeline = PreprocessPipeline_ODE_Trajectory
+    elif args.preprocess_task == "hy15_ode_trajectory":
+        assert args.flow_shift is not None, "flow_shift is required for hy15_ode_trajectory"
+        fastvideo_args.pipeline_config.flow_shift = args.flow_shift
+        PreprocessPipeline = Hy15ODEPreprocessPipeline
     elif args.preprocess_task == "matrixgame":
         PreprocessPipeline = PreprocessPipeline_MatrixGame
     else:
         raise ValueError(
             f"Invalid preprocess task: {args.preprocess_task}. "
-            f"Valid options: t2v, i2v, ode_trajectory, text_only, matrixgame")
+            f"Valid options: t2v, i2v, ode_trajectory, hy15_ode_trajectory, text_only, matrixgame")
 
     logger.info("Preprocess task: %s using %s", args.preprocess_task,
                 PreprocessPipeline.__name__)
@@ -115,7 +121,7 @@ if __name__ == "__main__":
         "--preprocess_task",
         type=str,
         default="t2v",
-        choices=["t2v", "i2v", "text_only", "ode_trajectory", "matrixgame"],
+        choices=["t2v", "i2v", "text_only", "ode_trajectory", "hy15_ode_trajectory", "matrixgame"],
         help="Type of preprocessing task to run")
     parser.add_argument("--train_fps", type=int, default=30)
     parser.add_argument("--use_image_num", type=int, default=0)
