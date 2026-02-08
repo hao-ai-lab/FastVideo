@@ -16,12 +16,18 @@ import sys
 
 import torch
 
-# Add SGLang to path
-SGLANG_PATH = os.environ.get(
-    "SGLANG_PATH",
-    os.path.join(os.path.dirname(__file__), "..", "sglang", "python"),
-)
-if os.path.isdir(SGLANG_PATH) and SGLANG_PATH not in sys.path:
+# Add SGLang to path (try SGLANG_PATH env, else ../sglang/python, else /sglang/python)
+_sglang_candidates = [
+    os.environ.get("SGLANG_PATH"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sglang", "python"),
+    "/sglang/python",
+]
+SGLANG_PATH = None
+for p in _sglang_candidates:
+    if p and os.path.isdir(p):
+        SGLANG_PATH = os.path.abspath(p)
+        break
+if SGLANG_PATH and SGLANG_PATH not in sys.path:
     sys.path.insert(0, SGLANG_PATH)
 
 DUMP_PATH = "flux2_step0_sglang_dump.pt"
