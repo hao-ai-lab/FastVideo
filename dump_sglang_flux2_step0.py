@@ -195,7 +195,7 @@ def main():
     freqs_cis = (cos, sin)
 
     print("Running SGLang transformer for step 0 ...")
-    with torch.no_grad():
+    with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
         noise_pred = transformer(
             hidden_states=latent_model_input,
             encoder_hidden_states=prompt_embeds,
