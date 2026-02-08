@@ -136,9 +136,13 @@ class ForwardBatch:
     # Camera control inputs (HYWorld)
     pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
 
-    # Camera control inputs (HunyuanGameCraft)
-    # Plücker coordinates for camera pose conditioning [B, F, 6, H, W]
-    camera_states: torch.Tensor | None = None
+    # Camera/action control inputs (GameCraft)
+    camera_states: torch.Tensor | None = None  # Plücker coordinates [B, T, 6, H, W]
+    gt_latents: torch.Tensor | None = None  # Ground truth latents for conditioning [B, 16, T, H, W]
+    conditioning_mask: torch.Tensor | None = None  # Mask for conditioning [B, 1, T, H, W]
+    camera_trajectory: str | None = None  # Camera trajectory file/identifier
+    action_list: list[str] | None = None  # List of actions (e.g., ['forward', 'left'])
+    action_speed_list: list[float] | None = None  # Speed for each action
 
     # Latent dimensions
     height_latents: list[int] | int | None = None
