@@ -9,6 +9,7 @@ Create step-0 dump for Flux (FLUX.1-dev) using diffusers and save:
 import argparse
 import os
 import sys
+import inspect
 from typing import Any
 
 import torch
@@ -54,21 +55,29 @@ def _extract_prompt_embeds(encoded):
     if isinstance(encoded, tuple):
         if len(encoded) == 2:
             prompt_embeds, pooled = encoded
-            return prompt_embeds, pooled
+            return prompt_embeds, pooled, None
+        if len(encoded) == 3:
+            prompt_embeds, pooled, text_ids = encoded
+            return prompt_embeds, pooled, text_ids
         if len(encoded) == 4:
             prompt_embeds, _negative_prompt_embeds, pooled, _negative_pooled = encoded
-            return prompt_embeds, pooled
+            return prompt_embeds, pooled, None
         if len(encoded) >= 2:
             prompt_embeds = encoded[0]
             pooled = None
+            text_ids = None
             if torch.is_tensor(prompt_embeds):
                 for item in encoded[1:]:
                     if torch.is_tensor(item) and item.ndim == 2 and item.shape[0] == prompt_embeds.shape[0]:
                         pooled = item
                         break
-            return prompt_embeds, pooled
+                for item in encoded[1:]:
+                    if torch.is_tensor(item) and item.ndim == 2 and item.shape[1] == 3:
+                        text_ids = item
+                        break
+            return prompt_embeds, pooled, text_ids
     if isinstance(encoded, torch.Tensor):
-        return encoded, None
+        return encoded, None, None
 
     # Handle dict-like or ModelOutput objects
     if isinstance(encoded, dict):
@@ -79,7 +88,7 @@ def _extract_prompt_embeds(encoded):
             or encoded.get("clip_pooled")
         )
         if prompt_embeds is not None:
-            return prompt_embeds, pooled
+            return prompt_embeds, pooled, encoded.get("text_ids")
 
     prompt_embeds = getattr(encoded, "prompt_embeds", None)
     pooled = (
@@ -87,8 +96,9 @@ def _extract_prompt_embeds(encoded):
         or getattr(encoded, "pooled_projections", None)
         or getattr(encoded, "clip_pooled", None)
     )
+    text_ids = getattr(encoded, "text_ids", None)
     if prompt_embeds is not None:
-        return prompt_embeds, pooled
+        return prompt_embeds, pooled, text_ids
 
     raise ValueError(
         f"Unrecognized encode_prompt output format: {type(encoded)}"
@@ -99,19 +109,57 @@ def _prepare_latents(pipe, batch_size: int, height: int, width: int, dtype: torc
     if not hasattr(pipe, "prepare_latents"):
         raise AttributeError("Pipeline has no prepare_latents")
 
-    # Try to infer latent channels from transformer config
-    num_channels = getattr(getattr(pipe, "transformer", None), "config", None)
-    num_channels = getattr(num_channels, "in_channels", None) or 16
+    # Flux transformer expects packed latents (channels*4), so use in_channels//4
+    config = getattr(getattr(pipe, "transformer", None), "config", None)
+    in_channels = getattr(config, "in_channels", None) or 64
+    num_channels_latents = max(int(in_channels) // 4, 1)
 
-    return pipe.prepare_latents(
+    latents = pipe.prepare_latents(
         batch_size,
-        num_channels,
+        num_channels_latents,
         height,
         width,
         dtype,
         device,
         generator=None,
     )
+    if isinstance(latents, (list, tuple)):
+        latents, latent_image_ids = latents
+        return latents, latent_image_ids
+    return latents, None
+
+
+def _compute_mu(pipe, height: int, width: int) -> float | None:
+    cfg = getattr(pipe.scheduler, "config", None)
+    if cfg is None or not getattr(cfg, "use_dynamic_shifting", False):
+        return None
+
+    vae_scale = getattr(pipe, "vae_scale_factor", None)
+    if vae_scale is None:
+        vae_cfg = getattr(getattr(pipe, "vae", None), "config", None)
+        if vae_cfg is not None:
+            vae_scale = getattr(vae_cfg, "vae_scale_factor", None)
+            if vae_scale is None:
+                vae_scale = getattr(vae_cfg, "scaling_factor", None)
+
+    if isinstance(vae_scale, (float, int)) and vae_scale > 0:
+        if float(vae_scale) < 1.0:
+            vae_scale = None
+
+    denom = int(vae_scale * 2) if vae_scale is not None else 16
+    if denom <= 0:
+        denom = 16
+    image_seq_len = (height + denom - 1) // denom * ((width + denom - 1) // denom)
+
+    base_shift = getattr(cfg, "base_shift", 0.5)
+    max_shift = getattr(cfg, "max_shift", 1.15)
+    base_seq_len = getattr(cfg, "base_image_seq_len", 256)
+    max_seq_len = getattr(cfg, "max_image_seq_len", 4096)
+    if max_seq_len == base_seq_len:
+        return float(base_shift)
+    m = (max_shift - base_shift) / (max_seq_len - base_seq_len)
+    b = base_shift - m * base_seq_len
+    return float(m * image_seq_len + b)
 
 
 def main() -> None:
@@ -148,18 +196,40 @@ def main() -> None:
     width = args.width or getattr(pipe, "default_sample_size", None) or 1024
 
     encoded = _encode_prompt(pipe, args.prompt, args.device, torch_dtype)
-    prompt_embeds, pooled_projections = _extract_prompt_embeds(encoded)
+    prompt_embeds, pooled_projections, text_ids = _extract_prompt_embeds(encoded)
+    if pooled_projections is None and hasattr(pipe, "_get_clip_prompt_embeds"):
+        pooled_projections = pipe._get_clip_prompt_embeds(
+            prompt=args.prompt,
+            device=args.device,
+            num_images_per_prompt=1,
+        )
+    if text_ids is None:
+        dtype = getattr(pipe.text_encoder, "dtype", torch_dtype)
+        text_ids = torch.zeros(prompt_embeds.shape[1], 3).to(device=args.device, dtype=dtype)
 
     if isinstance(prompt_embeds, torch.Tensor):
         prompt_embeds = prompt_embeds.to(args.device, dtype=torch_dtype)
     if pooled_projections is not None:
         pooled_projections = pooled_projections.to(args.device, dtype=torch_dtype)
+    if text_ids is not None:
+        text_ids = text_ids.to(args.device, dtype=torch_dtype)
 
-    pipe.scheduler.set_timesteps(args.num_steps, device=args.device)
+    extra_set_timesteps_kwargs: dict[str, Any] = {}
+    sig = inspect.signature(pipe.scheduler.set_timesteps)
+    if "mu" in sig.parameters:
+        mu = _compute_mu(pipe, height, width)
+        if mu is not None:
+            extra_set_timesteps_kwargs["mu"] = mu
+
+    pipe.scheduler.set_timesteps(
+        args.num_steps,
+        device=args.device,
+        **extra_set_timesteps_kwargs,
+    )
     timesteps = pipe.scheduler.timesteps
-    timestep_scaled = timesteps[0]
+    timestep_scaled = timesteps[0] / 1000
 
-    latent_model_input = _prepare_latents(
+    latent_model_input, latent_image_ids = _prepare_latents(
         pipe,
         batch_size=1,
         height=height,
@@ -167,6 +237,8 @@ def main() -> None:
         dtype=torch_dtype,
         device=args.device,
     )
+    if latent_image_ids is not None:
+        latent_image_ids = latent_image_ids.to(args.device, dtype=torch_dtype)
 
     with torch.no_grad():
         noise_pred_official = pipe.transformer(
@@ -175,6 +247,8 @@ def main() -> None:
             pooled_projections=pooled_projections,
             timestep=timestep_scaled,
             guidance=None,
+            txt_ids=text_ids,
+            img_ids=latent_image_ids,
         )
 
     dump = {
@@ -182,6 +256,8 @@ def main() -> None:
         "timestep_scaled": timestep_scaled.detach().cpu(),
         "prompt_embeds": prompt_embeds.detach().cpu(),
         "pooled_projections": pooled_projections.detach().cpu() if pooled_projections is not None else None,
+        "text_ids": text_ids.detach().cpu() if text_ids is not None else None,
+        "latent_image_ids": latent_image_ids.detach().cpu() if latent_image_ids is not None else None,
         "noise_pred_official": noise_pred_official.detach().cpu(),
         "model_id": args.model_id,
         "prompt": args.prompt,

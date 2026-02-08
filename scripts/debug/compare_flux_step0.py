@@ -96,6 +96,8 @@ def main() -> None:
         or data.get("prompt_embeds_2")
     )
     noise_pred_official = data.get("noise_pred_official") or data.get("noise_pred")
+    text_ids = data.get("text_ids")
+    latent_image_ids = data.get("latent_image_ids")
 
     if latent is None or timestep_scaled is None or prompt_embeds is None or noise_pred_official is None:
         missing = [
@@ -140,6 +142,11 @@ def main() -> None:
     if pooled_projections is not None:
         pooled_projections = pooled_projections.to(args.device, dtype=model_dtype)
 
+    if text_ids is not None:
+        text_ids = text_ids.to(args.device, dtype=model_dtype)
+    if latent_image_ids is not None:
+        latent_image_ids = latent_image_ids.to(args.device, dtype=model_dtype)
+
     with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
         noise_pred_fv = transformer(
             hidden_states=latent,
@@ -147,6 +154,8 @@ def main() -> None:
             pooled_projections=pooled_projections,
             timestep=timestep_scaled,
             guidance=None,
+            txt_ids=text_ids,
+            img_ids=latent_image_ids,
         )
 
     # Official returns (B, seq, C); FastVideo may return 5D -> take same slice if needed
