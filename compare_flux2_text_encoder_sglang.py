@@ -160,6 +160,7 @@ def main():
     fv_args = FastVideoArgs.from_kwargs(
         model_path=root,
         pipeline_config=Flux2KleinPipelineConfig(),
+        text_encoder_cpu_offload=False,
     )
     fv_args.pipeline_config.text_encoder_precisions = ("bf16",)
     loader = TextEncoderLoader()
