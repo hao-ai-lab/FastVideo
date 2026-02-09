@@ -332,13 +332,13 @@ def get_1d_rotary_pos_embed(
     freqs_sin = freqs.sin()  # [S, D/2]
     
     if use_real:
-        # For rotate_half style RoPE (used by HunyuanVideo, GameCraft), 
-        # we need to repeat cos/sin to full head_dim
-        # The rotate_half operation expects: x * cos + rotate_half(x) * sin
-        # where rotate_half splits x into [x1, x2] and returns [-x2, x1]
-        # So we need cos and sin to have shape [S, D] to broadcast correctly
-        freqs_cos = torch.cat([freqs_cos, freqs_cos], dim=-1)  # [S, D]
-        freqs_sin = torch.cat([freqs_sin, freqs_sin], dim=-1)  # [S, D]
+        # For rotate_half style RoPE (used by HunyuanVideo, GameCraft),
+        # we need to expand cos/sin to full head_dim using repeat_interleave.
+        # The rotate_half operation works on consecutive PAIRS: (x0,x1), (x2,x3)...
+        # so cos/sin must be interleaved: [c0,c0,c1,c1,...] to match the pairing.
+        # Using torch.cat would produce [c0,c1,...,c0,c1,...] which is WRONG.
+        freqs_cos = freqs_cos.repeat_interleave(2, dim=-1)  # [S, D]
+        freqs_sin = freqs_sin.repeat_interleave(2, dim=-1)  # [S, D]
     
     return freqs_cos, freqs_sin
 
