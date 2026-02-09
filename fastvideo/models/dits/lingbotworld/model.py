@@ -368,6 +368,10 @@ class LingBotWorldTransformer3DModel(CachableDiT):
         # Shard with padding support - returns (sharded_tensor, original_seq_len)
         hidden_states, original_seq_len = sequence_model_parallel_shard(hidden_states, dim=1)
         
+        # Shard c2ws_plucker_emb
+        if c2ws_plucker_emb is not None:
+            c2ws_plucker_emb, _ = sequence_model_parallel_shard(c2ws_plucker_emb, dim=1)
+        
         # Create attention mask for padded tokens if padding was applied
         current_seq_len = hidden_states.shape[1]
         sp_world_size = get_sp_world_size()
