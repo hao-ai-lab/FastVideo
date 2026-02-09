@@ -33,7 +33,7 @@
 - Document GPU assumptions in tests that require specific hardware.
 
 ## Commit & Pull Request Guidelines
-- Follow existing commit style: short subject with optional tag prefix, e.g. `[bugfix]: ...`, `[feat] ...`, `[misc] ...`, and include PR reference like `(#1234)` when applicable.
+- Follow existing commit style: short subject with optional tag prefix, e.g. `[bugfix]: ...`, `[feat]: ...`, `[misc]: ...`, and include PR reference like `(#1234)` when applicable.
 - Keep commits focused by concern (feature, refactor, fix).
 - PRs should include:
   - clear problem/solution summary,
