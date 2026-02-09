@@ -132,7 +132,7 @@ class WanVideoArchConfig(DiTArchConfig):
 
     patch_size: tuple[int, int, int] = (1, 2, 2)
     dim: int | None = None
-    text_len = 512
+    text_len: int = 512
     num_heads: int | None = None
     num_attention_heads: int = 40
     attention_head_dim: int = 128

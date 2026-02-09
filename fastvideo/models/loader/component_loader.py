@@ -782,6 +782,22 @@ class TransformerLoader(ComponentLoader):
 
         # Config from Diffusers supersedes fastvideo's model config
         dit_config = deepcopy(fastvideo_args.pipeline_config.dit_config)
+        if cls_name == "WanModel":
+            valid_fields = {
+                field.name for field in dataclasses.fields(dit_config.arch_config)
+            }
+            unknown_fields = sorted(set(config.keys()) - valid_fields)
+            if unknown_fields:
+                logger.warning(
+                    "Ignoring %d unsupported WanModel config fields: %s",
+                    len(unknown_fields),
+                    ", ".join(unknown_fields),
+                )
+                config = {
+                    key: value
+                    for key, value in config.items()
+                    if key in valid_fields
+                }
         dit_config.update_model_arch(config)
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
