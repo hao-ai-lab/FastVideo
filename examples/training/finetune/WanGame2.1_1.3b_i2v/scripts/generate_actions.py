@@ -135,7 +135,7 @@ if __name__ == "__main__":
     # key_seq is a list of strings, length of FRAME_COUNT, each string is a key in 'W', 'S', 'A', 'D', 'WA', 'WD', 'SA', 'SD'
     # mouse_seq is a list of strings, length of FRAME_COUNT, each string is a mouse action in 'up', 'down', 'left', 'right', 'up_right', 'up_left', 'down_right', 'down_left'
 
-    # Naming: 1=WASDudlr (key: W.npy, SA.npy; camera: u.npy; key+camera: W_u.npy, SA_dl.npy). 2-6=rand names below.
+    # Naming: 1=WASDudlr (key: W.npy, SA.npy; camera: u.npy; key+camera: W_u.npy, SA_dl.npy). Rand: 1_action=WASD/UDLR+still only, 2_action=full set. 2-6=rand names below.
     # Group 1: Constant Keyboard, No Mouse. W.npy, S.npy, WA.npy, SA.npy, ...
     keys_basic = ["W", "S", "A", "D", "WA", "WD", "SA", "SD"]
     for key in keys_basic:
@@ -178,32 +178,32 @@ if __name__ == "__main__":
     keys_basic_still = keys_basic + [""]
     mouse_basic_still = mouse_basic + [""]
 
-    # Group 5: key_1_action_rand (full key set). key_1_action_rand_1..4, key_1_action_rand_1_f4..4_f4
+    # Group 5: key_2_action_rand (full key set). key_2_action_rand_1..4, key_2_action_rand_1_f4..4_f4
     for granularity in (4, 12):
         suffix = "_f4" if granularity == 4 else ""
         for i in range(1, 5):
             key_seq = build_random_sequence(keys_basic_still, granularity, rng)
             configs.append(
-                (f"key_1_action_rand_{i}{suffix}", key_seq, build_constant_sequence(""))
+                (f"key_2_action_rand_{i}{suffix}", key_seq, build_constant_sequence(""))
             )
 
-    # Group 6: camera_1_action_rand (full camera set)
+    # Group 6: camera_2_action_rand (full camera set)
     for granularity in (4, 12):
         suffix = "_f4" if granularity == 4 else ""
         for i in range(1, 5):
             mouse_seq = build_random_sequence(mouse_basic_still, granularity, rng)
             configs.append(
-                (f"camera_1_action_rand_{i}{suffix}", build_constant_sequence(""), mouse_seq)
+                (f"camera_2_action_rand_{i}{suffix}", build_constant_sequence(""), mouse_seq)
             )
 
-    # Group 7: key_camera_1_action_rand (both full sets)
+    # Group 7: key_camera_2_action_rand (both full sets)
     for granularity in (4, 12):
         suffix = "_f4" if granularity == 4 else ""
         for i in range(1, 5):
             key_seq = build_random_sequence(keys_basic_still, granularity, rng)
             mouse_seq = build_random_sequence(mouse_basic_still, granularity, rng)
             configs.append(
-                (f"key_camera_1_action_rand_{i}{suffix}", key_seq, mouse_seq)
+                (f"key_camera_2_action_rand_{i}{suffix}", key_seq, mouse_seq)
             )
 
     # WASD-only (no combined keys) and u/d/l/r-only (no combined directions), with still as option
@@ -212,35 +212,35 @@ if __name__ == "__main__":
     keys_wasd_still = keys_wasd_only + [""]
     mouse_udlr_still = mouse_udlr_only + [""]
 
-    # Group 8: key_2_action_rand (WASD+still only)
+    # Group 8: key_1_action_rand (WASD+still only)
     for granularity in (4, 12):
         suffix = "_f4" if granularity == 4 else ""
         for i in range(1, 5):
             key_seq = build_random_sequence(keys_wasd_still, granularity, rng)
             configs.append(
-                (f"key_2_action_rand_{i}{suffix}", key_seq, build_constant_sequence(""))
+                (f"key_1_action_rand_{i}{suffix}", key_seq, build_constant_sequence(""))
             )
 
-    # Group 9: camera_2_action_rand (UDLR+still only)
+    # Group 9: camera_1_action_rand (UDLR+still only)
     for granularity in (4, 12):
         suffix = "_f4" if granularity == 4 else ""
         for i in range(1, 5):
             mouse_seq = build_random_sequence(mouse_udlr_still, granularity, rng)
             configs.append(
-                (f"camera_2_action_rand_{i}{suffix}", build_constant_sequence(""), mouse_seq)
+                (f"camera_1_action_rand_{i}{suffix}", build_constant_sequence(""), mouse_seq)
             )
 
-    # Group 10: key_camera_2_action_rand (WASD+still, UDLR+still)
+    # Group 10: key_camera_1_action_rand (WASD+still, UDLR+still)
     for granularity in (4, 12):
         suffix = "_f4" if granularity == 4 else ""
         for i in range(1, 5):
             key_seq = build_random_sequence(keys_wasd_still, granularity, rng)
             mouse_seq = build_random_sequence(mouse_udlr_still, granularity, rng)
             configs.append(
-                (f"key_camera_2_action_rand_{i}{suffix}", key_seq, mouse_seq)
+                (f"key_camera_1_action_rand_{i}{suffix}", key_seq, mouse_seq)
             )
 
-    # Group 11a: key_camera_excl_1_action_rand (either key OR camera per block, full key + full camera set)
+    # Group 11a: key_camera_excl_2_action_rand (either key OR camera per block, full key + full camera set)
     for granularity in (4, 12):
         suffix = "_f4" if granularity == 4 else ""
         for i in range(1, 5):
@@ -249,13 +249,13 @@ if __name__ == "__main__":
                 (f"key_camera_excl_1_action_rand_{i}{suffix}", key_seq, mouse_seq)
             )
 
-    # Group 11b: key_camera_excl_2_action_rand (either key OR camera per block, WASD/UDLR+still)
+    # Group 11b: key_camera_excl_1_action_rand (either key OR camera per block, WASD/UDLR+still)
     for granularity in (4, 12):
         suffix = "_f4" if granularity == 4 else ""
         for i in range(1, 5):
             key_seq, mouse_seq = build_random_sequence_either_or(keys_wasd_still, mouse_udlr_still, granularity, rng)
             configs.append(
-                (f"key_camera_excl_2_action_rand_{i}{suffix}", key_seq, mouse_seq)
+                (f"key_camera_excl_1_action_rand_{i}{suffix}", key_seq, mouse_seq)
             )
 
     # Execution
