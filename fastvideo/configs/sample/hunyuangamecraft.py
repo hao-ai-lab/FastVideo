@@ -35,12 +35,18 @@ class HunyuanGameCraftSamplingParam(SamplingParam):
     width: int = 1280
     fps: int = 24
     
-    # Guidance scale (typically 1.0 for flow matching)
-    guidance_scale: float = 1.0
+    # Guidance scale - official GameCraft uses CFG with guidance_scale=6.0
+    guidance_scale: float = 6.0
+    
+    # Negative prompt for CFG (empty string = unconditional)
+    negative_prompt: str = ""
     
     # Camera/Action conditioning
-    # Camera trajectory as Plücker coordinates [B, T_video, 6, H, W]
-    camera_trajectory: Any | None = None
+    # Camera states as Plücker coordinates [B, T_video, 6, H, W]
+    camera_states: Any | None = None
+    
+    # Camera trajectory file/identifier (alternative to camera_states)
+    camera_trajectory: str | None = None
     
     # Action list for camera motion (e.g., ["forward", "left"])
     action_list: list[str] | None = None
@@ -55,8 +61,8 @@ class HunyuanGameCraftSamplingParam(SamplingParam):
     # Mask for conditioning (1=use gt, 0=generate) [B, 1, T, H, W]
     conditioning_mask: Any | None = None
     
-    # Number of history frames to condition on (for autoregressive)
-    num_history_frames: int = 0
+    # Number of conditioning frames (for autoregressive) - maps to num_cond_frames
+    num_cond_frames: int = 0
     
     # TeaCache parameters (if enabled)
     teacache_params: TeaCacheParams = field(

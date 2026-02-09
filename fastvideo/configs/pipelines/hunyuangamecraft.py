@@ -24,7 +24,7 @@ from fastvideo.configs.models.encoders import (
     CLIPTextConfig,
     LlamaConfig,
 )
-from fastvideo.configs.models.vaes import HunyuanVAEConfig
+from fastvideo.configs.models.vaes import GameCraftVAEConfig
 from fastvideo.configs.pipelines.base import PipelineConfig
 
 
@@ -91,12 +91,14 @@ class HunyuanGameCraftPipelineConfig(PipelineConfig):
     # DiT config - uses GameCraft config (33 input channels)
     dit_config: DiTConfig = field(default_factory=HunyuanGameCraftConfig)
     
-    # VAE config - same as HunyuanVideo
-    vae_config: VAEConfig = field(default_factory=HunyuanVAEConfig)
+    # VAE config - GameCraft VAE (mid_block_causal_attn=True, etc.)
+    vae_config: VAEConfig = field(default_factory=GameCraftVAEConfig)
     
     # Denoising parameters
-    embedded_cfg_scale: int = 6
-    flow_shift: int = 7
+    # Official GameCraft does NOT use embedded guidance (passes guidance=None)
+    # It uses standard CFG with guidance_scale=6.0 instead
+    embedded_cfg_scale: int = None
+    flow_shift: int = 5  # Official GameCraft uses flow_shift=5.0
     
     # Text encoding stage - same as HunyuanVideo
     # Uses LLaMA-3-8B (via LLaVA) + CLIP
