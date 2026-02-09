@@ -10,7 +10,10 @@ from fastvideo.training.self_forcing_distillation_pipeline import (
     SelfForcingDistillationPipeline)
 from fastvideo.utils import is_vsa_available
 
-vsa_available = is_vsa_available()
+try:
+    vsa_available = is_vsa_available()
+except Exception:
+    vsa_available = False
 
 logger = init_logger(__name__)
 

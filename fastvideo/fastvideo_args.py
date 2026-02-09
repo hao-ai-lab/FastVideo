@@ -916,6 +916,7 @@ class TrainingArgs(FastVideoArgs):
     training_state_checkpointing_steps: int = 0  # for resuming training
     weight_only_checkpointing_steps: int = 0  # for inference
     log_visualization: bool = False
+    visualization_steps: int = 0
     # simulate generator forward to match inference
     simulate_generator_forward: bool = False
     warp_denoising_step: bool = False
@@ -1079,6 +1080,9 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--log-validation",
                             action=StoreBoolean,
                             help="Whether to log validation results")
+        parser.add_argument("--visualization-steps",
+                            type=int,
+                            help="Number of visualization steps")
         parser.add_argument("--tracker-project-name",
                             type=str,
                             help="Project name for tracking")
