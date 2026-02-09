@@ -150,7 +150,7 @@ class LingBotWorldTransformerBlock(nn.Module):
         temb: torch.Tensor,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         attention_mask: torch.Tensor | None = None,
-        c2ws_plucker_emb: list[torch.Tensor] | None = None,
+        c2ws_plucker_emb: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if hidden_states.dim() == 4:
             hidden_states = hidden_states.squeeze(1)
@@ -318,7 +318,7 @@ class LingBotWorldTransformer3DModel(CachableDiT):
                 encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
                 | None = None,
                 guidance=None,
-                c2ws_plucker_emb: list[torch.Tensor] | None = None,
+                c2ws_plucker_emb: torch.Tensor | None = None,
                 **kwargs) -> torch.Tensor:
         forward_batch = get_forward_context().forward_batch
         enable_teacache = forward_batch is not None and forward_batch.enable_teacache
@@ -356,12 +356,9 @@ class LingBotWorldTransformer3DModel(CachableDiT):
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
         c2ws_hidden_states = None
         if c2ws_plucker_emb is not None:
-            c2ws_plucker_emb = [
-                self.patch_embedding_wancamctrl(
-                    i.to(device=hidden_states.device, dtype=hidden_states.dtype)
-                ) for i in c2ws_plucker_emb
-            ]
-            c2ws_plucker_emb = torch.cat(c2ws_plucker_emb, dim=1)
+            c2ws_plucker_emb = self.patch_embedding_wancamctrl(
+                c2ws_plucker_emb.to(device=hidden_states.device, dtype=hidden_states.dtype)
+            )
             c2ws_hidden_states = self.c2ws_mlp(c2ws_plucker_emb)
             c2ws_plucker_emb = c2ws_plucker_emb + c2ws_hidden_states
 

@@ -137,7 +137,7 @@ class ForwardBatch:
     pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
 
     # Camera control inputs (LingBotWorld)
-    c2ws_plucker_emb: list[torch.Tensor] | None = None  # Plucker embeddings
+    c2ws_plucker_emb: torch.Tensor | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
 
     # Latent dimensions
     height_latents: list[int] | int | None = None

@@ -160,7 +160,7 @@ def prepare_camera_embedding(
     height: int,
     width: int,
     spatial_scale: int = 8,
-) -> tuple[list[torch.Tensor], int]:
+) -> tuple[torch.Tensor, int]:
     c2ws = np.load(os.path.join(action_path, "poses.npy"))
     len_c2ws = ((len(c2ws) - 1) // 4) * 4 + 1
     num_frames = min(num_frames, len_c2ws)
@@ -200,5 +200,4 @@ def prepare_camera_embedding(
     plucker = plucker.view(num_latent_frames, latent_height, latent_width, 6 * spatial_scale * spatial_scale)
     c2ws_plucker_emb = plucker.permute(3, 0, 1, 2).contiguous().unsqueeze(0)
 
-    c2ws_plucker_emb = list(c2ws_plucker_emb.chunk(1, dim=0))
     return c2ws_plucker_emb, num_frames
