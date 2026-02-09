@@ -2,10 +2,10 @@
 
 import math
 from typing import Any
-
+import gc
 import numpy as np
-import torch
-import torch.nn as nn
+import torch  # ty:ignore[unresolved-import]
+import torch.nn as nn  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.nn.attention.flex_attention import BlockMask
@@ -20,7 +20,7 @@ import fastvideo.envs as envs
 from fastvideo.attention import (DistributedAttention,
                                  LocalAttention)
 from fastvideo.configs.models.dits import WanVideoConfig
-from fastvideo.distributed.parallel_state import get_sp_world_size
+from fastvideo.distributed.parallel_state import get_sp_world_size, get_local_torch_device
 from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import (FP32LayerNorm, LayerNormScaleShift,
                                         RMSNorm, ScaleResidual,
@@ -36,6 +36,26 @@ from fastvideo.models.dits.wanvideo import WanT2VCrossAttention, WanTimeTextImag
 from fastvideo.platforms import AttentionBackendEnum, current_platform
 
 logger = init_logger(__name__)
+
+class CacheAppend(torch.autograd.Function):
+    """
+    KV cache with shape [batch, seq_len, heads, head_dim].
+    """
+    @staticmethod
+    def forward(ctx, storage, active_cache, x, start, end):
+        # Ensure storage has the same dtype as x
+        storage.data[:, start:end] = x
+        ctx.save_for_backward(storage.to(x.dtype))
+        ctx.start = start
+        ctx.end = end
+        return storage[:, :end].to(x.dtype) # Ensure returned value has same dtype as input
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        start = ctx.start
+        end = ctx.end
+        return None, grad_output[:, :start], grad_output[:, start:end], None, None
+
 class CausalWanSelfAttention(nn.Module):
 
     def __init__(self,
@@ -57,6 +77,9 @@ class CausalWanSelfAttention(nn.Module):
         self.eps = eps
         self.parallel_attention = parallel_attention
         self.max_attention_size = 32760 if local_attn_size == -1 else local_attn_size * 1560
+        # self.max_attention_size = 29640 # 1560 * 19
+        # self.max_attention_size = 3600 * 19 # 720P
+        # self.max_attention_size = 40 * 1560 # 10 seconds
 
         # Scaled dot product attention
         self.attn = LocalAttention(
@@ -67,6 +90,9 @@ class CausalWanSelfAttention(nn.Module):
             causal=False,
             supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
                                           AttentionBackendEnum.TORCH_SDPA))
+        
+        self.k_cache = None
+        self.v_cache = None
 
     def forward(self, 
                 q: torch.Tensor,
@@ -84,6 +110,33 @@ class CausalWanSelfAttention(nn.Module):
             grid_sizes(Tensor): Shape [B, 3], the second dimension contains (F, H, W)
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
         """
+        # def drop_cache(grad):
+        #     # self.k_cache = torch.cat([self.k_cache[:, :current_start], self.k_cache[:, current_start:].detach()], dim=1)
+        #     # self.v_cache = torch.cat([self.v_cache[:, :current_start], self.v_cache[:, current_start:].detach()], dim=1)
+        #     self.k_cache = self.k_cache[:, :current_start]
+        #     self.v_cache = self.v_cache[:, :current_start]
+        #     if self.k_cache.numel() == 0:
+        #         self.k_cache = None
+        #     if self.v_cache.numel() == 0:
+        #         self.v_cache = None
+        #     gc.collect()
+        #     torch.cuda.empty_cache()
+        #     return grad
+
+        # if q.requires_grad:
+        #     q.register_hook(drop_cache)
+
+        if kv_cache is not None:
+            # Then we are in _forward_inference mode
+            if self.k_cache is None:
+                del self.k_cache
+                self.register_buffer("k_cache", torch.empty(1, self.max_attention_size, self.num_heads, self.head_dim, device=q.device, dtype=q.dtype), persistent=False)
+                self.k_cache.requires_grad_(True)
+            if self.v_cache is None:
+                del self.v_cache
+                self.register_buffer("v_cache", torch.empty(1, self.max_attention_size, self.num_heads, self.head_dim, device=v.device, dtype=v.dtype), persistent=False)
+                self.v_cache.requires_grad_(True)
+
         if cache_start is None:
             cache_start = current_start
 
@@ -128,35 +181,55 @@ class CausalWanSelfAttention(nn.Module):
             num_new_tokens = roped_query.shape[1]
             if self.local_attn_size != -1 and (current_end > kv_cache["global_end_index"].item()) and (
                     num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size):
+                # @TODO(Wei): This part has not been thoroughly tested yet. Use with caution.
                 # Calculate the number of new tokens added in this step
                 # Shift existing cache content left to discard oldest tokens
                 # Clone the source slice to avoid overlapping memory error
                 num_evicted_tokens = num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
                 num_rolled_tokens = kv_cache["local_end_index"].item() - num_evicted_tokens - sink_tokens
-                kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                    kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-                kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                    kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+                # kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+                #     kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+                # kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+                #     kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+                self.k_cache[:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+                    self.k_cache[:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+                self.v_cache[:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+                    self.v_cache[:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
                 # Insert the new keys/values at the end
                 local_end_index = kv_cache["local_end_index"].item() + current_end - \
                     kv_cache["global_end_index"].item() - num_evicted_tokens
                 local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
+                local_k = CacheAppend.apply(self.k_cache, kv_cache["k"], roped_key, local_start_index, local_end_index)
+                local_v = CacheAppend.apply(self.v_cache, kv_cache["v"], v, local_start_index, local_end_index)
+                # kv_cache["k"][:, local_start_index:local_end_index] = roped_key
+                # kv_cache["v"][:, local_start_index:local_end_index] = v
             else:
+                assert kv_cache["local_end_index"].item() == kv_cache["global_end_index"].item(), "local_end_index and global_end_index must be the same"
                 # Assign new keys/values directly up to current_end
                 local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
                 local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"] = kv_cache["k"].detach()
-                kv_cache["v"] = kv_cache["v"].detach()
-                # logger.info("kv_cache['k'] is in comp graph: %s", kv_cache["k"].requires_grad or kv_cache["k"].grad_fn is not None)
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
+                # kv_cache["k"] = kv_cache["k"].detach()
+                # kv_cache["v"] = kv_cache["v"].detach()
+                # kv_cache["k"][:, local_start_index:local_end_index] = roped_key
+                # kv_cache["v"][:, local_start_index:local_end_index] = v
+                local_k = CacheAppend.apply(self.k_cache, kv_cache["k"], roped_key, local_start_index, local_end_index)
+                # logger.info("Is local_k meta tensor: %s, %s", local_k.is_meta, local_k.shape)
+                # logger.info("local_start_index: %d, local_end_index: %d, number of zeros in local k: %d", local_start_index, local_end_index, (local_k == 0).sum().item())
+                local_v = CacheAppend.apply(self.v_cache, kv_cache["v"], v, local_start_index, local_end_index)
+
             x = self.attn(
                 roped_query,
-                kv_cache["k"][:, max(0, local_end_index - self.max_attention_size):local_end_index],
-                kv_cache["v"][:, max(0, local_end_index - self.max_attention_size):local_end_index]
+                local_k,
+                local_v
             )
+            # x = self.attn(
+            #     roped_query,
+            #     kv_cache["k"][:, max(0, local_end_index - self.max_attention_size):local_end_index],
+            #     kv_cache["v"][:, max(0, local_end_index - self.max_attention_size):local_end_index]
+            # )
+
+            kv_cache["k"] = local_k
+            kv_cache["v"] = local_v
             kv_cache["global_end_index"].fill_(current_end)
             kv_cache["local_end_index"].fill_(local_end_index)
 
@@ -233,6 +306,9 @@ class CausalWanTransformerBlock(nn.Module):
 
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
 
+        self.null_shift = torch.tensor([0], device=get_local_torch_device())
+        self.null_scale = torch.tensor([0], device=get_local_torch_device())
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -283,9 +359,8 @@ class CausalWanTransformerBlock(nn.Module):
         attn_output, _ = self.to_out(attn_output)
         attn_output = attn_output.squeeze(1)
 
-        null_shift = null_scale = torch.tensor([0], device=hidden_states.device)
         norm_hidden_states, hidden_states = self.self_attn_residual_norm(
-            hidden_states, attn_output, gate_msa, null_shift, null_scale)
+            hidden_states, attn_output, gate_msa, self.null_shift, self.null_scale)
 
         # 2. Cross-attention
         attn_output = self.attn2(norm_hidden_states,

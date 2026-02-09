@@ -109,7 +109,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         set_random_seed(self.seed)
         self.transformer.train()
         self.transformer.requires_grad_(True)
-        self.transformer.scale_shift_table.requires_grad_(False)
         if training_args.enable_gradient_checkpointing_type is not None:
             self.transformer = apply_activation_checkpointing(
                 self.transformer,
@@ -149,7 +148,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
             # Ensure transformer_2 has trainable parameters before creating optimizer
             self.transformer_2.train()
             self.transformer_2.requires_grad_(True)
-            self.transformer_2.scale_shift_table.requires_grad_(False)
             if training_args.enable_gradient_checkpointing_type is not None:
                 self.transformer_2 = apply_activation_checkpointing(
                     self.transformer_2,

@@ -20,9 +20,10 @@ from fastvideo.fastvideo_args import TrainingArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 
+from fastvideo.configs.sample import SamplingParam
 from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import SelfForcingFlowMatchScheduler
 from fastvideo.models.utils import pred_noise_to_pred_video, pred_noise_to_x_bound
-from fastvideo.pipelines import TrainingBatch
+from fastvideo.pipelines import TrainingBatch, ForwardBatch
 from fastvideo.training.distillation_pipeline import DistillationPipeline
 from fastvideo.training.training_utils import (EMA_FSDP,
                                                save_distillation_checkpoint)
@@ -537,6 +538,8 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                         crossattn_cache=crossattn_cache,
                         current_start=current_start_frame * self.frame_seq_length,
                         start_frame=current_start_frame)
+                    gc.collect()
+                    torch.cuda.empty_cache()
 
                 # context_timestep is 0 so we use transformer_2
                 # current_model = self.transformer_2 if self.transformer_2 is not None else self.transformer
@@ -1039,7 +1042,44 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         training_batch.fake_score_loss = avg_critic_loss.item()
         training_batch.critic_grad_norm = critic_grad_norm
         training_batch.total_loss = training_batch.generator_loss + training_batch.fake_score_loss
+
+        gc.collect()
+        torch.cuda.empty_cache()
         return training_batch
+
+    def _init_negative_prompt(self, training_args: TrainingArgs) -> None:
+        """Initialize negative prompt embeddings for training."""
+        if getattr(self, 'validation_pipeline', None) is None:
+            logger.warning("Validation pipeline not set, skipping negative prompt initialization")
+            return
+
+        logger.info("Initializing negative prompt embeddings...")
+        # Create sampling parameters to get default negative prompt
+        sampling_param = SamplingParam.from_pretrained(training_args.model_path)
+        negative_prompt = sampling_param.negative_prompt
+        
+        batch_negative = ForwardBatch(
+            data_type="video",
+            prompt=negative_prompt,
+            prompt_embeds=[],
+            prompt_attention_mask=[],
+        )
+        
+        # Encode negative prompt
+        # Ensure inference mode is set if needed by pipeline
+        original_inference_mode = getattr(training_args, 'inference_mode', False)
+        training_args.inference_mode = True
+        
+        try:
+            result_batch = self.validation_pipeline.prompt_encoding_stage(
+                batch_negative, training_args)
+            self.negative_prompt_embeds = result_batch.prompt_embeds[0]
+            self.negative_prompt_attention_mask = result_batch.prompt_attention_mask[0]
+            logger.info("Negative prompt embeddings initialized")
+        except Exception as e:
+            logger.error("Failed to initialize negative prompt embeddings: %s", str(e))
+        finally:
+            training_args.inference_mode = original_inference_mode
 
     def _log_training_info(self) -> None:
         """Log self-forcing specific training information."""
@@ -1212,15 +1252,14 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
         step_times: deque[float] = deque(maxlen=100)
 
         self._log_training_info()
-        assert self.transformer.scale_shift_table.requires_grad == False
-        if self.transformer_2 is not None:
-            assert self.transformer_2.scale_shift_table.requires_grad == False
+
+        # Initialize negative prompt regardless of validation settings
+        # self._init_negative_prompt(self.training_args)
+
         validation_args = deepcopy(self.training_args)
         self._log_validation(validation_args,
                              self.init_steps)
-        assert self.transformer.scale_shift_table.requires_grad == False
-        if self.transformer_2 is not None:
-            assert self.transformer_2.scale_shift_table.requires_grad == False
+        
         gc.collect()
         torch.cuda.empty_cache()
 

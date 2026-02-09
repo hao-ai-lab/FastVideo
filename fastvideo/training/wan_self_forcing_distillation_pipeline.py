@@ -49,7 +49,7 @@ class WanSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
             sp_size=training_args.sp_size,
             num_gpus=training_args.num_gpus,
             pin_cpu_memory=training_args.pin_cpu_memory,
-            dit_cpu_offload=True)
+            dit_cpu_offload=False)
 
         self.validation_pipeline = validation_pipeline
 

@@ -185,10 +185,10 @@ class SelfForcingMoEWanT2V480PConfig(SelfForcingWanT2V480PConfig):
 @dataclass
 class SelfForcingMoEWanT2V720PConfig(SelfForcingMoEWanT2V480PConfig):
     flow_shift: float | None = 12.0
-    dmd_denoising_steps: list[int] | None = field(
-        default_factory=lambda: [1000,850,700,550,350,275,200,125])
     # dmd_denoising_steps: list[int] | None = field(
-    #     default_factory=lambda: [1000,850,350,275])
+    #     default_factory=lambda: [1000,850,700,550,350,275,200,125])
+    dmd_denoising_steps: list[int] | None = field(
+        default_factory=lambda: [1000,550,350,125])
     # flow_shift: float | None = 5.0
     # dmd_denoising_steps: list[int] | None = field(
     #     default_factory=lambda: [1000,850,800,750,570,450,350,250])

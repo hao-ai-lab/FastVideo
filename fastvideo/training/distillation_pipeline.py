@@ -366,11 +366,9 @@ class DistillationPipeline(TrainingPipeline):
         """Prepare training environment for distillation."""
         self.transformer.requires_grad_(True)
         self.transformer.train()
-        self.transformer.scale_shift_table.requires_grad_(False)
         if self.transformer_2 is not None:
             self.transformer_2.requires_grad_(True)
             self.transformer_2.train()
-            self.transformer_2.scale_shift_table.requires_grad_(False)
         self.fake_score_transformer.requires_grad_(True)
         self.fake_score_transformer.train()
         if self.fake_score_transformer_2 is not None:
@@ -780,15 +778,15 @@ class DistillationPipeline(TrainingPipeline):
 
                     if train_critic_2:
                         start_timestep = 0
-                        end_timestep = boundary_timestep_pre_shift
+                        end_timestep = boundary_timestep_pre_shift - 2
                     else:
-                        start_timestep = boundary_timestep_pre_shift + 2
+                        start_timestep = boundary_timestep_pre_shift + 4
                         end_timestep = self.num_train_timestep
                 elif exit_timestep < self.boundary_timestep and self.fake_score_transformer_2 is None:
                     start_timestep = 0
                     end_timestep = self.num_train_timestep
                 else:
-                    start_timestep = boundary_timestep_pre_shift + 2
+                    start_timestep = boundary_timestep_pre_shift + 4
                     end_timestep = self.num_train_timestep
             else:
                 start_timestep = 0
@@ -840,6 +838,7 @@ class DistillationPipeline(TrainingPipeline):
             training_batch = self._build_distill_input_kwargs(
                 noisy_latent, timestep, training_batch.conditional_dict,
                 training_batch)
+            assert int(timestep) != self.boundary_timestep, "Timestep is equal to boundary timestep"
             current_fake_score_transformer = self._get_fake_score_transformer(
                 timestep)
             fake_score_pred_noise = current_fake_score_transformer(
@@ -1019,15 +1018,15 @@ class DistillationPipeline(TrainingPipeline):
 
                 if train_critic_2:
                     start_timestep = 0
-                    end_timestep = boundary_timestep_pre_shift
+                    end_timestep = boundary_timestep_pre_shift - 2
                 else:
-                    start_timestep = boundary_timestep_pre_shift + 2
+                    start_timestep = boundary_timestep_pre_shift + 4
                     end_timestep = self.num_train_timestep
             elif exit_timestep < self.boundary_timestep and self.fake_score_transformer_2 is None:
                 start_timestep = 0
                 end_timestep = self.num_train_timestep
             else:
-                start_timestep = boundary_timestep_pre_shift + 2
+                start_timestep = boundary_timestep_pre_shift + 4
                 end_timestep = self.num_train_timestep
         else:
             start_timestep = 0
@@ -1083,6 +1082,7 @@ class DistillationPipeline(TrainingPipeline):
                 noisy_generator_pred_video, fake_score_timestep,
                 training_batch.conditional_dict, training_batch)
 
+            assert int(fake_score_timestep) != self.boundary_timestep, "Timestep is equal to boundary timestep"
             current_fake_score_transformer = self._get_fake_score_transformer(
                 fake_score_timestep)
             fake_score_pred_noise = current_fake_score_transformer(
