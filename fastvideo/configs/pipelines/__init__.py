@@ -10,7 +10,9 @@ from fastvideo.configs.pipelines.registry import (
     get_pipeline_config_cls_from_name)
 from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
 from fastvideo.configs.pipelines.wan import (SelfForcingWanT2V480PConfig,
+                                             WanGameI2V480PConfig,
                                              WanI2V480PConfig, WanI2V720PConfig,
+                                             WanLingBotI2V480PConfig,
                                              WanT2V480PConfig, WanT2V720PConfig)
 
 __all__ = [
@@ -19,5 +21,6 @@ __all__ = [
     "WanT2V480PConfig", "WanI2V480PConfig", "WanT2V720PConfig",
     "WanI2V720PConfig", "StepVideoT2VConfig", "SelfForcingWanT2V480PConfig",
     "CosmosConfig", "Cosmos25Config", "LTX2T2VConfig", "HYWorldConfig",
+    "WanGameI2V480PConfig", "WanLingBotI2V480PConfig",
     "get_pipeline_config_cls_from_name"
 ]

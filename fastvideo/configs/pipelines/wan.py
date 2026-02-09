@@ -7,6 +7,8 @@ import torch
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.configs.models.dits.matrixgame import MatrixGameWanVideoConfig
+from fastvideo.configs.models.dits.wangamevideo import (WanGameVideoConfig,
+                                                        WanLingBotVideoConfig)
 from fastvideo.configs.models.encoders import (BaseEncoderOutput,
                                                CLIPVisionConfig, T5Config,
                                                WAN2_1ControlCLIPVisionConfig)
@@ -110,6 +112,20 @@ class WANV2VConfig(WanI2V480PConfig):
         default_factory=WAN2_1ControlCLIPVisionConfig)
     # CLIP encoder precision
     image_encoder_precision: str = 'bf16'
+
+
+@dataclass
+class WanLingBotI2V480PConfig(WanI2V480PConfig):
+    """Configuration for Wan LingBot image-to-video pipeline."""
+
+    dit_config: DiTConfig = field(default_factory=WanLingBotVideoConfig)
+
+
+@dataclass
+class WanGameI2V480PConfig(WanI2V480PConfig):
+    """Configuration for WanGame image-to-video pipeline."""
+
+    dit_config: DiTConfig = field(default_factory=WanGameVideoConfig)
 
 
 @dataclass

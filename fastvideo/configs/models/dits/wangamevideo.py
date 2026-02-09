@@ -113,3 +113,10 @@ class WanGameVideoConfig(DiTConfig):
     arch_config: DiTArchConfig = field(default_factory=WanGameVideoArchConfig)
 
     prefix: str = "WanGame"
+
+
+@dataclass
+class WanLingBotVideoConfig(DiTConfig):
+    arch_config: DiTArchConfig = field(default_factory=WanGameVideoArchConfig)
+
+    prefix: str = "WanLingBot"

@@ -810,6 +810,9 @@ class TransformerLoader(ComponentLoader):
             cls_name.startswith("WanGame")
             or cls_name == "WanGameActionTransformer3DModel"
             or getattr(fastvideo_args.pipeline_config, "prefix", "") == "WanGame"
+            or cls_name.startswith("WanLingBot")
+            or cls_name == "WanLingBotTransformer3DModel"
+            or getattr(fastvideo_args.pipeline_config, "prefix", "") == "WanLingBot"
         )
         model = maybe_load_fsdp_model(
             model_cls=model_cls,

@@ -197,3 +197,5 @@ pyarrow_schema_wangame = pa.schema([
     pa.field("duration_sec", pa.float64()),
     pa.field("fps", pa.float64()),
 ])
+
+pyarrow_schema_wangame_lingbot = pyarrow_schema_wangame

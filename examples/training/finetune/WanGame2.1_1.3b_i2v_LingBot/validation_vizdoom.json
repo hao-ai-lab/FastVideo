@@ -1,0 +1,84 @@
+{
+    "data": [
+        {
+            "caption": "00. Hold [W] + Static",
+            "image_path": "doom/000000.jpg",
+            "action_path": "action/000000_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "01. Hold [S] + Static",
+            "image_path": "doom/000001.jpg",
+            "action_path": "action/000001_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "02. Hold [A] + Static",
+            "image_path": "doom/000002.jpg",
+            "action_path": "action/000002_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "10. No Key + Hold [left]",
+            "image_path": "doom/000003.jpg",
+            "action_path": "action/000010_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "12. No Key + Hold [up_right]",
+            "image_path": "doom/000004.jpg",
+            "action_path": "action/000012_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "21. Switch [W]->[D] + Static",
+            "image_path": "doom/000005.jpg",
+            "action_path": "action/000021_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "29. No Key + Switch [up_right]->[up_left]",
+            "image_path": "doom/000006.jpg",
+            "action_path": "action/000029_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        },
+        {
+            "caption": "50. Hold [W] + Switch [up]->[down]",
+            "image_path": "doom/000007.jpg",
+            "action_path": "action/000050_action.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 81
+        }
+    ]
+}

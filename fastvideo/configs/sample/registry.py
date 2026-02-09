@@ -126,6 +126,10 @@ SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "wanpipeline" in id.lower(),
     "wanimagetovideo":
     lambda id: "wanimagetovideo" in id.lower(),
+    "wangameactionimagetovideo":
+    lambda id: "wangameactionimagetovideo" in id.lower(),
+    "wanlingbotimagetovideo":
+    lambda id: "wanlingbotimagetovideo" in id.lower(),
     "stepvideo":
     lambda id: "stepvideo" in id.lower(),
     "wandmdpipeline":
@@ -156,6 +160,8 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
     "wanpipeline":
     WanT2V_1_3B_SamplingParam,  # Base Wan config as fallback for any Wan variant
     "wanimagetovideo": WanI2V_14B_480P_SamplingParam,
+    "wangameactionimagetovideo": Wan2_1_Fun_1_3B_InP_SamplingParam,
+    "wanlingbotimagetovideo": Wan2_1_Fun_1_3B_InP_SamplingParam,
     "wandmdpipeline": FastWanT2V480P_SamplingParam,
     "wancausaldmdpipeline": SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam,
     "stepvideo": StepVideoT2VSamplingParam,
