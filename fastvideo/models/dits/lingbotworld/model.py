@@ -204,7 +204,10 @@ class LingBotWorldTransformerBlock(nn.Module):
         norm_hidden_states, hidden_states = norm_hidden_states.to(
             orig_dtype), hidden_states.to(orig_dtype)
         # Inject camera condition
-        norm_hidden_states = self.cam_conditioner(norm_hidden_states, c2ws_plucker_emb)
+        # must be applied after the self-attention residual update.
+        hidden_states = self.cam_conditioner(hidden_states, c2ws_plucker_emb)
+        norm_hidden_states = self.self_attn_residual_norm.norm(hidden_states)
+        norm_hidden_states = norm_hidden_states.to(orig_dtype)
 
         # 2. Cross-attention
         attn_output = self.attn2(norm_hidden_states,

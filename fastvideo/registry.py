@@ -335,7 +335,10 @@ def _register_configs() -> None:
         hf_model_paths=[
             "FastVideo/LingBot-World-Base-Cam-Diffusers",
         ],
-        model_detectors=[lambda path: "lingbotworld" in path.lower()],
+        model_detectors=[
+            lambda path: ("lingbotworld" in path.lower()
+                          or "lingbot-world" in path.lower())
+        ],
     )
 
     # LongCat

@@ -69,7 +69,7 @@ class LingBotWorldArchConfig(DiTArchConfig):
     lora_param_names_mapping: dict = field(default_factory=lambda: {})
 
     patch_size: tuple[int, int, int] = (1, 2, 2)
-    text_len = 512
+    text_len: int = 512
     num_attention_heads: int = 40
     attention_head_dim: int = 128
     in_channels: int = 16

@@ -9,7 +9,7 @@ def main():
     # If a local path is provided, FastVideo will make a best effort
     # attempt to identify the optimal arguments.
     generator = VideoGenerator.from_pretrained(
-         "H1yori233/LingBot-World-Base-Cam-Diffusers",
+         "FastVideo/LingBot-World-Base-Cam-Diffusers",
         # FastVideo will automatically handle distributed setup
         num_gpus=1,
         use_fsdp_inference=False, # set to True if GPU is out of memory
@@ -23,8 +23,8 @@ def main():
 
     num_frames = 81
     prompt = "The video presents a soaring journey through a fantasy jungle. The wind whips past the rider's blue hands gripping the reins, causing the leather straps to vibrate. The ancient gothic castle approaches steadily, its stone details becoming clearer against the backdrop of floating islands and distant waterfalls."
-    image_path = "https://raw.githubusercontent.com/Robbyant/lingbot-world/main/examples/01/image.jpg"
-    action_path = "examples/inference/basic/lingbotworld_examples/01"
+    image_path = "https://raw.githubusercontent.com/Robbyant/lingbot-world/main/examples/00/image.jpg"
+    action_path = "examples/inference/basic/lingbotworld_examples/00"
     c2ws_plucker_emb, num_frames = prepare_camera_embedding(
         action_path=action_path,
         num_frames=num_frames,
