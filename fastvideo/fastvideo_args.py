@@ -990,6 +990,7 @@ class TrainingArgs(FastVideoArgs):
                             help="Number of workers for dataloader")
         parser.add_argument("--reshuffle-each-epoch",
                             action=StoreBoolean,
+                            default=TrainingArgs.reshuffle_each_epoch,
                             help="Whether to reshuffle dataset order each epoch")
         parser.add_argument("--num-height",
                             type=int,
