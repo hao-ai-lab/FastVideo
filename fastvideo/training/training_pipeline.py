@@ -42,9 +42,9 @@ from fastvideo.training.trackers import (DummyTracker, TrackerType,
                                          initialize_trackers, Trackers)
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
-    compute_density_for_timestep_sampling, count_trainable, get_scheduler,
-    get_sigmas, load_checkpoint, normalize_dit_input, save_checkpoint,
-    shard_latents_across_sp)
+    compute_density_for_timestep_sampling, count_trainable,
+    count_trainable_total, get_scheduler, get_sigmas, load_checkpoint,
+    normalize_dit_input, save_checkpoint, shard_latents_across_sp)
 from fastvideo.utils import (is_vmoba_available, is_vsa_available,
                              set_random_seed, shallow_asdict)
 
@@ -582,15 +582,30 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     local_main_process_only=False)
         if not self.post_init_called:
             self.post_init()
-        num_trainable_params = count_trainable(self.transformer)
-        logger.info("Starting training with %s B trainable parameters",
-                    round(num_trainable_params / 1e9, 3))
+        local_trainable = count_trainable(self.transformer)
+        total_trainable = count_trainable_total(
+            self.transformer,
+            get_local_torch_device(),
+        )
+        logger.info(
+            "Starting training with %s B trainable parameters (total); "
+            "this rank shard: %s B",
+            round(total_trainable / 1e9, 3),
+            round(local_trainable / 1e9, 3),
+        )
 
         if getattr(self, "transformer_2", None) is not None:
-            num_trainable_params = count_trainable(self.transformer_2)
+            local_trainable_2 = count_trainable(self.transformer_2)
+            total_trainable_2 = count_trainable_total(
+                self.transformer_2,
+                get_local_torch_device(),
+            )
             logger.info(
-                "Transformer 2: Starting training with %s B trainable parameters",
-                round(num_trainable_params / 1e9, 3))
+                "Transformer 2: %s B trainable parameters (total); "
+                "this rank shard: %s B",
+                round(total_trainable_2 / 1e9, 3),
+                round(local_trainable_2 / 1e9, 3),
+            )
 
         # Set random seeds for deterministic training
         self.noise_random_generator = torch.Generator(device="cpu").manual_seed(

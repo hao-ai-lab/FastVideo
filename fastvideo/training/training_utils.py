@@ -1630,7 +1630,25 @@ def _local_numel(p: torch.Tensor) -> int:
 
 
 def count_trainable(model: torch.nn.Module) -> int:
+    """Return this rank's trainable parameter count (FSDP local shard)."""
     return sum(_local_numel(p) for p in model.parameters() if p.requires_grad)
+
+
+def count_trainable_total(
+    model: torch.nn.Module,
+    device: torch.device | None = None,
+) -> int:
+    """Return total trainable parameter count across all ranks (FSDP-safe).
+
+    When device is provided and dist is initialized, torch.distributed.all_reduce(SUM)
+    with the default world group is used. Otherwise returns local count.
+    """
+    local = count_trainable(model)
+    if device is not None and dist.is_initialized():
+        t = torch.tensor([local], dtype=torch.long, device=device)
+        dist.all_reduce(t, op=dist.ReduceOp.SUM)
+        return t.item()
+    return local
 
 
 class EMA_FSDP:
