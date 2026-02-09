@@ -13,7 +13,7 @@ from fastvideo.distributed import (get_local_torch_device, get_tp_rank,
                                    split_tensor_along_last_dim,
                                    tensor_model_parallel_all_gather,
                                    tensor_model_parallel_all_reduce)
-from fastvideo.layers.linear import (ColumnParallelLinear, LinearBase,
+from fastvideo.layers.linear import (ColumnParallelLinear,
                                      MergedColumnParallelLinear,
                                      QKVParallelLinear, ReplicatedLinear,
                                      RowParallelLinear)
@@ -82,10 +82,9 @@ class BaseLayerWithLoRA(nn.Module):
             lora_B_sliced = self.slice_lora_b_weights(
                 lora_B.to(x, non_blocking=True))
             delta = x @ lora_A_sliced.T @ lora_B_sliced.T
-            if self.lora_alpha != self.lora_rank:
-                delta = delta * (
-                    self.lora_alpha / self.lora_rank  # type: ignore
-                )  # type: ignore
+            if (self.lora_alpha is not None and self.lora_rank is not None
+                    and self.lora_alpha != self.lora_rank):
+                delta = delta * (self.lora_alpha / self.lora_rank)
             out, output_bias = self.base_layer(x)
             return out + delta, output_bias
         else:
@@ -97,6 +96,31 @@ class BaseLayerWithLoRA(nn.Module):
 
     def slice_lora_b_weights(self, B: torch.Tensor) -> torch.Tensor:
         return B
+
+
+class TorchLinearWithLoRA(BaseLayerWithLoRA):
+    """LoRA wrapper for torch.nn.Linear modules."""
+
+    @torch.compile()
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        lora_A = self.lora_A
+        lora_B = self.lora_B
+        if isinstance(self.lora_B, DTensor):
+            lora_B = self.lora_B.to_local()
+            lora_A = self.lora_A.to_local()
+
+        if not self.merged and not self.disable_lora:
+            lora_A_sliced = self.slice_lora_a_weights(
+                lora_A.to(x, non_blocking=True))
+            lora_B_sliced = self.slice_lora_b_weights(
+                lora_B.to(x, non_blocking=True))
+            delta = x @ lora_A_sliced.T @ lora_B_sliced.T
+            if (self.lora_alpha is not None and self.lora_rank is not None
+                    and self.lora_alpha != self.lora_rank):
+                delta = delta * (self.lora_alpha / self.lora_rank)
+            out = self.base_layer(x)
+            return out + delta
+        return self.base_layer(x)
 
     def set_lora_weights(self,
                          A: torch.Tensor,
@@ -369,7 +393,7 @@ def get_lora_layer(layer: nn.Module,
                    lora_rank: int | None = None,
                    lora_alpha: int | None = None,
                    training_mode: bool = False) -> BaseLayerWithLoRA | None:
-    supported_layer_types: dict[type[LinearBase], type[BaseLayerWithLoRA]] = {
+    supported_layer_types: dict[type[nn.Module], type[BaseLayerWithLoRA]] = {
         # the order matters
         # VocabParallelEmbedding: VocabParallelEmbeddingWithLoRA,
         QKVParallelLinear: QKVParallelLinearWithLoRA,
@@ -377,6 +401,7 @@ def get_lora_layer(layer: nn.Module,
         ColumnParallelLinear: ColumnParallelLinearWithLoRA,
         RowParallelLinear: RowParallelLinearWithLoRA,
         ReplicatedLinear: BaseLayerWithLoRA,
+        nn.Linear: TorchLinearWithLoRA,
     }
     for src_layer_type, lora_layer_type in supported_layer_types.items():
         if isinstance(layer, src_layer_type):  # pylint: disable=unidiomatic-typecheck

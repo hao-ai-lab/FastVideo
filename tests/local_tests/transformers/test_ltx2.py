@@ -9,8 +9,11 @@ from torch.testing import assert_close
 
 os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29513")
+os.environ.setdefault("FASTVIDEO_ATTENTION_BACKEND", "TORCH_SDPA")
 
 repo_root = Path(__file__).resolve().parents[3]
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 ltx_core_path = repo_root / "LTX-2" / "packages" / "ltx-core" / "src"
 if ltx_core_path.exists() and str(ltx_core_path) not in sys.path:
     sys.path.insert(0, str(ltx_core_path))
@@ -32,7 +35,7 @@ def _read_transformer_config(config: dict) -> dict:
 def _infer_patch_params(in_channels: int) -> tuple[int, int]:
     patch_size = 1
     num_channels_latents = 128
-    for candidate in (8, 16, 32, 64, 128):
+    for candidate in (128, 64, 32, 16, 8):
         if in_channels % candidate != 0:
             continue
         patch_volume = in_channels // candidate
@@ -161,16 +164,26 @@ def test_ltx2_transformer_parity():
         pytest.skip(f"FastVideo converted weights not found at {fastvideo_path}")
 
     try:
-        from ltx_core.components.patchifiers import VideoLatentPatchifier
+        from ltx_core.components.patchifiers import (VideoLatentPatchifier,
+                                                     get_pixel_coords)
         from ltx_core.guidance.perturbations import BatchedPerturbationConfig
         from ltx_core.loader.sft_loader import SafetensorsModelStateDictLoader
         from ltx_core.loader.single_gpu_model_builder import SingleGPUModelBuilder
         from ltx_core.model.transformer import (LTXModelConfigurator,
                                                 LTXV_MODEL_COMFY_RENAMING_MAP)
         from ltx_core.model.transformer.modality import Modality
-        from ltx_core.types import VideoLatentShape
+        from ltx_core.types import VideoLatentShape, VIDEO_SCALE_FACTORS
+        from ltx_core.utils import to_denoised
     except ImportError as exc:
         pytest.skip(f"LTX-2 import failed: {exc}")
+
+    # Force reference attention to use PyTorch SDPA for parity with FastVideo.
+    try:
+        from ltx_core.model.transformer import attention as ltx_attention
+        ltx_attention.memory_efficient_attention = None
+        ltx_attention.flash_attn_interface = None
+    except Exception:
+        pass
 
     config_loader = SafetensorsModelStateDictLoader()
     metadata = config_loader.metadata(str(official_path))
@@ -304,11 +317,21 @@ def test_ltx2_transformer_parity():
         device=device,
         dtype=precision,
     )
-    timestep = torch.tensor([500], device=device, dtype=precision)
 
     video_shape = VideoLatentShape.from_torch_shape(hidden_states.shape)
-    positions = patchifier.get_patch_grid_bounds(video_shape, device=hidden_states.device)
+    latent_coords = patchifier.get_patch_grid_bounds(video_shape, device=hidden_states.device)
+    positions = get_pixel_coords(
+        latent_coords=latent_coords,
+        scale_factors=VIDEO_SCALE_FACTORS,
+        causal_fix=True,
+    )
     latents = patchifier.patchify(hidden_states)
+    timestep = torch.full(
+        (batch_size, latents.shape[1], 1),
+        500,
+        device=device,
+        dtype=precision,
+    )
 
     video = Modality(
         enabled=True,
@@ -325,6 +348,7 @@ def test_ltx2_transformer_parity():
             audio=None,
             perturbations=BatchedPerturbationConfig.empty(batch_size),
         )
+        ref_out = to_denoised(latents, ref_out, timestep)
         ref_out = patchifier.unpatchify(ref_out, output_shape=video_shape)
         print(f"[LTX2 TEST] Reference model output shape: {ref_out.shape}")
         with set_forward_context(

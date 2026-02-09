@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 import os
+from pathlib import Path
 
 import torch
 from tqdm.auto import tqdm
@@ -80,9 +81,21 @@ def _ltx2_sigmas(
 class LTX2DenoisingStage(PipelineStage):
     """Run the LTX-2 denoising loop over the sigma schedule."""
 
-    def __init__(self, transformer) -> None:
+    def __init__(
+        self,
+        transformer,
+        *,
+        sigmas_override: list[float] | None = None,
+        num_inference_steps_override: int | None = None,
+        force_guidance_scale: float | None = None,
+        initial_audio_latents_key: str | None = None,
+    ) -> None:
         super().__init__()
         self.transformer = transformer
+        self.sigmas_override = sigmas_override
+        self.num_inference_steps_override = num_inference_steps_override
+        self.force_guidance_scale = force_guidance_scale
+        self.initial_audio_latents_key = initial_audio_latents_key
 
     def forward(
         self,
@@ -98,8 +111,14 @@ class LTX2DenoisingStage(PipelineStage):
 
         neg_prompt_embeds = None
         neg_prompt_mask = None
+        guidance_scale = batch.guidance_scale
+        use_cfg = batch.do_classifier_free_guidance
+        if self.force_guidance_scale is not None:
+            guidance_scale = self.force_guidance_scale
+            use_cfg = guidance_scale > 1.0
+
         # Only load negative prompts if CFG is actually enabled
-        if batch.do_classifier_free_guidance:
+        if use_cfg:
             assert batch.negative_prompt_embeds is not None, (
                 "CFG is enabled but negative_prompt_embeds is None")
             neg_prompt_embeds = batch.negative_prompt_embeds[0]
@@ -121,22 +140,31 @@ class LTX2DenoisingStage(PipelineStage):
                             ) and not fastvideo_args.disable_autocast and (
                                 not disable_autocast)
 
-        # Use official distilled sigma schedule for 8 steps (distilled models)
-        use_distilled_sigmas = os.getenv("LTX2_USE_DISTILLED_SIGMAS",
-                                         "1") == "1"
-        if use_distilled_sigmas and batch.num_inference_steps == 8:
+        num_steps = self.num_inference_steps_override or batch.num_inference_steps
+        if self.sigmas_override is not None:
             sigmas = torch.tensor(
-                DISTILLED_SIGMA_VALUES,
+                self.sigmas_override,
                 device=latents.device,
                 dtype=torch.float32,
             )
-            logger.info("[LTX2] Using official distilled sigma schedule")
+            logger.info("[LTX2] Using overridden sigma schedule")
         else:
-            sigmas = _ltx2_sigmas(
-                steps=batch.num_inference_steps,
-                latent=None,
-                device=latents.device,
-            )
+            # Use official distilled sigma schedule for 8 steps (distilled models)
+            use_distilled_sigmas = os.getenv("LTX2_USE_DISTILLED_SIGMAS",
+                                             "1") == "1"
+            if use_distilled_sigmas and num_steps == 8:
+                sigmas = torch.tensor(
+                    DISTILLED_SIGMA_VALUES,
+                    device=latents.device,
+                    dtype=torch.float32,
+                )
+                logger.info("[LTX2] Using official distilled sigma schedule")
+            else:
+                sigmas = _ltx2_sigmas(
+                    steps=num_steps,
+                    latent=None,
+                    device=latents.device,
+                )
         if hasattr(self.transformer, "patchifier"):
             video_shape = VideoLatentShape.from_torch_shape(latents.shape)
             token_count = self.transformer.patchifier.get_token_count(
@@ -144,7 +172,7 @@ class LTX2DenoisingStage(PipelineStage):
         else:
             token_count = 1
         timestep_template = torch.ones(
-            (latents.shape[0], token_count),
+            (latents.shape[0], token_count, 1),
             device=latents.device,
             dtype=torch.float32,
         )
@@ -154,7 +182,15 @@ class LTX2DenoisingStage(PipelineStage):
         audio_context_n = audio_neg_embeds[0] if audio_neg_embeds else None
         audio_latents = None
         audio_timestep_template = None
-        if audio_context_p is not None:
+        if self.initial_audio_latents_key is not None:
+            audio_latents = batch.extra.get(self.initial_audio_latents_key)
+            if audio_latents is not None:
+                audio_timestep_template = torch.ones(
+                    (latents.shape[0], audio_latents.shape[2], 1),
+                    device=latents.device,
+                    dtype=torch.float32,
+                )
+        if audio_context_p is not None and audio_latents is None:
             fps_value = batch.fps
             if isinstance(fps_value, list):
                 fps_value = fps_value[0] if fps_value else None
@@ -170,53 +206,69 @@ class LTX2DenoisingStage(PipelineStage):
                 hop_length=DEFAULT_LTX2_AUDIO_HOP_LENGTH,
                 audio_latent_downsample_factor=DEFAULT_LTX2_AUDIO_DOWNSAMPLE,
             )
-            audio_generator = None
-            if fastvideo_args.ltx2_initial_latent_path and batch.seed is not None:
-                audio_generator = torch.Generator(
-                    device=latents.device).manual_seed(batch.seed)
-            elif batch.generator is not None:
-                if isinstance(batch.generator, list):
-                    audio_generator = batch.generator[0]
-                else:
-                    audio_generator = batch.generator
-            if audio_generator is not None and audio_generator.device.type != latents.device.type:
-                if batch.seed is None:
-                    audio_generator = torch.Generator(device=latents.device)
-                else:
-                    audio_generator = torch.Generator(
-                        device=latents.device).manual_seed(batch.seed)
-            audio_patch_shape = (
+            expected_shape = (
                 audio_shape.batch,
+                audio_shape.channels,
                 audio_shape.frames,
-                audio_shape.channels * audio_shape.mel_bins,
+                audio_shape.mel_bins,
             )
-            audio_latents_patch = torch.randn(
-                audio_patch_shape,
-                generator=audio_generator,
+            audio_latent_path = fastvideo_args.ltx2_audio_latent_path
+            audio_latents = self._load_audio_latents(
+                audio_latent_path,
                 device=latents.device,
                 dtype=latents.dtype,
-            )
-            if hasattr(self.transformer, "audio_patchifier"):
-                audio_latents = self.transformer.audio_patchifier.unpatchify(
-                    audio_latents_patch, audio_shape)
-            else:
-                audio_latents = audio_latents_patch.view(
+                expected_shape=expected_shape,
+            ) if audio_latent_path else None
+            if audio_latents is None:
+                audio_generator = None
+                if fastvideo_args.ltx2_initial_latent_path and batch.seed is not None:
+                    audio_generator = torch.Generator(
+                        device=latents.device).manual_seed(batch.seed)
+                elif batch.generator is not None:
+                    if isinstance(batch.generator, list):
+                        audio_generator = batch.generator[0]
+                    else:
+                        audio_generator = batch.generator
+                if audio_generator is not None and audio_generator.device.type != latents.device.type:
+                    if batch.seed is None:
+                        audio_generator = torch.Generator(device=latents.device)
+                    else:
+                        audio_generator = torch.Generator(
+                            device=latents.device).manual_seed(batch.seed)
+                audio_patch_shape = (
                     audio_shape.batch,
                     audio_shape.frames,
-                    audio_shape.channels,
-                    audio_shape.mel_bins,
-                ).permute(0, 2, 1, 3).contiguous()
+                    audio_shape.channels * audio_shape.mel_bins,
+                )
+                audio_latents_patch = torch.randn(
+                    audio_patch_shape,
+                    generator=audio_generator,
+                    device=latents.device,
+                    dtype=latents.dtype,
+                )
+                if hasattr(self.transformer, "audio_patchifier"):
+                    audio_latents = self.transformer.audio_patchifier.unpatchify(
+                        audio_latents_patch, audio_shape)
+                else:
+                    audio_latents = audio_latents_patch.view(
+                        audio_shape.batch,
+                        audio_shape.frames,
+                        audio_shape.channels,
+                        audio_shape.mel_bins,
+                    ).permute(0, 2, 1, 3).contiguous()
+                if audio_latent_path:
+                    self._save_audio_latents(audio_latent_path, audio_latents)
             audio_timestep_template = torch.ones(
-                (latents.shape[0], audio_shape.frames),
+                (latents.shape[0], audio_shape.frames, 1),
                 device=latents.device,
                 dtype=torch.float32,
             )
         logger.info(
             "[LTX2] Denoising start: steps=%d dtype=%s guidance=%s "
             "sigmas_shape=%s latents_shape=%s",
-            batch.num_inference_steps,
+            num_steps,
             target_dtype,
-            batch.guidance_scale,
+            guidance_scale,
             tuple(sigmas.shape),
             tuple(latents.shape),
         )
@@ -253,7 +305,7 @@ class LTX2DenoisingStage(PipelineStage):
                     pos_audio = None
 
                 # Only run negative pass if CFG is enabled
-                if batch.do_classifier_free_guidance:
+                if use_cfg:
                     neg_outputs = self.transformer(
                         hidden_states=latents.to(target_dtype),
                         encoder_hidden_states=neg_prompt_embeds,
@@ -268,10 +320,10 @@ class LTX2DenoisingStage(PipelineStage):
                     else:
                         neg_denoised = neg_outputs
                         neg_audio = None
-                    pos_denoised = pos_denoised + (batch.guidance_scale - 1) * (
+                    pos_denoised = pos_denoised + (guidance_scale - 1) * (
                         pos_denoised - neg_denoised)
                     if pos_audio is not None and neg_audio is not None:
-                        pos_audio = pos_audio + (batch.guidance_scale -
+                        pos_audio = pos_audio + (guidance_scale -
                                                  1) * (pos_audio - neg_audio)
 
             sigma_value = sigma.to(torch.float32) if isinstance(
@@ -296,6 +348,43 @@ class LTX2DenoisingStage(PipelineStage):
         batch.extra["ltx2_audio_latents"] = audio_latents
         logger.info("[LTX2] Denoising done.")
         return batch
+
+    def _load_audio_latents(
+        self,
+        latent_path: str | None,
+        *,
+        device: torch.device,
+        dtype: torch.dtype,
+        expected_shape: tuple[int, ...],
+    ) -> torch.Tensor | None:
+        if not latent_path:
+            return None
+        path = Path(latent_path)
+        if not path.exists():
+            return None
+        payload = torch.load(path, map_location=device)
+        if isinstance(payload, dict):
+            latent = (payload.get("audio_latent") or payload.get("latent")
+                      or payload.get("audio"))
+        else:
+            latent = payload
+        if not torch.is_tensor(latent):
+            raise TypeError(f"Expected tensor audio latent in {path}")
+        if tuple(latent.shape) != tuple(expected_shape):
+            raise ValueError(
+                f"Audio latent shape mismatch for {path}: expected {expected_shape}, got {tuple(latent.shape)}"
+            )
+        logger.info("[LTX2] Loaded audio latent from %s", path)
+        return latent.to(device=device, dtype=dtype)
+
+    def _save_audio_latents(self, latent_path: str,
+                            latents: torch.Tensor) -> None:
+        path = Path(latent_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            return
+        torch.save({"audio_latent": latents.detach().cpu()}, path)
+        logger.info("[LTX2] Saved audio latent to %s", path)
 
     def verify_input(self, batch: ForwardBatch,
                      fastvideo_args: FastVideoArgs) -> VerificationResult:

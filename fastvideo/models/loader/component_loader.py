@@ -34,6 +34,7 @@ from fastvideo.models.loader.weight_utils import (
     safetensors_weights_iterator,
 )
 from fastvideo.models.registry import ModelRegistry
+from fastvideo.models.upsamplers.config_adapters import get_upsampler_config
 from fastvideo.utils import PRECISION_TO_TYPE, is_pin_memory_available
 from fastvideo.hooks.layerwise_offload import enable_layerwise_offload
 
@@ -84,6 +85,8 @@ class ComponentLoader(ABC):
             "audio_vae": (AudioDecoderLoader, "diffusers"),
             "audio_decoder": (AudioDecoderLoader, "diffusers"),
             "vocoder": (VocoderLoader, "diffusers"),
+            "upsampler": (UpsamplerLoader, "diffusers"),
+            "spatial_upsampler": (UpsamplerLoader, "diffusers"),
             "text_encoder": (TextEncoderLoader, "transformers"),
             "text_encoder_2": (TextEncoderLoader, "transformers"),
             "tokenizer": (TokenizerLoader, "transformers"),
@@ -727,6 +730,34 @@ class VocoderLoader(ComponentLoader):
         return vocoder.eval()
 
 
+class UpsamplerLoader(ComponentLoader):
+    """Loader for LTX-2 spatial/temporal upsampler."""
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        config = get_diffusers_config(model=model_path)
+        class_name = config.pop("_class_name", None) or "LTX2LatentUpsampler"
+
+        model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+        target_device = get_local_torch_device()
+
+        precision = getattr(
+            fastvideo_args.pipeline_config, "vae_precision", "bf16"
+        )
+        with set_default_torch_dtype(PRECISION_TO_TYPE[precision]):
+            upsampler = model_cls(config).to(target_device)
+
+        safetensors_list = glob.glob(
+            os.path.join(str(model_path), "*.safetensors")
+        )
+        loaded: dict[str, torch.Tensor] = {}
+        for sf_file in safetensors_list:
+            loaded.update(safetensors_load_file(sf_file))
+
+        target_module = getattr(upsampler, "model", upsampler)
+        target_module.load_state_dict(loaded, strict=False)
+        return upsampler.eval()
+
+
 class TransformerLoader(ComponentLoader):
     """Loader for transformer."""
 
@@ -896,14 +927,10 @@ class UpsamplerLoader(ComponentLoader):
                 "Only diffusers format is supported."
             )
 
-        try:
-            upsampler_cfg = deepcopy(fastvideo_args.pipeline_config.upsampler_config[0])
-            upsampler_cfg.update_model_config(config_dict)
-        except Exception as e:
-            upsampler_cfg = deepcopy(fastvideo_args.pipeline_config.upsampler_config[1])
-            upsampler_cfg.update_model_config(config_dict)
-
         model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+        upsampler_cfg = get_upsampler_config(
+            class_name, config_dict, fastvideo_args.pipeline_config
+        )
         model = model_cls(upsampler_cfg)
 
         target_device = get_local_torch_device()
@@ -914,15 +941,21 @@ class UpsamplerLoader(ComponentLoader):
             os.path.join(str(model_path), "*.safetensors"))
         if not safetensors_list:
             raise ValueError(f"No safetensors files found in {model_path}")
-        
+
         if len(safetensors_list) == 1:
             loaded = safetensors_load_file(safetensors_list[0])
         else:
             loaded = {}
             for sf_file in safetensors_list:
                 loaded.update(safetensors_load_file(sf_file))
-        
-        model.load_state_dict(loaded, strict=True)
+
+        # LTX2 latent upsamplers typically store weights without "model." prefix.
+        target_module = getattr(model, "model", model)
+        if loaded and all(k.startswith("model.") for k in loaded.keys()):
+            stripped = {k[len("model.") :]: v for k, v in loaded.items()}
+            target_module.load_state_dict(stripped, strict=True)
+        else:
+            target_module.load_state_dict(loaded, strict=True)
 
         return model.eval()
 
