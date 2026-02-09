@@ -1006,7 +1006,7 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--data-path",
                             type=str,
                             required=True,
-                            help="Path to parquet files")
+                            help="Path to parquet files (comma-separated for multiple; path:N for repeat count)")
         parser.add_argument("--dataloader-num-workers",
                             type=int,
                             required=True,

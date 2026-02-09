@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import hashlib
 import os
 import pickle
 import random
@@ -106,10 +107,90 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
         return len(self.sp_group_local_indices) // self.batch_size
 
 
+def _parse_data_path_specs(path: str) -> list[tuple[str, int]]:
+    """
+    Parse data_path into a list of (directory, repeat_count).
+    Syntax: comma-separated entries; each entry is "path" (default 1) or "path:N" (N = repeat count).
+    N=0 means skip that path (convenience to disable without removing). If no ":" present, default is 1.
+    Example: "/dir1:2,/dir2,/dir3:0" -> dir1 2x, dir2 1x, dir3 skipped.
+    """
+    specs: list[tuple[str, int]] = []
+    for part in path.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if ":" in part:
+            p, _, count_str = part.rpartition(":")
+            p = p.strip()
+            try:
+                count = int(count_str.strip())
+            except ValueError:
+                raise ValueError(
+                    f"data_path repeat count must be an integer, got {count_str!r}"
+                ) from None
+            if count < 0:
+                raise ValueError(
+                    f"data_path repeat count must be >= 0, got {count}"
+                )
+            specs.append((p, count))
+        else:
+            specs.append((part, 1))
+    return specs
+
+
+def _scan_parquet_files_for_path(p: str) -> tuple[list[str], list[int]]:
+    """Return (file_paths, row_lengths) for a single directory."""
+    file_names: list[str] = []
+    for root, _, files in os.walk(p):
+        for file in sorted(files):
+            if file.endswith(".parquet"):
+                file_names.append(os.path.join(root, file))
+    lengths = []
+    for file_path in tqdm.tqdm(
+            file_names, desc="Reading parquet files to get lengths"):
+        lengths.append(pq.ParquetFile(file_path).metadata.num_rows)
+    logger.info("Found %d parquet files with %d total rows", len(file_names), sum(lengths))
+    return file_names, lengths
+
+
 def get_parquet_files_and_length(path: str):
-    # Check if cached info exists
-    cache_dir = os.path.join(path, "map_style_cache")
-    cache_file = os.path.join(cache_dir, "file_info.pkl")
+    """
+    Collect parquet file paths and row lengths from one or more directories.
+    path: single directory, or comma-separated "path" or "path:N" (N = repeat count).
+    E.g. "/dir1:2,/dir2:1" -> dir1's files appear 2x (oversampled), dir2 once.
+    """
+    path_specs = _parse_data_path_specs(path)
+    if not path_specs:
+        raise ValueError(
+            "data_path must be a non-empty path or comma-separated path specs"
+        )
+    # Use first path with count > 0 for cache_dir (single-path case only)
+    first_path = next(
+        (p for p, c in path_specs if c > 0),
+        path_specs[0][0],
+    )
+    is_single_no_repeat = (
+        len(path_specs) == 1 and path_specs[0][1] == 1
+    )
+    effective_path = path.strip()
+    # Single path, no repeat: cache under that path (backward compatible).
+    # Multi-path or repeat: cache in a neutral dir keyed by hash of full path spec,
+    # so we never reuse "first path's" cache and the cached list is the merged list.
+    if is_single_no_repeat:
+        cache_dir = os.path.join(first_path, "map_style_cache")
+        cache_suffix = "file_info.pkl"
+    else:
+        neutral_root = os.environ.get(
+            "FASTVIDEO_MAP_STYLE_CACHE_DIR",
+            os.path.join(os.path.expanduser("~"), ".cache", "fastvideo", "map_style_cache"),
+        )
+        cache_dir = neutral_root
+        cache_suffix = (
+            "file_info_"
+            + hashlib.md5(effective_path.encode()).hexdigest()[:16]
+            + ".pkl"
+        )
+    cache_file = os.path.join(cache_dir, cache_suffix)
 
     # Only rank 0 checks for cache and scans files if needed
     if get_world_rank() == 0:
@@ -132,26 +213,30 @@ def get_parquet_files_and_length(path: str):
 
         # If cache not loaded (either doesn't exist or failed to load), scan files
         if not cache_loaded:
-            logger.info("Scanning parquet files to get lengths")
-            lengths = []
-            file_names = []
-            for root, _, files in os.walk(path):
-                for file in sorted(files):
-                    if file.endswith('.parquet'):
-                        file_path = os.path.join(root, file)
-                        file_names.append(file_path)
-            for file_path in tqdm.tqdm(
-                    file_names, desc="Reading parquet files to get lengths"):
-                num_rows = pq.ParquetFile(file_path).metadata.num_rows
-                lengths.append(num_rows)
-            # sort according to file name to ensure all rank has the same order
-            file_names_sorted, lengths_sorted = zip(*sorted(zip(file_names,
-                                                                lengths,
-                                                                strict=True),
-                                                            key=lambda x: x[0]),
-                                                    strict=True)
-            assert len(
-                file_names_sorted) != 0, "No parquet files found in the dataset"
+            logger.info(
+                "Scanning parquet files (path specs: %s)",
+                [(p, c) for p, c in path_specs],
+            )
+            # Build list with repeats; use (path, length, sort_index) for stable order
+            # Skip paths with count 0 (no I/O for disabled paths)
+            combined: list[tuple[str, int, int]] = []
+            sort_index = 0
+            for p, count in path_specs:
+                if count == 0:
+                    continue
+                fnames, lens = _scan_parquet_files_for_path(p)
+                for _ in range(count):
+                    for f, ln in zip(fnames, lens, strict=True):
+                        combined.append((f, ln, sort_index))
+                        sort_index += 1
+            if not combined:
+                raise ValueError(
+                    "No parquet files found in the dataset (paths: %s)"
+                    % [p for p, _ in path_specs]
+                )
+            combined.sort(key=lambda x: (x[0], x[2]))
+            file_names_sorted = tuple(x[0] for x in combined)
+            lengths_sorted = tuple(x[1] for x in combined)
 
             # Save the cache
             os.makedirs(cache_dir, exist_ok=True)

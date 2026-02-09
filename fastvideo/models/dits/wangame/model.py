@@ -174,7 +174,7 @@ class WanGameActionTransformerBlock(nn.Module):
         key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
         value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
 
-        # Self-attention with optional camera PRoPE
+        # Self-attention with camera PRoPE
         attn_output_rope, attn_output_prope = self.attn1(
             query, key, value, freqs_cis,
             kv_cache, current_start, cache_start, viewmats, Ks,

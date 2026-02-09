@@ -17,7 +17,7 @@ export TORCH_NCCL_ENABLE_MONITORING=0
 export NCCL_DEBUG_SUBSYS=INIT,NET
 # different cache dir for different processes
 export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
-export MASTER_PORT=29500
+export MASTER_PORT=29501
 export NODE_RANK=$SLURM_PROCID
 nodes=( $(scontrol show hostnames $SLURM_JOB_NODELIST) )
 export MASTER_ADDR=${nodes[0]}
@@ -26,6 +26,7 @@ export WANDB_API_KEY="d5b02b05e30d8cb34c7b31c6ae10416fc26dcb66"
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
+export FASTVIDEO_MAP_STYLE_CACHE_DIR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/map_style_cache"
 
 source ~/conda/miniconda/bin/activate
 conda activate mhuo-fv
@@ -37,27 +38,44 @@ NUM_NODES=4
 NUM_TOTAL_GPUS=$((NUM_GPUS * NUM_NODES))
 BS_PER_GPU=1
 GRADIENT_ACCUMULATION_STEPS=1
-WANDB_RUN_NAME="MC_wsad_random_lr_1e-5"
+WANDB_RUN_NAME="MC_1action_rand_from_scratch"
 FREEZE_DIT=False
-RUN_DIR="wangame_1.3b_wsad_random_lr_1e-5"
+RUN_DIR="wangame_1.3b_1action_rand_from_scratch"
 CHECKPOINTING_STEPS=1000
 ACTION_WARMUP_STEPS=0
 LEARNING_RATE=1e-5
 
 MODEL_PATH="weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers"
-CKPT_SAFETENSOR="wangame_1.3b_with_warmup_lr_1e-5/checkpoint-7000/transformer/diffusion_pytorch_model.safetensors"
-# MC wasd only 
-# DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed"
-# VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_wsad.json"
+# CKPT_SAFETENSOR="wangame_1.3b_with_warmup_lr_1e-5/checkpoint-7000/transformer/diffusion_pytorch_model.safetensors"
+#
+# Data dirs (use one of the following):
+#   - DATA_DIR_ALL: all datasets below combined (comma-separated)
+#   - Or a single path / subset; optional ":N" = repeat, ":0" = skip
+#
+DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0204_2130/preprocessed:0" # Random
+DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0204_1600/preprocessed:0" # Doom
+DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/0_static_plus_w_only/preprocessed:1" # Static + w only
+DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed:1" # w/s/a/d only
+DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/preprocessed:1" # wasd only
+DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/camera/preprocessed:1" # camera l-only and r-only
+DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/camera4hold_alpha1/preprocessed:1" # camera only
+DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed:1" # key_camera_excl_1_action_rand
 
-# MC random
-DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/preprocessed"
-VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_mc.json"
-
-# DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0204_1600/preprocessed"
-# VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_doom.json"
-# DATA_DIR="mc_wasd_10/preprocessed/combined_parquet_dataset"
-# VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_overfit.json"
+VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random.json"
+#
+# Single-dir / validation alternatives (comment out DATA_DIR above and uncomment one block):
+# MC wasd only:
+#   DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed"
+#   VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_wsad.json"
+# MC random:
+#   DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/preprocessed"
+#   VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_mc.json"
+# Doom:
+#   DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0204_1600/preprocessed"
+#   VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_doom.json"
+# Overfit:
+#   DATA_DIR="mc_wasd_10/preprocessed/combined_parquet_dataset"
+#   VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_overfit.json"
 
 
 # Training arguments
@@ -65,7 +83,7 @@ training_args=(
   --tracker_project_name "wangame_1.3b"
   --output_dir $RUN_DIR
   --wandb_run_name "$WANDB_RUN_NAME"
-  --max_train_steps 10000
+  --max_train_steps 20000
   --train_batch_size $BS_PER_GPU
   --train_sp_batch_size $BS_PER_GPU
   --gradient_accumulation_steps $GRADIENT_ACCUMULATION_STEPS
@@ -76,7 +94,7 @@ training_args=(
   --enable_gradient_checkpointing_type "full"
   --train_action_only $FREEZE_DIT
   --action_warmup_steps $ACTION_WARMUP_STEPS
-  --init_weights_from_safetensors $CKPT_SAFETENSOR
+  # --init_weights_from_safetensors $CKPT_SAFETENSOR
 )
 
 # Parallel arguments
