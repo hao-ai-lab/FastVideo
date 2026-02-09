@@ -104,8 +104,8 @@ class LingBotWorldTransformerBlock(nn.Module):
             self.norm_q = RMSNorm(dim, eps=eps)
             self.norm_k = RMSNorm(dim, eps=eps)
         else:
-            print("QK Norm type not supported")
-            raise Exception
+            raise NotImplementedError(
+                f"QK Norm type '{qk_norm}' not supported")
         assert cross_attn_norm is True
         self.self_attn_residual_norm = ScaleResidualLayerNormScaleShift(
             dim,
@@ -150,7 +150,7 @@ class LingBotWorldTransformerBlock(nn.Module):
         temb: torch.Tensor,
         freqs_cis: tuple[torch.Tensor, torch.Tensor],
         attention_mask: torch.Tensor | None = None,
-        c2ws_plucker_emb: torch.Tensor | None = None,
+        c2ws_plucker_emb: list[torch.Tensor] | None = None,
     ) -> torch.Tensor:
         if hidden_states.dim() == 4:
             hidden_states = hidden_states.squeeze(1)
@@ -318,7 +318,7 @@ class LingBotWorldTransformer3DModel(CachableDiT):
                 encoder_hidden_states_image: torch.Tensor | list[torch.Tensor]
                 | None = None,
                 guidance=None,
-                c2ws_plucker_emb: torch.Tensor | None = None,
+                c2ws_plucker_emb: list[torch.Tensor] | None = None,
                 **kwargs) -> torch.Tensor:
         forward_batch = get_forward_context().forward_batch
         enable_teacache = forward_batch is not None and forward_batch.enable_teacache

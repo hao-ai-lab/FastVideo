@@ -160,7 +160,7 @@ def prepare_camera_embedding(
     height: int,
     width: int,
     spatial_scale: int = 8,
-) -> tuple[torch.Tensor, int]:
+) -> tuple[list[torch.Tensor], int]:
     c2ws = np.load(os.path.join(action_path, "poses.npy"))
     len_c2ws = ((len(c2ws) - 1) // 4) * 4 + 1
     num_frames = min(num_frames, len_c2ws)
