@@ -51,7 +51,7 @@ dataset_args=(
 validation_args=(
   --log_validation True
   --validation_dataset_file $VALIDATION_DATASET_FILE
-  --validation_steps 30
+  --validation_steps 15
   --validation_sampling_steps "20"
   --validation_guidance_scale "4.5"
 )

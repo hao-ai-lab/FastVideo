@@ -90,6 +90,92 @@ On our machine, use the conda environment **fastvideo_shijie**. Activate it befo
 **Transformer forward args (log_prob replay).** To ensure the first log_prob after trajectory collection matches the log_prob from the trajectory collection process, the transformer forward in `_compute_log_prob_for_timestep` (GRPO loss) must use the same inputs and `set_forward_context` as the DenoisingStage. The DenoisingStage therefore saves, when RL is enabled, the transformer forward args (per-step context: `current_timestep`, `attn_metadata`; trajectory-scope: `image_kwargs`, `pos_cond_kwargs`, `neg_cond_kwargs`, `action_kwargs`, `guidance_expand`, `video_latent`, `image_latent`, `forward_batch_snapshot`) into `ForwardBatch.RLData.transformer_forward_args`. These are copied to `TrainingBatch.transformer_forward_args` in `collect_trajectories` and used in `_compute_log_prob_for_timestep` to replay the same forward. Data structures live in `fastvideo/pipelines/pipeline_batch_info.py`: `RLTransformerForwardArgs`, `TrajectoryScopeForwardArgs`, `PerStepForwardContext`.
 
 **Multiple batches per step (flow_grpo-style).** `--rl-num-batches-per-step` (default 1) controls how many sampling batches are collected per training step. Each batch is processed independently: get prompts, collect trajectories, compute rewards, then compute advantages (per-prompt stats within that batch). When > 1, one optimizer step and one log are performed per batch; when 1, `gradient_accumulation_steps` batches are accumulated then one optimizer step and one log. No concatenation or splitting; advantages are computed per batch so each trajectory's advantage uses only its group.
+
+---
+
+## Source codebase: flow_grpo
+
+The FastVideo RL pipeline above was ported from the **flow_grpo** repo. This section documents the original flow_grpo layout so readers can map concepts and file locations between the two codebases.
+
+### How to run (flow_grpo)
+
+From the flow_grpo repo root:
+
+```bash
+bash train_wan.sh
+```
+
+This launches `accelerate launch` with `scripts/accelerate_configs/multi_gpu.yaml` and runs `scripts/train_wan2_1.py` with config `config/grpo.py:general_ocr_wan2_1`.
+
+### Code structure (flow_grpo)
+
+```
+flow_grpo/
+├── train_wan.sh                      # Wan GRPO runscript (accelerate + train_wan2_1.py)
+├── config/
+│   ├── base.py                       # Base config (ml_collections)
+│   └── grpo.py                       # GRPO configs (e.g. general_ocr_wan2_1)
+│
+├── dataset/                          # Prompt datasets (data files)
+│   ├── ocr/                          # Text prompts (train.txt, test.txt)
+│   ├── geneval/                      # GenEval JSONL (train_metadata.jsonl, test_metadata.jsonl)
+│   └── ...
+│
+├── scripts/
+│   ├── train_wan2_1.py               # Wan2.1 GRPO training entry: loop, dataloader, rollout, reward, advantage, loss
+│   └── accelerate_configs/
+│       └── multi_gpu.yaml             # Multi-GPU / bf16 accelerate config
+│
+└── flow_grpo/
+    ├── diffusers_patch/
+    │   ├── wan_pipeline_with_logprob.py   # Rollout + logprob: sde_step_with_logprob, wan_pipeline_with_logprob
+    │   └── wan_prompt_embedding.py        # encode_prompt for Wan
+    ├── rewards.py                    # Reward functions (video_ocr, jpeg_compressibility, etc.)
+    ├── stat_tracking.py              # PerPromptStatTracker (per-prompt advantage normalization)
+    ├── prompts.py                    # Prompt sampling (general_ocr, from_file, etc.)
+    └── ema.py                        # EMAModuleWrapper for policy EMA
+```
+
+### Where things live (flow_grpo)
+
+| Component            | Location |
+|----------------------|----------|
+| Runscript            | `train_wan.sh` (repo root) |
+| Training entry       | `scripts/train_wan2_1.py` |
+| Wan pipeline + logprob | `flow_grpo/diffusers_patch/wan_pipeline_with_logprob.py` |
+| Config               | `config/grpo.py` (and `config/base.py`) |
+| Accelerate config    | `scripts/accelerate_configs/multi_gpu.yaml` |
+| Rewards              | `flow_grpo/rewards.py` (e.g. video_ocr), `flow_grpo/ocr.py` |
+| Per-prompt stats     | `flow_grpo/stat_tracking.py` |
+| Prompts              | `flow_grpo/prompts.py` |
+| Prompt dataset (code)| `TextPromptDataset`, `GenevalPromptDataset`, `DistributedKRepeatSampler` in `scripts/train_wan2_1.py` |
+| Prompt dataset (data)| `dataset/ocr/`, `dataset/geneval/`, etc. |
+| EMA                  | `flow_grpo/ema.py` |
+
+### Component overview (flow_grpo)
+
+**Runscript.** `train_wan.sh` at the repo root sets `PYTHONPATH` and `WANDB_API_KEY`, then runs `accelerate launch` with `--config_file scripts/accelerate_configs/multi_gpu.yaml` and `--main_process_port 29503`, invoking `scripts/train_wan2_1.py` with `--config config/grpo.py:general_ocr_wan2_1`. Optional single-GPU usage is commented out (e.g. `--num_processes 1`).
+
+**Training script.** `scripts/train_wan2_1.py` is the Wan2.1 GRPO entry point. It defines the training loop: load config, build Wan pipeline and scheduler, create dataloader (with `TextPromptDataset` or `GenevalPromptDataset` and `DistributedKRepeatSampler`), and each step collects rollouts via `wan_pipeline_with_logprob`, computes rewards via `flow_grpo.rewards`, normalizes advantages with `PerPromptStatTracker`, computes log-probabilities for the GRPO loss, and updates the transformer (with optional EMA). It also contains `eval`, `save_ckpt`, `compute_log_prob`, and helper functions (`get_sigmas`, `set_adapter_and_freeze_params`, etc.).
+
+**Wan pipeline with logprob.** `flow_grpo/diffusers_patch/wan_pipeline_with_logprob.py` provides `sde_step_with_logprob` (UniPC-style SDE step returning transition log-probability) and `wan_pipeline_with_logprob` (full pipeline call for generation with log-probabilities and optional KL reward). These are used by the training script for rollout generation and for GRPO loss computation.
+
+**Config.** `config/grpo.py` defines ml_collections configs such as `general_ocr_wan2_1()`: dataset path (`dataset/ocr`), pretrained model (e.g. Wan2.1-T2V-1.3B-Diffusers), sample settings (steps, resolution, batch sizes, num_image_per_prompt, num_batches_per_epoch), train settings (learning rate, beta, clip_range, gradient_accumulation_steps, timestep_fraction), reward (`reward_fn`, e.g. video_ocr), prompt fn (e.g. general_ocr), per-prompt stat tracking, EMA, and save/eval paths. It imports and extends `config/base.py` for default keys.
+
+**Accelerate config.** `scripts/accelerate_configs/multi_gpu.yaml` sets `distributed_type: MULTI_GPU`, `mixed_precision: bf16`, `downcast_bf16: yes`, and `num_processes: 8` (single machine). Used by `train_wan.sh` for multi-GPU launches.
+
+**Rewards.** `flow_grpo/rewards.py` implements reward functions (e.g. jpeg compressibility, aesthetic score, CLIP score, pickscore, and video_ocr which uses `flow_grpo/ocr.py`). The config’s `reward_fn` (e.g. `{"video_ocr": 1.0}`) selects and weights them; the training script builds the reward callable from this and evaluates it on sampled videos/frames.
+
+**Per-prompt stat tracking.** `flow_grpo/stat_tracking.py` defines `PerPromptStatTracker`, which keeps reward statistics per unique prompt and computes normalized advantages (per-prompt mean and std, or global std when `global_std=True`). Used in the training script for GRPO advantage normalization.
+
+**Prompts.** `flow_grpo/prompts.py` provides prompt-sampling helpers (e.g. `general_ocr`, `from_file`) that load lines from assets or dataset files and return a random prompt. The config’s `prompt_fn` names the function used during training.
+
+**Dataset.** Prompt data lives under `dataset/ocr/` (train.txt, test.txt) or `dataset/geneval/` (train_metadata.jsonl, test_metadata.jsonl). The dataset classes and `DistributedKRepeatSampler` (k repeats per prompt for GRPO) are defined in `scripts/train_wan2_1.py`; the script builds the dataloader from the config’s dataset path and split.
+
+**EMA.** `flow_grpo/ema.py` provides `EMAModuleWrapper` for exponential moving average of the policy; the training script optionally maintains an EMA model and can save it with checkpoints.
+
+---
+
 # Debugging message rules
 
 Debugging messages should be printed using the logger.info function
