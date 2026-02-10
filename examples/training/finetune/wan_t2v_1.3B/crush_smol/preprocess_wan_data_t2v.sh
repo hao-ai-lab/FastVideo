@@ -10,7 +10,7 @@ torchrun --nproc_per_node=$GPU_NUM \
     fastvideo/pipelines/preprocess/v1_preprocess.py \
     --model_path $MODEL_PATH \
     --data_merge_path $DATA_MERGE_PATH \
-    --preprocess_video_batch_size 1 \
+    --preprocess_video_batch_size 8 \
     --seed 42 \
     --max_height 480 \
     --max_width 832 \
