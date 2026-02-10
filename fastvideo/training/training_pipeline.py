@@ -888,58 +888,61 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
             # Only sp_group leaders (rank_in_sp_group == 0) need to send their
             # results to global rank 0
-            if self.rank_in_sp_group == 0:
-                if self.global_rank == 0:
-                    # Global rank 0 collects results from all sp_group leaders
-                    all_videos = step_videos  # Start with own results
-                    all_captions = step_captions
+            if self.rank_in_sp_group == 0 and self.global_rank == 0:
+                # Global rank 0 collects results from all sp_group leaders
+                all_videos = step_videos  # Start with own results
+                all_captions = step_captions
 
-                    # Receive from other sp_group leaders
-                    for sp_group_idx in range(1, num_sp_groups):
-                        src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
-                        recv_videos = world_group.recv_object(src=src_rank)
-                        recv_captions = world_group.recv_object(src=src_rank)
-                        all_videos.extend(recv_videos)
-                        all_captions.extend(recv_captions)
+                # Receive from other sp_group leaders
+                for sp_group_idx in range(1, num_sp_groups):
+                    src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
+                    recv_videos = world_group.recv_object(src=src_rank)
+                    recv_captions = world_group.recv_object(src=src_rank)
+                    all_videos.extend(recv_videos)
+                    all_captions.extend(recv_captions)
 
-                    video_filenames = []
-                    for i, (video, caption) in enumerate(
-                            zip(all_videos, all_captions, strict=True)):
-                        os.makedirs(training_args.output_dir, exist_ok=True)
-                        filename = os.path.join(
-                            training_args.output_dir,
-                            f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
-                        )
-                        imageio.mimsave(filename, video, fps=sampling_param.fps)
-                        # Mux audio if available
-                        audio = output_batch.extra.get("audio")
-                        audio_sample_rate = output_batch.extra.get(
-                            "audio_sample_rate")
-                        if audio is not None and audio_sample_rate is not None and not self._mux_audio(
-                                filename, audio, audio_sample_rate):
-                            logger.warning(
-                                "Audio mux failed for validation video %s; saved video without audio.",
-                                filename)
-                        video_filenames.append(filename)
+                video_filenames = []
+                for i, (video, caption) in enumerate(
+                        zip(all_videos, all_captions, strict=True)):
+                    os.makedirs(training_args.output_dir, exist_ok=True)
+                    filename = os.path.join(
+                        training_args.output_dir,
+                        f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
+                    )
+                    imageio.mimsave(filename, video, fps=sampling_param.fps)
+                    # Mux audio if available
+                    audio = output_batch.extra.get("audio")
+                    audio_sample_rate = output_batch.extra.get(
+                        "audio_sample_rate")
+                    if (audio is not None and audio_sample_rate is not None
+                            and not self._mux_audio(
+                                filename,
+                                audio,
+                                audio_sample_rate,
+                            )):
+                        logger.warning(
+                            "Audio mux failed for validation video %s; saved video without audio.",
+                            filename)
+                    video_filenames.append(filename)
 
-                    artifacts = []
-                    for filename, caption in zip(video_filenames,
-                                                 all_captions,
-                                                 strict=True):
-                        video_artifact = self.tracker.video(filename,
-                                                            caption=caption)
-                        if video_artifact is not None:
-                            artifacts.append(video_artifact)
-                    if artifacts:
-                        logs = {
-                            f"validation_videos_{num_inference_steps}_steps":
-                            artifacts
-                        }
-                        self.tracker.log_artifacts(logs, global_step)
-                else:
-                    # Other sp_group leaders send their results to global rank 0
-                    world_group.send_object(step_videos, dst=0)
-                    world_group.send_object(step_captions, dst=0)
+                artifacts = []
+                for filename, caption in zip(video_filenames,
+                                             all_captions,
+                                             strict=True):
+                    video_artifact = self.tracker.video(filename,
+                                                        caption=caption)
+                    if video_artifact is not None:
+                        artifacts.append(video_artifact)
+                if artifacts:
+                    logs = {
+                        f"validation_videos_{num_inference_steps}_steps":
+                        artifacts
+                    }
+                    self.tracker.log_artifacts(logs, global_step)
+            elif self.rank_in_sp_group == 0:
+                # Other sp_group leaders send their results to global rank 0
+                world_group.send_object(step_videos, dst=0)
+                world_group.send_object(step_captions, dst=0)
 
         # Re-enable gradients for training
         training_args.inference_mode = False

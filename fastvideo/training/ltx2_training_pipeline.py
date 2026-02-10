@@ -280,9 +280,10 @@ class LTX2TrainingPipeline(TrainingPipeline):
 
         conditioning_mask = None
         first_frame_p = self.training_args.ltx2_first_frame_conditioning_p
-        if first_frame_p > 0 and torch.rand(
+        if (first_frame_p > 0 and torch.rand(
                 1,
-                generator=self.noise_random_generator).item() < first_frame_p:
+                generator=self.noise_random_generator,
+        ).item() < first_frame_p):
             conditioning_mask = torch.zeros(
                 (batch_size, 1, latents.shape[2], latents.shape[3],
                  latents.shape[4]),
