@@ -53,7 +53,7 @@ for i in {1..8}; do
     
     # Calculate which file this GPU should process
     file_num=$((START_FILE + i - 1))
-    DATA_MERGE_PATH="prompts/v2m_${file_num}.txt"
+    DATA_MERGE_PATH="assets/prompts/v2m_${file_num}.txt"
     
     # Create unique output directory based on node and GPU for text-only processing
     OUTPUT_DIR="data/test-text-preprocessing/Node_${NODE_ID}_GPU_${i}_File_${file_num}"

@@ -1,4 +1,4 @@
-# FastVideo/videos
+# FastVideo/assets/videos
 
 This folder is used to store **video assets for examples**, primarily **input videos** consumed by scripts under `FastVideo/examples/`.
 
