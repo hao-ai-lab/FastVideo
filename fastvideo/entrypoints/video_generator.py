@@ -223,7 +223,6 @@ class VideoGenerator:
                                            sampling_param=sampling_param,
                                            **kwargs)
 
-    @property
     def _is_image_workload(self) -> bool:
         """Return True when the workload produces a single image (t2i, i2i …)."""
         return self.fastvideo_args.workload_type.value.endswith("2i")
@@ -247,7 +246,7 @@ class VideoGenerator:
           warning is logged.
         - If the target path already exists, a numeric suffix is appended.
         """
-        target_ext = ".png" if self._is_image_workload else ".mp4"
+        target_ext = ".png" if self._is_image_workload() else ".mp4"
 
         def _sanitize_filename_component(name: str) -> str:
             # Remove characters invalid on common filesystems, strip spaces/dots
@@ -444,7 +443,7 @@ class VideoGenerator:
 
         # Save output if requested
         if batch.save_video:
-            if self._is_image_workload:
+            if self._is_image_workload():
                 # Image workloads (t2i, i2i, …): save the first frame as PNG.
                 imageio.imwrite(output_path, frames[0])
                 logger.info("Saved image to %s", output_path)
