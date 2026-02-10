@@ -855,7 +855,13 @@ class TransformerArgsPreprocessor:
         )
 
     def prepare(self, modality: Modality) -> TransformerArgs:
-        x = self.patchify_proj(modality.latent)
+        # `rearrange`-produced latent tokens can be non-contiguous with large
+        # leading strides. Materialize a contiguous view before Linear to avoid
+        # invalid BF16 GEMM descriptors on some CUDA/cuBLAS stacks.
+        latent = modality.latent
+        if not latent.is_contiguous():
+            latent = latent.contiguous()
+        x = self.patchify_proj(latent)
         timestep, embedded_timestep = self._prepare_timestep(modality.timesteps, x.shape[0], modality.latent.dtype)
         context, attention_mask = self._prepare_context(modality.context, x, modality.context_mask)
         attention_mask = self._prepare_attention_mask(attention_mask, modality.latent.dtype)

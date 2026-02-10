@@ -374,8 +374,21 @@ class ComposedPipelineBase(ABC):
         logger.info("Loading required modules: %s", required_modules)
 
         modules = {}
-        for module_name, (transformers_or_diffusers,
-                          architecture) in model_index.items():
+        for module_name, module_spec in model_index.items():
+            if not isinstance(module_spec, (list, tuple)):
+                logger.info(
+                    "Skipping non-module config entry %s=%s",
+                    module_name,
+                    module_spec,
+                )
+                continue
+            if len(module_spec) < 1:
+                logger.warning(
+                    "Skipping module %s due to invalid empty spec in model_index.json",
+                    module_name,
+                )
+                continue
+            transformers_or_diffusers = module_spec[0]
             if transformers_or_diffusers is None:
                 logger.warning(
                     "Module %s in model_index.json has null value, removing from required_config_modules",

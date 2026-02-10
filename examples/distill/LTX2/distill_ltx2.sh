@@ -1,65 +1,53 @@
 #!/bin/bash
-#SBATCH --job-name=t2v
-#SBATCH --partition=main
+#SBATCH --job-name=ltx2_distillation
 #SBATCH --nodes=8
-#SBATCH --ntasks=8
+#SBATCH --gres=gpu:4
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:8
-#SBATCH --cpus-per-task=128
-#SBATCH --mem=1440G
-#SBATCH --output=dmd_Wan2.2/t2v_g2e5_f1e5_%j.out
-#SBATCH --error=dmd_Wan2.2/t2v_g2e5_f1e5_%j.err
-#SBATCH --exclusive
-set -e -x
+#SBATCH --output=logs/ltx2_distillation.out
+#SBATCH --error=logs/ltx2_distillation.err
 
+source .venv/bin/activate
 
-
-export SLURM_JOB_NUM_NODES=1
-export NODE_RANK=0
-export SLURM_PROCID=0
-
-
-
-# Environment Setup
-# source ~/conda/miniconda/bin/activate
-# conda activate your_env
-
-# Basic Info
-export NCCL_P2P_DISABLE=1
-export TORCH_NCCL_ENABLE_MONITORING=0
-# different cache dir for different processes
-export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
-export MASTER_PORT=29500
-export NODE_RANK=$SLURM_PROCID
-# nodes=( $(scontrol show hostnames $SLURM_JOB_NODELIST) )
-# export MASTER_ADDR=${nodes[0]}
-export MASTER_ADDR=$(hostname)
-# export CUDA_VISIBLE_DEVICES=$SLURM_LOCALID
+export WANDB_BASE_URL="https://api.wandb.ai"
+export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
-# export WANDB_BASE_URL="https://api.wandb.ai"
-# export WANDB_MODE="online"
-export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
-# export WANDB_API_KEY=your_wandb_api_key
-# export FASTVIDEO_ATTENTION_BACKEND=TORCH_SDPA
 
+# Use node-local Triton cache to avoid stale file handle errors on shared filesystems
+export TRITON_CACHE_DIR="/tmp/triton_cache_${SLURM_JOB_ID}_${SLURM_NODEID}"
+export WANDB_API_KEY=2f25ad37933894dbf0966c838c0b8494987f9f2f
+export PYTHONPATH=/home/hal-matthewn/FastVideo-demo/fastvideo-kernel/python:$PYTHONPATH
+export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN  # TODO: Change to VSA
 
-echo "MASTER_ADDR: $MASTER_ADDR"
-echo "NODE_RANK: $NODE_RANK"
+set -euo pipefail
+
+# ---- torchrun rendezvous (multi-node) ----
+# 1. Get the hostname of the first node (Master)
+nodes=( $( scontrol show hostnames $SLURM_JOB_NODELIST ) )
+nodes_array=($nodes)
+head_node=${nodes_array[0]}
+MASTER_ADDR=$(srun --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address)
+MASTER_PORT=29500
+
+# 2. Get the node count automatically
+NNODES=$SLURM_NNODES
+GPUS_PER_NODE=$SLURM_GPUS_ON_NODE
+NUM_GPUS=$((NNODES * GPUS_PER_NODE))
+
+echo "MASTER_ADDR=$MASTER_ADDR MASTER_PORT=$MASTER_PORT NNODES=$NNODES"
 
 # Configs
-NUM_GPUS=2
-MODEL_PATH="Davids048/LTX2-Base-Diffusers"
+MODEL_PATH="FastVideo/LTX2-Distilled-Diffusers"
 REAL_SCORE_MODEL_PATH="Davids048/LTX2-Base-Diffusers"
 FAKE_SCORE_MODEL_PATH="Davids048/LTX2-Base-Diffusers"
-DATA_DIR=data/test-text-preprocessing/single_node/
-VALIDATION_DIR=your_validation_path  #(example:validation_64.json)
+DATA_DIR=data/ltx2-data
+VALIDATION_DIR="examples/distill/LTX2/validation.json"  #(example:validation_64.json)
 OUTPUT_DIR="checkpoints/ltx2_distillation"
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
 # Training arguments
 training_args=(
-#   --tracker_project_name LTX2_distillation
+  --tracker_project_name LTX2_distillation
   --output_dir "$OUTPUT_DIR"
   --max_train_steps 4000
   --train_batch_size 1
@@ -75,7 +63,7 @@ training_args=(
 # Parallel arguments
 parallel_args=(
   --num_gpus $NUM_GPUS
-  --sp_size 1
+  --sp_size $NUM_GPUS
   --tp_size 1
   --hsdp_replicate_dim 1
   --hsdp_shard_dim $NUM_GPUS
@@ -96,13 +84,13 @@ dataset_args=(
 )
 
 # Validation arguments
-# validation_args=(
-#   --log_validation
-#   --validation_dataset_file "$VALIDATION_DIR"
-#   --validation_steps 200
-#   --validation_sampling_steps "3"
-#   --validation_guidance_scale "6.0" # not used for dmd inference
-# )
+validation_args=(
+  --log_validation
+  --validation_dataset_file "$VALIDATION_DIR"
+  --validation_steps 200
+  --validation_sampling_steps "8"
+  --validation_guidance_scale "1.0" # used by validation inference; keep aligned with basic_ltx2_distilled defaults
+)
 
 # Optimizer arguments
 optimizer_args=(
@@ -132,27 +120,28 @@ miscellaneous_args=(
 
 # DMD arguments
 dmd_args=(
-  --dmd_denoising_steps '1000,757,522'
+  --dmd_denoising_steps '1000,993,987,981,975,909,725,421'
   --min_timestep_ratio 0.02
   --max_timestep_ratio 0.98
   --generator_update_interval 5
   --real_score_guidance_scale 3
   --simulate_generator_forward 
   --log_visualization # disable if oom
+  --VSA_sparsity 0.8
 )
 
-# srun torchrun \
-torchrun \
---nnodes $SLURM_JOB_NUM_NODES \
---nproc_per_node $NUM_GPUS \
---node_rank $SLURM_PROCID \
---rdzv_backend=c10d \
---rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
-    fastvideo/training/ltx2_distillation_pipeline.py \
-    "${parallel_args[@]}" \
-    "${model_args[@]}" \
-    "${dataset_args[@]}" \
-    "${training_args[@]}" \
-    "${optimizer_args[@]}" \
-    "${miscellaneous_args[@]}" \
-    "${dmd_args[@]}"
+srun torchrun \
+    --nnodes $NNODES \
+    --nproc_per_node $GPUS_PER_NODE \
+    --node_rank $SLURM_PROCID \
+    --rdzv_backend c10d \
+    --rdzv_endpoint $MASTER_ADDR:$MASTER_PORT \
+      fastvideo/training/ltx2_distillation_pipeline.py \
+      "${parallel_args[@]}" \
+      "${model_args[@]}" \
+      "${dataset_args[@]}" \
+      "${training_args[@]}" \
+      "${optimizer_args[@]}" \
+      "${validation_args[@]}" \
+      "${miscellaneous_args[@]}" \
+      "${dmd_args[@]}"
