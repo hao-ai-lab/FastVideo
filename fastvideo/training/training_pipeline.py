@@ -692,11 +692,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
                 arch_config = self.training_args.pipeline_config.dit_config.arch_config
 
-                logger.info(f"arch_config: {arch_config}")
-                logger.info(f"arch_config.hidden_size: {arch_config.hidden_size}")
-                logger.info(f"arch_config.num_layers: {arch_config.num_layers}")
-                logger.info(f"arch_config.ffn_dim: {arch_config.ffn_dim}")
-
                 metrics["hidden_dim"] = arch_config.hidden_size
                 metrics["num_layers"] = arch_config.num_layers
                 metrics["ffn_dim"] = arch_config.ffn_dim
