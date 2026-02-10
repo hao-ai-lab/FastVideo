@@ -101,6 +101,58 @@ class ComposedPipelineBase(ABC):
                 module.requires_grad_(True)
                 module.train()
 
+    @staticmethod
+    def _compile_with_conditions(
+        module: torch.nn.Module,
+        compile_kwargs: dict[str, Any],
+    ) -> int:
+        """Compile submodules that match module._compile_conditions."""
+        compile_conditions = getattr(module, "_compile_conditions", None)
+        if not compile_conditions:
+            return 0
+
+        compiled_count = 0
+        for name, submodule in module.named_modules():
+            if not name:
+                continue
+            if any(cond(name, submodule) for cond in compile_conditions):
+                submodule.forward = torch.compile(submodule.forward,
+                                                  **compile_kwargs)
+                compiled_count += 1
+        return compiled_count
+
+    def _maybe_compile_pipeline_module(
+        self,
+        module_name: str,
+        fsdp_module_cls: type | None,
+        compile_kwargs: dict[str, Any],
+    ) -> None:
+        if module_name not in self.modules:
+            return
+
+        module = self.modules[module_name]
+        if fsdp_module_cls is not None and isinstance(module, fsdp_module_cls):
+            logger.info(
+                "%s is already FSDP-wrapped; skipping torch.compile in pipeline",
+                module_name.capitalize(),
+            )
+            return
+
+        compiled_count = self._compile_with_conditions(module, compile_kwargs)
+        if compiled_count > 0:
+            logger.info(
+                "Enabled torch.compile for %d submodules in %s via _compile_conditions with kwargs=%s",
+                compiled_count,
+                module_name,
+                compile_kwargs,
+            )
+            return
+
+        # Backward-compatible fallback: compile full module if no condition matched.
+        logger.info("Enabling torch.compile for %s with kwargs=%s", module_name,
+                    compile_kwargs)
+        self.modules[module_name] = torch.compile(module, **compile_kwargs)
+
     def post_init(self) -> None:
         assert self.fastvideo_args is not None, "fastvideo_args must be set"
         if self.post_init_called:
@@ -116,7 +168,6 @@ class ComposedPipelineBase(ABC):
 
         self.initialize_pipeline(self.fastvideo_args)
         if self.fastvideo_args.enable_torch_compile:
-            transformer_module = self.modules["transformer"]
             if self.fastvideo_args.training_mode:
                 logger.info(
                     "Torch Compile enabled via FSDP loader for training; skipping additional pipeline compile"
@@ -130,29 +181,16 @@ class ComposedPipelineBase(ABC):
                     fsdp_module_cls = None
 
                 compile_kwargs = self.fastvideo_args.torch_compile_kwargs or {}
-                if fsdp_module_cls is not None and isinstance(
-                        transformer_module, fsdp_module_cls):
-                    logger.info(
-                        "Transformer is already FSDP-wrapped; skipping torch.compile in pipeline"
-                    )
-                else:
-                    logger.info("Enabling torch.compile for DiT with kwargs=%s",
-                                compile_kwargs)
-                    self.modules["transformer"] = torch.compile(
-                        transformer_module, **compile_kwargs)
-                if "transformer_2" in self.modules:
-                    transformer_module_2 = self.modules["transformer_2"]
-                    if fsdp_module_cls is not None and isinstance(
-                            transformer_module_2, fsdp_module_cls):
-                        logger.info(
-                            "Transformer_2 is already FSDP-wrapped; skipping torch.compile in pipeline"
-                        )
-                    else:
-                        logger.info(
-                            "Enabling torch.compile for Transformer_2 with kwargs=%s",
-                            compile_kwargs)
-                        self.modules["transformer_2"] = torch.compile(
-                            transformer_module_2, **compile_kwargs)
+                self._maybe_compile_pipeline_module(
+                    module_name="transformer",
+                    fsdp_module_cls=fsdp_module_cls,
+                    compile_kwargs=compile_kwargs,
+                )
+                self._maybe_compile_pipeline_module(
+                    module_name="transformer_2",
+                    fsdp_module_cls=fsdp_module_cls,
+                    compile_kwargs=compile_kwargs,
+                )
                 logger.info("Torch Compile enabled for DiT")
 
         if not self.fastvideo_args.training_mode:

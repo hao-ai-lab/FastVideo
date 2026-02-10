@@ -1,4 +1,6 @@
 from dataclasses import dataclass, field
+
+import torch
 from fastvideo.configs.models.dits.wanvideo import WanVideoArchConfig, WanVideoConfig
 
 
@@ -76,8 +78,14 @@ class MatrixGameWanVideoArchConfig(WanVideoArchConfig):
     image_dim: int = 1280
 
 
+def _is_transformer_block(param_name: str, module: torch.nn.Module) -> bool:
+    return bool("blocks" in param_name and param_name.split(".")[-1].isdigit())
+
+
 @dataclass
 class MatrixGameWanVideoConfig(WanVideoConfig):
     arch_config: MatrixGameWanVideoArchConfig = field(
         default_factory=MatrixGameWanVideoArchConfig)
     prefix: str = "Wan"
+    _compile_conditions: list = field(
+        default_factory=lambda: [_is_transformer_block])

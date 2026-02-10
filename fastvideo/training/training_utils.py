@@ -257,8 +257,6 @@ def save_distillation_checkpoint(
         if generator_scheduler is not None:
             generator_states["scheduler"] = SchedulerWrapper(
                 generator_scheduler)
-        if generator_ema is not None:
-            generator_states["ema"] = generator_ema.state_dict()
 
         generator_dcp_dir = os.path.join(save_dir, "distributed_checkpoint",
                                          "generator")
@@ -290,8 +288,6 @@ def save_distillation_checkpoint(
             if generator_scheduler_2 is not None:
                 generator_2_states["scheduler"] = SchedulerWrapper(
                     generator_scheduler_2)
-            if generator_ema_2 is not None:
-                generator_2_states["ema"] = generator_ema_2.state_dict()
 
             generator_2_dcp_dir = os.path.join(save_dir,
                                                "distributed_checkpoint",
@@ -417,6 +413,67 @@ def save_distillation_checkpoint(
             rank,
             local_main_process_only=False)
 
+    # Persist EMA separately to avoid shape mismatches across ranks.
+    # Supports:
+    #   - mode="rank0_full": save consolidated EMA only on rank 0
+    #   - mode="local_shard": save per-rank EMA shard for each rank
+    try:
+        if generator_ema is not None and getattr(generator_ema, "mode",
+                                                 None) == "rank0_full":
+            _save_rank0_full_ema_safetensors(generator_ema,
+                                             generator_transformer, rank,
+                                             save_dir, "generator_ema")
+        elif generator_ema is not None and getattr(generator_ema, "mode",
+                                                   None) == "local_shard":
+            # Save per-rank shard
+            ema_dir_shard = os.path.join(save_dir, "ema_local_shard")
+            os.makedirs(ema_dir_shard, exist_ok=True)
+            ema_shard_path = os.path.join(ema_dir_shard,
+                                          f"generator_ema_rank{rank}.pt")
+            torch.save(generator_ema.state_dict(), ema_shard_path)
+            logger.info(
+                "rank: %s, saved generator EMA shard (local_shard) to %s",
+                rank,
+                ema_shard_path,
+                local_main_process_only=False)
+
+            # Also consolidate EMA to a single full-state file on rank 0 by applying EMA to the model and gathering
+            _consolidate_local_shard_ema_and_save_safetensors(
+                generator_ema, generator_transformer, rank, save_dir,
+                "generator_ema")
+
+    except Exception as e:
+        logger.warning("rank: %s, failed saving EMA separately: %s", rank,
+                       str(e))
+
+    try:
+        if generator_ema_2 is not None and getattr(generator_ema_2, "mode",
+                                                   None) == "rank0_full":
+            _save_rank0_full_ema_safetensors(generator_ema_2,
+                                             generator_transformer_2, rank,
+                                             save_dir, "generator_ema_2")
+        elif generator_ema_2 is not None and getattr(generator_ema_2, "mode",
+                                                     None) == "local_shard":
+            # Save per-rank shard for EMA_2
+            ema_dir_shard_2 = os.path.join(save_dir, "ema_local_shard")
+            os.makedirs(ema_dir_shard_2, exist_ok=True)
+            ema2_shard_path = os.path.join(ema_dir_shard_2,
+                                           f"generator_ema_2_rank{rank}.pt")
+            torch.save(generator_ema_2.state_dict(), ema2_shard_path)
+            logger.info(
+                "rank: %s, saved generator_2 EMA shard (local_shard) to %s",
+                rank,
+                ema2_shard_path,
+                local_main_process_only=False)
+
+            # Also consolidate EMA_2 to a single full-state file on rank 0
+            _consolidate_local_shard_ema_and_save_safetensors(
+                generator_ema_2, generator_transformer_2, rank, save_dir,
+                "generator_ema_2")
+    except Exception as e:
+        logger.warning("rank: %s, failed saving EMA_2 separately: %s", rank,
+                       str(e))
+
     # Save generator model weights (consolidated) for inference
     cpu_state = gather_state_dict_on_cpu_rank0(generator_transformer,
                                                device=None)
@@ -454,46 +511,45 @@ def save_distillation_checkpoint(
         logger.info("--> distillation checkpoint saved at step %s to %s", step,
                     weight_path)
 
-        # Save generator_2 model weights (consolidated) for inference (MoE support)
-        if generator_transformer_2 is not None:
-            inference_save_dir_2 = os.path.join(
-                save_dir, "generator_2_inference_transformer")
-            cpu_state_2 = gather_state_dict_on_cpu_rank0(
-                generator_transformer_2, device=None)
+    # Save generator_2 model weights (consolidated) for inference (MoE support)
+    if generator_transformer_2 is not None:
+        inference_save_dir_2 = os.path.join(
+            save_dir, "generator_2_inference_transformer")
+        cpu_state_2 = gather_state_dict_on_cpu_rank0(generator_transformer_2,
+                                                     device=None)
 
-            if rank == 0:
-                os.makedirs(inference_save_dir_2, exist_ok=True)
-                weight_path_2 = os.path.join(
-                    inference_save_dir_2, "diffusion_pytorch_model.safetensors")
-                logger.info(
-                    "rank: %s, saving consolidated generator_2 inference checkpoint to %s",
-                    rank,
-                    weight_path_2,
-                    local_main_process_only=False)
+        if rank == 0:
+            os.makedirs(inference_save_dir_2, exist_ok=True)
+            weight_path_2 = os.path.join(inference_save_dir_2,
+                                         "diffusion_pytorch_model.safetensors")
+            logger.info(
+                "rank: %s, saving consolidated generator_2 inference checkpoint to %s",
+                rank,
+                weight_path_2,
+                local_main_process_only=False)
 
-                # Convert training format to diffusers format and save
-                diffusers_state_dict_2 = custom_to_hf_state_dict(
-                    cpu_state_2,
-                    generator_transformer_2.reverse_param_names_mapping)
-                save_file(diffusers_state_dict_2, weight_path_2)
+            # Convert training format to diffusers format and save
+            diffusers_state_dict_2 = custom_to_hf_state_dict(
+                cpu_state_2,
+                generator_transformer_2.reverse_param_names_mapping)
+            save_file(diffusers_state_dict_2, weight_path_2)
 
-                logger.info(
-                    "rank: %s, consolidated generator_2 inference checkpoint saved to %s",
-                    rank,
-                    weight_path_2,
-                    local_main_process_only=False)
+            logger.info(
+                "rank: %s, consolidated generator_2 inference checkpoint saved to %s",
+                rank,
+                weight_path_2,
+                local_main_process_only=False)
 
-                # Save model config
-                config_dict_2 = generator_transformer_2.hf_config
-                if "dtype" in config_dict_2:
-                    del config_dict_2["dtype"]  # TODO
-                config_path_2 = os.path.join(inference_save_dir_2,
-                                             "config.json")
-                with open(config_path_2, "w") as f:
-                    json.dump(config_dict_2, f, indent=4)
-                logger.info(
-                    "--> generator_2 distillation checkpoint saved at step %s to %s",
-                    step, weight_path_2)
+            # Save model config
+            config_dict_2 = generator_transformer_2.hf_config
+            if "dtype" in config_dict_2:
+                del config_dict_2["dtype"]  # TODO
+            config_path_2 = os.path.join(inference_save_dir_2, "config.json")
+            with open(config_path_2, "w") as f:
+                json.dump(config_dict_2, f, indent=4)
+            logger.info(
+                "--> generator_2 distillation checkpoint saved at step %s to %s",
+                step, weight_path_2)
 
 
 def load_checkpoint(transformer,
@@ -644,18 +700,37 @@ def load_distillation_checkpoint(
         end_time - begin_time,
         local_main_process_only=False)
 
-    # Load EMA state if available and generator_ema is provided
+    # Load EMA separately if saved in rank0_full mode
     if generator_ema is not None:
         try:
-            ema_state = generator_states.get("ema")
-            if ema_state is not None:
-                generator_ema.load_state_dict(ema_state)
-                logger.info("rank: %s, generator EMA state loaded successfully",
-                            rank)
-            else:
-                logger.info("rank: %s, no EMA state found in checkpoint", rank)
+            if getattr(generator_ema, "mode", None) == "rank0_full":
+                ema_path = os.path.join(checkpoint_path, "ema",
+                                        "generator_ema.pt")
+                if rank == 0 and os.path.exists(ema_path):
+                    ema_state = torch.load(ema_path, map_location="cpu")
+                    generator_ema.load_state_dict(ema_state)
+                    logger.info(
+                        "rank: %s, generator EMA (rank0_full) loaded from %s",
+                        rank, ema_path)
+                elif rank == 0:
+                    logger.info(
+                        "rank: %s, generator EMA file not found at %s; skipping",
+                        rank, ema_path)
+            elif getattr(generator_ema, "mode", None) == "local_shard":
+                ema_path = os.path.join(checkpoint_path, "ema_local_shard",
+                                        f"generator_ema_rank{rank}.pt")
+                if os.path.exists(ema_path):
+                    ema_state = torch.load(ema_path, map_location="cpu")
+                    generator_ema.load_state_dict(ema_state)
+                    logger.info(
+                        "rank: %s, generator EMA shard (local_shard) loaded from %s",
+                        rank, ema_path)
+                else:
+                    logger.info(
+                        "rank: %s, generator EMA shard file not found at %s; skipping",
+                        rank, ema_path)
         except Exception as e:
-            logger.warning("rank: %s, failed to load EMA state: %s", rank,
+            logger.warning("rank: %s, failed to load generator EMA: %s", rank,
                            str(e))
 
     # Load generator_2 distributed checkpoint (MoE support)
@@ -850,7 +925,7 @@ def load_distillation_checkpoint(
 
 def normalize_dit_input(model_type, latents, vae) -> torch.Tensor:
     if model_type == "hunyuan_hf" or model_type == "hunyuan":
-        return latents * 0.476986
+        return latents * vae.config.scaling_factor
     elif model_type == "wan":
         latents_mean = torch.tensor(vae.latents_mean)
         latents_std = 1.0 / torch.tensor(vae.latents_std)
@@ -1167,6 +1242,71 @@ def custom_to_hf_state_dict(
             new_state_dict[training_key] = v
 
     return new_state_dict
+
+
+def _save_full_ema_safetensors_from_state(
+    state_dict: dict[str, Any],
+    reverse_param_names_mapping: dict[str, tuple[str, int, int]],
+    output_path: str,
+) -> None:
+    """
+    Convert a training-format state_dict to HF format and save as safetensors.
+    """
+    diffusers_state_dict = custom_to_hf_state_dict(state_dict,
+                                                   reverse_param_names_mapping)
+    save_file(diffusers_state_dict, output_path)
+
+
+def _save_rank0_full_ema_safetensors(
+    ema: "EMA_FSDP",
+    module,
+    rank: int,
+    save_dir: str,
+    base_name: str,
+) -> None:
+    if rank != 0:
+        return
+    ema_dir = os.path.join(save_dir, "ema")
+    os.makedirs(ema_dir, exist_ok=True)
+    output_path = os.path.join(ema_dir, f"{base_name}.safetensors")
+    ema_state = ema.state_dict()
+    _save_full_ema_safetensors_from_state(ema_state,
+                                          module.reverse_param_names_mapping,
+                                          output_path)
+    logger.info("rank: %s, saved %s as consolidated EMA safetensors to %s",
+                rank,
+                base_name,
+                output_path,
+                local_main_process_only=False)
+
+
+def _consolidate_local_shard_ema_and_save_safetensors(
+    ema: "EMA_FSDP",
+    module,
+    rank: int,
+    save_dir: str,
+    base_name: str,
+) -> None:
+    try:
+        # Temporarily apply EMA to the live (sharded) module and gather full CPU state on rank 0
+        with ema.apply_to_model(module):
+            cpu_state_full = gather_state_dict_on_cpu_rank0(module, device=None)
+        if rank == 0:
+            ema_dir = os.path.join(save_dir, "ema")
+            os.makedirs(ema_dir, exist_ok=True)
+            output_path = os.path.join(ema_dir, f"{base_name}.safetensors")
+            _save_full_ema_safetensors_from_state(
+                cpu_state_full, module.reverse_param_names_mapping, output_path)
+            logger.info(
+                "rank: %s, saved consolidated %s EMA (from local_shard) as safetensors to %s",
+                rank,
+                base_name,
+                output_path,
+                local_main_process_only=False)
+    except Exception as ce:
+        logger.warning(
+            "rank: %s, failed consolidating %s EMA (local_shard): %s", rank,
+            base_name, str(ce))
 
 
 def shift_timestep(timestep: torch.Tensor, shift: float,
@@ -1795,5 +1935,5 @@ class EMA_FSDP:
             self.saved.clear()
             return False
 
-    def apply_to_model(self, module):
+    def apply_to_model(self, module: torch.nn.Module) -> _ApplyEMACtx:
         return EMA_FSDP._ApplyEMACtx(self, module)
