@@ -66,7 +66,9 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
         self.noise_scheduler.set_timesteps(num_inference_steps=1000,
                                            training=True)
 
-        self.training_args.pipeline_config.dmd_denoising_steps = [1000, 666, 333]
+        self.training_args.pipeline_config.dmd_denoising_steps = [
+            1000, 666, 333
+        ]
         logger.info("dmd_denoising_steps: %s",
                     self.training_args.pipeline_config.dmd_denoising_steps)
         self.dmd_denoising_steps = torch.tensor([1000, 666, 333],
@@ -171,14 +173,18 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
 
         # Move to device
         device = get_local_torch_device()
-        training_batch.image_embeds = clip_feature.to(device, dtype=torch.bfloat16)
-        training_batch.image_latents = first_frame_latent.to(device, dtype=torch.bfloat16)
+        training_batch.image_embeds = clip_feature.to(device,
+                                                      dtype=torch.bfloat16)
+        training_batch.image_latents = first_frame_latent.to(
+            device, dtype=torch.bfloat16)
         if keyboard_cond is not None and keyboard_cond.numel() > 0:
-            training_batch.keyboard_cond = keyboard_cond.to(device, dtype=torch.bfloat16)
+            training_batch.keyboard_cond = keyboard_cond.to(
+                device, dtype=torch.bfloat16)
         else:
             training_batch.keyboard_cond = None
         if mouse_cond is not None and mouse_cond.numel() > 0:
-            training_batch.mouse_cond = mouse_cond.to(device, dtype=torch.bfloat16)
+            training_batch.mouse_cond = mouse_cond.to(device,
+                                                      dtype=torch.bfloat16)
         else:
             training_batch.mouse_cond = None
         training_batch.infos = infos
@@ -251,10 +257,8 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
 
     def _step_predict_next_latent(
         self, traj_latents: torch.Tensor, traj_timesteps: torch.Tensor,
-        image_embeds: torch.Tensor,
-        image_latents: torch.Tensor,
-        keyboard_cond: torch.Tensor | None,
-        mouse_cond: torch.Tensor | None
+        image_embeds: torch.Tensor, image_latents: torch.Tensor,
+        keyboard_cond: torch.Tensor | None, mouse_cond: torch.Tensor | None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str,
                                                               torch.Tensor]]:
         latent_vis_dict: dict[str, torch.Tensor] = {}
@@ -269,8 +273,7 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
             traj_ts = traj_timesteps[0].float().cpu()
             dmd_steps = self.dmd_denoising_steps.float().cpu()
             closest_idx = torch.argmin(
-                torch.abs(traj_ts.unsqueeze(0) - dmd_steps.unsqueeze(1)),
-                dim=1)
+                torch.abs(traj_ts.unsqueeze(0) - dmd_steps.unsqueeze(1)), dim=1)
             self._cached_closest_idx_per_dmd = closest_idx.to(torch.long).cpu()
             logger.info("self._cached_closest_idx_per_dmd: %s",
                         self._cached_closest_idx_per_dmd)
@@ -306,13 +309,12 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
                                             width).to(self.device)).squeeze(1)
         latent_model_input = noisy_input.permute(0, 2, 1, 3, 4)
         if image_latents is not None:
-            latent_model_input = torch.cat(
-                [
-                    latent_model_input,
-                    image_latents.to(latent_model_input.device,
-                                     latent_model_input.dtype),
-                ],
-                dim=1)
+            latent_model_input = torch.cat([
+                latent_model_input,
+                image_latents.to(latent_model_input.device,
+                                 latent_model_input.dtype),
+            ],
+                                           dim=1)
         timestep = self.dmd_denoising_steps[indexes]
         logger.info("selected timestep for rank %s: %s",
                     self.global_rank,
@@ -329,13 +331,20 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
         timestep = timestep.to(device, dtype=torch.bfloat16)
 
         logger.info("========== Transformer Input ==========")
-        logger.info("hidden_states (latent_model_input) shape: %s, dtype: %s", latent_model_input.shape, latent_model_input.dtype)
+        logger.info("hidden_states (latent_model_input) shape: %s, dtype: %s",
+                    latent_model_input.shape, latent_model_input.dtype)
         logger.info("hidden_states min/max/mean: %.4f / %.4f / %.4f",
-                    latent_model_input.min().item(), latent_model_input.max().item(), latent_model_input.mean().item())
-        logger.info("encoder_hidden_states_image (image_embeds) shape: %s", image_embeds.shape if image_embeds is not None else None)
-        logger.info("timestep shape: %s, dtype: %s", timestep.shape, timestep.dtype)
-        logger.info("keyboard_cond: %s", keyboard_cond.shape if keyboard_cond is not None else None)
-        logger.info("mouse_cond: %s", mouse_cond.shape if mouse_cond is not None else None)
+                    latent_model_input.min().item(),
+                    latent_model_input.max().item(),
+                    latent_model_input.mean().item())
+        logger.info("encoder_hidden_states_image (image_embeds) shape: %s",
+                    image_embeds.shape if image_embeds is not None else None)
+        logger.info("timestep shape: %s, dtype: %s", timestep.shape,
+                    timestep.dtype)
+        logger.info("keyboard_cond: %s",
+                    keyboard_cond.shape if keyboard_cond is not None else None)
+        logger.info("mouse_cond: %s",
+                    mouse_cond.shape if mouse_cond is not None else None)
 
         if keyboard_cond is not None and mouse_cond is not None:
             viewmats_list = []
@@ -347,21 +356,24 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
                 viewmats_list.append(viewmats)
                 intrinsics_list.append(intrinsics)
                 action_labels_list.append(action_labels)
-            viewmats = torch.stack(viewmats_list, dim=0).to(device=device,
-                                                            dtype=torch.bfloat16)
-            intrinsics = torch.stack(intrinsics_list, dim=0).to(
-                device=device, dtype=torch.bfloat16)
-            action_labels = torch.stack(action_labels_list, dim=0).to(
-                device=device, dtype=torch.bfloat16)
+            viewmats = torch.stack(viewmats_list,
+                                   dim=0).to(device=device,
+                                             dtype=torch.bfloat16)
+            intrinsics = torch.stack(intrinsics_list,
+                                     dim=0).to(device=device,
+                                               dtype=torch.bfloat16)
+            action_labels = torch.stack(action_labels_list,
+                                        dim=0).to(device=device,
+                                                  dtype=torch.bfloat16)
         else:
             viewmats = None
             intrinsics = None
             action_labels = None
 
-        empty_text = torch.zeros((latent_model_input.shape[0], 0,
-                                  self.transformer.hidden_size),
-                                 device=device,
-                                 dtype=torch.bfloat16)
+        empty_text = torch.zeros(
+            (latent_model_input.shape[0], 0, self.transformer.hidden_size),
+            device=device,
+            dtype=torch.bfloat16)
 
         input_kwargs = {
             "hidden_states": latent_model_input,
@@ -382,7 +394,9 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
         logger.info("========== Transformer Output ==========")
         logger.info("noise_pred shape: %s", noise_pred.shape)
         logger.info("noise_pred min/max/mean: %.4f / %.4f / %.4f",
-                    noise_pred.min().item(), noise_pred.max().item(), noise_pred.mean().item())
+                    noise_pred.min().item(),
+                    noise_pred.max().item(),
+                    noise_pred.mean().item())
 
         from fastvideo.models.utils import pred_noise_to_pred_video
         pred_video = pred_noise_to_pred_video(
@@ -420,7 +434,8 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
 
             # Forward to predict next latent by stepping scheduler with predicted noise
             noise_pred, target_latent, t, latent_vis_dict = self._step_predict_next_latent(
-                traj_latents, traj_timesteps, image_embeds, image_latents, keyboard_cond, mouse_cond)
+                traj_latents, traj_timesteps, image_embeds, image_latents,
+                keyboard_cond, mouse_cond)
 
             training_batch.latent_vis_dict.update(latent_vis_dict)
 

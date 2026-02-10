@@ -176,8 +176,8 @@ class PreprocessPipeline_WanGame_ODE_Trajectory(BasePreprocessPipeline):
             latent_condition = (latent_condition - latents_mean) / latents_std
         elif (hasattr(vae, "shift_factor") and vae.shift_factor is not None):
             if isinstance(vae.shift_factor, torch.Tensor):
-                latent_condition -= vae.shift_factor.to(
-                    latent_condition.device, latent_condition.dtype)
+                latent_condition -= vae.shift_factor.to(latent_condition.device,
+                                                        latent_condition.dtype)
             else:
                 latent_condition -= vae.shift_factor
 
@@ -224,11 +224,13 @@ class PreprocessPipeline_WanGame_ODE_Trajectory(BasePreprocessPipeline):
             for action_path in valid_data["action_path"]:
                 if action_path:
                     action_data = np.load(action_path, allow_pickle=True)
-                    if isinstance(action_data,
-                                  np.ndarray) and action_data.dtype == np.dtype('O'):
+                    if isinstance(
+                            action_data,
+                            np.ndarray) and action_data.dtype == np.dtype('O'):
                         action_dict = action_data.item()
                         if "keyboard" in action_dict:
-                            keyboard = action_dict["keyboard"].astype(np.float32)
+                            keyboard = action_dict["keyboard"].astype(
+                                np.float32)
                             if keyboard_dim is not None:
                                 if keyboard.ndim >= 2:
                                     keyboard = keyboard[:, :keyboard_dim]
@@ -292,8 +294,8 @@ class PreprocessPipeline_WanGame_ODE_Trajectory(BasePreprocessPipeline):
 
                 pixel_values = valid_data["pixel_values"]
                 if pixel_values.shape[2] == 1 and args.num_frames is not None:
-                    pixel_values = pixel_values.repeat(
-                        1, 1, args.num_frames, 1, 1)
+                    pixel_values = pixel_values.repeat(1, 1, args.num_frames, 1,
+                                                       1)
                     valid_data["pixel_values"] = pixel_values
 
                 # Get extra features if needed
@@ -344,9 +346,10 @@ class PreprocessPipeline_WanGame_ODE_Trajectory(BasePreprocessPipeline):
                     batch.do_classifier_free_guidance = False
                     batch.prompt = ""
                     batch.prompt_embeds = [
-                        torch.zeros((1, 0, self.get_module("transformer").hidden_size),
-                                    dtype=torch.bfloat16,
-                                    device=device)
+                        torch.zeros(
+                            (1, 0, self.get_module("transformer").hidden_size),
+                            dtype=torch.bfloat16,
+                            device=device)
                     ]
 
                     result_batch = self.input_validation_stage(

@@ -140,17 +140,20 @@ class CausalDMDDenosingStage(DenoisingStage):
             intrinsics_list = []
             action_list = []
             for bi in range(b):
-                vm, ks, action = process_custom_actions(
-                    batch.keyboard_cond[bi], batch.mouse_cond[bi])
+                vm, ks, action = process_custom_actions(batch.keyboard_cond[bi],
+                                                        batch.mouse_cond[bi])
                 viewmats_list.append(vm)
                 intrinsics_list.append(ks)
                 action_list.append(action)
-            viewmats_full = torch.stack(viewmats_list, dim=0).to(
-                device=latents.device, dtype=target_dtype)
-            intrinsics_full = torch.stack(intrinsics_list, dim=0).to(
-                device=latents.device, dtype=target_dtype)
-            action_full = torch.stack(action_list, dim=0).to(
-                device=latents.device, dtype=target_dtype)
+            viewmats_full = torch.stack(viewmats_list,
+                                        dim=0).to(device=latents.device,
+                                                  dtype=target_dtype)
+            intrinsics_full = torch.stack(intrinsics_list,
+                                          dim=0).to(device=latents.device,
+                                                    dtype=target_dtype)
+            action_full = torch.stack(action_list,
+                                      dim=0).to(device=latents.device,
+                                                dtype=target_dtype)
 
         # Initialize or reset caches
         kv_cache1 = self._initialize_kv_cache(batch_size=latents.shape[0],
@@ -214,10 +217,12 @@ class CausalDMDDenosingStage(DenoisingStage):
                     image_for_vae = image_for_vae[:, :, :1]
                 else:
                     raise ValueError(
-                        f"Unsupported image tensor shape for causal VAE encode: {tuple(image_for_vae.shape)}")
+                        f"Unsupported image tensor shape for causal VAE encode: {tuple(image_for_vae.shape)}"
+                    )
             else:
                 raise TypeError(
-                    f"Unsupported batch.pil_image type for causal VAE encode: {type(image_for_vae)}")
+                    f"Unsupported batch.pil_image type for causal VAE encode: {type(image_for_vae)}"
+                )
 
             image_for_vae = image_for_vae.to(get_local_torch_device(),
                                              dtype=torch.float32)
@@ -246,14 +251,17 @@ class CausalDMDDenosingStage(DenoisingStage):
                 if (batch.image_latent is not None
                         and not independent_first_frame):
                     # Keep channel layout consistent with the main denoising loop.
-                    first_frame_image_latent = batch.image_latent[:, :, start_index:start_index + 1, :, :]
+                    first_frame_image_latent = batch.image_latent[:, :,
+                                                                  start_index:
+                                                                  start_index +
+                                                                  1, :, :]
                     first_frame_input = torch.cat([
                         first_frame_input,
                         first_frame_image_latent.to(target_dtype)
                     ],
                                                   dim=1)
-                elif (batch.image_latent is not None
-                      and independent_first_frame and start_index == 0):
+                elif (batch.image_latent is not None and independent_first_frame
+                      and start_index == 0):
                     first_frame_input = torch.cat([
                         first_frame_input,
                         batch.image_latent.to(target_dtype)
@@ -272,7 +280,8 @@ class CausalDMDDenosingStage(DenoisingStage):
                 first_frame_action_kwargs = {}
                 if action_full is not None:
                     first_frame_action_kwargs = {
-                        "viewmats": viewmats_full[:, start_index:start_index + 1],
+                        "viewmats": viewmats_full[:,
+                                                  start_index:start_index + 1],
                         "Ks": intrinsics_full[:, start_index:start_index + 1],
                         "action": action_full[:, start_index:start_index + 1],
                     }
@@ -329,7 +338,8 @@ class CausalDMDDenosingStage(DenoisingStage):
 
                     if (batch.image_latent is not None
                             and not independent_first_frame):
-                        image_latent_chunk = batch.image_latent[:, :, start_index:
+                        image_latent_chunk = batch.image_latent[:, :,
+                                                                start_index:
                                                                 start_index +
                                                                 current_num_frames, :, :]
                         latent_model_input = torch.cat([
@@ -479,11 +489,10 @@ class CausalDMDDenosingStage(DenoisingStage):
                     image_context_chunk = batch.image_latent[:, :, start_index:
                                                              start_index +
                                                              current_num_frames, :, :]
-                    context_input = torch.cat([
-                        context_input,
-                        image_context_chunk.to(target_dtype)
-                    ],
-                                              dim=1)
+                    context_input = torch.cat(
+                        [context_input,
+                         image_context_chunk.to(target_dtype)],
+                        dim=1)
                 context_action_kwargs = {}
                 if action_full is not None:
                     end_index = start_index + current_num_frames

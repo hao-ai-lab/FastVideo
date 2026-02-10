@@ -11,8 +11,7 @@ from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
                                         InputValidationStage,
                                         LatentPreparationStage,
                                         TextEncodingStage)
-from fastvideo.pipelines.stages.image_encoding import (
-    ImageVAEEncodingStage)
+from fastvideo.pipelines.stages.image_encoding import (ImageVAEEncodingStage)
 
 logger = init_logger(__name__)
 
@@ -51,9 +50,8 @@ class WanGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
                            scheduler=self.get_module("scheduler"),
                            transformer=self.get_module("transformer", None)))
 
-        self.add_stage(
-            stage_name="image_latent_preparation_stage",
-            stage=ImageVAEEncodingStage(vae=self.get_module("vae")))
+        self.add_stage(stage_name="image_latent_preparation_stage",
+                       stage=ImageVAEEncodingStage(vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",
                        stage=CausalDMDDenosingStage(
@@ -65,7 +63,7 @@ class WanGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))
 
-        logger.info(
-            "WanGameCausalDMDPipeline initialized with action support")
+        logger.info("WanGameCausalDMDPipeline initialized with action support")
+
 
 EntryClass = WanGameCausalDMDPipeline

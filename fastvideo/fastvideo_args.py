@@ -1003,18 +1003,22 @@ class TrainingArgs(FastVideoArgs):
 
     @staticmethod
     def add_cli_args(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
-        parser.add_argument("--data-path",
-                            type=str,
-                            required=True,
-                            help="Path to parquet files (comma-separated for multiple; path:N for repeat count)")
+        parser.add_argument(
+            "--data-path",
+            type=str,
+            required=True,
+            help=
+            "Path to parquet files (comma-separated for multiple; path:N for repeat count)"
+        )
         parser.add_argument("--dataloader-num-workers",
                             type=int,
                             required=True,
                             help="Number of workers for dataloader")
-        parser.add_argument("--reshuffle-each-epoch",
-                            action=StoreBoolean,
-                            default=TrainingArgs.reshuffle_each_epoch,
-                            help="Whether to reshuffle dataset order each epoch")
+        parser.add_argument(
+            "--reshuffle-each-epoch",
+            action=StoreBoolean,
+            default=TrainingArgs.reshuffle_each_epoch,
+            help="Whether to reshuffle dataset order each epoch")
         parser.add_argument("--num-height",
                             type=int,
                             required=True,
@@ -1104,9 +1108,10 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--validation-steps",
                             type=float,
                             help="Number of validation steps")
-        parser.add_argument("--validation-num-samples",
-                            type=int,
-                            help="Limit number of validation samples (default: use all)")
+        parser.add_argument(
+            "--validation-num-samples",
+            type=int,
+            help="Limit number of validation samples (default: use all)")
         parser.add_argument("--log-validation",
                             action=StoreBoolean,
                             help="Whether to log validation results")
@@ -1286,18 +1291,19 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--lora-alpha", type=int, help="LoRA alpha")
 
         # Action-only training (freeze base model, only train action params)
-        parser.add_argument("--train-action-only",
-                            action=StoreBoolean,
-                            help="Whether to only train action-related parameters "
-                                 "(action_embedder and to_out_prope) while freezing base model")
+        parser.add_argument(
+            "--train-action-only",
+            action=StoreBoolean,
+            help="Whether to only train action-related parameters "
+            "(action_embedder and to_out_prope) while freezing base model")
 
         # Action warmup: keep action modules frozen for N steps
         parser.add_argument("--action-warmup-steps",
                             type=int,
                             default=0,
                             help="Number of steps to keep action modules "
-                                 "(action_embedder, to_out_prope) frozen to let "
-                                 "the base model stabilize first")
+                            "(action_embedder, to_out_prope) frozen to let "
+                            "the base model stabilize first")
 
         # V-MoBA parameters
         parser.add_argument(

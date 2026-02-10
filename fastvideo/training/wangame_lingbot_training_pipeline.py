@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 import sys
-from copy import deepcopy
 from typing import Any
 
 import numpy as np
@@ -10,7 +9,6 @@ from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_wangame_lingbot
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
-from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
     FlowUniPCMultistepScheduler)
@@ -33,7 +31,7 @@ class WanLingBotTrainingPipeline(TrainingPipeline):
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         self.modules["scheduler"] = FlowUniPCMultistepScheduler(
             shift=fastvideo_args.pipeline_config.flow_shift)
-        
+
     def create_training_stages(self, training_args: TrainingArgs):
         """
         May be used in future refactors.
@@ -49,44 +47,47 @@ class WanLingBotTrainingPipeline(TrainingPipeline):
         - patch_embedding_wancamctrl: embeds camera Plucker coordinates
         - blocks.*.cam_conditioner: injects camera conditioning into transformer blocks
         """
-        train_action_only = getattr(self.fastvideo_args, "train_action_only", False)
-        
+        train_action_only = getattr(self.fastvideo_args, "train_action_only",
+                                    False)
+
         if not train_action_only:
             # Default behavior: train all parameters
             super().set_trainable()
             return
-        
+
         # Freeze all transformer parameters first
         transformer = self.get_module("transformer")
         transformer.train()
         transformer.requires_grad_(False)
-        
+
         # Define which parameter name patterns to train
         action_param_patterns = [
             "patch_embedding_wancamctrl",
             "cam_conditioner",
         ]
-        
+
         # Enable gradients for action-related parameters only
         trainable_count = 0
         frozen_count = 0
         for name, param in transformer.named_parameters():
-            should_train = any(pattern in name for pattern in action_param_patterns)
+            should_train = any(pattern in name
+                               for pattern in action_param_patterns)
             if should_train:
                 param.requires_grad_(True)
                 trainable_count += 1
                 logger.info(f"Trainable: {name} ({param.numel()} params)")
             else:
                 frozen_count += 1
-        
-        logger.info(f"Action-only training: {trainable_count} trainable param groups, "
-                    f"{frozen_count} frozen param groups")
+
+        logger.info(
+            f"Action-only training: {trainable_count} trainable param groups, "
+            f"{frozen_count} frozen param groups")
 
     # ── Action module warmup ──────────────────────────────────────────────
     # For the first `action_warmup_steps`, action modules (action_embedder,
     # to_out_prope) have requires_grad=False so the base model stabilizes
     # first.  After warmup the gradients are re-enabled.
-    
+
     _ACTION_PARAM_PATTERNS = [
         "patch_embedding_wancamctrl",
         "cam_conditioner",
@@ -244,18 +245,18 @@ class WanLingBotTrainingPipeline(TrainingPipeline):
         image_embeds = image_embeds.to(get_local_torch_device(),
                                        dtype=torch.bfloat16)
         encoder_hidden_states_image = image_embeds
-        
+
         from fastvideo.models.dits.wangame_lingbot.cam_utils import process_custom_actions
-        
+
         # Process actions for each batch sample
         batch_size = training_batch.noisy_model_input.shape[0]
         num_latent_t = training_batch.noisy_model_input.shape[2]
         latent_height = training_batch.noisy_model_input.shape[3]
         latent_width = training_batch.noisy_model_input.shape[4]
-        
+
         temporal_compression_ratio = self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
         num_frames = (num_latent_t - 1) * temporal_compression_ratio + 1
-        
+
         c2ws_plucker_emb_list = []
         for b in range(batch_size):
             # Lingbot's process_custom_actions returns [1, 6*spatial_scale^2, lat_f, H_lat, W_lat]
@@ -264,11 +265,12 @@ class WanLingBotTrainingPipeline(TrainingPipeline):
                 keyboard_cond=training_batch.keyboard_cond[b],
                 mouse_cond=training_batch.mouse_cond[b],
                 latent_height=latent_height,
-                latent_width=latent_width
-            )
+                latent_width=latent_width)
             c2ws_plucker_emb_list.append(c2ws_plucker_emb)
-            
-        c2ws_plucker_emb = torch.cat(c2ws_plucker_emb_list, dim=0).to(get_local_torch_device(), dtype=torch.bfloat16)
+
+        c2ws_plucker_emb = torch.cat(c2ws_plucker_emb_list,
+                                     dim=0).to(get_local_torch_device(),
+                                               dtype=torch.bfloat16)
 
         # c2ws_plucker_emb: [B, C, lat_f, H_lat, W_lat]
         assert c2ws_plucker_emb.shape[2] == num_latent_t, (
@@ -288,7 +290,8 @@ class WanLingBotTrainingPipeline(TrainingPipeline):
             "encoder_hidden_states_image":
             encoder_hidden_states_image,
             # Action conditioning
-            "c2ws_plucker_emb": c2ws_plucker_emb,
+            "c2ws_plucker_emb":
+            c2ws_plucker_emb,
             "return_dict":
             False,
         }
@@ -342,8 +345,9 @@ class WanLingBotTrainingPipeline(TrainingPipeline):
 
         return batch
 
-    def _post_process_validation_frames(self, frames: list[np.ndarray],
-                                        batch: ForwardBatch) -> list[np.ndarray]:
+    def _post_process_validation_frames(
+            self, frames: list[np.ndarray],
+            batch: ForwardBatch) -> list[np.ndarray]:
         """Apply action overlay to validation frames for WanGame.
         
         Draws keyboard (WASD) and mouse (pitch/yaw) indicators on the video frames.
@@ -351,41 +355,44 @@ class WanLingBotTrainingPipeline(TrainingPipeline):
         # Check if action data is available
         keyboard_cond = getattr(batch, 'keyboard_cond', None)
         mouse_cond = getattr(batch, 'mouse_cond', None)
-        
+
         if keyboard_cond is None and mouse_cond is None:
             return frames
-        
+
         # Import overlay functions
-        from fastvideo.models.dits.matrixgame.utils import (
-            draw_keys_on_frame, draw_mouse_on_frame)
-        
+        from fastvideo.models.dits.matrixgame.utils import (draw_keys_on_frame,
+                                                            draw_mouse_on_frame)
+
         # Convert tensors to numpy if needed (bfloat16 -> float32 -> numpy)
         if keyboard_cond is not None:
-            keyboard_cond = keyboard_cond.squeeze(0).cpu().float().numpy()  # (T, 6)
+            keyboard_cond = keyboard_cond.squeeze(
+                0).cpu().float().numpy()  # (T, 6)
         if mouse_cond is not None:
             mouse_cond = mouse_cond.squeeze(0).cpu().float().numpy()  # (T, 2)
-        
+
         # MatrixGame convention: keyboard [W, S, A, D, left, right], mouse [Pitch, Yaw]
         key_names = ["W", "S", "A", "D", "left", "right"]
-        
+
         processed_frames = []
         for frame_idx, frame in enumerate(frames):
             frame = np.ascontiguousarray(frame.copy())
-            
+
             # Draw keyboard overlay
             if keyboard_cond is not None and frame_idx < len(keyboard_cond):
-                keys = {key_names[i]: bool(keyboard_cond[frame_idx, i]) 
-                        for i in range(min(len(key_names), keyboard_cond.shape[1]))}
+                keys = {
+                    key_names[i]: bool(keyboard_cond[frame_idx, i])
+                    for i in range(min(len(key_names), keyboard_cond.shape[1]))
+                }
                 draw_keys_on_frame(frame, keys, mode='universal')
-            
+
             # Draw mouse overlay
             if mouse_cond is not None and frame_idx < len(mouse_cond):
                 pitch = float(mouse_cond[frame_idx, 0])
                 yaw = float(mouse_cond[frame_idx, 1])
                 draw_mouse_on_frame(frame, pitch, yaw)
-            
+
             processed_frames.append(frame)
-        
+
         return processed_frames
 
 
