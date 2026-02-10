@@ -1,9 +1,6 @@
 #!/bin/bash
 
-# Use a GPU that has free memory (check nvidia-smi); preprocessing only supports 1 GPU
-export CUDA_VISIBLE_DEVICES=2
-
-GPU_NUM=1 # only 1 GPU supported for preprocessing
+GPU_NUM=1 # 2,4,8
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 MODEL_TYPE="wan"
 DATA_MERGE_PATH="data/crush-smol/merge.txt"
