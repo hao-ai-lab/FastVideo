@@ -402,6 +402,7 @@ class LTX2TrainingPipeline(TrainingPipeline):
             with torch.autocast("cuda", dtype=training_batch.latents.dtype
                                 ), torch.autograd.set_detect_anomaly(True):
                 outputs = self.transformer(**input_kwargs)
+
             if isinstance(outputs, tuple):
                 video_denoised, audio_denoised = outputs
             else:
