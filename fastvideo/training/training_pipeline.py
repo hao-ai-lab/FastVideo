@@ -15,16 +15,18 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torchvision
-from diffusers import FlowMatchEulerDiscreteScheduler
 from einops import rearrange
 from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm.auto import tqdm
 
 import fastvideo.envs as envs
-from fastvideo.attention.backends.video_sparse_attn import (
-    VideoSparseAttentionMetadataBuilder)
-from fastvideo.attention.backends.vmoba import VideoMobaAttentionMetadataBuilder
+try:
+    from fastvideo.attention.backends.video_sparse_attn import (
+        VideoSparseAttentionMetadataBuilder)
+    from fastvideo.attention.backends.vmoba import VideoMobaAttentionMetadataBuilder
+except Exception:
+    pass
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset import build_parquet_map_style_dataloader
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
@@ -50,8 +52,12 @@ from fastvideo.training.training_utils import (
 from fastvideo.utils import (is_vmoba_available, is_vsa_available,
                              set_random_seed, shallow_asdict)
 
-vsa_available = is_vsa_available()
-vmoba_available = is_vmoba_available()
+try:
+    vsa_available = is_vsa_available()
+    vmoba_available = is_vmoba_available()
+except Exception:
+    vsa_available = False
+    vmoba_available = False
 
 logger = init_logger(__name__)
 
@@ -110,7 +116,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         # Set random seeds for deterministic training
         assert self.seed is not None, "seed must be set"
-        set_random_seed(self.seed)
+        set_random_seed(self.seed + self.global_rank)
         self.transformer.train()
         if training_args.enable_gradient_checkpointing_type is not None:
             self.transformer = apply_activation_checkpointing(
@@ -590,15 +596,15 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 round(num_trainable_params / 1e9, 3))
 
         # Set random seeds for deterministic training
-        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
-            self.seed)
+        self.noise_random_generator = torch.Generator(
+            device="cpu").manual_seed(self.seed + self.global_rank)
         self.noise_gen_cuda = torch.Generator(
-            device=current_platform.device_name).manual_seed(self.seed)
+            device=current_platform.device_name).manual_seed(self.seed +
+                                                             self.global_rank)
         self.validation_random_generator = torch.Generator(
-            device="cpu").manual_seed(self.seed)
-        logger.info("Initialized random seeds with seed: %s", self.seed)
-
-        self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
+            device="cpu").manual_seed(self.seed + self.global_rank)
+        logger.info("Initialized random seeds with seed: %s",
+                    self.seed + self.global_rank)
 
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
@@ -663,25 +669,31 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     "grad_norm": grad_norm,
                     "vsa_sparsity": current_vsa_sparsity,
                 }
-                metrics["batch_size"] = int(training_batch.raw_latent_shape[0])
+                try:
+                    metrics["batch_size"] = int(
+                        training_batch.raw_latent_shape[0])
 
-                patch_t, patch_h, patch_w = self.training_args.pipeline_config.dit_config.patch_size
-                seq_len = (training_batch.raw_latent_shape[2] // patch_t) * (
-                    training_batch.raw_latent_shape[3] //
-                    patch_h) * (training_batch.raw_latent_shape[4] // patch_w)
-                if training_batch.encoder_hidden_states is not None:
-                    context_len = int(
-                        training_batch.encoder_hidden_states.shape[1])
-                else:
-                    context_len = 0
+                    patch_t, patch_h, patch_w = self.training_args.pipeline_config.dit_config.patch_size
+                    seq_len = (
+                        training_batch.raw_latent_shape[2] // patch_t) * (
+                            training_batch.raw_latent_shape[3] // patch_h) * (
+                                training_batch.raw_latent_shape[4] // patch_w)
+                    if training_batch.encoder_hidden_states is not None:
+                        context_len = int(
+                            training_batch.encoder_hidden_states.shape[1])
+                    else:
+                        context_len = 0
 
-                metrics["dit_seq_len"] = int(seq_len)
-                metrics["context_len"] = context_len
+                    metrics["dit_seq_len"] = int(seq_len)
+                    metrics["context_len"] = context_len
 
-                arch_config = self.training_args.pipeline_config.dit_config.arch_config
+                    arch_config = self.training_args.pipeline_config.dit_config.arch_config
 
-                metrics["hidden_dim"] = arch_config.hidden_size
-                metrics["num_layers"] = arch_config.num_layers
+                    metrics["hidden_dim"] = arch_config.hidden_size
+                    metrics["num_layers"] = arch_config.num_layers
+                    metrics["ffn_dim"] = arch_config.ffn_dim
+                except Exception:
+                    pass
 
                 self.tracker.log(metrics, step)
             if step % self.training_args.training_state_checkpointing_steps == 0:
@@ -694,12 +706,14 @@ class TrainingPipeline(LoRAPipeline, ABC):
                                     self.noise_random_generator)
                 self.transformer.train()
                 self.sp_group.barrier()
+
+            if self.training_args.log_visualization and step % self.training_args.visualization_steps == 0:
+                self.visualize_intermediate_latents(training_batch,
+                                                    self.training_args, step)
+
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 with self.profiler_controller.region(
                         "profiler_region_training_validation"):
-                    if self.training_args.log_visualization:
-                        self.visualize_intermediate_latents(
-                            training_batch, self.training_args, step)
                     self._log_validation(self.transformer, self.training_args,
                                          step)
                     gpu_memory_usage = current_platform.get_torch_device(
@@ -858,7 +872,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 # Run validation inference
                 output_batch = self.validation_pipeline.forward(
                     batch, training_args)
-                samples = output_batch.output
+                samples = output_batch.output.cpu()
 
                 if self.rank_in_sp_group != 0:
                     continue

@@ -10,7 +10,7 @@ from enum import Enum
 from typing import Any, TYPE_CHECKING
 
 from fastvideo.configs.configs import PreprocessConfig
-from fastvideo.configs.pipelines.base import PipelineConfig, STA_Mode
+from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.utils import clean_cli_args
 from fastvideo.layers.quantization import QUANTIZATION_METHODS, QuantizationMethods
 from fastvideo.logger import init_logger
@@ -141,8 +141,6 @@ class FastVideoArgs:
 
     # STA (Sliding Tile Attention) parameters
     mask_strategy_file_path: str | None = None
-    STA_mode: STA_Mode = STA_Mode.STA_INFERENCE
-    skip_time_steps: int = 15
 
     # Compilation
     enable_torch_compile: bool = False
@@ -465,20 +463,6 @@ class FastVideoArgs:
         )
 
         # STA (Sliding Tile Attention) parameters
-        parser.add_argument(
-            "--STA-mode",
-            type=str,
-            default=FastVideoArgs.STA_mode.value,
-            choices=[mode.value for mode in STA_Mode],
-            help=
-            "STA mode contains STA_inference, STA_searching, STA_tuning, STA_tuning_cfg, None",
-        )
-        parser.add_argument(
-            "--skip-time-steps",
-            type=int,
-            default=FastVideoArgs.skip_time_steps,
-            help="Number of time steps to warmup (full attention) for STA",
-        )
         parser.add_argument(
             "--mask-strategy-file-path",
             type=str,
@@ -933,6 +917,7 @@ class TrainingArgs(FastVideoArgs):
     training_state_checkpointing_steps: int = 0  # for resuming training
     weight_only_checkpointing_steps: int = 0  # for inference
     log_visualization: bool = False
+    visualization_steps: int = 0
     # simulate generator forward to match inference
     simulate_generator_forward: bool = False
     warp_denoising_step: bool = False
@@ -1096,6 +1081,9 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--log-validation",
                             action=StoreBoolean,
                             help="Whether to log validation results")
+        parser.add_argument("--visualization-steps",
+                            type=int,
+                            help="Number of visualization steps")
         parser.add_argument("--tracker-project-name",
                             type=str,
                             help="Project name for tracking")
