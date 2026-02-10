@@ -790,6 +790,9 @@ class RLArgs:
     global_std: bool = False  # Use global std across all samples vs per-group std
     per_prompt_stat_tracking: bool = True  # Track statistics per prompt
 
+    # Multiple batches per step (flow_grpo-style: sample N batches then train on each)
+    num_batches_per_step: int = 1  # Number of sampling batches per training step; >1 => optimizer step and logging per batch
+
     # Training options
     use_diffusion_loss: bool = True  # Use diffusion loss in training
 
@@ -982,6 +985,11 @@ class RLArgs:
         parser.add_argument("--rl-per-prompt-stat-tracking",
                             action=StoreBoolean,
                             help="Track statistics per prompt")
+        parser.add_argument("--rl-num-batches-per-step",
+                            type=int,
+                            default=RLArgs.num_batches_per_step,
+                            dest="num_batches_per_step",
+                            help="Number of sampling batches per step (flow_grpo-style); >1 => optimizer step and logging per batch")
 
         # Training options
         parser.add_argument("--rl-use-diffusion-loss",

@@ -1371,8 +1371,6 @@ class RLPipeline(TrainingPipeline):
             timesteps_j = timesteps[:, j]  # [B]
             old_log_probs_j = old_log_probs[:, j]  # [B]
             advantages_j = advantages[:, j]  # [B]
-            if j == 0:
-                logger.info(f"guidance_scale: {guidance_scale}")
             # Per-step context from trajectory collection (same forward pass as DenoisingStage)
             step_context = None
             transformer_kwargs = None
@@ -1449,21 +1447,25 @@ class RLPipeline(TrainingPipeline):
             ratio = torch.exp(log_prob - old_log_probs_j)
 
             # myregion debug
+            
             if j == 0:
-                logger.info(
-                    "RL_METRIC: GRPO first timestep (j=0): ratio mean=%.6f min=%.6f max=%.6f | "
-                    "log_prob mean=%.6f min=%.6f max=%.6f | "
-                    "old_log_probs_j mean=%.6f min=%.6f max=%.6f",
-                    ratio.mean().item(),
-                    ratio.min().item(),
-                    ratio.max().item(),
-                    log_prob.mean().item(),
-                    log_prob.min().item(),
-                    log_prob.max().item(),
-                    old_log_probs_j.mean().item(),
-                    old_log_probs_j.min().item(),
-                    old_log_probs_j.max().item(),
-                )
+                logger.info(f"guidance_scale: {guidance_scale}")
+            # if j == 0:
+            logger.info(
+                f"RL_METRIC: GRPO first timestep {j}: ratio mean=%.6f min=%.6f max=%.6f | "
+                "log_prob mean=%.6f min=%.6f max=%.6f | "
+                "old_log_probs_j mean=%.6f min=%.6f max=%.6f",
+                ratio.mean().item(),
+                ratio.min().item(),
+                ratio.max().item(),
+                log_prob.mean().item(),
+                log_prob.min().item(),
+                log_prob.max().item(),
+                old_log_probs_j.mean().item(),
+                old_log_probs_j.min().item(),
+                old_log_probs_j.max().item(),
+            )
+
             # endregion
 
             # Clipped surrogate objective
@@ -1507,8 +1509,8 @@ class RLPipeline(TrainingPipeline):
 
             # Explicitly delete intermediate tensors to free memory (only removes local
             # variable names; list contents above are separate tensors and are unchanged)
-            del prev_sample, log_prob, prev_sample_mean, std_dev_t, dt
-            del advantages_j_clipped, ratio, unclipped_loss, clipped_loss, policy_loss_j, total_loss_j, kl_loss_j
+            # del prev_sample, log_prob, prev_sample_mean, std_dev_t, dt
+            # del advantages_j_clipped, ratio, unclipped_loss, clipped_loss, policy_loss_j, total_loss_j, kl_loss_j
             if kl_beta > 0:
                 del prev_sample_mean_ref, dt_ref
 
@@ -1536,125 +1538,97 @@ class RLPipeline(TrainingPipeline):
 
         return total_loss, metrics
 
+    def _log_grpo_metrics(
+        self,
+        tb: TrainingBatch,
+        total_loss: torch.Tensor,
+        metrics: dict[str, Any],
+        log_step: int,
+    ) -> None:
+        """Allreduce loss/metrics and log to tracker on rank 0."""
+        total_loss_t = torch.tensor(total_loss.item(), device=self.device)
+        policy_loss_t = torch.tensor(metrics.get("policy_loss", 0.0), device=self.device)
+        kl_loss_t = torch.tensor(metrics.get("kl_loss", 0.0), device=self.device)
+        if getattr(self, "world_size", 1) > 1:
+            wg = get_world_group()
+            wg.all_reduce(total_loss_t, op=dist.ReduceOp.AVG)
+            wg.all_reduce(policy_loss_t, op=dist.ReduceOp.AVG)
+            wg.all_reduce(kl_loss_t, op=dist.ReduceOp.AVG)
+        if getattr(self, "global_rank", 0) == 0:
+            self.tracker.log(
+                {
+                    "reward_mean": getattr(tb, "reward_mean", 0.0),
+                    "reward_std": getattr(tb, "reward_std", 0.0),
+                    "total_loss": total_loss_t.item(),
+                    "policy_loss": policy_loss_t.item(),
+                    "kl_loss": kl_loss_t.item(),
+                    "importance_ratio": metrics.get("importance_ratio_mean", 1.0),
+                    "clip_fraction": metrics.get("clip_fraction", 0.0),
+                },
+                log_step,
+            )
+
     def train_one_step(self, training_batch: TrainingBatch) -> TrainingBatch:
         """
-        Train one step using GRPO algorithm.
-
-        This method orchestrates the GRPO training step:
-        1. Collect trajectories with current policy
-        2. Compute rewards
-        3. Compute advantages
-        4. Compute GRPO loss (policy loss with clipping + KL regularization)
-        5. Update policy
-
-        Args:
-            training_batch: Current training batch
-
-        Returns:
-            Updated training_batch with loss and metrics
+        Train one step using GRPO: sample M batches (each with get_batch -> collect -> reward -> advantage),
+        then backward and optimizer step(s). M = num_batches_per_step when > 1, else gradient_accumulation_steps.
+        When num_batches_per_step > 1, one optimizer step and one log per batch; otherwise one step and one log after M batches.
         """
         training_batch = self._prepare_training(training_batch)
+        num_batches_per_step = getattr(
+            self.training_args.rl_args, "num_batches_per_step", 1
+        )
+        M = (
+            num_batches_per_step
+            if num_batches_per_step > 1
+            else self.training_args.gradient_accumulation_steps
+        )
+        base_step = getattr(
+            training_batch, "current_timestep", getattr(self, "current_trainstep", 0)
+        )
 
-        # Gradient accumulation loop
-        for _ in range(self.training_args.gradient_accumulation_steps):
-            # Get next batch of prompts (skip normalization steps for RL)
-            training_batch = self._get_next_batch(training_batch)
-            # Note: _normalize_dit_input and _prepare_dit_inputs are skipped for RL
-            # since we generate latents from prompts, not from pre-computed latents
+        # Sampling: M batches, advantage computed per batch (per group)
+        collected: list[TrainingBatch] = []
+        for _ in range(M):
+            tb = self._get_next_batch(training_batch)
+            tb = self.collect_trajectories(tb)
+            tb = self.compute_rewards(tb)
+            tb = self.compute_advantages(tb)
+            collected.append(tb)
 
-            # === RL-specific steps ===
+        # Training: backward, then optimizer step and log per batch
+        self.optimizer.zero_grad(set_to_none=True)
+        for batch_idx, tb in enumerate(collected):
+            total_loss, metrics = self._compute_grpo_loss(tb)
+            tb.policy_loss = metrics.get("policy_loss", 0.0)
+            tb.kl_divergence = metrics.get("kl_loss", 0.0)
+            tb.importance_ratio = metrics.get("importance_ratio_mean", 1.0)
+            tb.clip_fraction = metrics.get("clip_fraction", 0.0)
+            tb.value_loss = 0.0
+            tb.entropy = 0.0
+            tb.total_loss = total_loss.item()
+            tb = self._clip_grad_norm(tb)
 
-            # 1. Collect trajectories (generates latents and log_probs)
-            training_batch = self.collect_trajectories(training_batch)
+            with self.tracker.timed("timing/optimizer_step"):
+                self.optimizer.step()
+                self.lr_scheduler.step()
+                if self.value_optimizer is not None:
+                    self.value_optimizer.step()
+                    self.value_scheduler.step()
+            self.optimizer.zero_grad(set_to_none=True)
+            self._log_grpo_metrics(
+                tb, total_loss, metrics, base_step * M + batch_idx
+            )
 
-            # 2. Compute rewards
-            training_batch = self.compute_rewards(training_batch)
-
-            # 3. Compute value predictions (if algorithm requires)
-            # training_batch = self.compute_values(training_batch)
-
-            # 4. Compute advantages
-            training_batch = self.compute_advantages(training_batch)
-
-            # 5. Compute GRPO loss
-            # Note: _compute_grpo_loss now does backward() internally after each timestep
-            # to prevent OOM from accumulating activations (aligned with flow_grpo)
-
-            # Compute GRPO loss (policy loss + KL loss)
-            # Backward is done inside _compute_grpo_loss after each timestep
-            total_loss, metrics = self._compute_grpo_loss(training_batch)
-
-            # Store metrics in training batch
-            training_batch.policy_loss = metrics.get("policy_loss", 0.0)
-            training_batch.kl_divergence = metrics.get(
-                "kl_loss", 0.0)  # KL loss is the KL divergence
-            training_batch.importance_ratio = metrics.get(
-                "importance_ratio_mean", 1.0)
-            training_batch.clip_fraction = metrics.get("clip_fraction", 0.0)
-            training_batch.value_loss = 0.0  # GRPO doesn't use value loss
-            training_batch.entropy = 0.0  # Not computed for now
-
-            # Accumulate total loss (local)
-            if training_batch.total_loss is None:
-                training_batch.total_loss = 0.0
-            training_batch.total_loss += total_loss.item()
-
-            # Multi-GPU: allreduce losses for logging (mean across diffusion timesteps and ranks)
-            step = training_batch.current_timestep if hasattr(
-                training_batch, "current_timestep") else (
-                    getattr(self, "current_trainstep", 0) if hasattr(
-                        self, "current_trainstep") else 0)
-            total_loss_t = torch.tensor(total_loss.item(), device=self.device)
-            policy_loss_t = torch.tensor(metrics.get("policy_loss", 0.0),
-                                         device=self.device)
-            kl_loss_t = torch.tensor(metrics.get("kl_loss", 0.0),
-                                     device=self.device)
-            if getattr(self, "world_size", 1) > 1:
-                wg = get_world_group()
-                wg.all_reduce(total_loss_t, op=dist.ReduceOp.AVG)
-                wg.all_reduce(policy_loss_t, op=dist.ReduceOp.AVG)
-                wg.all_reduce(kl_loss_t, op=dist.ReduceOp.AVG)
-            total_loss_value = total_loss_t.item()
-            policy_loss_value = policy_loss_t.item()
-            kl_loss_value = kl_loss_t.item()
-
-            if getattr(self, "global_rank", 0) == 0:
-                reward_mean = training_batch.reward_mean if hasattr(
-                    training_batch, "reward_mean") else 0.0
-                reward_std = training_batch.reward_std if hasattr(
-                    training_batch, "reward_std") else 0.0
-                tracker_metrics = {
-                    "reward_mean": reward_mean,
-                    "reward_std": reward_std,
-                    "total_loss": total_loss_value,
-                    "policy_loss": policy_loss_value,
-                    "kl_loss": kl_loss_value,
-                    "importance_ratio": metrics.get("importance_ratio_mean",
-                                                    1.0),
-                    "clip_fraction": metrics.get("clip_fraction", 0.0),
-                }
-                self.tracker.log(tracker_metrics, step)
-
-        # Clip gradients
-        training_batch = self._clip_grad_norm(training_batch)
-
-        # Optimizer step
-        with self.tracker.timed("timing/optimizer_step"):
-            self.optimizer.step()
-            self.lr_scheduler.step()
-
-            if self.value_optimizer is not None:
-                self.value_optimizer.step()
-                self.value_scheduler.step()
-
-        # Check for early stopping based on KL divergence
-        # Use a simple threshold check (hardcoded for now)
-        kl_threshold = 0.1  # Hardcoded
+        training_batch = collected[-1]
+        kl_threshold = 0.1
         if training_batch.kl_divergence > kl_threshold:
-            logger.warning("High KL divergence at step %d: %.4f > %.4f",
-                           training_batch.current_timestep,
-                           training_batch.kl_divergence, kl_threshold)
-
+            logger.warning(
+                "High KL divergence at step %d: %.4f > %.4f",
+                getattr(training_batch, "current_timestep", 0),
+                training_batch.kl_divergence,
+                kl_threshold,
+            )
         return training_batch
 
     def set_trainable(self) -> None:
