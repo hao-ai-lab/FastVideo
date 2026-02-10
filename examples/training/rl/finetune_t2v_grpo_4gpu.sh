@@ -9,9 +9,9 @@ MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
 RL_DATASET_DIR="data/ocr/"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VALIDATION_DATASET_FILE="$SCRIPT_DIR/validation.json"
-NUM_GPUS=8
+NUM_GPUS=4
 
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export CUDA_VISIBLE_DEVICES=4,5,6,7
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # Training arguments (aligned with WandB sample + train; SFT not used)
@@ -19,7 +19,7 @@ training_args=(
   --tracker_project_name "wan_t2v_grpo"
   --output_dir "checkpoints/wan_t2v_grpo_4gpu"
   --max_train_steps 3000
-  --train_batch_size 8
+  --train_batch_size 16
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
   --num_latent_t 20
@@ -72,6 +72,7 @@ rl_args=(
   --rl_kl_reward 0.0
   --rl_global_std False
   --rl_per_prompt_stat_tracking True
+  --rl_num_batches_per_step 2
   --rl_warmup_steps 0
   --reward-models "{\"paddle_ocr\": 1.0}"
 )

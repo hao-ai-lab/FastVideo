@@ -326,6 +326,148 @@ class TrainingBatch:
     reward_std: float = 0.0  # Std of rewards
     value_mean: float = 0.0  # Mean value prediction
     entropy: float = 0.0  # Policy entropy (for exploration)
+    '''
+    "latents", "timesteps", "old_log_probs", "advantages", "reward_scores",
+        "log_probs", "kl", "prompt_ids", "prompt_embeds", "negative_prompt_embeds",
+        "values", "returns", "encoder_hidden_states", "encoder_attention_mask",
+        "noise_latents", "trajectory_latents", "trajectory_timesteps",
+    '''
+
+
+def _cat_tensors_or_none(tensors: list) -> torch.Tensor | None:
+    non_none = [t for t in tensors if t is not None]
+    if not non_none:
+        return None
+    return torch.cat(non_none, dim=0)
+
+
+def _concat_dict_tensors(dicts: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not dicts or all(d is None for d in dicts):
+        return dicts[0] if dicts else None
+    out = {}
+    keys = set()
+    for d in dicts:
+        if d is not None:
+            keys |= set(d.keys())
+    for k in keys:
+        vals = [d.get(k) for d in dicts if d is not None and k in d]
+        vals = [v for v in vals if v is not None]
+        if not vals:
+            continue
+        v0 = vals[0]
+        if isinstance(v0, torch.Tensor):
+            out[k] = torch.cat(vals, dim=0)
+        elif isinstance(v0, dict):
+            out[k] = _concat_dict_tensors(vals)
+        else:
+            out[k] = v0
+    return out if out else None
+
+
+def concat_training_batches(batches: list[TrainingBatch]) -> TrainingBatch:
+    """Concatenate multiple TrainingBatches along batch dim (for flow_grpo-style multi-batch per step)."""
+    if len(batches) == 1:
+        return batches[0]
+    out = TrainingBatch()
+    out.current_timestep = batches[0].current_timestep
+    out.current_vsa_sparsity = batches[0].current_vsa_sparsity
+
+    tensor_fields = [
+        "latents", "timesteps", "old_log_probs", "advantages", "reward_scores",
+        "log_probs", "kl", "prompt_ids", "prompt_embeds", "negative_prompt_embeds",
+        "values", "returns", "encoder_hidden_states", "encoder_attention_mask",
+        "noise_latents", "trajectory_latents", "trajectory_timesteps",
+    ]
+    for f in tensor_fields:
+        vals = [getattr(b, f) for b in batches]
+        if any(v is not None for v in vals):
+            setattr(out, f, _cat_tensors_or_none(vals))
+
+    if any(b.input_kwargs for b in batches):
+        out.input_kwargs = {}
+        for k in ("prompts", "metadata"):
+            lst = []
+            for b in batches:
+                if b.input_kwargs and k in b.input_kwargs:
+                    v = b.input_kwargs[k]
+                    lst.extend(v) if isinstance(v, list) else lst.append(v)
+            if lst:
+                out.input_kwargs[k] = lst
+        vlist = [b.input_kwargs["decoded_videos"] for b in batches if b.input_kwargs and "decoded_videos" in b.input_kwargs]
+        if vlist:
+            out.input_kwargs["decoded_videos"] = torch.cat(vlist, dim=0)
+
+    out.infos = []
+    for b in batches:
+        if b.infos:
+            out.infos.extend(b.infos)
+
+    out.rl_transformer_forward_contexts = batches[0].rl_transformer_forward_contexts
+    out.rl_transformer_forward_kwargs = _concat_dict_tensors([b.rl_transformer_forward_kwargs for b in batches])
+
+    if batches[0].raw_latent_shape is not None:
+        total_b = sum((b.raw_latent_shape or (0,))[0] for b in batches)
+        out.raw_latent_shape = (total_b,) + tuple(batches[0].raw_latent_shape[1:])
+
+    return out
+
+
+def split_training_batch(batch: TrainingBatch, num_splits: int) -> list[TrainingBatch]:
+    """Split a TrainingBatch into num_splits chunks along batch dim (for per-batch optimizer step)."""
+    if num_splits <= 1:
+        return [batch]
+    B = batch.latents.shape[0] if batch.latents is not None else (batch.reward_scores.shape[0] if batch.reward_scores is not None else 0)
+    if B == 0:
+        return [batch]
+    sizes = [B // num_splits] * num_splits
+    for i in range(B % num_splits):
+        sizes[i] += 1
+    offsets = [0]
+    for s in sizes:
+        offsets.append(offsets[-1] + s)
+
+    tensor_fields = [
+        "latents", "timesteps", "old_log_probs", "advantages", "reward_scores",
+        "log_probs", "kl", "prompt_ids", "prompt_embeds", "negative_prompt_embeds",
+        "values", "returns", "encoder_hidden_states", "encoder_attention_mask",
+        "noise_latents", "trajectory_latents", "trajectory_timesteps",
+    ]
+    out_batches = []
+    for i in range(num_splits):
+        s, e = offsets[i], offsets[i + 1]
+        sub = TrainingBatch()
+        sub.current_timestep = batch.current_timestep
+        sub.current_vsa_sparsity = batch.current_vsa_sparsity
+        for f in tensor_fields:
+            t = getattr(batch, f)
+            if t is not None:
+                setattr(sub, f, t[s:e].clone() if t.is_cuda else t[s:e])
+        if batch.input_kwargs:
+            sub.input_kwargs = {}
+            for k, v in batch.input_kwargs.items():
+                if k == "decoded_videos" and isinstance(v, torch.Tensor):
+                    sub.input_kwargs[k] = v[s:e]
+                elif isinstance(v, list):
+                    sub.input_kwargs[k] = v[s:e]
+                else:
+                    sub.input_kwargs[k] = v
+        if batch.infos:
+            sub.infos = batch.infos[s:e]
+        sub.rl_transformer_forward_contexts = batch.rl_transformer_forward_contexts
+        if batch.rl_transformer_forward_kwargs:
+
+            def _slice_kwargs(obj: Any, sl: slice) -> Any:
+                if isinstance(obj, torch.Tensor):
+                    return obj[sl]
+                if isinstance(obj, dict):
+                    return {k: _slice_kwargs(v, sl) for k, v in obj.items()}
+                return obj
+
+            sub.rl_transformer_forward_kwargs = _slice_kwargs(batch.rl_transformer_forward_kwargs, slice(s, e))
+        if batch.raw_latent_shape is not None:
+            sub.raw_latent_shape = (sizes[i],) + tuple(batch.raw_latent_shape[1:])
+        out_batches.append(sub)
+    return out_batches
 
 
 @dataclass
