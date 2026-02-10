@@ -122,7 +122,6 @@ def _init_dist_and_tp_groups():
             )
             created_tp = True
     except Exception:
-        
         old_tp = getattr(ps, "_TP", None)
         old_sp = getattr(ps, "_SP", None)
         old_dp = getattr(ps, "_DP", None)
@@ -158,8 +157,6 @@ def _init_dist_and_tp_groups():
     yield
 
     if stubbed:
-
-
         ps._TP = old_tp
         ps._SP = old_sp
         ps._DP = old_dp
@@ -207,7 +204,7 @@ def test_sd35_sd3_transformer2d_parity():
     ref.load_state_dict(ref_sd, strict=True)
     ref = ref.to(device=device, dtype=dtype)
 
-    B, H, W = 1, 16, 16 
+    B, H, W = 1, 16, 16
     hidden = torch.randn(B, cfg["in_channels"], H, W, device=device, dtype=dtype)
     enc = torch.randn(B, 16, cfg["joint_attention_dim"], device=device, dtype=dtype)
     pooled = torch.randn(B, cfg["pooled_projection_dim"], device=device, dtype=dtype)

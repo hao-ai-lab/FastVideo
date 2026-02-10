@@ -50,12 +50,10 @@ class SD35LatentPreparationStage(PipelineStage):
                 f"generator list length {len(batch.generator)} does not match batch_size {batch_size}"
             )
 
-        in_channels = int(
-            fastvideo_args.pipeline_config.dit_config.arch_config.in_channels)
-        spatial_ratio = int(fastvideo_args.pipeline_config.vae_config.
-                            arch_config.spatial_compression_ratio)
-        h_lat = int(batch.height) // spatial_ratio
-        w_lat = int(batch.width) // spatial_ratio
+        in_channels = fastvideo_args.pipeline_config.dit_config.arch_config.in_channels
+        spatial_ratio = fastvideo_args.pipeline_config.vae_config.arch_config.spatial_compression_ratio
+        h_lat = batch.height // spatial_ratio
+        w_lat = batch.width // spatial_ratio
         shape = (batch_size, in_channels, 1, h_lat, w_lat)
 
         latents = batch.latents

@@ -105,7 +105,7 @@ def main() -> None:
     generator = VideoGenerator.from_pretrained(model_path=args.model_path, **init_kwargs)
     try:
         for i, prompt in enumerate(prompts):
-            seed = int(args.seed) + int(i)
+            seed = args.seed + i
 
             filename_base = f"sd35_{i:02d}_seed{seed}_{_safe_filename(prompt, max_len=80)}"
             _remove_existing_outputs(args.out_dir, filename_base)
@@ -115,12 +115,12 @@ def main() -> None:
 
             generation_kwargs = {
                 "output_path": output_path,
-                "height": int(args.height),
-                "width": int(args.width),
+                "height": args.height,
+                "width": args.width,
                 "num_frames": 1,
                 "fps": 1,
-                "num_inference_steps": int(args.steps),
-                "guidance_scale": float(args.guidance),
+                "num_inference_steps": args.steps,
+                "guidance_scale": args.guidance,
                 "seed": seed,
                 "negative_prompt": args.negative,
                 "save_video": True,
