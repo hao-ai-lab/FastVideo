@@ -23,7 +23,6 @@ from fastvideo.models.dits.ltx2 import (
     DEFAULT_LTX2_AUDIO_DOWNSAMPLE, DEFAULT_LTX2_AUDIO_HOP_LENGTH,
     DEFAULT_LTX2_AUDIO_MEL_BINS, DEFAULT_LTX2_AUDIO_SAMPLE_RATE,
     VideoLatentShape)
-from fastvideo.utils import PRECISION_TO_TYPE
 
 BASE_SHIFT_ANCHOR = 1024
 MAX_SHIFT_ANCHOR = 4096
@@ -46,6 +45,7 @@ def _ltx2_sigmas(
     stretch: bool = True,
     terminal: float = 0.1,
 ) -> torch.Tensor:
+    # Copied/following official LTX-2 scheduler (LTX2Scheduler.execute).
     tokens = math.prod(
         latent.shape[2:]) if latent is not None else MAX_SHIFT_ANCHOR
     sigmas = torch.linspace(1.0,
@@ -114,12 +114,9 @@ class LTX2DenoisingStage(PipelineStage):
         if neg_prompt_mask is not None and neg_prompt_mask.device != latents.device:
             neg_prompt_mask = neg_prompt_mask.to(latents.device)
 
-        target_dtype = PRECISION_TO_TYPE[
-            fastvideo_args.pipeline_config.dit_precision]
-        disable_autocast = os.getenv("LTX2_DISABLE_AUTOCAST", "1") == "1"
+        target_dtype = torch.bfloat16
         autocast_enabled = (target_dtype != torch.float32
-                            ) and not fastvideo_args.disable_autocast and (
-                                not disable_autocast)
+                            ) and not fastvideo_args.disable_autocast
 
         # Use official distilled sigma schedule for 8 steps (distilled models)
         use_distilled_sigmas = os.getenv("LTX2_USE_DISTILLED_SIGMAS",
@@ -137,6 +134,7 @@ class LTX2DenoisingStage(PipelineStage):
                 latent=None,
                 device=latents.device,
             )
+            logger.info("[LTX2] Using computed sigma schedule")
         if hasattr(self.transformer, "patchifier"):
             video_shape = VideoLatentShape.from_torch_shape(latents.shape)
             token_count = self.transformer.patchifier.get_token_count(

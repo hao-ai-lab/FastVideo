@@ -17,6 +17,7 @@ from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
     SelfForcingFlowMatchScheduler)
 from fastvideo.pipelines.basic.wan.wan_causal_dmd_pipeline import (
     WanCausalDMDPipeline)
+from fastvideo.pipelines.stages.decoding import DecodingStage
 from fastvideo.pipelines.pipeline_batch_info import TrainingBatch
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
@@ -57,15 +58,17 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         self.vae.requires_grad_(False)
 
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
-        assert self.timestep_shift == 5.0, "flow_shift must be 5.0"
         self.noise_scheduler = SelfForcingFlowMatchScheduler(
             shift=self.timestep_shift, sigma_min=0.0, extra_one_step=True)
         self.noise_scheduler.set_timesteps(num_inference_steps=1000,
                                            training=True)
 
+        self.add_stage(stage_name="decoding_stage",
+                       stage=DecodingStage(vae=self.get_module("vae")))
+
         logger.info("dmd_denoising_steps: %s",
                     self.training_args.pipeline_config.dmd_denoising_steps)
-        self.dmd_denoising_steps = torch.tensor([1000, 750, 500, 250],
+        self.dmd_denoising_steps = torch.tensor([1000, 750, 500, 250, 0],
                                                 dtype=torch.long,
                                                 device=get_local_torch_device())
         if training_args.warp_denoising_step:  # Warp the denoising step according to the scheduler time shift
@@ -161,27 +164,12 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             device, dtype=torch.bfloat16)
         training_batch.infos = infos
 
-        return training_batch, trajectory_latents.to(
-            device, dtype=torch.bfloat16), trajectory_timesteps.to(device)
-
-        ## TEMP Used for loading the sf .pt files directly
-        """
-        self.manual_idx = self.manual_idx % 155
-        path = f"/mnt/weka/home/hao.zhang/wl/Self-Forcing/ode_pt_vidprom_1000/{self.manual_idx:05d}.pt"
-        logger.info("path: %s", path)
-        self.manual_idx += 1
-        # path = "/mnt/weka/home/hao.zhang/wl/Self-Forcing/ode_single_full/00000.pt"
-        b = torch.load(path)
-        training_batch.encoder_hidden_states = b["text_embedding"][0].unsqueeze(
-            0).to(device, dtype=torch.bfloat16)
-        trajectory_latents = b["ode_latent"].to(device, dtype=torch.bfloat16)
-        logger.info("trajectory_latents: %s", trajectory_latents.shape)
-        logger.info("encoder_hidden_states: %s",
-                    training_batch.encoder_hidden_states.shape)
-        assert trajectory_latents.shape[1] <= 10, "trajectory_latents.shape[1] must be <= 10"
-        return training_batch, trajectory_latents.to(
-            device, dtype=torch.bfloat16), trajectory_timesteps.to(device)
-        """
+        return training_batch, trajectory_latents[:, :, :self.training_args.
+                                                  num_latent_t].to(
+                                                      device,
+                                                      dtype=torch.bfloat16
+                                                  ), trajectory_timesteps.to(
+                                                      device)
 
     def _get_timestep(self,
                       min_timestep: int,
@@ -225,7 +213,7 @@ class ODEInitTrainingPipeline(TrainingPipeline):
         # Lazily cache nearest trajectory index per DMD step based on the (fixed) S timesteps
         if self._cached_closest_idx_per_dmd is None:
             self._cached_closest_idx_per_dmd = torch.tensor(
-                [0, 12, 24, 36], dtype=torch.long).cpu()
+                [0, 12, 24, 36, S - 1], dtype=torch.long).cpu()
             # [0, 1, 2, 3], dtype=torch.long).cpu()
             logger.info("self._cached_closest_idx_per_dmd: %s",
                         self._cached_closest_idx_per_dmd)
@@ -367,8 +355,7 @@ class ODEInitTrainingPipeline(TrainingPipeline):
             assert latent_key in latents_vis_dict and latents_vis_dict[
                 latent_key] is not None
             latent = latents_vis_dict[latent_key]
-            pixel_latent = self.validation_pipeline.decoding_stage.decode(
-                latent, training_args)
+            pixel_latent = self.decoding_stage.decode(latent, training_args)
 
             video = pixel_latent.cpu().float()
             video = video.permute(0, 2, 1, 3, 4)

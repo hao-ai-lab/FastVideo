@@ -233,6 +233,14 @@ class TrainingBatch:
     noise_latents: torch.Tensor | None = None
     encoder_hidden_states: torch.Tensor | None = None
     encoder_attention_mask: torch.Tensor | None = None
+    # LTX related audio inputs
+    audio_latents: torch.Tensor | None = None
+    audio_noisy_model_input: torch.Tensor | None = None
+    audio_timesteps: torch.Tensor | None = None
+    audio_noise: torch.Tensor | None = None
+    audio_encoder_hidden_states: torch.Tensor | None = None
+    audio_encoder_attention_mask: torch.Tensor | None = None
+    conditioning_mask: torch.Tensor | None = None
     # i2v
     preprocessed_image: torch.Tensor | None = None
     image_embeds: torch.Tensor | None = None
