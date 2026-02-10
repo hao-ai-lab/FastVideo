@@ -225,7 +225,10 @@ class VideoGenerator:
 
     def _is_image_workload(self) -> bool:
         """Return True when the workload produces a single image (t2i, i2i …)."""
-        return self.fastvideo_args.workload_type.value.endswith("2i")
+        args = getattr(self, "fastvideo_args", None)
+        if args is None:
+            return False
+        return args.workload_type.value.endswith("2i")
 
     def _prepare_output_path(
         self,
