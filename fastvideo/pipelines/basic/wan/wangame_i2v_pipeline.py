@@ -71,4 +71,8 @@ class WanGameActionImageToVideoPipeline(LoRAPipeline, ComposedPipelineBase):
                        stage=DecodingStage(vae=self.get_module("vae")))
 
 
-EntryClass = WanGameActionImageToVideoPipeline
+class WanLingBotImageToVideoPipeline(WanGameActionImageToVideoPipeline):
+    pass
+
+
+EntryClass = [WanGameActionImageToVideoPipeline, WanLingBotImageToVideoPipeline]

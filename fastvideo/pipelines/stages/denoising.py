@@ -179,6 +179,14 @@ class DenoisingStage(PipelineStage):
                     "action": action_labels.unsqueeze(0).to(get_local_torch_device(), dtype=target_dtype),
                 },
             )
+            # from fastvideo.models.dits.wangame_lingbot.cam_utils import process_custom_actions as process_lingbot_actions
+            # num_frames = batch.num_frames
+            # latent_height = batch.height // 8
+            # latent_width = batch.width // 8
+            # c2ws_plucker_emb = process_lingbot_actions(
+            #     num_frames, batch.keyboard_cond, batch.mouse_cond,
+            #     latent_height=latent_height, latent_width=latent_width
+            # ).to(get_local_torch_device(), dtype=target_dtype)
         else:
             camera_action_kwargs = {}
 
@@ -187,6 +195,7 @@ class DenoisingStage(PipelineStage):
             {
                 "mouse_cond": batch.mouse_cond,
                 "keyboard_cond": batch.keyboard_cond,
+                "c2ws_plucker_emb": batch.c2ws_plucker_emb,
             },
         )
 

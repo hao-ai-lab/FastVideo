@@ -343,7 +343,14 @@ def load_model_from_full_model_state_dict(
                        unused_keys)
 
     # List of allowed parameter name patterns (whitelist for new params not in checkpoint)
-    ALLOWED_NEW_PARAM_PATTERNS = ["gate_compress", "proj_l", "to_out_prope", "action_embedder"]
+    ALLOWED_NEW_PARAM_PATTERNS = [
+        "gate_compress",
+        "proj_l",
+        "to_out_prope",
+        "action_embedder",
+        "patch_embedding_wancamctrl",
+        "cam_conditioner",
+    ]  # Can be extended as needed
     
     # Patterns for params that need kaiming_uniform init (input projections need non-zero for gradient flow)
     KAIMING_INIT_PATTERNS = ["fc_in.weight"]
