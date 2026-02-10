@@ -431,8 +431,7 @@ class LTX2TrainingPipeline(TrainingPipeline):
 
     def _build_attention_metadata(
             self, training_batch: TrainingBatch) -> TrainingBatch:
-        training_batch.attn_metadata = None
-        return training_batch
+        return super()._build_attention_metadata(training_batch)
 
     def _build_input_kwargs(self,
                             training_batch: TrainingBatch) -> TrainingBatch:

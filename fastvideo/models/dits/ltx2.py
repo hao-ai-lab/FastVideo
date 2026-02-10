@@ -1023,6 +1023,7 @@ class LTXDistributedAttention(DistributedAttention):
         replicated_q: torch.Tensor | None = None,
         replicated_k: torch.Tensor | None = None,
         replicated_v: torch.Tensor | None = None,
+        gate_compress: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
         ltx_freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
@@ -1048,6 +1049,56 @@ class LTXDistributedAttention(DistributedAttention):
 
         forward_context: ForwardContext = get_forward_context()
         ctx_attn_metadata = forward_context.attn_metadata
+
+        use_vsa = self.backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN
+
+        if use_vsa:
+            assert (
+                replicated_q is None and replicated_k is None
+                and replicated_v is None
+            ), "Replicated QKV is not supported for VSA now"
+            if gate_compress is None:
+                raise ValueError(
+                    "gate_compress must be provided when using VIDEO_SPARSE_ATTN"
+                )
+
+            qkvg = torch.cat([q, k, v, gate_compress],
+                             dim=0)  # [4*batch, seq_len, heads, head_dim]
+            qkvg = sequence_model_parallel_all_to_all_4D(qkvg,
+                                                         scatter_dim=2,
+                                                         gather_dim=1)
+
+            valid_seq_len = None
+            if attention_mask is not None:
+                valid_seq_len = (attention_mask[0] == 1).sum().item()
+                qkvg = qkvg[:, :valid_seq_len, :, :]
+
+            if ltx_freqs_cis is not None:
+                cos, sin = ltx_freqs_cis
+                heads_per_rank = num_heads // world_size
+                head_start = local_rank * heads_per_rank
+                head_end = head_start + heads_per_rank
+                cos_local = cos[:, head_start:head_end, :valid_seq_len, :]
+                sin_local = sin[:, head_start:head_end, :valid_seq_len, :]
+                qk_part = qkvg[:batch_size * 2].transpose(1, 2)
+                qk_part = apply_ltx_rotary_emb_4d(
+                    qk_part, (cos_local, sin_local), self.rope_type)
+                qkvg[:batch_size * 2] = qk_part.transpose(1, 2)
+
+            qkvg = self.attn_impl.preprocess_qkv(qkvg, ctx_attn_metadata)
+            q, k, v, gate_compress = qkvg.chunk(4, dim=0)
+            output = self.attn_impl.forward(  # type: ignore[call-arg]
+                q, k, v, gate_compress, ctx_attn_metadata)
+            output = self.attn_impl.postprocess_output(output, ctx_attn_metadata)
+
+            if attention_mask is not None:
+                pad_len = (attention_mask[0] == 0).sum().item()
+                output = torch.nn.functional.pad(output, (0, 0, 0, 0, 0, pad_len))
+
+            output = sequence_model_parallel_all_to_all_4D(output,
+                                                           scatter_dim=1,
+                                                           gather_dim=2)
+            return output, None
 
         # Stack QKV
         qkv = torch.cat([q, k, v], dim=0)  # [3*batch, seq_len, num_heads, head_dim]
@@ -1149,6 +1200,7 @@ class LTXLocalAttention(LocalAttention):
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
+        gate_compress: torch.Tensor | None = None,
         ltx_freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
         ltx_k_freqs_cis: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> torch.Tensor:
@@ -1182,7 +1234,15 @@ class LTXLocalAttention(LocalAttention):
             q = q.transpose(1, 2)
             k = k.transpose(1, 2)
 
-        output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
+        if self.backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
+            if gate_compress is None:
+                raise ValueError(
+                    "gate_compress must be provided when using VIDEO_SPARSE_ATTN"
+                )
+            output = self.attn_impl.forward(  # type: ignore[call-arg]
+                q, k, v, gate_compress, ctx_attn_metadata)
+        else:
+            output = self.attn_impl.forward(q, k, v, ctx_attn_metadata)
         return output
 
 
@@ -1222,6 +1282,9 @@ class LTXSelfAttention(nn.Module):
             causal=False,
             supported_attention_backends=supported_attention_backends,
         )
+        self.to_gate_compress: nn.Linear | None = None
+        if self.attn.backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
+            self.to_gate_compress = nn.Linear(context_dim, inner_dim, bias=True)
         self.attn_masked = LTXLocalAttention(
             num_heads=heads,
             head_size=dim_head,
@@ -1244,6 +1307,8 @@ class LTXSelfAttention(nn.Module):
         context = x if context is None else context
         k = self.to_k(context)
         v = self.to_v(context)
+        gate_compress = (self.to_gate_compress(context)
+                         if self.to_gate_compress is not None else None)
 
         q = self.q_norm(q)
         k = self.k_norm(k)
@@ -1254,6 +1319,9 @@ class LTXSelfAttention(nn.Module):
         q = q.view(b, q_len, self.heads, self.dim_head)
         k = k.view(b, k_len, self.heads, self.dim_head)
         v = v.view(b, k_len, self.heads, self.dim_head)
+        if gate_compress is not None:
+            gate_compress = gate_compress.view(b, k_len, self.heads,
+                                               self.dim_head)
 
         if mask is not None:
             if mask.ndim == 2:
@@ -1276,9 +1344,18 @@ class LTXSelfAttention(nn.Module):
                 attn_metadata=attn_metadata,
                 forward_batch=forward_batch,
             ):
-                out = self.attn_masked(q, k, v, ltx_freqs_cis=pe, ltx_k_freqs_cis=k_pe)
+                out = self.attn_masked(q,
+                                       k,
+                                       v,
+                                       ltx_freqs_cis=pe,
+                                       ltx_k_freqs_cis=k_pe)
         else:
-            out = self.attn(q, k, v, ltx_freqs_cis=pe, ltx_k_freqs_cis=k_pe)
+            out = self.attn(q,
+                            k,
+                            v,
+                            gate_compress=gate_compress,
+                            ltx_freqs_cis=pe,
+                            ltx_k_freqs_cis=k_pe)
         out = out.reshape(b, q_len, -1)
         return self.to_out(out)
 
@@ -1320,6 +1397,9 @@ class LTXDistributedSelfAttention(nn.Module):
             supported_attention_backends=supported_attention_backends,
             prefix=f"{prefix}.attn",
         )
+        self.to_gate_compress: nn.Linear | None = None
+        if self.attn.backend == AttentionBackendEnum.VIDEO_SPARSE_ATTN:
+            self.to_gate_compress = nn.Linear(context_dim, inner_dim, bias=True)
 
     def forward(
         self,
@@ -1343,6 +1423,8 @@ class LTXDistributedSelfAttention(nn.Module):
         context = x if context is None else context
         k = self.to_k(context)
         v = self.to_v(context)
+        gate_compress = (self.to_gate_compress(context)
+                         if self.to_gate_compress is not None else None)
 
         q = self.q_norm(q)
         k = self.k_norm(k)
@@ -1354,11 +1436,15 @@ class LTXDistributedSelfAttention(nn.Module):
         q = q.view(b, q_len, self.heads, self.dim_head)
         k = k.view(b, k_len, self.heads, self.dim_head)
         v = v.view(b, k_len, self.heads, self.dim_head)
+        if gate_compress is not None:
+            gate_compress = gate_compress.view(b, k_len, self.heads,
+                                               self.dim_head)
 
         # Pass full RoPE to distributed attention - it will apply after all-to-all
         # and slice to this rank's heads
         out, _ = self.attn(
             q, k, v,
+            gate_compress=gate_compress,
             attention_mask=attention_mask,
             ltx_freqs_cis=pe,
         )
@@ -1389,6 +1475,15 @@ class BasicAVTransformerBlock(torch.nn.Module):
         # Text cross-attention uses LocalAttention (text embeddings are replicated)
         SelfAttnCls = LTXDistributedSelfAttention if use_distributed_attention else LTXSelfAttention
         CrossAttnCls = LTXSelfAttention  # Text cross-attention is always local
+        video_self_attn_backends = (
+            AttentionBackendEnum.FLASH_ATTN,
+            AttentionBackendEnum.TORCH_SDPA,
+            AttentionBackendEnum.VIDEO_SPARSE_ATTN,
+        )
+        dense_attn_backends = (
+            AttentionBackendEnum.FLASH_ATTN,
+            AttentionBackendEnum.TORCH_SDPA,
+        )
 
         if video is not None:
             # Video self-attention - use distributed when SP > 1
@@ -1399,7 +1494,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 dim_head=video.d_head,
                 norm_eps=norm_eps,
                 rope_type=rope_type,
-                supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA),
+                supported_attention_backends=video_self_attn_backends,
                 prefix=f"{prefix}.blocks.{idx}.attn1" if use_distributed_attention else "",
             ) if use_distributed_attention else LTXSelfAttention(
                 query_dim=video.dim,
@@ -1408,7 +1503,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 dim_head=video.d_head,
                 norm_eps=norm_eps,
                 rope_type=rope_type,
-                supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA),
+                supported_attention_backends=video_self_attn_backends,
             )
             # Text cross-attention - always local (text is replicated)
             self.attn2 = CrossAttnCls(
@@ -1418,7 +1513,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 dim_head=video.d_head,
                 norm_eps=norm_eps,
                 rope_type=rope_type,
-                supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA),
+                supported_attention_backends=dense_attn_backends,
             )
             self.ff = FeedForward(video.dim, dim_out=video.dim)
             self.scale_shift_table = torch.nn.Parameter(torch.empty(6, video.dim))
@@ -1432,7 +1527,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 dim_head=audio.d_head,
                 norm_eps=norm_eps,
                 rope_type=rope_type,
-                supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA),
+                supported_attention_backends=dense_attn_backends,
                 prefix=f"{prefix}.blocks.{idx}.audio_attn1" if use_distributed_attention else "",
             ) if use_distributed_attention else LTXSelfAttention(
                 query_dim=audio.dim,
@@ -1441,7 +1536,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 dim_head=audio.d_head,
                 norm_eps=norm_eps,
                 rope_type=rope_type,
-                supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA),
+                supported_attention_backends=dense_attn_backends,
             )
             # Text cross-attention - always local (text is replicated)
             self.audio_attn2 = CrossAttnCls(
@@ -1451,7 +1546,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 dim_head=audio.d_head,
                 norm_eps=norm_eps,
                 rope_type=rope_type,
-                supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA),
+                supported_attention_backends=dense_attn_backends,
             )
             self.audio_ff = FeedForward(audio.dim, dim_out=audio.dim)
             self.audio_scale_shift_table = torch.nn.Parameter(torch.empty(6, audio.dim))
@@ -1466,7 +1561,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 dim_head=audio.d_head,
                 norm_eps=norm_eps,
                 rope_type=rope_type,
-                supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA),
+                supported_attention_backends=dense_attn_backends,
             )
             # Video-to-audio cross-attention
             # Uses local attention - context is gathered from all SP ranks in forward()
@@ -1477,7 +1572,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 dim_head=audio.d_head,
                 norm_eps=norm_eps,
                 rope_type=rope_type,
-                supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN, AttentionBackendEnum.TORCH_SDPA),
+                supported_attention_backends=dense_attn_backends,
             )
             self.scale_shift_table_a2v_ca_audio = torch.nn.Parameter(torch.empty(5, audio.dim))
             self.scale_shift_table_a2v_ca_video = torch.nn.Parameter(torch.empty(5, video.dim))
@@ -2126,7 +2221,9 @@ class LTX2Transformer3DModel(CachableDiT):
 
         # Get SP world size for distributed attention
         sp_world_size = get_sp_world_size()
-        use_distributed_attention = sp_world_size > 1
+        use_vsa_backend = os.getenv("FASTVIDEO_ATTENTION_BACKEND",
+                                    "") == "VIDEO_SPARSE_ATTN"
+        use_distributed_attention = sp_world_size > 1 or use_vsa_backend
 
         # Validate that attention heads are divisible by SP world size
         if sp_world_size > 1:
@@ -2141,6 +2238,10 @@ class LTX2Transformer3DModel(CachableDiT):
             logger.info(
                 f"LTX2 sequence parallelism enabled with SP world size {sp_world_size}"
             )
+        elif use_vsa_backend:
+            logger.info(
+                "LTX2 VSA enabled with SP world size 1; using distributed "
+                "attention path for VSA compatibility")
 
         model_type = LTXModelType.AudioVideo
         self.model = LTXModel(

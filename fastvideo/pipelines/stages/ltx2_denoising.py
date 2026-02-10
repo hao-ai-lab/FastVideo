@@ -11,6 +11,9 @@ import os
 import torch
 from tqdm.auto import tqdm
 
+import fastvideo.envs as envs
+from fastvideo.attention.backends.video_sparse_attn import (
+    VideoSparseAttentionMetadataBuilder)
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
@@ -23,6 +26,7 @@ from fastvideo.models.dits.ltx2 import (
     DEFAULT_LTX2_AUDIO_DOWNSAMPLE, DEFAULT_LTX2_AUDIO_HOP_LENGTH,
     DEFAULT_LTX2_AUDIO_MEL_BINS, DEFAULT_LTX2_AUDIO_SAMPLE_RATE,
     VideoLatentShape)
+from fastvideo.utils import is_vsa_available
 
 BASE_SHIFT_ANCHOR = 1024
 MAX_SHIFT_ANCHOR = 4096
@@ -34,6 +38,11 @@ DISTILLED_SIGMA_VALUES = [
 ]
 
 logger = init_logger(__name__)
+
+try:
+    vsa_available = is_vsa_available()
+except ImportError:
+    vsa_available = False
 
 
 def _ltx2_sigmas(
@@ -234,6 +243,10 @@ class LTX2DenoisingStage(PipelineStage):
             tuple(sigmas.shape),
             tuple(latents.shape),
         )
+        use_vsa = (vsa_available
+                   and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN")
+        vsa_metadata_builder = (
+            VideoSparseAttentionMetadataBuilder() if use_vsa else None)
 
         for step_index in tqdm(range(len(sigmas) - 1)):
             sigma = sigmas[step_index]
@@ -241,6 +254,15 @@ class LTX2DenoisingStage(PipelineStage):
             timestep = timestep_template * sigma
             audio_timestep = (audio_timestep_template * sigma
                               if audio_timestep_template is not None else None)
+            attn_metadata = None
+            if vsa_metadata_builder is not None:
+                attn_metadata = vsa_metadata_builder.build(
+                    current_timestep=step_index,
+                    raw_latent_shape=latents.shape[2:5],
+                    patch_size=fastvideo_args.pipeline_config.dit_config.patch_size,
+                    VSA_sparsity=fastvideo_args.VSA_sparsity,
+                    device=latents.device,
+                )
 
             with torch.autocast(
                     device_type="cuda",
@@ -248,7 +270,7 @@ class LTX2DenoisingStage(PipelineStage):
                     enabled=autocast_enabled,
             ), set_forward_context(
                     current_timestep=sigma.item(),
-                    attn_metadata=None,
+                    attn_metadata=attn_metadata,
                     forward_batch=batch,
             ):
                 # Pass 1: Full conditioning (text + cross-modal)
