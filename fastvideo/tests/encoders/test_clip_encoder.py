@@ -6,7 +6,7 @@ import pytest
 import torch
 from transformers import AutoConfig, AutoTokenizer, CLIPTextModel
 import gc
-from fastvideo.configs.pipelines import PipelineConfig
+from fastvideo.configs.pipelines import HunyuanConfig, PipelineConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -40,7 +40,7 @@ def test_clip_encoder():
     - Produce nearly identical outputs for the same input prompts
     """
     args = FastVideoArgs(model_path="openai/clip-vit-large-patch14",
-                         pipeline_config=PipelineConfig(text_encoder_configs=(CLIPTextConfig(),), text_encoder_precisions=("fp16",)))
+                         pipeline_config=HunyuanConfig())
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     logger.info("Loading models from %s", args.model_path)

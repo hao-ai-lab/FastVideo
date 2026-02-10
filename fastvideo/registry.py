@@ -45,6 +45,7 @@ from fastvideo.configs.pipelines.wan import (
     WanT2V480PConfig,
     WanT2V720PConfig,
 )
+from fastvideo.configs.pipelines.sd35 import SD35Config
 from fastvideo.configs.sample.base import SamplingParam
 from fastvideo.configs.sample.cosmos import (
     Cosmos_Predict2_2B_Video2World_SamplingParam, )
@@ -80,6 +81,8 @@ from fastvideo.configs.sample.wan import (
     WanT2V_14B_SamplingParam,
     WanT2V_1_3B_SamplingParam,
 )
+from fastvideo.configs.sample.sd35 import SD35SamplingParam
+
 from fastvideo.fastvideo_args import WorkloadType
 from fastvideo.logger import init_logger
 from fastvideo.utils import (maybe_download_model_index,
@@ -249,8 +252,8 @@ def _register_configs() -> None:
             "FastVideo/LTX2-base",
         ],
         model_detectors=[
-            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower())
-            and "distilled" not in path.lower(),
+            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and
+            "distilled" not in path.lower(),
         ],
     )
     # LTX-2 (distilled)
@@ -261,7 +264,8 @@ def _register_configs() -> None:
             "FastVideo/LTX2-Distilled-Diffusers",
         ],
         model_detectors=[
-            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and "distilled" in path.lower(),
+            lambda path: ("ltx2" in path.lower() or "ltx-2" in path.lower()) and
+            "distilled" in path.lower(),
         ],
     )
 
@@ -533,6 +537,22 @@ def _register_configs() -> None:
         hf_model_paths=[
             "rand0nmr/SFWan2.2-T2V-A14B-Diffusers",
             "FastVideo/SFWan2.2-I2V-A14B-Preview-Diffusers",
+        ],
+    )
+
+    # SD3.5
+    register_configs(
+        sampling_param_cls=SD35SamplingParam,
+        pipeline_config_cls=SD35Config,
+        hf_model_paths=[
+            "stabilityai/stable-diffusion-3.5-medium",
+        ],
+        model_detectors=[
+            lambda path: any(token in path.lower() for token in (
+                "sd35",
+                "stablediffusion3",
+                "stabilityai__stable-diffusion-3.5-medium",
+            )),
         ],
     )
 

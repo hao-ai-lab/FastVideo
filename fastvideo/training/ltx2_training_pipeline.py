@@ -280,18 +280,18 @@ class LTX2TrainingPipeline(TrainingPipeline):
 
         conditioning_mask = None
         first_frame_p = self.training_args.ltx2_first_frame_conditioning_p
-        if first_frame_p > 0:
-            if torch.rand(1, generator=self.noise_random_generator).item(
-            ) < first_frame_p:
-                conditioning_mask = torch.zeros(
-                    (batch_size, 1, latents.shape[2], latents.shape[3],
-                     latents.shape[4]),
-                    dtype=torch.bool,
-                    device=latents.device,
-                )
-                conditioning_mask[:, :, 0:1] = True
-                noisy_model_input = torch.where(conditioning_mask, latents,
-                                                noisy_model_input)
+        if first_frame_p > 0 and torch.rand(
+                1,
+                generator=self.noise_random_generator).item() < first_frame_p:
+            conditioning_mask = torch.zeros(
+                (batch_size, 1, latents.shape[2], latents.shape[3],
+                 latents.shape[4]),
+                dtype=torch.bool,
+                device=latents.device,
+            )
+            conditioning_mask[:, :, 0:1] = True
+            noisy_model_input = torch.where(conditioning_mask, latents,
+                                            noisy_model_input)
 
         if conditioning_mask is None:
             mask_patch = torch.zeros(
@@ -398,9 +398,10 @@ class LTX2TrainingPipeline(TrainingPipeline):
         with self.tracker.timed("timing/forward_backward"), set_forward_context(
                 current_timestep=training_batch.current_timestep,
                 attn_metadata=training_batch.attn_metadata):
-            with torch.autocast("cuda", dtype=training_batch.latents.dtype):
-                with torch.autograd.set_detect_anomaly(True):
-                    outputs = self.transformer(**input_kwargs)
+            with torch.autocast("cuda", dtype=training_batch.latents.dtype
+                                ), torch.autograd.set_detect_anomaly(True):
+                outputs = self.transformer(**input_kwargs)
+
             if isinstance(outputs, tuple):
                 video_denoised, audio_denoised = outputs
             else:
@@ -422,7 +423,7 @@ class LTX2TrainingPipeline(TrainingPipeline):
                 audio_loss = (audio_pred_velocity.float() -
                               audio_target.float())**2
                 loss = loss + audio_loss.mean()
-                logger.info("Audio loss: {}".format(audio_loss.mean()))
+                logger.info("Audio loss: %s", audio_loss.mean())
             else:
                 logger.warning("Audio denoised is None")
 

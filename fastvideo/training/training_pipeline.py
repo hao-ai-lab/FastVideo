@@ -915,12 +915,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         audio = output_batch.extra.get("audio")
                         audio_sample_rate = output_batch.extra.get(
                             "audio_sample_rate")
-                        if audio is not None and audio_sample_rate is not None:
-                            if not self._mux_audio(filename, audio,
-                                                   audio_sample_rate):
-                                logger.warning(
-                                    "Audio mux failed for validation video %s; saved video without audio.",
-                                    filename)
+                        if audio is not None and audio_sample_rate is not None and not self._mux_audio(
+                                filename, audio, audio_sample_rate):
+                            logger.warning(
+                                "Audio mux failed for validation video %s; saved video without audio.",
+                                filename)
                         video_filenames.append(filename)
 
                     artifacts = []
