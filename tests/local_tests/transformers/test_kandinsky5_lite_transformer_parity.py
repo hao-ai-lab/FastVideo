@@ -55,7 +55,8 @@ def test_kandinsky5_lite_transformer_parity():
     config = Kandinsky5VideoConfig()
     args = FastVideoArgs(
         model_path=str(transformer_path),
-        dit_cpu_offload=True,
+        dit_cpu_offload=False,
+        dit_layerwise_offload=False,
         use_fsdp_inference=False,
         pipeline_config=PipelineConfig(
             dit_config=config,

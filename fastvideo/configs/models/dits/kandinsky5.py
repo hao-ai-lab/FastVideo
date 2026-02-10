@@ -13,11 +13,8 @@ class Kandinsky5ArchConfig(DiTArchConfig):
             and n.split(".")[-1].isdigit()
         ])
 
-    # All weights live under self.model when wrapped in FastVideo.
-    param_names_mapping: dict = field(
-        default_factory=lambda: {
-            r"^(.*)$": r"model.\1",
-        })
+    # Native FastVideo implementation uses the same parameter names as diffusers.
+    param_names_mapping: dict = field(default_factory=lambda: {})
 
     reverse_param_names_mapping: dict = field(default_factory=lambda: {})
 
