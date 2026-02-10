@@ -2,6 +2,8 @@
 from dataclasses import asdict
 import math
 import os
+import shutil
+import tempfile
 import time
 from abc import ABC, abstractmethod
 from collections import deque
@@ -13,16 +15,18 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torchvision
-from diffusers import FlowMatchEulerDiscreteScheduler
 from einops import rearrange
 from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm.auto import tqdm
 
 import fastvideo.envs as envs
-from fastvideo.attention.backends.video_sparse_attn import (
-    VideoSparseAttentionMetadataBuilder)
-from fastvideo.attention.backends.vmoba import VideoMobaAttentionMetadataBuilder
+try:
+    from fastvideo.attention.backends.video_sparse_attn import (
+        VideoSparseAttentionMetadataBuilder)
+    from fastvideo.attention.backends.vmoba import VideoMobaAttentionMetadataBuilder
+except Exception:
+    pass
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset import build_parquet_map_style_dataloader
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
@@ -48,8 +52,12 @@ from fastvideo.training.training_utils import (
 from fastvideo.utils import (is_vmoba_available, is_vsa_available,
                              set_random_seed, shallow_asdict)
 
-vsa_available = is_vsa_available()
-vmoba_available = is_vmoba_available()
+try:
+    vsa_available = is_vsa_available()
+    vmoba_available = is_vmoba_available()
+except Exception:
+    vsa_available = False
+    vmoba_available = False
 
 logger = init_logger(__name__)
 
@@ -108,7 +116,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         # Set random seeds for deterministic training
         assert self.seed is not None, "seed must be set"
-        set_random_seed(self.seed)
+        set_random_seed(self.seed + self.global_rank)
         self.transformer.train()
         if training_args.enable_gradient_checkpointing_type is not None:
             self.transformer = apply_activation_checkpointing(
@@ -588,15 +596,15 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 round(num_trainable_params / 1e9, 3))
 
         # Set random seeds for deterministic training
-        self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
-            self.seed)
+        self.noise_random_generator = torch.Generator(
+            device="cpu").manual_seed(self.seed + self.global_rank)
         self.noise_gen_cuda = torch.Generator(
-            device=current_platform.device_name).manual_seed(self.seed)
+            device=current_platform.device_name).manual_seed(self.seed +
+                                                             self.global_rank)
         self.validation_random_generator = torch.Generator(
-            device="cpu").manual_seed(self.seed)
-        logger.info("Initialized random seeds with seed: %s", self.seed)
-
-        self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
+            device="cpu").manual_seed(self.seed + self.global_rank)
+        logger.info("Initialized random seeds with seed: %s",
+                    self.seed + self.global_rank)
 
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
@@ -661,26 +669,31 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     "grad_norm": grad_norm,
                     "vsa_sparsity": current_vsa_sparsity,
                 }
-                metrics["batch_size"] = int(training_batch.raw_latent_shape[0])
+                try:
+                    metrics["batch_size"] = int(
+                        training_batch.raw_latent_shape[0])
 
-                patch_t, patch_h, patch_w = self.training_args.pipeline_config.dit_config.patch_size
-                seq_len = (training_batch.raw_latent_shape[2] // patch_t) * (
-                    training_batch.raw_latent_shape[3] //
-                    patch_h) * (training_batch.raw_latent_shape[4] // patch_w)
-                if training_batch.encoder_hidden_states is not None:
-                    context_len = int(
-                        training_batch.encoder_hidden_states.shape[1])
-                else:
-                    context_len = 0
+                    patch_t, patch_h, patch_w = self.training_args.pipeline_config.dit_config.patch_size
+                    seq_len = (
+                        training_batch.raw_latent_shape[2] // patch_t) * (
+                            training_batch.raw_latent_shape[3] // patch_h) * (
+                                training_batch.raw_latent_shape[4] // patch_w)
+                    if training_batch.encoder_hidden_states is not None:
+                        context_len = int(
+                            training_batch.encoder_hidden_states.shape[1])
+                    else:
+                        context_len = 0
 
-                metrics["dit_seq_len"] = int(seq_len)
-                metrics["context_len"] = context_len
+                    metrics["dit_seq_len"] = int(seq_len)
+                    metrics["context_len"] = context_len
 
-                arch_config = self.training_args.pipeline_config.dit_config.arch_config
+                    arch_config = self.training_args.pipeline_config.dit_config.arch_config
 
-                metrics["hidden_dim"] = arch_config.hidden_size
-                metrics["num_layers"] = arch_config.num_layers
-                metrics["ffn_dim"] = arch_config.ffn_dim
+                    metrics["hidden_dim"] = arch_config.hidden_size
+                    metrics["num_layers"] = arch_config.num_layers
+                    metrics["ffn_dim"] = arch_config.ffn_dim
+                except Exception:
+                    pass
 
                 self.tracker.log(metrics, step)
             if step % self.training_args.training_state_checkpointing_steps == 0:
@@ -693,12 +706,14 @@ class TrainingPipeline(LoRAPipeline, ABC):
                                     self.noise_random_generator)
                 self.transformer.train()
                 self.sp_group.barrier()
+
+            if self.training_args.log_visualization and step % self.training_args.visualization_steps == 0:
+                self.visualize_intermediate_latents(training_batch,
+                                                    self.training_args, step)
+
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 with self.profiler_controller.region(
                         "profiler_region_training_validation"):
-                    if self.training_args.log_visualization:
-                        self.visualize_intermediate_latents(
-                            training_batch, self.training_args, step)
                     self._log_validation(self.transformer, self.training_args,
                                          step)
                     gpu_memory_usage = current_platform.get_torch_device(
@@ -818,7 +833,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         validation_dataloader = DataLoader(validation_dataset,
                                            batch_size=None,
                                            num_workers=0)
-        # return
+
         self.transformer.eval()
         if getattr(self, "transformer_2", None) is not None:
             self.transformer_2.eval()
@@ -857,7 +872,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 # Run validation inference
                 output_batch = self.validation_pipeline.forward(
                     batch, training_args)
-                samples = output_batch.output
+                samples = output_batch.output.cpu()
 
                 if self.rank_in_sp_group != 0:
                     continue
@@ -896,6 +911,16 @@ class TrainingPipeline(LoRAPipeline, ABC):
                             f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
                         )
                         imageio.mimsave(filename, video, fps=sampling_param.fps)
+                        # Mux audio if available
+                        audio = output_batch.extra.get("audio")
+                        audio_sample_rate = output_batch.extra.get(
+                            "audio_sample_rate")
+                        if audio is not None and audio_sample_rate is not None:
+                            if not self._mux_audio(filename, audio,
+                                                   audio_sample_rate):
+                                logger.warning(
+                                    "Audio mux failed for validation video %s; saved video without audio.",
+                                    filename)
                         video_filenames.append(filename)
 
                     artifacts = []
@@ -922,6 +947,98 @@ class TrainingPipeline(LoRAPipeline, ABC):
         self.transformer.train()
         if getattr(self, "transformer_2", None) is not None:
             self.transformer_2.train()
+
+    @staticmethod
+    def _mux_audio(
+        video_path: str,
+        audio: torch.Tensor | np.ndarray,
+        sample_rate: int,
+    ) -> bool:
+        """Mux audio into video using PyAV."""
+        try:
+            import av
+        except ImportError:
+            logger.warning("PyAV not installed; cannot mux audio. "
+                           "Install with: pip install av")
+            return False
+
+        if torch.is_tensor(audio):
+            audio_np = audio.detach().cpu().float().numpy()
+        else:
+            audio_np = np.asarray(audio, dtype=np.float32)
+
+        if audio_np.ndim == 1:
+            audio_np = audio_np[:, None]
+        elif audio_np.ndim == 2:
+            if audio_np.shape[0] <= 8 and audio_np.shape[1] > audio_np.shape[0]:
+                audio_np = audio_np.T
+        else:
+            logger.warning("Unexpected audio shape %s; skipping mux.",
+                           audio_np.shape)
+            return False
+
+        audio_np = np.clip(audio_np, -1.0, 1.0)
+        audio_int16 = (audio_np * 32767.0).astype(np.int16)
+        num_channels = audio_int16.shape[1]
+        layout = "stereo" if num_channels == 2 else "mono"
+
+        try:
+            import wave
+            with tempfile.TemporaryDirectory() as tmpdir:
+                out_path = os.path.join(tmpdir, "muxed.mp4")
+                wav_path = os.path.join(tmpdir, "audio.wav")
+
+                # Write audio to WAV file
+                with wave.open(wav_path, "wb") as wav_file:
+                    wav_file.setnchannels(num_channels)
+                    wav_file.setsampwidth(2)
+                    wav_file.setframerate(sample_rate)
+                    wav_file.writeframes(audio_int16.tobytes())
+
+                # Open input video and audio
+                input_video = av.open(video_path)
+                input_audio = av.open(wav_path)
+
+                # Create output with both streams
+                output = av.open(out_path, mode="w")
+
+                # Add video stream (copy codec from input)
+                in_video_stream = input_video.streams.video[0]
+                out_video_stream = output.add_stream(
+                    codec_name=in_video_stream.codec_context.name,
+                    rate=in_video_stream.average_rate,
+                )
+                out_video_stream.width = in_video_stream.width
+                out_video_stream.height = in_video_stream.height
+                out_video_stream.pix_fmt = in_video_stream.pix_fmt
+
+                # Add audio stream (AAC)
+                out_audio_stream = output.add_stream("aac", rate=sample_rate)
+                out_audio_stream.layout = layout
+
+                # Remux video (decode and re-encode to be safe)
+                for frame in input_video.decode(video=0):
+                    for packet in out_video_stream.encode(frame):
+                        output.mux(packet)
+                for packet in out_video_stream.encode():
+                    output.mux(packet)
+
+                # Encode audio
+                for frame in input_audio.decode(audio=0):
+                    frame.pts = None  # Let encoder assign PTS
+                    for packet in out_audio_stream.encode(frame):
+                        output.mux(packet)
+                for packet in out_audio_stream.encode():
+                    output.mux(packet)
+
+                input_video.close()
+                input_audio.close()
+                output.close()
+                shutil.move(out_path, video_path)
+            return True
+        except Exception as e:
+            logger.warning("Audio mux failed: %s", e)
+            return False
 
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,
                                        training_args: TrainingArgs, step: int):

@@ -31,7 +31,7 @@ official_negative_prompt = (
 def main() -> None:
     # Uses FastVideo default sampling settings for LTX2 base.
     generator = VideoGenerator.from_pretrained(
-        "converted_weights/ltx2-base",
+        "Davids048/LTX2-Base-Diffusers",
         num_gpus=1,
     )
 

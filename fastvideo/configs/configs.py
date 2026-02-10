@@ -86,6 +86,7 @@ class PreprocessConfig:
 
     # Model configuration
     training_cfg_rate: float = 0.0
+    with_audio: bool = False
 
     # framework configuration
     seed: int = 42
@@ -190,6 +191,10 @@ class PreprocessConfig:
                                      type=float,
                                      default=PreprocessConfig.training_cfg_rate,
                                      help="Training CFG rate")
+        preprocess_args.add_argument(f"--{prefix_with_dot}with-audio",
+                                     action=StoreBoolean,
+                                     default=PreprocessConfig.with_audio,
+                                     help="Whether to extract and encode audio")
         preprocess_args.add_argument(f"--{prefix_with_dot}seed",
                                      type=int,
                                      default=PreprocessConfig.seed,

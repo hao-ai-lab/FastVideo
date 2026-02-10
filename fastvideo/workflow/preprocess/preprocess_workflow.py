@@ -119,6 +119,13 @@ class PreprocessWorkflow(WorkflowBase):
     @classmethod
     def get_workflow_cls(cls,
                          fastvideo_args: FastVideoArgs) -> "PreprocessWorkflow":
+        is_ltx2_t2v = (fastvideo_args.workload_type == WorkloadType.T2V
+                       and fastvideo_args.pipeline_config.__class__.__name__
+                       == "LTX2T2VConfig")
+        if is_ltx2_t2v:
+            from fastvideo.workflow.preprocess.preprocess_workflow_ltx2_t2v import (
+                PreprocessWorkflowLTX2T2V)
+            return cast(PreprocessWorkflow, PreprocessWorkflowLTX2T2V)
         if fastvideo_args.workload_type == WorkloadType.T2V:
             from fastvideo.workflow.preprocess.preprocess_workflow_t2v import (
                 PreprocessWorkflowT2V)

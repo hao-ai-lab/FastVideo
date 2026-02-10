@@ -343,7 +343,7 @@ class SRDenoisingStage(PipelineStage):
         batch.latents = latents
 
         # Save STA mask search results if needed
-        if st_attn_available and self.attn_backend == SlidingTileAttentionBackend and fastvideo_args.STA_mode == STA_Mode.STA_SEARCHING:
+        if st_attn_available and self.attn_backend == SlidingTileAttentionBackend and fastvideo_args.pipeline_config.STA_mode == STA_Mode.STA_SEARCHING:
             self.save_sta_search_results(batch)
 
         # deallocate transformer if on mps
