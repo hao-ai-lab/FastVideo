@@ -353,8 +353,8 @@ def _register_configs() -> None:
             "FastVideo/LingBot-World-Base-Cam-Diffusers",
         ],
         model_detectors=[
-            lambda path: ("lingbotworld" in path.lower()
-                          or "lingbot-world" in path.lower())
+            lambda path:
+            ("lingbotworld" in path.lower() or "lingbot-world" in path.lower())
         ],
     )
 

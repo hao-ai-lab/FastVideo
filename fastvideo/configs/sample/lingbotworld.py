@@ -15,8 +15,7 @@ class LingBotWorld_SamplingParam(Wan2_2_I2V_A14B_SamplingParam):
         "畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走，"
         "镜头晃动，画面闪烁，模糊，噪点，水印，签名，文字，变形，扭曲，液化，不合逻辑的结构，卡顿，"
         "PPT幻灯片感，过暗，欠曝，低对比度，霓虹灯光感，过度锐化，3D渲染感，人物，行人，游客，身体，"
-        "皮肤，肢体，面部特征，汽车，电线"
-    )
+        "皮肤，肢体，面部特征，汽车，电线")
     fps: int = 16
     # NOTE(will): default boundary timestep is tracked by PipelineConfig, but
     # can be overridden during sampling
