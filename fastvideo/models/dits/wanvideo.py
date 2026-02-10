@@ -35,6 +35,8 @@ from fastvideo.platforms import AttentionBackendEnum, current_platform
 from fastvideo.distributed.parallel_state import get_sp_world_size
 from fastvideo.distributed.utils import create_attention_mask_for_padding
 
+from fastvideo.profiler import nvtx_range
+
 logger = init_logger(__name__)
 
 
@@ -167,29 +169,32 @@ class WanT2VCrossAttention(WanSelfAttention):
         # compute query, key, value
         q = self.norm_q(self.to_q(x)[0]).view(b, -1, n, d)
 
-        if crossattn_cache is not None:
-            if not crossattn_cache["is_init"]:
-                crossattn_cache["is_init"] = True
+        with nvtx_range("WanT2VCrossAttention.forward.compute_kv"):
+            if crossattn_cache is not None:
+                if not crossattn_cache["is_init"]:
+                    crossattn_cache["is_init"] = True
+                    k = self.norm_k(self.to_k(context)[0]).view(b, -1, n, d)
+                    v = self.to_v(context)[0].view(b, -1, n, d)
+                    crossattn_cache["k"] = k
+                    crossattn_cache["v"] = v
+                else:
+                    k = crossattn_cache["k"]
+                    v = crossattn_cache["v"]
+            else:
                 k = self.norm_k(self.to_k(context)[0]).view(b, -1, n, d)
                 v = self.to_v(context)[0].view(b, -1, n, d)
-                crossattn_cache["k"] = k
-                crossattn_cache["v"] = v
-            else:
-                k = crossattn_cache["k"]
-                v = crossattn_cache["v"]
-        else:
-            k = self.norm_k(self.to_k(context)[0]).view(b, -1, n, d)
-            v = self.to_v(context)[0].view(b, -1, n, d)
 
         # compute attention
         if k.size(1) > 0:
-            x = self.attn(q, k, v)
+            with nvtx_range("WanT2VCrossAttention.forward.attn"):
+                x = self.attn(q, k, v)
         else:
             x = torch.zeros_like(q)
 
         # output
-        x = x.flatten(2)
-        x, _ = self.to_out(x)
+        with nvtx_range("WanT2VCrossAttention.forward.to_out"):
+            x = x.flatten(2)
+            x, _ = self.to_out(x)
         return x
 
 
@@ -337,65 +342,72 @@ class WanTransformerBlock(nn.Module):
         orig_dtype = hidden_states.dtype
         # assert orig_dtype != torch.float32
 
-        if temb.dim() == 4:
-            # temb: batch_size, seq_len, 6, inner_dim (wan2.2 ti2v)
-            shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
-                self.scale_shift_table.unsqueeze(0) + temb.float()
-            ).chunk(6, dim=2)
-            # batch_size, seq_len, 1, inner_dim
-            shift_msa = shift_msa.squeeze(2)
-            scale_msa = scale_msa.squeeze(2)
-            gate_msa = gate_msa.squeeze(2)
-            c_shift_msa = c_shift_msa.squeeze(2)
-            c_scale_msa = c_scale_msa.squeeze(2)
-            c_gate_msa = c_gate_msa.squeeze(2)
-        else:
-            # temb: batch_size, 6, inner_dim (wan2.1/wan2.2 14B)
-            e = self.scale_shift_table + temb.float()
-            shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
-                6, dim=1)
-        assert shift_msa.dtype == torch.float32
+        with nvtx_range("WanTransformerBlock.forward.scale_shift_table"):
+            if temb.dim() == 4:
+                # temb: batch_size, seq_len, 6, inner_dim (wan2.2 ti2v)
+                shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
+                    self.scale_shift_table.unsqueeze(0) + temb.float()
+                ).chunk(6, dim=2)
+                # batch_size, seq_len, 1, inner_dim
+                shift_msa = shift_msa.squeeze(2)
+                scale_msa = scale_msa.squeeze(2)
+                gate_msa = gate_msa.squeeze(2)
+                c_shift_msa = c_shift_msa.squeeze(2)
+                c_scale_msa = c_scale_msa.squeeze(2)
+                c_gate_msa = c_gate_msa.squeeze(2)
+            else:
+                # temb: batch_size, 6, inner_dim (wan2.1/wan2.2 14B)
+                e = self.scale_shift_table + temb.float()
+                shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(
+                    6, dim=1)
+            assert shift_msa.dtype == torch.float32
 
         # 1. Self-attention
-        norm_hidden_states = (self.norm1(hidden_states.float()) *
-                              (1 + scale_msa) + shift_msa).to(orig_dtype)
-        query, _ = self.to_q(norm_hidden_states)
-        key, _ = self.to_k(norm_hidden_states)
-        value, _ = self.to_v(norm_hidden_states)
+        with nvtx_range("WanTransformerBlock.forward.qkv"):
+            norm_hidden_states = (self.norm1(hidden_states.float()) *
+                                (1 + scale_msa) + shift_msa).to(orig_dtype)
+            query, _ = self.to_q(norm_hidden_states)
+            key, _ = self.to_k(norm_hidden_states)
+            value, _ = self.to_v(norm_hidden_states)
 
-        if self.norm_q is not None:
-            query = self.norm_q(query)
-        if self.norm_k is not None:
-            key = self.norm_k(key)
+            if self.norm_q is not None:
+                query = self.norm_q(query)
+            if self.norm_k is not None:
+                key = self.norm_k(key)
 
-        query = query.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
-        key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
-        value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
+            query = query.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
+            key = key.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
+            value = value.squeeze(1).unflatten(2, (self.num_attention_heads, -1))
 
-        attn_output, _ = self.attn1(query, key, value, freqs_cis=freqs_cis, attention_mask=attention_mask)
-        attn_output = attn_output.flatten(2)
-        attn_output, _ = self.to_out(attn_output)
-        attn_output = attn_output.squeeze(1)
+        with nvtx_range("WanTransformerBlock.forward.attn1"):
+            with nvtx_range("WanTransformerBlock.forward.attn1.attn"):
+                attn_output, _ = self.attn1(query, key, value, freqs_cis=freqs_cis, attention_mask=attention_mask)
+            attn_output = attn_output.flatten(2)
+            attn_output, _ = self.to_out(attn_output)
+            attn_output = attn_output.squeeze(1)
 
-        null_shift = null_scale = torch.tensor([0], device=hidden_states.device)
-        norm_hidden_states, hidden_states = self.self_attn_residual_norm(
-            hidden_states, attn_output, gate_msa, null_shift, null_scale)
-        norm_hidden_states, hidden_states = norm_hidden_states.to(
-            orig_dtype), hidden_states.to(orig_dtype)
+            null_shift = null_scale = torch.tensor([0], device=hidden_states.device)
+            norm_hidden_states, hidden_states = self.self_attn_residual_norm(
+                hidden_states, attn_output, gate_msa, null_shift, null_scale)
+            norm_hidden_states, hidden_states = norm_hidden_states.to(
+                orig_dtype), hidden_states.to(orig_dtype)
 
         # 2. Cross-attention
-        attn_output = self.attn2(norm_hidden_states,
-                                 context=encoder_hidden_states,
-                                 context_lens=None)
-        norm_hidden_states, hidden_states = self.cross_attn_residual_norm(
-            hidden_states, attn_output, 1, c_shift_msa, c_scale_msa)
-        norm_hidden_states, hidden_states = norm_hidden_states.to(
-            orig_dtype), hidden_states.to(orig_dtype)
+        with nvtx_range("WanTransformerBlock.forward.attn2"):
+            attn_output = self.attn2(norm_hidden_states,
+                                    context=encoder_hidden_states,
+                                    context_lens=None)
+            norm_hidden_states, hidden_states = self.cross_attn_residual_norm(
+                hidden_states, attn_output, 1, c_shift_msa, c_scale_msa)
+            norm_hidden_states, hidden_states = norm_hidden_states.to(
+                orig_dtype), hidden_states.to(orig_dtype)
 
         # 3. Feed-forward
-        ff_output = self.ffn(norm_hidden_states)
-        hidden_states = self.mlp_residual(hidden_states, ff_output, c_gate_msa)
-        hidden_states = hidden_states.to(orig_dtype)
+        with nvtx_range("WanTransformerBlock.forward.ffn"):
+            ff_output = self.ffn(norm_hidden_states)
+        with nvtx_range("WanTransformerBlock.forward.mlp_residual"):
+            hidden_states = self.mlp_residual(hidden_states, ff_output, c_gate_msa)
+            hidden_states = hidden_states.to(orig_dtype)
 
         return hidden_states
 
@@ -657,45 +669,49 @@ class WanTransformer3DModel(CachableDiT):
         post_patch_width = width // p_w
 
         # Get rotary embeddings
-        d = self.hidden_size // self.num_attention_heads
-        rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
-        freqs_cos, freqs_sin = get_rotary_pos_embed(
-            (post_patch_num_frames, post_patch_height,
-             post_patch_width),
-            self.hidden_size,
-            self.num_attention_heads,
-            rope_dim_list,
-            dtype=torch.float32 if current_platform.is_mps() else torch.float64,
-            rope_theta=10000)
-        freqs_cis = (freqs_cos.to(hidden_states.device).float(),
-                     freqs_sin.to(hidden_states.device).float())
+        with nvtx_range("WanTransformer3DModel.forward.rotary_pos_embed"):
+            d = self.hidden_size // self.num_attention_heads
+            rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
+            freqs_cos, freqs_sin = get_rotary_pos_embed(
+                (post_patch_num_frames, post_patch_height,
+                 post_patch_width),
+                self.hidden_size,
+                self.num_attention_heads,
+                rope_dim_list,
+                dtype=torch.float32 if current_platform.is_mps() else torch.float64,
+                rope_theta=10000)
+            freqs_cis = (freqs_cos.to(hidden_states.device).float(),
+                         freqs_sin.to(hidden_states.device).float())
 
-        hidden_states = self.patch_embedding(hidden_states)
-        hidden_states = hidden_states.flatten(2).transpose(1, 2)
+        with nvtx_range("WanTransformer3DModel.forward.patch_embedding"):
+            hidden_states = self.patch_embedding(hidden_states)
+            hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
-        # Shard with padding support - returns (sharded_tensor, original_seq_len)
-        hidden_states, original_seq_len = sequence_model_parallel_shard(hidden_states, dim=1)
+        with nvtx_range("sequence_model_parallel_shard"):
+            # Shard with padding support - returns (sharded_tensor, original_seq_len)
+            hidden_states, original_seq_len = sequence_model_parallel_shard(hidden_states, dim=1)
         
-        # Create attention mask for padded tokens if padding was applied
-        current_seq_len = hidden_states.shape[1]
-        sp_world_size = get_sp_world_size()
-        padded_seq_len = current_seq_len * sp_world_size
+            # Create attention mask for padded tokens if padding was applied
+            current_seq_len = hidden_states.shape[1]
+            sp_world_size = get_sp_world_size()
+            padded_seq_len = current_seq_len * sp_world_size
         
-        if padded_seq_len > original_seq_len:
-            if not self._logged_attention_mask:
-                logger.info(f"Padding applied, original seq len: {original_seq_len}, padded seq len: {padded_seq_len}")
-                self._logged_attention_mask = True
-            attention_mask = create_attention_mask_for_padding(
-                seq_len=original_seq_len,
-                padded_seq_len=padded_seq_len,
-                batch_size=batch_size,
-                device=hidden_states.device,
-            )
-        else:
-            if not self._logged_attention_mask:
-                logger.info(f"Padding not applied")
-                self._logged_attention_mask = True
-            attention_mask = None
+        with nvtx_range("create_attention_mask_for_padding"):
+            if padded_seq_len > original_seq_len:
+                if not self._logged_attention_mask:
+                    logger.info(f"Padding applied, original seq len: {original_seq_len}, padded seq len: {padded_seq_len}")
+                    self._logged_attention_mask = True
+                attention_mask = create_attention_mask_for_padding(
+                    seq_len=original_seq_len,
+                    padded_seq_len=padded_seq_len,
+                    batch_size=batch_size,
+                    device=hidden_states.device,
+                )
+            else:
+                if not self._logged_attention_mask:
+                    logger.info(f"Padding not applied")
+                    self._logged_attention_mask = True
+                attention_mask = None
 
         # timestep shape: batch_size, or batch_size, seq_len (wan 2.2 ti2v)
         if timestep.dim() == 2:
@@ -704,8 +720,9 @@ class WanTransformer3DModel(CachableDiT):
         else:
             ts_seq_len = None
 
-        temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
-            timestep, encoder_hidden_states, encoder_hidden_states_image, timestep_seq_len=ts_seq_len)
+        with nvtx_range("WanTransformer3DModel.forward.condition_embedder"):
+            temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
+                timestep, encoder_hidden_states, encoder_hidden_states_image, timestep_seq_len=ts_seq_len)
         if ts_seq_len is not None:
             # batch_size, seq_len, 6, inner_dim
             timestep_proj = timestep_proj.unflatten(2, (6, -1))
@@ -741,14 +758,16 @@ class WanTransformer3DModel(CachableDiT):
                 original_hidden_states = hidden_states.clone()
 
             if torch.is_grad_enabled() and self.gradient_checkpointing:
-                for block in self.blocks:
-                    hidden_states = self._gradient_checkpointing_func(
-                        block, hidden_states, encoder_hidden_states,
-                        timestep_proj, freqs_cis, attention_mask)
+                for i, block in enumerate(self.blocks):
+                    with nvtx_range(f"WanTransformer3DModel.forward.block[{i}].forward()"):
+                        hidden_states = self._gradient_checkpointing_func(
+                            block, hidden_states, encoder_hidden_states,
+                            timestep_proj, freqs_cis, attention_mask)
             else:
-                for block in self.blocks:
-                    hidden_states = block(hidden_states, encoder_hidden_states,
-                                              timestep_proj, freqs_cis, attention_mask)
+                for i, block in enumerate(self.blocks):
+                    with nvtx_range(f"WanTransformer3DModel.forward.block[{i}].forward()"):
+                        hidden_states = block(hidden_states, encoder_hidden_states,
+                                                timestep_proj, freqs_cis, attention_mask)
             # if teacache is enabled, we need to cache the original hidden states
 
             if enable_teacache:
@@ -764,12 +783,15 @@ class WanTransformer3DModel(CachableDiT):
             shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2, dim=1)
             
 
-        hidden_states = self.norm_out(hidden_states, shift, scale)
+        with nvtx_range("WanTransformer3DModel.forward.norm_out"):
+            hidden_states = self.norm_out(hidden_states, shift, scale)
 
         # Gather and unpad in one operation
-        hidden_states = sequence_model_parallel_all_gather_with_unpad(
-            hidden_states, original_seq_len, dim=1)
-        hidden_states = self.proj_out(hidden_states)
+        with nvtx_range("WanTransformer3DModel.forward.all_gather_unpad"):
+            hidden_states = sequence_model_parallel_all_gather_with_unpad(
+                hidden_states, original_seq_len, dim=1)
+        with nvtx_range("WanTransformer3DModel.forward.proj_out"):
+            hidden_states = self.proj_out(hidden_states)
 
         hidden_states = hidden_states.reshape(batch_size, post_patch_num_frames,
                                               post_patch_height,

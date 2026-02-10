@@ -2,14 +2,12 @@
 from dataclasses import asdict
 import math
 import os
-import shutil
-import tempfile
 import time
 from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Iterator
 from typing import Any
-from fastvideo.profiler import profile_region
+from fastvideo.profiler import profile_region, nvtx_range
 import imageio
 import numpy as np
 import torch
@@ -440,7 +438,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
         with self.tracker.timed("timing/forward_backward"), set_forward_context(
                 current_timestep=training_batch.current_timestep,
                 attn_metadata=training_batch.attn_metadata):
-            model_pred = current_model(**input_kwargs)
+            with nvtx_range("transformer_forward"):
+                model_pred = current_model(**input_kwargs)
             if self.training_args.precondition_outputs:
                 assert training_batch.sigmas is not None
                 model_pred = training_batch.noisy_model_input - model_pred * training_batch.sigmas
@@ -461,24 +460,27 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 # (t*h*w) with optional padding so (t*h*w) need not be divisible by sp_size.
                 sp_world_size = get_sp_group().world_size
                 if sp_world_size > 1:
-                    sharded_pred = shard_latents_across_sp(model_pred)
-                    sharded_target = shard_latents_across_sp(target)
-                    local_sse = ((sharded_pred.float() -
-                                  sharded_target.float())**2).sum()
-                    loss = (sp_world_size * local_sse / model_pred.numel()
-                            ) / self.training_args.gradient_accumulation_steps
+                    with nvtx_range("compute_loss_sp"):
+                        sharded_pred = shard_latents_across_sp(model_pred)
+                        sharded_target = shard_latents_across_sp(target)
+                        local_sse = ((sharded_pred.float() -
+                                      sharded_target.float())**2).sum()
+                        loss = (sp_world_size * local_sse / model_pred.numel()
+                                ) / self.training_args.gradient_accumulation_steps
                 else:
-                    loss = (torch.mean(
-                        (model_pred.float() - target.float())**2) /
-                            self.training_args.gradient_accumulation_steps)
+                    with nvtx_range("compute_loss"):
+                        loss = (torch.mean(
+                            (model_pred.float() - target.float())**2) /
+                                self.training_args.gradient_accumulation_steps)
 
-            loss.backward()
+            with nvtx_range("backward"):
+                loss.backward()
 
             avg_loss = loss.detach().clone()
 
         # logger.info(f"rank: {self.rank}, avg_loss: {avg_loss.item()}",
         #             local_main_process_only=False)
-        with self.tracker.timed("timing/reduce_loss"):
+        with nvtx_range("reduce_loss"), self.tracker.timed("timing/reduce_loss"):
             world_group = get_world_group()
             avg_loss = world_group.all_reduce(avg_loss, op=dist.ReduceOp.AVG)
         training_batch.total_loss += avg_loss.item()
@@ -547,10 +549,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
             training_batch = self._transformer_forward_and_compute_loss(
                 training_batch)
 
-        training_batch = self._clip_grad_norm(training_batch)
+        with nvtx_range("clip_grad_norm"):
+            training_batch = self._clip_grad_norm(training_batch)
 
         # Only step the optimizer and scheduler for the model that is currently training
-        with self.tracker.timed("timing/optimizer_step"):
+        with nvtx_range("optimizer_step"), self.tracker.timed("timing/optimizer_step"):
             if self.train_transformer_2 and self.transformer_2 is not None:
                 self.optimizer_2.step()
                 self.lr_scheduler_2.step()
@@ -628,31 +631,34 @@ class TrainingPipeline(LoRAPipeline, ABC):
         )
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
-            start_time = time.perf_counter()
-            if vsa_available:
-                vsa_sparsity = self.training_args.VSA_sparsity
-                vsa_decay_rate = self.training_args.VSA_decay_rate
-                vsa_decay_interval_steps = self.training_args.VSA_decay_interval_steps
-                current_decay_times = min(step // vsa_decay_interval_steps,
-                                          vsa_sparsity // vsa_decay_rate)
-                current_vsa_sparsity = current_decay_times * vsa_decay_rate
-            elif vmoba_available:
-                #TODO: add vmoba sparsity scheduling here
-                current_vsa_sparsity = 0.0
-            else:
-                current_vsa_sparsity = 0.0
+            with nvtx_range(f"train_step_{step}"):
+                torch.cuda.synchronize()
+                start_time = time.perf_counter()
+                if vsa_available:
+                    vsa_sparsity = self.training_args.VSA_sparsity
+                    vsa_decay_rate = self.training_args.VSA_decay_rate
+                    vsa_decay_interval_steps = self.training_args.VSA_decay_interval_steps
+                    current_decay_times = min(step // vsa_decay_interval_steps,
+                                              vsa_sparsity // vsa_decay_rate)
+                    current_vsa_sparsity = current_decay_times * vsa_decay_rate
+                elif vmoba_available:
+                    #TODO: add vmoba sparsity scheduling here
+                    current_vsa_sparsity = 0.0
+                else:
+                    current_vsa_sparsity = 0.0
 
-            training_batch = TrainingBatch()
-            training_batch.current_timestep = step
-            training_batch.current_vsa_sparsity = current_vsa_sparsity
-            training_batch = self.train_one_step(training_batch)
+                training_batch = TrainingBatch()
+                training_batch.current_timestep = step
+                training_batch.current_vsa_sparsity = current_vsa_sparsity
+                training_batch = self.train_one_step(training_batch)
 
-            loss = training_batch.total_loss
-            grad_norm = training_batch.grad_norm
+                loss = training_batch.total_loss
+                grad_norm = training_batch.grad_norm
 
-            step_time = time.perf_counter() - start_time
-            step_times.append(step_time)
-            avg_step_time = sum(step_times) / len(step_times)
+                torch.cuda.synchronize()
+                step_time = time.perf_counter() - start_time
+                step_times.append(step_time)
+                avg_step_time = sum(step_times) / len(step_times)
 
             progress_bar.set_postfix({
                 "loss": f"{loss:.4f}",
@@ -669,31 +675,31 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     "grad_norm": grad_norm,
                     "vsa_sparsity": current_vsa_sparsity,
                 }
-                try:
-                    metrics["batch_size"] = int(
-                        training_batch.raw_latent_shape[0])
+                metrics["batch_size"] = int(training_batch.raw_latent_shape[0])
 
-                    patch_t, patch_h, patch_w = self.training_args.pipeline_config.dit_config.patch_size
-                    seq_len = (
-                        training_batch.raw_latent_shape[2] // patch_t) * (
-                            training_batch.raw_latent_shape[3] // patch_h) * (
-                                training_batch.raw_latent_shape[4] // patch_w)
-                    if training_batch.encoder_hidden_states is not None:
-                        context_len = int(
-                            training_batch.encoder_hidden_states.shape[1])
-                    else:
-                        context_len = 0
+                patch_t, patch_h, patch_w = self.training_args.pipeline_config.dit_config.patch_size
+                seq_len = (training_batch.raw_latent_shape[2] // patch_t) * (
+                    training_batch.raw_latent_shape[3] //
+                    patch_h) * (training_batch.raw_latent_shape[4] // patch_w)
+                if training_batch.encoder_hidden_states is not None:
+                    context_len = int(
+                        training_batch.encoder_hidden_states.shape[1])
+                else:
+                    context_len = 0
 
-                    metrics["dit_seq_len"] = int(seq_len)
-                    metrics["context_len"] = context_len
+                metrics["dit_seq_len"] = int(seq_len)
+                metrics["context_len"] = context_len
 
-                    arch_config = self.training_args.pipeline_config.dit_config.arch_config
+                arch_config = self.training_args.pipeline_config.dit_config.arch_config
 
-                    metrics["hidden_dim"] = arch_config.hidden_size
-                    metrics["num_layers"] = arch_config.num_layers
-                    metrics["ffn_dim"] = arch_config.ffn_dim
-                except Exception:
-                    pass
+                logger.info(f"arch_config: {arch_config}")
+                logger.info(f"arch_config.hidden_size: {arch_config.hidden_size}")
+                logger.info(f"arch_config.num_layers: {arch_config.num_layers}")
+                logger.info(f"arch_config.ffn_dim: {arch_config.ffn_dim}")
+
+                metrics["hidden_dim"] = arch_config.hidden_size
+                metrics["num_layers"] = arch_config.num_layers
+                metrics["ffn_dim"] = arch_config.ffn_dim
 
                 self.tracker.log(metrics, step)
             if step % self.training_args.training_state_checkpointing_steps == 0:
@@ -706,14 +712,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
                                     self.noise_random_generator)
                 self.transformer.train()
                 self.sp_group.barrier()
-
-            if self.training_args.log_visualization and step % self.training_args.visualization_steps == 0:
-                self.visualize_intermediate_latents(training_batch,
-                                                    self.training_args, step)
-
             if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 with self.profiler_controller.region(
                         "profiler_region_training_validation"):
+                    if self.training_args.log_visualization:
+                        self.visualize_intermediate_latents(
+                            training_batch, self.training_args, step)
                     self._log_validation(self.transformer, self.training_args,
                                          step)
                     gpu_memory_usage = current_platform.get_torch_device(
@@ -833,7 +837,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         validation_dataloader = DataLoader(validation_dataset,
                                            batch_size=None,
                                            num_workers=0)
-
+        # return
         self.transformer.eval()
         if getattr(self, "transformer_2", None) is not None:
             self.transformer_2.eval()
@@ -911,16 +915,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
                             f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
                         )
                         imageio.mimsave(filename, video, fps=sampling_param.fps)
-                        # Mux audio if available
-                        audio = output_batch.extra.get("audio")
-                        audio_sample_rate = output_batch.extra.get(
-                            "audio_sample_rate")
-                        if audio is not None and audio_sample_rate is not None:
-                            if not self._mux_audio(filename, audio,
-                                                   audio_sample_rate):
-                                logger.warning(
-                                    "Audio mux failed for validation video %s; saved video without audio.",
-                                    filename)
                         video_filenames.append(filename)
 
                     artifacts = []
@@ -947,98 +941,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         self.transformer.train()
         if getattr(self, "transformer_2", None) is not None:
             self.transformer_2.train()
-
-    @staticmethod
-    def _mux_audio(
-        video_path: str,
-        audio: torch.Tensor | np.ndarray,
-        sample_rate: int,
-    ) -> bool:
-        """Mux audio into video using PyAV."""
-        try:
-            import av
-        except ImportError:
-            logger.warning("PyAV not installed; cannot mux audio. "
-                           "Install with: pip install av")
-            return False
-
-        if torch.is_tensor(audio):
-            audio_np = audio.detach().cpu().float().numpy()
-        else:
-            audio_np = np.asarray(audio, dtype=np.float32)
-
-        if audio_np.ndim == 1:
-            audio_np = audio_np[:, None]
-        elif audio_np.ndim == 2:
-            if audio_np.shape[0] <= 8 and audio_np.shape[1] > audio_np.shape[0]:
-                audio_np = audio_np.T
-        else:
-            logger.warning("Unexpected audio shape %s; skipping mux.",
-                           audio_np.shape)
-            return False
-
-        audio_np = np.clip(audio_np, -1.0, 1.0)
-        audio_int16 = (audio_np * 32767.0).astype(np.int16)
-        num_channels = audio_int16.shape[1]
-        layout = "stereo" if num_channels == 2 else "mono"
-
-        try:
-            import wave
-            with tempfile.TemporaryDirectory() as tmpdir:
-                out_path = os.path.join(tmpdir, "muxed.mp4")
-                wav_path = os.path.join(tmpdir, "audio.wav")
-
-                # Write audio to WAV file
-                with wave.open(wav_path, "wb") as wav_file:
-                    wav_file.setnchannels(num_channels)
-                    wav_file.setsampwidth(2)
-                    wav_file.setframerate(sample_rate)
-                    wav_file.writeframes(audio_int16.tobytes())
-
-                # Open input video and audio
-                input_video = av.open(video_path)
-                input_audio = av.open(wav_path)
-
-                # Create output with both streams
-                output = av.open(out_path, mode="w")
-
-                # Add video stream (copy codec from input)
-                in_video_stream = input_video.streams.video[0]
-                out_video_stream = output.add_stream(
-                    codec_name=in_video_stream.codec_context.name,
-                    rate=in_video_stream.average_rate,
-                )
-                out_video_stream.width = in_video_stream.width
-                out_video_stream.height = in_video_stream.height
-                out_video_stream.pix_fmt = in_video_stream.pix_fmt
-
-                # Add audio stream (AAC)
-                out_audio_stream = output.add_stream("aac", rate=sample_rate)
-                out_audio_stream.layout = layout
-
-                # Remux video (decode and re-encode to be safe)
-                for frame in input_video.decode(video=0):
-                    for packet in out_video_stream.encode(frame):
-                        output.mux(packet)
-                for packet in out_video_stream.encode():
-                    output.mux(packet)
-
-                # Encode audio
-                for frame in input_audio.decode(audio=0):
-                    frame.pts = None  # Let encoder assign PTS
-                    for packet in out_audio_stream.encode(frame):
-                        output.mux(packet)
-                for packet in out_audio_stream.encode():
-                    output.mux(packet)
-
-                input_video.close()
-                input_audio.close()
-                output.close()
-                shutil.move(out_path, video_path)
-            return True
-        except Exception as e:
-            logger.warning("Audio mux failed: %s", e)
-            return False
 
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,
                                        training_args: TrainingArgs, step: int):
