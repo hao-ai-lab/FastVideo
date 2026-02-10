@@ -180,6 +180,24 @@ class GameCraftDenoisingStage(DenoisingStage):
         trajectory_timesteps: list[torch.Tensor] = []
         trajectory_latents: list[torch.Tensor] = []
 
+        # For I2V: extract clean reference latents to inject at every step.
+        # Official GameCraft replaces conditioned frames of the denoising latents
+        # with the clean reference at EVERY timestep (not just the first).
+        # This keeps the conditioned frames noise-free so the model has a strong
+        # reference signal throughout the denoising process.
+        #
+        # ref_latent_for_injection: [B, 16, 1, H, W] or None
+        ref_latent_for_injection = getattr(batch, "_ref_latent_for_injection", None)
+        if ref_latent_for_injection is None and gt_latents is not None:
+            # Check if any frame in the mask is conditioned (non-zero)
+            if conditioning_mask.sum() > 0:
+                # Extract the clean reference from gt_latents first frame
+                # gt_latents[:, :, 0] should have the VAE-encoded reference image
+                if gt_latents[:, :, 0].abs().sum() > 0:
+                    ref_latent_for_injection = gt_latents[:, :, 0:1].clone()  # [B, 16, 1, H, W]
+                    logger.info(f"[GameCraft I2V] Will inject ref latent at conditioned frames each step. "
+                                f"ref mean={ref_latent_for_injection.abs().mean():.4f}")
+
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -189,6 +207,16 @@ class GameCraftDenoisingStage(DenoisingStage):
 
                 current_model = self.transformer
                 current_guidance_scale = batch.guidance_scale
+
+                # I2V: replace conditioned frames with clean reference latent
+                # (matches official: latents[:,:,0,:,:] = last_latents[:,:,-1,:,:])
+                if ref_latent_for_injection is not None:
+                    # conditioning_mask shape: [B, 1, T, H, W]
+                    # Where mask == 1, replace latents with the clean ref
+                    cond_frames = conditioning_mask[0, 0, :, 0, 0] > 0.5  # [T]
+                    for t_idx in range(cond_frames.shape[0]):
+                        if cond_frames[t_idx]:
+                            latents[:, :, t_idx, :, :] = ref_latent_for_injection[:, :, 0, :, :]
 
                 # Prepare model input: concatenate latents, gt_latents, and mask
                 # [B, 33, T, H, W] = [B, 16, T, H, W] + [B, 16, T, H, W] + [B, 1, T, H, W]
