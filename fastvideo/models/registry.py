@@ -43,7 +43,9 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
     "WanTransformer3DModel": ("dits", "wanvideo", "WanTransformer3DModel"),
     "CausalWanTransformer3DModel": ("dits", "causal_wanvideo", "CausalWanTransformer3DModel"),
     "CausalWanGameTransformer3DModel":
-    ("dits", "wangame", "CausalWanGameTransformer3DModel"),
+    ("dits", "wangame", "CausalWanGameActionTransformer3DModel"),
+    "CausalWanGameActionTransformer3DModel":
+    ("dits", "wangame", "CausalWanGameActionTransformer3DModel"),
     "WanGameActionTransformer3DModel": ("dits", "wangame", "WanGameActionTransformer3DModel"),
     "WanLingBotTransformer3DModel": ("dits", "wangame_lingbot", "WanLingBotTransformer3DModel"),
     "MatrixGameWanModel": ("dits", "matrixgame", "MatrixGameWanModel"),
