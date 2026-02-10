@@ -615,9 +615,8 @@ class RLPipeline(TrainingPipeline):
             # Sample multiple times per prompt if needed
             for _ in range(sample_time_per_prompt):
 
-                # Set seed in sampling_param - InputValidationStage will use this to create
-                # a list of generators (one per batch item)
-                sampling_param.seed = self.seed
+                # Set seed in sampling_param - vary per batch so rollouts differ across batches (align with flow_grpo advancing RNG)
+                sampling_param.seed = self.seed + getattr(self, "current_step", 0)
 
                 rl_data = ForwardBatch.RLData(
                     enabled=True,
@@ -888,7 +887,7 @@ class RLPipeline(TrainingPipeline):
             reward_scores = reward_scores - kl_reward * kl_penalty
 
         # Store reward scores
-        training_batch.reward_scores = reward_scores
+        training_batch.reward_scores = reward_scores.float()
 
         # Compute reward statistics (local)
         reward_stats = compute_reward_statistics(training_batch.reward_scores)
@@ -1014,6 +1013,8 @@ class RLPipeline(TrainingPipeline):
                 # myregion debug
                 logger.info(f"gathered_rewards: {gathered_rewards}")
                 logger.info(f"advantages_np: {advantages_np}")
+                logger.info(f"prompts_global: {prompts_global}")
+                logger.info(f"prompts: {prompts}")
                 # endregion
 
                 # Slice back to this rank's indices (same as flow_grpo reshape + [rank])
@@ -1588,9 +1589,13 @@ class RLPipeline(TrainingPipeline):
         )
 
         # Sampling: M batches, advantage computed per batch (per group)
+        # Use a new TrainingBatch per iteration so each collected[i] holds distinct data (avoids identical reward/loss per step).
         collected: list[TrainingBatch] = []
         for _ in range(M):
-            tb = self._get_next_batch(training_batch)
+            tb = TrainingBatch()
+            tb.current_timestep = getattr(training_batch, "current_timestep", 0)
+            tb.current_vsa_sparsity = getattr(training_batch, "current_vsa_sparsity", 0.0)
+            tb = self._get_next_batch(tb)
             tb = self.collect_trajectories(tb)
             tb = self.compute_rewards(tb)
             tb = self.compute_advantages(tb)
