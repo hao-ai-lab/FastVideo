@@ -128,6 +128,18 @@ class HunyuanVideo15TimeEmbedding(nn.Module):
         timestep: torch.Tensor,
         timestep_r: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        
+        ## Evelyn: fixed value error
+        # if timestep.dim() > 1:
+        #     timestep = timestep.squeeze()
+        #     if timestep.dim() > 1:
+        #         # Expect repeated timesteps across extra dims (e.g., [B, K]).
+        #         # Use the first column only if all values are identical.
+        #         if not torch.all(timestep == timestep[:, :1]):
+        #             raise ValueError(
+        #                 f"Unexpected timestep shape {tuple(timestep.shape)} with non-identical values across the last dimension."
+        #             )
+        #         timestep = timestep[:, 0]
         timesteps_emb = self.timestep_embedder(timestep)
 
         if timestep_r is not None:
@@ -474,9 +486,70 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
         timestep_r: Optional[torch.LongTensor] = None,
         attention_kwargs: Optional[Dict[str, Any]] = None,
     ):
+        def _describe(x):
+            if isinstance(x, torch.Tensor):
+                return f"Tensor shape={tuple(x.shape)} dtype={x.dtype}"
+            if isinstance(x, (list, tuple)):
+                return f"{type(x).__name__} len={len(x)} " + ", ".join(_describe(t) for t in x[:4])
+            if isinstance(x, dict):
+                return f"dict keys={list(x.keys())[:10]}"
+            return str(type(x))
+
+        logger.info(f"encoder_hidden_states: {_describe(encoder_hidden_states)}")
+        logger.info(f"encoder_attention_mask: {_describe(encoder_attention_mask)}")
+
         encoder_hidden_states_image = encoder_hidden_states_image[0]
         encoder_hidden_states, encoder_hidden_states_2 = encoder_hidden_states
         encoder_attention_mask, encoder_attention_mask_2 = encoder_attention_mask
+        # # Normalize encoder hidden states to always be a list/tuple with at least
+        # # two entries (Qwen + ByT5). Some training entrypoints only pass a single
+        # # tensor, so guard against that early to avoid cryptic unpack errors.
+        # if isinstance(encoder_hidden_states, torch.Tensor):
+        #     raise ValueError(
+        #         "HunyuanVideo15 expects both Qwen and ByT5 hidden states; "
+        #         "got a single tensor."
+        #     )
+        # if not isinstance(encoder_hidden_states, (list, tuple)):
+        #     raise TypeError(
+        #         f"Unsupported encoder_hidden_states type: {type(encoder_hidden_states)}"
+        #     )
+        # if len(encoder_hidden_states) < 2:
+        #     raise ValueError(
+        #         "encoder_hidden_states must contain both primary and secondary text embeddings."
+        #     )
+        # encoder_hidden_states = list(encoder_hidden_states)
+        # encoder_hidden_states, encoder_hidden_states_2 = (
+        #     encoder_hidden_states[0],
+        #     encoder_hidden_states[1],
+        # )
+
+        # # Dataloaders sometimes supply the attention mask as a plain tensor
+        # # (shape [B, L]) instead of the expected pair [mask_qwen, mask_byt5].
+        # # Accept either form and synthesize a zeros mask for the secondary
+        # # encoder when it is missing.
+        # if isinstance(encoder_attention_mask, torch.Tensor):
+        #     encoder_attention_mask_list: list[torch.Tensor] = [
+        #         encoder_attention_mask
+        #     ]
+        # elif isinstance(encoder_attention_mask, (list, tuple)):
+        #     encoder_attention_mask_list = list(encoder_attention_mask)
+        # else:
+        #     raise TypeError(
+        #         f"Unsupported encoder_attention_mask type: {type(encoder_attention_mask)}"
+        #     )
+
+        # if len(encoder_attention_mask_list) == 0:
+        #     raise ValueError("encoder_attention_mask cannot be empty")
+
+        # encoder_attention_mask = encoder_attention_mask_list[0]
+        # if len(encoder_attention_mask_list) > 1:
+        #     encoder_attention_mask_2 = encoder_attention_mask_list[1]
+        # else:
+        #     batch_mask_size = encoder_attention_mask.shape[0]
+        #     seq_len_2 = encoder_hidden_states_2.shape[1]
+        #     encoder_attention_mask_2 = encoder_attention_mask.new_zeros(
+        #         (batch_mask_size, seq_len_2)
+        #     )
 
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.config.patch_size_t, self.config.patch_size, self.config.patch_size

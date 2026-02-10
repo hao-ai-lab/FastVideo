@@ -10,7 +10,7 @@ export TOKENIZERS_PARALLELISM=false
 
 # Strongly recommended on shared nodes (prevents ranks from trying to use non-visible GPUs)
 # If your scheduler already sets CUDA_VISIBLE_DEVICES correctly, you can comment this out.
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 # Optional: helps fragmentation sometimes
 # export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -22,15 +22,15 @@ MODEL_PATH="hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
 DATA_DIR="data/crush-smol_processed_t2v_hunyuan15/combined_parquet_dataset"
 VALIDATION_DATASET_FILE="examples/training/finetune/hunyuan15_t2v/crush_smol/validation.json"
 
-NUM_GPUS=6
+NUM_GPUS=4
 
 # Must satisfy sp_size * tp_size == num_gpus
 SP_SIZE=$NUM_GPUS 
 TP_SIZE=1
 
 # Must satisfy: hsdp_shard_dim <= num_gpus AND num_gpus % hsdp_shard_dim == 0
-HSDP_REPLICATE_DIM=$NUM_GPUS 
-HSDP_SHARD_DIM=1
+HSDP_REPLICATE_DIM=1 
+HSDP_SHARD_DIM=$NUM_GPUS 
 
 if (( SP_SIZE * TP_SIZE != NUM_GPUS )); then
   echo "ERROR: sp_size*tp_size must equal num_gpus. Got ${SP_SIZE}*${TP_SIZE} != ${NUM_GPUS}"
@@ -70,12 +70,12 @@ training_args=(
   --tracker_project_name "hunyuan15_t2v_finetune"
   --output_dir "${DATA_DIR}/outputs_hunyuan15/crushsmol_finetune"
 
-  --max_train_steps 2000
-  --train_batch_size 4
+  --max_train_steps 5000
+  --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
+  --gradient_accumulation_steps 8
 
-  --num_latent_t 8
+  --num_latent_t 20
   --num_height 480
   --num_width 832
   --num_frames 77
@@ -92,7 +92,7 @@ validation_args=(
 )
 
 optimizer_args=(
-  --learning_rate 2e-5
+  --learning_rate 4e-6
   --mixed_precision bf16
   --weight_only_checkpointing_steps 2000
   --training_state_checkpointing_steps 2000
@@ -102,7 +102,7 @@ optimizer_args=(
 
 misc_args=(
   --checkpoints_total_limit 3
-  --training_cfg_rate 0.1
+  --training_cfg_rate 0.0
   --multi_phased_distill_schedule "4000-1"
   --not_apply_cfg_solver
   --dit_precision fp32

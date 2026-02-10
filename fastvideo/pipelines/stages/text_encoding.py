@@ -60,6 +60,16 @@ class TextEncodingStage(PipelineStage):
         assert len(self.text_encoders) == len(
             fastvideo_args.pipeline_config.text_encoder_configs)
 
+        # Reset per-batch buffers to avoid cross-sample accumulation when
+        # ForwardBatch is created from a shallow-copied SamplingParam.
+        batch.prompt_embeds = []
+        if batch.prompt_attention_mask is not None:
+            batch.prompt_attention_mask = []
+        if batch.do_classifier_free_guidance:
+            batch.negative_prompt_embeds = []
+            if batch.negative_attention_mask is not None:
+                batch.negative_attention_mask = []
+
         # Encode positive prompt with all available encoders
         assert batch.prompt is not None
         prompt_text: str | list[str] = batch.prompt
@@ -70,6 +80,16 @@ class TextEncodingStage(PipelineStage):
             encoder_index=all_indices,
             return_attention_mask=True,
         )
+        # Evelyn: added debug log
+        logger.info(
+            "TextEncodingStage BEFORE: prompt_embeds=%d prompt_masks=%s neg_embeds=%s neg_masks=%s",
+            len(batch.prompt_embeds),
+            (len(batch.prompt_attention_mask)
+             if batch.prompt_attention_mask is not None else None),
+            (len(batch.negative_prompt_embeds)
+             if batch.negative_prompt_embeds is not None else None),
+            (len(batch.negative_attention_mask)
+             if batch.negative_attention_mask is not None else None))
 
         for pe in prompt_embeds_list:
             batch.prompt_embeds.append(pe)
