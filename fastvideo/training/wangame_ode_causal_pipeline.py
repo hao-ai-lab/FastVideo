@@ -60,7 +60,7 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
         self.vae.requires_grad_(False)
 
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
-        assert self.timestep_shift == 5.0, "flow_shift must be 5.0"
+        assert self.timestep_shift == 3.0, f"flow_shift must be 3.0, but got {self.timestep_shift}"
         self.noise_scheduler = SelfForcingFlowMatchScheduler(
             shift=self.timestep_shift, sigma_min=0.0, extra_one_step=True)
         self.noise_scheduler.set_timesteps(num_inference_steps=1000,
@@ -68,7 +68,7 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
 
         logger.info("dmd_denoising_steps: %s",
                     self.training_args.pipeline_config.dmd_denoising_steps)
-        self.dmd_denoising_steps = torch.tensor([1000, 750, 500, 250],
+        self.dmd_denoising_steps = torch.tensor([1000, 666, 333],
                                                 dtype=torch.long,
                                                 device=get_local_torch_device())
         if training_args.warp_denoising_step:  # Warp the denoising step according to the scheduler time shift

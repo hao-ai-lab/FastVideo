@@ -37,7 +37,7 @@ from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.preprocess.preprocess_pipeline_base import (
     BasePreprocessPipeline)
-from fastvideo.pipelines.stages import (CausalDMDDenosingStage, DecodingStage,
+from fastvideo.pipelines.stages import (DecodingStage, DenoisingStage,
                                         InputValidationStage,
                                         LatentPreparationStage,
                                         ImageEncodingStage,
@@ -88,11 +88,10 @@ class PreprocessPipeline_WanGame_ODE_Trajectory(BasePreprocessPipeline):
                            scheduler=self.get_module("scheduler"),
                            transformer=self.get_module("transformer", None)))
         self.add_stage(stage_name="denoising_stage",
-                       stage=CausalDMDDenosingStage(
+                       stage=DenoisingStage(
                            transformer=self.get_module("transformer"),
                            scheduler=self.get_module("scheduler"),
-                           transformer_2=self.get_module("transformer_2", None),
-                           vae=self.get_module("vae"),
+                           pipeline=self,
                        ))
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))
