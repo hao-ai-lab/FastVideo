@@ -110,7 +110,7 @@ def main() -> None:
             filename_base = f"sd35_{i:02d}_seed{seed}_{_safe_filename(prompt, max_len=80)}"
             _remove_existing_outputs(args.out_dir, filename_base)
 
-            output_path = os.path.join(args.out_dir, f"{filename_base}.mp4")
+            output_path = os.path.join(args.out_dir, f"{filename_base}.png")
             print(f"[sd35] prompt_idx={i} seed={seed} output_path={output_path}")
 
             generation_kwargs = {
