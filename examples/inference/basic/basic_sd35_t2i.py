@@ -49,7 +49,7 @@ def _remove_existing_outputs(out_dir: str, filename_base: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run SD3.5 Medium text-to-image with FastVideo VideoGenerator.")
-    p.add_argument("--model-path", required=True, help="Path to local diffusers-format SD3.5 weights directory.")
+    p.add_argument("--model-path", default="stabilityai/stable-diffusion-3.5-medium", help="Path to local diffusers-format SD3.5 weights directory.")
     p.add_argument(
         "--out-dir",
         "--outdir",
