@@ -66,6 +66,7 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
         self.noise_scheduler.set_timesteps(num_inference_steps=1000,
                                            training=True)
 
+        self.training_args.pipeline_config.dmd_denoising_steps = [1000, 666, 333]
         logger.info("dmd_denoising_steps: %s",
                     self.training_args.pipeline_config.dmd_denoising_steps)
         self.dmd_denoising_steps = torch.tensor([1000, 666, 333],

@@ -1,4 +1,6 @@
+import PIL.Image
 import torch  # type: ignore
+import torchvision.transforms.functional as TF
 
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -198,14 +200,28 @@ class CausalDMDDenosingStage(DenoisingStage):
             # the image latent instead of appending along the channel dim
             assert self.vae is not None, "VAE is not provided for causal video gen task"
             self.vae = self.vae.to(get_local_torch_device())
-            first_frame_latent = self.vae.encode(batch.pil_image).mean.float()
-            if (hasattr(self.vae, "shift_factor")
-                    and self.vae.shift_factor is not None):
-                if isinstance(self.vae.shift_factor, torch.Tensor):
-                    first_frame_latent -= self.vae.shift_factor.to(
-                        first_frame_latent.device, first_frame_latent.dtype)
+            image_for_vae = batch.pil_image
+            if isinstance(image_for_vae, PIL.Image.Image):
+                # Fallback path when causal preprocessing did not convert PIL image to tensor.
+                image_for_vae = TF.to_tensor(image_for_vae).sub_(0.5).div_(0.5)
+                image_for_vae = image_for_vae.unsqueeze(0).unsqueeze(2)
+            elif isinstance(image_for_vae, torch.Tensor):
+                if image_for_vae.dim() == 4:
+                    # [B, C, H, W] -> [B, C, 1, H, W]
+                    image_for_vae = image_for_vae.unsqueeze(2)
+                elif image_for_vae.dim() == 5:
+                    # Keep only first frame for first-frame latent initialization.
+                    image_for_vae = image_for_vae[:, :, :1]
                 else:
-                    first_frame_latent -= self.vae.shift_factor
+                    raise ValueError(
+                        f"Unsupported image tensor shape for causal VAE encode: {tuple(image_for_vae.shape)}")
+            else:
+                raise TypeError(
+                    f"Unsupported batch.pil_image type for causal VAE encode: {type(image_for_vae)}")
+
+            image_for_vae = image_for_vae.to(get_local_torch_device(),
+                                             dtype=torch.float32)
+            first_frame_latent = self.vae.encode(image_for_vae).mean.float()
 
             if isinstance(self.vae.scaling_factor, torch.Tensor):
                 first_frame_latent = first_frame_latent * self.vae.scaling_factor.to(
@@ -226,6 +242,33 @@ class CausalDMDDenosingStage(DenoisingStage):
                 set_forward_context(current_timestep=0,
                                     attn_metadata=None,
                                     forward_batch=batch):
+                first_frame_input = first_frame_latent.to(target_dtype)
+                if (batch.image_latent is not None
+                        and not independent_first_frame):
+                    # Keep channel layout consistent with the main denoising loop.
+                    first_frame_image_latent = batch.image_latent[:, :, start_index:start_index + 1, :, :]
+                    first_frame_input = torch.cat([
+                        first_frame_input,
+                        first_frame_image_latent.to(target_dtype)
+                    ],
+                                                  dim=1)
+                elif (batch.image_latent is not None
+                      and independent_first_frame and start_index == 0):
+                    first_frame_input = torch.cat([
+                        first_frame_input,
+                        batch.image_latent.to(target_dtype)
+                    ],
+                                                  dim=2)
+
+                expected_in_channels = getattr(self.transformer, "in_channels",
+                                               None)
+                if (expected_in_channels is not None
+                        and first_frame_input.shape[1] != expected_in_channels):
+                    raise ValueError(
+                        "Causal first-frame cache init channel mismatch: "
+                        f"input channels={first_frame_input.shape[1]}, "
+                        f"expected={expected_in_channels}.")
+
                 first_frame_action_kwargs = {}
                 if action_full is not None:
                     first_frame_action_kwargs = {
@@ -234,7 +277,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                         "action": action_full[:, start_index:start_index + 1],
                     }
                 self.transformer(
-                    first_frame_latent.to(target_dtype),
+                    first_frame_input,
                     prompt_embeds,
                     t_zero,
                     kv_cache=kv_cache1,
@@ -248,7 +291,7 @@ class CausalDMDDenosingStage(DenoisingStage):
                 )
                 if boundary_timestep is not None:
                     self.transformer_2(
-                        first_frame_latent.to(target_dtype),
+                        first_frame_input,
                         prompt_embeds,
                         t_zero,
                         kv_cache=kv_cache2,

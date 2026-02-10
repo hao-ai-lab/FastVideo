@@ -202,13 +202,6 @@ pyarrow_schema_wangame_lingbot = pyarrow_schema_wangame
 
 pyarrow_schema_ode_trajectory_wangame = pa.schema([
     pa.field("id", pa.string()),
-    # --- Image/Video VAE latents ---
-    # Tensors are stored as raw bytes with shape and dtype info for loading
-    pa.field("vae_latent_bytes", pa.binary()),
-    # e.g., [C, T, H, W] or [C, H, W]
-    pa.field("vae_latent_shape", pa.list_(pa.int64())),
-    # e.g., 'float32'
-    pa.field("vae_latent_dtype", pa.string()),
     #I2V
     pa.field("clip_feature_bytes", pa.binary()),
     pa.field("clip_feature_shape", pa.list_(pa.int64())),

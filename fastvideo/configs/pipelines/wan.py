@@ -126,6 +126,9 @@ class WanGameI2V480PConfig(WanI2V480PConfig):
     """Configuration for WanGame image-to-video pipeline."""
 
     dit_config: DiTConfig = field(default_factory=WanGameVideoConfig)
+    flow_shift: float | None = 3.0
+    dmd_denoising_steps: list[int] | None = field(
+        default_factory=lambda: [1000, 666, 333])
 
 
 @dataclass
