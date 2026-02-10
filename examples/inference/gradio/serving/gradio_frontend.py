@@ -188,8 +188,9 @@ def load_example_prompts():
     prompt_to_image = {}
     # Try to find the JSON file relative to project root
     possible_json_paths = [
-        Path("prompts/mixkit_i2v.jsonl"),
-        Path(__file__).parent.parent.parent.parent / "prompts" / "mixkit_i2v.jsonl",
+        Path("assets/prompts/mixkit_i2v.jsonl"),
+        Path(__file__).resolve().parents[4] / "assets" / "prompts" /
+        "mixkit_i2v.jsonl",
     ]
     json_path = None
     for path in possible_json_paths:
@@ -201,8 +202,8 @@ def load_example_prompts():
         try:
             with open(json_path, "r", encoding='utf-8') as f:
                 data = json.load(f)
-                # Get the project root directory (parent of prompts directory)
-                project_root = json_path.parent.parent
+                # Resolve paths relative to repository root.
+                project_root = Path(__file__).resolve().parents[4]
                 for item in data:
                     prompt_text = item.get("prompt", "").strip()
                     image_path = item.get("image_path", "")
@@ -736,8 +737,8 @@ def main():
         allowed_paths=[
             os.path.abspath("outputs"), 
             os.path.abspath("fastvideo-logos"),
-            os.path.abspath("prompts"),
-            os.path.abspath("images"),
+            os.path.abspath("assets/prompts"),
+            os.path.abspath("assets/images"),
             os.path.abspath(tempfile.gettempdir()),
             os.path.abspath(os.path.join(tempfile.gettempdir(), "gradio")),
         ]

@@ -74,5 +74,5 @@ def test_prepare_output_path_empty_prompt_fallback(tmp_path):
     result = vg._prepare_output_path(str(out_dir), prompt=bad_prompt)
 
     assert os.path.dirname(result) == str(out_dir)
-    assert os.path.basename(result) == "video.mp4"
+    assert os.path.basename(result) == "output.mp4"
 

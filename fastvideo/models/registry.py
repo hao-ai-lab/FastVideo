@@ -39,6 +39,7 @@ _TEXT_TO_VIDEO_DIT_MODELS = {
     "LongCatVideoTransformer3DModel": ("dits", "longcat_video_dit", "LongCatVideoTransformer3DModel"),  # Wrapper (Phase 1)
     "LongCatTransformer3DModel": ("dits", "longcat", "LongCatTransformer3DModel"),  # Native (Phase 2)
     "LTX2Transformer3DModel": ("dits", "ltx2", "LTX2Transformer3DModel"),
+    "SD3Transformer2DModel": ("dits", "sd3", "SD3Transformer2DModel"),
 }
 
 _IMAGE_TO_VIDEO_DIT_MODELS = {
@@ -51,9 +52,11 @@ _IMAGE_TO_VIDEO_DIT_MODELS = {
 
 _TEXT_ENCODER_MODELS = {
     "CLIPTextModel": ("encoders", "clip", "CLIPTextModel"),
+    "CLIPTextModelWithProjection":
+    ("encoders", "clip", "CLIPTextModelWithProjection"),
     "LlamaModel": ("encoders", "llama", "LlamaModel"),
     "UMT5EncoderModel": ("encoders", "t5", "UMT5EncoderModel"),
-    "T5EncoderModel": ("encoders", "t5", "T5EncoderModel"),
+    "T5EncoderModel": ("encoders", "t5_hf", "T5EncoderModel"),
     "STEP1TextEncoder": ("encoders", "stepllm", "STEP1TextEncoder"),
     "BertModel": ("encoders", "clip", "CLIPTextModel"),
     "Qwen2_5_VLTextModel": ("encoders", "qwen2_5", "Qwen2_5_VLTextModel"),
@@ -78,6 +81,7 @@ _VAE_MODELS = {
     "AutoencoderKLHunyuanVideo15": ("vaes", "hunyuan15vae", "AutoencoderKLHunyuanVideo15"),
     "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
     "AutoencoderKLStepvideo": ("vaes", "stepvideovae", "AutoencoderKLStepvideo"),
+    "AutoencoderKL": ("vaes", "autoencoder_kl", "AutoencoderKL"),
     "CausalVideoAutoencoder": ("vaes", "ltx2vae", "LTX2CausalVideoAutoencoder"),
 }
 

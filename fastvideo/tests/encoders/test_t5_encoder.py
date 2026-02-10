@@ -8,7 +8,7 @@ from torch.distributed.tensor import DTensor
 from torch.testing import assert_close
 from transformers import AutoConfig, AutoTokenizer, UMT5EncoderModel, T5EncoderModel
 
-from fastvideo.configs.pipelines import PipelineConfig
+from fastvideo.configs.pipelines import CosmosConfig, PipelineConfig, WanT2V480PConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TextEncoderLoader
@@ -23,31 +23,31 @@ os.environ["MASTER_PORT"] = "29503"
 
 
 @pytest.fixture
-def t5_model_paths():
+def t5_model_paths_and_config():
     base_model_path = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
     model_path = maybe_download_model(base_model_path,
                                       local_dir=os.path.join(
                                           'data', base_model_path))
     text_encoder_path = os.path.join(model_path, "text_encoder")
     tokenizer_path = os.path.join(model_path, "tokenizer")
-    return text_encoder_path, tokenizer_path
+    return text_encoder_path, tokenizer_path, WanT2V480PConfig()
 
 
 @pytest.fixture
-def t5_large_model_paths():
+def t5_large_model_paths_and_config():
     base_model_path = "nvidia/Cosmos-Predict2-2B-Video2World"
     model_path = maybe_download_model(base_model_path,
                                       local_dir=os.path.join(
                                           'data', base_model_path))
     text_encoder_path = os.path.join(model_path, "text_encoder")
     tokenizer_path = os.path.join(model_path, "tokenizer")
-    return text_encoder_path, tokenizer_path
+    return text_encoder_path, tokenizer_path, CosmosConfig()
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_t5_encoder(t5_model_paths):
+def test_t5_encoder(t5_model_paths_and_config):
     # Initialize the two model implementations
-    text_encoder_path, tokenizer_path = t5_model_paths
+    text_encoder_path, tokenizer_path, pipeline_config = t5_model_paths_and_config
     hf_config = AutoConfig.from_pretrained(text_encoder_path)
     print(hf_config)
 
@@ -60,8 +60,7 @@ def test_t5_encoder(t5_model_paths):
 
 
     args = FastVideoArgs(model_path=text_encoder_path,
-                        pipeline_config=PipelineConfig(text_encoder_configs=(T5Config(),),
-                        text_encoder_precisions=(precision_str,)),
+                        pipeline_config=pipeline_config,
                         pin_cpu_memory=False)
     loader = TextEncoderLoader()
     model2 = loader.load(text_encoder_path, args)
@@ -137,9 +136,9 @@ def test_t5_encoder(t5_model_paths):
 
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_t5_large_encoder(t5_large_model_paths):
+def test_t5_large_encoder(t5_large_model_paths_and_config):
     # Initialize the two model implementations
-    text_encoder_path, tokenizer_path = t5_large_model_paths
+    text_encoder_path, tokenizer_path, pipeline_config = t5_large_model_paths_and_config
     hf_config = AutoConfig.from_pretrained(text_encoder_path)
     print(hf_config)
 
@@ -151,8 +150,7 @@ def test_t5_large_encoder(t5_large_model_paths):
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
     args = FastVideoArgs(model_path=text_encoder_path,
-                        pipeline_config=PipelineConfig(text_encoder_configs=(T5LargeConfig(),),
-                        text_encoder_precisions=(precision_str,)),
+                        pipeline_config=pipeline_config,
                         pin_cpu_memory=False)
     loader = TextEncoderLoader()
     model2 = loader.load(text_encoder_path, args)
