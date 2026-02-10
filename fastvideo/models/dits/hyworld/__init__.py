@@ -22,3 +22,6 @@ __all__ = [
     # Inference utilities (used by examples)
     "get_resolution_from_image",
 ]
+
+# Entry point for model registry
+EntryClass = HYWorldTransformer3DModel

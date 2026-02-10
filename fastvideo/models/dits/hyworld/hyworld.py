@@ -536,8 +536,8 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
                     temb_txt,
                     freqs_cis,
                     seq_attention_mask,
-                    viewmats_seq, # hyworld
-                    Ks_seq, # hyworld
+                    viewmats_seq,
+                    Ks_seq,
                 )
         else:
             for block in self.double_blocks:
@@ -549,8 +549,8 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
                     temb_txt,
                     freqs_cis,
                     seq_attention_mask,
-                    viewmats=viewmats_seq, # hyworld
-                    Ks=Ks_seq, # hyworld
+                    viewmats_seq,
+                    Ks_seq,
                 )
 
 

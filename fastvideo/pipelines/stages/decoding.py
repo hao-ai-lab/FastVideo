@@ -242,8 +242,8 @@ class DecodingStage(PipelineStage):
                 decoded_frames = self.decode(cur_latent, fastvideo_args)
                 batch.trajectory_decoded.append(decoded_frames.cpu().float())
 
-        # Convert to CPU float32 for compatibility
-        frames = frames.cpu().float()
+        # Convert to float32 for compatibility
+        frames = frames.to(torch.float32)
 
         # Crop padding if this is a LongCat refinement
         if hasattr(batch, 'num_cond_frames_added') and hasattr(

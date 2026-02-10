@@ -277,7 +277,7 @@ def load_video(
     if convert_method is not None:
         pil_images = convert_method(pil_images)
 
-    return pil_images, original_fps if return_fps else pil_images
+    return (pil_images, original_fps) if return_fps else pil_images
 
 
 def get_default_height_width(

@@ -55,6 +55,8 @@ class HunyuanVideo15ArchConfig(DiTArchConfig):
             r"txt_in.refiner_blocks.\1.mlp.fc_out.\2",
             r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.norm_out\.linear\.(.*)$":
             r"txt_in.refiner_blocks.\1.adaLN_modulation.linear.\2",
+            r"^context_embedder\.token_refiner\.refiner_blocks\.(\d+)\.self_attn_qkv\.(.*)$":
+            r"txt_in.refiner_blocks.\1.self_attn_qkv.\2",
 
             # 2. txt_in_2 mapping:
             r"^context_embedder_2\.(.*)$":

@@ -160,4 +160,6 @@ class SelfForcingFlowMatchScheduler(BaseScheduler, ConfigMixin, SchedulerMixin):
 
     def set_shift(self, shift: float) -> None:
         self.shift = shift
-    
+
+# Entry point for model registry
+EntryClass = SelfForcingFlowMatchScheduler

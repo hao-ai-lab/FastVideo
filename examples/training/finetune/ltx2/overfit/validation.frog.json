@@ -1,0 +1,13 @@
+{
+  "data": [
+    {
+      "caption": "The camera opens in a calm, sunlit frog yoga studio. Warm morning light washes over the wooden floor as incense smoke drifts lazily in the air. The senior frog instructor sits cross-legged at the center, eyes closed, voice deep and calm. “We are one with the pond.” All the frogs answer softly: “Ommm...” “We are one with the mud.” “Ommm...” He smiles faintly. “We are one with the flies.” A quiet pause. The camera slowly pans to the side — one frog twitches, eyes darting. Suddenly — *thwip!* — its tongue snaps out, catching a fly mid-air and pulling it into its mouth. The master exhales slowly, still serene.",
+      "image_path": null,
+      "video_path": null,
+      "num_inference_steps": 50,
+      "height": 1088,
+      "width": 1920,
+      "num_frames": 121
+    }
+  ]
+}

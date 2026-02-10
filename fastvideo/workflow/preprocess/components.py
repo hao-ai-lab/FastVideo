@@ -26,24 +26,18 @@ class PreprocessingDataValidator:
     def __init__(self,
                  max_height: int = 1024,
                  max_width: int = 1024,
-                 max_h_div_w_ratio: float = 17 / 16,
-                 min_h_div_w_ratio: float = 8 / 16,
                  num_frames: int = 16,
                  train_fps: int = 24,
                  speed_factor: float = 1.0,
                  video_length_tolerance_range: float = 5.0,
-                 drop_short_ratio: float = 0.0,
-                 hw_aspect_threshold: float = 1.5):
+                 drop_short_ratio: float = 0.0):
         self.max_height = max_height
         self.max_width = max_width
-        self.max_h_div_w_ratio = max_h_div_w_ratio
-        self.min_h_div_w_ratio = min_h_div_w_ratio
         self.num_frames = num_frames
         self.train_fps = train_fps
         self.speed_factor = speed_factor
         self.video_length_tolerance_range = video_length_tolerance_range
         self.drop_short_ratio = drop_short_ratio
-        self.hw_aspect_threshold = hw_aspect_threshold
         self.validators: dict[str, Callable[[dict[str, Any]], bool]] = {}
         self.filter_counts: dict[str, int] = {}
 
@@ -86,26 +80,11 @@ class PreprocessingDataValidator:
     def _validate_resolution(self, batch: dict[str, Any]) -> bool:
         """Validate resolution constraints"""
 
-        aspect = self.max_height / self.max_width
         if batch["resolution"] is not None:
             height = batch["resolution"].get("height", None)
             width = batch["resolution"].get("width", None)
 
-        if height is None or width is None:
-            return False
-
-        return self._filter_resolution(
-            height,
-            width,
-            max_h_div_w_ratio=self.hw_aspect_threshold * aspect,
-            min_h_div_w_ratio=1 / self.hw_aspect_threshold * aspect,
-        )
-
-    def _filter_resolution(self, h: int, w: int, max_h_div_w_ratio: float,
-                           min_h_div_w_ratio: float) -> bool:
-        """Filter based on aspect ratio"""
-        return (min_h_div_w_ratio <= h / w <= max_h_div_w_ratio) and (
-            self.min_h_div_w_ratio <= h / w <= self.max_h_div_w_ratio)
+        return not (height is None or width is None)
 
     def _validate_frame_sampling(self, batch: dict[str, Any]) -> bool:
         """Validate frame sampling constraints"""

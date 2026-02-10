@@ -1095,3 +1095,6 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
 
     def __len__(self):
         return self.config.num_train_timesteps
+
+# Entry point for model registry
+EntryClass = UniPCMultistepScheduler

@@ -28,6 +28,12 @@ class SamplingParam:
     keyboard_cond: Any | None = None  # Shape: (B, T, K)
     grid_sizes: Any | None = None  # Shape: (3,) [F,H,W]
 
+    # Camera control inputs (HYWorld)
+    pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
+
+    # Camera control inputs (LingBotWorld)
+    c2ws_plucker_emb: Any | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
+
     # Refine inputs (LongCat 480p->720p upscaling)
     # Path-based refine (load stage1 video from disk, e.g. MP4)
     refine_from: str | None = None  # Path to stage1 video (480p output from distill)
@@ -55,10 +61,13 @@ class SamplingParam:
     num_frames_round_down: bool = False  # Whether to round down num_frames if it's not divisible by num_gpus
     height: int = 720
     width: int = 1280
+    height_sr: int = 1072
+    width_sr: int = 1920
     fps: int = 24
 
     # Denoising parameters
     num_inference_steps: int = 50
+    num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
     guidance_rescale: float = 0.0
     boundary_ratio: float | None = None
@@ -92,8 +101,7 @@ class SamplingParam:
 
     @classmethod
     def from_pretrained(cls, model_path: str) -> "SamplingParam":
-        from fastvideo.configs.sample.registry import (
-            get_sampling_param_cls_for_name)
+        from fastvideo.registry import get_sampling_param_cls_for_name
         sampling_cls = get_sampling_param_cls_for_name(model_path)
         if sampling_cls is not None:
             sampling_param: SamplingParam = sampling_cls()

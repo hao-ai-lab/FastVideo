@@ -148,62 +148,6 @@ class DataValidationStage(DatasetFilterStage):
         return batch
 
 
-class ResolutionFilterStage(DatasetFilterStage):
-    """Stage for filtering data items based on resolution constraints."""
-
-    def __init__(self,
-                 max_h_div_w_ratio: float = 17 / 16,
-                 min_h_div_w_ratio: float = 8 / 16,
-                 max_height: int = 1024,
-                 max_width: int = 1024):
-        self.max_h_div_w_ratio = max_h_div_w_ratio
-        self.min_h_div_w_ratio = min_h_div_w_ratio
-        self.max_height = max_height
-        self.max_width = max_width
-
-    def should_keep(self, batch: PreprocessBatch, **kwargs) -> bool:
-        """
-        Check if data item passes resolution filtering.
-        
-        Args:
-            batch: Dataset batch with resolution information
-            
-        Returns:
-            True if passes filter, False otherwise
-        """
-        # Only apply to videos
-        if not batch.is_video:
-            return True
-
-        if batch.resolution is None:
-            return False
-
-        height = batch.resolution.get("height", None)
-        width = batch.resolution.get("width", None)
-        if height is None or width is None:
-            return False
-
-        # Check aspect ratio
-        aspect = self.max_height / self.max_width
-        hw_aspect_thr = 1.5
-
-        return self.filter_resolution(
-            height,
-            width,
-            max_h_div_w_ratio=hw_aspect_thr * aspect,
-            min_h_div_w_ratio=1 / hw_aspect_thr * aspect,
-        )
-
-    def process(self, batch: PreprocessBatch, **kwargs) -> PreprocessBatch:
-        """Process does nothing for resolution filtering - filtering is handled by should_keep."""
-        return batch
-
-    def filter_resolution(self, h: int, w: int, max_h_div_w_ratio: float,
-                          min_h_div_w_ratio: float) -> bool:
-        """Filter based on height/width ratio."""
-        return h / w <= max_h_div_w_ratio and h / w >= min_h_div_w_ratio
-
-
 class FrameSamplingStage(DatasetFilterStage):
     """Stage for temporal frame sampling and indexing."""
 
@@ -327,11 +271,6 @@ class VideoTransformStage(DatasetStage):
             video = self.transform(video)
         video = rearrange(video, "t c h w -> c t h w")
         video = video.to(torch.uint8)
-
-        h, w = video.shape[-2:]
-        assert (
-            h / w <= 17 / 16 and h / w >= 8 / 16
-        ), f"Only videos with a ratio (h/w) less than 17/16 and more than 8/16 are supported. But video ({batch.path}) found ratio is {round(h / w, 2)} with the shape of {video.shape}"
 
         video = video.float() / 127.5 - 1.0
         batch.pixel_values = video
@@ -489,8 +428,6 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
                      tokenizer) -> None:
         """Initialize all processing stages."""
         self.validation_stage = DataValidationStage()
-        self.resolution_filter_stage = ResolutionFilterStage(
-            max_height=args.max_height, max_width=args.max_width)
         self.frame_sampling_stage = FrameSamplingStage(
             num_frames=args.num_frames,
             train_fps=args.train_fps,
@@ -543,7 +480,6 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
         # Initialize counters
         filter_counts = {
             "validation_failed": 0,
-            "resolution_failed": 0,
             "frame_sampling_failed": 0
         }
         sample_num_frames: list[int] = []
@@ -579,10 +515,6 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
             filter_counts["validation_failed"] += 1
             return False
 
-        if not self.resolution_filter_stage.should_keep(batch):
-            filter_counts["resolution_failed"] += 1
-            return False
-
         if not self.frame_sampling_stage.should_keep(batch):
             filter_counts["frame_sampling_failed"] += 1
             return False
@@ -594,10 +526,9 @@ class VideoCaptionMergedDataset(torch.utils.data.IterableDataset,
                              after_count: int):
         """Log filtering statistics."""
         logger.info(
-            "validation_failed: %d, resolution_failed: %d, frame_sampling_failed: %d, "
+            "validation_failed: %d, frame_sampling_failed: %d, "
             "Counter(sample_num_frames): %s, before filter: %d, after filter: %d",
             filter_counts['validation_failed'],
-            filter_counts['resolution_failed'],
             filter_counts['frame_sampling_failed'], Counter(sample_num_frames),
             before_count, after_count)
 

@@ -30,7 +30,10 @@ from fastvideo.profiler import profile_region
 
 logger = init_logger(__name__)
 
-vsa_available = is_vsa_available()
+try:
+    vsa_available = is_vsa_available()
+except Exception:
+    vsa_available = False
 
 
 class SelfForcingDistillationPipeline(DistillationPipeline):
