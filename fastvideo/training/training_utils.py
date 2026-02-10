@@ -437,10 +437,19 @@ def save_distillation_checkpoint(
                 ema_shard_path,
                 local_main_process_only=False)
 
-            # Also consolidate EMA to a single full-state file on rank 0 by applying EMA to the model and gathering
-            _consolidate_local_shard_ema_and_save_safetensors(
-                generator_ema, generator_transformer, rank, save_dir,
-                "generator_ema")
+            # Consolidating local-shard EMA requires cross-rank FSDP gathers and
+            # can trigger NCCL failures on large/multi-node jobs. Keep shard
+            # save as the safe default, and allow opt-in consolidation.
+            if os.getenv("FASTVIDEO_CONSOLIDATE_LOCAL_SHARD_EMA",
+                         "0").lower() in {"1", "true", "yes"}:
+                _consolidate_local_shard_ema_and_save_safetensors(
+                    generator_ema, generator_transformer, rank, save_dir,
+                    "generator_ema")
+            elif rank == 0:
+                logger.info(
+                    "rank: %s, skipping local-shard EMA consolidation; set FASTVIDEO_CONSOLIDATE_LOCAL_SHARD_EMA=1 to enable",
+                    rank,
+                    local_main_process_only=False)
 
     except Exception as e:
         logger.warning("rank: %s, failed saving EMA separately: %s", rank,
@@ -466,90 +475,109 @@ def save_distillation_checkpoint(
                 ema2_shard_path,
                 local_main_process_only=False)
 
-            # Also consolidate EMA_2 to a single full-state file on rank 0
-            _consolidate_local_shard_ema_and_save_safetensors(
-                generator_ema_2, generator_transformer_2, rank, save_dir,
-                "generator_ema_2")
+            if os.getenv("FASTVIDEO_CONSOLIDATE_LOCAL_SHARD_EMA",
+                         "0").lower() in {"1", "true", "yes"}:
+                _consolidate_local_shard_ema_and_save_safetensors(
+                    generator_ema_2, generator_transformer_2, rank, save_dir,
+                    "generator_ema_2")
+            elif rank == 0:
+                logger.info(
+                    "rank: %s, skipping local-shard EMA_2 consolidation; set FASTVIDEO_CONSOLIDATE_LOCAL_SHARD_EMA=1 to enable",
+                    rank,
+                    local_main_process_only=False)
     except Exception as e:
         logger.warning("rank: %s, failed saving EMA_2 separately: %s", rank,
                        str(e))
 
-    # Save generator model weights (consolidated) for inference
-    cpu_state = gather_state_dict_on_cpu_rank0(generator_transformer,
-                                               device=None)
+    # Save generator model weights (consolidated) for inference.
+    # This requires distributed gathers; on large multi-node jobs it can fail
+    # with NCCL errors. Keep training alive and continue with shard checkpoints.
+    try:
+        cpu_state = gather_state_dict_on_cpu_rank0(generator_transformer,
+                                                   device=None)
 
-    if rank == 0:
-        # Save generator model weights (consolidated) for inference
-        os.makedirs(inference_save_dir, exist_ok=True)
-        weight_path = os.path.join(inference_save_dir,
-                                   "diffusion_pytorch_model.safetensors")
-        logger.info(
-            "rank: %s, saving consolidated generator inference checkpoint to %s",
+        if rank == 0:
+            os.makedirs(inference_save_dir, exist_ok=True)
+            weight_path = os.path.join(inference_save_dir,
+                                       "diffusion_pytorch_model.safetensors")
+            logger.info(
+                "rank: %s, saving consolidated generator inference checkpoint to %s",
+                rank,
+                weight_path,
+                local_main_process_only=False)
+
+            diffusers_state_dict = custom_to_hf_state_dict(
+                cpu_state, generator_transformer.reverse_param_names_mapping)
+            save_file(diffusers_state_dict, weight_path)
+
+            logger.info(
+                "rank: %s, consolidated generator inference checkpoint saved to %s",
+                rank,
+                weight_path,
+                local_main_process_only=False)
+
+            config_dict = generator_transformer.hf_config
+            if "dtype" in config_dict:
+                del config_dict["dtype"]  # TODO
+            config_path = os.path.join(inference_save_dir, "config.json")
+            with open(config_path, "w") as f:
+                json.dump(config_dict, f, indent=4)
+            logger.info("--> distillation checkpoint saved at step %s to %s",
+                        step, weight_path)
+    except Exception as e:
+        logger.warning(
+            "rank: %s, failed saving consolidated generator checkpoint at step %s: %s",
             rank,
-            weight_path,
+            step,
+            str(e),
             local_main_process_only=False)
-
-        # Convert training format to diffusers format and save
-        diffusers_state_dict = custom_to_hf_state_dict(
-            cpu_state, generator_transformer.reverse_param_names_mapping)
-        save_file(diffusers_state_dict, weight_path)
-
-        logger.info(
-            "rank: %s, consolidated generator inference checkpoint saved to %s",
-            rank,
-            weight_path,
-            local_main_process_only=False)
-
-        # Save model config
-        config_dict = generator_transformer.hf_config
-        if "dtype" in config_dict:
-            del config_dict["dtype"]  # TODO
-        config_path = os.path.join(inference_save_dir, "config.json")
-        # save dict as json
-        with open(config_path, "w") as f:
-            json.dump(config_dict, f, indent=4)
-        logger.info("--> distillation checkpoint saved at step %s to %s", step,
-                    weight_path)
 
     # Save generator_2 model weights (consolidated) for inference (MoE support)
     if generator_transformer_2 is not None:
         inference_save_dir_2 = os.path.join(
             save_dir, "generator_2_inference_transformer")
-        cpu_state_2 = gather_state_dict_on_cpu_rank0(generator_transformer_2,
-                                                     device=None)
+        try:
+            cpu_state_2 = gather_state_dict_on_cpu_rank0(generator_transformer_2,
+                                                         device=None)
 
-        if rank == 0:
-            os.makedirs(inference_save_dir_2, exist_ok=True)
-            weight_path_2 = os.path.join(inference_save_dir_2,
-                                         "diffusion_pytorch_model.safetensors")
-            logger.info(
-                "rank: %s, saving consolidated generator_2 inference checkpoint to %s",
+            if rank == 0:
+                os.makedirs(inference_save_dir_2, exist_ok=True)
+                weight_path_2 = os.path.join(
+                    inference_save_dir_2, "diffusion_pytorch_model.safetensors")
+                logger.info(
+                    "rank: %s, saving consolidated generator_2 inference checkpoint to %s",
+                    rank,
+                    weight_path_2,
+                    local_main_process_only=False)
+
+                diffusers_state_dict_2 = custom_to_hf_state_dict(
+                    cpu_state_2,
+                    generator_transformer_2.reverse_param_names_mapping)
+                save_file(diffusers_state_dict_2, weight_path_2)
+
+                logger.info(
+                    "rank: %s, consolidated generator_2 inference checkpoint saved to %s",
+                    rank,
+                    weight_path_2,
+                    local_main_process_only=False)
+
+                config_dict_2 = generator_transformer_2.hf_config
+                if "dtype" in config_dict_2:
+                    del config_dict_2["dtype"]  # TODO
+                config_path_2 = os.path.join(inference_save_dir_2,
+                                             "config.json")
+                with open(config_path_2, "w") as f:
+                    json.dump(config_dict_2, f, indent=4)
+                logger.info(
+                    "--> generator_2 distillation checkpoint saved at step %s to %s",
+                    step, weight_path_2)
+        except Exception as e:
+            logger.warning(
+                "rank: %s, failed saving consolidated generator_2 checkpoint at step %s: %s",
                 rank,
-                weight_path_2,
+                step,
+                str(e),
                 local_main_process_only=False)
-
-            # Convert training format to diffusers format and save
-            diffusers_state_dict_2 = custom_to_hf_state_dict(
-                cpu_state_2,
-                generator_transformer_2.reverse_param_names_mapping)
-            save_file(diffusers_state_dict_2, weight_path_2)
-
-            logger.info(
-                "rank: %s, consolidated generator_2 inference checkpoint saved to %s",
-                rank,
-                weight_path_2,
-                local_main_process_only=False)
-
-            # Save model config
-            config_dict_2 = generator_transformer_2.hf_config
-            if "dtype" in config_dict_2:
-                del config_dict_2["dtype"]  # TODO
-            config_path_2 = os.path.join(inference_save_dir_2, "config.json")
-            with open(config_path_2, "w") as f:
-                json.dump(config_dict_2, f, indent=4)
-            logger.info(
-                "--> generator_2 distillation checkpoint saved at step %s to %s",
-                step, weight_path_2)
 
 
 def load_checkpoint(transformer,

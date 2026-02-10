@@ -1414,6 +1414,24 @@ class DistillationPipeline(TrainingPipeline):
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,
                                        training_args: TrainingArgs, step: int):
         """Add visualization data to tracker logging and save frames to disk."""
+        def _prepare_vae_latents(latents: torch.Tensor) -> torch.Tensor:
+            # Most training paths store latents as [B, C, T, H, W]. Older
+            # visualization code permuted to [B, T, C, H, W] for WAN-like VAEs.
+            # LTX2 VAE expects [B, C, T, H, W], so keep native layout there.
+            if hasattr(self.vae, "TIME_SCALE") and hasattr(
+                    self.vae, "SPATIAL_SCALE"):
+                return latents
+            return latents.permute(0, 2, 1, 3, 4)
+
+        def _apply_vae_scale(latents: torch.Tensor) -> torch.Tensor:
+            scaling_factor = getattr(self.vae, "scaling_factor", None)
+            if scaling_factor is None:
+                return latents
+            if isinstance(scaling_factor, torch.Tensor):
+                return latents / scaling_factor.to(latents.device,
+                                                   latents.dtype)
+            return latents / scaling_factor
+
         tracker_loss_dict: dict[str, Any] = {}
         dmd_latents_vis_dict = training_batch.dmd_latent_vis_dict
         fake_score_latents_vis_dict = training_batch.fake_score_latent_vis_dict
@@ -1422,13 +1440,8 @@ class DistillationPipeline(TrainingPipeline):
 
         for latent_key in fake_score_log_keys:
             latents = fake_score_latents_vis_dict[latent_key]
-            latents = latents.permute(0, 2, 1, 3, 4)
-
-            if isinstance(self.vae.scaling_factor, torch.Tensor):
-                latents = latents / self.vae.scaling_factor.to(
-                    latents.device, latents.dtype)
-            else:
-                latents = latents / self.vae.scaling_factor
+            latents = _prepare_vae_latents(latents)
+            latents = _apply_vae_scale(latents)
 
             # Apply shifting if needed
             if (hasattr(self.vae, "shift_factor")
@@ -1455,13 +1468,9 @@ class DistillationPipeline(TrainingPipeline):
         if 'generator_pred_video' in dmd_latents_vis_dict:
             for latent_key in dmd_log_keys:
                 latents = dmd_latents_vis_dict[latent_key]
-                latents = latents.permute(0, 2, 1, 3, 4)
+                latents = _prepare_vae_latents(latents)
                 # decoded_latent = decode_stage(ForwardBatch(data_type="video", latents=latents), training_args)
-                if isinstance(self.vae.scaling_factor, torch.Tensor):
-                    latents = latents / self.vae.scaling_factor.to(
-                        latents.device, latents.dtype)
-                else:
-                    latents = latents / self.vae.scaling_factor
+                latents = _apply_vae_scale(latents)
 
                 # Apply shifting if needed
                 if (hasattr(self.vae, "shift_factor")

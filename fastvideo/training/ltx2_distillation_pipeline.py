@@ -91,6 +91,8 @@ class LTX2DistillationPipeline(DistillationPipeline):
     def initialize_training_pipeline(self, training_args: TrainingArgs):
         logger.info("Initializing LTX-2 distillation pipeline...")
         LTX2TrainingPipeline.initialize_training_pipeline(self, training_args)
+        self.vae = self.get_module("vae")
+        self.vae.requires_grad_(False)
 
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
             shift=self.training_args.pipeline_config.flow_shift)
