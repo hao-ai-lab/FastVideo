@@ -6,7 +6,7 @@ import os
 
 
 FIXED_DEBUG_PROMPT = (
-    "A detailed, vintage-style alien abduction pamphlet titled Probing FAQs, featuring illustrations of extraterrestrial beings and spacecraft, alongside text explaining common questions and procedures."
+    "\"A detailed, vintage-style alien abduction pamphlet titled Probing FAQs, featuring illustrations of extraterrestrial beings and spacecraft, alongside text explaining common questions and procedures.\""
 )
 
 
@@ -24,8 +24,8 @@ class TextPromptDataset(Dataset):
     def __getitem__(self, idx):
         # Debug mode: always return the same prompt for evaluation.
         # Keep dataset length/sampling behavior unchanged.
-        return {"prompt": self.prompts[idx], "metadata": {}}
-        # return {"prompt": FIXED_DEBUG_PROMPT, "metadata": {}}
+        # return {"prompt": self.prompts[idx], "metadata": {}}
+        return {"prompt": FIXED_DEBUG_PROMPT, "metadata": {}}
 
     @staticmethod
     def collate_fn(examples):
@@ -78,8 +78,8 @@ class KRepeatSampler(Sampler):
 
     def __iter__(self):
         while True:
-            # Generate a deterministic random sequence to ensure all cards are synchronized
-            g = torch.Generator()
+            # Deterministic sync across ranks (same as flow_grpo DistributedKRepeatSampler).
+            g = torch.Generator(device="cpu")
             g.manual_seed(self.seed + self.step)
             
             # Randomly select m unique samples
@@ -106,8 +106,12 @@ class KRepeatSampler(Sampler):
         return len(self.dataset) // self.batch_size
     
     def set_step(self, step):
-        """Used to synchronize the random state for different steps."""
+        """Synchronize random state for this step (global batch index)."""
         self.step = step
+
+    def set_epoch(self, epoch):
+        """Alias for set_step(epoch). Matches flow_grpo: epoch = epoch * num_batches_per_epoch + i."""
+        self.step = epoch
 
 
 def build_rl_prompt_dataloader(

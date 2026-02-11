@@ -6,7 +6,9 @@ export WANDB_MODE=online
 export WANDB_API_KEY="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"
 
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-RL_DATASET_DIR="data/ocr/"
+# For alignment with flow_grpo prompts, set to flow_grpo's dataset dir (e.g. /path/to/flow_grpo/dataset/ocr).
+# Then both codebases read the same train.txt and sampler seed gives same batch.
+RL_DATASET_DIR="${FLOW_GRPO_DATASET_OCR:-data/ocr/}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VALIDATION_DATASET_FILE="$SCRIPT_DIR/validation.json"
 NUM_GPUS=4
@@ -19,7 +21,7 @@ training_args=(
   --tracker_project_name "wan_t2v_grpo"
   --output_dir "checkpoints/wan_t2v_grpo_4gpu"
   --max_train_steps 3000
-  --train_batch_size 16
+  --train_batch_size 8
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
   --num_latent_t 20
@@ -51,7 +53,7 @@ dataset_args=(
 validation_args=(
   --log_validation True
   --validation_dataset_file $VALIDATION_DATASET_FILE
-  --validation_steps 15
+  --validation_steps 30
   --validation_sampling_steps "20"
   --validation_guidance_scale "4.5"
 )
@@ -91,7 +93,7 @@ miscellaneous_args=(
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
-  --master_port 29866 \
+  --master_port 26222 \
   "fastvideo/training/wan_rl_training_pipeline.py" \
   "${parallel_args[@]}" \
   "${model_args[@]}" \

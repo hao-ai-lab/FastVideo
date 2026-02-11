@@ -8,7 +8,8 @@ export WANDB_MODE=online
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 MODEL_PATH="Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
-RL_DATASET_DIR="data/ocr/"  # Path to RL prompt dataset directory (should contain train.txt and test.txt)
+# For alignment with flow_grpo: set FLOW_GRPO_DATASET_OCR=/path/to/flow_grpo/dataset/ocr
+RL_DATASET_DIR="${FLOW_GRPO_DATASET_OCR:-data/ocr/}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VALIDATION_DATASET_FILE="$SCRIPT_DIR/validation.json"
 NUM_GPUS=1

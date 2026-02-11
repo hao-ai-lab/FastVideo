@@ -64,7 +64,8 @@ def sde_step_with_logprob(
     generator: torch.Generator | None = None,
     deterministic: bool = False,
     return_pixel_log_prob: bool = False,
-    return_dt_and_std_dev_t: bool = False
+    return_dt_and_std_dev_t: bool = False,
+    return_variance_noise_sum: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, ...]:
     """
     Predict the sample from the previous timestep by reversing the SDE and
@@ -99,11 +100,10 @@ def sde_step_with_logprob(
             "Cannot pass both generator and prev_sample. Please make sure that either `generator` or"
             " `prev_sample` stays `None`.")
 
+    variance_noise_sum_fp64: float = 0.0
     if prev_sample is None:
         # For GRPO training, each timestep should have different random noise.
         # Do NOT use generator here - this ensures truly stochastic noise at each step.
-        # Using a fixed generator would make noise deterministic across timesteps, which
-        # is incorrect for GRPO training where we need independent randomness at each step.
         variance_noise = randn_tensor(
             model_output.shape,
             generator=
@@ -111,6 +111,8 @@ def sde_step_with_logprob(
             device=model_output.device,
             dtype=model_output.dtype,
         )
+        if return_variance_noise_sum:
+            variance_noise_sum_fp64 = float(variance_noise.detach().to(torch.float64).sum().item())
         sqrt_dt = torch.sqrt(-1 * dt)
         prev_sample = prev_sample_mean + std_dev_t * sqrt_dt * variance_noise
     else:
@@ -134,6 +136,8 @@ def sde_step_with_logprob(
     log_prob = log_prob.mean(dim=tuple(range(1, log_prob.ndim)))
 
     if return_dt_and_std_dev_t:
+        if return_variance_noise_sum:
+            return prev_sample, log_prob, prev_sample_mean, std_dev_t, sqrt_dt, variance_noise_sum_fp64
         return prev_sample, log_prob, prev_sample_mean, std_dev_t, sqrt_dt
     return prev_sample, log_prob, prev_sample_mean, std_dev_t * sqrt_dt
 
@@ -553,26 +557,43 @@ class DenoisingStage(PipelineStage):
                                 noise_pred_text,
                                 guidance_rescale=batch.guidance_rescale,
                             )
+                    collect_debug = rl_data is not None and getattr(rl_data, "collect_debug_sums", False)
+                    if collect_debug:
+                        s = float(noise_pred.detach().to(torch.float64).sum().item())
+                        rl_data.debug_model_pred_sum += s
+                        rl_data.debug_model_pred_per_step.append(s)
                     # Compute the previous noisy sample
                     prev_latents = latents
                     prev_latents_mean = None
                     std_dev_t = None
                     if rl_data is not None and rl_data.collect_log_probs:
                         # For RL training, use sde_step_with_logprob to generate latents with random noise
-                        # This matches flow_grpo's implementation where latents come from sde_step_with_logprob
                         # Note: generator=None ensures each timestep gets independent random noise (required for GRPO)
-                        latents, log_prob, prev_latents_mean, std_dev_t, _ = sde_step_with_logprob(
-                            self.scheduler,
-                            noise_pred.float(),
-                            t,
-                            prev_latents.float(),
-                            prev_sample=None,  # None means generate random noise
-                            generator=
-                            None,  # Always None for GRPO - each timestep needs independent randomness
-                            deterministic=
-                            False,  # Add random noise for RL training
-                            return_dt_and_std_dev_t=True,
-                        )
+                        if collect_debug:
+                            latents, log_prob, prev_latents_mean, std_dev_t, _, variance_noise_sum = sde_step_with_logprob(
+                                self.scheduler,
+                                noise_pred.float(),
+                                t,
+                                prev_latents.float(),
+                                prev_sample=None,
+                                generator=None,
+                                deterministic=False,
+                                return_dt_and_std_dev_t=True,
+                                return_variance_noise_sum=True,
+                            )
+                            rl_data.debug_intermediate_latents_per_step.append(latents.double().sum().item())
+                            rl_data.debug_variance_noise_sum_per_step.append(variance_noise_sum)
+                        else:
+                            latents, log_prob, prev_latents_mean, std_dev_t, _ = sde_step_with_logprob(
+                                self.scheduler,
+                                noise_pred.float(),
+                                t,
+                                prev_latents.float(),
+                                prev_sample=None,
+                                generator=None,
+                                deterministic=False,
+                                return_dt_and_std_dev_t=True,
+                            )
                         rl_log_probs.append(log_prob)
                     else:
                         # For non-RL inference, use scheduler.step() as before

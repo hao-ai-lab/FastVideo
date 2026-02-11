@@ -487,6 +487,7 @@ class RLPipeline(TrainingPipeline):
                             {"validation_reward_mean": validation_reward_mean},
                             global_step,
                         )
+                        logger.info(f"validation_reward_mean: {validation_reward_mean}, global_step: {global_step}")
                 else:
                     world_group.send_object(step_videos, dst=0)
                     world_group.send_object(step_captions, dst=0)
@@ -607,6 +608,7 @@ class RLPipeline(TrainingPipeline):
         # Placeholder for compatibility with older trajectory collection logic.
         # Kept to avoid NameError if referenced; currently prompt_ids are stored as None.
         all_prompt_ids_list = []
+        debug_last_output_batch = None  # rank 0: capture for debug_model_pred_sum
 
         # Set transformer to eval mode for sampling
         self.transformer.eval()
@@ -614,9 +616,9 @@ class RLPipeline(TrainingPipeline):
         with torch.no_grad():
             # Sample multiple times per prompt if needed
             for _ in range(sample_time_per_prompt):
-
-                # Set seed in sampling_param - vary per batch so rollouts differ across batches (align with flow_grpo advancing RNG)
-                sampling_param.seed = self.seed + getattr(self, "current_step", 0)
+                # Set seed: fixed 42 for debug (rank 0) to align with flow_grpo; else advance per step
+                debug_fixed_seed = self.global_rank == 0
+                sampling_param.seed = 42 if debug_fixed_seed else (self.seed + getattr(self, "current_step", 0))
 
                 rl_data = ForwardBatch.RLData(
                     enabled=True,
@@ -625,6 +627,8 @@ class RLPipeline(TrainingPipeline):
                     kl_reward=kl_reward,
                     store_trajectory=True,
                     keep_trajectory_on_cpu=False,
+                    debug_fixed_seed=debug_fixed_seed,
+                    collect_debug_sums=debug_fixed_seed,
                 )
 
                 # Create ForwardBatch using same pattern as validation: **shallow_asdict(sampling_param)
@@ -722,6 +726,8 @@ class RLPipeline(TrainingPipeline):
                 all_timesteps_list.append(timesteps)
                 all_decoded_videos_list.append(decoded_videos)
                 all_prompt_ids_list.append(None)
+                if self.global_rank == 0:
+                    debug_last_output_batch = output_batch
 
         # Concatenate across sample_time_per_prompt dimension (if sample_time_per_prompt > 1)
         if sample_time_per_prompt > 1:
@@ -772,55 +778,100 @@ class RLPipeline(TrainingPipeline):
         # Store decoded videos in input_kwargs (same pattern as validation)
         training_batch.input_kwargs["decoded_videos"] = decoded_videos
 
-        # myregion: Debug: Save decoded video for visual verification (rank 0 only).
-        # decoded_videos is already gathered along temporal dim above when sp_world_size > 1.
-        # if self.global_rank == 0:
-        #     from contextlib import nullcontext
-        #     import numpy as np
-        #     import imageio
-        #     controller = getattr(self, "profiler_controller", None)
-        #     region_cm = (controller.region("my region") if controller is not None
-        #                 and getattr(controller, "has_profiler", False) else
-        #                 nullcontext())
-        #     with region_cm:
-        #         out_dir = "/mnt/fast-disks/hao_lab/shijie/mylogs"
-        #         os.makedirs(out_dir, exist_ok=True)
-        #         batch_size = decoded_videos.shape[0]
-        #         logger.info(f"Debug region: Saving {batch_size} videos from batch")
-        #         fps = 24
-        #         videos_np_list = []
-        #         for batch_idx in range(batch_size):
-        #             vid = decoded_videos[batch_idx].detach().to(torch.float32).cpu()
-        #             vid = vid.permute(1, 2, 3, 0).contiguous()
-        #             vid_np = vid.numpy()
-        #             if vid_np.min() < 0.0:
-        #                 vid_np = (vid_np + 1.0) / 2.0
-        #             vid_np = np.clip(vid_np, 0.0, 1.0)
-        #             vid_np = (vid_np * 255.0).round().astype(np.uint8)
-        #             vid_fp64 = vid.detach().to(torch.float64).cpu().numpy()
-        #             if vid_fp64.min() < 0.0:
-        #                 vid_fp64 = (vid_fp64 + 1.0) / 2.0
-        #             vid_fp64 = np.clip(vid_fp64, 0.0, 1.0)
-        #             videos_np_list.append(vid_fp64)
-        #             out_path = os.path.join(out_dir, f"debug_step0_batch_{batch_idx}.mp4")
-        #             frames = [vid_np[t] for t in range(vid_np.shape[0])]
-        #             imageio.mimsave(out_path, frames, fps=fps)
-        #             logger.info(f"Saved debug video batch_{batch_idx} with {vid_np.shape[0]} frames at {fps} fps (duration: {vid_np.shape[0]/fps:.2f}s) to {out_path}")
-        #         if batch_size >= 2:
-        #             logger.info("=" * 80)
-        #             logger.info("Video Difference Statistics (calculated in float64 for precision):")
-        #             logger.info("=" * 80)
-        #             for i in range(batch_size - 1):
-        #                 vid_i, vid_j = videos_np_list[i], videos_np_list[i + 1]
-        #                 diff = np.abs(vid_i.astype(np.float64) - vid_j.astype(np.float64))
-        #                 avg_diff, max_diff = np.mean(diff), np.max(diff)
-        #                 min_diff, sum_diff = np.min(diff), np.sum(diff)
-        #                 total_elements = diff.size
-        #                 logger.info(f"Difference between video {i} and {i+1}:")
-        #                 logger.info(f"  Total elements: {total_elements:,}, Average: {avg_diff:.10f}, Max: {max_diff:.10f}, Min: {min_diff:.10f}, Sum: {sum_diff:.10f}")
-        #                 logger.info("-" * 80)
-        #             logger.info("=" * 80)
-        #     raise KeyboardInterrupt("Debug stop after saving decoded video (my region).")
+        # myregion debug: save collected videos, prompts, and debug metrics (rank 0 only)
+        if self.global_rank == 0:
+            from contextlib import nullcontext
+            import numpy as np
+            import imageio
+            controller = getattr(self, "profiler_controller", None)
+            region_cm = (controller.region("my region") if controller is not None
+                        and getattr(controller, "has_profiler", False) else nullcontext())
+            with region_cm:
+                out_dir = "/mnt/fast-disks/hao_lab/shijie/mylogs/fv_videos"
+                os.makedirs(out_dir, exist_ok=True)
+                batch_size = decoded_videos.shape[0]
+                fps = 24
+                for batch_idx in range(batch_size):
+                    vid = decoded_videos[batch_idx].detach().to(torch.float32).cpu()
+                    vid = vid.permute(1, 2, 3, 0).contiguous()
+                    vid_np = vid.numpy()
+                    if vid_np.min() < 0.0:
+                        vid_np = (vid_np + 1.0) / 2.0
+                    vid_np = np.clip(vid_np, 0.0, 1.0)
+                    vid_np = (vid_np * 255.0).round().astype(np.uint8)
+                    imageio.mimsave(
+                        os.path.join(out_dir, f"debug_step0_batch_{batch_idx}.mp4"),
+                        [vid_np[t] for t in range(vid_np.shape[0])],
+                        fps=fps,
+                    )
+                with open(os.path.join(out_dir, "prompts.txt"), "w") as f:
+                    f.write("\n".join(prompts))
+                # fp64 sums from existing data
+                traj = training_batch.latents
+                sum_initial = traj[:, 0].to(torch.float64).sum().item()
+                sum_intermediate = traj.to(torch.float64).sum().item()
+                sum_decoded = decoded_videos.to(torch.float64).sum().item()
+                pe = training_batch.prompt_embeds
+                npe = training_batch.negative_prompt_embeds
+                sum_prompt_embeds = pe.to(torch.float64).sum().item() if pe is not None else 0.0
+                sum_negative_prompt_embeds = npe.to(torch.float64).sum().item() if npe is not None else 0.0
+                rd = debug_last_output_batch.rl_data if debug_last_output_batch is not None else None
+                sum_model_pred = getattr(rd, "debug_model_pred_sum", 0.0) if rd is not None else 0.0
+                pred_per_step = getattr(rd, "debug_model_pred_per_step", []) if rd is not None else []
+                latents_per_step = getattr(rd, "debug_intermediate_latents_per_step", []) if rd is not None else []
+                variance_noise_per_step = getattr(rd, "debug_variance_noise_sum_per_step", []) if rd is not None else []
+                hyperparams = {
+                    "num_inference_steps": num_inference_steps,
+                    "guidance_scale": guidance_scale,
+                    "height": height,
+                    "width": width,
+                    "num_frames": num_frames,
+                    "batch_size": batch_size,
+                }
+                lines = [
+                    f"sum_initial_latents_fp64: {sum_initial}",
+                    f"sum_intermediate_latents_fp64: {sum_intermediate}",
+                    f"sum_model_pred_fp64: {sum_model_pred}",
+                    f"sum_prompt_embeds_fp64: {sum_prompt_embeds}",
+                    f"sum_negative_prompt_embeds_fp64: {sum_negative_prompt_embeds}",
+                    f"sum_decoded_fp64: {sum_decoded}",
+                ]
+                for step_i in range(max(len(pred_per_step), len(latents_per_step), len(variance_noise_per_step))):
+                    if step_i < len(pred_per_step):
+                        lines.append(f"step_{step_i} sum_model_pred_fp64: {pred_per_step[step_i]}")
+                    if step_i < len(latents_per_step):
+                        lines.append(f"step_{step_i} sum_intermediate_latents_fp64: {latents_per_step[step_i]}")
+                    if step_i < len(variance_noise_per_step):
+                        lines.append(f"step_{step_i} sum_variance_noise_fp64: {variance_noise_per_step[step_i]}")
+                for k, v in hyperparams.items():
+                    lines.append(f"{k}: {v}")
+                flow_path = "/mnt/fast-disks/hao_lab/shijie/mylogs/flow_videos/debug_metrics.txt"
+                flow_vals = {}
+                if os.path.isfile(flow_path):
+                    with open(flow_path) as f:
+                        for line in f:
+                            line = line.strip()
+                            if ":" in line:
+                                k, v = line.split(":", 1)
+                                k, v = k.strip(), v.strip()
+                                try:
+                                    flow_vals[k] = float(v)
+                                except ValueError:
+                                    flow_vals[k] = v
+                    for key in ["sum_initial_latents_fp64", "sum_intermediate_latents_fp64",
+                                "sum_model_pred_fp64", "sum_prompt_embeds_fp64",
+                                "sum_negative_prompt_embeds_fp64", "sum_decoded_fp64"]:
+                        fv = flow_vals.get(key)
+                        if fv is not None and isinstance(fv, (int, float)):
+                            ours = {"sum_initial_latents_fp64": sum_initial, "sum_intermediate_latents_fp64": sum_intermediate,
+                                    "sum_model_pred_fp64": sum_model_pred, "sum_prompt_embeds_fp64": sum_prompt_embeds,
+                                    "sum_negative_prompt_embeds_fp64": sum_negative_prompt_embeds, "sum_decoded_fp64": sum_decoded}[key]
+                            pct = 100.0 * (ours - fv) / (abs(fv) + 1e-20)
+                            lines.append(f"pct_diff_vs_flow_{key}: {pct:.6f}%")
+                with open(os.path.join(out_dir, "debug_metrics.txt"), "w") as f:
+                    f.write("\n".join(lines))
+                logger.info("RL_METRIC: Debug region saved fv_videos, prompts, and metrics; stopping.")
+            raise KeyboardInterrupt("Debug stop after saving decoded video (my region).")
         # endregion
 
         logger.info("==== RL pipeline: collect_trajectories FINISH ====")

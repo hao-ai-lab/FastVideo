@@ -137,8 +137,8 @@ class LatentPreparationStage(PipelineStage):
             )
         # Generate or use provided latents
         if latents is None:
-            # If doing RL training, latents should be generated without seed
-            if batch.rl_data is not None:
+            # If doing RL training, latents use unique seed per item unless debug_fixed_seed
+            if batch.rl_data is not None and not getattr(batch.rl_data, "debug_fixed_seed", False):
                 generator = [None] * len(generator) if isinstance(generator, list) else None
             
             # Handle batch processing: if generator is a list, generate latents for each item separately

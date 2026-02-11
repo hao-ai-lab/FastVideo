@@ -86,6 +86,13 @@ class ForwardBatch:
         transformer_forward_contexts: list[dict[str, Any]] | None = None
         # transformer_forward_kwargs: batch-level kwargs passed to transformer (image_kwargs, pos_cond_kwargs, neg_cond_kwargs, action_kwargs, guidance_expand).
         transformer_forward_kwargs: dict[str, Any] | None = None
+        # Debug: use fixed seed (don't null generator in latent_prep); per-step sums from denoising.
+        debug_fixed_seed: bool = False
+        collect_debug_sums: bool = False
+        debug_model_pred_sum: float = 0.0
+        debug_model_pred_per_step: list = field(default_factory=list)
+        debug_intermediate_latents_per_step: list = field(default_factory=list)
+        debug_variance_noise_sum_per_step: list = field(default_factory=list)
 
     # TODO(will): double check that args are separate from fastvideo_args
     # properly. Also maybe think about providing an abstraction for pipeline
