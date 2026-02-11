@@ -27,7 +27,8 @@ from fastvideo.pipelines.basic.waypoint.waypoint_pipeline import CtrlInput
 # and run:
 #   WAYPOINT_MODEL_ID=converted/waypoint_diffusers_stub python examples/inference/basic/basic_waypoint_streaming.py
 import os
-MODEL_ID = os.getenv("WAYPOINT_MODEL_ID", "FastVideo/Waypoint-1-Small-Diffusers")
+MODEL_ID = os.getenv("WAYPOINT_MODEL_ID",
+                      "smatta/Waypoint-1-Small-Diffusers")
 OUTPUT_PATH = "video_samples_waypoint"
 
 
