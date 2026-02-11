@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=ltx2_distillation
-#SBATCH --nodes=8
+#SBATCH --nodes=4
 #SBATCH --gres=gpu:4
 #SBATCH --ntasks-per-node=1
 #SBATCH --output=logs/ltx2_distillation.out
@@ -15,7 +15,7 @@ export TOKENIZERS_PARALLELISM=false
 # Use node-local Triton cache to avoid stale file handle errors on shared filesystems
 export TRITON_CACHE_DIR="/tmp/triton_cache_${SLURM_JOB_ID}_${SLURM_NODEID}"
 export WANDB_API_KEY=50632ebd88ffd970521cec9ab4a1a2d7e85bfc45
-export PYTHONPATH=/home/hal-matthewn/FastVideo-demo/fastvideo-kernel/python:$PYTHONPATH  # TODO: hack for paths bc of messy installation
+export PYTHONPATH=/home/hal-matthewn/FastVideo-demo/fastvideo-kernel/python:$PYTHONPATH  # TODO: hack for my paths bc of messy installation
 export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
 # export NCCL_DEBUG=INFO
 
@@ -81,7 +81,7 @@ model_args=(
 # Dataset arguments
 dataset_args=(
   --data_path "$DATA_DIR"
-  --dataloader_num_workers 2
+  --dataloader_num_workers 4
 )
 
 # Validation arguments
@@ -95,15 +95,10 @@ validation_args=(
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 4e-6
-  --lr_scheduler "cosine_with_min_lr"
-  --min_lr_ratio 0.5
-  --lr_warmup_steps 100
-  --fake_score_learning_rate 2e-6
-  --fake_score_lr_scheduler "cosine_with_min_lr"
+  --learning_rate 2e-6
   --mixed_precision "bf16"
   --training_state_checkpointing_steps 500
-  --weight_only_checkpointing_steps 200
+  --weight_only_checkpointing_steps 500
   --weight_decay 0.01
   --max_grad_norm 1.0
 )
@@ -115,7 +110,7 @@ miscellaneous_args=(
   --training_cfg_rate 0.0
   --dit_precision "fp32"
   --ema_start_step 0
-  --flow_shift 5
+  --flow_shift 5  # TODO: need to determine the correct value
   --seed 1000
 )
 

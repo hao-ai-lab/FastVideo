@@ -238,7 +238,7 @@ class ComposedPipelineBase(ABC):
             for key, value in kwargs.items():
                 setattr(fastvideo_args, key, value)
 
-            fastvideo_args.dit_cpu_offload = False
+            fastvideo_args.dit_cpu_offload = True
             # we hijack the precision to be the master weight type so that the
             # model is loaded with the correct precision. Subsequently we will
             # use FSDP2's MixedPrecisionPolicy to set the precision for the
