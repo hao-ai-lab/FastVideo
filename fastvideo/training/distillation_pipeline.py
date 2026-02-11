@@ -995,7 +995,7 @@ class DistillationPipeline(TrainingPipeline):
                 batch.attn_metadata.VSA_sparsity = 0.0  # type: ignore
             batches.append(batch)
 
-        self.optimizer.zero_grad()
+        self.optimizer.zero_grad(set_to_none=True)
         total_dmd_loss = 0.0
         dmd_latent_vis_dict = {}
         fake_score_latent_vis_dict = {}
@@ -1046,9 +1046,9 @@ class DistillationPipeline(TrainingPipeline):
         else:
             training_batch.generator_loss = 0.0
 
-        self.fake_score_optimizer.zero_grad()
+        self.fake_score_optimizer.zero_grad(set_to_none=True)
         if self.fake_score_transformer_2 is not None:
-            self.fake_score_optimizer_2.zero_grad()
+            self.fake_score_optimizer_2.zero_grad(set_to_none=True)
         total_fake_score_loss = 0.0
         for batch in batches:
             batch_fake = self._clone_training_batch(batch)
