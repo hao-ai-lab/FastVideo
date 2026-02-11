@@ -1196,9 +1196,9 @@ class CausalMatrixGameWanModel(BaseDiT):
             hidden_states.shape
         )
         p_t, p_h, p_w = self.patch_size
-        post_patch_num_frames = num_frames // p_t
-        post_patch_height = height // p_h
-        post_patch_width = width // p_w
+        post_patch_num_frames: int = num_frames // p_t
+        post_patch_height: int = height // p_h
+        post_patch_width: int = width // p_w
 
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
@@ -1221,6 +1221,7 @@ class CausalMatrixGameWanModel(BaseDiT):
         if self.block_mask is None:
             self.block_mask = self._prepare_blockwise_causal_attn_mask(
                 device=hidden_states.device,
+        # enable_torch_compile=True,
                 num_frames=num_frames,
                 frame_seqlen=post_patch_height * post_patch_width,
                 num_frame_per_block=self.num_frame_per_block,
@@ -1259,10 +1260,7 @@ class CausalMatrixGameWanModel(BaseDiT):
             )
 
         hidden_states = self.patch_embedding(hidden_states)
-        grid_sizes = torch.tensor(
-            [post_patch_num_frames, post_patch_height, post_patch_width],
-            device=hidden_states.device,
-        )
+        grid_sizes = (post_patch_num_frames, post_patch_height, post_patch_width)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
         if timestep.dim() == 2:

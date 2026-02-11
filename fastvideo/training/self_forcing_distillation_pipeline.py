@@ -582,9 +582,9 @@ class SelfForcingDistillationPipeline(DistillationPipeline):
                             dtype=dtype,
                             device=device),
                 "global_end_index":
-                torch.tensor([0], dtype=torch.long, device=device),
+                0,
                 "local_end_index":
-                torch.tensor([0], dtype=torch.long, device=device)
+                0
             })
 
         # Initialize cross-attention cache
