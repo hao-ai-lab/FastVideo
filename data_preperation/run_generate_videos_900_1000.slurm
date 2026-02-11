@@ -3,7 +3,7 @@
 #SBATCH --partition=all
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:4
 #SBATCH --output=logs/gen_%j.out
 #SBATCH --error=logs/gen_%j.err
 #SBATCH --exclusive
@@ -29,5 +29,4 @@ conda activate fastvideo &&  python data_preperation/generate_videos_from_json_p
   --output-dir "$OUTPUT_DIR" \
   --start-idx "$START_IDX" \
   --end-idx "$END_IDX" \
-  --num-gpus 1 \
-  --no-skip-existing
+  --num-gpus 4
