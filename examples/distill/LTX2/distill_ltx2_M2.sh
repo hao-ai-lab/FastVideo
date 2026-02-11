@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=ltx2_distillation_M2
+#SBATCH --job-name=ltx2_distillation
 #SBATCH --partition=main
 #SBATCH --nodes=8
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
 #SBATCH --mem=1440G
-#SBATCH --output=logs/ltx2_distillation_M2.out
-#SBATCH --error=logs/ltx2_distillation_M2.err
+#SBATCH --output=logs/ltx2_distillation.out
+#SBATCH --error=logs/ltx2_distillation.err
 #SBATCH --exclusive
 
 source ~/conda/miniconda/bin/activate
@@ -35,17 +35,21 @@ echo "NODE_RANK: $NODE_RANK"
 
 # export TRITON_PRINT_AUTOTUNING=1  # to print the best config
 export WANDB_API_KEY=50632ebd88ffd970521cec9ab4a1a2d7e85bfc45
-MODEL_PATH="Wan-AI/Wan2.1-T2V-14B-Diffusers"
+# Configs
+MODEL_PATH="FastVideo/LTX2-Distilled-Diffusers"
+REAL_SCORE_MODEL_PATH="Davids048/LTX2-Base-Diffusers"
+FAKE_SCORE_MODEL_PATH="Davids048/LTX2-Base-Diffusers"
 DATA_DIR=/mnt/weka/home/hao.zhang/data/FastVideo/LTX2_text_encoding_dataset
-VALIDATION_DATASET_FILE="examples/distill/LTX2/validation.json"
+VALIDATION_DIR="examples/distill/LTX2/validation.json"
 NUM_GPUS_PER_NODE=8
 TOTAL_GPUS=$((NUM_GPUS_PER_NODE * SLURM_JOB_NUM_NODES))
+OUTPUT_DIR="checkpoints/ltx2_distillation"
 # export CUDA_VISIBLE_DEVICES=4,5
 
 # Training arguments
 training_args=(
-  --tracker_project_name "LTX2_distillation_M2"
-  --output_dir "checkpoints/ltx2_distillation_M2"
+  --tracker_project_name LTX2_distillation
+  --output_dir "$OUTPUT_DIR"
   --max_train_steps 4000
   --train_batch_size 1
   --train_sp_batch_size 1
@@ -70,6 +74,8 @@ parallel_args=(
 model_args=(
   --model_path $MODEL_PATH
   --pretrained_model_name_or_path $MODEL_PATH
+  --real_score_model_path $REAL_SCORE_MODEL_PATH
+  --fake_score_model_path $FAKE_SCORE_MODEL_PATH
 )
 
 # Dataset arguments
@@ -81,8 +87,8 @@ dataset_args=(
 # Validation arguments
 validation_args=(
   --log_validation 
-  --validation_dataset_file $VALIDATION_DATASET_FILE
-  --validation_steps 200
+  --validation_dataset_file "$VALIDATION_DIR"
+  --validation_steps 5
   --validation_sampling_steps "8" 
   --validation_guidance_scale "1.0" # used by validation inference; keep aligned with basic_ltx2_distilled defaults
 )
@@ -133,5 +139,5 @@ srun torchrun \
     "${training_args[@]}" \
     "${optimizer_args[@]}" \
     "${validation_args[@]}" \
-      "${miscellaneous_args[@]}" \
-      "${dmd_args[@]}"
+    "${miscellaneous_args[@]}" \
+    "${dmd_args[@]}"

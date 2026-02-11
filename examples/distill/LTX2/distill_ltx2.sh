@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=ltx2_distillation
-#SBATCH --nodes=4
+#SBATCH --nodes=8
 #SBATCH --gres=gpu:4
 #SBATCH --ntasks-per-node=1
 #SBATCH --output=logs/ltx2_distillation.out
@@ -15,7 +15,7 @@ export TOKENIZERS_PARALLELISM=false
 # Use node-local Triton cache to avoid stale file handle errors on shared filesystems
 export TRITON_CACHE_DIR="/tmp/triton_cache_${SLURM_JOB_ID}_${SLURM_NODEID}"
 export WANDB_API_KEY=50632ebd88ffd970521cec9ab4a1a2d7e85bfc45
-export PYTHONPATH=/home/hal-matthewn/FastVideo-demo/fastvideo-kernel/python:$PYTHONPATH  # TODO: hack for my paths bc of messy installation
+export PYTHONPATH=/home/hal-matthewn/FastVideo-demo/fastvideo-kernel/python:$PYTHONPATH  # TODO: hack for my paths bc of messy installation on the NVL72
 export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
 
 set -euo pipefail
@@ -40,7 +40,7 @@ MODEL_PATH="FastVideo/LTX2-Distilled-Diffusers"
 REAL_SCORE_MODEL_PATH="Davids048/LTX2-Base-Diffusers"
 FAKE_SCORE_MODEL_PATH="Davids048/LTX2-Base-Diffusers"
 DATA_DIR=data/ltx2-data
-VALIDATION_DIR="examples/distill/LTX2/validation.json"  #(example:validation_64.json)
+VALIDATION_DIR="examples/distill/LTX2/validation.json"
 OUTPUT_DIR="checkpoints/ltx2_distillation"
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
@@ -52,7 +52,7 @@ training_args=(
   --max_train_steps 4000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 16
+  --gradient_accumulation_steps 32
   --num_latent_t 31
   --num_height 1088
   --num_width 1920
@@ -87,7 +87,7 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DIR"
-  --validation_steps 200
+  --validation_steps 5
   --validation_sampling_steps "8"
   --validation_guidance_scale "1.0" # used by validation inference; keep aligned with basic_ltx2_distilled defaults
 )
