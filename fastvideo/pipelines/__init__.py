@@ -12,10 +12,9 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.lora_pipeline import LoRAPipeline
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
-from fastvideo.pipelines.pipeline_registry import (PipelineType,
-                                                   get_pipeline_registry)
-from fastvideo.utils import (maybe_download_model,
-                             verify_model_config_and_directory)
+from fastvideo.pipelines.pipeline_registry import PipelineType
+from fastvideo.registry import get_model_info
+from fastvideo.utils import maybe_download_model
 
 logger = init_logger(__name__)
 
@@ -42,30 +41,17 @@ def build_pipeline(
     # fastvideo_args.downloaded_model_path = model_path
     logger.info("Model path: %s", model_path)
 
-    config = verify_model_config_and_directory(model_path)
-    pipeline_name = config.get("_class_name")
-
-    if fastvideo_args.override_pipeline_cls_name:
-        logger.info("Overriding pipeline class name from %s to %s",
-                    pipeline_name, fastvideo_args.override_pipeline_cls_name)
-        pipeline_name = fastvideo_args.override_pipeline_cls_name
-
-    if pipeline_name is None:
-        raise ValueError(
-            "Model config does not contain a _class_name attribute. "
-            "Only diffusers format is supported.")
-
-    # Get the appropriate pipeline registry based on pipeline_type
     logger.info(
         "Building pipeline of type: %s", pipeline_type.value if isinstance(
             pipeline_type, PipelineType) else pipeline_type)
-    pipeline_registry = get_pipeline_registry(pipeline_type)
 
-    if isinstance(pipeline_type, str):
-        pipeline_type = PipelineType.from_string(pipeline_type)
-
-    pipeline_cls = pipeline_registry.resolve_pipeline_cls(
-        pipeline_name, pipeline_type, fastvideo_args.workload_type)
+    model_info = get_model_info(
+        model_path=model_path,
+        pipeline_type=pipeline_type,
+        workload_type=fastvideo_args.workload_type,
+        override_pipeline_cls_name=fastvideo_args.override_pipeline_cls_name,
+    )
+    pipeline_cls = model_info.pipeline_cls
 
     # instantiate the pipelines
     pipeline = pipeline_cls(model_path, fastvideo_args)

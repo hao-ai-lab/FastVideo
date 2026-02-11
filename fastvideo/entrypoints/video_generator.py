@@ -9,6 +9,7 @@ diffusion models.
 import math
 import os
 import re
+import threading
 import time
 from copy import deepcopy
 from typing import Any
@@ -29,6 +30,21 @@ from fastvideo.utils import align_to, shallow_asdict
 from fastvideo.worker.executor import Executor
 
 logger = init_logger(__name__)
+
+
+def _infer_latent_batch_size(batch: ForwardBatch) -> int:
+    if isinstance(batch.prompt, list):
+        latent_batch_size = len(batch.prompt)
+    elif batch.prompt is not None:
+        latent_batch_size = 1
+    elif batch.prompt_embeds is not None and len(batch.prompt_embeds) > 0:
+        latent_batch_size = batch.prompt_embeds[0].shape[0]
+    else:
+        raise ValueError(
+            "Cannot infer batch size from batch; no prompt or prompt_embeds found"
+        )
+    latent_batch_size *= batch.num_videos_per_prompt
+    return latent_batch_size
 
 
 class VideoGenerator:
@@ -207,64 +223,82 @@ class VideoGenerator:
                                            sampling_param=sampling_param,
                                            **kwargs)
 
+    def _is_image_workload(self) -> bool:
+        """Return True when the workload produces a single image (t2i, i2i …)."""
+        args = getattr(self, "fastvideo_args", None)
+        if args is None:
+            return False
+        return args.workload_type.value.endswith("2i")
+
     def _prepare_output_path(
         self,
         output_path: str,
         prompt: str,
     ) -> str:
-        """Build a unique, sanitized .mp4 output file path.
+        """Build a unique, sanitized output file path.
 
-        - If `output_path` ends with .mp4 (case-insensitive), treat it as a file path.
-        - Otherwise, treat `output_path` as a directory and derive the filename
-          from the prompt.
+        The file extension is chosen automatically based on the workload type:
+        ``.png`` for image workloads (``t2i``, ``i2i``, …) and ``.mp4`` for
+        video workloads.
+
+        - If ``output_path`` already carries the correct extension, treat it
+          as a file path.
+        - Otherwise, treat ``output_path`` as a directory and derive the
+          filename from the prompt.
         - Invalid filename characters are removed; if the name changes, a
           warning is logged.
         - If the target path already exists, a numeric suffix is appended.
         """
+        target_ext = ".png" if self._is_image_workload() else ".mp4"
 
         def _sanitize_filename_component(name: str) -> str:
             # Remove characters invalid on common filesystems, strip spaces/dots
             sanitized = re.sub(r'[\\/:*?"<>|]', '', name)
             sanitized = sanitized.strip().strip('.')
             sanitized = re.sub(r'\s+', ' ', sanitized)
-            return sanitized or "video"
+            return sanitized or "output"
 
         base_path, extension = os.path.splitext(output_path)
         extension_lower = extension.lower()
 
-        if extension_lower == ".mp4":
+        if extension_lower == target_ext:
             output_dir = os.path.dirname(output_path)
             base_name = os.path.basename(
                 base_path)  # filename without extension
             sanitized_base = _sanitize_filename_component(base_name)
             if sanitized_base != base_name:
                 logger.warning(
-                    "The video name '%s' contained invalid characters. It has been renamed to '%s.mp4'",
+                    "The output name '%s' contained invalid characters. "
+                    "It has been renamed to '%s%s'",
                     os.path.basename(output_path),
                     sanitized_base,
+                    target_ext,
                 )
-            video_name = f"{sanitized_base}.mp4"
+            out_name = f"{sanitized_base}{target_ext}"
         else:
-            # Treat as directory; inform if an unexpected extension was provided.
+            # Treat as directory; inform if an unexpected extension was
+            # provided.
             if extension:
                 logger.info(
-                    "Output path '%s' has non-mp4 extension '%s'; treating it as a directory and using a .mp4 filename derived from the prompt",
+                    "Output path '%s' has extension '%s' which does not "
+                    "match the target '%s'; treating it as a directory",
                     output_path,
                     extension,
+                    target_ext,
                 )
             output_dir = output_path
             prompt_component = _sanitize_filename_component(prompt[:100])
-            video_name = f"{prompt_component}.mp4"
+            out_name = f"{prompt_component}{target_ext}"
 
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
 
-        new_output_path = os.path.join(output_dir, video_name)
+        new_output_path = os.path.join(output_dir, out_name)
         counter = 1
         while os.path.exists(new_output_path):
-            name_part, ext_part = os.path.splitext(video_name)
-            new_video_name = f"{name_part}_{counter}{ext_part}"
-            new_output_path = os.path.join(output_dir, new_video_name)
+            name_part, ext_part = os.path.splitext(out_name)
+            new_name = f"{name_part}_{counter}{ext_part}"
+            new_output_path = os.path.join(output_dir, new_name)
             counter += 1
         return new_output_path
 
@@ -372,8 +406,31 @@ class VideoGenerator:
 
         # Run inference
         start_time = time.perf_counter()
-        output_batch = self.executor.execute_forward(batch, fastvideo_args)
-        samples = output_batch.output
+
+        # Execute forward pass in a new thread for non-blocking tensor allocation
+        result_container = {}
+
+        def execute_forward_thread():
+            result_container['output_batch'] = self.executor.execute_forward(
+                batch, fastvideo_args)
+
+        thread = threading.Thread(target=execute_forward_thread)
+        thread.start()
+        latent_batch_size = _infer_latent_batch_size(batch)
+        samples = torch.empty((latent_batch_size, 3, sampling_param.num_frames,
+                               sampling_param.height, sampling_param.width),
+                              device='cpu',
+                              pin_memory=fastvideo_args.pin_cpu_memory)
+        thread.join()
+
+        output_batch = result_container['output_batch']
+        if output_batch.output.shape == samples.shape:
+            samples.copy_(output_batch.output)
+        else:
+            logger.warning(
+                "Output shape %s does not match expected shape %s; use slow path",
+                output_batch.output.shape, samples.shape)
+            samples = output_batch.output.cpu()
         logging_info = output_batch.logging_info
 
         gen_time = time.perf_counter() - start_time
@@ -387,15 +444,25 @@ class VideoGenerator:
             x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
             frames.append((x * 255).numpy().astype(np.uint8))
 
-        # Save video if requested
+        # Save output if requested
         if batch.save_video:
-            imageio.mimsave(output_path, frames, fps=batch.fps, format="mp4")
-            logger.info("Saved video to %s", output_path)
-            audio = output_batch.extra.get("audio")
-            audio_sample_rate = output_batch.extra.get("audio_sample_rate")
-            if (audio is not None and audio_sample_rate is not None and
-                    not self._mux_audio(output_path, audio, audio_sample_rate)):
-                logger.warning("Audio mux failed; saved video without audio.")
+            if self._is_image_workload():
+                # Image workloads (t2i, i2i, …): save the first frame as PNG.
+                imageio.imwrite(output_path, frames[0])
+                logger.info("Saved image to %s", output_path)
+            else:
+                imageio.mimsave(output_path,
+                                frames,
+                                fps=batch.fps,
+                                format="mp4")
+                logger.info("Saved video to %s", output_path)
+                audio = output_batch.extra.get("audio")
+                audio_sample_rate = output_batch.extra.get("audio_sample_rate")
+                if (audio is not None and audio_sample_rate is not None
+                        and not self._mux_audio(output_path, audio,
+                                                audio_sample_rate)):
+                    logger.warning(
+                        "Audio mux failed; saved video without audio.")
 
         if batch.return_frames:
             return frames

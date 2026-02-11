@@ -5,8 +5,8 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.stages import (ConditioningStage,
-                                        Cosmos25DenoisingStage,
-                                        Cosmos25LatentPreparationStage,
+                                        Cosmos25AutoDenoisingStage,
+                                        Cosmos25AutoLatentPreparationStage,
                                         DecodingStage, InputValidationStage,
                                         Cosmos25TextEncodingStage,
                                         Cosmos25TimestepPreparationStage)
@@ -42,13 +42,13 @@ class Cosmos2_5Pipeline(ComposedPipelineBase):
                            scheduler=self.get_module("scheduler")))
 
         self.add_stage(stage_name="latent_preparation_stage",
-                       stage=Cosmos25LatentPreparationStage(
+                       stage=Cosmos25AutoLatentPreparationStage(
                            scheduler=self.get_module("scheduler"),
                            transformer=self.get_module("transformer"),
                            vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",
-                       stage=Cosmos25DenoisingStage(
+                       stage=Cosmos25AutoDenoisingStage(
                            transformer=self.get_module("transformer"),
                            scheduler=self.get_module("scheduler")))
 

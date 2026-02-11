@@ -7,10 +7,12 @@ from dataclasses import dataclass, field
 
 from fastvideo.configs.models.dits.base import DiTArchConfig, DiTConfig
 
+import re
+
 
 def is_ltx2_blocks(name: str, _module) -> bool:
-    """FSDP shard condition for LTX-2 transformer blocks."""
-    return "transformer_blocks" in name
+    res = re.search(r"(?:^|\.)transformer_blocks\.\d+$", name) is not None
+    return res
 
 
 @dataclass

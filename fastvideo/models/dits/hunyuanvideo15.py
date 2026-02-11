@@ -853,3 +853,6 @@ class FinalLayer(nn.Module):
         x = self.norm_final(x) * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
         x, _ = self.linear(x)
         return x
+
+# Entry point for model registry
+EntryClass = HunyuanVideo15Transformer3DModel

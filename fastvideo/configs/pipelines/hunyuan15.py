@@ -11,7 +11,8 @@ from fastvideo.configs.models.dits import HunyuanVideo15Config
 from fastvideo.configs.models.encoders import (BaseEncoderOutput,
                                                Qwen2_5_VLConfig, T5Config)
 from fastvideo.configs.models.vaes import Hunyuan15VAEConfig
-from fastvideo.configs.pipelines.base import PipelineConfig
+from fastvideo.configs.models.upsamplers import SRTo720pUpsamplerConfig, SRTo1080pUpsamplerConfig
+from fastvideo.configs.pipelines.base import PipelineConfig, UpsamplerConfig
 
 PROMPT_TEMPLATE_TOKEN_LENGTH = 108
 
@@ -132,8 +133,34 @@ class Hunyuan15T2V480PConfig(PipelineConfig):
 
 
 @dataclass
+class Hunyuan15I2V480PStepDistilledConfig(Hunyuan15T2V480PConfig):
+    flow_shift: int = 7
+
+
+@dataclass
 class Hunyuan15T2V720PConfig(Hunyuan15T2V480PConfig):
     """Base configuration for HunYuan pipeline architecture."""
 
     # HunyuanConfig-specific parameters with defaults
     flow_shift: int = 9
+
+
+@dataclass
+class Hunyuan15I2V720PConfig(Hunyuan15T2V720PConfig):
+    """Base configuration for HunYuan pipeline architecture."""
+
+    # HunyuanConfig-specific parameters with defaults
+    flow_shift: int = 7
+
+
+@dataclass
+class Hunyuan15SR1080PConfig(Hunyuan15T2V720PConfig):
+    """Base configuration for HunYuan pipeline architecture."""
+
+    # HunyuanConfig-specific parameters with defaults
+    flow_shift: int = 7
+    flow_shift_sr: int = 2
+    upsampler_config: tuple[UpsamplerConfig, ...] = field(
+        default_factory=lambda:
+        (SRTo720pUpsamplerConfig(), SRTo1080pUpsamplerConfig()))
+    upsampler_precision: str = "fp32"

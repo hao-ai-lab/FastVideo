@@ -959,3 +959,5 @@ class Cosmos25Transformer3DModel(BaseDiT):
 
         return hidden_states
 
+# Entry point for model registry
+EntryClass = Cosmos25Transformer3DModel

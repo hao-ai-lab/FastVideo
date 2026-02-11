@@ -351,3 +351,5 @@ class Reason1TextEncoder(TextEncoder):
             tensor.std(dim=-1, keepdim=True) + 1e-8
         )
 
+# Entry point for model registry
+EntryClass = Reason1TextEncoder

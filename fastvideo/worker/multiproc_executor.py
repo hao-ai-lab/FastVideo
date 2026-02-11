@@ -650,8 +650,10 @@ class WorkerMultiprocProc:
                         logging_info = None
                         if envs.FASTVIDEO_STAGE_LOGGING:
                             logging_info = output_batch.logging_info
+                        # result tensor shared by CUDA IPC to avoid serialization overhead
+                        result = output_batch.output
                         self.pipe.send({
-                            "output_batch": output_batch.output.cpu(),
+                            "output_batch": result,
                             "logging_info": logging_info,
                             "extra": output_batch.extra,
                         })

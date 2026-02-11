@@ -685,3 +685,6 @@ class StepVideoModel(BaseDiT):
 
         output = rearrange(output, '(b f) c h w -> b c f h w', f=frame)
         return output
+
+# Entry point for model registry
+EntryClass = StepVideoModel

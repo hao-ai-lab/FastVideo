@@ -131,17 +131,41 @@ self.attn = DistributedAttention(
 
 ### Registering Models
 
-Register implemented modules in the model registry:
+Register implemented modules for auto‑discovery by adding `EntryClass` in each
+model module (the registry scans for it):
 
 ```python
-# In fastvideo/models/registry.py
-_TEXT_TO_VIDEO_DIT_MODELS = {
-    "YourTransformerModel": ("dits", "yourmodule", "YourTransformerClass"),
-}
+# In fastvideo/models/dits/your_module.py
+class YourTransformerModel(...):
+    ...
 
-_VAE_MODELS = {
-    "YourVAEModel": ("vaes", "yourvae", "YourVAEClass"),
-}
+# Entry point for model registry
+EntryClass = YourTransformerModel
+```
+
+```python
+# In fastvideo/models/vaes/your_vae.py
+class YourVAEModel(...):
+    ...
+
+# Entry point for model registry
+EntryClass = YourVAEModel
+```
+
+Register pipeline config + sampling defaults in the unified registry:
+
+```python
+# In fastvideo/registry.py
+register_configs(
+    sampling_param_cls=YourSamplingParam,
+    pipeline_config_cls=YourPipelineConfig,
+    hf_model_paths=[
+        "org/your-model-id",
+    ],
+    model_detectors=[
+        lambda path: "your-model" in path.lower(),
+    ],
+)
 ```
 
 ## Step 2: Directory Structure

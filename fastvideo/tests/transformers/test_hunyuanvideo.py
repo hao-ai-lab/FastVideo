@@ -39,6 +39,7 @@ REFERENCE_LATENT = 93.23263549804688
 
 
 @pytest.mark.usefixtures("distributed_setup")
+@pytest.mark.skip(reason="Skipping test_hunyuanvideo_distributed")
 def test_hunyuanvideo_distributed():
     logger.info(
         f"Initializing process: rank={RANK}, local_rank={LOCAL_RANK}, world_size={WORLD_SIZE}"

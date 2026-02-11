@@ -385,3 +385,6 @@ class Qwen2_5_VLTextModel(TextEncoder):
                 weight_loader(param, loaded_weight)
             loaded_params.add(name)
         return loaded_params
+
+# Entry point for model registry
+EntryClass = Qwen2_5_VLTextModel
