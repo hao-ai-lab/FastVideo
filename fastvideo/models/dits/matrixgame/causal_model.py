@@ -1221,7 +1221,6 @@ class CausalMatrixGameWanModel(BaseDiT):
         if self.block_mask is None:
             self.block_mask = self._prepare_blockwise_causal_attn_mask(
                 device=hidden_states.device,
-        # enable_torch_compile=True,
                 num_frames=num_frames,
                 frame_seqlen=post_patch_height * post_patch_width,
                 num_frame_per_block=self.num_frame_per_block,
