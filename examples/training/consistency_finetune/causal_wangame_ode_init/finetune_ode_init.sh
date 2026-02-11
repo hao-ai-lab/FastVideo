@@ -3,7 +3,7 @@
 export PYTHONPATH="/mnt/fast-disks/hao_lab/kaiqin/FastVideo_wangame:$PYTHONPATH"
 export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
 export WANDB_BASE_URL="https://api.wandb.ai"
-export WANDB_MODE=offline
+export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 
 MODEL_PATH="Wan2.1-Fun-1.3B-InP-Diffusers"

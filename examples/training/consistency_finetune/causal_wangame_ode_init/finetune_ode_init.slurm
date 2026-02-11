@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=wg-ode-64g
+#SBATCH --job-name=wg-ode
 #SBATCH --partition=main
-#SBATCH --nodes=4
-#SBATCH --ntasks=4
+#SBATCH --nodes=8
+#SBATCH --ntasks=8
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -14,13 +14,12 @@
 set -e -x
 
 # Environment Setup
-source ~/conda/miniconda/bin/activate
-conda activate your-conda-env
-export PYTHONPATH="/path/to/FastVideo:$PYTHONPATH"
+source ~/conda/miniconda/bin/activate /mnt/weka/home/hao.zhang/conda/miniconda/envs/mhuo-fv
+export PYTHONPATH="/mnt/weka/home/hao.zhang/kaiqin/FastVideo:$PYTHONPATH"
 
 # Basic Info
-export WANDB_API_KEY="your-wandb-api-key"
-export WANDB_MODE="online"
+export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
+export WANDB_MODE=online
 export NCCL_P2P_DISABLE=1
 export MASTER_PORT=29500
 export NODE_RANK=$SLURM_PROCID
@@ -32,9 +31,10 @@ echo "MASTER_ADDR: $MASTER_ADDR"
 echo "NODE_RANK: $NODE_RANK"
 
 # Configs
-MODEL_PATH=""
-DATA_DIR="../vizdoom/preprocessed"
+MODEL_PATH="weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers"
+DATA_DIR="../traindata_0209_1500/ode_init/preprocessed"
 VALIDATION_DATASET_FILE="examples/training/consistency_finetune/causal_wangame_ode_init/validation.json"
+CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/wangame_1.3b_with_warmup_lr_1e-5/checkpoint-7000/transformer/diffusion_pytorch_model.safetensors"
 
 # Training arguments
 training_args=(
@@ -42,7 +42,7 @@ training_args=(
   --output_dir "checkpoints/wangame_ode_init"
   --override_transformer_cls_name "CausalWanGameActionTransformer3DModel"
   --wandb_run_name "wangame_ode_init_64gpu"
-  --max_train_steps 2000
+  --max_train_steps 5000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
@@ -52,6 +52,7 @@ training_args=(
   --num_frames 81
   --warp_denoising_step
   --enable_gradient_checkpointing_type "full"
+  --init_weights_from_safetensors $CKPT_SAFETENSOR
 )
 
 # Parallel arguments
@@ -79,7 +80,7 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 200
+  --validation_steps 100
   --validation_sampling_steps "50"
   --validation_guidance_scale "6.0"
 )

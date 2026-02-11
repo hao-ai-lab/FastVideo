@@ -9,16 +9,15 @@
 #SBATCH --time=72:00:00
 
 # conda init
-source ~/conda/miniconda/bin/activate
-conda activate /mnt/weka/home/hao.zhang/conda/miniconda/envs/mhuo-fv
-export PYTHONPATH="/mnt/weka/home/hao.zhang/kaiqin/FastVideo_kaiqin:$PYTHONPATH"
+source ~/conda/miniconda/bin/activate /mnt/weka/home/hao.zhang/conda/miniconda/envs/mhuo-fv
+export PYTHONPATH="/mnt/weka/home/hao.zhang/kaiqin/FastVideo:$PYTHONPATH"
 
 # Accept parameters from launch script
 START_FILE=${1:-1}  # Starting file number for this node
 NODE_ID=${2:-0}     # Node identifier (0-7)
 
-MODEL_PATH="./Matrix-Game-2.0-Foundation-VizDoom1k-1000steps-Diffusers"
-OUTPUT_BASE="traindata_0209_1500/mg_ode_init/preprocessed"
+MODEL_PATH="./Wan2.1-Fun-1.3B-InP-Diffusers"
+OUTPUT_BASE="traindata_0209_1500/ode_init/preprocessed"
 
 # Port range calculation
 base_port=$((29500 + NODE_ID * 100))

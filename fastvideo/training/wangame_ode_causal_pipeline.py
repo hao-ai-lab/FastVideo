@@ -19,6 +19,7 @@ from fastvideo.models.schedulers.scheduling_self_forcing_flow_match import (
     SelfForcingFlowMatchScheduler)
 from fastvideo.pipelines.basic.wan.wangame_causal_dmd_pipeline import (
     WanGameCausalDMDPipeline)
+from fastvideo.pipelines.stages.decoding import DecodingStage
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
@@ -60,18 +61,18 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
         self.vae.requires_grad_(False)
 
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
-        assert self.timestep_shift == 3.0, f"flow_shift must be 3.0, but got {self.timestep_shift}"
         self.noise_scheduler = SelfForcingFlowMatchScheduler(
             shift=self.timestep_shift, sigma_min=0.0, extra_one_step=True)
         self.noise_scheduler.set_timesteps(num_inference_steps=1000,
                                            training=True)
 
-        self.training_args.pipeline_config.dmd_denoising_steps = [
-            1000, 666, 333
-        ]
+        self.training_args.pipeline_config.dmd_denoising_steps = [1000, 666, 333, 0]
+        self.add_stage(stage_name="decoding_stage",
+                       stage=DecodingStage(vae=self.get_module("vae")))
+
         logger.info("dmd_denoising_steps: %s",
                     self.training_args.pipeline_config.dmd_denoising_steps)
-        self.dmd_denoising_steps = torch.tensor([1000, 666, 333],
+        self.dmd_denoising_steps = torch.tensor([1000, 666, 333, 0],
                                                 dtype=torch.long,
                                                 device=get_local_torch_device())
         if training_args.warp_denoising_step:  # Warp the denoising step according to the scheduler time shift
@@ -189,8 +190,12 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
             training_batch.mouse_cond = None
         training_batch.infos = infos
 
-        return training_batch, trajectory_latents.to(
-            device, dtype=torch.bfloat16), trajectory_timesteps.to(device)
+        return training_batch, trajectory_latents[:, :, :self.training_args.
+                                                  num_latent_t].to(
+                                                      device,
+                                                      dtype=torch.bfloat16
+                                                  ), trajectory_timesteps.to(
+                                                      device)
 
     def _get_timestep(self,
                       min_timestep: int,
@@ -270,15 +275,14 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
 
         # Lazily cache nearest trajectory index per DMD step based on the (fixed) S timesteps
         if self._cached_closest_idx_per_dmd is None:
-            traj_ts = traj_timesteps[0].float().cpu()
-            dmd_steps = self.dmd_denoising_steps.float().cpu()
-            closest_idx = torch.argmin(
-                torch.abs(traj_ts.unsqueeze(0) - dmd_steps.unsqueeze(1)), dim=1)
-            self._cached_closest_idx_per_dmd = closest_idx.to(torch.long).cpu()
+            self._cached_closest_idx_per_dmd = torch.tensor(
+                [0, 12, 24, 36, S - 1], dtype=torch.long).cpu()
+            # [0, 1, 2, 3], dtype=torch.long).cpu()
             logger.info("self._cached_closest_idx_per_dmd: %s",
                         self._cached_closest_idx_per_dmd)
-            logger.info("corresponding timesteps: %s",
-                        traj_ts[self._cached_closest_idx_per_dmd])
+            logger.info(
+                "corresponding timesteps: %s", self.noise_scheduler.timesteps[
+                    self._cached_closest_idx_per_dmd])
 
         # Select the K indexes from traj_latents using self._cached_closest_idx_per_dmd
         # traj_latents: [B, S, C, T, H, W], self._cached_closest_idx_per_dmd: [K]
@@ -534,8 +538,7 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
             assert latent_key in latents_vis_dict and latents_vis_dict[
                 latent_key] is not None
             latent = latents_vis_dict[latent_key]
-            pixel_latent = self.validation_pipeline.decoding_stage.decode(
-                latent, training_args)
+            pixel_latent = self.decoding_stage.decode(latent, training_args)
 
             video = pixel_latent.cpu().float()
             video = video.permute(0, 2, 1, 3, 4)

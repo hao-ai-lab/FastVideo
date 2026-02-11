@@ -5,7 +5,7 @@ mkdir -p preprocess_output
 
 # Launch 8 jobs, one for each node (Total 64 GPUs)
 # Each node processes 8 consecutive files (64 total files / 8 nodes = 8 files per node)
-for node_id in {0..3}; do
+for node_id in {0..2}; do
     # Calculate the starting file number for this node
     start_file=$((node_id * 8))
     
@@ -14,7 +14,7 @@ for node_id in {0..3}; do
     sbatch --job-name=wg-pre-${node_id} \
            --output=preprocess_output/wg-node-${node_id}.out \
            --error=preprocess_output/wg-node-${node_id}.err \
-           $(pwd)/examples/training/consistency_finetune/causal_wangame_ode_init/preprocess_worker.slurm $start_file $node_id
+           $(pwd)/FastVideo/examples/training/consistency_finetune/causal_wangame_ode_init/preprocess_worker.slurm $start_file $node_id
 done
 
-echo "All 4 nodes (32 GPUs) launched successfully!"
+echo "All 3 nodes (24 GPUs) launched successfully!"
