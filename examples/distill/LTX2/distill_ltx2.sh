@@ -14,9 +14,10 @@ export TOKENIZERS_PARALLELISM=false
 
 # Use node-local Triton cache to avoid stale file handle errors on shared filesystems
 export TRITON_CACHE_DIR="/tmp/triton_cache_${SLURM_JOB_ID}_${SLURM_NODEID}"
-export WANDB_API_KEY=2f25ad37933894dbf0966c838c0b8494987f9f2f
-export PYTHONPATH=/home/hal-matthewn/FastVideo-demo/fastvideo-kernel/python:$PYTHONPATH
-export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN  # TODO: Change to VSA
+export WANDB_API_KEY=50632ebd88ffd970521cec9ab4a1a2d7e85bfc45
+export PYTHONPATH=/home/hal-matthewn/FastVideo-demo/fastvideo-kernel/python:$PYTHONPATH  # TODO: hack for paths bc of messy installation
+export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
+# export NCCL_DEBUG=INFO
 
 set -euo pipefail
 
@@ -63,7 +64,7 @@ training_args=(
 # Parallel arguments
 parallel_args=(
   --num_gpus $NUM_GPUS
-  --sp_size $NUM_GPUS
+  --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
   --hsdp_shard_dim $NUM_GPUS
