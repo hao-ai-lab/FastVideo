@@ -855,9 +855,10 @@ class TrainingArgs(FastVideoArgs):
     checkpoints_total_limit: int = 0
     resume_from_checkpoint: str = ""  # specify the checkpoint folder to resume from
     activation_offloading: bool = field(
-        default=False, 
-        metadata={"help": "Offload activations to CPU to save VRAM during training."}
-    )
+        default=False,
+        metadata={
+            "help": "Offload activations to CPU to save VRAM during training."
+        })
 
     # optimizer & scheduler
     num_train_epochs: int = 0
@@ -1124,6 +1125,12 @@ class TrainingArgs(FastVideoArgs):
                             help="Directory for logging")
 
         # Training configuration
+        parser.add_argument(
+            "--activation-offloading",
+            action=StoreBoolean,
+            default=False,
+            help="Offload activations to CPU to save VRAM."
+        )
         parser.add_argument("--num-train-epochs",
                             type=int,
                             help="Number of training epochs")
