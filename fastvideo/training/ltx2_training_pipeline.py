@@ -66,7 +66,7 @@ class LTX2TrainingPipeline(TrainingPipeline):
         self.seed = training_args.seed
 
         assert self.seed is not None, "seed must be set"
-        set_random_seed(self.seed)
+        set_random_seed(self.seed + self.global_rank)
         self.transformer.train()
 
         if training_args.enable_gradient_checkpointing_type is not None:

@@ -1410,6 +1410,7 @@ class DistillationPipeline(TrainingPipeline):
         if hasattr(self, 'transformer_2') and self.transformer_2 is not None:
             self.transformer_2.train()
         gc.collect()
+        torch.cuda.empty_cache()
 
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,
                                        training_args: TrainingArgs, step: int):
@@ -1514,12 +1515,12 @@ class DistillationPipeline(TrainingPipeline):
 
         # Set random seeds for deterministic training
         self.noise_random_generator = torch.Generator(device="cpu").manual_seed(
-            self.seed)
+            self.seed + self.global_rank)
         self.noise_gen_cuda = torch.Generator(device="cuda").manual_seed(
-            self.seed)
+            self.seed + self.global_rank)
         self.validation_random_generator = torch.Generator(
-            device="cpu").manual_seed(self.seed)
-        logger.info("Initialized random seeds with seed: %s", seed)
+            device="cpu").manual_seed(self.seed + self.global_rank)
+        logger.info("Initialized random seeds with seed: %s", seed + self.global_rank)
 
         # Initialize current_trainstep for EMA ready checks
         #TODO: check if needed
@@ -1550,6 +1551,9 @@ class DistillationPipeline(TrainingPipeline):
         use_vsa = vsa_available and envs.FASTVIDEO_ATTENTION_BACKEND == "VIDEO_SPARSE_ATTN"
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
+            if step % 5 == 0:
+                gc.collect()
+                torch.cuda.empty_cache()
             start_time = time.perf_counter()
             if use_vsa:
                 vsa_sparsity = self.training_args.VSA_sparsity

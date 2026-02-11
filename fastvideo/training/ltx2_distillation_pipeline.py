@@ -41,7 +41,9 @@ class LTX2DistillationPipeline(DistillationPipeline):
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         self.modules["scheduler"] = FlowMatchEulerDiscreteScheduler(
-            shift=fastvideo_args.pipeline_config.flow_shift)
+            shift=fastvideo_args.pipeline_config.flow_shift,
+            sigma_min=0.0,
+        )
 
     def load_modules(
         self,
@@ -95,7 +97,9 @@ class LTX2DistillationPipeline(DistillationPipeline):
         self.vae.requires_grad_(False)
 
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler(
-            shift=self.training_args.pipeline_config.flow_shift)
+            shift=self.training_args.pipeline_config.flow_shift,
+            sigma_min=0.0,
+        )
         self.modules["scheduler"] = self.noise_scheduler
 
         self.timestep_shift = self.training_args.pipeline_config.flow_shift
@@ -177,14 +181,14 @@ class LTX2DistillationPipeline(DistillationPipeline):
 
         self.generator_ema: EMA_FSDP | None = None
         self.generator_ema_2: EMA_FSDP | None = None
-        if (self.training_args.ema_decay
-                is not None) and (self.training_args.ema_decay > 0.0):
-            self.generator_ema = EMA_FSDP(self.transformer,
-                                          decay=self.training_args.ema_decay)
-            logger.info("Initialized generator EMA with decay=%s",
-                        self.training_args.ema_decay)
-        else:
-            logger.info("Generator EMA disabled (ema_decay <= 0.0)")
+        # if (self.training_args.ema_decay
+        #         is not None) and (self.training_args.ema_decay > 0.0):
+        #     self.generator_ema = EMA_FSDP(self.transformer,
+        #                                   decay=self.training_args.ema_decay)
+        #     logger.info("Initialized generator EMA with decay=%s",
+        #                 self.training_args.ema_decay)
+        # else:
+        #     logger.info("Generator EMA disabled (ema_decay <= 0.0)")
 
     def initialize_validation_pipeline(self, training_args: TrainingArgs):
         from fastvideo.pipelines.basic.ltx2.ltx2_pipeline import LTX2Pipeline

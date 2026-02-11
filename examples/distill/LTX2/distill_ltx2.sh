@@ -2,9 +2,9 @@
 #SBATCH --job-name=ltx2_distillation
 #SBATCH --nodes=8
 #SBATCH --gres=gpu:4
-#SBATCH --ntasks-per-node=1
-#SBATCH --output=logs/ltx2_distillation.out
-#SBATCH --error=logs/ltx2_distillation.err
+#SBATCH --ntasks-per-node=4
+#SBATCH --output=logs/ltx2_distillation_%j.out
+#SBATCH --error=logs/ltx2_distillation_%j.err
 
 source .venv/bin/activate
 
@@ -15,8 +15,7 @@ export TOKENIZERS_PARALLELISM=false
 # Use node-local Triton cache to avoid stale file handle errors on shared filesystems
 export TRITON_CACHE_DIR="/tmp/triton_cache_${SLURM_JOB_ID}_${SLURM_NODEID}"
 export WANDB_API_KEY=50632ebd88ffd970521cec9ab4a1a2d7e85bfc45
-export PYTHONPATH=/home/hal-matthewn/FastVideo-demo/fastvideo-kernel/python:$PYTHONPATH  # TODO: hack for my paths bc of messy installation on the NVL72
-export FASTVIDEO_ATTENTION_BACKEND=VIDEO_SPARSE_ATTN
+export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 
 set -euo pipefail
 
@@ -25,23 +24,24 @@ set -euo pipefail
 nodes=( $( scontrol show hostnames $SLURM_JOB_NODELIST ) )
 nodes_array=($nodes)
 head_node=${nodes_array[0]}
-MASTER_ADDR=$(srun --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address)
+# MASTER_ADDR=$(srun --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address)
+MASTER_ADDR=${nodes[0]}
 MASTER_PORT=29500
 
 # 2. Get the node count automatically
-NNODES=$SLURM_NNODES
-GPUS_PER_NODE=$SLURM_GPUS_ON_NODE
-NUM_GPUS=$((NNODES * GPUS_PER_NODE))
+NNODES=8
+GPUS_PER_NODE=4
+NUM_GPUS=32
 
 echo "MASTER_ADDR=$MASTER_ADDR MASTER_PORT=$MASTER_PORT NNODES=$NNODES"
 
 # Configs
-MODEL_PATH="FastVideo/LTX2-Distilled-Diffusers"
+MODEL_PATH="Davids048/LTX2-Base-Diffusers"
 REAL_SCORE_MODEL_PATH="Davids048/LTX2-Base-Diffusers"
 FAKE_SCORE_MODEL_PATH="Davids048/LTX2-Base-Diffusers"
-DATA_DIR=data/ltx2-data
+DATA_DIR=/home/hal-shared/ltx2-data/
 VALIDATION_DIR="examples/distill/LTX2/validation.json"
-OUTPUT_DIR="checkpoints/ltx2_distillation"
+OUTPUT_DIR="ltx2_distill_8steps"
 # export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
@@ -52,7 +52,7 @@ training_args=(
   --max_train_steps 4000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 32
+  --gradient_accumulation_steps 1
   --num_latent_t 31
   --num_height 1088
   --num_width 1920
@@ -63,7 +63,7 @@ training_args=(
 # Parallel arguments
 parallel_args=(
   --num_gpus $NUM_GPUS
-  --sp_size $NUM_GPUS
+  --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
   --hsdp_shard_dim $NUM_GPUS
@@ -87,18 +87,20 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DIR"
-  --validation_steps 5
+  --validation_steps 50
   --validation_sampling_steps "8"
   --validation_guidance_scale "1.0" # used by validation inference; keep aligned with basic_ltx2_distilled defaults
+  --text-encoder-cpu-offload
 )
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 2e-6
+  --learning_rate 1e-5
   --mixed_precision "bf16"
   --training_state_checkpointing_steps 500
   --weight_only_checkpointing_steps 500
   --weight_decay 0.01
+  --betas '0.0,0.999'
   --max_grad_norm 1.0
 )
 
@@ -108,7 +110,9 @@ miscellaneous_args=(
   --checkpoints_total_limit 3
   --training_cfg_rate 0.0
   --dit_precision "fp32"
-  --ema_start_step 0
+  --use_ema True
+  --ema_decay 0.99
+  --ema_start_step 200
   --flow_shift 5  # TODO: need to determine the correct value
   --seed 1000
 )
@@ -120,9 +124,10 @@ dmd_args=(
   --max_timestep_ratio 0.98
   --generator_update_interval 5
   --real_score_guidance_scale 3
+  --fake_score_learning_rate 2e-6
+  --fake_score_betas '0.0,0.999'
   --simulate_generator_forward 
   --log_visualization # disable if oom
-  --VSA_sparsity 0.8
 )
 
 srun torchrun \
