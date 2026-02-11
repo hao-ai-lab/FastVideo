@@ -21,8 +21,15 @@ from fastvideo.attention import DistributedAttention, LocalAttention
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.logger import init_logger
+from fastvideo.configs.models.dits.waypoint_transformer import (
+    WaypointConfig,
+)
 from fastvideo.models.dits.base import BaseDiT
 from fastvideo.platforms import AttentionBackendEnum
+
+# Default config instance used for class-level attributes (matches MatrixGame pattern)
+_DEFAULT_WAYPOINT_CONFIG = WaypointConfig()
+_DEFAULT_WAYPOINT_ARCH = _DEFAULT_WAYPOINT_CONFIG.arch_config
 
 logger = init_logger(__name__)
 
@@ -581,20 +588,16 @@ class WaypointWorldModel(BaseDiT):
     - The current noise level
     """
     
-    # Required class attributes for BaseDiT
-    _fsdp_shard_conditions = [is_blocks]
+    # Required class attributes for BaseDiT (read from default config)
+    _fsdp_shard_conditions = _DEFAULT_WAYPOINT_ARCH._fsdp_shard_conditions
     _compile_conditions = []
-    param_names_mapping = {}  # Direct loading - checkpoint keys match model keys
-    reverse_param_names_mapping = {}
+    param_names_mapping = _DEFAULT_WAYPOINT_ARCH.param_names_mapping
+    reverse_param_names_mapping = _DEFAULT_WAYPOINT_ARCH.reverse_param_names_mapping
     
     def __init__(self, config, hf_config: dict = None):
-        # Skip BaseDiT.__init__ and call nn.Module.__init__ directly
-        # because Waypoint uses a different config structure
-        nn.Module.__init__(self)
-        self.config = config
-        self.hf_config = hf_config or {}
+        super().__init__(config=config, hf_config=hf_config or {})
         
-        # Required attributes for BaseDiT compatibility
+        # Required instance attributes for BaseDiT
         self.hidden_size = config.d_model
         self.num_attention_heads = config.n_heads
         self.num_channels_latents = config.channels
@@ -640,13 +643,6 @@ class WaypointWorldModel(BaseDiT):
         )
         
         self.out_norm = AdaLN(config.d_model)
-        
-        # Position buffers for single frame
-        T = config.tokens_per_frame
-        idx = torch.arange(T, dtype=torch.long)
-        self.register_buffer("_t_pos_1f", torch.empty(T, dtype=torch.long), persistent=False)
-        self.register_buffer("_y_pos_1f", idx.div(config.width, rounding_mode="floor"), persistent=False)
-        self.register_buffer("_x_pos_1f", idx.remainder(config.width), persistent=False)
     
     def forward(
         self,
@@ -722,4 +718,8 @@ class WaypointWorldModel(BaseDiT):
     def from_config(cls, config):
         """Create model from config."""
         return cls(config)
+
+
+# Entry point for model registry
+EntryClass = WaypointWorldModel
 

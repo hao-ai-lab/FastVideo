@@ -377,7 +377,7 @@ class ComposedPipelineBase(ABC):
         for module_name, module_spec in model_index.items():
             if (module_spec is None
                     or (isinstance(module_spec, (list, tuple))
-                        and len(module_spec) > 0 and module_spec[0] is None)):
+                        and all(x is None for x in module_spec))):
                 logger.warning(
                     "Module %s in model_index.json has null value, removing from required_config_modules",
                     module_name)
