@@ -8,7 +8,7 @@
   - `tests/local_tests/` for additional local/component checks.
 - Docs and guides: `docs/` (MkDocs source), with contributor docs in `docs/contributing/`.
 - Runnable examples and scripts: `examples/` and `scripts/`.
-- Static assets: `assets/`, `images/`, `videos/`, and `comfyui/assets/`.
+- Static assets: `assets/` (including `assets/images/`, `assets/videos/`, and `assets/prompts/`) and `comfyui/assets/`.
 
 ## Build, Test, and Development Commands
 - `uv pip install -e .[dev]`: editable install with lint/test extras.

@@ -903,6 +903,7 @@ class TrainingArgs(FastVideoArgs):
     lora_rank: int | None = None
     lora_alpha: int | None = None
     lora_training: bool = False
+    ltx2_first_frame_conditioning_p: float = 0.1
 
     # distillation args
     generator_update_interval: int = 5
@@ -916,6 +917,7 @@ class TrainingArgs(FastVideoArgs):
     training_state_checkpointing_steps: int = 0  # for resuming training
     weight_only_checkpointing_steps: int = 0  # for inference
     log_visualization: bool = False
+    visualization_steps: int = 0
     # simulate generator forward to match inference
     simulate_generator_forward: bool = False
     warp_denoising_step: bool = False
@@ -1079,6 +1081,9 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--log-validation",
                             action=StoreBoolean,
                             help="Whether to log validation results")
+        parser.add_argument("--visualization-steps",
+                            type=int,
+                            help="Number of visualization steps")
         parser.add_argument("--tracker-project-name",
                             type=str,
                             help="Project name for tracking")
@@ -1253,6 +1258,13 @@ class TrainingArgs(FastVideoArgs):
                             help="Whether to use LoRA training")
         parser.add_argument("--lora-rank", type=int, help="LoRA rank")
         parser.add_argument("--lora-alpha", type=int, help="LoRA alpha")
+        parser.add_argument(
+            "--ltx2-first-frame-conditioning-p",
+            type=float,
+            default=TrainingArgs.ltx2_first_frame_conditioning_p,
+            help=
+            "Probability of conditioning on the first frame during LTX-2 training",
+        )
 
         # V-MoBA parameters
         parser.add_argument(

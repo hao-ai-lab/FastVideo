@@ -173,6 +173,7 @@ class DenoisingStage(PipelineStage):
             {
                 "mouse_cond": batch.mouse_cond,
                 "keyboard_cond": batch.keyboard_cond,
+                "c2ws_plucker_emb": batch.c2ws_plucker_emb,
             },
         )
 
@@ -314,6 +315,7 @@ class DenoisingStage(PipelineStage):
                     t_expand = timestep.repeat(latent_model_input.shape[0], 1)
                 else:
                     t_expand = t.repeat(latent_model_input.shape[0])
+                t_expand = t_expand.to(get_local_torch_device())
 
                 use_meanflow = getattr(self.transformer.config, "use_meanflow",
                                        False)

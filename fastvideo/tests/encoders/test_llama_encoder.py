@@ -6,7 +6,7 @@ import pytest
 import torch
 from transformers import AutoConfig, AutoTokenizer, LlamaModel
 import gc
-from fastvideo.configs.pipelines import PipelineConfig
+from fastvideo.configs.pipelines import HunyuanConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
@@ -40,7 +40,7 @@ def test_llama_encoder():
     - Produce nearly identical outputs for the same input prompts
     """
     args = FastVideoArgs(model_path="meta-llama/Llama-2-7b-hf",
-                         pipeline_config=PipelineConfig(text_encoder_configs=(LlamaConfig(),), text_encoder_precisions=("fp16",)))
+                         pipeline_config=HunyuanConfig())
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
