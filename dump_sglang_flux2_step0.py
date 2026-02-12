@@ -77,7 +77,7 @@ def main():
         _prepare_text_ids,
         flux2_pack_latents,
     )
-    from sglang.multimodal_gen.runtime.loader.component_loader import ComponentLoader
+    from sglang.multimodal_gen.runtime.loader.component_loaders.component_loader import ComponentLoader
     from sglang.multimodal_gen.runtime.server_args import ServerArgs, set_global_server_args
     from diffusers.utils.torch_utils import randn_tensor
 
