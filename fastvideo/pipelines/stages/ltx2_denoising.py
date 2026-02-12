@@ -218,8 +218,6 @@ class LTX2DenoisingStage(PipelineStage):
         rescale_scale = batch.ltx2_rescale_scale
 
         do_cfg = batch.do_classifier_free_guidance
-        do_modality = (modality_scale_video != 1.0
-                       or modality_scale_audio != 1.0)
 
         logger.info(
             "[LTX2] Denoising start: steps=%d dtype=%s "
@@ -269,10 +267,8 @@ class LTX2DenoisingStage(PipelineStage):
                     pos_denoised = pos_outputs
                     pos_audio = None
 
-                # Pass 2: Unconditioned text (negative prompt)
-                neg_denoised = None
-                neg_audio = None
                 if do_cfg:
+                    # Pass 2: Unconditioned text (negative prompt)
                     neg_outputs = self.transformer(
                         hidden_states=latents.to(target_dtype),
                         encoder_hidden_states=neg_prompt_embeds,
@@ -286,12 +282,9 @@ class LTX2DenoisingStage(PipelineStage):
                         neg_denoised, neg_audio = neg_outputs
                     else:
                         neg_denoised = neg_outputs
+                        neg_audio = None
 
-                # Pass 3: Modality-isolated (cross-modal attn
-                # skipped)
-                mod_denoised = None
-                mod_audio = None
-                if do_modality:
+                    # Pass 3: Modality-isolated (skip cross-modal attn)
                     mod_outputs = self.transformer(
                         hidden_states=latents.to(target_dtype),
                         encoder_hidden_states=prompt_embeds,
@@ -306,25 +299,19 @@ class LTX2DenoisingStage(PipelineStage):
                         mod_denoised, mod_audio = mod_outputs
                     else:
                         mod_denoised = mod_outputs
+                        mod_audio = None
 
-                # Apply multi-modal guidance formula per stream.
-                if do_cfg or do_modality:
-                    vid = pos_denoised.clone()
-                    aud = (pos_audio.clone() if pos_audio is not None else None)
-
-                    if do_cfg and neg_denoised is not None:
-                        vid = vid + (cfg_scale_video - 1) * (pos_denoised -
-                                                             neg_denoised)
-                        if aud is not None and neg_audio is not None:
-                            aud = aud + (cfg_scale_audio - 1) * (pos_audio -
-                                                                 neg_audio)
-
-                    if do_modality and mod_denoised is not None:
-                        vid = vid + (modality_scale_video - 1) * (pos_denoised -
-                                                                  mod_denoised)
-                        if aud is not None and mod_audio is not None:
-                            aud = aud + (modality_scale_audio -
-                                         1) * (pos_audio - mod_audio)
+                    # Multi-modal guidance formula per stream.
+                    vid = (pos_denoised + (cfg_scale_video - 1) *
+                           (pos_denoised - neg_denoised) +
+                           (modality_scale_video - 1) *
+                           (pos_denoised - mod_denoised))
+                    aud = None
+                    if pos_audio is not None:
+                        aud = (pos_audio + (cfg_scale_audio - 1) *
+                               (pos_audio - neg_audio) +
+                               (modality_scale_audio - 1) *
+                               (pos_audio - mod_audio))
 
                     # Guidance rescaling (prevents saturation).
                     if rescale_scale > 0:
