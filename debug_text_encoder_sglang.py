@@ -170,36 +170,19 @@ def main():
 
     # 2. Verify inputs
     print("\n--- 1. Input verification ---")
-    # Both use same input_ids, attention_mask from tokenizer above
     print("  input_ids shape:", input_ids.shape)
     print("  attention_mask shape:", attention_mask.shape)
     print("  (Both encoders receive identical inputs from same tokenizer)")
 
-    # 3. Compare embedding output
-    print("\n--- 2. Embedding layer output ---")
-    embed_fv = _get_embed_tokens(fv_encoder)
-    embed_ref = _get_embed_tokens(sgl_encoder)
-    with torch.no_grad():
-        emb_fv = embed_fv(input_ids)
-        emb_ref = embed_ref(input_ids)
-    diff_emb = (emb_fv.float() - emb_ref.float()).abs()
-    print(f"  FastVideo emb shape: {emb_fv.shape}")
-    print(f"  SGLang    emb shape: {emb_ref.shape}")
-    print(f"  max abs diff:  {diff_emb.max().item():.6f}")
-    print(f"  mean abs diff: {diff_emb.mean().item():.6f}")
-    if diff_emb.max().item() < 1e-4:
-        print("  -> Embeddings match.")
-    else:
-        print("  -> Embeddings DIFFER. Check embed_tokens / input_ids.")
-
-    # 4. Layer-by-layer hooks
-    print("\n--- 3. Layer-by-layer comparison ---")
+    # 3. Layer-by-layer hooks (run full forward only - avoid direct submodule calls for FSDP)
+    print("\n--- 2. Layer-by-layer comparison ---")
     fv_layers = _get_model_layers(fv_encoder)
     ref_layers = _get_model_layers(sgl_encoder)
     assert len(fv_layers) == len(ref_layers), "Layer count mismatch"
 
     fv_hiddens = []
     ref_hiddens = []
+    fv_emb, ref_emb = [], []
 
     def make_hook(storage):
         def hook(module, inp, out):
@@ -207,6 +190,14 @@ def main():
             storage.append(h.detach())
         return hook
 
+    def make_pre_hook(emb_storage):
+        def pre_hook(module, inp):
+            h = inp[0] if isinstance(inp, tuple) else inp
+            emb_storage.append(h.detach())
+        return pre_hook
+
+    fv_layers[0].register_forward_pre_hook(make_pre_hook(fv_emb))
+    ref_layers[0].register_forward_pre_hook(make_pre_hook(ref_emb))
     for layer in fv_layers:
         layer.register_forward_hook(make_hook(fv_hiddens))
     for layer in ref_layers:
@@ -223,6 +214,12 @@ def main():
     with torch.no_grad():
         _ = sgl_encoder(**enc_kwargs)
 
+    if fv_emb and ref_emb:
+        print("\n--- Embedding (layer 0 input) ---")
+        diff_emb = (fv_emb[0].float() - ref_emb[0].float()).abs()
+        print(f"  max abs diff: {diff_emb.max().item():.6f}  mean: {diff_emb.mean().item():.6f}")
+        print("  -> Embeddings match." if diff_emb.max().item() < 1e-4 else "  -> Embeddings DIFFER.")
+
     first_divergent = None
     for i, (fv_h, ref_h) in enumerate(zip(fv_hiddens, ref_hiddens)):
         diff = (fv_h.float() - ref_h.float()).abs()
@@ -237,7 +234,7 @@ def main():
         print(f"\n  -> First divergent layer: {first_divergent}")
 
         # 5. Drill into first divergent layer: attention vs MLP
-        print("\n--- 4. First divergent layer: attention vs MLP ---")
+        print("\n--- 3. First divergent layer: attention vs MLP ---")
         fv_layer = fv_layers[first_divergent]
         ref_layer = ref_layers[first_divergent]
 
