@@ -216,12 +216,12 @@ class PreprocessPipeline_WanGame_ODE_Trajectory(BasePreprocessPipeline):
         features["first_frame_latent"] = cond_concat
 
         if "action_path" in valid_data and valid_data["action_path"]:
-            keyboard_cond_list = []
-            mouse_cond_list = []
+            keyboard_cond_list = [None] * len(valid_data["action_path"])
+            mouse_cond_list = [None] * len(valid_data["action_path"])
             arch_cfg = self.get_module("transformer").config.arch_config
             action_cfg = getattr(arch_cfg, "action_config", {}) or {}
             keyboard_dim = action_cfg.get("keyboard_dim_in", None)
-            for action_path in valid_data["action_path"]:
+            for idx, action_path in enumerate(valid_data["action_path"]):
                 if action_path:
                     action_data = np.load(action_path, allow_pickle=True)
                     if isinstance(
@@ -236,9 +236,10 @@ class PreprocessPipeline_WanGame_ODE_Trajectory(BasePreprocessPipeline):
                                     keyboard = keyboard[:, :keyboard_dim]
                                 else:
                                     keyboard = keyboard[:keyboard_dim]
-                            keyboard_cond_list.append(keyboard)
+                            keyboard_cond_list[idx] = keyboard
                         if "mouse" in action_dict:
-                            mouse_cond_list.append(action_dict["mouse"])
+                            mouse_cond_list[idx] = action_dict["mouse"].astype(
+                                np.float32)
                     else:
                         keyboard = action_data.astype(np.float32)
                         if keyboard_dim is not None:
@@ -246,11 +247,9 @@ class PreprocessPipeline_WanGame_ODE_Trajectory(BasePreprocessPipeline):
                                 keyboard = keyboard[:, :keyboard_dim]
                             else:
                                 keyboard = keyboard[:keyboard_dim]
-                        keyboard_cond_list.append(keyboard)
-            if keyboard_cond_list:
-                features["keyboard_cond"] = keyboard_cond_list
-            if mouse_cond_list:
-                features["mouse_cond"] = mouse_cond_list
+                        keyboard_cond_list[idx] = keyboard
+            features["keyboard_cond"] = keyboard_cond_list
+            features["mouse_cond"] = mouse_cond_list
         return features
 
     def preprocess_action_and_trajectory(self, fastvideo_args: FastVideoArgs,
@@ -327,12 +326,17 @@ class PreprocessPipeline_WanGame_ODE_Trajectory(BasePreprocessPipeline):
                     batch = ForwardBatch(**shallow_asdict(sampling_params), )
                     batch.image_embeds = [clip_features[i].unsqueeze(0)]
                     batch.image_latent = image_latents[i].unsqueeze(0)
-                    batch.keyboard_cond = (torch.from_numpy(
-                        keyboard_cond[i]).unsqueeze(0).to(device) if
-                                           keyboard_cond is not None else None)
-                    batch.mouse_cond = (torch.from_numpy(
-                        mouse_cond[i]).unsqueeze(0).to(device)
-                                        if mouse_cond is not None else None)
+                    sample_keyboard = keyboard_cond[
+                        i] if keyboard_cond is not None else None
+                    sample_mouse = mouse_cond[i] if mouse_cond is not None else None
+                    if sample_keyboard is not None and sample_mouse is not None:
+                        batch.keyboard_cond = torch.from_numpy(
+                            sample_keyboard).unsqueeze(0).to(device)
+                        batch.mouse_cond = torch.from_numpy(
+                            sample_mouse).unsqueeze(0).to(device)
+                    else:
+                        batch.keyboard_cond = None
+                        batch.mouse_cond = None
                     batch.num_inference_steps = 48
                     batch.return_trajectory_latents = True
                     # Enabling this will save the decoded trajectory videos.

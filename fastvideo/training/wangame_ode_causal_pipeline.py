@@ -66,13 +66,13 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
         self.noise_scheduler.set_timesteps(num_inference_steps=1000,
                                            training=True)
 
-        self.training_args.pipeline_config.dmd_denoising_steps = [1000, 666, 333, 0]
+        self.training_args.pipeline_config.dmd_denoising_steps = [1000, 750, 500, 250, 0]
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))
 
         logger.info("dmd_denoising_steps: %s",
                     self.training_args.pipeline_config.dmd_denoising_steps)
-        self.dmd_denoising_steps = torch.tensor([1000, 666, 333, 0],
+        self.dmd_denoising_steps = torch.tensor([1000, 750, 500, 250, 0],
                                                 dtype=torch.long,
                                                 device=get_local_torch_device())
         if training_args.warp_denoising_step:  # Warp the denoising step according to the scheduler time shift
@@ -189,6 +189,19 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
         else:
             training_batch.mouse_cond = None
         training_batch.infos = infos
+
+        # Validate action temporal dimensions match expected video frame count.
+        expected_num_frames = (self.training_args.num_latent_t - 1) * 4 + 1
+        if training_batch.keyboard_cond is not None:
+            assert training_batch.keyboard_cond.shape[1] == expected_num_frames, (
+                f"keyboard_cond temporal dim {training_batch.keyboard_cond.shape[1]} "
+                f"!= expected {expected_num_frames} "
+                f"(num_latent_t={self.training_args.num_latent_t})")
+        if training_batch.mouse_cond is not None:
+            assert training_batch.mouse_cond.shape[1] == expected_num_frames, (
+                f"mouse_cond temporal dim {training_batch.mouse_cond.shape[1]} "
+                f"!= expected {expected_num_frames} "
+                f"(num_latent_t={self.training_args.num_latent_t})")
 
         return training_batch, trajectory_latents[:, :, :self.training_args.
                                                   num_latent_t].to(
@@ -528,6 +541,57 @@ class WanGameODEInitTrainingPipeline(TrainingPipeline):
             batch.mouse_cond = mouse_cond
 
         return batch
+
+    def _post_process_validation_frames(
+            self, frames: list[np.ndarray],
+            batch: ForwardBatch) -> list[np.ndarray]:
+        """Apply action overlay to validation frames for WanGame.
+        
+        Draws keyboard (WASD) and mouse (pitch/yaw) indicators on the video frames.
+        """
+        # Check if action data is available
+        keyboard_cond = getattr(batch, 'keyboard_cond', None)
+        mouse_cond = getattr(batch, 'mouse_cond', None)
+
+        if keyboard_cond is None and mouse_cond is None:
+            return frames
+
+        # Import overlay functions
+        from fastvideo.models.dits.matrixgame.utils import (draw_keys_on_frame,
+                                                            draw_mouse_on_frame)
+
+        # Convert tensors to numpy if needed (bfloat16 -> float32 -> numpy)
+        if keyboard_cond is not None:
+            keyboard_cond = keyboard_cond.squeeze(
+                0).cpu().float().numpy()  # (T, 6)
+        if mouse_cond is not None:
+            mouse_cond = mouse_cond.squeeze(0).cpu().float().numpy()  # (T, 2)
+
+        # MatrixGame convention: keyboard [W, S, A, D, left, right], mouse [Pitch, Yaw]
+        key_names = ["W", "S", "A", "D", "left", "right"]
+
+        processed_frames = []
+        for frame_idx, frame in enumerate(frames):
+            frame = np.ascontiguousarray(frame.copy())
+
+            # Draw keyboard overlay
+            if keyboard_cond is not None and frame_idx < len(keyboard_cond):
+                keys = {
+                    key_names[i]: bool(keyboard_cond[frame_idx, i])
+                    for i in range(min(len(key_names), keyboard_cond.shape[1]))
+                }
+                draw_keys_on_frame(frame, keys, mode='universal')
+
+            # Draw mouse overlay
+            if mouse_cond is not None and frame_idx < len(mouse_cond):
+                pitch = float(mouse_cond[frame_idx, 0])
+                yaw = float(mouse_cond[frame_idx, 1])
+                draw_mouse_on_frame(frame, pitch, yaw)
+
+            processed_frames.append(frame)
+
+        return processed_frames
+
 
     def visualize_intermediate_latents(self, training_batch: TrainingBatch,
                                        training_args: TrainingArgs, step: int):

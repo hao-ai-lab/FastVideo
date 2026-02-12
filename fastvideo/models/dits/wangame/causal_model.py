@@ -36,6 +36,7 @@ from fastvideo.models.dits.wangame.hyworld_action_module import (
     WanGameActionTimeImageEmbedding,
     WanGameActionSelfAttention
 )
+from fastvideo.models.dits.hyworld.camera_rope import prope_qkv
 
 logger = init_logger(__name__)
 
@@ -81,12 +82,7 @@ class CausalWanGameCrossAttention(WanI2VCrossAttention):
         return x
 
 
-class CausalWanGameActionSelfAttention(nn.Module):
-    """
-    Causal self-attention module combining:
-    - WanGameActionSelfAttention (dual RoPE + PRoPE paths) for training with flex_attention
-    - KV caching for autoregressive inference
-    """
+class CausalWanGameActionSelfAttention(WanGameActionSelfAttention):
 
     def __init__(self,
                  dim: int,
@@ -95,27 +91,17 @@ class CausalWanGameActionSelfAttention(nn.Module):
                  sink_size: int = 0,
                  qk_norm=True,
                  eps=1e-6) -> None:
-        assert dim % num_heads == 0
-        super().__init__()
-        self.dim = dim
-        self.num_heads = num_heads
-        self.head_dim = dim // num_heads
-        self.local_attn_size = local_attn_size
-        self.sink_size = sink_size
-        self.qk_norm = qk_norm
-        self.eps = eps
-        self.max_attention_size = 32760 if local_attn_size == -1 else local_attn_size * 1560
-
-        # Inner attention module with PRoPE support
-        self.attn = WanGameActionSelfAttention(
-            dim,
-            num_heads,
+        super().__init__(
+            dim=dim,
+            num_heads=num_heads,
             local_attn_size=local_attn_size,
             sink_size=sink_size,
             qk_norm=qk_norm,
-            eps=eps)
+            eps=eps,
+        )
+        self.max_attention_size = 32760 if local_attn_size == -1 else local_attn_size * 1560
 
-        # Separate local attention for KV cache inference
+        # Local attention for KV-cache inference
         self.local_attn = LocalAttention(
             num_heads=num_heads,
             head_size=self.head_dim,
@@ -124,6 +110,60 @@ class CausalWanGameActionSelfAttention(nn.Module):
             causal=False,
             supported_attention_backends=(AttentionBackendEnum.FLASH_ATTN,
                                           AttentionBackendEnum.TORCH_SDPA))
+
+    @staticmethod
+    def _masked_flex_attn(
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        block_mask: BlockMask,
+    ) -> torch.Tensor:
+        padded_length = math.ceil(query.shape[1] / 128) * 128 - query.shape[1]
+        if padded_length > 0:
+            query = torch.cat(
+                [
+                    query,
+                    torch.zeros(
+                        [query.shape[0], padded_length, query.shape[2], query.shape[3]],
+                        device=query.device,
+                        dtype=value.dtype,
+                    ),
+                ],
+                dim=1,
+            )
+            key = torch.cat(
+                [
+                    key,
+                    torch.zeros(
+                        [key.shape[0], padded_length, key.shape[2], key.shape[3]],
+                        device=key.device,
+                        dtype=value.dtype,
+                    ),
+                ],
+                dim=1,
+            )
+            value = torch.cat(
+                [
+                    value,
+                    torch.zeros(
+                        [value.shape[0], padded_length, value.shape[2], value.shape[3]],
+                        device=value.device,
+                        dtype=value.dtype,
+                    ),
+                ],
+                dim=1,
+            )
+
+        out = flex_attention(
+            query=query.transpose(2, 1),
+            key=key.transpose(2, 1),
+            value=value.transpose(2, 1),
+            block_mask=block_mask,
+        ).transpose(2, 1)
+
+        if padded_length > 0:
+            out = out[:, :-padded_length]
+        return out
 
     def forward(self,
                 q: torch.Tensor,
@@ -144,20 +184,61 @@ class CausalWanGameActionSelfAttention(nn.Module):
             cache_start = current_start
 
         if kv_cache is None:
-            return self.attn(
-                q, k, v, freqs_cis,
-                kv_cache=None,
-                current_start=current_start,
-                cache_start=cache_start,
+            if block_mask is None:
+                raise ValueError(
+                    "block_mask must be provided for causal training attention")
+            if viewmats is None or Ks is None:
+                raise ValueError(
+                    "viewmats and Ks must be provided for WanGame causal attention")
+
+            cos, sin = freqs_cis
+            query_rope = _apply_rotary_emb(
+                q, cos, sin, is_neox_style=False).type_as(v)
+            key_rope = _apply_rotary_emb(
+                k, cos, sin, is_neox_style=False).type_as(v)
+            rope_output = self._masked_flex_attn(
+                query_rope, key_rope, v, block_mask)
+
+            # PRoPE path with the same causal mask.
+            query_prope, key_prope, value_prope, apply_fn_o = prope_qkv(
+                q.transpose(1, 2),
+                k.transpose(1, 2),
+                v.transpose(1, 2),
                 viewmats=viewmats,
                 Ks=Ks,
-                is_cache=is_cache
+                patches_x=40,
+                patches_y=22,
             )
+            query_prope = query_prope.transpose(1, 2)
+            key_prope = key_prope.transpose(1, 2)
+            value_prope = value_prope.transpose(1, 2)
+            prope_output = self._masked_flex_attn(
+                query_prope, key_prope, value_prope, block_mask)
+            prope_output = apply_fn_o(
+                prope_output.transpose(1, 2)).transpose(1, 2)
+
+            return rope_output, prope_output
         else:
             # Inference mode with KV cache
+            if viewmats is None or Ks is None:
+                raise ValueError(
+                    "viewmats and Ks must be provided for WanGame causal attention")
+
             cos, sin = freqs_cis
             roped_query = _apply_rotary_emb(q, cos, sin, is_neox_style=False).type_as(v)
             roped_key = _apply_rotary_emb(k, cos, sin, is_neox_style=False).type_as(v)
+            query_prope, key_prope, value_prope, apply_fn_o = prope_qkv(
+                q.transpose(1, 2),
+                k.transpose(1, 2),
+                v.transpose(1, 2),
+                viewmats=viewmats,
+                Ks=Ks,
+                patches_x=40,
+                patches_y=22,
+            )
+            query_prope = query_prope.transpose(1, 2).type_as(v)
+            key_prope = key_prope.transpose(1, 2).type_as(v)
+            value_prope = value_prope.transpose(1, 2).type_as(v)
 
             frame_seqlen = q.shape[1]
             current_end = current_start + roped_query.shape[1]
@@ -166,6 +247,22 @@ class CausalWanGameActionSelfAttention(nn.Module):
             kv_cache_size = kv_cache["k"].shape[1]
             num_new_tokens = roped_query.shape[1]
 
+            # rope+prope
+            if kv_cache["k"].shape[-1] == self.head_dim:
+                kv_cache["k"] = torch.cat(
+                    [kv_cache["k"], torch.zeros_like(kv_cache["k"])], dim=-1)
+                kv_cache["v"] = torch.cat(
+                    [kv_cache["v"], torch.zeros_like(kv_cache["v"])], dim=-1)
+            elif kv_cache["k"].shape[-1] != self.head_dim * 2:
+                raise ValueError(
+                    f"Unexpected kv_cache head dim: {kv_cache['k'].shape[-1]}, "
+                    f"expected {self.head_dim} or {self.head_dim * 2}")
+
+            cache_k_rope = kv_cache["k"][..., :self.head_dim]
+            cache_k_prope = kv_cache["k"][..., self.head_dim:]
+            cache_v_rope = kv_cache["v"][..., :self.head_dim]
+            cache_v_prope = kv_cache["v"][..., self.head_dim:]
+
             if self.local_attn_size != -1 and (current_end > kv_cache["global_end_index"].item()) and (
                     num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size):
                 # Calculate the number of new tokens added in this step
@@ -173,36 +270,53 @@ class CausalWanGameActionSelfAttention(nn.Module):
                 # Clone the source slice to avoid overlapping memory error
                 num_evicted_tokens = num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
                 num_rolled_tokens = kv_cache["local_end_index"].item() - num_evicted_tokens - sink_tokens
-                kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                    kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
-                kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
-                    kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+                cache_k_rope[:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+                    cache_k_rope[:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+                cache_v_rope[:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+                    cache_v_rope[:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+                cache_k_prope[:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+                    cache_k_prope[:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
+                cache_v_prope[:, sink_tokens:sink_tokens + num_rolled_tokens] = \
+                    cache_v_prope[:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
                 # Insert the new keys/values at the end
                 local_end_index = kv_cache["local_end_index"].item() + current_end - \
                     kv_cache["global_end_index"].item() - num_evicted_tokens
                 local_start_index = local_end_index - num_new_tokens
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
+                cache_k_rope[:, local_start_index:local_end_index] = roped_key
+                cache_v_rope[:, local_start_index:local_end_index] = v
+                cache_k_prope[:, local_start_index:local_end_index] = key_prope
+                cache_v_prope[:, local_start_index:local_end_index] = value_prope
             else:
                 # Assign new keys/values directly up to current_end
                 local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
                 local_start_index = local_end_index - num_new_tokens
                 kv_cache["k"] = kv_cache["k"].detach()
                 kv_cache["v"] = kv_cache["v"].detach()
+                cache_k_rope = kv_cache["k"][..., :self.head_dim]
+                cache_k_prope = kv_cache["k"][..., self.head_dim:]
+                cache_v_rope = kv_cache["v"][..., :self.head_dim]
+                cache_v_prope = kv_cache["v"][..., self.head_dim:]
                 # logger.info("kv_cache['k'] is in comp graph: %s", kv_cache["k"].requires_grad or kv_cache["k"].grad_fn is not None)
-                kv_cache["k"][:, local_start_index:local_end_index] = roped_key
-                kv_cache["v"][:, local_start_index:local_end_index] = v
+                cache_k_rope[:, local_start_index:local_end_index] = roped_key
+                cache_v_rope[:, local_start_index:local_end_index] = v
+                cache_k_prope[:, local_start_index:local_end_index] = key_prope
+                cache_v_prope[:, local_start_index:local_end_index] = value_prope
 
-            x = self.local_attn(
+            rope_x = self.local_attn(
                 roped_query,
-                kv_cache["k"][:, max(0, local_end_index - self.max_attention_size):local_end_index],
-                kv_cache["v"][:, max(0, local_end_index - self.max_attention_size):local_end_index]
+                cache_k_rope[:, max(0, local_end_index - self.max_attention_size):local_end_index],
+                cache_v_rope[:, max(0, local_end_index - self.max_attention_size):local_end_index]
             )
+            prope_x = self.local_attn(
+                query_prope,
+                cache_k_prope[:, max(0, local_end_index - self.max_attention_size):local_end_index],
+                cache_v_prope[:, max(0, local_end_index - self.max_attention_size):local_end_index]
+            )
+            prope_x = apply_fn_o(prope_x.transpose(1, 2)).transpose(1, 2)
             kv_cache["global_end_index"].fill_(current_end)
             kv_cache["local_end_index"].fill_(local_end_index)
 
-            # In inference mode, only return rope output; prope is zero
-            return x, torch.zeros_like(x)
+            return rope_x, prope_x
 
 
 class CausalWanGameActionTransformerBlock(nn.Module):
