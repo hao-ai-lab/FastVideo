@@ -146,7 +146,7 @@ def main():
     from sglang.multimodal_gen.runtime.loader.component_loaders.component_loader import (
         ComponentLoader,
     )
-    from sglang.multimodal_gen.runtime.server_args import ServerArgs
+    from sglang.multimodal_gen.runtime.server_args import ServerArgs, set_global_server_args
     from sglang.multimodal_gen.configs.pipeline_configs.flux import (
         Flux2KleinPipelineConfig as SGLangFlux2KleinConfig,
     )
@@ -155,8 +155,11 @@ def main():
     sgl_args = ServerArgs(
         model_path=root,
         pipeline_config=SGLangFlux2KleinConfig(),
+        hsdp_shard_dim=1,
+        hsdp_replicate_dim=1,
     )
     sgl_args.model_paths = {"text_encoder": text_encoder_path}
+    set_global_server_args(sgl_args)
     sgl_loader = ComponentLoader.for_component_type("text_encoder", "transformers")
     sgl_encoder, _ = sgl_loader.load(
         text_encoder_path, sgl_args, "text_encoder", "transformers"
