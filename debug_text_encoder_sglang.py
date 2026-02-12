@@ -117,16 +117,16 @@ def main():
     input_ids = inputs["input_ids"].to(device)
     attention_mask = inputs["attention_mask"].to(device)
 
-    # 1. Init SGLang distributed + TP so custom text encoder (VocabParallelEmbedding) can load
+    # 1. Init distributed for BOTH: FastVideo and SGLang use separate TP state
+    from fastvideo.distributed import maybe_init_distributed_environment_and_model_parallel as fv_init
+    fv_init(tp_size=1, sp_size=1)
+
     from sglang.multimodal_gen.runtime.distributed import (
-        maybe_init_distributed_environment_and_model_parallel,
+        maybe_init_distributed_environment_and_model_parallel as sgl_init,
     )
-    maybe_init_distributed_environment_and_model_parallel(
-        tp_size=1, sp_size=1, enable_cfg_parallel=False
-    )
+    sgl_init(tp_size=1, sp_size=1, enable_cfg_parallel=False)
 
     # 2. Load both encoders
-
     from fastvideo.configs.pipelines.flux_2 import Flux2KleinPipelineConfig
     from fastvideo.forward_context import set_forward_context
     from fastvideo.fastvideo_args import FastVideoArgs
