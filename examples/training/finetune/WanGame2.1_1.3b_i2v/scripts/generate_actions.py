@@ -3,13 +3,13 @@ import numpy as np
 
 # Configuration
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-BASE_OUTPUT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "actions"))
+BASE_OUTPUT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "actions_81"))
 VIDEO_OUTPUT_DIR = BASE_OUTPUT_DIR
 
 os.makedirs(VIDEO_OUTPUT_DIR, exist_ok=True)
 
 CAM_VALUE = 0.1
-FRAME_COUNT = 76
+FRAME_COUNT = 80
 
 # Action Mapping
 KEY_TO_INDEX = {
@@ -246,7 +246,7 @@ if __name__ == "__main__":
         for i in range(1, 5):
             key_seq, mouse_seq = build_random_sequence_either_or(keys_basic_still, mouse_basic_still, granularity, rng)
             configs.append(
-                (f"key_camera_excl_1_action_rand_{i}{suffix}", key_seq, mouse_seq)
+                (f"key_camera_excl_2_action_rand_{i}{suffix}", key_seq, mouse_seq)
             )
 
     # Group 11b: key_camera_excl_1_action_rand (either key OR camera per block, WASD/UDLR+still)
