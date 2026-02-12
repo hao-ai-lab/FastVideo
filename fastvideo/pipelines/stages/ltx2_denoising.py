@@ -141,6 +141,7 @@ class LTX2DenoisingStage(PipelineStage):
                 video_shape)
         else:
             token_count = 1
+
         timestep_template = torch.ones(
             (latents.shape[0], token_count),
             device=latents.device,
@@ -209,12 +210,29 @@ class LTX2DenoisingStage(PipelineStage):
                 device=latents.device,
                 dtype=torch.float32,
             )
+        # Multi-modal CFG parameters (per-stream scales).
+        cfg_scale_video = batch.ltx2_cfg_scale_video
+        cfg_scale_audio = batch.ltx2_cfg_scale_audio
+        modality_scale_video = batch.ltx2_modality_scale_video
+        modality_scale_audio = batch.ltx2_modality_scale_audio
+        rescale_scale = batch.ltx2_rescale_scale
+
+        do_cfg = batch.do_classifier_free_guidance
+        do_modality = (modality_scale_video != 1.0
+                       or modality_scale_audio != 1.0)
+
         logger.info(
-            "[LTX2] Denoising start: steps=%d dtype=%s guidance=%s "
+            "[LTX2] Denoising start: steps=%d dtype=%s "
+            "cfg_video=%.1f cfg_audio=%.1f mod_video=%.1f "
+            "mod_audio=%.1f rescale=%.2f "
             "sigmas_shape=%s latents_shape=%s",
             batch.num_inference_steps,
             target_dtype,
-            batch.guidance_scale,
+            cfg_scale_video,
+            cfg_scale_audio,
+            modality_scale_video,
+            modality_scale_audio,
+            rescale_scale,
             tuple(sigmas.shape),
             tuple(latents.shape),
         )
@@ -235,6 +253,7 @@ class LTX2DenoisingStage(PipelineStage):
                     attn_metadata=None,
                     forward_batch=batch,
             ):
+                # Pass 1: Full conditioning (text + cross-modal)
                 pos_outputs = self.transformer(
                     hidden_states=latents.to(target_dtype),
                     encoder_hidden_states=prompt_embeds,
@@ -250,8 +269,10 @@ class LTX2DenoisingStage(PipelineStage):
                     pos_denoised = pos_outputs
                     pos_audio = None
 
-                # Only run negative pass if CFG is enabled
-                if batch.do_classifier_free_guidance:
+                # Pass 2: Unconditioned text (negative prompt)
+                neg_denoised = None
+                neg_audio = None
+                if do_cfg:
                     neg_outputs = self.transformer(
                         hidden_states=latents.to(target_dtype),
                         encoder_hidden_states=neg_prompt_embeds,
@@ -265,12 +286,58 @@ class LTX2DenoisingStage(PipelineStage):
                         neg_denoised, neg_audio = neg_outputs
                     else:
                         neg_denoised = neg_outputs
-                        neg_audio = None
-                    pos_denoised = pos_denoised + (batch.guidance_scale - 1) * (
-                        pos_denoised - neg_denoised)
-                    if pos_audio is not None and neg_audio is not None:
-                        pos_audio = pos_audio + (batch.guidance_scale -
-                                                 1) * (pos_audio - neg_audio)
+
+                # Pass 3: Modality-isolated (cross-modal attn
+                # skipped)
+                mod_denoised = None
+                mod_audio = None
+                if do_modality:
+                    mod_outputs = self.transformer(
+                        hidden_states=latents.to(target_dtype),
+                        encoder_hidden_states=prompt_embeds,
+                        encoder_attention_mask=prompt_mask,
+                        timestep=timestep,
+                        audio_hidden_states=audio_latents,
+                        audio_encoder_hidden_states=audio_context_p,
+                        audio_timestep=audio_timestep,
+                        skip_cross_modal_attn=True,
+                    )
+                    if isinstance(mod_outputs, tuple):
+                        mod_denoised, mod_audio = mod_outputs
+                    else:
+                        mod_denoised = mod_outputs
+
+                # Apply multi-modal guidance formula per stream.
+                if do_cfg or do_modality:
+                    vid = pos_denoised.clone()
+                    aud = (pos_audio.clone() if pos_audio is not None else None)
+
+                    if do_cfg and neg_denoised is not None:
+                        vid = vid + (cfg_scale_video - 1) * (pos_denoised -
+                                                             neg_denoised)
+                        if aud is not None and neg_audio is not None:
+                            aud = aud + (cfg_scale_audio - 1) * (pos_audio -
+                                                                 neg_audio)
+
+                    if do_modality and mod_denoised is not None:
+                        vid = vid + (modality_scale_video - 1) * (pos_denoised -
+                                                                  mod_denoised)
+                        if aud is not None and mod_audio is not None:
+                            aud = aud + (modality_scale_audio -
+                                         1) * (pos_audio - mod_audio)
+
+                    # Guidance rescaling (prevents saturation).
+                    if rescale_scale > 0:
+                        f_v = pos_denoised.std() / vid.std()
+                        f_v = rescale_scale * f_v + (1 - rescale_scale)
+                        vid = vid * f_v
+                        if aud is not None:
+                            f_a = pos_audio.std() / aud.std()
+                            f_a = rescale_scale * f_a + (1 - rescale_scale)
+                            aud = aud * f_a
+
+                    pos_denoised = vid
+                    pos_audio = aud
 
             sigma_value = sigma.to(torch.float32) if isinstance(
                 sigma, torch.Tensor) else torch.tensor(
@@ -281,6 +348,7 @@ class LTX2DenoisingStage(PipelineStage):
             dt = sigma_next - sigma
             velocity = ((latents.float() - pos_denoised.float()) /
                         sigma_value).to(latents.dtype)
+
             latents = (latents.float() + velocity.float() * dt).to(
                 latents.dtype)
             if pos_audio is not None and audio_latents is not None:
