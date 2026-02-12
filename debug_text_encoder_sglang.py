@@ -277,6 +277,49 @@ def main():
         if fv_mlp_out and ref_mlp_out:
             d_mlp = (fv_mlp_out[0].float() - ref_mlp_out[0].float()).abs()
             print(f"  MLP output:       max_diff={d_mlp.max().item():.6f} mean_diff={d_mlp.mean().item():.6f}")
+
+        # 6. Layer 0 granular: input_norm, attn, post_attn_norm, mlp
+        print("\n--- 4. Layer 0 granular (input_norm -> attn -> post_attn_norm -> mlp) ---")
+        fv_layer = fv_layers[0]
+        ref_layer = ref_layers[0]
+
+        def make_out_hook(storage):
+            def h(module, inp, out):
+                x = out[0] if isinstance(out, tuple) else out
+                if isinstance(x, tuple):
+                    x = x[0]
+                storage.append(x.detach())
+            return h
+
+        fv_in, ref_in = [], []
+        fv_attn, ref_attn = [], []
+        fv_post, ref_post = [], []
+        fv_mlp2, ref_mlp2 = [], []
+
+        fv_layer.input_layernorm.register_forward_hook(make_out_hook(fv_in))
+        ref_layer.input_layernorm.register_forward_hook(make_out_hook(ref_in))
+        fv_layer.self_attn.register_forward_hook(make_out_hook(fv_attn))
+        ref_layer.self_attn.register_forward_hook(make_out_hook(ref_attn))
+        fv_layer.post_attention_layernorm.register_forward_hook(make_out_hook(fv_post))
+        ref_layer.post_attention_layernorm.register_forward_hook(make_out_hook(ref_post))
+        fv_layer.mlp.register_forward_hook(make_out_hook(fv_mlp2))
+        ref_layer.mlp.register_forward_hook(make_out_hook(ref_mlp2))
+
+        with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
+            _ = fv_encoder(**enc_kwargs)
+        with torch.no_grad(), sgl_set_forward_context(current_timestep=0, attn_metadata=None):
+            _ = sgl_encoder(**enc_kwargs)
+
+        for name, fa, ra in [
+            ("input_layernorm (-> attn)", fv_in, ref_in),
+            ("self_attn output", fv_attn, ref_attn),
+            ("post_attention_layernorm (-> mlp)", fv_post, ref_post),
+            ("mlp output", fv_mlp2, ref_mlp2),
+        ]:
+            if fa and ra:
+                d = (fa[0].float() - ra[0].float()).abs()
+                status = "OK" if d.max().item() < 1e-3 else "DIVERGE"
+                print(f"  {name}: max={d.max().item():.6f} mean={d.mean().item():.6f}  {status}")
     else:
         print("\n  -> All layers match within tolerance.")
 
