@@ -7,10 +7,10 @@ export WANDB_MODE=online
 export TOKENIZERS_PARALLELISM=false
 
 MODEL_PATH="Wan2.1-Fun-1.3B-InP-Diffusers"
-DATA_DIR="mc_wasd_action/preprocessed"
+DATA_DIR="../traindata_0209_1500/ode_init_mc/preprocessed/combined_parquet_dataset/worker_0"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
-NUM_GPUS=8
-# export CUDA_VISIBLE_DEVICES=4,5,6,7
+NUM_GPUS=4
+export CUDA_VISIBLE_DEVICES=4,5,6,7
 # IP=[MASTER NODE IP]
 
 # Training arguments
@@ -18,11 +18,11 @@ training_args=(
   --tracker_project_name "wangame_ode_init"
   --output_dir "checkpoints/wangame_ode_init"
   --override_transformer_cls_name "CausalWanGameActionTransformer3DModel"
-  --wandb_run_name "wangame_ode_init"
-  --max_train_steps 10000000
+  --wandb_run_name "0211_1830_steps2000_bs_8"
+  --max_train_steps 2000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 4
+  --gradient_accumulation_steps 1
   --num_latent_t 21
   --num_height 352
   --num_width 640
@@ -55,8 +55,10 @@ dataset_args=(
 # Validation arguments
 validation_args=(
   --log_validation
+  --log-visualization
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
   --validation_steps 100
+  --visualization-steps 100
   --validation_sampling_steps "50"
   --validation_guidance_scale "6.0"
 )
@@ -65,8 +67,8 @@ validation_args=(
 optimizer_args=(
   --learning_rate 6e-6
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 10000000
-  --training_state_checkpointing_steps 10000000
+  --weight_only_checkpointing_steps 200
+  --training_state_checkpointing_steps 200
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )

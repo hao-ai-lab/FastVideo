@@ -14,7 +14,8 @@ from fastvideo.configs.pipelines.wan import (SelfForcingWanT2V480PConfig,
                                              WanGameI2V480PConfig,
                                              WanI2V480PConfig, WanI2V720PConfig,
                                              WanLingBotI2V480PConfig,
-                                             WanT2V480PConfig, WanT2V720PConfig)
+                                             WanT2V480PConfig, WanT2V720PConfig,
+                                             SelfForcingWanGameI2V480PConfig)
 
 __all__ = [
     "HunyuanConfig", "FastHunyuanConfig", "PipelineConfig",
@@ -23,6 +24,6 @@ __all__ = [
     "WanI2V720PConfig", "StepVideoT2VConfig", "SelfForcingWanT2V480PConfig",
     "CosmosConfig", "Cosmos25Config", "LTX2T2VConfig", "HYWorldConfig",
     "SD35Config", "LingBotWorldI2V480PConfig",
-    "WanGameI2V480PConfig", "WanLingBotI2V480PConfig",
+    "WanGameI2V480PConfig", "WanLingBotI2V480PConfig", "SelfForcingWanGameI2V480PConfig",
     "get_pipeline_config_cls_from_name"
 ]

@@ -4,8 +4,8 @@ export PYTHONPATH="/mnt/fast-disks/hao_lab/kaiqin/FastVideo_wangame:$PYTHONPATH"
 
 GPU_NUM=1 # 2,4,8
 MODEL_PATH="./Wan2.1-Fun-1.3B-InP-Diffusers"
-DATA_MERGE_PATH="mc_wasd_action/merge.txt"
-OUTPUT_DIR="mc_wasd_action/preprocessed"
+DATA_MERGE_PATH="../traindata_0209_1500/ode_init_mc/merge.txt"
+OUTPUT_DIR="../traindata_0209_1500/ode_init_mc/preprocessed"
 
 torchrun --nproc_per_node=$GPU_NUM \
     fastvideo/pipelines/preprocess/v1_preprocess.py \

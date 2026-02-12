@@ -7,11 +7,11 @@ from fastvideo.pipelines import ComposedPipelineBase, LoRAPipeline
 
 from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
                                         CausalDMDDenosingStage,
-                                        ImageEncodingStage,
+                                        MatrixGameImageEncodingStage,
                                         InputValidationStage,
                                         LatentPreparationStage,
                                         TextEncodingStage)
-from fastvideo.pipelines.stages.image_encoding import (ImageVAEEncodingStage)
+from fastvideo.pipelines.stages.image_encoding import (MatrixGameImageVAEEncodingStage)
 
 logger = init_logger(__name__)
 
@@ -37,7 +37,7 @@ class WanGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
                 and self.get_module("image_processor", None) is not None):
             self.add_stage(
                 stage_name="image_encoding_stage",
-                stage=ImageEncodingStage(
+                stage=MatrixGameImageEncodingStage(
                     image_encoder=self.get_module("image_encoder"),
                     image_processor=self.get_module("image_processor"),
                 ))
@@ -51,7 +51,7 @@ class WanGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
                            transformer=self.get_module("transformer", None)))
 
         self.add_stage(stage_name="image_latent_preparation_stage",
-                       stage=ImageVAEEncodingStage(vae=self.get_module("vae")))
+                       stage=MatrixGameImageVAEEncodingStage(vae=self.get_module("vae")))
 
         self.add_stage(stage_name="denoising_stage",
                        stage=CausalDMDDenosingStage(
