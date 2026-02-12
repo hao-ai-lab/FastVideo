@@ -249,7 +249,7 @@ def test_video_sparse_attention_backward():
     print("=" * 60)
     for mode in ['backward']:
         generate_error_graphs(h, d, error_mode=mode)
-        # generate_error_graphs_qkdiff(h, d, error_mode=mode)
+        generate_error_graphs_qkdiff(h, d, error_mode=mode)
     print("\nAnalysis completed for all modes.")
 
 if __name__ == "__main__":

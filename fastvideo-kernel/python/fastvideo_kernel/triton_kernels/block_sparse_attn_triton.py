@@ -29,7 +29,7 @@ configs = [
 
 
 # ──────────────────────────── SPARSE ADDITION BEGIN ───────────────────────────
-@triton.autotune(configs, key=["N_CTX", "HEAD_DIM"])
+@triton.autotune(configs, key=["N_CTX_Q", "HEAD_DIM"])
 @triton.jit
 def _attn_fwd_sparse(
         Q,
@@ -60,7 +60,8 @@ def _attn_fwd_sparse(
         stride_on,
         Z,
         H,
-        N_CTX,  #
+        N_CTX_Q,  #
+        N_CTX_KV,  #
         HEAD_DIM: tl.constexpr,  #
         BLOCK_M: tl.constexpr,
         BLOCK_N: tl.constexpr,
@@ -75,24 +76,29 @@ def _attn_fwd_sparse(
     off_hz = tl.program_id(1)  # fused (batch, head)
     b = off_hz // H
     h = off_hz % H
-    q_tiles = N_CTX // BLOCK_M
+    q_tiles = N_CTX_Q // BLOCK_M
     meta_base = ((b * H + h) * q_tiles + q_blk)
 
     kv_blocks = tl.load(q2k_num + meta_base)  # int32
     kv_ptr = q2k_index + meta_base * max_kv_blks  # ptr to list
 
     # ----- base pointers -----
-    qvk_off = (b.to(tl.int64) * stride_qz + h.to(tl.int64) * stride_qh)
+    # Note: when q and kv have different sequence lengths, their per-(batch,head)
+    # strides differ, so we must compute separate base offsets.
+    q_off = (b.to(tl.int64) * stride_qz + h.to(tl.int64) * stride_qh)
+    k_off = (b.to(tl.int64) * stride_kz + h.to(tl.int64) * stride_kh)
+    v_off = (b.to(tl.int64) * stride_vz + h.to(tl.int64) * stride_vh)
+    o_off = (b.to(tl.int64) * stride_oz + h.to(tl.int64) * stride_oh)
 
-    Q_ptr = tl.make_block_ptr(base=Q + qvk_off,
-                              shape=(N_CTX, HEAD_DIM),
+    Q_ptr = tl.make_block_ptr(base=Q + q_off,
+                              shape=(N_CTX_Q, HEAD_DIM),
                               strides=(stride_qm, stride_qk),
                               offsets=(q_blk * BLOCK_M, 0),
                               block_shape=(BLOCK_M, HEAD_DIM),
                               order=(1, 0))
 
-    K_base = tl.make_block_ptr(base=K + qvk_off,
-                               shape=(HEAD_DIM, N_CTX),
+    K_base = tl.make_block_ptr(base=K + k_off,
+                               shape=(HEAD_DIM, N_CTX_KV),
                                strides=(stride_kk, stride_kn),
                                offsets=(0, 0),
                                block_shape=(HEAD_DIM, BLOCK_N),
@@ -100,15 +106,15 @@ def _attn_fwd_sparse(
 
     v_order: tl.constexpr = (0, 1) if V.dtype.element_ty == tl.float8e5 else (1,
                                                                               0)
-    V_base = tl.make_block_ptr(base=V + qvk_off,
-                               shape=(N_CTX, HEAD_DIM),
+    V_base = tl.make_block_ptr(base=V + v_off,
+                               shape=(N_CTX_KV, HEAD_DIM),
                                strides=(stride_vk, stride_vn),
                                offsets=(0, 0),
                                block_shape=(BLOCK_N, HEAD_DIM),
                                order=v_order)
 
-    O_ptr = tl.make_block_ptr(base=Out + qvk_off,
-                              shape=(N_CTX, HEAD_DIM),
+    O_ptr = tl.make_block_ptr(base=Out + o_off,
+                              shape=(N_CTX_Q, HEAD_DIM),
                               strides=(stride_om, stride_on),
                               offsets=(q_blk * BLOCK_M, 0),
                               block_shape=(BLOCK_M, HEAD_DIM),
@@ -150,7 +156,7 @@ def _attn_fwd_sparse(
     # ----- epilogue -----
     m_i += tl.math.log2(l_i)
     acc = acc / l_i[:, None]
-    tl.store(M + off_hz * N_CTX + offs_m, m_i)
+    tl.store(M + off_hz * N_CTX_Q + offs_m, m_i)
     tl.store(O_ptr, acc.to(Out.type.element_ty))
 
 
@@ -201,7 +207,7 @@ def _attn_bwd_dkdv(
         stride_tok,
         stride_d,  #
         H,
-        N_CTX,
+        N_CTX_KV,
         BLOCK_M1: tl.constexpr,  #
         BLOCK_N1: tl.constexpr,  #
         HEAD_DIM: tl.constexpr,  #
@@ -221,8 +227,8 @@ def _attn_bwd_dkdv(
     off_hz = tl.program_id(2)  # fused (batch, head)
     b = off_hz // H
     h = off_hz % H
-    q_tiles = N_CTX // BLOCK_N1
-    meta_base = ((b * H + h) * q_tiles + kv_blk)
+    kv_tiles = N_CTX_KV // BLOCK_N1
+    meta_base = ((b * H + h) * kv_tiles + kv_blk)
 
     q_blocks = tl.load(k2q_num + meta_base)  # int32
     q_ptr = k2q_index + meta_base * max_q_blks  # ptr to list
@@ -472,19 +478,235 @@ def _attn_bwd(
     tl.store(dq_ptrs, dq)
 
 
+@triton.jit
+def _attn_bwd_dkdv_kernel(
+        Q,
+        K,
+        V,
+        sm_scale,  #
+        DO,  #
+        DK,
+        DV,  #
+        M,
+        D,
+        k2q_index,
+        k2q_num,
+        max_q_blks,
+        variable_block_sizes,
+        # shared token/dim strides (assumed contiguous along token and dim)
+        stride_tok,
+        stride_d,  #
+        # batch/head strides (may differ between Q and KV)
+        stride_qz,
+        stride_qh,
+        stride_kz,
+        stride_kh,
+        stride_vz,
+        stride_vh,
+        stride_doz,
+        stride_doh,
+        stride_dkz,
+        stride_dkh,
+        stride_dvz,
+        stride_dvh,
+        H,
+        N_CTX_Q,
+        N_CTX_KV,
+        BLOCK_M1: tl.constexpr,  #
+        BLOCK_N1: tl.constexpr,  #
+        HEAD_DIM: tl.constexpr):
+    """
+    Backward kernel that computes dK and dV for each KV block (64 tokens).
+    Grid:
+      pid0: kv_blk in [0, N_CTX_KV/BLOCK_N1)
+      pid2: fused (batch, head) in [0, B*H)
+    """
+    bhid = tl.program_id(2)
+    b = bhid // H
+    h = bhid % H
+    kv_blk = tl.program_id(0)
+
+    q_adj = (b.to(tl.int64) * stride_qz + h.to(tl.int64) * stride_qh)
+    kv_adj_k = (b.to(tl.int64) * stride_kz + h.to(tl.int64) * stride_kh)
+    kv_adj_v = (b.to(tl.int64) * stride_vz + h.to(tl.int64) * stride_vh)
+    do_adj = (b.to(tl.int64) * stride_doz + h.to(tl.int64) * stride_doh)
+    dk_adj = (b.to(tl.int64) * stride_dkz + h.to(tl.int64) * stride_dkh)
+    dv_adj = (b.to(tl.int64) * stride_dvz + h.to(tl.int64) * stride_dvh)
+
+    Q = Q + q_adj
+    K = K + kv_adj_k
+    V = V + kv_adj_v
+    DO = DO + do_adj
+    DK = DK + dk_adj
+    DV = DV + dv_adj
+
+    # M and D (delta) are always sized by Q length.
+    M = M + (bhid * N_CTX_Q).to(tl.int64)
+    D = D + (bhid * N_CTX_Q).to(tl.int64)
+
+    offs_k = tl.arange(0, HEAD_DIM)
+    start_n = kv_blk * BLOCK_N1
+    offs_n = start_n + tl.arange(0, BLOCK_N1)
+
+    # load K and V: they stay in SRAM throughout the inner loop.
+    k = tl.load(K + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
+    v = tl.load(V + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d)
+
+    dv_acc = tl.zeros([BLOCK_N1, HEAD_DIM], dtype=tl.float32)
+    dk_acc = tl.zeros([BLOCK_N1, HEAD_DIM], dtype=tl.float32)
+
+    num_steps = N_CTX_Q // BLOCK_M1
+    dk_acc, dv_acc = _attn_bwd_dkdv(
+        dk_acc,
+        dv_acc,
+        Q,
+        k,
+        v,
+        sm_scale,
+        DO,
+        M,
+        D,
+        k2q_index,
+        k2q_num,
+        max_q_blks,
+        variable_block_sizes,
+        stride_tok,
+        stride_d,
+        H,
+        N_CTX_KV,
+        BLOCK_M1=BLOCK_M1,
+        BLOCK_N1=BLOCK_N1,
+        HEAD_DIM=HEAD_DIM,
+        start_n=start_n,
+        start_m=0,
+        num_steps=num_steps,
+    )
+
+    dv_ptrs = DV + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
+    tl.store(dv_ptrs, dv_acc)
+
+    dk_acc *= sm_scale
+    dk_ptrs = DK + offs_n[:, None] * stride_tok + offs_k[None, :] * stride_d
+    tl.store(dk_ptrs, dk_acc)
+
+
+@triton.jit
+def _attn_bwd_dq_kernel(
+        Q,
+        K,
+        V,
+        DO,  #
+        DQ,
+        M,
+        D,
+        q2k_index,
+        q2k_num,
+        max_kv_blks,
+        variable_block_sizes,
+        # shared token/dim strides (assumed contiguous along token and dim)
+        stride_tok,
+        stride_d,  #
+        # batch/head strides (may differ between Q and KV)
+        stride_qz,
+        stride_qh,
+        stride_kz,
+        stride_kh,
+        stride_vz,
+        stride_vh,
+        stride_doz,
+        stride_doh,
+        stride_dqz,
+        stride_dqh,
+        H,
+        N_CTX_Q,
+        BLOCK_M2: tl.constexpr,  #
+        BLOCK_N2: tl.constexpr,  #
+        HEAD_DIM: tl.constexpr):
+    """
+    Backward kernel that computes dQ for each Q block (64 tokens).
+    Grid:
+      pid0: q_blk in [0, N_CTX_Q/BLOCK_M2)
+      pid2: fused (batch, head) in [0, B*H)
+    """
+    LN2 = 0.6931471824645996  # = ln(2)
+    bhid = tl.program_id(2)
+    b = bhid // H
+    h = bhid % H
+    q_blk = tl.program_id(0)
+
+    q_adj = (b.to(tl.int64) * stride_qz + h.to(tl.int64) * stride_qh)
+    kv_adj_k = (b.to(tl.int64) * stride_kz + h.to(tl.int64) * stride_kh)
+    kv_adj_v = (b.to(tl.int64) * stride_vz + h.to(tl.int64) * stride_vh)
+    do_adj = (b.to(tl.int64) * stride_doz + h.to(tl.int64) * stride_doh)
+    dq_adj = (b.to(tl.int64) * stride_dqz + h.to(tl.int64) * stride_dqh)
+
+    Q = Q + q_adj
+    K = K + kv_adj_k
+    V = V + kv_adj_v
+    DO = DO + do_adj
+    DQ = DQ + dq_adj
+
+    M = M + (bhid * N_CTX_Q).to(tl.int64)
+    D = D + (bhid * N_CTX_Q).to(tl.int64)
+
+    offs_k = tl.arange(0, HEAD_DIM)
+    start_m = q_blk * BLOCK_M2
+    offs_m = start_m + tl.arange(0, BLOCK_M2)
+
+    q = tl.load(Q + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d)
+    do = tl.load(DO + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d)
+    m = tl.load(M + offs_m)[:, None]
+
+    dq_acc = tl.zeros([BLOCK_M2, HEAD_DIM], dtype=tl.float32)
+    num_steps = 0  # unused in _attn_bwd_dq
+    dq_acc = _attn_bwd_dq(
+        dq_acc,
+        q,
+        K,
+        V,
+        do,
+        m,
+        D,
+        q2k_index,
+        q2k_num,
+        max_kv_blks,
+        variable_block_sizes,
+        stride_tok,
+        stride_d,
+        H,
+        N_CTX_Q,
+        BLOCK_M2=BLOCK_M2,
+        BLOCK_N2=BLOCK_N2,
+        HEAD_DIM=HEAD_DIM,
+        start_m=start_m,
+        start_n=0,
+        num_steps=num_steps,
+    )
+
+    dq_ptrs = DQ + offs_m[:, None] * stride_tok + offs_k[None, :] * stride_d
+    dq_acc *= LN2
+    tl.store(dq_ptrs, dq_acc)
+
+
 # ──────────────────────────── SPARSE ADDITION BEGIN ───────────────────────────
 def triton_block_sparse_attn_forward(q, k, v, q2k_index, q2k_num,
                                      variable_block_sizes):
-    B, H, T, D = q.shape
+    B, H, Tq, D = q.shape
+    Tkv = k.shape[2]
     sm_scale = 1.0 / math.sqrt(D)
     max_kv_blks = q2k_index.shape[-1]
-    assert T % 64 == 0, f"T must be a multiple of 64, but got {T}"
+    assert Tq % 64 == 0, f"q length must be a multiple of 64, but got {Tq}"
+    assert Tkv % 64 == 0, f"kv length must be a multiple of 64, but got {Tkv}"
     assert q2k_num.shape[
-        -1] == T // 64, f"shape mismatch, T // 64 = {T // 64}, q2k_num.shape[-2] = {q2k_num.shape[-2]}"
+        -1] == Tq // 64, f"shape mismatch, Tq // 64 = {Tq // 64}, q2k_num.shape[-2] = {q2k_num.shape[-2]}"
+    assert variable_block_sizes.numel() == Tkv // 64, (
+        f"shape mismatch, variable_block_sizes must have length {Tkv // 64}, "
+        f"got {variable_block_sizes.numel()}"
+    )
     o = torch.empty_like(q)
-    M = torch.empty((B, H, T), dtype=torch.float32, device=q.device)
+    M = torch.empty((B, H, Tq), dtype=torch.float32, device=q.device)
 
-    grid = lambda _: (triton.cdiv(T, 64), B * H, 1)
+    grid = lambda _: (triton.cdiv(Tq, 64), B * H, 1)
     _attn_fwd_sparse[grid](q,
                            k,
                            v,
@@ -513,7 +735,8 @@ def triton_block_sparse_attn_forward(q, k, v, q2k_index, q2k_num,
                            o.stride(3),
                            B,
                            H,
-                           T,
+                           Tq,
+                           Tkv,
                            HEAD_DIM=D,
                            STAGE=3)
 
@@ -523,21 +746,21 @@ def triton_block_sparse_attn_forward(q, k, v, q2k_index, q2k_num,
 def triton_block_sparse_attn_backward(do, q, k, v, o, M, q2k_index, q2k_num,
                                       k2q_index, k2q_num, variable_block_sizes):
     assert do.is_contiguous()
-    assert q.stride() == k.stride() == v.stride() == o.stride() == do.stride()
 
-    B, H, T, D = q.shape
+    B, H, Tq, D = q.shape
+    Tkv = k.shape[2]
     sm_scale = 1.0 / math.sqrt(D)
     dq = torch.empty_like(q)
     dk = torch.empty_like(k)
     dv = torch.empty_like(v)
-    BATCH, N_HEAD, N_CTX = q.shape[:3]
+    BATCH, N_HEAD = q.shape[:2]
     BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 64, 64, 32
     RCP_LN2 = 1.4426950408889634  # = 1.0 / ln(2)
     arg_k = k
     arg_k = arg_k * (sm_scale * RCP_LN2)
     PRE_BLOCK = 64
-    assert N_CTX % PRE_BLOCK == 0
-    pre_grid = (N_CTX // PRE_BLOCK, BATCH * N_HEAD)
+    assert Tq % PRE_BLOCK == 0
+    pre_grid = (Tq // PRE_BLOCK, BATCH * N_HEAD)
     delta = torch.empty_like(M)
     _attn_bwd_preprocess[pre_grid](
         o,
@@ -545,7 +768,7 @@ def triton_block_sparse_attn_backward(do, q, k, v, o, M, q2k_index, q2k_num,
         delta,  #
         BATCH,
         N_HEAD,
-        N_CTX,  #
+        Tq,  #
         BLOCK_M=PRE_BLOCK,
         HEAD_DIM=D  #
     )
@@ -553,36 +776,75 @@ def triton_block_sparse_attn_backward(do, q, k, v, o, M, q2k_index, q2k_num,
     max_q_blks = k2q_index.shape[-1]
     max_kv_blks = q2k_index.shape[-1]
 
-    grid = (N_CTX // BLOCK_N1, 1, BATCH * N_HEAD)
-    _attn_bwd[grid](
+    # dK/dV kernel: grid over KV blocks
+    grid_kv = (Tkv // BLOCK_N1, 1, BATCH * N_HEAD)
+    _attn_bwd_dkdv_kernel[grid_kv](
         q,
         arg_k,
         v,
         sm_scale,
         do,
-        dq,
         dk,
-        dv,  #
+        dv,
         M,
-        delta,  #
-        q2k_index,
-        q2k_num,
-        max_kv_blks,
+        delta,
         k2q_index,
         k2q_num,
         max_q_blks,
         variable_block_sizes,
+        q.stride(2),
+        q.stride(3),
         q.stride(0),
         q.stride(1),
-        q.stride(2),
-        q.stride(3),  #
+        arg_k.stride(0),
+        arg_k.stride(1),
+        v.stride(0),
+        v.stride(1),
+        do.stride(0),
+        do.stride(1),
+        dk.stride(0),
+        dk.stride(1),
+        dv.stride(0),
+        dv.stride(1),
         N_HEAD,
-        N_CTX,  #
+        Tq,
+        Tkv,
         BLOCK_M1=BLOCK_M1,
-        BLOCK_N1=BLOCK_N1,  #
+        BLOCK_N1=BLOCK_N1,
+        HEAD_DIM=D,
+    )
+
+    # dQ kernel: grid over Q blocks
+    grid_q = (Tq // BLOCK_M2, 1, BATCH * N_HEAD)
+    _attn_bwd_dq_kernel[grid_q](
+        q,
+        arg_k,
+        v,
+        do,
+        dq,
+        M,
+        delta,
+        q2k_index,
+        q2k_num,
+        max_kv_blks,
+        variable_block_sizes,
+        q.stride(2),
+        q.stride(3),
+        q.stride(0),
+        q.stride(1),
+        arg_k.stride(0),
+        arg_k.stride(1),
+        v.stride(0),
+        v.stride(1),
+        do.stride(0),
+        do.stride(1),
+        dq.stride(0),
+        dq.stride(1),
+        N_HEAD,
+        Tq,
         BLOCK_M2=BLOCK_M2,
-        BLOCK_N2=BLOCK_N2,  #
-        HEAD_DIM=D  #
+        BLOCK_N2=BLOCK_N2,
+        HEAD_DIM=D,
     )
 
     return dq, dk, dv
