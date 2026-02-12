@@ -302,16 +302,21 @@ def _attn_bwd_dq(
 
     kv_blocks = tl.load(q2k_num + meta_base)  # int32
     kv_ptr = q2k_index + meta_base * max_kv_blks  # ptr to list
-    block_size = tl.load(variable_block_sizes + q_blk)
 
     for blk_idx in range(kv_blocks * 2):
-        block_sparse_offset = (tl.load(kv_ptr + blk_idx // 2).to(tl.int32) * 2 +
-                               blk_idx % 2) * step_n * stride_tok
+        kv_idx = tl.load(kv_ptr + blk_idx // 2).to(tl.int32)
+        # variable_block_sizes is defined per KV block (tile). Mask must therefore
+        # use kv_idx (not q_blk). Also, because we split each 64-token block into
+        # two 32-token halves, the mask must account for the half-block offset.
+        block_size = tl.load(variable_block_sizes + kv_idx).to(tl.int32)
+        half = (blk_idx % 2).to(tl.int32)
+        block_sparse_offset = (kv_idx * 2 + half) * step_n * stride_tok
         kT = tl.load(kT_ptrs + block_sparse_offset)
         vT = tl.load(vT_ptrs + block_sparse_offset)
         qk = tl.dot(q, kT)
         p = tl.math.exp2(qk - m)
-        mask = tl.arange(0, BLOCK_N2) < block_size.to(tl.int32)
+        offs_in_block = half * step_n + tl.arange(0, BLOCK_N2)
+        mask = offs_in_block < block_size
         p = tl.where(mask[None, :], p, 0.0)
         # Compute dP and dS.
         dp = tl.dot(do, vT).to(tl.float32)

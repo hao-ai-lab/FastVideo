@@ -19,9 +19,18 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
+from pathlib import Path
 from typing import Iterable
 
 import torch
+
+
+# Prefer the in-repo fastvideo-kernel implementation (not site-packages).
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_KERNEL_PYTHON_DIR = _REPO_ROOT / "fastvideo-kernel" / "python"
+if _KERNEL_PYTHON_DIR.exists():
+    sys.path.insert(0, str(_KERNEL_PYTHON_DIR))
 
 
 def _parse_args() -> argparse.Namespace:
@@ -66,6 +75,15 @@ def _parse_args() -> argparse.Namespace:
                    default="bf16",
                    choices=["bf16", "fp16"],
                    help="Computation dtype for q/k/v")
+    p.add_argument(
+        "--anti-correlate-qk",
+        action="store_true",
+        help=(
+            "Construct K=-Q on valid tokens (and K=0 on padded tokens). "
+            "This forces valid qk scores to be strongly negative while padded "
+            "columns have qk≈0, which can amplify masking bugs in backward."
+        ),
+    )
     p.add_argument(
         "--scales",
         type=float,
@@ -173,6 +191,7 @@ def _build_qkv_from_block_sizes(
     device: torch.device,
     block_sizes: torch.Tensor,
     scale: float,
+    anti_correlate_qk: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Build q/k/v as [B,H,seq_len,D] where each block has `block_sizes[b]`
@@ -186,19 +205,28 @@ def _build_qkv_from_block_sizes(
     q = torch.randn((batch, heads, num_blocks, block_elems, dim),
                     device=device,
                     dtype=dtype)
-    k = torch.randn((batch, heads, num_blocks, block_elems, dim),
-                    device=device,
-                    dtype=dtype)
+    # Build K in a controlled way if requested.
+    if anti_correlate_qk:
+        k = q.clone()
+    else:
+        k = torch.randn((batch, heads, num_blocks, block_elems, dim),
+                        device=device,
+                        dtype=dtype)
     v = torch.randn((batch, heads, num_blocks, block_elems, dim),
                     device=device,
                     dtype=dtype)
     with torch.no_grad():
         q.mul_(scale)
-        k.mul_(scale)
         v.mul_(scale)
         q.mul_(mask)
-        k.mul_(mask)
         v.mul_(mask)
+        if anti_correlate_qk:
+            # Valid tokens: K=-Q. Padded tokens: K=0.
+            k.mul_(0)
+            k.add_(-q)
+        else:
+            k.mul_(scale)
+            k.mul_(mask)
 
     seq_len = num_blocks * block_elems
     q = q.view(batch, heads, seq_len, dim).requires_grad_(True)
@@ -318,6 +346,8 @@ def main() -> None:
             "sm90_bwd_available": sm90_bwd is not None,
         },
     )
+    import fastvideo_kernel.triton_kernels.block_sparse_attn_triton as triton_src
+    print("kernel_source:", triton_src.__file__)
 
     if args.use_video_sparse_attn:
         from fastvideo_kernel import video_sparse_attn
@@ -340,6 +370,7 @@ def main() -> None:
                 device=device,
                 block_sizes=variable_block_sizes,
                 scale=scale,
+                anti_correlate_qk=args.anti_correlate_qk,
             )
         else:
             # Build inputs, apply "padding" zeros, then enable grads.
@@ -365,11 +396,17 @@ def main() -> None:
 
             with torch.no_grad():
                 q.mul_(scale)
-                k.mul_(scale)
                 v.mul_(scale)
                 _zero_invalid_tokens(q, args.partial_block_size)
-                _zero_invalid_tokens(k, args.partial_block_size)
                 _zero_invalid_tokens(v, args.partial_block_size)
+                if args.anti_correlate_qk:
+                    # Valid tokens: K=-Q, padded tokens: K=0.
+                    k.zero_()
+                    k.add_(-q)
+                    _zero_invalid_tokens(k, args.partial_block_size)
+                else:
+                    k.mul_(scale)
+                    _zero_invalid_tokens(k, args.partial_block_size)
 
             q.requires_grad_(True)
             k.requires_grad_(True)
