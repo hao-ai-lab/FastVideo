@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import cast
 
 import torch
+import torch.distributed as dist
 
 from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
@@ -30,8 +31,6 @@ class LTX2DistillationPipeline(DistillationPipeline):
 
     _required_config_modules = [
         "transformer",
-        "text_encoder",
-        "tokenizer",
         "vae",
         "audio_vae",
         "vocoder",
@@ -120,12 +119,12 @@ class LTX2DistillationPipeline(DistillationPipeline):
             from fastvideo.training.activation_checkpoint import (
                 apply_activation_checkpointing)
 
-            self.fake_score_transformer = apply_activation_checkpointing(
-                self.fake_score_transformer,
+            self.fake_score_transformer.model = apply_activation_checkpointing(
+                self.fake_score_transformer.model,
                 checkpointing_type=training_args.
                 enable_gradient_checkpointing_type)
-            self.real_score_transformer = apply_activation_checkpointing(
-                self.real_score_transformer,
+            self.real_score_transformer.model = apply_activation_checkpointing(
+                self.real_score_transformer.model,
                 checkpointing_type=training_args.
                 enable_gradient_checkpointing_type)
 
@@ -202,11 +201,6 @@ class LTX2DistillationPipeline(DistillationPipeline):
             inference_mode=True,
             loaded_modules={
                 "transformer": self.get_module("transformer"),
-                "text_encoder": self.get_module("text_encoder"),
-                "tokenizer": self.get_module("tokenizer"),
-                "vae": self.get_module("vae"),
-                "audio_vae": self.get_module("audio_vae"),
-                "vocoder": self.get_module("vocoder"),
             },
             tp_size=training_args.tp_size,
             sp_size=training_args.sp_size,
@@ -354,7 +348,7 @@ class LTX2DistillationPipeline(DistillationPipeline):
         prompt_attention_mask = batch["text_attention_mask"].to(
             device, dtype=torch.int64)
         video_embeds, audio_embeds, attention_mask = (
-            self.text_encoder.run_connectors(
+            self.validation_pipeline.modules["text_encoder"].run_connectors(
                 prompt_embeds, prompt_attention_mask))
 
         batch_size = video_embeds.shape[0]
@@ -408,7 +402,7 @@ class LTX2DistillationPipeline(DistillationPipeline):
             prompt_attention_mask = conditions[
                 "prompt_attention_mask"].to(device, dtype=torch.int64)
             video_embeds, audio_embeds, attention_mask = (
-                self.text_encoder.run_connectors(
+                self.validation_pipeline.modules["text_encoder"].run_connectors(
                     prompt_embeds, prompt_attention_mask))
 
         if self.training_args.simulate_generator_forward:
@@ -621,7 +615,10 @@ class LTX2DistillationPipeline(DistillationPipeline):
         target_idx = torch.randint(0,
                                    len(self.denoising_step_list), [1],
                                    device=self.device,
-                                   dtype=torch.long).item()
+                                   dtype=torch.long)
+        if dist.is_initialized():
+            dist.broadcast(target_idx, src=0)
+        target_idx = target_idx.item()
         target_timestep = self.denoising_step_list[target_idx:target_idx + 1]
 
         noisy_input = torch.randn(self.video_latent_shape,
@@ -770,6 +767,7 @@ class LTX2DistillationPipeline(DistillationPipeline):
                 else:
                     real_score_pred_audio = real_cond_audio
             else:
+                raise NotImplementedError("Missing unconditional prediction for LTX-2 distillation pipeline")
                 real_score_pred_video = real_cond_video
                 real_score_pred_audio = real_cond_audio
 
@@ -817,6 +815,7 @@ class LTX2DistillationPipeline(DistillationPipeline):
                 generator_pred_video, generator_pred_audio = self._generator_multi_step_simulation_forward(
                     training_batch)
             else:
+                raise NotImplementedError("Generator forward is not implemented for LTX-2 distillation pipeline")
                 generator_pred_video, generator_pred_audio = self._generator_forward(
                     training_batch)
 

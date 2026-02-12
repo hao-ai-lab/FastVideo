@@ -60,9 +60,9 @@ class LTX2TrainingPipeline(TrainingPipeline):
         self.local_rank = world_group.local_rank
         self.transformer = self.get_module("transformer")
         self.transformer_2 = self.get_module("transformer_2", None)
-        self.text_encoder = self.get_module("text_encoder")
-        self.text_encoder.eval()
-        self.text_encoder.to(self.device)
+        # self.text_encoder = self.get_module("text_encoder")
+        # self.text_encoder.eval()
+        # self.text_encoder.to(self.device)
         self.seed = training_args.seed
 
         assert self.seed is not None, "seed must be set"
@@ -72,8 +72,8 @@ class LTX2TrainingPipeline(TrainingPipeline):
         if training_args.enable_gradient_checkpointing_type is not None:
             from fastvideo.training.activation_checkpoint import (
                 apply_activation_checkpointing)
-            self.transformer = apply_activation_checkpointing(
-                self.transformer,
+            self.transformer.model = apply_activation_checkpointing(
+                self.transformer.model,
                 checkpointing_type=training_args.
                 enable_gradient_checkpointing_type)
 

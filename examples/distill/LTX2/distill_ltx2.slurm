@@ -1,45 +1,47 @@
 #!/bin/bash
-#SBATCH --job-name=ltx2_distillation
+#SBATCH --job-name=ltx2_dmd
+#SBATCH --partition=main
 #SBATCH --nodes=8
-#SBATCH --gres=gpu:4
-#SBATCH --ntasks-per-node=4
-#SBATCH --output=logs/ltx2_distillation_%j.out
-#SBATCH --error=logs/ltx2_distillation_%j.err
+#SBATCH --ntasks=8
+#SBATCH --ntasks-per-node=1
+#SBATCH --gres=gpu:8
+#SBATCH --cpus-per-task=128
+#SBATCH --mem=1440G
+#SBATCH --output=ltx2_dmd_output/ltx2_dmd_%j.out
+#SBATCH --error=ltx2_dmd_output/ltx2_dmd_%j.err
+#SBATCH --exclusive
 
-source .venv/bin/activate
-
+# Basic Info
+export NCCL_P2P_DISABLE=1
+export TORCH_NCCL_ENABLE_MONITORING=0
+export NCCL_DEBUG_SUBSYS=INIT,NET
+# different cache dir for different processes
+export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
+export MASTER_PORT=29500
+export NODE_RANK=$SLURM_PROCID
+nodes=( $(scontrol show hostnames $SLURM_JOB_NODELIST) )
+export MASTER_ADDR=${nodes[0]}
+export TOKENIZERS_PARALLELISM=false
+# export WANDB_API_KEY="8d9f4b39abd68eb4e29f6fc010b7ee71a2207cde"
+export WANDB_API_KEY="50632ebd88ffd970521cec9ab4a1a2d7e85bfc45"
+# export WANDB_API_KEY='your_wandb_api_key_here'
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
-export TOKENIZERS_PARALLELISM=false
-
-# Use node-local Triton cache to avoid stale file handle errors on shared filesystems
-export TRITON_CACHE_DIR="/tmp/triton_cache_${SLURM_JOB_ID}_${SLURM_NODEID}"
-export WANDB_API_KEY=50632ebd88ffd970521cec9ab4a1a2d7e85bfc45
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 
-set -euo pipefail
+source ~/conda/miniconda/bin/activate
+conda activate wei-fv-distill
+export HOME="/mnt/weka/home/hao.zhang/wei"
 
-# ---- torchrun rendezvous (multi-node) ----
-# 1. Get the hostname of the first node (Master)
-nodes=( $( scontrol show hostnames $SLURM_JOB_NODELIST ) )
-nodes_array=($nodes)
-head_node=${nodes_array[0]}
-# MASTER_ADDR=$(srun --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address)
-MASTER_ADDR=${nodes[0]}
-MASTER_PORT=29500
-
-# 2. Get the node count automatically
-NNODES=8
-GPUS_PER_NODE=4
-NUM_GPUS=32
-
-echo "MASTER_ADDR=$MASTER_ADDR MASTER_PORT=$MASTER_PORT NNODES=$NNODES"
+# Configs
+NUM_GPUS=8
+NUM_TOTAL_GPUS=64
 
 # Configs
 MODEL_PATH="Davids048/LTX2-Base-Diffusers"
 REAL_SCORE_MODEL_PATH="Davids048/LTX2-Base-Diffusers"
 FAKE_SCORE_MODEL_PATH="Davids048/LTX2-Base-Diffusers"
-DATA_DIR=/home/hal-shared/ltx2-data/
+DATA_DIR=/mnt/weka/home/hao.zhang/data/FastVideo/LTX2_text_encoding_dataset
 VALIDATION_DIR="examples/distill/LTX2/validation.json"
 OUTPUT_DIR="ltx2_distill_8steps"
 # export CUDA_VISIBLE_DEVICES=4,5
@@ -62,11 +64,11 @@ training_args=(
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus $NUM_GPUS
+  --num_gpus $NUM_TOTAL_GPUS
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
-  --hsdp_shard_dim $NUM_GPUS
+  --hsdp_shard_dim $NUM_TOTAL_GPUS
 )
 
 # Model arguments
@@ -131,10 +133,10 @@ dmd_args=(
 )
 
 srun torchrun \
-    --nnodes $NNODES \
-    --nproc_per_node $GPUS_PER_NODE \
+    --nnodes $SLURM_JOB_NUM_NODES \
+    --nproc_per_node $NUM_GPUS \
     --node_rank $SLURM_PROCID \
-    --rdzv_backend c10d \
+    --rdzv_backend=c10d \
     --rdzv_endpoint $MASTER_ADDR:$MASTER_PORT \
       fastvideo/training/ltx2_distillation_pipeline.py \
       "${parallel_args[@]}" \
