@@ -6,6 +6,10 @@ This mirrors other FastVideo streaming examples and uses
 `StreamingVideoGenerator` so weights can be auto-downloaded from a HF repo
 that contains a FastVideo-compatible `model_index.json`.
 
+The Hugging Face repo (e.g. FastVideo/Waypoint-1-Small-Diffusers) must have
+a valid, non-empty model_index.json; an empty or missing file will raise
+a clear error at load time.
+
 Usage:
     python examples/inference/basic/basic_waypoint_streaming.py
 """

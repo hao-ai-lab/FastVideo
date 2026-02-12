@@ -2,8 +2,6 @@
 """Waypoint interactive world model pipeline."""
 
 from fastvideo.pipelines.basic.waypoint.waypoint_pipeline import (
-    WaypointPipeline,
-)
+    WaypointPipeline, )
 
 __all__ = ["WaypointPipeline"]
-

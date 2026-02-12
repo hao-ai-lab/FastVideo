@@ -69,6 +69,7 @@ The `CtrlInput` dataclass accepts:
 - `scroll`: Scroll wheel value (-1, 0, or 1)
 
 Common keycodes:
+
 | Key | Keycode |
 |-----|---------|
 | W   | 17      |
@@ -121,4 +122,3 @@ config = WaypointT2VConfig(
 - [Hugging Face Model Card](https://huggingface.co/Overworld/Waypoint-1-Small)
 - [World Engine Repository](https://github.com/Overworldai/world_engine)
 - [Overworld Website](https://www.overworld.ai/)
-
