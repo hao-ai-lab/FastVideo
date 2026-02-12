@@ -463,7 +463,7 @@ def _register_configs() -> None:
         pipeline_config_cls=WaypointT2VConfig,
         hf_model_paths=[
             "Overworld/Waypoint-1-Small",
-            "smatta/Waypoint-1-Small-Diffusers",
+            "FastVideo/Waypoint-1-Small-Diffusers",
         ],
         model_detectors=[
             lambda path: "waypoint" in path.lower() or "worldengine" in
