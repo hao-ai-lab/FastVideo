@@ -320,6 +320,62 @@ def main():
                 d = (fa[0].float() - ra[0].float()).abs()
                 status = "OK" if d.max().item() < 1e-3 else "DIVERGE"
                 print(f"  {name}: max={d.max().item():.6f} mean={d.mean().item():.6f}  {status}")
+
+        # 7. Attention-internal: qkv_proj, q_norm, k_norm, rope, attn, o_proj
+        print("\n--- 5. Layer 0 attention internal ---")
+        fv_attn_mod = fv_layers[0].self_attn
+        ref_attn_mod = ref_layers[0].self_attn
+
+        fv_qkv, ref_qkv = [], []
+        fv_qn, ref_qn = [], []
+        fv_kn, ref_kn = [], []
+        fv_qr, ref_qr = [], []
+        fv_kr, ref_kr = [], []
+        fv_attn_out, ref_attn_out = [], []
+        fv_o, ref_o = [], []
+
+        def _out(storage):
+            return lambda m, i, o: storage.append(
+                (o[0] if isinstance(o, tuple) else o).detach()
+            )
+
+        def _rope_hook(q_stor, k_stor):
+            def h(m, i, o):
+                q_stor.append(o[0].detach())
+                k_stor.append(o[1].detach())
+            return h
+
+        fv_attn_mod.qkv_proj.register_forward_hook(_out(fv_qkv))
+        ref_attn_mod.qkv_proj.register_forward_hook(_out(ref_qkv))
+        fv_attn_mod.q_norm.register_forward_hook(_out(fv_qn))
+        ref_attn_mod.q_norm.register_forward_hook(_out(ref_qn))
+        fv_attn_mod.k_norm.register_forward_hook(_out(fv_kn))
+        ref_attn_mod.k_norm.register_forward_hook(_out(ref_kn))
+        fv_attn_mod.rotary_emb.register_forward_hook(_rope_hook(fv_qr, fv_kr))
+        ref_attn_mod.rotary_emb.register_forward_hook(_rope_hook(ref_qr, ref_kr))
+        fv_attn_mod.attn.register_forward_hook(_out(fv_attn_out))
+        ref_attn_mod.attn.register_forward_hook(_out(ref_attn_out))
+        fv_attn_mod.o_proj.register_forward_hook(_out(fv_o))
+        ref_attn_mod.o_proj.register_forward_hook(_out(ref_o))
+
+        with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
+            _ = fv_encoder(**enc_kwargs)
+        with torch.no_grad(), sgl_set_forward_context(current_timestep=0, attn_metadata=None):
+            _ = sgl_encoder(**enc_kwargs)
+
+        for name, fa, ra in [
+            ("qkv_proj", fv_qkv, ref_qkv),
+            ("q_norm", fv_qn, ref_qn),
+            ("k_norm", fv_kn, ref_kn),
+            ("q after RoPE", fv_qr, ref_qr),
+            ("k after RoPE", fv_kr, ref_kr),
+            ("attn (before o_proj)", fv_attn_out, ref_attn_out),
+            ("o_proj", fv_o, ref_o),
+        ]:
+            if fa and ra:
+                d = (fa[0].float() - ra[0].float()).abs()
+                status = "OK" if d.max().item() < 1e-3 else "DIVERGE"
+                print(f"  {name}: max={d.max().item():.6f} mean={d.mean().item():.6f}  {status}")
     else:
         print("\n  -> All layers match within tolerance.")
 
