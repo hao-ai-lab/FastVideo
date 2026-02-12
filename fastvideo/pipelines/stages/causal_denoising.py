@@ -314,7 +314,13 @@ class CausalDMDDenosingStage(DenoisingStage):
                     )
 
             start_index += 1
-            block_sizes.pop(0)
+            if len(block_sizes) == 0:
+                raise ValueError(
+                    "block_sizes is empty after first-frame initialization")
+            if block_sizes[0] > 1:
+                block_sizes[0] -= 1
+            else:
+                block_sizes.pop(0)
             latents[:, :, :1, :, :] = first_frame_latent
 
         # DMD loop in causal blocks
@@ -364,8 +370,9 @@ class CausalDMDDenosingStage(DenoisingStage):
                             "action": action_full[:, start_index:end_index],
                         }
 
-                    # Prepare inputs
-                    t_expand = t_cur.repeat(latent_model_input.shape[0])
+                    # Prepare inputs [B*T, C, H, W]
+                    t_expand = t_cur.repeat(latent_model_input.shape[0] *
+                                            current_num_frames)
 
                     # Attention metadata if needed
                     if (vsa_available and self.attn_backend
