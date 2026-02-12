@@ -146,6 +146,9 @@ def main():
     from sglang.multimodal_gen.runtime.loader.component_loaders.component_loader import (
         ComponentLoader,
     )
+    from sglang.multimodal_gen.runtime.managers.forward_context import (
+        set_forward_context as sgl_set_forward_context,
+    )
     from sglang.multimodal_gen.runtime.server_args import ServerArgs, set_global_server_args
     from sglang.multimodal_gen.configs.pipeline_configs.flux import (
         Flux2KleinPipelineConfig as SGLangFlux2KleinConfig,
@@ -211,7 +214,7 @@ def main():
 
     with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
         _ = fv_encoder(**enc_kwargs)
-    with torch.no_grad():
+    with torch.no_grad(), sgl_set_forward_context(current_timestep=0, attn_metadata=None):
         _ = sgl_encoder(**enc_kwargs)
 
     if fv_emb and ref_emb:
@@ -265,7 +268,7 @@ def main():
 
         with torch.no_grad(), set_forward_context(current_timestep=0, attn_metadata=None):
             _ = fv_encoder(**enc_kwargs)
-        with torch.no_grad():
+        with torch.no_grad(), sgl_set_forward_context(current_timestep=0, attn_metadata=None):
             _ = sgl_encoder(**enc_kwargs)
 
         if fv_attn_out and ref_attn_out:
