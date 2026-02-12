@@ -11,7 +11,7 @@ def main() -> None:
         "--folder_path",
         type=str,
         required=True,
-        help="Local folder to upload (output of scripts/convert_waypoint_stub_repo.py).",
+        help="Local diffusers-style folder to upload (model_index.json + weights).",
     )
     parser.add_argument(
         "--repo_id",

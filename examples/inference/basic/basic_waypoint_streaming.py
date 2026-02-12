@@ -15,20 +15,6 @@ import torch
 from fastvideo.entrypoints.streaming_generator import StreamingVideoGenerator
 from fastvideo.pipelines.basic.waypoint.waypoint_pipeline import CtrlInput
 
-# A FastVideo-compatible model repo ID / local path (needs `model_index.json`).
-#
-# Preferred (reviewer-friendly) flow is to publish a small HF repo like:
-#   FastVideo/Waypoint-1-Small-Diffusers
-# containing a `model_index.json` (and optionally transformer weights under
-# `transformer/`), so StreamingVideoGenerator can auto-download everything.
-#
-# For local testing, you can generate a compatible repo directory via:
-#   python scripts/convert_waypoint_stub_repo.py --out converted/waypoint_diffusers_stub
-# and run:
-#   WAYPOINT_MODEL_ID=converted/waypoint_diffusers_stub python examples/inference/basic/basic_waypoint_streaming.py
-import os
-MODEL_ID = os.getenv("WAYPOINT_MODEL_ID",
-                      "FastVideo/Waypoint-1-Small-Diffusers")
 OUTPUT_PATH = "video_samples_waypoint"
 
 
@@ -93,7 +79,7 @@ def main():
         raise SystemExit("CUDA is required for Waypoint inference.")
 
     generator = StreamingVideoGenerator.from_pretrained(
-        MODEL_ID,
+        "FastVideo/Waypoint-1-Small-Diffusers",
         num_gpus=1,
         use_fsdp_inference=False,
         dit_cpu_offload=False,
