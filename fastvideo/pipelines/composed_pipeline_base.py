@@ -376,9 +376,8 @@ class ComposedPipelineBase(ABC):
         modules = {}
         for module_name, module_spec in model_index.items():
             if (module_spec is None or
-                (isinstance(module_spec,
-                            (list, tuple)) and all(x is None
-                                                   for x in module_spec))):
+                (isinstance(module_spec, list | tuple)
+                 and all(x is None for x in module_spec))):
                 logger.warning(
                     "Module %s in model_index.json has null value, removing from required_config_modules",
                     module_name)
@@ -400,7 +399,7 @@ class ComposedPipelineBase(ABC):
             #     "text_encoder": [null, null, {"pretrained_model_name_or_path": "google/umt5-xl", "type_hint": ["transformers","UMT5EncoderModel"]}]
             transformers_or_diffusers: str
             component_model_path: str
-            if (isinstance(module_spec, (list, tuple))
+            if (isinstance(module_spec, list | tuple)
                     and len(module_spec) == 2):
                 transformers_or_diffusers = module_spec[0]
                 # architecture = module_spec[1]  # currently unused by loaders
@@ -412,12 +411,12 @@ class ComposedPipelineBase(ABC):
                     load_module_name = module_name
                 component_model_path = os.path.join(self.model_path,
                                                     load_module_name)
-            elif (isinstance(module_spec,
-                             (list, tuple)) and len(module_spec) == 3
+            elif (isinstance(module_spec, list | tuple)
+                  and len(module_spec) == 3
                   and isinstance(module_spec[2], dict)):
                 cfg: dict[str, Any] = module_spec[2]
                 type_hint = cfg.get("type_hint")
-                if isinstance(type_hint, (list, tuple)) and len(type_hint) >= 1:
+                if isinstance(type_hint, list | tuple) and len(type_hint) >= 1:
                     transformers_or_diffusers = type_hint[0]
                 else:
                     transformers_or_diffusers = "diffusers"
