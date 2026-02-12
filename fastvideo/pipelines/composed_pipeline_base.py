@@ -375,9 +375,10 @@ class ComposedPipelineBase(ABC):
 
         modules = {}
         for module_name, module_spec in model_index.items():
-            if (module_spec is None
-                    or (isinstance(module_spec, (list, tuple))
-                        and all(x is None for x in module_spec))):
+            if (module_spec is None or
+                (isinstance(module_spec,
+                            (list, tuple)) and all(x is None
+                                                   for x in module_spec))):
                 logger.warning(
                     "Module %s in model_index.json has null value, removing from required_config_modules",
                     module_name)
@@ -405,13 +406,15 @@ class ComposedPipelineBase(ABC):
                 # architecture = module_spec[1]  # currently unused by loaders
                 # we load the module from the extra config module map if it exists
                 if module_name in self._extra_config_module_map:
-                    load_module_name = self._extra_config_module_map[module_name]
+                    load_module_name = self._extra_config_module_map[
+                        module_name]
                 else:
                     load_module_name = module_name
                 component_model_path = os.path.join(self.model_path,
                                                     load_module_name)
-            elif (isinstance(module_spec, (list, tuple))
-                  and len(module_spec) == 3 and isinstance(module_spec[2], dict)):
+            elif (isinstance(module_spec,
+                             (list, tuple)) and len(module_spec) == 3
+                  and isinstance(module_spec[2], dict)):
                 cfg: dict[str, Any] = module_spec[2]
                 type_hint = cfg.get("type_hint")
                 if isinstance(type_hint, (list, tuple)) and len(type_hint) >= 1:
@@ -425,15 +428,14 @@ class ComposedPipelineBase(ABC):
                         f"Invalid pretrained_model_name_or_path for module {module_name}"
                     )
                 src_local = maybe_download_model(src.strip())
-                subfolder = cfg.get("subfolder", None)
+                subfolder = cfg.get("subfolder")
                 component_model_path = (os.path.join(src_local, subfolder)
                                         if subfolder else src_local)
                 # extra map does not apply in this mode (explicit module path).
                 load_module_name = module_name
             else:
                 raise ValueError(
-                    f"Unsupported module spec for {module_name}: {module_spec}"
-                )
+                    f"Unsupported module spec for {module_name}: {module_spec}")
 
             # we load the module from the extra config module map if it exists
             module = PipelineComponentLoader.load_module(
