@@ -2,6 +2,7 @@
 # Code adapted from SGLang https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/lora/layers.py
 
 import math
+import os
 
 import torch
 from torch import nn
@@ -21,6 +22,14 @@ from fastvideo.layers.vocab_parallel_embedding import VocabParallelEmbedding
 from fastvideo.utils import get_mixed_precision_state
 
 torch._dynamo.config.recompile_limit = 16
+
+
+def _optional_torch_compile(fn):
+    """Apply torch.compile only when TORCH_COMPILE_DISABLE/TORCHDYNAMO_DISABLE unset."""
+    if os.environ.get("TORCH_COMPILE_DISABLE") == "1" or os.environ.get(
+            "TORCHDYNAMO_DISABLE") == "1":
+        return fn
+    return torch.compile()(fn)
 
 
 class BaseLayerWithLoRA(nn.Module):
@@ -68,7 +77,7 @@ class BaseLayerWithLoRA(nn.Module):
             self.lora_A = None
             self.lora_B = None
 
-    @torch.compile()
+    @_optional_torch_compile
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         lora_A = self.lora_A
         lora_B = self.lora_B
