@@ -222,8 +222,9 @@ class LTX2DenoisingStage(PipelineStage):
         stg_blocks_video = batch.ltx2_stg_blocks_video
         stg_blocks_audio = batch.ltx2_stg_blocks_audio
         do_stg = stg_scale_video != 0.0 or stg_scale_audio != 0.0
-
-        do_cfg = batch.do_classifier_free_guidance
+        do_cfg_text = (cfg_scale_video != 1.0 or cfg_scale_audio != 1.0)
+        do_mod = (modality_scale_video != 1.0 or modality_scale_audio != 1.0)
+        do_guidance = do_cfg_text or do_mod or do_stg
 
         logger.info(
             "[LTX2] Denoising start: steps=%d dtype=%s "
@@ -276,44 +277,51 @@ class LTX2DenoisingStage(PipelineStage):
                     pos_denoised = pos_outputs
                     pos_audio = None
 
-                if do_cfg:
-                    # Pass 2: Unconditioned text (negative prompt)
-                    neg_outputs = self.transformer(
-                        hidden_states=latents.to(target_dtype),
-                        encoder_hidden_states=neg_prompt_embeds,
-                        encoder_attention_mask=neg_prompt_mask,
-                        timestep=timestep,
-                        audio_hidden_states=audio_latents,
-                        audio_encoder_hidden_states=audio_context_n,
-                        audio_timestep=audio_timestep,
-                    )
-                    if isinstance(neg_outputs, tuple):
-                        neg_denoised, neg_audio = neg_outputs
-                    else:
-                        neg_denoised = neg_outputs
-                        neg_audio = None
+                if do_guidance:
+                    # Defaults: (pos - pos) = 0 under each scale.
+                    neg_denoised = pos_denoised
+                    neg_audio = pos_audio
+                    mod_denoised = pos_denoised
+                    mod_audio = pos_audio
+                    ptb_denoised = None
+                    ptb_audio = None
 
-                    # Pass 3: Modality-isolated (skip cross-modal attn)
-                    mod_outputs = self.transformer(
-                        hidden_states=latents.to(target_dtype),
-                        encoder_hidden_states=prompt_embeds,
-                        encoder_attention_mask=prompt_mask,
-                        timestep=timestep,
-                        audio_hidden_states=audio_latents,
-                        audio_encoder_hidden_states=audio_context_p,
-                        audio_timestep=audio_timestep,
-                        skip_cross_modal_attn=True,
-                    )
-                    if isinstance(mod_outputs, tuple):
-                        mod_denoised, mod_audio = mod_outputs
-                    else:
-                        mod_denoised = mod_outputs
-                        mod_audio = None
+                    # Pass 2: text CFG (negative prompt)
+                    if do_cfg_text and neg_prompt_embeds is not None:
+                        neg_outputs = self.transformer(
+                            hidden_states=latents.to(target_dtype),
+                            encoder_hidden_states=neg_prompt_embeds,
+                            encoder_attention_mask=neg_prompt_mask,
+                            timestep=timestep,
+                            audio_hidden_states=audio_latents,
+                            audio_encoder_hidden_states=audio_context_n,
+                            audio_timestep=audio_timestep,
+                        )
+                        if isinstance(neg_outputs, tuple):
+                            neg_denoised, neg_audio = neg_outputs
+                        else:
+                            neg_denoised = neg_outputs
+
+                    # Pass 3: Modality-isolated (skip cross-modal
+                    # attn)
+                    if do_mod:
+                        mod_outputs = self.transformer(
+                            hidden_states=latents.to(target_dtype),
+                            encoder_hidden_states=prompt_embeds,
+                            encoder_attention_mask=prompt_mask,
+                            timestep=timestep,
+                            audio_hidden_states=audio_latents,
+                            audio_encoder_hidden_states=audio_context_p,
+                            audio_timestep=audio_timestep,
+                            skip_cross_modal_attn=True,
+                        )
+                        if isinstance(mod_outputs, tuple):
+                            mod_denoised, mod_audio = mod_outputs
+                        else:
+                            mod_denoised = mod_outputs
 
                     # Pass 4: STG perturbed (skip self-attn in
                     # specified blocks)
-                    ptb_denoised = None
-                    ptb_audio = None
                     if do_stg:
                         ptb_outputs = self.transformer(
                             hidden_states=latents.to(target_dtype),
