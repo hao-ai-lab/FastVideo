@@ -291,11 +291,23 @@ class DenoisingStage(PipelineStage):
                 # Expand latents for V2V/I2V
                 latent_model_input = latents.to(target_dtype)
                 if batch.video_latent is not None:
-                    latent_model_input = torch.cat([
-                        latent_model_input, batch.video_latent,
-                        torch.zeros_like(latents)
-                    ],
-                                                   dim=1).to(target_dtype)
+                    # Check if the transformer expects zero-padding
+                    # (e.g., 144ch = noise + video + zeros) or just
+                    # noise + video (e.g., 96ch for Lucy-Edit).
+                    noise_ch = latents.shape[1]
+                    video_ch = batch.video_latent.shape[1]
+                    model_in_ch = getattr(current_model, "in_channels",
+                                          noise_ch + video_ch + noise_ch)
+                    if model_in_ch > noise_ch + video_ch:
+                        latent_model_input = torch.cat([
+                            latent_model_input, batch.video_latent,
+                            torch.zeros_like(latents)
+                        ],
+                                                       dim=1).to(target_dtype)
+                    else:
+                        latent_model_input = torch.cat(
+                            [latent_model_input, batch.video_latent],
+                            dim=1).to(target_dtype)
                 elif batch.image_latent is not None:
                     assert not fastvideo_args.pipeline_config.ti2v_task, "image latents should not be provided for TI2V task"
                     latent_model_input = torch.cat(
