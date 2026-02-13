@@ -174,7 +174,7 @@ def _import_pipeline_classes_cached(
                     pipeline_module = importlib.import_module(module_name)
                     if not hasattr(pipeline_module, "EntryClass"):
                         continue
-                    entry_cls = pipeline_module.EntryClass
+                    entry_cls = getattr(pipeline_module, "EntryClass")
                     entry_cls_list = ([
                         entry_cls
                     ] if not isinstance(entry_cls, list) else entry_cls)
