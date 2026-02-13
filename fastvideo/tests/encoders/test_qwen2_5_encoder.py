@@ -6,7 +6,7 @@ from torch.distributed.tensor import DTensor
 from torch.testing import assert_close
 from transformers import AutoConfig, AutoTokenizer, Qwen2_5_VLTextModel
 
-from fastvideo.configs.pipelines import PipelineConfig
+from fastvideo.configs.pipelines import Hunyuan15T2V480PConfig, PipelineConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TextEncoderLoader
@@ -20,16 +20,16 @@ os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29505"
 
 @pytest.fixture
-def qwen_model_path():
+def qwen_model_path_and_config():
     base_model_path = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
     model_path = maybe_download_model(base_model_path)
     text_encoder_path = os.path.join(model_path, "text_encoder")
     tokenizer_path = os.path.join(model_path, "tokenizer")
-    return text_encoder_path, tokenizer_path
+    return text_encoder_path, tokenizer_path, Hunyuan15T2V480PConfig()
 
 @pytest.mark.usefixtures("distributed_setup")
-def test_qwen2_5_encoder(qwen_model_path):
-    text_encoder_path, tokenizer_path = qwen_model_path
+def test_qwen2_5_encoder(qwen_model_path_and_config):
+    text_encoder_path, tokenizer_path, pipeline_config = qwen_model_path_and_config
     hf_config = AutoConfig.from_pretrained(text_encoder_path)
     print(hf_config)
 
@@ -47,8 +47,7 @@ def test_qwen2_5_encoder(qwen_model_path):
 
     # Load FastVideo model
     args = FastVideoArgs(model_path=text_encoder_path,
-                        pipeline_config=PipelineConfig(text_encoder_configs=(Qwen2_5_VLConfig(),),
-                        text_encoder_precisions=(precision_str,)),
+                        pipeline_config=pipeline_config,
                         pin_cpu_memory=False)
     
     loader = TextEncoderLoader()

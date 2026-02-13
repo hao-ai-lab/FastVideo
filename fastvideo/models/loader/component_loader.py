@@ -79,17 +79,22 @@ class ComponentLoader(ABC):
             "scheduler": (SchedulerLoader, "diffusers"),
             "transformer": (TransformerLoader, "diffusers"),
             "transformer_2": (TransformerLoader, "diffusers"),
+            "transformer_3": (TransformerLoader, "diffusers"),
             "vae": (VAELoader, "diffusers"),
             "audio_vae": (AudioDecoderLoader, "diffusers"),
             "audio_decoder": (AudioDecoderLoader, "diffusers"),
             "vocoder": (VocoderLoader, "diffusers"),
             "text_encoder": (TextEncoderLoader, "transformers"),
             "text_encoder_2": (TextEncoderLoader, "transformers"),
+            "text_encoder_3": (TextEncoderLoader, "transformers"),
             "tokenizer": (TokenizerLoader, "transformers"),
             "tokenizer_2": (TokenizerLoader, "transformers"),
+            "tokenizer_3": (TokenizerLoader, "transformers"),
             "image_processor": (ImageProcessorLoader, "transformers"),
             "feature_extractor": (ImageProcessorLoader, "transformers"),
             "image_encoder": (ImageEncoderLoader, "transformers"),
+            "upsampler": (UpsamplerLoader, "diffusers"),
+            "upsampler_2": (UpsamplerLoader, "diffusers"),
         }
 
         if module_type in module_loaders:
@@ -289,23 +294,26 @@ class TextEncoderLoader(ComponentLoader):
                 pass
         logger.info("HF Model config: %s", model_config)
 
-        # @TODO(Wei): Better way to handle this?
-        try:
-            encoder_config = (
-                fastvideo_args.pipeline_config.text_encoder_configs[0]
+        base = os.path.basename(os.path.normpath(model_path))
+        idx = 0
+        if base.startswith("text_encoder_"):
+            try:
+                idx = int(base.split("_")[-1]) - 1
+            except Exception:
+                idx = 0
+        encoder_configs = fastvideo_args.pipeline_config.text_encoder_configs
+        encoder_precisions = fastvideo_args.pipeline_config.text_encoder_precisions
+        if idx < 0 or idx >= len(encoder_configs):
+            raise IndexError(
+                f"text encoder index {idx} out of range for text_encoder_configs (len={len(encoder_configs)}), model_path={model_path}"
             )
-            encoder_config.update_model_arch(model_config)
-            encoder_precision = (
-                fastvideo_args.pipeline_config.text_encoder_precisions[0]
+        encoder_config = encoder_configs[idx]
+        encoder_config.update_model_arch(model_config)
+        if idx < 0 or idx >= len(encoder_precisions):
+            raise IndexError(
+                f"text encoder index {idx} out of range for text_encoder_precisions (len={len(encoder_precisions)}), model_path={model_path}"
             )
-        except Exception:
-            encoder_config = (
-                fastvideo_args.pipeline_config.text_encoder_configs[1]
-            )
-            encoder_config.update_model_arch(model_config)
-            encoder_precision = (
-                fastvideo_args.pipeline_config.text_encoder_precisions[1]
-            )
+        encoder_precision = encoder_precisions[idx]
 
         target_device = get_local_torch_device()
         # TODO(will): add support for other dtypes
@@ -359,7 +367,16 @@ class TextEncoderLoader(ComponentLoader):
             with target_device:
                 architectures = getattr(model_config, "architectures", [])
                 model_cls, _ = ModelRegistry.resolve_model_cls(architectures)
-                model: TextEncoder = model_cls(model_config)  # type: ignore
+                if getattr(model_cls, "supports_hf_from_pretrained", False):
+                    model = model_cls.from_pretrained_local(  # type: ignore[attr-defined]
+                        model_path,
+                        model_config,  # type: ignore[arg-type]
+                        dtype=PRECISION_TO_TYPE[dtype],
+                        device=target_device,
+                    )
+                    return model.eval()
+
+                model = model_cls(model_config)  # type: ignore
 
             weights_to_load = {name for name, _ in model.named_parameters()}
             if (
@@ -558,7 +575,8 @@ class VAELoader(ComponentLoader):
     def load(self, model_path: str, fastvideo_args: FastVideoArgs):
         """Load the VAE based on the model path, and inference args."""
         config = get_diffusers_config(model=model_path)
-        class_name = config.get("_class_name")
+        class_name = config.pop("_class_name")
+        config.pop("_name_or_path", None)
         assert class_name is not None, (
             "Model config does not contain a _class_name attribute. Only diffusers format is supported."
         )
@@ -655,7 +673,10 @@ class VAELoader(ComponentLoader):
                         break
             loaded = remapped
 
-        vae.load_state_dict(loaded, strict=False)
+        # Diffusers-format AutoencoderKL checkpoints should match exactly; load
+        # strictly so missing/unexpected keys are surfaced early.
+        strict_load = class_name == "AutoencoderKL"
+        vae.load_state_dict(loaded, strict=strict_load)
 
         return vae.eval()
 
@@ -731,6 +752,7 @@ class TransformerLoader(ComponentLoader):
         config = get_diffusers_config(model=model_path)
         hf_config = deepcopy(config)
         cls_name = config.pop("_class_name")
+        config.pop("_name_or_path", None)
         if cls_name is None:
             raise ValueError(
                 "Model config does not contain a _class_name attribute. "
@@ -745,7 +767,7 @@ class TransformerLoader(ComponentLoader):
         fastvideo_args.model_paths["transformer"] = model_path
 
         # Config from Diffusers supersedes fastvideo's model config
-        dit_config = fastvideo_args.pipeline_config.dit_config
+        dit_config = deepcopy(fastvideo_args.pipeline_config.dit_config)
         dit_config.update_model_arch(config)
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
@@ -876,6 +898,50 @@ class SchedulerLoader(ComponentLoader):
             )
         return scheduler
 
+
+class UpsamplerLoader(ComponentLoader):
+    """Loader for upsamplers."""
+
+    def load(self, model_path: str, fastvideo_args: FastVideoArgs):
+        """Load the upsampler based on the model path, and inference args."""
+        config_dict = get_diffusers_config(model=model_path)
+        class_name = config_dict.pop("_class_name", None)
+
+        if class_name is None:
+            raise ValueError(
+                "Model config does not contain a _class_name attribute. "
+                "Only diffusers format is supported."
+            )
+
+        try:
+            upsampler_cfg = deepcopy(fastvideo_args.pipeline_config.upsampler_config[0])
+            upsampler_cfg.update_model_config(config_dict)
+        except Exception as e:
+            upsampler_cfg = deepcopy(fastvideo_args.pipeline_config.upsampler_config[1])
+            upsampler_cfg.update_model_config(config_dict)
+
+        model_cls, _ = ModelRegistry.resolve_model_cls(class_name)
+        model = model_cls(upsampler_cfg)
+
+        target_device = get_local_torch_device()
+        model = model.to(target_device, dtype=PRECISION_TO_TYPE[fastvideo_args.pipeline_config.upsampler_precision])
+
+        # Find all safetensors files
+        safetensors_list = glob.glob(
+            os.path.join(str(model_path), "*.safetensors"))
+        if not safetensors_list:
+            raise ValueError(f"No safetensors files found in {model_path}")
+        
+        if len(safetensors_list) == 1:
+            loaded = safetensors_load_file(safetensors_list[0])
+        else:
+            loaded = {}
+            for sf_file in safetensors_list:
+                loaded.update(safetensors_load_file(sf_file))
+        
+        model.load_state_dict(loaded, strict=True)
+
+        return model.eval()
 
 class GenericComponentLoader(ComponentLoader):
     """Generic loader for components that don't have a specific loader."""

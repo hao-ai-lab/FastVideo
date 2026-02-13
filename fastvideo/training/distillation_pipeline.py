@@ -43,7 +43,10 @@ from fastvideo.training.training_utils import (
 from fastvideo.utils import (is_vsa_available, maybe_download_model,
                              set_random_seed, verify_model_config_and_directory)
 
-vsa_available = is_vsa_available()
+try:
+    vsa_available = is_vsa_available()
+except Exception:
+    vsa_available = False
 
 logger = init_logger(__name__)
 
@@ -1267,7 +1270,7 @@ class DistillationPipeline(TrainingPipeline):
                     with torch.no_grad():
                         output_batch = self.validation_pipeline.forward(
                             batch, training_args)
-                    samples = output_batch.output
+                    samples = output_batch.output.cpu()
                     if self.rank_in_sp_group != 0:
                         continue
 

@@ -814,6 +814,8 @@ class TransformerArgsPreprocessor:
         batch_size = x.shape[0]
         if context.device != x.device:
             context = context.to(x.device)
+        if context.dtype != x.dtype:
+            context = context.to(x.dtype)
         if attention_mask is not None and attention_mask.device != x.device:
             attention_mask = attention_mask.to(x.device)
         context = self.caption_projection(context)
@@ -1476,6 +1478,26 @@ class BasicAVTransformerBlock(torch.nn.Module):
 
         self.norm_eps = norm_eps
 
+    def _register_fsdp_backward_hooks_on_output(self, vx, ax):
+        """Register backward hooks on output tensors to trigger FSDP2 unshard.
+        
+        FSDP2's module-level backward hooks don't fire when the module returns 
+        dataclass outputs. We must register hooks directly on the output tensors.
+        """
+        if not hasattr(self, 'unshard'):
+            return  # Not wrapped by FSDP2
+            
+        def make_unshard_hook():
+            def hook(grad):
+                self.unshard()
+                return grad
+            return hook
+        
+        if vx is not None and vx.requires_grad:
+            vx.register_hook(make_unshard_hook())
+        if ax is not None and ax.requires_grad:
+            ax.register_hook(make_unshard_hook())
+
     def get_ada_values(
         self, scale_shift_table: torch.Tensor, batch_size: int, timestep: torch.Tensor, indices: slice
     ) -> tuple[torch.Tensor, ...]:
@@ -1703,6 +1725,10 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 f"fastvideo:block={self.idx}:video_sum={video_sum:.6f} "
                 f"audio_sum={audio_sum:.6f}"
             )
+
+        # Register FSDP2 backward hooks on output tensors (module-level hooks don't
+        # fire for dataclass outputs, so we must hook the tensors directly)
+        self._register_fsdp_backward_hooks_on_output(vx, ax)
 
         return (
             replace(video, x=vx) if video is not None else None,
@@ -2075,6 +2101,7 @@ class LTX2Transformer3DModel(CachableDiT):
     param_names_mapping = LTX2VideoConfig().param_names_mapping
     reverse_param_names_mapping = LTX2VideoConfig().reverse_param_names_mapping
     lora_param_names_mapping = LTX2VideoConfig().lora_param_names_mapping
+    _fsdp_shard_conditions = LTX2VideoConfig()._fsdp_shard_conditions
 
     def __init__(self, config: LTX2VideoConfig, hf_config: dict[str, Any]):
         super().__init__(config=config, hf_config=hf_config)
@@ -2403,3 +2430,6 @@ class LTX2Transformer3DModel(CachableDiT):
         audio_out = self.audio_patchifier.unpatchify(
             audio_out, output_shape=audio_shape)
         return video_out, audio_out
+
+# Entry point for model registry
+EntryClass = LTX2Transformer3DModel

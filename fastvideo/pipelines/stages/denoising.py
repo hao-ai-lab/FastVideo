@@ -173,6 +173,7 @@ class DenoisingStage(PipelineStage):
             {
                 "mouse_cond": batch.mouse_cond,
                 "keyboard_cond": batch.keyboard_cond,
+                "c2ws_plucker_emb": batch.c2ws_plucker_emb,
             },
         )
 
@@ -314,6 +315,27 @@ class DenoisingStage(PipelineStage):
                     t_expand = timestep.repeat(latent_model_input.shape[0], 1)
                 else:
                     t_expand = t.repeat(latent_model_input.shape[0])
+                t_expand = t_expand.to(get_local_torch_device())
+
+                use_meanflow = getattr(self.transformer.config, "use_meanflow",
+                                       False)
+                if use_meanflow:
+                    if i == len(timesteps) - 1:
+                        timesteps_r = torch.tensor(
+                            [0.0], device=get_local_torch_device())
+                    else:
+                        timesteps_r = timesteps[i + 1]
+                    timesteps_r = timesteps_r.repeat(
+                        latent_model_input.shape[0])
+                else:
+                    timesteps_r = None
+
+                timesteps_r_kwarg = self.prepare_extra_func_kwargs(
+                    self.transformer.forward,
+                    {
+                        "timestep_r": timesteps_r,
+                    },
+                )
 
                 latent_model_input = self.scheduler.scale_model_input(
                     latent_model_input, t)
@@ -406,6 +428,7 @@ class DenoisingStage(PipelineStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                             **action_kwargs,
+                            **timesteps_r_kwarg,
                         )
 
                     if batch.do_classifier_free_guidance:
@@ -423,6 +446,7 @@ class DenoisingStage(PipelineStage):
                                 **image_kwargs,
                                 **neg_cond_kwargs,
                                 **action_kwargs,
+                                **timesteps_r_kwarg,
                             )
 
                         noise_pred_text = noise_pred
@@ -487,7 +511,7 @@ class DenoisingStage(PipelineStage):
                     mgr2.release_all()
 
         # Save STA mask search results if needed
-        if st_attn_available and self.attn_backend == SlidingTileAttentionBackend and fastvideo_args.STA_mode == STA_Mode.STA_SEARCHING:
+        if st_attn_available and self.attn_backend == SlidingTileAttentionBackend and fastvideo_args.pipeline_config.STA_mode == STA_Mode.STA_SEARCHING:
             self.save_sta_search_results(batch)
 
         # deallocate transformer if on mps
@@ -580,8 +604,8 @@ class DenoisingStage(PipelineStage):
         """
         # TODO(kevin): STA mask search, currently only support Wan2.1 with 69x768x1280
         from fastvideo.attention.backends.STA_configuration import configure_sta
-        STA_mode = fastvideo_args.STA_mode
-        skip_time_steps = fastvideo_args.skip_time_steps
+        STA_mode = fastvideo_args.pipeline_config.STA_mode
+        skip_time_steps = fastvideo_args.pipeline_config.skip_time_steps
         if batch.timesteps is None:
             raise ValueError("Timesteps must be provided")
         timesteps_num = batch.timesteps.shape[0]

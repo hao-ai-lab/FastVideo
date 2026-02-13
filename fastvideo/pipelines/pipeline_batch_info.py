@@ -123,6 +123,7 @@ class ForwardBatch:
 
     # Latent tensors
     latents: torch.Tensor | None = None
+    lq_latents: torch.Tensor | None = None
     raw_latent_shape: tuple[int, ...] | None = None
     noise_pred: torch.Tensor | None = None
     image_latent: torch.Tensor | None = None
@@ -135,6 +136,9 @@ class ForwardBatch:
     # Camera control inputs (HYWorld)
     pose: str | None = None  # Camera trajectory: pose string (e.g., 'w-31') or JSON file path
 
+    # Camera control inputs (LingBotWorld)
+    c2ws_plucker_emb: torch.Tensor | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
+
     # Latent dimensions
     height_latents: list[int] | int | None = None
     width_latents: list[int] | int | None = None
@@ -144,6 +148,8 @@ class ForwardBatch:
     # Original dimensions (before VAE scaling)
     height: list[int] | int | None = None
     width: list[int] | int | None = None
+    height_sr: list[int] | int | None = None
+    width_sr: list[int] | int | None = None
     fps: list[int] | int | None = None
 
     # Timesteps
@@ -154,6 +160,7 @@ class ForwardBatch:
 
     # Scheduler parameters
     num_inference_steps: int = 50
+    num_inference_steps_sr: int = 50
     guidance_scale: float = 1.0
     guidance_scale_2: float | None = None
     guidance_rescale: float = 0.0
@@ -226,6 +233,14 @@ class TrainingBatch:
     noise_latents: torch.Tensor | None = None
     encoder_hidden_states: torch.Tensor | None = None
     encoder_attention_mask: torch.Tensor | None = None
+    # LTX related audio inputs
+    audio_latents: torch.Tensor | None = None
+    audio_noisy_model_input: torch.Tensor | None = None
+    audio_timesteps: torch.Tensor | None = None
+    audio_noise: torch.Tensor | None = None
+    audio_encoder_hidden_states: torch.Tensor | None = None
+    audio_encoder_attention_mask: torch.Tensor | None = None
+    conditioning_mask: torch.Tensor | None = None
     # i2v
     preprocessed_image: torch.Tensor | None = None
     image_embeds: torch.Tensor | None = None

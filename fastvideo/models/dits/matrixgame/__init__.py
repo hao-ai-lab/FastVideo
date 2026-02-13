@@ -9,3 +9,6 @@ __all__ = [
     "CausalMatrixGameTransformerBlock",
     "ActionModule",
 ]
+
+# Entry point for model registry
+EntryClass = [MatrixGameWanModel, CausalMatrixGameWanModel]

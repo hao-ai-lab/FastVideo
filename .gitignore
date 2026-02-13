@@ -32,6 +32,11 @@ env
 **.txt
 *.log
 weights/
+official_weights/
+converted_weights/
+
+# SSIM test outputs
+fastvideo/tests/ssim/generated_videos/
 
 # Distribution / packaging
 build/
@@ -69,6 +74,11 @@ docs/distillation/examples/
 !docs/assets/images/**/*.png
 !comfyui/assets/**/*.png
 !comfyui/assets/**/*.gif
+!assets/images/**/*.png
+!assets/images/**/*.jpg
+!assets/images/**/*.jpeg
+!assets/images/**/*.gif
+!assets/videos/**/*.mp4
 
 dmd_t2v_output/
 preprocess_output_text/

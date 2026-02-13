@@ -1134,3 +1134,5 @@ class LongCatTransformer3DModel(CachableDiT):
         )
         return x
 
+# Entry point for model registry
+EntryClass = LongCatTransformer3DModel

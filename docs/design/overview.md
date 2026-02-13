@@ -51,8 +51,9 @@ runtime parameters consistent:
 - `fastvideo/configs/pipelines/`: pipeline wiring and required components.
 - `fastvideo/configs/sample/`: default sampling parameters (steps, frames,
   guidance scale, resolution, fps).
-- `fastvideo/configs/registry.py`: pipeline registry.
-- `fastvideo/configs/sample/registry.py`: sampling param registry.
+- `fastvideo/registry.py`: unified registry for pipeline config + sampling
+  defaults and model metadata resolution, defined via explicit
+  `register_configs(...)` blocks (no separate dict registries).
 
 `FastVideoArgs` (in `fastvideo/fastvideo_args.py`) provides runtime settings and
 is passed into pipeline construction and stages.

@@ -121,6 +121,15 @@ This page contains the complete API reference for the FastVideo library.
       show_root_toc_entry: true
       heading_level: 4
 
+## fastvideo.registry
+
+::: fastvideo.registry
+    options:
+      show_source: true
+      show_root_heading: true
+      show_root_toc_entry: true
+      heading_level: 3
+
 ## fastvideo.pipelines
 
 ::: fastvideo.pipelines

@@ -8,7 +8,7 @@ from typing import Any, cast
 import torch
 
 from fastvideo.configs.models import (DiTConfig, EncoderConfig, ModelConfig,
-                                      VAEConfig)
+                                      VAEConfig, UpsamplerConfig)
 from fastvideo.configs.models.encoders import BaseEncoderOutput
 from fastvideo.configs.utils import update_config_from_args
 from fastvideo.logger import init_logger
@@ -44,12 +44,15 @@ class PipelineConfig:
     # Video generation parameters
     embedded_cfg_scale: float = 6.0
     flow_shift: float | None = None
+    flow_shift_sr: float | None = None
     disable_autocast: bool = False
     is_causal: bool = False
 
     # Model configuration
     dit_config: DiTConfig = field(default_factory=DiTConfig)
     dit_precision: str = "bf16"
+    upsampler_config: UpsamplerConfig = field(default_factory=UpsamplerConfig)
+    upsampler_precision: str = "fp32"
 
     # VAE configuration
     vae_config: VAEConfig = field(default_factory=VAEConfig)
@@ -216,6 +219,24 @@ class PipelineConfig:
             "Comma-separated list of denoising steps (e.g., '1000,757,522')",
         )
 
+        # STA (Sliding Tile Attention) parameters
+        parser.add_argument(
+            f"--{prefix_with_dot}STA-mode",
+            type=str,
+            dest=f"{prefix_with_dot.replace('-', '_')}STA_mode",
+            default=PipelineConfig.STA_mode.value,
+            choices=[mode.value for mode in STA_Mode],
+            help=
+            "STA mode: STA_inference, STA_searching, STA_tuning, STA_tuning_cfg, None",
+        )
+        parser.add_argument(
+            f"--{prefix_with_dot}skip-time-steps",
+            type=int,
+            dest=f"{prefix_with_dot.replace('-', '_')}skip_time_steps",
+            default=PipelineConfig.skip_time_steps,
+            help="Number of time steps to warmup (full attention) for STA",
+        )
+
         # Add VAE configuration arguments
         from fastvideo.configs.models.vaes.base import VAEConfig
         VAEConfig.add_cli_args(parser, prefix=f"{prefix_with_dot}vae-config")
@@ -245,8 +266,7 @@ class PipelineConfig:
         """
         use the pipeline class setting from model_path to match the pipeline config
         """
-        from fastvideo.configs.pipelines.registry import (
-            get_pipeline_config_cls_from_name)
+        from fastvideo.registry import get_pipeline_config_cls_from_name
         pipeline_config_cls = get_pipeline_config_cls_from_name(model_path)
 
         return cast(PipelineConfig, pipeline_config_cls(model_path=model_path))
@@ -260,8 +280,7 @@ class PipelineConfig:
         kwargs: dictionary of kwargs
         config_cli_prefix: prefix of CLI arguments for this PipelineConfig instance
         """
-        from fastvideo.configs.pipelines.registry import (
-            get_pipeline_config_cls_from_name)
+        from fastvideo.registry import get_pipeline_config_cls_from_name
 
         prefix_with_dot = f"{config_cli_prefix}." if (config_cli_prefix.strip()
                                                       != "") else ""
@@ -298,6 +317,12 @@ class PipelineConfig:
         # 4. Update PipelineConfig from CLI arguments if provided
         kwargs[prefix_with_dot + 'model_path'] = model_path
         pipeline_config.update_config_from_dict(kwargs, config_cli_prefix)
+
+        # Convert STA_mode string to enum if necessary
+        if isinstance(pipeline_config.STA_mode, str) and not isinstance(
+                pipeline_config.STA_mode, STA_Mode):
+            pipeline_config.STA_mode = STA_Mode(pipeline_config.STA_mode)
+
         return pipeline_config
 
     def check_pipeline_config(self) -> None:
