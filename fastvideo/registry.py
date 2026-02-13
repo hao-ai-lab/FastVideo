@@ -61,7 +61,6 @@ from fastvideo.configs.sample.hunyuan15 import (
     Hunyuan15_SR_1080P_SamplingParam)
 from fastvideo.configs.sample.hyworld import HYWorld_SamplingParam
 from fastvideo.configs.sample.hunyuangamecraft import HunyuanGameCraftSamplingParam
-from fastvideo.configs.sample.ltx2 import LTX2SamplingParam
 from fastvideo.configs.sample.lingbotworld import LingBotWorld_SamplingParam
 from fastvideo.configs.sample.ltx2 import (LTX2BaseSamplingParam,
                                            LTX2DistilledSamplingParam)
@@ -329,11 +328,9 @@ def _register_configs() -> None:
             "hunyuanvideo-community/HunyuanVideo",
         ],
         model_detectors=[
-            lambda path: "hunyuan" in path.lower() 
-            and "gamecraft" not in path.lower()
-            and "hyworld" not in path.lower()
-            and "1.5" not in path.lower()
-            and "1-5" not in path.lower()
+            lambda path: "hunyuan" in path.lower()
+            and "gamecraft" not in path.lower() and "hyworld" not in path.lower(
+            ) and "1.5" not in path.lower() and "1-5" not in path.lower()
         ],
     )
     register_configs(
@@ -362,6 +359,7 @@ def _register_configs() -> None:
             "tencent/Hunyuan-GameCraft-1.0",
         ],
         model_detectors=[lambda path: "gamecraft" in path.lower()],
+    )
     # LingBotWorld
     register_configs(
         sampling_param_cls=LingBotWorld_SamplingParam,

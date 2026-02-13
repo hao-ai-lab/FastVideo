@@ -16,5 +16,4 @@ __all__ = [
     "LTX2AudioDecoderConfig",
     "LTX2VocoderConfig",
     "UpsamplerConfig",
-    
 ]

@@ -120,7 +120,7 @@ def _apply_rotary_emb(
     """
     head_size = x.shape[-1]
     rope_dim = cos.shape[-1]
-    
+
     # Check if cos/sin are full head_dim (rotate_half style) or half (traditional style)
     if rope_dim == head_size:
         # Full head_dim - use rotate_half style (HunyuanVideo, GameCraft)
@@ -128,8 +128,10 @@ def _apply_rotary_emb(
         cos = cos.unsqueeze(-2)  # [num_tokens, 1, head_size]
         sin = sin.unsqueeze(-2)  # [num_tokens, 1, head_size]
         # rotate_half: split into pairs, negate and swap
-        x_real, x_imag = x.float().reshape(*x.shape[:-1], -1, 2).unbind(-1)  # [B, H, D//2] each
-        x_rotated = torch.stack([-x_imag, x_real], dim=-1).flatten(-2)  # [B, H, D]
+        x_real, x_imag = x.float().reshape(*x.shape[:-1], -1,
+                                           2).unbind(-1)  # [B, H, D//2] each
+        x_rotated = torch.stack([-x_imag, x_real],
+                                dim=-1).flatten(-2)  # [B, H, D]
         return (x.float() * cos + x_rotated * sin).type_as(x)
     else:
         # Half head_dim - use traditional Neox/GPT-J style
@@ -330,7 +332,7 @@ def get_1d_rotary_pos_embed(
     freqs = torch.outer(pos * interpolation_factor, freqs)  # [S, D/2]
     freqs_cos = freqs.cos()  # [S, D/2]
     freqs_sin = freqs.sin()  # [S, D/2]
-    
+
     if use_real:
         # For rotate_half style RoPE (used by HunyuanVideo, GameCraft),
         # we need to expand cos/sin to full head_dim using repeat_interleave.
@@ -339,7 +341,7 @@ def get_1d_rotary_pos_embed(
         # Using torch.cat would produce [c0,c1,...,c0,c1,...] which is WRONG.
         freqs_cos = freqs_cos.repeat_interleave(2, dim=-1)  # [S, D]
         freqs_sin = freqs_sin.repeat_interleave(2, dim=-1)  # [S, D]
-    
+
     return freqs_cos, freqs_sin
 
 

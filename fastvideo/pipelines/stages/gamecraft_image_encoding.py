@@ -69,7 +69,8 @@ class GameCraftImageVAEEncodingStage(PipelineStage):
                 # [B, C, F, H, W] -> take first frame
                 ref_pixel = image[:, :, :1]
             elif image.dim() == 4:
-                ref_pixel = image.unsqueeze(2)  # [B, C, H, W] -> [B, C, 1, H, W]
+                ref_pixel = image.unsqueeze(
+                    2)  # [B, C, H, W] -> [B, C, 1, H, W]
             else:
                 raise ValueError(f"Unexpected image tensor dims: {image.dim()}")
             ref_pixel = ref_pixel.to(device=device, dtype=torch.float32)
@@ -95,7 +96,7 @@ class GameCraftImageVAEEncodingStage(PipelineStage):
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
             ])
-            ref_pixel = ref_transform(image)            # [3, H, W]
+            ref_pixel = ref_transform(image)  # [3, H, W]
             ref_pixel = ref_pixel.unsqueeze(0).unsqueeze(2)  # [1, 3, 1, H, W]
             ref_pixel = ref_pixel.to(device=device, dtype=torch.float32)
 
@@ -104,14 +105,14 @@ class GameCraftImageVAEEncodingStage(PipelineStage):
         # ------------------------------------------------------------------
         self.vae = self.vae.to(device)
 
-        vae_dtype = PRECISION_TO_TYPE[fastvideo_args.pipeline_config.vae_precision]
+        vae_dtype = PRECISION_TO_TYPE[
+            fastvideo_args.pipeline_config.vae_precision]
         vae_autocast_enabled = (
-            vae_dtype != torch.float32
-        ) and not fastvideo_args.disable_autocast
+            vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
-        with torch.autocast(
-            device_type="cuda", dtype=vae_dtype, enabled=vae_autocast_enabled
-        ):
+        with torch.autocast(device_type="cuda",
+                            dtype=vae_dtype,
+                            enabled=vae_autocast_enabled):
             if fastvideo_args.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
             if not vae_autocast_enabled:
@@ -119,7 +120,8 @@ class GameCraftImageVAEEncodingStage(PipelineStage):
             encoder_output = self.vae.encode(ref_pixel)
 
         # Sample from the distribution (official uses .sample())
-        ref_latents = encoder_output.latent_dist.sample().to(dtype=torch.float32)
+        ref_latents = encoder_output.latent_dist.sample().to(
+            dtype=torch.float32)
         # Scale by VAE scaling factor (0.476986 for GameCraft)
         ref_latents.mul_(self.vae.config.scaling_factor)
         # ref_latents: [B, 16, 1, H_lat, W_lat]
@@ -128,9 +130,9 @@ class GameCraftImageVAEEncodingStage(PipelineStage):
         # 3. Build gt_latents + conditioning_mask
         # ------------------------------------------------------------------
         # Get latent temporal dimension from batch latents (set by LatentPreparationStage)
-        latent_frames = batch.latents.shape[2] if batch.latents is not None else (
-            (batch.num_frames - 1) // 4 + 1
-        )
+        latent_frames = batch.latents.shape[
+            2] if batch.latents is not None else ((batch.num_frames - 1) // 4 +
+                                                  1)
 
         # Repeat to all frames
         gt_latents = ref_latents.repeat(1, 1, latent_frames, 1, 1)
@@ -140,9 +142,13 @@ class GameCraftImageVAEEncodingStage(PipelineStage):
         #   - Short videos (latent_frames <= 10): first frame conditioned
         #   - Longer videos: first half conditioned (autoregressive)
         mask = torch.ones(
-            gt_latents.shape[0], 1,
-            gt_latents.shape[2], gt_latents.shape[3], gt_latents.shape[4],
-            device=gt_latents.device, dtype=gt_latents.dtype,
+            gt_latents.shape[0],
+            1,
+            gt_latents.shape[2],
+            gt_latents.shape[3],
+            gt_latents.shape[4],
+            device=gt_latents.device,
+            dtype=gt_latents.dtype,
         )
 
         if latent_frames <= 10:
@@ -164,16 +170,14 @@ class GameCraftImageVAEEncodingStage(PipelineStage):
 
         return batch
 
-    def verify_input(
-        self, batch: ForwardBatch, fastvideo_args: FastVideoArgs
-    ) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         # Stage is a no-op when pil_image is None, so nothing required
         return result
 
-    def verify_output(
-        self, batch: ForwardBatch, fastvideo_args: FastVideoArgs
-    ) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         result = VerificationResult()
         # gt_latents and conditioning_mask are only set for I2V
         return result

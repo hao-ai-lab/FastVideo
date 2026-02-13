@@ -11,6 +11,7 @@ from fastvideo.configs.models.dits.hyworld import HYWorldConfig
 
 __all__ = [
     "HunyuanVideoConfig", "HunyuanVideo15Config", "HunyuanGameCraftConfig",
-    "WanVideoConfig", "StepVideoConfig", "CosmosVideoConfig", "Cosmos25VideoConfig",
-    "LongCatVideoConfig", "LTX2VideoConfig", "HYWorldConfig"
+    "WanVideoConfig", "StepVideoConfig", "CosmosVideoConfig",
+    "Cosmos25VideoConfig", "LongCatVideoConfig", "LTX2VideoConfig",
+    "HYWorldConfig"
 ]

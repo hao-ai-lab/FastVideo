@@ -72,7 +72,8 @@ class HunyuanGameCraftPipeline(ComposedPipelineBase):
 
         self.add_stage(
             stage_name="timestep_preparation_stage",
-            stage=TimestepPreparationStage(scheduler=self.get_module("scheduler")),
+            stage=TimestepPreparationStage(
+                scheduler=self.get_module("scheduler")),
         )
 
         self.add_stage(

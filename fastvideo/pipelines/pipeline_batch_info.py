@@ -141,7 +141,8 @@ class ForwardBatch:
     gt_latents: torch.Tensor | None = None  # Ground truth latents for conditioning [B, 16, T, H, W]
     conditioning_mask: torch.Tensor | None = None  # Mask for conditioning [B, 1, T, H, W]
     camera_trajectory: str | None = None  # Camera trajectory file/identifier
-    action_list: list[str] | None = None  # List of actions (e.g., ['forward', 'left'])
+    action_list: list[
+        str] | None = None  # List of actions (e.g., ['forward', 'left'])
     action_speed_list: list[float] | None = None  # Speed for each action
     # Camera control inputs (LingBotWorld)
     c2ws_plucker_emb: torch.Tensor | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
