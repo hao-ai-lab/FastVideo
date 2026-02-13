@@ -125,6 +125,12 @@ rocm = [
     "amdsmi",
 ]
 
+stable-audio = [
+    "k-diffusion>=0.1.1",
+    "alias-free-torch>=0.0.6",
+    "einops-exts>=0.0.4",
+]
+
 [project.scripts]
 fastvideo = "fastvideo.entrypoints.cli.main:main"
 

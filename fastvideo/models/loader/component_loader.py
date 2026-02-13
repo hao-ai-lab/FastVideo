@@ -772,17 +772,29 @@ class TransformerLoader(ComponentLoader):
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 
-        # Find all safetensors files
-        safetensors_list = glob.glob(
-            os.path.join(str(model_path), "*.safetensors")
-        )
-        if not safetensors_list:
-            raise ValueError(f"No safetensors files found in {model_path}")
-
-        # Check if we should use custom initialization weights
+        # Check if we should use custom initialization weights or unified checkpoint
         custom_weights_path = getattr(
             fastvideo_args, "init_weights_from_safetensors", None
         )
+        pipeline_dit_config = getattr(
+            fastvideo_args.pipeline_config, "dit_config", None
+        )
+        unified_path = getattr(pipeline_dit_config, "unified_checkpoint_path", None)
+        if unified_path:
+            if not os.path.isabs(unified_path):
+                # Resolve relative to model root (parent of transformer/)
+                model_root = os.path.dirname(str(model_path))
+                unified_path = os.path.join(model_root, unified_path)
+            if os.path.exists(unified_path):
+                custom_weights_path = unified_path
+        elif getattr(pipeline_dit_config, "transformer_key_prefix", None):
+            # Infer unified checkpoint: model.safetensors or model.ckpt in model root
+            model_root = os.path.dirname(str(model_path))
+            for name in ("model.safetensors", "model.ckpt"):
+                inferred = os.path.join(model_root, name)
+                if os.path.exists(inferred):
+                    custom_weights_path = inferred
+                    break
         use_custom_weights = (
             custom_weights_path
             and os.path.exists(custom_weights_path)
@@ -802,10 +814,17 @@ class TransformerLoader(ComponentLoader):
                     os.path.join(str(custom_weights_path), "*.safetensors")
                 )
             else:
-                assert custom_weights_path.endswith(".safetensors"), (
-                    "Custom initialization weights must be a safetensors file"
+                assert custom_weights_path.endswith((".safetensors", ".ckpt")), (
+                    "Custom initialization weights must be a .safetensors or .ckpt file"
                 )
                 safetensors_list = [custom_weights_path]
+        else:
+            safetensors_list = glob.glob(
+                os.path.join(str(model_path), "*.safetensors")
+            )
+
+        if not safetensors_list:
+            raise ValueError(f"No safetensors files found in {model_path}")
 
         logger.info(
             "Loading model from %s safetensors files: %s",
@@ -829,6 +848,13 @@ class TransformerLoader(ComponentLoader):
             or cls_name == "Cosmos25Transformer3DModel"
             or getattr(fastvideo_args.pipeline_config, "prefix", "") == "Cosmos25"
         )
+        # For unified checkpoints (e.g. Stable Audio model.safetensors), filter
+        # keys by prefix when loading transformer weights
+        weight_key_prefix = getattr(
+            pipeline_dit_config,
+            "transformer_key_prefix",
+            None,
+        )
         model = maybe_load_fsdp_model(
             model_cls=model_cls,
             init_params={"config": dit_config, "hf_config": hf_config},
@@ -848,6 +874,7 @@ class TransformerLoader(ComponentLoader):
             training_mode=fastvideo_args.training_mode,
             enable_torch_compile=fastvideo_args.enable_torch_compile,
             torch_compile_kwargs=fastvideo_args.torch_compile_kwargs,
+            weight_key_prefix=weight_key_prefix,
         )
 
         total_params = sum(p.numel() for p in model.parameters())

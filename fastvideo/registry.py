@@ -25,6 +25,7 @@ from fastvideo.configs.pipelines.hyworld import HYWorldConfig
 from fastvideo.configs.pipelines.lingbotworld import LingBotWorldI2V480PConfig
 from fastvideo.configs.pipelines.longcat import LongCatT2V480PConfig
 from fastvideo.configs.pipelines.ltx2 import LTX2T2VConfig
+from fastvideo.configs.pipelines.stable_audio import StableAudioPipelineConfig
 from fastvideo.configs.pipelines.stepvideo import StepVideoT2VConfig
 from fastvideo.configs.pipelines.turbodiffusion import (
     TurboDiffusionI2V_A14B_Config,
@@ -62,6 +63,7 @@ from fastvideo.configs.sample.hyworld import HYWorld_SamplingParam
 from fastvideo.configs.sample.lingbotworld import LingBotWorld_SamplingParam
 from fastvideo.configs.sample.ltx2 import (LTX2BaseSamplingParam,
                                            LTX2DistilledSamplingParam)
+from fastvideo.configs.sample.stable_audio import StableAudioSamplingParam
 from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
 from fastvideo.configs.sample.turbodiffusion import (
     TurboDiffusionI2V_A14B_SamplingParam,
@@ -245,6 +247,20 @@ def _get_config_info(
 
 
 def _register_configs() -> None:
+    # Stable Audio
+    register_configs(
+        sampling_param_cls=StableAudioSamplingParam,
+        pipeline_config_cls=StableAudioPipelineConfig,
+        hf_model_paths=[
+            "stabilityai/stable-audio-open-1.0",
+            "stable-audio-open-1.0",
+        ],
+        model_detectors=[
+            lambda path: "stable-audio" in path.lower(),
+            lambda path: "stableaudio" in path.lower(),
+        ],
+    )
+
     # LTX-2 (base)
     register_configs(
         sampling_param_cls=LTX2BaseSamplingParam,

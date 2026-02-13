@@ -138,6 +138,11 @@ class ForwardBatch:
 
     # Camera control inputs (LingBotWorld)
     c2ws_plucker_emb: torch.Tensor | None = None  # Plucker embedding: [B, C, F_lat, H_lat, W_lat]
+    # Audio inputs (Stable Audio)
+    sample_rate: int | None = None
+    duration_seconds: float | None = None
+    seconds_start: float | None = None
+    seconds_total: float | None = None
 
     # Latent dimensions
     height_latents: list[int] | int | None = None

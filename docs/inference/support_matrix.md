@@ -60,6 +60,7 @@ The `HuggingFace Model ID` can be directly pass to `from_pretrained()` methods a
 | Matrix Game 2.0 Base | `FastVideo/Matrix-Game-2.0-Base-Diffusers` | 352x640 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Matrix Game 2.0 GTA | `FastVideo/Matrix-Game-2.0-GTA-Diffusers` | 352x640 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Matrix Game 2.0 TempleRun | `FastVideo/Matrix-Game-2.0-TempleRun-Diffusers` | 352x640 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
+| Stable Audio Open 1.0 (T2A) | `stabilityai/stable-audio-open-1.0` | 44.1 kHz stereo | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 
 **Note**: Wan2.2 TI2V 5B has some quality issues when performing I2V generation. We are working on fixing this issue.
 
@@ -80,3 +81,6 @@ The `HuggingFace Model ID` can be directly pass to `from_pretrained()` methods a
 - Image-to-video game world models with keyboard/mouse control input
 - Three variants available: Base (universal), GTA, and TempleRun
 - Each variant has different keyboard dimensions for control inputs
+
+### Stable Audio Open 1.0
+- Text-to-audio (T2A) only. See [Stable Audio](stable_audio.md) for installation and usage.
