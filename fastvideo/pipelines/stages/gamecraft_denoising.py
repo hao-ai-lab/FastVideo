@@ -174,11 +174,11 @@ class GameCraftDenoisingStage(DenoisingStage):
                                              dtype=target_dtype)
 
         # Debug logging
-        logger.info("[GameCraft DEBUG] latents shape: %s, min/max: %.4f/%.4f",
+        logger.debug("[GameCraft DEBUG] latents shape: %s, min/max: %.4f/%.4f",
                     latents.shape, latents.min(), latents.max())
-        logger.info("[GameCraft DEBUG] camera_states: %s",
+        logger.debug("[GameCraft DEBUG] camera_states: %s",
                     camera_states.shape if camera_states is not None else None)
-        logger.info("[GameCraft DEBUG] prompt_embeds[0] shape: %s",
+        logger.debug("[GameCraft DEBUG] prompt_embeds[0] shape: %s",
                     prompt_embeds[0].shape)
 
         # Initialize lists for trajectory
