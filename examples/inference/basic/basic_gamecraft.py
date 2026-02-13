@@ -34,6 +34,16 @@ DEFAULT_PROMPTS = {
     "beach": "A tropical beach with crystal clear turquoise water, white sand, and palm trees swaying in the breeze.",
 }
 
+# I2V: default reference image (URL). Can override with a local path.
+DEFAULT_I2V_IMAGE_URL = (
+    "https://huggingface.co/datasets/huggingface/documentation-images/"
+    "resolve/main/diffusers/astronaut.jpg"
+)
+DEFAULT_I2V_PROMPT = (
+    "An astronaut hatching from an egg, on the surface of the moon, "
+    "the darkness and depth of space realised in the background."
+)
+
 OUTPUT_PATH = "video_samples_gamecraft"
 
 
@@ -68,9 +78,12 @@ def main():
     )
     print(f"Camera states shape: {camera_states.shape}")
 
-    # Generate video
+    # I2V: reference image (URL or local path). Set to None for T2V only.
+    image_path = os.environ.get("GAMECRAFT_I2V_IMAGE", DEFAULT_I2V_IMAGE_URL)
+
+    # Generate video (I2V when image_path is set)
     generator.generate_video(
-        prompt=DEFAULT_PROMPTS["temple"],
+        prompt=DEFAULT_I2V_PROMPT if image_path else DEFAULT_PROMPTS["temple"],
         negative_prompt="",
         camera_states=camera_states,
         height=height,
@@ -82,6 +95,7 @@ def main():
         fps=24,
         output_path=OUTPUT_PATH,
         save_video=True,
+        image_path=image_path,
     )
 
 
