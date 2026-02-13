@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
+import json
 import os
 from contextlib import contextmanager
-from collections.abc import Iterator
+from typing import Iterator
 
 import torch
 import pytest
@@ -242,7 +243,7 @@ def test_i2v_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     if not reference_video_name:
         logger.error(f"Reference video not found for prompt: {prompt} with backend: {ATTENTION_BACKEND}")
-        raise FileNotFoundError("Reference video missing")
+        raise FileNotFoundError(f"Reference video missing")
 
     reference_video_path = os.path.join(reference_folder, reference_video_name)
     generated_video_path = os.path.join(output_dir, output_video_name)
@@ -359,7 +360,7 @@ def test_inference_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     if not reference_video_name:
         logger.error(f"Reference video not found for prompt: {prompt} with backend: {ATTENTION_BACKEND}")
-        raise FileNotFoundError("Reference video missing")
+        raise FileNotFoundError(f"Reference video missing")
 
     reference_video_path = os.path.join(reference_folder, reference_video_name)
     generated_video_path = os.path.join(output_dir, output_video_name)

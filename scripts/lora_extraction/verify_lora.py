@@ -11,6 +11,7 @@ import argparse
 import logging
 from pathlib import Path
 
+import torch
 from safetensors.torch import load_file
 
 LOG = logging.getLogger(__name__)
@@ -117,7 +118,7 @@ def main():
     
     results.sort(key=lambda x: x["max_abs"], reverse=True)
     
-    LOG.info("\nTop 10 mismatches by max_abs_error:")
+    LOG.info(f"\nTop 10 mismatches by max_abs_error:")
     for i, r in enumerate(results[:10], 1):
         LOG.info(f"{i:2d}. {r['key']}")
         LOG.info(f"    shape={r['shape']}, max_abs={r['max_abs']:.3e}, mean_abs={r['mean_abs']:.3e}, rel_mean={r['rel_mean']:.4f}%")
@@ -125,7 +126,7 @@ def main():
     overall_mean = sum(r["mean_abs"] for r in results) / len(results)
     overall_max = max(r["max_abs"] for r in results)
     
-    LOG.info("\nOverall metrics:")
+    LOG.info(f"\nOverall metrics:")
     LOG.info(f"  Layers compared: {len(results)}")
     LOG.info(f"  Mean(mean_abs): {overall_mean:.3e}")
     LOG.info(f"  Max(max_abs): {overall_max:.3e}")

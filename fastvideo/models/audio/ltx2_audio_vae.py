@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 from enum import Enum
-from typing import Any, NamedTuple
+from typing import Any, List, NamedTuple, Set, Tuple
 
 import einops
 import torch
@@ -191,9 +191,9 @@ class CausalConv2d(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: int | tuple[int, int],
+        kernel_size: int | Tuple[int, int],
         stride: int = 1,
-        dilation: int | tuple[int, int] = 1,
+        dilation: int | Tuple[int, int] = 1,
         groups: int = 1,
         bias: bool = True,
         causality_axis: CausalityAxis = CausalityAxis.HEIGHT,
@@ -240,9 +240,9 @@ class CausalConv2d(nn.Module):
 def make_conv2d(
     in_channels: int,
     out_channels: int,
-    kernel_size: int | tuple[int, int],
+    kernel_size: int | Tuple[int, int],
     stride: int = 1,
-    padding: tuple[int, int, int, int] | None = None,
+    padding: Tuple[int, int, int, int] | None = None,
     dilation: int = 1,
     groups: int = 1,
     bias: bool = True,
@@ -421,7 +421,7 @@ class ResBlock1(nn.Module):
         self,
         channels: int,
         kernel_size: int = 3,
-        dilation: tuple[int, int, int] = (1, 3, 5),
+        dilation: Tuple[int, int, int] = (1, 3, 5),
     ):
         super().__init__()
         self.convs1 = nn.ModuleList(
@@ -456,7 +456,7 @@ class ResBlock2(nn.Module):
         self,
         channels: int,
         kernel_size: int = 3,
-        dilation: tuple[int, int] = (1, 3),
+        dilation: Tuple[int, int] = (1, 3),
     ):
         super().__init__()
         self.convs = nn.ModuleList(
@@ -523,7 +523,7 @@ class Downsample(nn.Module):
 def build_downsampling_path(
     *,
     ch: int,
-    ch_mult: tuple[int, ...],
+    ch_mult: Tuple[int, ...],
     num_resolutions: int,
     num_res_blocks: int,
     resolution: int,
@@ -532,9 +532,9 @@ def build_downsampling_path(
     norm_type: NormType,
     causality_axis: CausalityAxis,
     attn_type: AttentionType,
-    attn_resolutions: set[int],
+    attn_resolutions: Set[int],
     resamp_with_conv: bool,
-) -> tuple[nn.ModuleList, int]:
+) -> Tuple[nn.ModuleList, int]:
     """Build the downsampling path with residual blocks, attention, and downsampling layers."""
     down_modules = nn.ModuleList()
     curr_res = resolution
@@ -617,7 +617,7 @@ class Upsample(nn.Module):
 def build_upsampling_path(
     *,
     ch: int,
-    ch_mult: tuple[int, ...],
+    ch_mult: Tuple[int, ...],
     num_resolutions: int,
     num_res_blocks: int,
     resolution: int,
@@ -626,10 +626,10 @@ def build_upsampling_path(
     norm_type: NormType,
     causality_axis: CausalityAxis,
     attn_type: AttentionType,
-    attn_resolutions: set[int],
+    attn_resolutions: Set[int],
     resamp_with_conv: bool,
     initial_block_channels: int,
-) -> tuple[nn.ModuleList, int]:
+) -> Tuple[nn.ModuleList, int]:
     """Build the upsampling path with residual blocks, attention, and upsampling layers."""
     up_modules = nn.ModuleList()
     block_in = initial_block_channels
@@ -726,9 +726,9 @@ class AudioEncoder(nn.Module):
         self,
         *,
         ch: int,
-        ch_mult: tuple[int, ...] = (1, 2, 4, 8),
+        ch_mult: Tuple[int, ...] = (1, 2, 4, 8),
         num_res_blocks: int,
-        attn_resolutions: set[int],
+        attn_resolutions: Set[int],
         dropout: float = 0.0,
         resamp_with_conv: bool = True,
         in_channels: int,
@@ -885,9 +885,9 @@ class AudioDecoder(nn.Module):
         *,
         ch: int,
         out_ch: int,
-        ch_mult: tuple[int, ...] = (1, 2, 4, 8),
+        ch_mult: Tuple[int, ...] = (1, 2, 4, 8),
         num_res_blocks: int,
-        attn_resolutions: set[int],
+        attn_resolutions: Set[int],
         resolution: int,
         z_channels: int,
         norm_type: NormType = NormType.GROUP,
@@ -993,7 +993,7 @@ class AudioDecoder(nn.Module):
 
     def _denormalize_latents(
         self, sample: torch.Tensor
-    ) -> tuple[torch.Tensor, AudioLatentShape]:
+    ) -> Tuple[torch.Tensor, AudioLatentShape]:
         latent_shape = AudioLatentShape(
             batch=sample.shape[0],
             channels=sample.shape[1],
@@ -1088,10 +1088,10 @@ class Vocoder(nn.Module):
 
     def __init__(
         self,
-        resblock_kernel_sizes: list[int] | None = None,
-        upsample_rates: list[int] | None = None,
-        upsample_kernel_sizes: list[int] | None = None,
-        resblock_dilation_sizes: list[list[int]] | None = None,
+        resblock_kernel_sizes: List[int] | None = None,
+        upsample_rates: List[int] | None = None,
+        upsample_kernel_sizes: List[int] | None = None,
+        resblock_dilation_sizes: List[List[int]] | None = None,
         upsample_initial_channel: int = 1024,
         stereo: bool = True,
         resblock: str = "1",

@@ -2,6 +2,7 @@
 Inference using a LoRA checkpoint from FastVideo trainer.
 """
 from fastvideo import VideoGenerator
+from fastvideo.configs.sample import SamplingParam
 
 OUTPUT_PATH = "./lora_out"
 def main():

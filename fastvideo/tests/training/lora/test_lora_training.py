@@ -1,6 +1,7 @@
 import os
 os.environ["MASTER_ADDR"] = "localhost"
 os.environ["MASTER_PORT"] = "29514"
+import sys
 import subprocess
 from pathlib import Path
 import torch

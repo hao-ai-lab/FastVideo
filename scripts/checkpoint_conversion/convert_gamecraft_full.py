@@ -28,6 +28,8 @@ import json
 import shutil
 from pathlib import Path
 
+import torch
+from safetensors.torch import save_file
 
 # Import conversion functions
 from convert_gamecraft_weights import convert_weights as convert_transformer
@@ -71,7 +73,7 @@ def create_model_index(output_dir: Path) -> None:
     
     with open(output_dir / "model_index.json", "w") as f:
         json.dump(model_index, f, indent=2)
-    print("Created model_index.json")
+    print(f"Created model_index.json")
 
 
 def create_scheduler_config(output_dir: Path) -> None:
@@ -93,7 +95,7 @@ def create_scheduler_config(output_dir: Path) -> None:
     
     with open(scheduler_dir / "scheduler_config.json", "w") as f:
         json.dump(scheduler_config, f, indent=2)
-    print("Created scheduler config")
+    print(f"Created scheduler config")
 
 
 def copy_text_encoder(src_dir: Path, dst_dir: Path, name: str) -> None:
@@ -206,7 +208,7 @@ def convert_full_model(
         print(f"\n[4/5] Skipping text_encoder_2 (not found: {text_encoder_2_path})")
     
     # 5. Create model_index.json and scheduler
-    print("\n[5/5] Creating model_index.json and scheduler config")
+    print(f"\n[5/5] Creating model_index.json and scheduler config")
     create_model_index(output_dir)
     create_scheduler_config(output_dir)
     

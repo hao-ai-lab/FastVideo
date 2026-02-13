@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import math
 from typing import Any
 
 import numpy as np
@@ -9,6 +10,7 @@ from torchvision import transforms
 
 from fastvideo.attention import DistributedAttention, LocalAttention
 from fastvideo.configs.models.dits.cosmos2_5 import Cosmos25VideoConfig
+from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import apply_rotary_emb

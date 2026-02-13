@@ -1,3 +1,6 @@
+import os
+import sys
+from typing import Tuple
 
 import torch
 import pytest
@@ -75,7 +78,7 @@ def run_forward_equal_qk(
     num_blocks: int = 16,
     k: int = 2,
     num_iterations: int = 5,
-) -> tuple[float, float]:
+) -> Tuple[float, float]:
     """
     Forward-only correctness test for the case S_q == S_kv.
     Mirrors `check_correctness` but only compares forward outputs.
@@ -142,7 +145,7 @@ def run_forward_qk_diff(
     num_kv_blocks: int = 32,
     k: int = 2,
     num_iterations: int = 5,
-) -> tuple[float, float]:
+) -> Tuple[float, float]:
     """
     Forward-only correctness test for the case S_q != S_kv.
     """

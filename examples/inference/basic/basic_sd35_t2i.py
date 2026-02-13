@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+from typing import List
 
 
 DEFAULT_PROMPTS = [
@@ -78,7 +79,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    prompts: list[str] = args.prompt if args.prompt else DEFAULT_PROMPTS
+    prompts: List[str] = args.prompt if args.prompt else DEFAULT_PROMPTS
 
     if args.backend:
         os.environ["FASTVIDEO_ATTENTION_BACKEND"] = args.backend

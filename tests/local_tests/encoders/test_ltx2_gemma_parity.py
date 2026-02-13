@@ -87,7 +87,7 @@ def _log_register_sums(encoder: torch.nn.Module, log_path: Path, label: str) -> 
     def _sum_param(module: torch.nn.Module, name: str) -> float | None:
         if not hasattr(module, "learnable_registers"):
             return None
-        param = module.learnable_registers
+        param = getattr(module, "learnable_registers")
         if not torch.is_tensor(param):
             return None
         return param.float().sum().item()

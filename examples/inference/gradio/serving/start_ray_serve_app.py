@@ -12,7 +12,7 @@ import threading
 import signal
 import requests
 from pathlib import Path
-from typing import Any
+from typing import Dict, Any, Optional
 
 
 DEFAULT_BACKEND_HOST = "0.0.0.0"
@@ -39,8 +39,8 @@ class ServiceManager:
     
     def __init__(self, args: argparse.Namespace):
         self.args = args
-        self.backend_process: subprocess.Popen | None = None
-        self.frontend_process: subprocess.Popen | None = None
+        self.backend_process: Optional[subprocess.Popen] = None
+        self.frontend_process: Optional[subprocess.Popen] = None
         self.backend_url = f"http://{args.backend_host}:{args.backend_port}"
     
     def check_backend_health(self, max_retries: int = HEALTH_CHECK_MAX_RETRIES) -> bool:
@@ -72,7 +72,7 @@ class ServiceManager:
         thread.start()
         return thread
     
-    def _start_service(self, script_name: str, args_dict: dict[str, Any], service_name: str) -> subprocess.Popen:
+    def _start_service(self, script_name: str, args_dict: Dict[str, Any], service_name: str) -> subprocess.Popen:
         script_path = Path(__file__).parent / script_name
         
         cmd = [sys.executable, str(script_path)]

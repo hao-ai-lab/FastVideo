@@ -622,7 +622,7 @@ class TextDataset(torch.utils.data.IterableDataset,
     def _load_text_data(self) -> list[str]:
         """Load text prompts from file."""
         prompts = []
-        with open(self.data_merge_path, encoding='utf-8') as f:
+        with open(self.data_merge_path, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if line:  # Skip empty lines

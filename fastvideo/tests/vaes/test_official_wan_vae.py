@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
 
+import numpy as np
 import pytest
 import torch
+from diffusers import AutoencoderKLWan
 
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.fastvideo_args import FastVideoArgs

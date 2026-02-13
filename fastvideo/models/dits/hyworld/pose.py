@@ -13,6 +13,7 @@ import json
 import numpy as np
 import torch
 from scipy.spatial.transform import Rotation as R
+from typing import Union, Optional
 
 from .trajectory import generate_camera_trajectory_local
 
@@ -141,7 +142,7 @@ def parse_pose_string(
 
 def pose_string_to_json(
     pose_string: str,
-    intrinsic: list[list[float]] | None = None,
+    intrinsic: Optional[list[list[float]]] = None,
 ) -> dict:
     """
     Convert pose string to pose JSON format.
@@ -166,7 +167,7 @@ def pose_string_to_json(
     return pose_json
 
 def pose_to_input(
-    pose_data: str | dict,
+    pose_data: Union[str, dict],
     latent_num: int,
     tps: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -191,7 +192,7 @@ def pose_to_input(
     if isinstance(pose_data, str):
         if pose_data.endswith(".json"):
             # Load from JSON file
-            with open(pose_data) as f:
+            with open(pose_data, "r") as f:
                 pose_json = json.load(f)
         else:
             # Parse pose string

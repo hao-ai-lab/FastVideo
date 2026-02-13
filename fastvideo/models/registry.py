@@ -11,7 +11,7 @@ import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Set
 from dataclasses import dataclass, field
-from functools import lru_cache, cache
+from functools import lru_cache
 from typing import NoReturn, TypeVar, cast
 
 import cloudpickle
@@ -126,7 +126,7 @@ _LEGACY_FAST_VIDEO_MODELS = {
 MODELS_PATH = os.path.dirname(__file__)
 
 
-@cache
+@lru_cache(maxsize=None)
 def _discover_and_register_models() -> dict[str, tuple[str, str, str]]:
     discovered_models: dict[str, tuple[str, str, str]] = {}
     for root, dirs, files in os.walk(MODELS_PATH):
@@ -141,7 +141,7 @@ def _discover_and_register_models() -> dict[str, tuple[str, str, str]]:
 
             filepath = os.path.join(root, filename)
             try:
-                with open(filepath, encoding="utf-8") as f:
+                with open(filepath, "r", encoding="utf-8") as f:
                     source = f.read()
                 tree = ast.parse(source, filename=filename)
 

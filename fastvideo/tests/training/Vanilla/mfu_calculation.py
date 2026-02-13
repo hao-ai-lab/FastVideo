@@ -14,6 +14,7 @@ import json
 from huggingface_hub import snapshot_download
 from fastvideo.utils import logger
 # Import the training pipeline
+from fastvideo.training.wan_training_pipeline import main
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.utils import FlexibleArgumentParser
 from fastvideo.training.wan_training_pipeline import WanTrainingPipeline
@@ -179,7 +180,9 @@ def test_distributed_training():
         # Peak FLOPs based on device
         if "H100" in device_name:
             peak_flops_per_gpu = 989e12
-        elif "A100" in device_name or "A40" in device_name:
+        elif "A100" in device_name:
+            peak_flops_per_gpu = 312e12
+        elif "A40" in device_name:
             peak_flops_per_gpu = 312e12
         elif "L40S" in device_name:
             peak_flops_per_gpu = 362e12

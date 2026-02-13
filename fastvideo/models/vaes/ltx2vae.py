@@ -9,11 +9,11 @@ import itertools
 import math
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import Any, NamedTuple
-from collections.abc import Callable, Iterator
+from typing import Any, Callable, Iterator, List, NamedTuple, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from einops import rearrange
 
 from fastvideo.models.vaes.common import DiagonalGaussianDistribution
@@ -93,7 +93,7 @@ class TilingConfig:
     temporal_config: TemporalTilingConfig | None = None
 
     @classmethod
-    def default(cls) -> TilingConfig:
+    def default(cls) -> "TilingConfig":
         return cls(
             spatial_config=SpatialTilingConfig(tile_size_in_pixels=512, tile_overlap_in_pixels=64),
             temporal_config=TemporalTilingConfig(tile_size_in_frames=64, tile_overlap_in_frames=24),
@@ -103,17 +103,17 @@ class TilingConfig:
 @dataclass(frozen=True)
 class DimensionIntervals:
     """Intervals which a single dimension of the latent space is split into."""
-    starts: list[int]
-    ends: list[int]
-    left_ramps: list[int]
-    right_ramps: list[int]
+    starts: List[int]
+    ends: List[int]
+    left_ramps: List[int]
+    right_ramps: List[int]
 
 
 @dataclass(frozen=True)
 class LatentIntervals:
     """Intervals which the latent tensor of given shape is split into."""
     original_shape: torch.Size
-    dimension_intervals: tuple[DimensionIntervals, ...]
+    dimension_intervals: Tuple[DimensionIntervals, ...]
 
 
 class VideoLatentShape(NamedTuple):
@@ -128,7 +128,7 @@ class VideoLatentShape(NamedTuple):
         return torch.Size([self.batch, self.channels, self.frames, self.height, self.width])
 
     @staticmethod
-    def from_torch_shape(shape: torch.Size) -> VideoLatentShape:
+    def from_torch_shape(shape: torch.Size) -> "VideoLatentShape":
         return VideoLatentShape(
             batch=shape[0],
             channels=shape[1],
@@ -137,7 +137,7 @@ class VideoLatentShape(NamedTuple):
             width=shape[4],
         )
 
-    def upscale(self, time_scale: int, spatial_scale: int) -> VideoLatentShape:
+    def upscale(self, time_scale: int, spatial_scale: int) -> "VideoLatentShape":
         return self._replace(
             channels=3,
             frames=(self.frames - 1) * time_scale + 1,
@@ -149,19 +149,19 @@ class VideoLatentShape(NamedTuple):
 # Operation to split a single dimension of the tensor into intervals based on the length along the dimension.
 SplitOperation = Callable[[int], DimensionIntervals]
 # Operation to map the intervals in input dimension to slices and masks along a corresponding output dimension.
-MappingOperation = Callable[[DimensionIntervals], tuple[list[slice], list[torch.Tensor | None]]]
+MappingOperation = Callable[[DimensionIntervals], Tuple[List[slice], List[torch.Tensor | None]]]
 
 
 class Tile(NamedTuple):
     """Represents a single tile."""
-    in_coords: tuple[slice, ...]
-    out_coords: tuple[slice, ...]
-    masks_1d: tuple[torch.Tensor | None, ...]
+    in_coords: Tuple[slice, ...]
+    out_coords: Tuple[slice, ...]
+    masks_1d: Tuple[torch.Tensor | None, ...]
 
     @property
     def blend_mask(self) -> torch.Tensor:
         num_dims = len(self.out_coords)
-        per_dimension_masks: list[torch.Tensor] = []
+        per_dimension_masks: List[torch.Tensor] = []
 
         for dim_idx in range(num_dims):
             mask_1d = self.masks_1d[dim_idx]
@@ -225,7 +225,7 @@ DEFAULT_SPLIT_OPERATION: SplitOperation = default_split_operation
 
 def default_mapping_operation(
     _intervals: DimensionIntervals,
-) -> tuple[list[slice], list[torch.Tensor | None]]:
+) -> Tuple[List[slice], List[torch.Tensor | None]]:
     return [slice(0, None)], [None]
 
 
@@ -263,7 +263,7 @@ def split_in_temporal(size: int, overlap: int) -> SplitOperation:
     return split
 
 
-def map_temporal_slice(begin: int, end: int, left_ramp: int, right_ramp: int, scale: int) -> tuple[slice, torch.Tensor]:
+def map_temporal_slice(begin: int, end: int, left_ramp: int, right_ramp: int, scale: int) -> Tuple[slice, torch.Tensor]:
     start = begin * scale
     stop = 1 + (end - 1) * scale
     left_ramp_scaled = 1 + (left_ramp - 1) * scale
@@ -272,7 +272,7 @@ def map_temporal_slice(begin: int, end: int, left_ramp: int, right_ramp: int, sc
     return slice(start, stop), compute_trapezoidal_mask_1d(stop - start, left_ramp_scaled, right_ramp_scaled, True)
 
 
-def map_spatial_slice(begin: int, end: int, left_ramp: int, right_ramp: int, scale: int) -> tuple[slice, torch.Tensor]:
+def map_spatial_slice(begin: int, end: int, left_ramp: int, right_ramp: int, scale: int) -> Tuple[slice, torch.Tensor]:
     start = begin * scale
     stop = end * scale
     left_ramp_scaled = left_ramp * scale
@@ -282,12 +282,12 @@ def map_spatial_slice(begin: int, end: int, left_ramp: int, right_ramp: int, sca
 
 
 def to_mapping_operation(
-    map_func: Callable[[int, int, int, int, int], tuple[slice, torch.Tensor]],
+    map_func: Callable[[int, int, int, int, int], Tuple[slice, torch.Tensor]],
     scale: int,
 ) -> MappingOperation:
-    def map_op(intervals: DimensionIntervals) -> tuple[list[slice], list[torch.Tensor | None]]:
-        output_slices: list[slice] = []
-        masks_1d: list[torch.Tensor | None] = []
+    def map_op(intervals: DimensionIntervals) -> Tuple[List[slice], List[torch.Tensor | None]]:
+        output_slices: List[slice] = []
+        masks_1d: List[torch.Tensor | None] = []
         number_of_slices = len(intervals.starts)
         for i in range(number_of_slices):
             start = intervals.starts[i]
@@ -304,8 +304,8 @@ def to_mapping_operation(
 
 def create_tiles_from_intervals_and_mappers(
     intervals: LatentIntervals,
-    mappers: list[MappingOperation],
-) -> list[Tile]:
+    mappers: List[MappingOperation],
+) -> List[Tile]:
     full_dim_input_slices = []
     full_dim_output_slices = []
     full_dim_masks_1d = []
@@ -336,9 +336,9 @@ def create_tiles_from_intervals_and_mappers(
 
 def create_tiles(
     latent_shape: torch.Size,
-    splitters: list[SplitOperation],
-    mappers: list[MappingOperation],
-) -> list[Tile]:
+    splitters: List[SplitOperation],
+    mappers: List[MappingOperation],
+) -> List[Tile]:
     if len(splitters) != len(latent_shape):
         raise ValueError(
             f"Number of splitters must be equal to number of dimensions in latent shape, "
@@ -480,7 +480,7 @@ class CausalConv3d(nn.Module):
         in_channels: int,
         out_channels: int,
         kernel_size: int = 3,
-        stride: int | tuple[int, int, int] = 1,
+        stride: int | Tuple[int, int, int] = 1,
         dilation: int = 1,
         groups: int = 1,
         bias: bool = True,
@@ -533,7 +533,7 @@ def make_conv_nd(
     in_channels: int,
     out_channels: int,
     kernel_size: int,
-    stride: int | tuple[int, int, int] = 1,
+    stride: int | Tuple[int, int, int] = 1,
     padding: int = 0,
     dilation: int = 1,
     groups: int = 1,
@@ -901,7 +901,7 @@ class SpaceToDepthDownsample(nn.Module):
         dims: int,
         in_channels: int,
         out_channels: int,
-        stride: tuple[int, int, int],
+        stride: Tuple[int, int, int],
         spatial_padding_mode: PaddingModeType = PaddingModeType.ZEROS,
     ):
         super().__init__()
@@ -951,7 +951,7 @@ class DepthToSpaceUpsample(nn.Module):
         self,
         dims: int,
         in_channels: int,
-        stride: tuple[int, int, int],
+        stride: Tuple[int, int, int],
         residual: bool = False,
         out_channels_reduction_factor: int = 1,
         spatial_padding_mode: PaddingModeType = PaddingModeType.ZEROS,
@@ -1013,7 +1013,7 @@ def _make_encoder_block(
     norm_layer: NormLayerType,
     norm_num_groups: int,
     spatial_padding_mode: PaddingModeType,
-) -> tuple[nn.Module, int]:
+) -> Tuple[nn.Module, int]:
     """Create an encoder block based on the block name and config."""
     out_channels = in_channels
 
@@ -1121,7 +1121,7 @@ def _make_decoder_block(
     timestep_conditioning: bool,
     norm_num_groups: int,
     spatial_padding_mode: PaddingModeType,
-) -> tuple[nn.Module, int]:
+) -> Tuple[nn.Module, int]:
     """Create a decoder block based on the block name and config."""
     out_channels = in_channels
 
@@ -1637,10 +1637,10 @@ class LTX2CausalVideoAutoencoder(nn.Module):
         self,
         latent: torch.Tensor,
         tiling_config: TilingConfig | None,
-    ) -> list[Tile]:
+    ) -> List[Tile]:
         """Prepare tiles for tiled decoding based on tiling configuration."""
-        splitters: list[SplitOperation] = [DEFAULT_SPLIT_OPERATION] * 5
-        mappers: list[MappingOperation] = [DEFAULT_MAPPING_OPERATION] * 5
+        splitters: List[SplitOperation] = [DEFAULT_SPLIT_OPERATION] * 5
+        mappers: List[MappingOperation] = [DEFAULT_MAPPING_OPERATION] * 5
 
         if tiling_config is not None and tiling_config.spatial_config is not None:
             cfg = tiling_config.spatial_config
@@ -1660,7 +1660,7 @@ class LTX2CausalVideoAutoencoder(nn.Module):
 
         return create_tiles(latent.shape, splitters, mappers)
 
-    def _group_tiles_by_temporal_slice(self, tiles: list[Tile]) -> list[list[Tile]]:
+    def _group_tiles_by_temporal_slice(self, tiles: List[Tile]) -> List[List[Tile]]:
         """Group tiles by their temporal output slice."""
         if not tiles:
             return []
@@ -1685,7 +1685,7 @@ class LTX2CausalVideoAutoencoder(nn.Module):
 
     def _accumulate_temporal_group_into_buffer(
         self,
-        group_tiles: list[Tile],
+        group_tiles: List[Tile],
         buffer: torch.Tensor,
         latent: torch.Tensor,
         timestep: torch.Tensor | None,

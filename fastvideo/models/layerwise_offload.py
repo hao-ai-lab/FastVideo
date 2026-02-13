@@ -7,6 +7,7 @@
 
 import re
 from contextlib import contextmanager
+from typing import Dict, Set, Optional, Tuple
 
 import torch
 
@@ -43,20 +44,20 @@ class LayerwiseOffloadManager:
             rf"(^|\.){re.escape(module_list_attr)}\.(\d+)(\.|$)"
         )
 
-        self._cpu_weights: dict[int, dict[str, torch.Tensor]] = {}
-        self._cpu_dtypes: dict[int, dict[str, torch.dtype]] = {}
+        self._cpu_weights: Dict[int, Dict[str, torch.Tensor]] = {}
+        self._cpu_dtypes: Dict[int, Dict[str, torch.dtype]] = {}
 
-        self._gpu_layers: dict[int, set[str]] = {}
+        self._gpu_layers: Dict[int, Set[str]] = {}
 
-        self._named_parameters: dict[str, torch.nn.Parameter] = {}
-        self._named_buffers: dict[str, torch.Tensor] = {}
+        self._named_parameters: Dict[str, torch.nn.Parameter] = {}
+        self._named_buffers: Dict[str, torch.Tensor] = {}
 
-        self._meta: dict[str, tuple[int, torch.dtype]] = {}
+        self._meta: Dict[str, Tuple[int, torch.dtype]] = {}
 
         if auto_initialize:
             self.initialize()
 
-    def _match_layer_idx(self, name: str) -> int | None:
+    def _match_layer_idx(self, name: str) -> Optional[int]:
         m = self._layer_name_re.search(name)
         if not m:
             return None
@@ -137,7 +138,7 @@ class LayerwiseOffloadManager:
 
         self.copy_stream.wait_stream(torch.cuda.current_stream())
 
-        param_names: set[str] = set()
+        param_names: Set[str] = set()
         with torch.cuda.stream(self.copy_stream):
             for name, cpu_weight in self._cpu_weights[layer_idx].items():
                 target = self._get_target(name)
@@ -158,8 +159,8 @@ class LayerwiseOffloadManager:
     def layer_scope(
         self,
         *,
-        prefetch_layer_idx: int | None,
-        release_layer_idx: int | None,
+        prefetch_layer_idx: Optional[int],
+        release_layer_idx: Optional[int],
         non_blocking: bool = True,
     ):
         if self.enabled and release_layer_idx is not None:

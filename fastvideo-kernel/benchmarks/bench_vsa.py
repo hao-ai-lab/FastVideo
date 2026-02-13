@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import os
 import random
-from collections.abc import Callable
+from typing import Tuple, Callable
 
 import numpy as np
 import torch
@@ -52,7 +52,7 @@ def parse_arguments() -> argparse.Namespace:
     return p.parse_args()
 
 
-def create_qkv(batch: int, heads: int, q_len: int, kv_len: int, d: int, dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def create_qkv(batch: int, heads: int, q_len: int, kv_len: int, d: int, dtype: torch.dtype) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     q = torch.randn(batch, heads, q_len, d, dtype=dtype, device="cuda")
     k = torch.randn(batch, heads, kv_len, d, dtype=dtype, device="cuda")
     v = torch.randn(batch, heads, kv_len, d, dtype=dtype, device="cuda")

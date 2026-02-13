@@ -175,11 +175,11 @@ class GameCraftDenoisingStage(DenoisingStage):
 
         # Debug logging
         logger.debug("[GameCraft DEBUG] latents shape: %s, min/max: %.4f/%.4f",
-                     latents.shape, latents.min(), latents.max())
+                    latents.shape, latents.min(), latents.max())
         logger.debug("[GameCraft DEBUG] camera_states: %s",
-                     camera_states.shape if camera_states is not None else None)
+                    camera_states.shape if camera_states is not None else None)
         logger.debug("[GameCraft DEBUG] prompt_embeds[0] shape: %s",
-                     prompt_embeds[0].shape)
+                    prompt_embeds[0].shape)
 
         # Initialize lists for trajectory
         trajectory_timesteps: list[torch.Tensor] = []

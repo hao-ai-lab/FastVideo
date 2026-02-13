@@ -6,7 +6,7 @@ import random
 
 def generate_merged_validation_json(input_dir, output_file):
     # read in video2caption.json
-    with open(os.path.join(input_dir, "video2caption_replace.json")) as f:
+    with open(os.path.join(input_dir, "video2caption_replace.json"), "r") as f:
         video2caption = json.load(f)
 
     # count how many elements are in the list

@@ -123,10 +123,10 @@ class Reason1TextEncoder(TextEncoder):
             inputs_embeds=inputs_embeds,
             output_hidden_states=True,
             return_dict=True,
-            pixel_values=kwargs.get('pixel_values'),
-            pixel_values_videos=kwargs.get('pixel_values_videos'),
-            image_grid_thw=kwargs.get('image_grid_thw'),
-            video_grid_thw=kwargs.get('video_grid_thw'),
+            pixel_values=kwargs.get('pixel_values', None),
+            pixel_values_videos=kwargs.get('pixel_values_videos', None),
+            image_grid_thw=kwargs.get('image_grid_thw', None),
+            video_grid_thw=kwargs.get('video_grid_thw', None),
         )
         
         hidden_states = outputs.hidden_states
@@ -196,7 +196,7 @@ class Reason1TextEncoder(TextEncoder):
             self.model = self.model.to(first_weight.device)
         
         all_params = set(f"model.{name}" if self.prefix == "" else f"{self.prefix}.{name}" 
-                        for name in params_dict)
+                        for name in params_dict.keys())
         loaded_params.update(all_params)
         
         # Mark weights as loaded

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import math
+from contextlib import nullcontext
 from typing import Any
 
 import numpy as np
@@ -385,7 +386,7 @@ class LingBotWorldTransformer3DModel(CachableDiT):
             )
         else:
             if not self._logged_attention_mask:
-                logger.info("Padding not applied")
+                logger.info(f"Padding not applied")
                 self._logged_attention_mask = True
             attention_mask = None
 

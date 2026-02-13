@@ -21,6 +21,7 @@
 # ==============================================================================
 
 import math
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -199,7 +200,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         beta_start: float = 0.0001,
         beta_end: float = 0.02,
         beta_schedule: str = "linear",
-        trained_betas: np.ndarray | list[float] | None = None,
+        trained_betas: Optional[Union[np.ndarray, List[float]]] = None,
         solver_order: int = 2,
         prediction_type: str = "epsilon",
         thresholding: bool = False,
@@ -208,16 +209,16 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         predict_x0: bool = True,
         solver_type: str = "bh2",
         lower_order_final: bool = True,
-        disable_corrector: list[int] = [],
+        disable_corrector: List[int] = [],
         solver_p: SchedulerMixin = None,
-        use_karras_sigmas: bool | None = False,
-        use_exponential_sigmas: bool | None = False,
-        use_beta_sigmas: bool | None = False,
-        use_flow_sigmas: bool | None = False,
-        flow_shift: float | None = 1.0,
+        use_karras_sigmas: Optional[bool] = False,
+        use_exponential_sigmas: Optional[bool] = False,
+        use_beta_sigmas: Optional[bool] = False,
+        use_flow_sigmas: Optional[bool] = False,
+        flow_shift: Optional[float] = 1.0,
         timestep_spacing: str = "linspace",
         steps_offset: int = 0,
-        final_sigmas_type: str | None = "zero",  # "zero", "sigma_min"
+        final_sigmas_type: Optional[str] = "zero",  # "zero", "sigma_min"
         rescale_betas_zero_snr: bool = False,
         use_dynamic_shifting: bool = False,
         time_shift_type: str = "exponential",
@@ -314,7 +315,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
         self._begin_index = begin_index
 
     def set_timesteps(
-        self, num_inference_steps: int, device: str | torch.device = None, mu: float | None = None
+        self, num_inference_steps: int, device: Union[str, torch.device] = None, mu: Optional[float] = None
     ):
         """
         Sets the discrete timesteps used for the diffusion chain (to be run before inference).
@@ -964,10 +965,10 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin, BaseScheduler):
     def step(
         self,
         model_output: torch.Tensor,
-        timestep: int | torch.Tensor,
+        timestep: Union[int, torch.Tensor],
         sample: torch.Tensor,
         return_dict: bool = True,
-    ) -> SchedulerOutput | tuple:
+    ) -> Union[SchedulerOutput, Tuple]:
         """
         Predict the sample from the previous timestep by reversing the SDE. This function propagates the sample with
         the multistep UniPC.

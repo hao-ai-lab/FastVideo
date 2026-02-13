@@ -16,7 +16,8 @@ from fastvideo.layers.layernorm import (LayerNormScaleShift, ScaleResidual,
 from fastvideo.layers.linear import ReplicatedLinear
 # TODO(will-PY-refactor): RMSNorm ....
 from fastvideo.layers.mlp import MLP
-from fastvideo.layers.rotary_embedding import (get_rotary_pos_embed)
+from fastvideo.layers.rotary_embedding import (_apply_rotary_emb,
+                                               get_rotary_pos_embed)
 from fastvideo.layers.visual_embedding import (ModulateProjection, PatchEmbed,
                                                TimestepEmbedder, unpatchify)
 from fastvideo.models.dits.base import CachableDiT

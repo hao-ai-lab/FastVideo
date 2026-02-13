@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -41,10 +42,10 @@ class HYWorldCausalConv3d(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: int | tuple[int, int, int] = 3,
-        stride: int | tuple[int, int, int] = 1,
-        padding: int | tuple[int, int, int] = 0,
-        dilation: int | tuple[int, int, int] = 1,
+        kernel_size: Union[int, Tuple[int, int, int]] = 3,
+        stride: Union[int, Tuple[int, int, int]] = 1,
+        padding: Union[int, Tuple[int, int, int]] = 0,
+        dilation: Union[int, Tuple[int, int, int]] = 1,
         bias: bool = True,
         pad_mode: str = "replicate",
     ) -> None:
@@ -65,7 +66,7 @@ class HYWorldCausalConv3d(nn.Module):
 
         self.conv = nn.Conv3d(in_channels, out_channels, kernel_size, stride, padding, dilation, bias=bias)
 
-    def forward(self, hidden_states: torch.Tensor, cache_x: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor, cache_x: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Forward pass with optional temporal caching.
         
@@ -100,8 +101,8 @@ class HYWorldUpsample(nn.Module):
     def forward(
         self, 
         x: torch.Tensor,
-        feat_cache: list[torch.Tensor | None] | None = None,
-        feat_idx: list[int] | None = None,
+        feat_cache: Optional[List[Optional[torch.Tensor]]] = None,
+        feat_idx: Optional[List[int]] = None,
         first_chunk: bool = False,
     ):
         """
@@ -184,8 +185,8 @@ class HYWorldDownsample(nn.Module):
     def forward(
         self, 
         x: torch.Tensor,
-        feat_cache: list[torch.Tensor | None] | None = None,
-        feat_idx: list[int] | None = None,
+        feat_cache: Optional[List[Optional[torch.Tensor]]] = None,
+        feat_idx: Optional[List[int]] = None,
     ):
         """
         Forward pass with optional temporal caching.
@@ -241,7 +242,7 @@ class HYWorldResnetBlock(nn.Module):
     def __init__(
         self,
         in_channels: int,
-        out_channels: int | None = None,
+        out_channels: Optional[int] = None,
         non_linearity: str = "swish",
     ) -> None:
         super().__init__()
@@ -262,8 +263,8 @@ class HYWorldResnetBlock(nn.Module):
     def forward(
         self, 
         hidden_states: torch.Tensor,
-        feat_cache: list[torch.Tensor | None] | None = None,
-        feat_idx: list[int] | None = None,
+        feat_cache: Optional[List[Optional[torch.Tensor]]] = None,
+        feat_idx: Optional[List[int]] = None,
     ) -> torch.Tensor:
         """
         Forward pass with optional temporal feature caching.
@@ -373,8 +374,8 @@ class HYWorldMidBlock(nn.Module):
     def forward(
         self, 
         hidden_states: torch.Tensor,
-        feat_cache: list[torch.Tensor | None] | None = None,
-        feat_idx: list[int] | None = None,
+        feat_cache: Optional[List[Optional[torch.Tensor]]] = None,
+        feat_idx: Optional[List[int]] = None,
     ) -> torch.Tensor:
         """
         Forward pass with optional temporal caching.
@@ -402,7 +403,7 @@ class HYWorldDownBlock3D(nn.Module):
         in_channels: int,
         out_channels: int,
         num_layers: int = 1,
-        downsample_out_channels: int | None = None,
+        downsample_out_channels: Optional[int] = None,
         add_temporal_downsample: int = True,
     ) -> None:
         super().__init__()
@@ -437,8 +438,8 @@ class HYWorldDownBlock3D(nn.Module):
     def forward(
         self, 
         hidden_states: torch.Tensor,
-        feat_cache: list[torch.Tensor | None] | None = None,
-        feat_idx: list[int] | None = None,
+        feat_cache: Optional[List[Optional[torch.Tensor]]] = None,
+        feat_idx: Optional[List[int]] = None,
     ) -> torch.Tensor:
         """
         Forward pass with optional temporal caching.
@@ -466,7 +467,7 @@ class HYWorldUpBlock3D(nn.Module):
         in_channels: int,
         out_channels: int,
         num_layers: int = 1,
-        upsample_out_channels: int | None = None,
+        upsample_out_channels: Optional[int] = None,
         add_temporal_upsample: bool = True,
     ) -> None:
         super().__init__()
@@ -502,8 +503,8 @@ class HYWorldUpBlock3D(nn.Module):
     def forward(
         self, 
         hidden_states: torch.Tensor,
-        feat_cache: list[torch.Tensor | None] | None = None,
-        feat_idx: list[int] | None = None,
+        feat_cache: Optional[List[Optional[torch.Tensor]]] = None,
+        feat_idx: Optional[List[int]] = None,
         first_chunk: bool = False,
     ) -> torch.Tensor:
         """
@@ -538,7 +539,7 @@ class HYWorldEncoder3D(nn.Module):
         self,
         in_channels: int = 3,
         out_channels: int = 64,
-        block_out_channels: tuple[int, ...] = (128, 256, 512, 1024, 1024),
+        block_out_channels: Tuple[int, ...] = (128, 256, 512, 1024, 1024),
         layers_per_block: int = 2,
         temporal_compression_ratio: int = 4,
         spatial_compression_ratio: int = 16,
@@ -593,8 +594,8 @@ class HYWorldEncoder3D(nn.Module):
     def forward(
         self, 
         hidden_states: torch.Tensor,
-        feat_cache: list[torch.Tensor | None] | None = None,
-        feat_idx: list[int] | None = None,
+        feat_cache: Optional[List[Optional[torch.Tensor]]] = None,
+        feat_idx: Optional[List[int]] = None,
     ) -> torch.Tensor:
         """
         Forward pass with optional temporal caching.
@@ -663,7 +664,7 @@ class HYWorldDecoder3D(nn.Module):
         self,
         in_channels: int = 32,
         out_channels: int = 3,
-        block_out_channels: tuple[int, ...] = (1024, 1024, 512, 256, 128),
+        block_out_channels: Tuple[int, ...] = (1024, 1024, 512, 256, 128),
         layers_per_block: int = 2,
         spatial_compression_ratio: int = 16,
         temporal_compression_ratio: int = 4,
@@ -721,8 +722,8 @@ class HYWorldDecoder3D(nn.Module):
     def forward(
         self, 
         hidden_states: torch.Tensor,
-        feat_cache: list[torch.Tensor | None] | None = None,
-        feat_idx: list[int] | None = None,
+        feat_cache: Optional[List[Optional[torch.Tensor]]] = None,
+        feat_idx: Optional[List[int]] = None,
         first_chunk: bool = False,
     ) -> torch.Tensor:
         """
@@ -797,8 +798,8 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
         nn.Module.__init__(self)
         ParallelTiledVAE.__init__(self, config)
 
-        self.encoder: HYWorldEncoder3D | None = None
-        self.decoder: HYWorldDecoder3D | None = None
+        self.encoder: Optional[HYWorldEncoder3D] = None
+        self.decoder: Optional[HYWorldDecoder3D] = None
 
         if config.load_encoder:
             self.encoder = HYWorldEncoder3D(
@@ -832,11 +833,11 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
 
         # Cache-related attributes (initialized in clear_cache)
         self._conv_num: int = 0
-        self._conv_idx: list[int] = [0]
-        self._feat_map: list[torch.Tensor | None] = []
+        self._conv_idx: List[int] = [0]
+        self._feat_map: List[Optional[torch.Tensor]] = []
         self._enc_conv_num: int = 0
-        self._enc_conv_idx: list[int] = [0]
-        self._enc_feat_map: list[torch.Tensor | None] = []
+        self._enc_conv_idx: List[int] = [0]
+        self._enc_feat_map: List[Optional[torch.Tensor]] = []
 
         # Precompute and cache conv counts for encoder and decoder for clear_cache speedup
         self._cached_conv_counts = {
@@ -862,12 +863,12 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
         # Cache for decoder
         self._conv_num = self._cached_conv_counts["decoder"]
         self._conv_idx = [0]
-        self._feat_map: list[torch.Tensor | None] = [None] * self._conv_num
+        self._feat_map: List[Optional[torch.Tensor]] = [None] * self._conv_num
         
         # Cache for encoder
         self._enc_conv_num = self._cached_conv_counts["encoder"]
         self._enc_conv_idx = [0]
-        self._enc_feat_map: list[torch.Tensor | None] = [None] * self._enc_conv_num
+        self._enc_feat_map: List[Optional[torch.Tensor]] = [None] * self._enc_conv_num
 
     def _encode(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -959,7 +960,7 @@ class AutoencoderKLHYWorld(nn.Module, ParallelTiledVAE):
         sample: torch.Tensor,
         sample_posterior: bool = False,
         return_dict: bool = True,
-        generator: torch.Generator | None = None,
+        generator: Optional[torch.Generator] = None,
     ) -> torch.Tensor:
         r"""
         Args:

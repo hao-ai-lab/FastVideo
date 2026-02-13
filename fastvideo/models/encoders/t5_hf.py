@@ -26,7 +26,7 @@ class T5EncoderModel(TextEncoder):
         *,
         dtype: torch.dtype,
         device: torch.device,
-    ) -> T5EncoderModel:
+    ) -> "T5EncoderModel":
         from transformers import T5EncoderModel as HFT5EncoderModel
 
         kwargs = {

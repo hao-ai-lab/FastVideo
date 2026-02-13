@@ -16,6 +16,7 @@ Usage:
 import argparse
 import os
 import re
+import json
 import torch
 import shutil
 import glob
@@ -182,7 +183,7 @@ def main():
     print("Copied config.json to both transformer directories")
     
     print(f"\n{'='*60}")
-    print("Conversion complete!")
+    print(f"Conversion complete!")
     print(f"High-noise model: {high_noise_output}")
     print(f"Low-noise model: {low_noise_output}")
     print(f"{'='*60}")

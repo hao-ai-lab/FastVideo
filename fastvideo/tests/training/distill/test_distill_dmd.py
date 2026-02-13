@@ -4,10 +4,13 @@ os.environ["MASTER_PORT"] = "29512"
 import sys
 import subprocess
 from pathlib import Path
+import torch
+import json
 from huggingface_hub import snapshot_download
 from fastvideo.utils import logger
 # Import the training pipeline
 sys.path.append(str(Path(__file__).parent.parent.parent.parent.parent))
+from fastvideo.training.wan_training_pipeline import main
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.utils import FlexibleArgumentParser
 from fastvideo.training.wan_distillation_pipeline import WanDistillationPipeline

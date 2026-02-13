@@ -31,7 +31,7 @@ def main():
     sampling_param.height = 480
     sampling_param.seed = 1000
 
-    with open("assets/prompts/mixkit_i2v.jsonl") as f:
+    with open("assets/prompts/mixkit_i2v.jsonl", "r") as f:
         prompt_image_pairs = json.load(f)
 
     for prompt_image_pair in prompt_image_pairs:

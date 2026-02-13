@@ -23,8 +23,10 @@ os.environ.setdefault("RANK", "0")
 os.environ.setdefault("LOCAL_RANK", "0")
 
 import argparse
+import sys
 import logging
 from pathlib import Path
+from typing import Dict, Optional
 
 import torch
 from tqdm import tqdm
@@ -39,7 +41,7 @@ except Exception:
     safe_open = None  # type: ignore
 
 
-def load_transformer_state_dict_from_safetensors(model_path: str) -> dict[str, torch.Tensor]:
+def load_transformer_state_dict_from_safetensors(model_path: str) -> Dict[str, torch.Tensor]:
     """Load transformer weights directly from safetensors files.
     
     This bypasses the pipeline loader and works even when the model has
@@ -66,7 +68,7 @@ def load_transformer_state_dict_from_safetensors(model_path: str) -> dict[str, t
         raise FileNotFoundError(f"Transformer directory not found at {transformer_dir}")
     
     # Load all safetensors files
-    state_dict: dict[str, torch.Tensor] = {}
+    state_dict: Dict[str, torch.Tensor] = {}
     for fname in sorted(os.listdir(transformer_dir)):
         if fname.endswith('.safetensors'):
             fpath = os.path.join(transformer_dir, fname)
@@ -115,7 +117,7 @@ def load_transformer_state_dict_from_model(
     vae_cpu_offload: bool = True,
     text_encoder_cpu_offload: bool = True,
     pin_cpu_memory: bool = True,
-) -> dict[str, torch.Tensor]:
+) -> Dict[str, torch.Tensor]:
     """Load pipeline and extract transformer.state_dict as CPU tensors."""
     pipeline_cls = get_pipeline_class_for_model(model_path)
     pipeline = pipeline_cls.from_pretrained(
@@ -150,7 +152,7 @@ def load_transformer_state_dict_from_model(
         DTensor = None  # type: ignore
         _HAS_DTENSOR = False
 
-    state_dict_cpu: dict[str, torch.Tensor] = {}
+    state_dict_cpu: Dict[str, torch.Tensor] = {}
     for k, v in state_dict.items():
         if _HAS_DTENSOR and isinstance(v, DTensor):  # type: ignore
             state_dict_cpu[k] = v.to_local().detach().cpu().contiguous()
@@ -177,7 +179,7 @@ def is_extractable_weight(key: str) -> bool:
     return True
 
 
-def save_adapter_state(adapter_state: dict[str, torch.Tensor], out_path: Path) -> None:
+def save_adapter_state(adapter_state: Dict[str, torch.Tensor], out_path: Path) -> None:
     """Save adapter state dict to safetensors (if available) or torch.save."""
     cleaned = {k: v.detach().cpu().contiguous() for k, v in adapter_state.items()}
     out_str = str(out_path)
@@ -188,15 +190,15 @@ def save_adapter_state(adapter_state: dict[str, torch.Tensor], out_path: Path) -
 
 
 def build_adapter_from_states(
-    base_sd: dict[str, torch.Tensor],
-    ft_sd: dict[str, torch.Tensor],
+    base_sd: Dict[str, torch.Tensor],
+    ft_sd: Dict[str, torch.Tensor],
     rank: int,
     full_rank: bool,
     min_delta: float,
     checkpoint_interval: int,
-    checkpoint_path: Path | None,
+    checkpoint_path: Optional[Path],
     resume_from: int = 0,
-) -> dict[str, torch.Tensor]:
+) -> Dict[str, torch.Tensor]:
     """Compute low-rank LoRA adapters by SVD on (ft - base) for extractable weights."""
     # DTensor detection
     try:
@@ -207,7 +209,7 @@ def build_adapter_from_states(
         _HAS_DTENSOR = False
 
     keys = sorted(ft_sd.keys())
-    adapter_state: dict[str, torch.Tensor] = {}
+    adapter_state: Dict[str, torch.Tensor] = {}
     processed = 0
     mean_deltas = []
 
@@ -320,7 +322,7 @@ def extract_lora_adapter(
     rank: int = 32,
     full_rank: bool = False,
     min_delta: float = 1e-6,
-    checkpoint: str | None = None,
+    checkpoint: Optional[str] = None,
     resume: bool = False,
     log_level: str = "INFO",
 ) -> None:
@@ -360,7 +362,7 @@ def extract_lora_adapter(
 
 
     resume_idx = 0
-    adapter_existing: dict[str, torch.Tensor] = {}
+    adapter_existing: Dict[str, torch.Tensor] = {}
     if resume and checkpoint_path and checkpoint_path.exists():
         try:
             ck = torch.load(str(checkpoint_path), map_location="cpu")

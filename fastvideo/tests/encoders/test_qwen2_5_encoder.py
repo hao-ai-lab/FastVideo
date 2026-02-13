@@ -6,12 +6,13 @@ from torch.distributed.tensor import DTensor
 from torch.testing import assert_close
 from transformers import AutoConfig, AutoTokenizer, Qwen2_5_VLTextModel
 
-from fastvideo.configs.pipelines import Hunyuan15T2V480PConfig
+from fastvideo.configs.pipelines import Hunyuan15T2V480PConfig, PipelineConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TextEncoderLoader
 from fastvideo.utils import maybe_download_model, PRECISION_TO_TYPE
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.configs.models.encoders import Qwen2_5_VLConfig
 
 logger = init_logger(__name__)
 

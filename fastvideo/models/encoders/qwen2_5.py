@@ -1,14 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # Adapted from transformers: https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen2_5_vl/modeling_qwen2_5_vl.py
 
-from collections.abc import Iterable
+import math
+from typing import Any, Optional, Tuple, Union, List, Callable, Iterable
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from fastvideo.configs.models.encoders import BaseEncoderOutput, Qwen2_5_VLConfig
-from fastvideo.distributed import get_tp_world_size
-from fastvideo.layers.activation import SiluAndMul
+from fastvideo.distributed import get_tp_rank, get_tp_world_size
+from fastvideo.layers.activation import get_act_fn, SiluAndMul
 from fastvideo.layers.layernorm import RMSNorm
 from fastvideo.layers.linear import MergedColumnParallelLinear, QKVParallelLinear, RowParallelLinear
 from fastvideo.layers.quantization import QuantizationConfig
@@ -36,10 +38,10 @@ def sdpa_attention_forward(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    attention_mask: torch.Tensor | None,
+    attention_mask: Optional[torch.Tensor],
     dropout: float = 0.0,
-    scaling: float | None = None,
-    is_causal: bool | None = None,
+    scaling: Optional[float] = None,
+    is_causal: Optional[bool] = None,
     **kwargs,
 ) -> tuple[torch.Tensor, None]:
     if kwargs.get("output_attentions", False) or kwargs.get("head_mask") is not None:
@@ -209,11 +211,11 @@ class Qwen2_5_VLAttention(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        attention_mask: torch.Tensor | None = None,
-        position_ids: torch.LongTensor | None = None,
-        position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
         output_attentions: bool = False,
-    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         bsz, q_len, _ = hidden_states.size()
 
         qkv, _ = self.qkv_proj(hidden_states)
@@ -244,11 +246,11 @@ class Qwen2_5_VLDecoderLayer(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        attention_mask: torch.Tensor | None = None,
-        position_ids: torch.LongTensor | None = None,
-        position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
-        output_attentions: bool | None = False,
-    ) -> tuple[torch.FloatTensor, tuple[torch.FloatTensor, torch.FloatTensor] | None]:
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
+        output_attentions: Optional[bool] = False,
+    ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
@@ -296,11 +298,11 @@ class Qwen2_5_VLTextModel(TextEncoder):
 
     def forward(
         self,
-        input_ids: torch.LongTensor | None = None,
-        position_ids: torch.LongTensor | None = None,
-        attention_mask: torch.Tensor | None = None,
-        inputs_embeds: torch.FloatTensor | None = None,
-        output_hidden_states: bool | None = None,
+        input_ids: Optional[torch.LongTensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        output_hidden_states: Optional[bool] = None,
         **kwargs,
     ) -> BaseEncoderOutput:
         output_hidden_states = (

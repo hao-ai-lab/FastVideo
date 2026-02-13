@@ -1,18 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
 
+import numpy as np
 import pytest
 import torch
 from torch.distributed.tensor import DTensor
 from torch.testing import assert_close
 from transformers import AutoConfig, AutoTokenizer, UMT5EncoderModel, T5EncoderModel
 
-from fastvideo.configs.pipelines import CosmosConfig, WanT2V480PConfig
+from fastvideo.configs.pipelines import CosmosConfig, PipelineConfig, WanT2V480PConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TextEncoderLoader
 from fastvideo.utils import maybe_download_model, PRECISION_TO_TYPE
 from fastvideo.fastvideo_args import FastVideoArgs
+from fastvideo.configs.models.encoders import T5Config, T5LargeConfig
 
 logger = init_logger(__name__)
 

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
 
+import numpy as np
 import pytest
 import torch
 from transformers import AutoConfig, AutoTokenizer, LlamaModel
@@ -11,6 +12,7 @@ from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.models.loader.component_loader import TextEncoderLoader
 from fastvideo.utils import maybe_download_model
+from fastvideo.configs.models.encoders import LlamaConfig
 from torch.distributed.tensor import DTensor
 from torch.testing import assert_close
 logger = init_logger(__name__)

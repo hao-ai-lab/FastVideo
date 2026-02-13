@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from huggingface_hub import snapshot_download
+import shutil
 import subprocess
 import sys
 from fastvideo.tests.ssim.test_inference_similarity import compute_video_ssim_torchvision

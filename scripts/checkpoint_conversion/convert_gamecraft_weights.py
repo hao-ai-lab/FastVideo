@@ -195,7 +195,7 @@ def convert_weights(
         if actual_in_channels != expected_in_channels:
             print(f"  WARNING: Expected {expected_in_channels} input channels, got {actual_in_channels}")
         else:
-            print("  OK: 33 input channels (16 latent + 16 gt_latent + 1 mask)")
+            print(f"  OK: 33 input channels (16 latent + 16 gt_latent + 1 mask)")
     
     return {
         "total": len(converted_state_dict),
@@ -247,7 +247,7 @@ def main():
         verbose=args.verbose,
     )
     
-    print("\nConversion complete!")
+    print(f"\nConversion complete!")
     print(f"  Total parameters: {stats['total']}")
     print(f"  Renamed: {stats['renamed']}")
     print(f"  Unchanged: {stats['unchanged']}")

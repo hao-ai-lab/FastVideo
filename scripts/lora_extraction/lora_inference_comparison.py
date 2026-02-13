@@ -29,7 +29,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Optional, Dict, Any
 
 import logging
 
@@ -56,7 +56,7 @@ def configure_logging(level: str = "INFO") -> None:
     logger.setLevel(level)
 
 
-def _validate_adapter(adapter: str | None) -> str | None:
+def _validate_adapter(adapter: Optional[str]) -> Optional[str]:
     if not adapter:
         return None
     if adapter.upper() == "NONE":
@@ -88,14 +88,14 @@ def generate_with_model(
     output_name: str,
     prompt: str,
     seed: int,
-    lora_path: str | None,
+    lora_path: Optional[str],
     height: int,
     width: int,
     num_frames: int,
     num_inference_steps: int,
     guidance_scale: float,
-    flow_shift: float | None = None,
-    embedded_guidance_scale: float | None = None,
+    flow_shift: Optional[float] = None,
+    embedded_guidance_scale: Optional[float] = None,
 ) -> str:
     """Produce a video with VideoGenerator.from_pretrained; returns video path."""
     try:
@@ -103,7 +103,7 @@ def generate_with_model(
     except Exception as exc:
         raise RuntimeError(f"Failed to import fastvideo.VideoGenerator: {exc}") from exc
 
-    init_kwargs: dict[str, Any] = {
+    init_kwargs: Dict[str, Any] = {
         "num_gpus": 1,
         "dit_cpu_offload": True,
         "vae_cpu_offload": True,
@@ -223,7 +223,7 @@ def parse_args() -> argparse.Namespace:
 def compare_inference(
     base: str,
     ft: str,
-    adapter: str | None,
+    adapter: Optional[str],
     output_dir: str,
     prompt: str = "A cat sitting on a windowsill",
     seed: int = 42,
@@ -232,8 +232,8 @@ def compare_inference(
     num_frames: int = 49,
     num_inference_steps: int = 32,
     guidance_scale: float = 5.0,
-    flow_shift: float | None = None,
-    embedded_guidance_scale: float | None = None,
+    flow_shift: Optional[float] = None,
+    embedded_guidance_scale: Optional[float] = None,
     compute_ssim: bool = False,
     compute_lpips: bool = False,
     log_level: str = "INFO",
