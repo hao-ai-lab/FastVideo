@@ -11,7 +11,6 @@ game-like videos with camera and action conditioning via:
 
 import torch
 
-from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
@@ -68,8 +67,7 @@ class GameCraftDenoisingStage(DenoisingStage):
         if not fastvideo_args.model_loaded["transformer"]:
             loader = TransformerLoader()
             self.transformer = loader.load(
-                fastvideo_args.model_paths["transformer"], fastvideo_args
-            )
+                fastvideo_args.model_paths["transformer"], fastvideo_args)
             if pipeline:
                 pipeline.add_module("transformer", self.transformer)
             fastvideo_args.model_loaded["transformer"] = True
@@ -78,11 +76,11 @@ class GameCraftDenoisingStage(DenoisingStage):
         camera_states = getattr(batch, "camera_states", None)
         if camera_states is None:
             camera_states = batch.extra.get("camera_states", None)
-        
+
         gt_latents = getattr(batch, "gt_latents", None)
         if gt_latents is None:
             gt_latents = batch.extra.get("gt_latents", None)
-        
+
         conditioning_mask = getattr(batch, "conditioning_mask", None)
         if conditioning_mask is None:
             conditioning_mask = batch.extra.get("conditioning_mask", None)
@@ -98,21 +96,22 @@ class GameCraftDenoisingStage(DenoisingStage):
 
         # Setup precision and autocast settings
         target_dtype = torch.bfloat16
-        autocast_enabled = (
-            target_dtype != torch.float32
-        ) and not fastvideo_args.disable_autocast
+        autocast_enabled = (target_dtype != torch.float32
+                            ) and not fastvideo_args.disable_autocast
 
         # Get timesteps
         timesteps = batch.timesteps
         if timesteps is None:
             raise ValueError("Timesteps must be provided")
         num_inference_steps = batch.num_inference_steps
-        num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
+        num_warmup_steps = len(
+            timesteps) - num_inference_steps * self.scheduler.order
 
         # Prepare image embeddings for I2V generation (if any)
         image_embeds = batch.image_embeds
         if len(image_embeds) > 0:
-            assert not torch.isnan(image_embeds[0]).any(), "image_embeds contains nan"
+            assert not torch.isnan(
+                image_embeds[0]).any(), "image_embeds contains nan"
             image_embeds = [
                 image_embed.to(target_dtype) for image_embed in image_embeds
             ]
@@ -141,14 +140,14 @@ class GameCraftDenoisingStage(DenoisingStage):
         # Get latents and embeddings
         latents = batch.latents
         prompt_embeds = batch.prompt_embeds
-        assert not torch.isnan(prompt_embeds[0]).any(), "prompt_embeds contains nan"
+        assert not torch.isnan(
+            prompt_embeds[0]).any(), "prompt_embeds contains nan"
 
         if batch.do_classifier_free_guidance:
             neg_prompt_embeds = batch.negative_prompt_embeds
             assert neg_prompt_embeds is not None
             assert not torch.isnan(
-                neg_prompt_embeds[0]
-            ).any(), "neg_prompt_embeds contains nan"
+                neg_prompt_embeds[0]).any(), "neg_prompt_embeds contains nan"
 
         # Prepare gt_latents and mask for concatenation
         # If not provided, use zeros (for unconditional generation)
@@ -160,7 +159,9 @@ class GameCraftDenoisingStage(DenoisingStage):
         if conditioning_mask is None:
             # Default mask: all zeros (generate everything)
             conditioning_mask = torch.zeros(
-                latents.shape[0], 1, *latents.shape[2:],
+                latents.shape[0],
+                1,
+                *latents.shape[2:],
                 device=latents.device,
                 dtype=target_dtype,
             )
@@ -169,12 +170,16 @@ class GameCraftDenoisingStage(DenoisingStage):
 
         # Move camera states to device if provided
         if camera_states is not None:
-            camera_states = camera_states.to(device=latents.device, dtype=target_dtype)
-            
+            camera_states = camera_states.to(device=latents.device,
+                                             dtype=target_dtype)
+
         # Debug logging
-        logger.info(f"[GameCraft DEBUG] latents shape: {latents.shape}, min/max: {latents.min():.4f}/{latents.max():.4f}")
-        logger.info(f"[GameCraft DEBUG] camera_states: {camera_states.shape if camera_states is not None else None}")
-        logger.info(f"[GameCraft DEBUG] prompt_embeds[0] shape: {prompt_embeds[0].shape}")
+        logger.info("[GameCraft DEBUG] latents shape: %s, min/max: %.4f/%.4f",
+                    latents.shape, latents.min(), latents.max())
+        logger.info("[GameCraft DEBUG] camera_states: %s",
+                    camera_states.shape if camera_states is not None else None)
+        logger.info("[GameCraft DEBUG] prompt_embeds[0] shape: %s",
+                    prompt_embeds[0].shape)
 
         # Initialize lists for trajectory
         trajectory_timesteps: list[torch.Tensor] = []
@@ -187,16 +192,19 @@ class GameCraftDenoisingStage(DenoisingStage):
         # reference signal throughout the denoising process.
         #
         # ref_latent_for_injection: [B, 16, 1, H, W] or None
-        ref_latent_for_injection = getattr(batch, "_ref_latent_for_injection", None)
-        if ref_latent_for_injection is None and gt_latents is not None:
-            # Check if any frame in the mask is conditioned (non-zero)
-            if conditioning_mask.sum() > 0:
-                # Extract the clean reference from gt_latents first frame
-                # gt_latents[:, :, 0] should have the VAE-encoded reference image
-                if gt_latents[:, :, 0].abs().sum() > 0:
-                    ref_latent_for_injection = gt_latents[:, :, 0:1].clone()  # [B, 16, 1, H, W]
-                    logger.info(f"[GameCraft I2V] Will inject ref latent at conditioned frames each step. "
-                                f"ref mean={ref_latent_for_injection.abs().mean():.4f}")
+        ref_latent_for_injection = getattr(batch, "_ref_latent_for_injection",
+                                           None)
+        if (ref_latent_for_injection is None and gt_latents is not None
+                and conditioning_mask.sum() > 0
+                and gt_latents[:, :, 0].abs().sum() > 0):
+            # Extract the clean reference from gt_latents first frame
+            # gt_latents[:, :, 0] should have the VAE-encoded reference image
+            ref_latent_for_injection = gt_latents[:, :, 0:1].clone(
+            )  # [B, 16, 1, H, W]
+            logger.info(
+                "[GameCraft I2V] Will inject ref latent at conditioned frames each step. "
+                "ref mean=%.4f",
+                ref_latent_for_injection.abs().mean())
 
         # Run denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
@@ -216,7 +224,9 @@ class GameCraftDenoisingStage(DenoisingStage):
                     cond_frames = conditioning_mask[0, 0, :, 0, 0] > 0.5  # [T]
                     for t_idx in range(cond_frames.shape[0]):
                         if cond_frames[t_idx]:
-                            latents[:, :, t_idx, :, :] = ref_latent_for_injection[:, :, 0, :, :]
+                            latents[:, :,
+                                    t_idx, :, :] = ref_latent_for_injection[:, :,
+                                                                            0, :, :]
 
                 # Prepare model input: concatenate latents, gt_latents, and mask
                 # [B, 33, T, H, W] = [B, 16, T, H, W] + [B, 16, T, H, W] + [B, 1, T, H, W]
@@ -226,14 +236,12 @@ class GameCraftDenoisingStage(DenoisingStage):
                 )
 
                 assert not torch.isnan(
-                    latent_model_input
-                ).any(), "latent_model_input contains nan"
+                    latent_model_input).any(), "latent_model_input contains nan"
 
                 t_expand = t.repeat(latent_model_input.shape[0])
 
                 latent_model_input = self.scheduler.scale_model_input(
-                    latent_model_input, t
-                )
+                    latent_model_input, t)
 
                 # Official GameCraft does NOT use embedded guidance (guidance=None)
                 # It uses standard CFG with guidance_scale instead
@@ -241,15 +249,15 @@ class GameCraftDenoisingStage(DenoisingStage):
 
                 # Run transformer with camera conditioning
                 with torch.autocast(
-                    device_type="cuda",
-                    dtype=target_dtype,
-                    enabled=autocast_enabled,
+                        device_type="cuda",
+                        dtype=target_dtype,
+                        enabled=autocast_enabled,
                 ):
                     batch.is_cfg_negative = False
                     with set_forward_context(
-                        current_timestep=i,
-                        attn_metadata=None,
-                        forward_batch=batch,
+                            current_timestep=i,
+                            attn_metadata=None,
+                            forward_batch=batch,
                     ):
                         noise_pred = current_model(
                             latent_model_input,
@@ -260,18 +268,21 @@ class GameCraftDenoisingStage(DenoisingStage):
                             **image_kwargs,
                             **pos_cond_kwargs,
                         )
-                        
+
                         # Debug: log first step output
                         if i == 0:
-                            logger.info(f"[GameCraft DEBUG] Step 0 noise_pred: shape={noise_pred.shape}, min/max={noise_pred.min():.4f}/{noise_pred.max():.4f}")
+                            logger.info(
+                                "[GameCraft DEBUG] Step 0 noise_pred: shape=%s, min/max=%.4f/%.4f",
+                                noise_pred.shape, noise_pred.min(),
+                                noise_pred.max())
 
                     # Classifier-free guidance
                     if batch.do_classifier_free_guidance:
                         batch.is_cfg_negative = True
                         with set_forward_context(
-                            current_timestep=i,
-                            attn_metadata=None,
-                            forward_batch=batch,
+                                current_timestep=i,
+                                attn_metadata=None,
+                                forward_batch=batch,
                         ):
                             noise_pred_uncond = current_model(
                                 latent_model_input,
@@ -282,10 +293,9 @@ class GameCraftDenoisingStage(DenoisingStage):
                                 **image_kwargs,
                                 **neg_cond_kwargs,
                             )
-                        
+
                         noise_pred = noise_pred_uncond + current_guidance_scale * (
-                            noise_pred - noise_pred_uncond
-                        )
+                            noise_pred - noise_pred_uncond)
 
                 # Compute the previous noisy sample
                 latents = self.scheduler.step(
@@ -303,14 +313,15 @@ class GameCraftDenoisingStage(DenoisingStage):
 
                 # Update progress bar
                 if i == len(timesteps) - 1 or (
-                    (i + 1) > num_warmup_steps
-                    and (i + 1) % self.scheduler.order == 0
-                ):
+                    (i + 1) > num_warmup_steps and
+                    (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
 
         # Debug: log final latents
-        logger.info(f"[GameCraft DEBUG] Final latents: shape={latents.shape}, min/max={latents.min():.4f}/{latents.max():.4f}")
-        
+        logger.info(
+            "[GameCraft DEBUG] Final latents: shape=%s, min/max=%.4f/%.4f",
+            latents.shape, latents.min(), latents.max())
+
         # Store final latents and trajectory
         batch.latents = latents
         if batch.return_trajectory_latents:
@@ -319,17 +330,23 @@ class GameCraftDenoisingStage(DenoisingStage):
 
         return batch
 
-    def verify_input(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_input(self, batch: ForwardBatch,
+                     fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify that required inputs are present."""
         result = VerificationResult()
-        result.add_check("timesteps", batch.timesteps, [V.is_tensor, V.min_dims(1)])
-        result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
+        result.add_check("timesteps", batch.timesteps,
+                         [V.is_tensor, V.min_dims(1)])
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(5)])
         result.add_check("prompt_embeds", batch.prompt_embeds, V.list_not_empty)
-        result.add_check("num_inference_steps", batch.num_inference_steps, V.positive_int)
+        result.add_check("num_inference_steps", batch.num_inference_steps,
+                         V.positive_int)
         return result
 
-    def verify_output(self, batch: ForwardBatch, fastvideo_args: FastVideoArgs) -> VerificationResult:
+    def verify_output(self, batch: ForwardBatch,
+                      fastvideo_args: FastVideoArgs) -> VerificationResult:
         """Verify that outputs are properly set."""
         result = VerificationResult()
-        result.add_check("latents", batch.latents, [V.is_tensor, V.with_dims(5)])
+        result.add_check("latents", batch.latents,
+                         [V.is_tensor, V.with_dims(5)])
         return result
