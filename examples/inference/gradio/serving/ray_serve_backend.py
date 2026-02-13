@@ -4,7 +4,7 @@ import torch
 import base64
 import io
 from copy import deepcopy
-from typing import Dict, Any, Optional, List
+from typing import Any
 import signal
 import sys
 
@@ -56,7 +56,7 @@ MODEL_CONFIGS = {
 
 class VideoGenerationRequest(BaseModel):
     prompt: str
-    negative_prompt: Optional[str] = None
+    negative_prompt: str | None = None
     use_negative_prompt: bool = False
     seed: int = 42
     guidance_scale: float = 7.5
@@ -65,25 +65,25 @@ class VideoGenerationRequest(BaseModel):
     width: int = 832
     randomize_seed: bool = False
     return_frames: bool = False
-    model_path: Optional[str] = None
-    image_data: Optional[str] = None  # Base64 encoded image for I2V
+    model_path: str | None = None
+    image_data: str | None = None  # Base64 encoded image for I2V
 
 
 class VideoGenerationResponse(BaseModel):
-    video_data: Optional[str] = None
+    video_data: str | None = None
     seed: int
     success: bool
-    error_message: Optional[str] = None
-    generation_time: Optional[float] = None
-    model_load_time: Optional[float] = None
-    inference_time: Optional[float] = None
-    encoding_time: Optional[float] = None
-    total_time: Optional[float] = None
-    stage_names: Optional[List[str]] = None
-    stage_execution_times: Optional[List[float]] = None
+    error_message: str | None = None
+    generation_time: float | None = None
+    model_load_time: float | None = None
+    inference_time: float | None = None
+    encoding_time: float | None = None
+    total_time: float | None = None
+    stage_names: list[str] | None = None
+    stage_execution_times: list[float] | None = None
 
 
-def encode_video_to_base64(frames: List[np.ndarray], fps: int = DEFAULT_FPS) -> str:
+def encode_video_to_base64(frames: list[np.ndarray], fps: int = DEFAULT_FPS) -> str:
     if not frames:
         return ""
     
@@ -100,7 +100,7 @@ def encode_video_to_base64(frames: List[np.ndarray], fps: int = DEFAULT_FPS) -> 
         return ""
 
 
-def save_image_from_base64(image_data: str, output_dir: str) -> Optional[str]:
+def save_image_from_base64(image_data: str, output_dir: str) -> str | None:
     """Save base64 image data to a temporary file and return the path."""
     if not image_data:
         return None
@@ -135,7 +135,7 @@ def setup_model_environment(model_path: str) -> None:
     os.environ["FASTVIDEO_STAGE_LOGGING"] = "1"
 
 
-def process_generation_result(result: Any) -> tuple[List[np.ndarray], float, List[str], List[float]]:
+def process_generation_result(result: Any) -> tuple[list[np.ndarray], float, list[str], list[float]]:
     frames = result if isinstance(result, list) else result.get("frames", [])
     generation_time = result.get("generation_time", 0.0) if isinstance(result, dict) else 0.0
     
@@ -183,7 +183,7 @@ class BaseModelDeployment:
         os.makedirs(self.output_path, exist_ok=True)
         setup_model_environment(self.model_path)
 
-    def _initialize_generator(self, config: Dict[str, Any]) -> None:
+    def _initialize_generator(self, config: dict[str, Any]) -> None:
         from fastvideo.entrypoints.video_generator import VideoGenerator
         from fastvideo.configs.sample.base import SamplingParam
 
@@ -305,7 +305,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 @serve.ingress(app)
 class FastVideoAPI:
 
-    def __init__(self, t2v_deployments: Dict[str, DeploymentHandle], i2v_deployments: Dict[str, DeploymentHandle] = None):
+    def __init__(self, t2v_deployments: dict[str, DeploymentHandle], i2v_deployments: dict[str, DeploymentHandle] = None):
         self.t2v_deployments = t2v_deployments
         self.i2v_deployments = i2v_deployments or {}
         self.all_deployments = {**self.t2v_deployments, **self.i2v_deployments}
@@ -315,10 +315,10 @@ class FastVideoAPI:
         self.request_duration = Histogram('fastvideo_request_duration_seconds', 'FastVideo request duration', ['model_type'])
         self.video_generation_time = Histogram('fastvideo_video_generation_seconds', 'Video generation time', ['model_type'])
     
-    def _get_model_name(self, model_path: Optional[str]) -> str:
+    def _get_model_name(self, model_path: str | None) -> str:
         return model_path.split('/')[-1] if model_path else "unknown"
     
-    def _record_metrics(self, model_name: str, status: str, duration: float, response: Optional[VideoGenerationResponse] = None) -> None:
+    def _record_metrics(self, model_name: str, status: str, duration: float, response: VideoGenerationResponse | None = None) -> None:
         self.request_count.labels(model_type=model_name, status=status).inc()
         self.request_duration.labels(model_type=model_name).observe(duration)
         
@@ -358,7 +358,7 @@ class FastVideoAPI:
     
     @app.get("/health")
     @limiter.limit("10/minute")
-    async def health_check(self, request: Request) -> Dict[str, str]:
+    async def health_check(self, request: Request) -> dict[str, str]:
         return {"status": "healthy"}
     
     @app.get("/metrics")
@@ -366,14 +366,14 @@ class FastVideoAPI:
         return Response(generate_latest(), media_type="text/plain")
 
 
-def validate_configuration(model_paths: List[str], replicas: List[int]) -> None:
+def validate_configuration(model_paths: list[str], replicas: list[int]) -> None:
     assert len(model_paths) > 0, "At least one model must be specified"
     assert len(model_paths) == len(replicas), "Number of models and replicas must match"
     assert sum(replicas) <= NUM_GPUS, f"Total replicas ({sum(replicas)}) must be <= {NUM_GPUS}"
     
     for model, replica_count in zip(model_paths, replicas):
         assert model in SUPPORTED_MODELS, f"Model {model} not supported. Supported models: {SUPPORTED_MODELS}"
-        assert replica_count > 0, f"Replicas must be greater than 0"
+        assert replica_count > 0, "Replicas must be greater than 0"
 
 
 def start_ray_serve(

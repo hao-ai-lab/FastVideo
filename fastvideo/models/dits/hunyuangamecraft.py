@@ -4,7 +4,7 @@ HunyuanGameCraft Transformer model for FastVideo.
 
 Ported from official Hunyuan-GameCraft-1.0 implementation.
 """
-from typing import Any, List, Optional
+from typing import Any
 
 import numpy as np
 import torch
@@ -84,9 +84,9 @@ class CameraNet(nn.Module):
         in_channels: int = 6,
         downscale_coef: int = 8,
         out_channels: int = 16,
-        patch_size: List[int] = [1, 2, 2],
+        patch_size: list[int] = [1, 2, 2],
         hidden_size: int = 3072,
-        dtype: Optional[torch.dtype] = None,
+        dtype: torch.dtype | None = None,
         prefix: str = "",
     ):
         super().__init__()
@@ -289,11 +289,11 @@ class HunyuanGameCraftTransformer3DModel(CachableDiT):
     def forward(
         self,
         x: torch.Tensor,
-        encoder_hidden_states: List[torch.Tensor],
+        encoder_hidden_states: list[torch.Tensor],
         timestep: torch.Tensor,
-        camera_states: Optional[torch.Tensor] = None,
-        encoder_attention_mask: Optional[List[torch.Tensor]] = None,
-        guidance: Optional[torch.Tensor] = None,
+        camera_states: torch.Tensor | None = None,
+        encoder_attention_mask: list[torch.Tensor] | None = None,
+        guidance: torch.Tensor | None = None,
         return_dict: bool = False,
     ) -> torch.Tensor:
         img = x

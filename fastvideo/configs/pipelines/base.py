@@ -284,11 +284,11 @@ class PipelineConfig:
 
         prefix_with_dot = f"{config_cli_prefix}." if (config_cli_prefix.strip()
                                                       != "") else ""
-        model_path: str | None = kwargs.get(prefix_with_dot + 'model_path',
-                                            None) or kwargs.get('model_path')
+        model_path: str | None = kwargs.get(
+            prefix_with_dot + 'model_path') or kwargs.get('model_path')
         pipeline_config_or_path: str | PipelineConfig | dict[
-            str, Any] | None = kwargs.get(prefix_with_dot + 'pipeline_config',
-                                          None) or kwargs.get('pipeline_config')
+            str, Any] | None = kwargs.get(prefix_with_dot + 'pipeline_config'
+                                          ) or kwargs.get('pipeline_config')
         if model_path is None:
             raise ValueError("model_path is required in kwargs")
 

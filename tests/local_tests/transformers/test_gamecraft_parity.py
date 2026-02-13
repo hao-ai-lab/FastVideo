@@ -289,7 +289,7 @@ def test_gamecraft_transformer_parity():
     freqs_cos = freqs_cos.to(device=device, dtype=dtype)
     freqs_sin = freqs_sin.to(device=device, dtype=dtype)
     
-    print(f"[GameCraft TEST] Input shapes:")
+    print("[GameCraft TEST] Input shapes:")
     print(f"  x: {x.shape}")
     print(f"  text_states: {text_states.shape}")
     print(f"  cam_latents: {cam_latents.shape}")

@@ -54,7 +54,7 @@ def _load_into_model(
         if k in model_state and model_state[k].shape == v.shape
     }
     missing = [k for k in model_state.keys() if k not in filtered]
-    unexpected = [k for k in weights.keys() if k not in model_state]
+    unexpected = [k for k in weights if k not in model_state]
     print(
         f"[VAE TEST] {name}: Loading {len(filtered)}/{len(model_state)} tensors "
         f"({len(missing)} missing, {len(unexpected)} unexpected)"

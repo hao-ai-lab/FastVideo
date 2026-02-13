@@ -1,11 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
-import json
 import os
 
 import pytest
 import torch
-from safetensors.torch import load_file
 
 from fastvideo.configs.pipelines import PipelineConfig
 from fastvideo.logger import init_logger

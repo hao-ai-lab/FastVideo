@@ -1,5 +1,3 @@
-import os
-import time
 from fastvideo import VideoGenerator, SamplingParam
 
 OUTPUT_PATH = "video_samples_causal"

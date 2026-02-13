@@ -1,7 +1,6 @@
 import os
 import json
 import argparse
-from pathlib import Path
 from safetensors import safe_open
 
 
@@ -25,7 +24,7 @@ def validate_components(model_path):
         print(f"\n{component}:")
         
         if not os.path.exists(component_path):
-            print(f"  ✗ Directory not found")
+            print("  ✗ Directory not found")
             all_valid = False
             continue
         
@@ -55,7 +54,7 @@ def validate_dit_weights(dit_path):
     depth = config["depth"]
     num_heads = config["num_heads"]
     
-    print(f"\nArchitecture:")
+    print("\nArchitecture:")
     print(f"  - hidden_size: {hidden_size}")
     print(f"  - depth: {depth}")
     print(f"  - num_heads: {num_heads}")
@@ -68,7 +67,7 @@ def validate_dit_weights(dit_path):
     weight_map = index["weight_map"]
     all_keys = list(weight_map.keys())
     
-    print(f"\nWeight statistics:")
+    print("\nWeight statistics:")
     print(f"  - Total keys: {len(all_keys)}")
     print(f"  - Total size: {index['metadata']['total_size'] / 1e9:.2f} GB")
     
@@ -77,7 +76,7 @@ def validate_dit_weights(dit_path):
     block_keys = [k for k in all_keys if k.startswith('blocks.')]
     final_keys = [k for k in all_keys if k.startswith('final_layer.')]
     
-    print(f"\nKey distribution:")
+    print("\nKey distribution:")
     print(f"  - Embedder layers: {len(embedder_keys)}")
     print(f"  - Transformer blocks: {len(block_keys)}")
     print(f"  - Final layer: {len(final_keys)}")
@@ -100,7 +99,7 @@ def validate_dit_weights(dit_path):
     
     # Sample weights
     first_shard = os.path.join(dit_path, "diffusion_pytorch_model-00001-of-00006.safetensors")
-    print(f"\nSampling weights from first shard:")
+    print("\nSampling weights from first shard:")
     
     with safe_open(first_shard, framework="pt", device="cpu") as f:
         sample_keys = [k for k in f.keys() if k in all_keys][:5]

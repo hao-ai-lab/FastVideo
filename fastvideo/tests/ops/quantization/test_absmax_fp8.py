@@ -9,7 +9,6 @@ from fastvideo.layers.quantization.absmax_fp8 import (
     AbsMaxFP8MergedParameter,
     AbsMaxFP8Parameter,
 )
-from fastvideo.models.utils import set_weight_attrs
 
 
 class TestAbsMaxFP8LinearMethod(unittest.TestCase):

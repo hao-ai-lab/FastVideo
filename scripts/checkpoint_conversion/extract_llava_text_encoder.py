@@ -93,7 +93,7 @@ def extract_text_encoder(
     
     with open(output_dir / "config.json", "w") as f:
         json.dump(config, f, indent=2)
-    print(f"Saved config.json")
+    print("Saved config.json")
     
     # Copy tokenizer files if they exist
     tokenizer_files = [
@@ -182,7 +182,7 @@ def extract_clip_text_encoder(
     
     with open(output_dir / "config.json", "w") as f:
         json.dump(config, f, indent=2)
-    print(f"Saved config.json")
+    print("Saved config.json")
     
     # Copy tokenizer files if they exist
     tokenizer_files = [

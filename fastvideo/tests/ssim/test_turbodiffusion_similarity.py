@@ -124,7 +124,7 @@ def test_turbodiffusion_inference_similarity(prompt, model_id):
         logger.error(
             f"Reference video not found for prompt: {prompt} with backend: {ATTENTION_BACKEND}"
         )
-        raise FileNotFoundError(f"Reference video missing")
+        raise FileNotFoundError("Reference video missing")
 
     reference_video_path = os.path.join(reference_folder, reference_video_name)
     generated_video_path = os.path.join(output_dir, output_video_name)
@@ -266,7 +266,7 @@ def test_turbodiffusion_i2v_inference_similarity(prompt, model_id):
         logger.error(
             f"Reference video not found for prompt: {prompt} with backend: {ATTENTION_BACKEND}"
         )
-        raise FileNotFoundError(f"Reference video missing")
+        raise FileNotFoundError("Reference video missing")
 
     reference_video_path = os.path.join(reference_folder, reference_video_name)
     generated_video_path = os.path.join(output_dir, output_video_name)

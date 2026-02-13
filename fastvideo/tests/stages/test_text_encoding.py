@@ -1,6 +1,5 @@
 import torch
 import types
-import pytest
 
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch

@@ -1,17 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
 
-import numpy as np
 import pytest
 import torch
 from transformers import AutoConfig, AutoTokenizer, CLIPTextModel
 import gc
-from fastvideo.configs.pipelines import HunyuanConfig, PipelineConfig
+from fastvideo.configs.pipelines import HunyuanConfig
 from fastvideo.forward_context import set_forward_context
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.logger import init_logger
 from fastvideo.utils import maybe_download_model
-from fastvideo.configs.models.encoders import CLIPTextConfig
 from torch.distributed.tensor import DTensor
 from torch.testing import assert_close
 

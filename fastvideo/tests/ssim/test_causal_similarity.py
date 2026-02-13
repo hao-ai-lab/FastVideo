@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-import json
 import os
 
 import torch
@@ -129,7 +128,7 @@ def test_causal_similarity(prompt, ATTENTION_BACKEND, model_id):
 
     if not reference_video_name:
         logger.error(f"Reference video not found for prompt: {prompt} with backend: {ATTENTION_BACKEND}")
-        raise FileNotFoundError(f"Reference video missing")
+        raise FileNotFoundError("Reference video missing")
 
     reference_video_path = os.path.join(reference_folder, reference_video_name)
     generated_video_path = os.path.join(output_dir, output_video_name)

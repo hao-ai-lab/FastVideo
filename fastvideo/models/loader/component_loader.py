@@ -23,7 +23,6 @@ from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.layers.quantization import get_quantization_config
 from fastvideo.logger import init_logger
-from fastvideo.models.encoders.base import TextEncoder
 from fastvideo.models.hf_transformer_utils import get_diffusers_config
 from fastvideo.models.loader.fsdp_load import maybe_load_fsdp_model, shard_model
 from fastvideo.models.loader.utils import set_default_torch_dtype
@@ -524,7 +523,7 @@ class TokenizerLoader(ComponentLoader):
         tokenizer_cfg_path = os.path.join(model_path, "config.json")
         if os.path.exists(tokenizer_cfg_path):
             try:
-                with open(tokenizer_cfg_path, "r") as f:
+                with open(tokenizer_cfg_path) as f:
                     tokenizer_cfg = json.load(f)
                 if isinstance(tokenizer_cfg, dict) and (
                     tokenizer_cfg.get("_class_name") == "AutoProcessor"
@@ -916,7 +915,7 @@ class UpsamplerLoader(ComponentLoader):
         try:
             upsampler_cfg = deepcopy(fastvideo_args.pipeline_config.upsampler_config[0])
             upsampler_cfg.update_model_config(config_dict)
-        except Exception as e:
+        except Exception:
             upsampler_cfg = deepcopy(fastvideo_args.pipeline_config.upsampler_config[1])
             upsampler_cfg.update_model_config(config_dict)
 

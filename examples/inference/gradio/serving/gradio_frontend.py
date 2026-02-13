@@ -166,7 +166,7 @@ def load_example_prompts():
     def load_from_file(filepath):
         prompts, labels = [], []
         try:
-            with open(filepath, "r", encoding='utf-8') as f:
+            with open(filepath, encoding='utf-8') as f:
                 for line in f:
                     line = line.strip()
                     if line and not contains_chinese(line):
@@ -200,7 +200,7 @@ def load_example_prompts():
     
     if json_path and json_path.exists():
         try:
-            with open(json_path, "r", encoding='utf-8') as f:
+            with open(json_path, encoding='utf-8') as f:
                 data = json.load(f)
                 # Resolve paths relative to repository root.
                 project_root = Path(__file__).resolve().parents[4]
@@ -258,7 +258,7 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
         # Validate dimensions
         max_pixels = 720 * 1280
         if height * width > max_pixels:
-            return None, f"Video dimensions too large. Maximum: 720x1280 pixels", ""
+            return None, "Video dimensions too large. Maximum: 720x1280 pixels", ""
         
         if progress:
             progress(0.1, desc="Checking backend health...")
@@ -415,9 +415,8 @@ def create_gradio_interface(backend_url: str, default_params: dict[str, Sampling
             with gr.Column(scale=1, min_width=120, elem_classes="center-button"):
                 run_button = gr.Button("Run", variant="primary", size="lg")
         
-        with gr.Row():
-            with gr.Column():
-                error_output = gr.Text(label="Error", visible=False)
+        with gr.Row(), gr.Column():
+            error_output = gr.Text(label="Error", visible=False)
                 # timing_display = gr.Markdown(label="Timing Breakdown", visible=False)
 
         with gr.Row(equal_height=False):

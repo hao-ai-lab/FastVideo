@@ -24,7 +24,7 @@ It also exposes flags used by pipeline stages to avoid double (de)normalization:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -65,8 +65,8 @@ class Cosmos25WanVAEAdapter(nn.Module):
         self,
         inner: Any,
         *,
-        latents_mean: Optional[torch.Tensor] = None,
-        latents_std: Optional[torch.Tensor] = None,
+        latents_mean: torch.Tensor | None = None,
+        latents_std: torch.Tensor | None = None,
     ) -> None:
         super().__init__()
         self.inner = inner
@@ -537,8 +537,8 @@ class Cosmos25WanVAE(nn.Module):
         device: torch.device | str = "cpu",
         dtype: torch.dtype = torch.float32,
         temporal_window: int = 4,
-        latents_mean: Optional[torch.Tensor] = None,
-        latents_std: Optional[torch.Tensor] = None,
+        latents_mean: torch.Tensor | None = None,
+        latents_std: torch.Tensor | None = None,
     ) -> None:
         super().__init__()
 

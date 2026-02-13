@@ -20,15 +20,12 @@ Notes:
     - This test requires significant GPU memory (~40GB+)
     - The test compares denoised latents, not final decoded video (for speed)
 """
-import math
 import os
 import sys
 from pathlib import Path
 
 import pytest
 import torch
-import numpy as np
-from torch.testing import assert_close
 
 # Set up distributed environment defaults
 os.environ.setdefault("MASTER_ADDR", "localhost")
@@ -254,7 +251,7 @@ def test_gamecraft_pipeline_latent_parity():
     num_inference_steps = 5  # Reduced for testing
     seed = 42
     
-    print(f"\n[GAMECRAFT PIPELINE TEST] Configuration:")
+    print("\n[GAMECRAFT PIPELINE TEST] Configuration:")
     print(f"  - Prompt: {prompt}")
     print(f"  - Action: {action_id} (forward)")
     print(f"  - Size: {height}x{width}")
@@ -372,7 +369,7 @@ def test_gamecraft_pipeline_latent_parity():
     fastvideo_flat = fastvideo_f32.flatten()
     correlation = torch.corrcoef(torch.stack([official_flat, fastvideo_flat]))[0, 1].item()
     
-    print(f"\n[GAMECRAFT PIPELINE TEST] Results:")
+    print("\n[GAMECRAFT PIPELINE TEST] Results:")
     print(f"  - Max absolute difference: {max_diff:.6f}")
     print(f"  - Mean absolute difference: {mean_diff:.6f}")
     print(f"  - Correlation: {correlation:.6f}")

@@ -1,5 +1,5 @@
 import torch
-from typing import Callable, Optional
+from collections.abc import Callable
 
 def and_masks(*mask_functions: Callable) -> Callable:
     """Returns a mask function that is the intersection of provided mask functions"""
@@ -34,8 +34,8 @@ def padding_mask_function(padding_mask: torch.Tensor) -> Callable:
     return inner_mask
 
 def prepare_padding_mask(
-    attention_mask: Optional[torch.Tensor], kv_length: int, kv_offset: int
-) -> Optional[torch.Tensor]:
+    attention_mask: torch.Tensor | None, kv_length: int, kv_offset: int
+) -> torch.Tensor | None:
     """
     From the 2D attention mask, prepare the correct padding mask to use by potentially padding it.
     """
@@ -70,14 +70,14 @@ def sdpa_mask(
     kv_length: int,
     kv_offset: int = 0,
     mask_function: Callable = causal_mask_function,
-    attention_mask: Optional[torch.Tensor] = None,
-    local_size: Optional[int] = None,
+    attention_mask: torch.Tensor | None = None,
+    local_size: int | None = None,
     allow_is_causal_skip: bool = True,
     allow_is_bidirectional_skip: bool = False,
     allow_torch_fix: bool = True,
     use_vmap: bool = False,
     **kwargs,
-) -> Optional[torch.Tensor]:
+) -> torch.Tensor | None:
     """
     Create a 4D boolean mask of shape `(batch_size, 1, query_length, kv_length)` where a value of True indicates that
     the element should take part in the attention computation, and False that it should not.

@@ -18,7 +18,6 @@ Usage:
 import argparse
 import os
 import re
-import json
 import torch
 import shutil
 import glob
@@ -163,12 +162,12 @@ def main():
         
         converted_state_dict[new_key] = tensor
     
-    print(f"\nConversion summary:")
+    print("\nConversion summary:")
     print(f"  Converted: {len(converted_state_dict)} keys")
     print(f"  Skipped (SLA): {len(skipped_keys)} keys")
     
     if skipped_keys:
-        print(f"\nSkipped SLA keys (first 5):")
+        print("\nSkipped SLA keys (first 5):")
         for k in skipped_keys[:5]:
             print(f"  - {k}")
     
@@ -189,16 +188,16 @@ def main():
     src_config = os.path.join(ref_local, "transformer", "config.json")
     dst_config = os.path.join(args.output_dir, "config.json")
     shutil.copy(src_config, dst_config)
-    print(f"Copied config.json")
+    print("Copied config.json")
     
     print(f"\nDone! Converted weights saved to: {args.output_dir}")
-    print(f"\nNext steps:")
-    print(f"  1. Use create_hf_repo.py to create a complete diffusers repo:")
-    print(f"     python scripts/checkpoint_conversion/create_hf_repo.py \\")
-    print(f"       --repo_id Wan-AI/Wan2.1-T2V-1.3B-Diffusers \\")
-    print(f"       --local_dir /tmp/turbodiffusion-wan \\")
+    print("\nNext steps:")
+    print("  1. Use create_hf_repo.py to create a complete diffusers repo:")
+    print("     python scripts/checkpoint_conversion/create_hf_repo.py \\")
+    print("       --repo_id Wan-AI/Wan2.1-T2V-1.3B-Diffusers \\")
+    print("       --local_dir /tmp/turbodiffusion-wan \\")
     print(f"       --checkpoint_dir {args.output_dir} \\")
-    print(f"       --push_to_hub --upload_repo_id YOUR_USERNAME/TurboWan-Diffusers")
+    print("       --push_to_hub --upload_repo_id YOUR_USERNAME/TurboWan-Diffusers")
 
 
 if __name__ == "__main__":

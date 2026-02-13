@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 
-import glob
 import json
 import os
 import pytest

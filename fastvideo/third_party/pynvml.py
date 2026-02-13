@@ -34,7 +34,6 @@
 # Python bindings for the NVML library
 ##
 from ctypes import *
-from ctypes.util import find_library
 from functools import wraps
 import sys
 import os
@@ -1072,7 +1071,7 @@ def _nvmlGetFunctionPointer(name):
 # Allows the object to be printed
 # Allows mismatched types to be assigned
 #  - like None when the Structure variant requires c_uint
-class nvmlFriendlyObject(object):
+class nvmlFriendlyObject:
     def __init__(self, dictionary):
         for x in dictionary:
             setattr(self, x, dictionary[x])
@@ -1140,7 +1139,7 @@ class _PrintableStructure(Structure):
         return self.__class__.__name__ + "(" +  ", ".join(result) + ")"
 
     def __getattribute__(self, name):
-        res = super(_PrintableStructure, self).__getattribute__(name)
+        res = super().__getattribute__(name)
         # need to convert bytes to unicode for python3 don't need to for python2
         # Python 2 strings are of both str and bytes
         # Python 3 strings are not of type bytes
@@ -1156,7 +1155,7 @@ class _PrintableStructure(Structure):
             # encoding a python2 string returns the same value, since python2 strings are bytes already
             # bytes passed in python3 will be ignored.
             value = value.encode()
-        super(_PrintableStructure, self).__setattr__(name, value)
+        super().__setattr__(name, value)
 
 class c_nvmlUnitInfo_t(_PrintableStructure):
     _fields_ = [
@@ -1171,7 +1170,7 @@ class c_nvmlC2cModeInfo_v1_t(_PrintableStructure):
         ('isC2cEnabled', c_uint)
     ]
 
-nvmlC2cModeInfo_v1 = 0x1000008;
+nvmlC2cModeInfo_v1 = 0x1000008
 
 class c_nvmlLedState_t(_PrintableStructure):
     _fields_ = [
@@ -1467,7 +1466,7 @@ class c_nvmlNvlinkSupportedBwModes_v1_t(_PrintableStructure):
     ]
 
     def __init__(self):
-        super(c_nvmlNvlinkSupportedBwModes_v1_t, self).__init__(version=nvmlNvlinkSupportedBwModes_v1)
+        super().__init__(version=nvmlNvlinkSupportedBwModes_v1)
 
 nvmlNvlinkGetBwMode_v1 = 0x100000c
 class c_nvmlNvlinkGetBwMode_v1_t(_PrintableStructure):
@@ -1478,7 +1477,7 @@ class c_nvmlNvlinkGetBwMode_v1_t(_PrintableStructure):
     ]
 
     def __init__(self):
-        super(c_nvmlNvlinkGetBwMode_v1_t, self).__init__(version=nvmlNvlinkGetBwMode_v1)
+        super().__init__(version=nvmlNvlinkGetBwMode_v1)
 
 nvmlNvlinkSetBwMode_v1 = 0x100000c
 class c_nvmlNvlinkSetBwMode_v1_t(_PrintableStructure):
@@ -1489,7 +1488,7 @@ class c_nvmlNvlinkSetBwMode_v1_t(_PrintableStructure):
     ]
 
     def __init__(self):
-        super(c_nvmlNvlinkSetBwMode_v1_t, self).__init__(version=nvmlNvlinkSetBwMode_v1)
+        super().__init__(version=nvmlNvlinkSetBwMode_v1)
 
 class c_nvmlVgpuHeterogeneousMode_v1_t(_PrintableStructure):
     _fields_ = [
@@ -2082,7 +2081,7 @@ class c_nvmlGpuInstanceProfileInfo_v2_t(_PrintableStructure):
                ]
     
     def __init__(self):
-        super(c_nvmlGpuInstanceProfileInfo_v2_t, self).__init__(version=nvmlGpuInstanceProfileInfo_v2)
+        super().__init__(version=nvmlGpuInstanceProfileInfo_v2)
 
 class c_nvmlGpuInstanceInfo_t(Structure):
     _fields_ = [("device", c_nvmlDevice_t),
@@ -2142,7 +2141,7 @@ class c_nvmlComputeInstanceProfileInfo_v2_t(_PrintableStructure):
                ]
 
     def __init__(self):
-        super(c_nvmlComputeInstanceProfileInfo_v2_t, self).__init__(version=nvmlComputeInstanceProfileInfo_v2)
+        super().__init__(version=nvmlComputeInstanceProfileInfo_v2)
 
 class c_nvmlComputeInstanceInfo_t(Structure):
     _fields_ = [("device", c_nvmlDevice_t),
@@ -2288,7 +2287,7 @@ class c_nvmlSystemConfComputeSettings_v1_t(Structure):
                 ('multiGpuMode', c_uint),
                ]
     def __init__(self):
-        super(c_nvmlSystemConfComputeSettings_v1_t, self).__init__(version=nvmlSystemConfComputeSettings_v1)
+        super().__init__(version=nvmlSystemConfComputeSettings_v1)
 
 class c_nvmlConfComputeSystemCaps_t(Structure):
     _fields_ = [('cpuCaps', c_uint),
@@ -2410,14 +2409,14 @@ def _LoadNvmlLibrary():
                         try:
                             # Check for nvml.dll in System32 first for DCH drivers
                             nvmlLib = CDLL(os.path.join(os.getenv("WINDIR", "C:/Windows"), "System32/nvml.dll"))
-                        except OSError as ose:
+                        except OSError:
                             # If nvml.dll is not found in System32, it should be in ProgramFiles
                             # load nvml.dll from %ProgramFiles%/NVIDIA Corporation/NVSMI/nvml.dll
                             nvmlLib = CDLL(os.path.join(os.getenv("ProgramFiles", "C:/Program Files"), "NVIDIA Corporation/NVSMI/nvml.dll"))
                     else:
                         # assume linux
                         nvmlLib = CDLL("libnvidia-ml.so.1")
-                except OSError as ose:
+                except OSError:
                     _nvmlCheckReturn(NVML_ERROR_LIBRARY_NOT_FOUND)
                 if (nvmlLib == None):
                     _nvmlCheckReturn(NVML_ERROR_LIBRARY_NOT_FOUND)
@@ -2436,7 +2435,7 @@ def nvmlShutdown():
     # Atomically update refcount
     global _nvmlLib_refcount
     libLoadLock.acquire()
-    if (0 < _nvmlLib_refcount):
+    if (_nvmlLib_refcount > 0):
         _nvmlLib_refcount -= 1
     libLoadLock.release()
     return None
@@ -2678,14 +2677,14 @@ def nvmlDeviceGetCurrentClockFreqs(handle):
     return currentClockFreqs.str
 
 def nvmlDeviceGetBoardId(handle):
-    c_id = c_uint();
+    c_id = c_uint()
     fn = _nvmlGetFunctionPointer("nvmlDeviceGetBoardId")
     ret = fn(handle, byref(c_id))
     _nvmlCheckReturn(ret)
     return c_id.value
 
 def nvmlDeviceGetMultiGpuBoard(handle):
-    c_multiGpu = c_uint();
+    c_multiGpu = c_uint()
     fn = _nvmlGetFunctionPointer("nvmlDeviceGetMultiGpuBoard")
     ret = fn(handle, byref(c_multiGpu))
     _nvmlCheckReturn(ret)
@@ -3020,7 +3019,7 @@ def nvmlDeviceGetNumFans(device):
     return c_numFans.value
 
 def nvmlDeviceSetDefaultFanSpeed_v2(handle, index):
-    fn = _nvmlGetFunctionPointer("nvmlDeviceSetDefaultFanSpeed_v2");
+    fn = _nvmlGetFunctionPointer("nvmlDeviceSetDefaultFanSpeed_v2")
     ret = fn(handle, index)
     _nvmlCheckReturn(ret)
     return NVML_SUCCESS
@@ -3927,7 +3926,7 @@ def nvmlDeviceGetRetiredPages_v2(device, sourceFilter):
     c_times = times_array()
     ret = fn(device, c_source, byref(c_count), c_pages, c_times)
     _nvmlCheckReturn(ret)
-    return [ { 'address': int(c_pages[i]), 'timestamp': int(c_times[i]) } for i in range(c_count.value) ];
+    return [ { 'address': int(c_pages[i]), 'timestamp': int(c_times[i]) } for i in range(c_count.value) ]
 
 def nvmlDeviceGetRetiredPagesPendingStatus(device):
     c_pending = _nvmlEnableState_t()
@@ -5361,13 +5360,13 @@ def nvmlDeviceGetDynamicPstatesInfo(device, c_dynamicpstatesinfo=c_nvmlGpuDynami
     isReference = type(c_dynamicpstatesinfo) is not c_nvmlGpuDynamicPstatesInfo_t
     dynamicpstatesinfoRef = c_dynamicpstatesinfo if isReference else byref(c_dynamicpstatesinfo)
 
-    fn = _nvmlGetFunctionPointer("nvmlDeviceGetDynamicPstatesInfo");
+    fn = _nvmlGetFunctionPointer("nvmlDeviceGetDynamicPstatesInfo")
     ret = fn(device, dynamicpstatesinfoRef)
     _nvmlCheckReturn(ret)
     return NVML_SUCCESS if isReference else c_dynamicpstatesinfo
 
 def nvmlDeviceSetFanSpeed_v2(handle, index, speed):
-    fn = _nvmlGetFunctionPointer("nvmlDeviceSetFanSpeed_v2");
+    fn = _nvmlGetFunctionPointer("nvmlDeviceSetFanSpeed_v2")
     ret = fn(handle, index, speed)
     _nvmlCheckReturn(ret)
     return NVML_SUCCESS
@@ -5375,7 +5374,7 @@ def nvmlDeviceSetFanSpeed_v2(handle, index, speed):
 def nvmlDeviceGetThermalSettings(device, sensorindex, c_thermalsettings=c_nvmlGpuThermalSettings_t()):
     isReference = type(c_thermalsettings) is not c_nvmlGpuThermalSettings_t
     thermalsettingsRef = c_thermalsettings if isReference else byref(c_thermalsettings)
-    fn = _nvmlGetFunctionPointer("nvmlDeviceGetThermalSettings");
+    fn = _nvmlGetFunctionPointer("nvmlDeviceGetThermalSettings")
     ret = fn(device, sensorindex, thermalsettingsRef)
     _nvmlCheckReturn(ret)
     return NVML_SUCCESS if isReference else c_thermalsettings.sensor[:]
@@ -5384,7 +5383,7 @@ def nvmlDeviceGetMinMaxClockOfPState(device, clockType, pstate, minClockMHz=c_ui
     isReference = (type(minClockMHz) is not c_uint) or (type(maxClockMHz) is not c_uint)
     minClockMHzRef = minClockMHz if isReference else byref(minClockMHz)
     maxClockMHzRef = maxClockMHz if isReference else byref(maxClockMHz)
-    fn = _nvmlGetFunctionPointer("nvmlDeviceGetMinMaxClockOfPState");
+    fn = _nvmlGetFunctionPointer("nvmlDeviceGetMinMaxClockOfPState")
     ret = fn(device, _nvmlClockType_t(clockType), _nvmlClockType_t(pstate), minClockMHzRef, maxClockMHzRef)
     _nvmlCheckReturn(ret)
     return NVML_SUCCESS if isReference else (minClockMHz.value, maxClockMHz.value)
@@ -5402,12 +5401,12 @@ class c_nvmlClockOffset_t(_PrintableStructure):
 nvmlClockOffset_v1 = 0x1000018
 
 def nvmlDeviceGetClockOffsets(device, info):
-    fn = _nvmlGetFunctionPointer("nvmlDeviceGetClockOffsets");
+    fn = _nvmlGetFunctionPointer("nvmlDeviceGetClockOffsets")
     ret = fn(device, info)
     return NVML_SUCCESS
 
 def nvmlDeviceSetClockOffsets(device, info):
-    fn = _nvmlGetFunctionPointer("nvmlDeviceSetClockOffsets");
+    fn = _nvmlGetFunctionPointer("nvmlDeviceSetClockOffsets")
     ret = fn(device, info)
     return NVML_SUCCESS
 
@@ -5539,7 +5538,7 @@ def nvmlDeviceGetConfComputeGpuCertificate(device):
 def nvmlDeviceGetConfComputeGpuAttestationReport(device, c_nonce):
     c_attestReport = c_nvmlConfComputeGpuAttestationReport_t()
     c_nonce_arr = (c_uint8 * len(c_nonce))(*(c_nonce))
-    setattr(c_attestReport, 'nonce', c_nonce_arr)
+    c_attestReport.nonce = c_nonce_arr
     fn = _nvmlGetFunctionPointer("nvmlDeviceGetConfComputeGpuAttestationReport")
     ret = fn(device, byref(c_attestReport))
     _nvmlCheckReturn(ret)
@@ -5819,16 +5818,16 @@ class c_nvmlGpuFabricInfoV_t(_PrintableStructure):
     ]
 
     def __init__(self):
-        super(c_nvmlGpuFabricInfoV_t, self).__init__(version=nvmlGpuFabricInfo_v2)
+        super().__init__(version=nvmlGpuFabricInfo_v2)
 
 def nvmlDeviceGetGpuFabricInfo(device, gpuFabricInfo):
-    fn = _nvmlGetFunctionPointer("nvmlDeviceGetGpuFabricInfo");
+    fn = _nvmlGetFunctionPointer("nvmlDeviceGetGpuFabricInfo")
     ret = fn(device, gpuFabricInfo)
     _nvmlCheckReturn(ret)
     return NVML_SUCCESS
 
 def nvmlDeviceGetGpuFabricInfoV(device, gpuFabricInfo):
-    fn = _nvmlGetFunctionPointer("nvmlDeviceGetGpuFabricInfoV");
+    fn = _nvmlGetFunctionPointer("nvmlDeviceGetGpuFabricInfoV")
     ret = fn(device, gpuFabricInfo)
     _nvmlCheckReturn(ret)
     return NVML_SUCCESS
@@ -5899,7 +5898,7 @@ class c_nvmlEccSramErrorStatus_v1_t(_PrintableStructure):
     ]
 
     def __init__(self):
-        super(c_nvmlEccSramErrorStatus_v1_t, self).__init__(version=nvmlEccSramErrorStatus_v1)
+        super().__init__(version=nvmlEccSramErrorStatus_v1)
 
 nvmlEccSramErrorStatus_v1 = 0x1000068
 def nvmlDeviceGetSramEccErrorStatus(device, status):
@@ -5918,7 +5917,7 @@ class c_nvmlDeviceCapabilities_v1_t(_PrintableStructure):
     ]
 
     def __init__(self):
-        super(c_nvmlDeviceCapabilities_v1_t, self).__init__(version=nvmlDeviceCapabilities_v1)
+        super().__init__(version=nvmlDeviceCapabilities_v1)
 
 
 def nvmlDeviceGetCapabilities(device, caps):
@@ -5938,7 +5937,7 @@ class c_nvmlPlatformInfo_v1_t(_PrintableStructure):
     ]
 
     def __init__(self):
-        super(c_nvmlPlatformInfo_v1_t, self).__init__(version=nvmlPlatformInfo_v1)
+        super().__init__(version=nvmlPlatformInfo_v1)
 
 nvmlPlatformInfo_v1 = 0x100002c
 def nvmlDeviceGetPlatformInfo(device, platformInfo):
@@ -5980,7 +5979,7 @@ class c_nvmlWorkloadPowerProfileInfo_v1_t(_PrintableStructure):
     ]
 
     def __init__(self):
-        super(c_nvmlWorkloadPowerProfileInfo_v1_t, self).__init__(version=nvmlWorkloadPowerProfileInfo_v1)
+        super().__init__(version=nvmlWorkloadPowerProfileInfo_v1)
 
 nvmlWorkloadPowerProfileProfilesInfo_v1 = 0x1002bf8
 class c_nvmlWorkloadPowerProfileProfilesInfo_v1_t(_PrintableStructure):
@@ -5991,7 +5990,7 @@ class c_nvmlWorkloadPowerProfileProfilesInfo_v1_t(_PrintableStructure):
     ]
 
     def __init__(self):
-        super(c_nvmlWorkloadPowerProfileProfilesInfo_v1_t, self).__init__(version=nvmlWorkloadPowerProfileProfilesInfo_v1)
+        super().__init__(version=nvmlWorkloadPowerProfileProfilesInfo_v1)
 
 nvmlWorkloadPowerProfileCurrentProfiles_v1 = 0x1000064
 class c_nvmlWorkloadPowerProfileCurrentProfiles_v1_t(_PrintableStructure):
@@ -6003,7 +6002,7 @@ class c_nvmlWorkloadPowerProfileCurrentProfiles_v1_t(_PrintableStructure):
     ]
 
     def __init__(self):
-        super(c_nvmlWorkloadPowerProfileCurrentProfiles_v1_t, self).__init__(version=nvmlWorkloadPowerProfileCurrentProfiles_v1)
+        super().__init__(version=nvmlWorkloadPowerProfileCurrentProfiles_v1)
 
 nvmlWorkloadPowerProfileRequestedProfiles_v1 = 0x1000024
 class c_nvmlWorkloadPowerProfileRequestedProfiles_v1_t(_PrintableStructure):
@@ -6013,7 +6012,7 @@ class c_nvmlWorkloadPowerProfileRequestedProfiles_v1_t(_PrintableStructure):
     ]
 
     def __init__(self):
-        super(c_nvmlWorkloadPowerProfileRequestedProfiles_v1_t, self).__init__(version=nvmlWorkloadPowerProfileRequestedProfiles_v1)
+        super().__init__(version=nvmlWorkloadPowerProfileRequestedProfiles_v1)
 
 def nvmlDeviceWorkloadPowerProfileGetProfilesInfo(device, profilesInfo):
     fn = _nvmlGetFunctionPointer("nvmlDeviceWorkloadPowerProfileGetProfilesInfo")
@@ -6066,7 +6065,7 @@ class c_nvmlDramEncryptionInfo_t(_PrintableStructure):
     ]
 
     def __init__(self):
-        super(c_nvmlDramEncryptionInfo_t, self).__init__(version=nvmlDramEncryptionInfo_v1)
+        super().__init__(version=nvmlDramEncryptionInfo_v1)
 
 def nvmlDeviceGetDramEncryptionMode(handle):
     c_currState = c_nvmlDramEncryptionInfo_t()
@@ -6087,7 +6086,7 @@ def nvmlDeviceGetPendingDramEncryptionMode(handle):
 def nvmlDeviceSetDramEncryptionMode(handle, mode):
     fn = _nvmlGetFunctionPointer("nvmlDeviceSetDramEncryptionMode")
     c_dramEncryptionMode = c_nvmlDramEncryptionInfo_t()
-    c_dramEncryptionMode.encryptionState = mode;
+    c_dramEncryptionMode.encryptionState = mode
     ret = fn(handle, byref(c_dramEncryptionMode))
     _nvmlCheckReturn(ret)
     return None
@@ -6108,7 +6107,7 @@ class c_nvmlPowerSmoothingState_v1_t(_PrintableStructure):
     ]
 
     def __init__(self):
-        super(c_nvmlPowerSmoothingState_v1_t, self).__init__(version=nvmlPowerSmoothingState_v1)
+        super().__init__(version=nvmlPowerSmoothingState_v1)
 
 nvmlPowerSmoothingProfile_v1=0x1000018
 class c_nvmlPowerSmoothingProfile_v1_t(_PrintableStructure):
@@ -6120,7 +6119,7 @@ class c_nvmlPowerSmoothingProfile_v1_t(_PrintableStructure):
     ]
 
     def __init__(self):
-        super(c_nvmlPowerSmoothingProfile_v1_t, self).__init__(version=nvmlPowerSmoothingProfile_v1)
+        super().__init__(version=nvmlPowerSmoothingProfile_v1)
 
 def nvmlDevicePowerSmoothingActivatePresetProfile(device, profile):
     fn = _nvmlGetFunctionPointer("nvmlDevicePowerSmoothingActivatePresetProfile")

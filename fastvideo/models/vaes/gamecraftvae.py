@@ -5,7 +5,6 @@ GameCraft VAE - ported from official Hunyuan-GameCraft-1.0/hymm_sp/vae/.
 Matches the official AutoencoderKLCausal3D structure exactly for weight loading.
 """
 from dataclasses import dataclass
-from typing import Optional, Tuple
 
 import numpy as np
 import torch
@@ -42,8 +41,8 @@ class EncoderCausal3D(nn.Module):
         self,
         in_channels: int = 3,
         out_channels: int = 16,
-        down_block_types: Tuple[str, ...] = ("DownEncoderBlockCausal3D",),
-        block_out_channels: Tuple[int, ...] = (128, 256, 512, 512),
+        down_block_types: tuple[str, ...] = ("DownEncoderBlockCausal3D",),
+        block_out_channels: tuple[int, ...] = (128, 256, 512, 512),
         layers_per_block: int = 2,
         norm_num_groups: int = 32,
         act_fn: str = "silu",
@@ -142,8 +141,8 @@ class DecoderCausal3D(nn.Module):
         self,
         in_channels: int = 16,
         out_channels: int = 3,
-        up_block_types: Tuple[str, ...] = ("UpDecoderBlockCausal3D",),
-        block_out_channels: Tuple[int, ...] = (128, 256, 512, 512),
+        up_block_types: tuple[str, ...] = ("UpDecoderBlockCausal3D",),
+        block_out_channels: tuple[int, ...] = (128, 256, 512, 512),
         layers_per_block: int = 2,
         norm_num_groups: int = 32,
         act_fn: str = "silu",
@@ -228,7 +227,7 @@ class DecoderCausal3D(nn.Module):
     def forward(
         self,
         sample: torch.Tensor,
-        latent_embeds: Optional[torch.Tensor] = None,
+        latent_embeds: torch.Tensor | None = None,
     ) -> torch.Tensor:
         sample = self.conv_in(sample)
         sample = self.mid_block(sample, temb=latent_embeds)

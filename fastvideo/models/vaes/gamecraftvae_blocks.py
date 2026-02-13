@@ -4,7 +4,6 @@ GameCraft VAE building blocks - ported from official Hunyuan-GameCraft-1.0/hymm_
 
 Matches the official structure exactly for weight loading.
 """
-from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -13,7 +12,7 @@ from einops import rearrange
 
 
 def prepare_causal_attention_mask(
-    n_frame: int, n_hw: int, dtype, device, batch_size: Optional[int] = None
+    n_frame: int, n_hw: int, dtype, device, batch_size: int | None = None
 ):
     seq_len = n_frame * n_hw
     mask = torch.full((seq_len, seq_len), float("-inf"), dtype=dtype, device=device)
@@ -32,9 +31,9 @@ class CausalConv3d(nn.Module):
         self,
         chan_in: int,
         chan_out: int,
-        kernel_size: Union[int, Tuple[int, int, int]] = 3,
-        stride: Union[int, Tuple[int, int, int]] = 1,
-        dilation: Union[int, Tuple[int, int, int]] = 1,
+        kernel_size: int | tuple[int, int, int] = 3,
+        stride: int | tuple[int, int, int] = 1,
+        dilation: int | tuple[int, int, int] = 1,
         pad_mode: str = "replicate",
         disable_causal: bool = False,
         **kwargs,
@@ -65,9 +64,9 @@ class DownsampleCausal3D(nn.Module):
     def __init__(
         self,
         channels: int,
-        out_channels: Optional[int] = None,
+        out_channels: int | None = None,
         padding: int = 1,
-        stride: Union[int, Tuple[int, int, int]] = 2,
+        stride: int | tuple[int, int, int] = 2,
         kernel_size: int = 3,
         bias: bool = True,
         disable_causal: bool = False,
@@ -94,9 +93,9 @@ class UpsampleCausal3D(nn.Module):
     def __init__(
         self,
         channels: int,
-        out_channels: Optional[int] = None,
+        out_channels: int | None = None,
         kernel_size: int = 3,
-        upsample_factor: Tuple[int, int, int] = (2, 2, 2),
+        upsample_factor: tuple[int, int, int] = (2, 2, 2),
         disable_causal: bool = False,
         bias: bool = True,
     ):
@@ -116,7 +115,7 @@ class UpsampleCausal3D(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        output_size: Optional[int] = None,
+        output_size: int | None = None,
         scale: float = 1.0,
     ) -> torch.Tensor:
         B, C, T, H, W = hidden_states.shape
@@ -152,7 +151,7 @@ class GameCraftVAEAttention(nn.Module):
         heads: int,
         dim_head: int,
         eps: float = 1e-6,
-        norm_num_groups: Optional[int] = 32,
+        norm_num_groups: int | None = 32,
         bias: bool = True,
     ):
         super().__init__()
@@ -170,7 +169,7 @@ class GameCraftVAEAttention(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
+        attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         residual = hidden_states
         batch_size, seq_len, _ = hidden_states.shape
@@ -205,8 +204,8 @@ class ResnetBlockCausal3D(nn.Module):
     def __init__(
         self,
         in_channels: int,
-        out_channels: Optional[int] = None,
-        temb_channels: Optional[int] = None,
+        out_channels: int | None = None,
+        temb_channels: int | None = None,
         eps: float = 1e-6,
         groups: int = 32,
         dropout: float = 0.0,
@@ -230,7 +229,7 @@ class ResnetBlockCausal3D(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        temb: Optional[torch.Tensor] = None,
+        temb: torch.Tensor | None = None,
         scale: float = 1.0,
     ) -> torch.Tensor:
         h = self.norm1(x)
@@ -251,7 +250,7 @@ class UNetMidBlockCausal3D(nn.Module):
     def __init__(
         self,
         in_channels: int,
-        temb_channels: Optional[int] = None,
+        temb_channels: int | None = None,
         num_layers: int = 1,
         resnet_eps: float = 1e-6,
         resnet_act_fn: str = "swish",
@@ -311,7 +310,7 @@ class UNetMidBlockCausal3D(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        temb: Optional[torch.Tensor] = None,
+        temb: torch.Tensor | None = None,
     ) -> torch.Tensor:
         hidden_states = self.resnets[0](hidden_states, temb)
         for attn, resnet in zip(self.attentions, self.resnets[1:]):
@@ -344,7 +343,7 @@ class DownEncoderBlockCausal3D(nn.Module):
         resnet_act_fn: str = "swish",
         resnet_groups: int = 32,
         add_downsample: bool = True,
-        downsample_stride: Union[int, Tuple[int, int, int]] = 2,
+        downsample_stride: int | tuple[int, int, int] = 2,
         downsample_padding: int = 0,
         disable_causal: bool = False,
     ):
@@ -400,8 +399,8 @@ class UpDecoderBlockCausal3D(nn.Module):
         resnet_act_fn: str = "swish",
         resnet_groups: int = 32,
         add_upsample: bool = True,
-        upsample_scale_factor: Tuple[int, int, int] = (2, 2, 2),
-        temb_channels: Optional[int] = None,
+        upsample_scale_factor: tuple[int, int, int] = (2, 2, 2),
+        temb_channels: int | None = None,
         disable_causal: bool = False,
     ):
         super().__init__()
@@ -435,7 +434,7 @@ class UpDecoderBlockCausal3D(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        temb: Optional[torch.Tensor] = None,
+        temb: torch.Tensor | None = None,
         scale: float = 1.0,
     ) -> torch.Tensor:
         for resnet in self.resnets:

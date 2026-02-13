@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from typing import Optional, Tuple
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import triton
 import triton.language as tl
 
@@ -20,7 +18,7 @@ except ImportError:
     rms_norm_cuda = None
     layer_norm_cuda = None
 
-def int8_quant(x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+def int8_quant(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Quantize a floating-point tensor to int8 using a custom CUDA kernel.
 

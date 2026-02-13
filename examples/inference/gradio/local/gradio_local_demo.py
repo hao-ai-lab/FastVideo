@@ -1,6 +1,5 @@
 import argparse
 import os
-import base64
 import time
 
 import gradio as gr
@@ -71,7 +70,7 @@ def load_example_prompts():
     def load_from_file(filepath):
         prompts, labels = [], []
         try:
-            with open(filepath, "r", encoding='utf-8') as f:
+            with open(filepath, encoding='utf-8') as f:
                 for line in f:
                     line = line.strip()
                     if line and not contains_chinese(line):

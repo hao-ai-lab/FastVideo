@@ -7,16 +7,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from fastvideo.attention import DistributedAttention, LocalAttention
 from fastvideo.configs.models.dits.cosmos import CosmosVideoConfig
 from fastvideo.forward_context import get_forward_context
 from fastvideo.layers.layernorm import RMSNorm
-from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.mlp import MLP
 from fastvideo.layers.rotary_embedding import apply_rotary_emb
 from fastvideo.layers.visual_embedding import Timesteps
 from fastvideo.models.dits.base import BaseDiT
-from fastvideo.platforms import AttentionBackendEnum
 
 
 class CosmosPatchEmbed(nn.Module):

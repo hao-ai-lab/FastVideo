@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from typing import Tuple
 
 import torch
 
@@ -30,7 +29,7 @@ def _force_triton() -> bool:
     return os.environ.get("FASTVIDEO_KERNEL_VSA_FORCE_TRITON", "0") == "1"
 
 
-def _map_to_index(block_map: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+def _map_to_index(block_map: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Preferred map->index conversion used by the wrapper.
 
@@ -68,7 +67,7 @@ def block_sparse_attn_triton(
     v: torch.Tensor,
     block_map: torch.Tensor,
     variable_block_sizes: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     q = q.contiguous()
     k = k.contiguous()
     v = v.contiguous()
@@ -91,7 +90,7 @@ def _block_sparse_attn_triton_fake(
     v: torch.Tensor,
     block_map: torch.Tensor,
     variable_block_sizes: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     o = torch.empty_like(q)
     M = torch.empty((q.shape[0], q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
     return o, M
@@ -111,7 +110,7 @@ def block_sparse_attn_backward_triton(
     M: torch.Tensor,
     block_map: torch.Tensor,
     variable_block_sizes: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     grad_output = grad_output.contiguous()
     block_map = block_map.to(torch.bool)
     q2k_idx, q2k_num = _map_to_index(block_map)
@@ -137,7 +136,7 @@ def _block_sparse_attn_backward_triton_fake(
     M: torch.Tensor,
     block_map: torch.Tensor,
     variable_block_sizes: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     dq = torch.empty_like(q)
     dk = torch.empty_like(k)
     dv = torch.empty_like(v)
@@ -170,7 +169,7 @@ def block_sparse_attn_sm90(
     v_padded: torch.Tensor,
     block_map: torch.Tensor,
     variable_block_sizes: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     block_sparse_fwd, _ = _get_sm90_ops()
     if block_sparse_fwd is None:
         raise ImportError("fastvideo_kernel_ops.block_sparse_fwd is not available")
@@ -194,7 +193,7 @@ def _block_sparse_attn_sm90_fake(
     v_padded: torch.Tensor,
     block_map: torch.Tensor,
     variable_block_sizes: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     o = torch.empty_like(q_padded)
     lse = torch.empty((q_padded.shape[0], q_padded.shape[1], q_padded.shape[2], 1), device=q_padded.device, dtype=torch.float32)
     return o, lse
@@ -214,7 +213,7 @@ def block_sparse_attn_backward_sm90(
     lse_padded: torch.Tensor,
     block_map: torch.Tensor,
     variable_block_sizes: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     _, block_sparse_bwd = _get_sm90_ops()
     if block_sparse_bwd is None:
         raise ImportError("fastvideo_kernel_ops.block_sparse_bwd is not available")
@@ -248,7 +247,7 @@ def _block_sparse_attn_backward_sm90_fake(
     lse_padded: torch.Tensor,
     block_map: torch.Tensor,
     variable_block_sizes: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     dq = torch.empty_like(q_padded)
     dk = torch.empty_like(k_padded)
     dv = torch.empty_like(v_padded)
@@ -278,7 +277,7 @@ def block_sparse_attn(
     v: torch.Tensor,
     block_map: torch.Tensor,
     variable_block_sizes: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Unified block-sparse attention op with autograd support.
     - On SM90 with compiled extension present: uses fastvideo_kernel_ops.block_sparse_fwd/bwd.

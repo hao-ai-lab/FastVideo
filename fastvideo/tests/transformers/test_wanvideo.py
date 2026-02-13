@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
 
-import numpy as np
 import pytest
 import torch
 from diffusers import WanTransformer3DModel

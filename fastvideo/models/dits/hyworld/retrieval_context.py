@@ -18,7 +18,6 @@
 
 import torch
 import numpy as np
-from typing import List, Tuple, Dict
 import math
 
 
@@ -47,7 +46,7 @@ def generate_points_in_sphere(n_points: int, radius: float) -> torch.Tensor:
     return points
 
 
-def rotation_matrix_to_angles(R: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+def rotation_matrix_to_angles(R: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Estimate the Pitch and Yaw angles from a 3x3 rotation matrix R in the camera coordinate system.
 
@@ -216,7 +215,7 @@ def calculate_fov_overlap_similarity(
 
 
 def select_aligned_memory_frames(
-    w2c_list: List[np.ndarray],
+    w2c_list: list[np.ndarray],
     current_frame_idx: int,
     memory_frames: int,
     temporal_context_size: int,
@@ -225,7 +224,7 @@ def select_aligned_memory_frames(
     ang_weight: float = 1.0,
     device=None,
     points_local=None,
-) -> List[int]:
+) -> list[int]:
     """
     Selects memory and context frames for a given frame based on a four-frame segment distance calculation.
 

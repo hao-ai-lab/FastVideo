@@ -15,7 +15,6 @@ from pathlib import Path
 
 import pytest
 import torch
-from torch.testing import assert_close
 
 os.environ.setdefault("MASTER_ADDR", "localhost")
 os.environ.setdefault("MASTER_PORT", "29516")
@@ -64,7 +63,7 @@ def test_gamecraft_llama_encoder():
         # Load tokenizer
         tokenizer = LlamaTokenizerFast.from_pretrained(llama_path, padding_side="right")
         
-        print(f"[LLAMA TEST] Model loaded successfully")
+        print("[LLAMA TEST] Model loaded successfully")
         print(f"[LLAMA TEST] Model dtype: {model.dtype}")
         
         # Test encoding
@@ -134,7 +133,7 @@ def test_gamecraft_clip_encoder():
         # Load tokenizer
         tokenizer = CLIPTokenizer.from_pretrained(clip_path, max_length=77)
         
-        print(f"[CLIP TEST] Model loaded successfully")
+        print("[CLIP TEST] Model loaded successfully")
         print(f"[CLIP TEST] Model dtype: {model.dtype}")
         
         # Test encoding

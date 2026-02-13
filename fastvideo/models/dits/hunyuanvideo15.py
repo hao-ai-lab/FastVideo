@@ -12,11 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Dict, Optional, List
+from typing import Any
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from fastvideo.attention import DistributedAttention, LocalAttention
 from fastvideo.distributed.communication_op import (
@@ -35,7 +34,6 @@ from fastvideo.models.dits.base import CachableDiT
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.logger import init_logger
 from fastvideo.forward_context import set_forward_context
-from fastvideo.attention.backends.abstract import AttentionMetadata
 
 from fastvideo.distributed.parallel_state import get_sp_world_size
 from fastvideo.distributed.utils import create_attention_mask_for_padding
@@ -126,7 +124,7 @@ class HunyuanVideo15TimeEmbedding(nn.Module):
     def forward(
         self,
         timestep: torch.Tensor,
-        timestep_r: Optional[torch.Tensor] = None,
+        timestep_r: torch.Tensor | None = None,
     ) -> torch.Tensor:
         timesteps_emb = self.timestep_embedder(timestep)
 
@@ -466,13 +464,13 @@ class HunyuanVideo15Transformer3DModel(CachableDiT):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        encoder_hidden_states: List[torch.Tensor],
+        encoder_hidden_states: list[torch.Tensor],
         timestep: torch.LongTensor,
-        encoder_hidden_states_image: List[torch.Tensor],
-        encoder_attention_mask: List[torch.Tensor],
-        guidance: Optional[torch.Tensor] = None,
-        timestep_r: Optional[torch.LongTensor] = None,
-        attention_kwargs: Optional[Dict[str, Any]] = None,
+        encoder_hidden_states_image: list[torch.Tensor],
+        encoder_attention_mask: list[torch.Tensor],
+        guidance: torch.Tensor | None = None,
+        timestep_r: torch.LongTensor | None = None,
+        attention_kwargs: dict[str, Any] | None = None,
     ):
         encoder_hidden_states_image = encoder_hidden_states_image[0]
         encoder_hidden_states, encoder_hidden_states_2 = encoder_hidden_states

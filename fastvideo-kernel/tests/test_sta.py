@@ -38,7 +38,6 @@ def check_correctness(b, h, n, d, causal, mean, std, num_iterations=50, error_mo
         },
     }
     kernel_size_ls = [(3, 3, 5), (3, 1, 10)]
-    from tqdm import tqdm
     for kernel_size in tqdm(kernel_size_ls):
         for _ in range(num_iterations):
             torch.manual_seed(0)

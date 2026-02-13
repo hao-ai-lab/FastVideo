@@ -14,7 +14,6 @@ from einops import rearrange
 from fastvideo.configs.models.dits import LongCatVideoConfig
 from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.layers.layernorm import RMSNorm, FP32LayerNorm
-from fastvideo.layers.activation import get_act_fn
 from fastvideo.layers.rotary_embedding_3d import RotaryPositionalEmbedding3D
 from fastvideo.attention.layer import DistributedAttention, LocalAttention
 from fastvideo.models.dits.base import CachableDiT

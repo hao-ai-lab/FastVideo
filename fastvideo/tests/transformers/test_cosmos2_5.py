@@ -563,21 +563,20 @@ def test_cosmos25_transformer_video():
     
     logger.info("Running video inference...")
     
-    with torch.no_grad():
-        with torch.autocast('cuda', dtype=precision):
-            with set_forward_context(
-                current_timestep=500,
-                attn_metadata=None,
-                forward_batch=forward_batch,
-            ):
-                output = model(
-                    hidden_states=hidden_states,
-                    encoder_hidden_states=encoder_hidden_states,
-                    timestep=timestep,
-                    condition_mask=condition_mask,
-                    padding_mask=padding_mask,
-                    fps=fps,
-                )
+    with torch.no_grad(), torch.autocast('cuda', dtype=precision):
+        with set_forward_context(
+            current_timestep=500,
+            attn_metadata=None,
+            forward_batch=forward_batch,
+        ):
+            output = model(
+                hidden_states=hidden_states,
+                encoder_hidden_states=encoder_hidden_states,
+                timestep=timestep,
+                condition_mask=condition_mask,
+                padding_mask=padding_mask,
+                fps=fps,
+            )
     
     logger.info(f"Video output shape: {output.shape}")
     logger.info(f"Video output dtype: {output.dtype}")
@@ -586,7 +585,7 @@ def test_cosmos25_transformer_video():
     assert output.shape[0] == batch_size, "Batch size mismatch"
     assert output.shape[1] == 16, "Output channels should be 16"
     assert output.shape[2] == num_frames, "Number of frames mismatch"
-    assert output.dtype == precision, f"Output dtype mismatch"
+    assert output.dtype == precision, "Output dtype mismatch"
     
     logger.info("✓ COSMOS 2.5 video inference successful!")
 

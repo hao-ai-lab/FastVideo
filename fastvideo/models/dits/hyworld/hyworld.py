@@ -14,7 +14,7 @@
 # of rights and permissions under this agreement.
 # See the License for the specific language governing permissions and limitations under the License.
 
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -347,9 +347,9 @@ class HYWorldTransformer3DModel(HunyuanVideo15Transformer3DModel):
         viewmats: torch.Tensor,
         Ks: torch.Tensor,
         timestep_txt: torch.LongTensor,
-        guidance: Optional[torch.Tensor] = None,
-        timestep_r: Optional[torch.LongTensor] = None,
-        attention_kwargs: Optional[dict[str, Any]] = None,
+        guidance: torch.Tensor | None = None,
+        timestep_r: torch.LongTensor | None = None,
+        attention_kwargs: dict[str, Any] | None = None,
     ):
         """
         Forward pass with action and camera conditioning.

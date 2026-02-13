@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import math
-from contextlib import nullcontext
 from typing import Any
 
 import numpy as np
@@ -14,7 +13,6 @@ from fastvideo.attention import (DistributedAttention, DistributedAttention_VSA,
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.configs.sample.wan import WanTeaCacheParams
 from fastvideo.distributed.communication_op import (
-    sequence_model_parallel_all_gather,
     sequence_model_parallel_all_gather_with_unpad,
     sequence_model_parallel_shard)
 from fastvideo.forward_context import get_forward_context
@@ -693,7 +691,7 @@ class WanTransformer3DModel(CachableDiT):
             )
         else:
             if not self._logged_attention_mask:
-                logger.info(f"Padding not applied")
+                logger.info("Padding not applied")
                 self._logged_attention_mask = True
             attention_mask = None
 

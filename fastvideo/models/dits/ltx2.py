@@ -9,7 +9,8 @@ import functools
 import math
 import os
 from pathlib import Path
-from typing import Any, Optional, Tuple, Callable
+from typing import Any
+from collections.abc import Callable
 
 import numpy as np
 
@@ -143,8 +144,8 @@ class AdaLayerNormSingle(torch.nn.Module):
     def forward(
         self,
         timestep: torch.Tensor,
-        hidden_dtype: Optional[torch.dtype] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        hidden_dtype: torch.dtype | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         embedded_timestep = self.emb(timestep, hidden_dtype=hidden_dtype)
         return self.linear(self.silu(embedded_timestep)), embedded_timestep
 
@@ -272,7 +273,7 @@ class VideoLatentPatchifier:
         self._patch_size = (1, patch_size, patch_size)
 
     @property
-    def patch_size(self) -> Tuple[int, int, int]:
+    def patch_size(self) -> tuple[int, int, int]:
         return self._patch_size
 
     def get_token_count(self, tgt_shape: VideoLatentShape) -> int:
@@ -304,7 +305,7 @@ class VideoLatentPatchifier:
     def get_patch_grid_bounds(
         self,
         output_shape: VideoLatentShape,
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
     ) -> torch.Tensor:
         """Get patch grid bounds for RoPE computation.
 
@@ -381,7 +382,7 @@ class AudioLatentPatchifier:
     def get_patch_grid_bounds(
         self,
         output_shape: AudioLatentShape,
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
     ) -> torch.Tensor:
         """Get patch grid bounds for audio RoPE computation.
 
@@ -414,7 +415,7 @@ class AudioLatentPatchifier:
         start_latent: int,
         end_latent: int,
         dtype: torch.dtype,
-        device: Optional[torch.device],
+        device: torch.device | None,
     ) -> torch.Tensor:
         resolved_device = device or torch.device("cpu")
         audio_latent_frame = torch.arange(

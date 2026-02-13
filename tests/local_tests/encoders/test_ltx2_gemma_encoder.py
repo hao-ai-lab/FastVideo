@@ -26,9 +26,7 @@ def _load_connector_weights(path: str) -> dict[str, torch.Tensor]:
     for name, tensor in weights.items():
         if name == "aggregate_embed.weight":
             mapped["feature_extractor_linear.aggregate_embed.weight"] = tensor
-        elif name.startswith("embeddings_connector."):
-            mapped[name] = tensor
-        elif name.startswith("audio_embeddings_connector."):
+        elif name.startswith("embeddings_connector.") or name.startswith("audio_embeddings_connector."):
             mapped[name] = tensor
     return mapped
 

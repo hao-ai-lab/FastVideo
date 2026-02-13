@@ -177,11 +177,7 @@ def convert_transformer_weights(source_weights: dict[str, torch.Tensor]) -> dict
         elif ".mod_norm_attn." in key or ".mod_norm_ffn." in key:
             continue
         
-        elif ".pre_crs_attn_norm.weight" in key:
-            new_key = key.replace(".pre_crs_attn_norm.", ".norm_cross.")
-            converted[new_key] = value
-        
-        elif ".pre_crs_attn_norm.bias" in key:
+        elif ".pre_crs_attn_norm.weight" in key or ".pre_crs_attn_norm.bias" in key:
             new_key = key.replace(".pre_crs_attn_norm.", ".norm_cross.")
             converted[new_key] = value
         
@@ -212,9 +208,7 @@ def validate_conversion(original: dict, converted: dict) -> bool:
     
     dropped_count = 0
     for key, value in original.items():
-        if ".mod_norm_attn." in key or ".mod_norm_ffn." in key:
-            dropped_count += value.numel()
-        elif "final_layer.norm_final." in key:
+        if ".mod_norm_attn." in key or ".mod_norm_ffn." in key or "final_layer.norm_final." in key:
             dropped_count += value.numel()
     
     expected_conv_count = orig_count - dropped_count
@@ -224,10 +218,10 @@ def validate_conversion(original: dict, converted: dict) -> bool:
     print(f"    Dropped parameters (norms without params): {dropped_count:,}")
     
     if conv_count != expected_conv_count:
-        print(f"    ⚠️  Parameter count mismatch!")
+        print("    ⚠️  Parameter count mismatch!")
         return False
     
-    print(f"    ✓ Parameter count matches")
+    print("    ✓ Parameter count matches")
     
     # Verify QKV/KV splits
     print("\n  Verifying QKV/KV splits...")
@@ -253,7 +247,7 @@ def validate_conversion(original: dict, converted: dict) -> bool:
                 print(f"    ❌ KV weight mismatch in block {i}")
                 return False
     
-    print(f"    ✓ All splits verified successfully")
+    print("    ✓ All splits verified successfully")
     return True
 
 
@@ -295,7 +289,7 @@ def update_transformer_config(transformer_dir: Path):
         print("  ⚠️  Transformer config not found, skipping")
         return
     
-    with open(config_path, 'r') as f:
+    with open(config_path) as f:
         config = json.load(f)
     
     if '_class_name' in config:
@@ -304,12 +298,12 @@ def update_transformer_config(transformer_dir: Path):
         print(f"  Updated _class_name: {old_class} → LongCatTransformer3DModel")
     else:
         config['_class_name'] = 'LongCatTransformer3DModel'
-        print(f"  Added _class_name: LongCatTransformer3DModel")
+        print("  Added _class_name: LongCatTransformer3DModel")
     
     # Fix num_heads -> num_attention_heads for FastVideo compatibility
     if 'num_heads' in config and 'num_attention_heads' not in config:
         config['num_attention_heads'] = config.pop('num_heads')
-        print(f"  Updated num_heads → num_attention_heads")
+        print("  Updated num_heads → num_attention_heads")
     
     with open(config_path, 'w') as f:
         json.dump(config, f, indent=2)
@@ -399,7 +393,7 @@ def convert_lora_weights(source_weights: dict[str, torch.Tensor], lora_name: str
     
     # Group by module
     modules = {}
-    for key in source_weights.keys():
+    for key in source_weights:
         try:
             module_path, weight_type = parse_lora_key(key)
             if module_path not in modules:
@@ -580,7 +574,7 @@ def main():
     # Check for dit/transformer directory (original uses 'dit', we output to 'transformer')
     transformer_source = source_dir / "dit"
     if not transformer_source.exists():
-        print(f"❌ Error: DiT directory not found in source")
+        print("❌ Error: DiT directory not found in source")
         return 1
     
     print("=" * 60)
@@ -651,7 +645,7 @@ def main():
     output_config = transformer_output / "config.json"
     if source_config.exists():
         shutil.copy(source_config, output_config)
-        print(f"  Copied config.json")
+        print("  Copied config.json")
     
     update_transformer_config(transformer_output)
     print()

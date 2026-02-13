@@ -1,4 +1,3 @@
-from typing import Tuple
 
 import torch
 from torch import BoolTensor, IntTensor
@@ -26,7 +25,7 @@ def generate_sta_mask(canvas_twh, kernel_twh, tile_twh, text_length):
     canvas_tile_t, canvas_tile_h, canvas_tile_w = canvas_t // tile_t_size, canvas_h // tile_h_size, canvas_w // tile_w_size
     img_seq_len = canvas_t * canvas_h * canvas_w
 
-    def get_tile_t_x_y(idx: IntTensor) -> Tuple[IntTensor, IntTensor, IntTensor]:
+    def get_tile_t_x_y(idx: IntTensor) -> tuple[IntTensor, IntTensor, IntTensor]:
         tile_id = idx // total_tile_size
         tile_t = tile_id // (canvas_tile_h * canvas_tile_w)
         tile_h = (tile_id % (canvas_tile_h * canvas_tile_w)) // canvas_tile_w

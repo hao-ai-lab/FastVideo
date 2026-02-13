@@ -1,8 +1,6 @@
 import os
-import sys
 import subprocess
 from pathlib import Path
-import pytest
 
 NUM_NODES = "1"
 NUM_GPUS_PER_NODE = "2"

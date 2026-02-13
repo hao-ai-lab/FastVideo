@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-import json
 import os
 import re
 
@@ -14,7 +13,6 @@ from fastvideo.pipelines import build_pipeline
 from fastvideo.models.loader.utils import hf_to_custom_state_dict, get_param_names_mapping
 from torch.testing import assert_close
 from torch.distributed.tensor import DTensor
-from fastvideo.worker import MultiprocExecutor
 import torch
 logger = init_logger(__name__)
 os.environ["MASTER_ADDR"] = "localhost"
