@@ -15,6 +15,11 @@ Available actions:
     - right_rot: Rotate camera right (pan)
     - up_rot: Rotate camera up (tilt)
     - down_rot: Rotate camera down (tilt)
+
+T2V vs I2V:
+    - Default: I2V (uses a default reference image). Set GAMECRAFT_I2V_IMAGE to a
+      URL or path to use a different image.
+    - T2V only (no reference image): run with GAMECRAFT_I2V_IMAGE= (empty).
 """
 import os
 
@@ -78,12 +83,21 @@ def main():
     )
     print(f"Camera states shape: {camera_states.shape}")
 
-    # I2V: reference image (URL or local path). Set to None for T2V only.
-    image_path = os.environ.get("GAMECRAFT_I2V_IMAGE", DEFAULT_I2V_IMAGE_URL)
+    # I2V vs T2V: unset GAMECRAFT_I2V_IMAGE -> I2V (default image). Set to "" -> T2V.
+    env_image = os.environ.get("GAMECRAFT_I2V_IMAGE")
+    if env_image is None:
+        image_path = DEFAULT_I2V_IMAGE_URL  # default: I2V
+    elif env_image.strip() == "":
+        image_path = None  # T2V
+    else:
+        image_path = env_image.strip()  # I2V with given URL/path
 
-    # Generate video (I2V when image_path is set)
-    generator.generate_video(
-        prompt=DEFAULT_I2V_PROMPT if image_path else DEFAULT_PROMPTS["temple"],
+    is_i2v = image_path is not None
+    prompt = DEFAULT_I2V_PROMPT if is_i2v else DEFAULT_PROMPTS["temple"]
+    print(f"Mode: {'I2V' if is_i2v else 'T2V'}, prompt: {prompt[:60]}...")
+
+    gen_kw = dict(
+        prompt=prompt,
         negative_prompt="",
         camera_states=camera_states,
         height=height,
@@ -95,8 +109,10 @@ def main():
         fps=24,
         output_path=OUTPUT_PATH,
         save_video=True,
-        image_path=image_path,
     )
+    if is_i2v:
+        gen_kw["image_path"] = image_path
+    generator.generate_video(**gen_kw)
 
 
 if __name__ == "__main__":
