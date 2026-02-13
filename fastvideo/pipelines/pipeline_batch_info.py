@@ -181,6 +181,11 @@ class ForwardBatch:
     ltx2_modality_scale_video: float = 1.0
     ltx2_modality_scale_audio: float = 1.0
     ltx2_rescale_scale: float = 0.0
+    # STG (Spatio-Temporal Guidance) parameters
+    ltx2_stg_scale_video: float = 0.0
+    ltx2_stg_scale_audio: float = 0.0
+    ltx2_stg_blocks_video: list[int] = field(default_factory=list)
+    ltx2_stg_blocks_audio: list[int] = field(default_factory=list)
 
     n_tokens: int | None = None
 

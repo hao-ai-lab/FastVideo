@@ -216,6 +216,12 @@ class LTX2DenoisingStage(PipelineStage):
         modality_scale_video = batch.ltx2_modality_scale_video
         modality_scale_audio = batch.ltx2_modality_scale_audio
         rescale_scale = batch.ltx2_rescale_scale
+        # STG (Spatio-Temporal Guidance) parameters.
+        stg_scale_video = batch.ltx2_stg_scale_video
+        stg_scale_audio = batch.ltx2_stg_scale_audio
+        stg_blocks_video = batch.ltx2_stg_blocks_video
+        stg_blocks_audio = batch.ltx2_stg_blocks_audio
+        do_stg = stg_scale_video != 0.0 or stg_scale_audio != 0.0
 
         do_cfg = batch.do_classifier_free_guidance
 
@@ -223,6 +229,7 @@ class LTX2DenoisingStage(PipelineStage):
             "[LTX2] Denoising start: steps=%d dtype=%s "
             "cfg_video=%.1f cfg_audio=%.1f mod_video=%.1f "
             "mod_audio=%.1f rescale=%.2f "
+            "stg_video=%.1f stg_audio=%.1f "
             "sigmas_shape=%s latents_shape=%s",
             batch.num_inference_steps,
             target_dtype,
@@ -231,6 +238,8 @@ class LTX2DenoisingStage(PipelineStage):
             modality_scale_video,
             modality_scale_audio,
             rescale_scale,
+            stg_scale_video,
+            stg_scale_audio,
             tuple(sigmas.shape),
             tuple(latents.shape),
         )
@@ -301,17 +310,44 @@ class LTX2DenoisingStage(PipelineStage):
                         mod_denoised = mod_outputs
                         mod_audio = None
 
+                    # Pass 4: STG perturbed (skip self-attn in
+                    # specified blocks)
+                    ptb_denoised = None
+                    ptb_audio = None
+                    if do_stg:
+                        ptb_outputs = self.transformer(
+                            hidden_states=latents.to(target_dtype),
+                            encoder_hidden_states=prompt_embeds,
+                            encoder_attention_mask=prompt_mask,
+                            timestep=timestep,
+                            audio_hidden_states=audio_latents,
+                            audio_encoder_hidden_states=(audio_context_p),
+                            audio_timestep=audio_timestep,
+                            skip_video_self_attn_blocks=(stg_blocks_video),
+                            skip_audio_self_attn_blocks=(stg_blocks_audio),
+                        )
+                        if isinstance(ptb_outputs, tuple):
+                            ptb_denoised, ptb_audio = ptb_outputs
+                        else:
+                            ptb_denoised = ptb_outputs
+
                     # Multi-modal guidance formula per stream.
                     vid = (pos_denoised + (cfg_scale_video - 1) *
                            (pos_denoised - neg_denoised) +
                            (modality_scale_video - 1) *
                            (pos_denoised - mod_denoised))
+                    if ptb_denoised is not None:
+                        vid = vid + stg_scale_video * (pos_denoised -
+                                                       ptb_denoised)
                     aud = None
                     if pos_audio is not None:
                         aud = (pos_audio + (cfg_scale_audio - 1) *
                                (pos_audio - neg_audio) +
                                (modality_scale_audio - 1) *
                                (pos_audio - mod_audio))
+                        if ptb_audio is not None:
+                            aud = aud + stg_scale_audio * (pos_audio -
+                                                           ptb_audio)
 
                     # Guidance rescaling (prevents saturation).
                     if rescale_scale > 0:
