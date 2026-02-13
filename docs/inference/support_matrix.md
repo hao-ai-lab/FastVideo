@@ -60,6 +60,7 @@ The `HuggingFace Model ID` can be directly pass to `from_pretrained()` methods a
 | Matrix Game 2.0 Base | `FastVideo/Matrix-Game-2.0-Base-Diffusers` | 352x640 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Matrix Game 2.0 GTA | `FastVideo/Matrix-Game-2.0-GTA-Diffusers` | 352x640 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | Matrix Game 2.0 TempleRun | `FastVideo/Matrix-Game-2.0-TempleRun-Diffusers` | 352x640 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
+| Lucy-Edit-Dev 5B | `decart-ai/Lucy-Edit-Dev` | 480x832 | ❌ | ❌ | ❌ | ⭕ | ⭕ |
 
 **Note**: Wan2.2 TI2V 5B has some quality issues when performing I2V generation. We are working on fixing this issue.
 
@@ -80,3 +81,10 @@ The `HuggingFace Model ID` can be directly pass to `from_pretrained()` methods a
 - Image-to-video game world models with keyboard/mouse control input
 - Three variants available: Base (universal), GTA, and TempleRun
 - Each variant has different keyboard dimensions for control inputs
+
+### Lucy-Edit-Dev
+- Video-to-video editing model built on Wan2.2 5B architecture
+- Requires an input video for editing (instruction-guided video editing)
+- Supports clothing changes, character swaps, object insertions, and scene replacements
+- Recommended: 81-frame generations for best temporal consistency
+- Uses Wan2.2 enhanced VAE (z_dim=48, spatial compression 16x)
