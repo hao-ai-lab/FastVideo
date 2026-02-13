@@ -8,6 +8,12 @@ This is a port of the Overworld Waypoint-1-Small model to FastVideo's
 architecture, maintaining weight compatibility with the official checkpoint.
 
 Reference: https://huggingface.co/Overworld/Waypoint-1-Small
+
+Correctness: Denoising follows the official rectified-flow update
+x = x + (sigma_next - sigma_curr) * v (see Overworld denoise.py).
+For parity with diffusers/WorldEngine, consider adding a cache pass
+(single forward with sigma=0 after denoising) to update KV cache when
+generating multiple frames autoregressively.
 """
 
 import math
@@ -18,13 +24,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from fastvideo.attention import DistributedAttention, LocalAttention
-from fastvideo.layers.layernorm import RMSNorm
-from fastvideo.layers.linear import ReplicatedLinear
 from fastvideo.logger import init_logger
 from fastvideo.configs.models.dits.waypoint_transformer import (
     WaypointConfig,
 )
-from fastvideo.models.dits.base import BaseDiT
+from fastvideo.models.dits.base import CachableDiT
 from fastvideo.platforms import AttentionBackendEnum
 
 # Default config instance used for class-level attributes (matches MatrixGame pattern)
@@ -49,15 +53,27 @@ def rms_norm(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
     return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)
 
 
-def ada_rmsnorm(x: torch.Tensor, scale: torch.Tensor, bias: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
-    """Adaptive RMS normalization with scale and bias."""
+def ada_rmsnorm(
+    x: torch.Tensor,
+    scale: torch.Tensor,
+    bias: torch.Tensor,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Adaptive RMS normalization; scale/bias [B, N, D] broadcast to [B, L, D]."""
+    B, L, D = x.shape
+    N = scale.shape[1]
     x = rms_norm(x, eps)
-    return x * (1 + scale.unsqueeze(1)) + bias.unsqueeze(1)
+    scale = scale.unsqueeze(2).expand(-1, -1, L // N, -1).reshape(B, L, D)
+    bias = bias.unsqueeze(2).expand(-1, -1, L // N, -1).reshape(B, L, D)
+    return x * (1 + scale) + bias
 
 
 def ada_gate(x: torch.Tensor, gate: torch.Tensor) -> torch.Tensor:
-    """Apply gating to output."""
-    return x * gate.unsqueeze(1)
+    """Apply gating; gate [B, N, D] broadcast to [B, L, D]."""
+    B, L, D = x.shape
+    N = gate.shape[1]
+    gate = gate.unsqueeze(2).expand(-1, -1, L // N, -1).reshape(B, L, D)
+    return x * gate
 
 
 # =============================================================================
@@ -77,21 +93,19 @@ class MLP(nn.Module):
 
 
 class AdaLN(nn.Module):
-    """Adaptive Layer Normalization for output (produces scale + shift)."""
-    
+    """Adaptive Layer Normalization for output; cond [B, N, D] per-frame scale/shift."""
+
     def __init__(self, d_model: int):
         super().__init__()
-        # Output 2*d_model: first half is scale, second half is shift
         self.fc = nn.Linear(d_model, 2 * d_model, bias=False)
-    
+
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
-        # cond: [B, N, D] -> take first frame for modulation
-        if cond.dim() == 3:
-            cond = cond[:, 0:1, :]  # [B, 1, D]
-        
-        scale_shift = self.fc(cond)  # [B, 1, 2*D]
-        scale, shift = scale_shift.chunk(2, dim=-1)  # Each [B, 1, D]
-        
+        B, L, D = x.shape
+        N = cond.shape[1]
+        h = F.silu(cond)
+        ab = self.fc(h)
+        ab = ab.view(B, N, 1, 2 * D).expand(-1, -1, L // N, -1).reshape(B, L, 2 * D)
+        scale, shift = ab.chunk(2, dim=-1)
         return rms_norm(x) * (1 + scale) + shift
 
 
@@ -146,13 +160,20 @@ class ControllerInputEmbedding(nn.Module):
 # =============================================================================
 
 class NoiseConditioner(nn.Module):
-    """Timestep/noise level conditioner using sinusoidal embeddings."""
-    
-    def __init__(self, d_model: int, freq_dim: int = 512):
+    """Timestep/noise level conditioner (Wan-style). Matches Overworld: sigma*1000,
+    logspace freqs, sin/cos order, unit-variance scale. Frequencies are computed
+    in forward() (no buffer) so the model state_dict matches the checkpoint.
+    """
+
+    def __init__(self, d_model: int, freq_dim: int = 512, base: float = 10_000.0):
         super().__init__()
         self.freq_dim = freq_dim
+        self.base = base
+        half = freq_dim // 2
+        assert half * 2 == freq_dim
         self.mlp = MLP(freq_dim, d_model * 4, d_model)
-    
+
+    @torch.autocast("cuda", enabled=False)
     def forward(self, sigma: torch.Tensor) -> torch.Tensor:
         """
         Args:
@@ -160,21 +181,128 @@ class NoiseConditioner(nn.Module):
         Returns:
             [B, N, d_model] conditioning embedding
         """
-        # Sinusoidal embedding
-        half_dim = self.freq_dim // 2
-        freqs = torch.exp(-math.log(10000) * torch.arange(half_dim, device=sigma.device, dtype=sigma.dtype) / half_dim)
-        
-        # sigma: [B, N] -> [B, N, 1]
-        if sigma.dim() == 2:
-            sigma = sigma.unsqueeze(-1)
-        elif sigma.dim() == 1:
-            sigma = sigma.unsqueeze(0).unsqueeze(-1)
-        
-        # [B, N, half_dim]
-        args = sigma * freqs
-        emb = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
-        
-        return self.mlp(emb)
+        orig_dtype, shape = sigma.dtype, sigma.shape
+        s = sigma.reshape(-1).float() * 1000.0
+        half = self.freq_dim // 2
+        freqs = torch.logspace(
+            0, -1, steps=half, base=self.base,
+            dtype=torch.float32, device=sigma.device,
+        )
+        phase = s.unsqueeze(1) * freqs.unsqueeze(0)
+        emb = torch.cat([torch.sin(phase), torch.cos(phase)], dim=-1)
+        emb = emb * (2.0 ** 0.5)
+        # MLP is in model dtype (e.g. bfloat16); cast emb to match to avoid mat1/mat2 dtype error
+        mlp_dtype = next(self.mlp.parameters()).dtype
+        emb = self.mlp(emb.to(mlp_dtype))
+        return emb.to(orig_dtype).view(*shape, -1)
+
+
+# =============================================================================
+# OrthoRoPE (3-axis: time, height, width) — matches HF Overworld/Waypoint-1-Small
+# - Time: geometric spectrum (lang-style), rotates 1/4 head_dim
+# - Height/Width: linear spectrum (pixel-style), positions in [-1, 1], 1/8 each
+# =============================================================================
+
+
+def _pixel_frequencies(dim: int, max_freq: float, device: torch.device) -> torch.Tensor:
+    """Linear frequency spectrum for spatial RoPE.
+    HF: pixel_frequencies(dim) returns [dim//2] freqs; repeat_interleave(2) -> dim.
+    """
+    return torch.linspace(
+        1.0, max_freq / 2, dim // 2, device=device, dtype=torch.float32
+    ) * math.pi
+
+
+def _lang_frequencies(dim: int, device: torch.device) -> torch.Tensor:
+    """Geometric frequency spectrum for temporal RoPE.
+    HF: lang_frequencies(dim) returns [dim//2] freqs; repeat_interleave(2) -> dim.
+    """
+    return 10.0 ** (
+        -torch.arange(dim // 2, device=device, dtype=torch.float32) / 2
+    )
+
+
+class OrthoRoPE(nn.Module):
+    """RoPE matching HF Overworld/Waypoint-1-Small attn.py exactly.
+    - Spatial (X/Y): pixel_frequencies(head_dim//8) -> [D/16] freqs, repeat 2 -> D/8 each.
+    - Temporal: lang_frequencies(head_dim//4) -> [D/8] freqs, repeat 2 -> D/4.
+    - Total: D/8 + D/8 + D/4 = D/2. Positions: linspace(-1+1/W, 1-1/W, W) style.
+    """
+
+    def __init__(self, height: int, width: int, n_frames: int, head_dim: int):
+        super().__init__()
+        self.height = height
+        self.width = width
+        self.n_frames = n_frames
+        self.head_dim = head_dim
+        # HF: spatial D/8 each (pixel_frequencies(D/8) -> D/16, repeat 2), temporal D/4
+        assert head_dim // 8 + head_dim // 8 + head_dim // 4 == head_dim // 2
+
+    def get_angles(
+        self,
+        t_pos: torch.Tensor,
+        y_pos: torch.Tensor,
+        x_pos: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return cos, sin [B, L, head_dim/2] matching HF _compute_freqs + get_angles."""
+        device = t_pos.device
+        H, W = self.height, self.width
+        head_dim = self.head_dim
+        max_freq = min(H, W) * 0.8
+
+        # HF: spatial_freqs = pixel_frequencies(head_dim//8, max_freq)  # [D/16]
+        spatial_freqs = _pixel_frequencies(head_dim // 8, max_freq, device)
+        # HF: pos_x = linspace(-1+1/W, 1-1/W, W); we have integer x_pos in [0, W-1]
+        w1 = max(W - 1, 1)
+        h1 = max(H - 1, 1)
+        norm_x = (-1.0 + 1.0 / W) + (2.0 - 2.0 / W) * x_pos.float() / w1
+        norm_y = (-1.0 + 1.0 / H) + (2.0 - 2.0 / H) * y_pos.float() / h1
+        # freqs_x: [B,L,D/16] then repeat_interleave(2) -> [B,L,D/8]
+        angle_x = norm_x.unsqueeze(-1) * spatial_freqs.unsqueeze(0).unsqueeze(0)
+        angle_x = angle_x.repeat_interleave(2, dim=-1)
+        angle_y = norm_y.unsqueeze(-1) * spatial_freqs.unsqueeze(0).unsqueeze(0)
+        angle_y = angle_y.repeat_interleave(2, dim=-1)
+
+        # HF: temporal_freqs = lang_frequencies(head_dim//4)  # [D/8]
+        temporal_freqs = _lang_frequencies(head_dim // 4, device)
+        angle_t = t_pos.float().unsqueeze(-1) * temporal_freqs.unsqueeze(0).unsqueeze(0)
+        angle_t = angle_t.repeat_interleave(2, dim=-1)
+
+        angles = torch.cat([angle_x, angle_y, angle_t], dim=-1)
+        return angles.cos(), angles.sin()
+
+    @torch.autocast("cuda", enabled=False)
+    def forward(
+        self, x: torch.Tensor, pos_ids: dict[str, torch.Tensor]
+    ) -> torch.Tensor:
+        """Apply RoPE to ALL of head_dim (matching official OrthoRoPE).
+
+        x: [B, L, n_heads, head_dim]  (or [B, n_heads, L, head_dim])
+        cos/sin: [B, L, head_dim/2] with repeat_interleave(2) baked in.
+
+        Official rotation:
+            x0, x1 = x.unfold(-1, 2, 2).unbind(-1)   # consecutive pairs
+            y0 = x0 * cos - x1 * sin
+            y1 = x1 * cos + x0 * sin
+            return cat((y0, y1), dim=-1)
+        """
+        cos, sin = self.get_angles(
+            pos_ids["t_pos"],
+            pos_ids["y_pos"],
+            pos_ids["x_pos"],
+        )
+        # cos/sin: [B, L, head_dim/2] — one value per consecutive pair.
+        # Add head-dim broadcast: [B, L, 1, head_dim/2]
+        cos = cos.unsqueeze(2)
+        sin = sin.unsqueeze(2)
+
+        # unfold ALL of head_dim into consecutive pairs
+        x_float = x.float()
+        x0, x1 = x_float.unfold(-1, 2, 2).unbind(-1)  # each [..., head_dim/2]
+
+        y0 = x0 * cos - x1 * sin
+        y1 = x1 * cos + x0 * sin
+        return torch.cat((y0, y1), dim=-1).type_as(x)
 
 
 # =============================================================================
@@ -220,34 +348,24 @@ class MLPFusion(nn.Module):
 # =============================================================================
 
 class CondHead(nn.Module):
-    """Per-layer conditioning head producing 6 modulation vectors."""
-    
+    """Per-layer conditioning head producing 6 modulation vectors [B, N, D] each."""
+
     n_cond = 6  # scale0, bias0, gate0, scale1, bias1, gate1
-    
+
     def __init__(self, d_model: int, noise_conditioning: str = "wan"):
         super().__init__()
-        # Wan-style: add learnable bias before activation
-        self.bias_in = nn.Parameter(torch.zeros(d_model)) if noise_conditioning == "wan" else None
+        self.bias_in = (
+            nn.Parameter(torch.zeros(d_model)) if noise_conditioning == "wan" else None
+        )
         self.cond_proj = nn.ModuleList([
             nn.Linear(d_model, d_model, bias=False) for _ in range(self.n_cond)
         ])
-    
+
     def forward(self, cond: torch.Tensor):
-        """
-        Args:
-            cond: [B, N, D] noise conditioning
-        Returns:
-            Tuple of 6 tensors, each [B, D] (using first frame's conditioning)
-        """
+        """cond [B, N, D] -> 6 tensors each [B, N, D]."""
         if self.bias_in is not None:
             cond = cond + self.bias_in
-        
         h = F.silu(cond)
-        
-        # Take first frame's conditioning for modulation
-        if h.dim() == 3:
-            h = h[:, 0, :]  # [B, D]
-        
         return tuple(proj(h) for proj in self.cond_proj)
 
 
@@ -255,24 +373,9 @@ class CondHead(nn.Module):
 # Attention Layers
 # =============================================================================
 
-class GateProj(nn.Module):
-    """Simple wrapper to create gate_proj.weight naming in state_dict."""
-    
-    def __init__(self, n_heads: int):
-        super().__init__()
-        self.weight = nn.Parameter(torch.ones(n_heads, n_heads))
-    
-    def forward(self) -> torch.Tensor:
-        """Return sigmoid of the gate weights."""
-        return torch.sigmoid(self.weight)
-
-
 class GatedSelfAttention(nn.Module):
-    """Gated self-attention with GQA support.
-    
-    Uses DistributedAttention for full self-attention (supports sequence parallelism).
-    """
-    
+    """Gated self-attention with GQA, QK norm, and OrthoRoPE."""
+
     def __init__(
         self,
         d_model: int,
@@ -281,6 +384,7 @@ class GatedSelfAttention(nn.Module):
         layer_idx: int,
         causal: bool = True,
         gated_attn: bool = True,
+        rope: Optional["OrthoRoPE"] = None,
     ):
         super().__init__()
         self.d_model = d_model
@@ -290,73 +394,140 @@ class GatedSelfAttention(nn.Module):
         self.layer_idx = layer_idx
         self.causal = causal
         self.gated_attn = gated_attn
-        
-        # Q, K, V projections
+        self.rope = rope
+
         self.q_proj = nn.Linear(d_model, d_model, bias=False)
         self.k_proj = nn.Linear(d_model, n_kv_heads * self.head_dim, bias=False)
         self.v_proj = nn.Linear(d_model, n_kv_heads * self.head_dim, bias=False)
         self.out_proj = nn.Linear(d_model, d_model, bias=False)
 
-        # DistributedAttention for full self-attention (supports sequence parallelism)
         self.attn = DistributedAttention(
             num_heads=n_heads,
             head_size=self.head_dim,
             num_kv_heads=n_kv_heads,
             causal=causal,
-            supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA, ),
+            supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA,),
         )
-        
-        # Per-head gating: learnable [n_heads, n_heads] matrix
+
         if gated_attn:
-            self.gate_proj = GateProj(n_heads)
-        
+            self.gate_proj = nn.Linear(n_heads, n_heads, bias=False)
+            nn.init.zeros_(self.gate_proj.weight)
+
         self.scale = self.head_dim ** -0.5
-    
+
     def forward(
         self,
         x: torch.Tensor,
-        pos_emb: Optional[torch.Tensor] = None,
+        pos_ids: Optional[dict[str, torch.Tensor]] = None,
         kv_cache=None,
+        update_cache: bool = False,
     ) -> torch.Tensor:
         B, L, D = x.shape
-        
-        # Project Q, K, V
+
         q = self.q_proj(x).view(B, L, self.n_heads, self.head_dim)
         k = self.k_proj(x).view(B, L, self.n_kv_heads, self.head_dim)
         v = self.v_proj(x).view(B, L, self.n_kv_heads, self.head_dim)
-        
-        # Apply RoPE if provided
-        if pos_emb is not None:
-            q = self._apply_rope(q, pos_emb)
-            k = self._apply_rope(k, pos_emb)
-        
-        # Expand K/V heads to match Q heads for GQA (DistributedAttention expects matching heads)
-        if self.n_kv_heads != self.n_heads:
-            n_rep = self.n_heads // self.n_kv_heads
-            k = k.repeat_interleave(n_rep, dim=2)
-            v = v.repeat_interleave(n_rep, dim=2)
-        
-        # Attention via DistributedAttention
-        attn_out, _ = self.attn(q=q, k=k, v=v)
-        attn_out = attn_out.reshape(B, L, D)
-        
-        # Output projection with optional per-head gating
-        out = self.out_proj(attn_out)
-        
+
+        q, k = rms_norm(q), rms_norm(k)
+
+        if self.rope is not None and pos_ids is not None:
+            q = self.rope(q, pos_ids)
+            k = self.rope(k, pos_ids)
+
+        # KV cache: prepend cached K/V for cross-frame causal attention
+        if kv_cache is not None:
+            cache_end = kv_cache["end"]
+            if isinstance(cache_end, torch.Tensor):
+                cache_end = int(cache_end.item())
+            cache_k = kv_cache["k"]  # [B, n_kv_heads, cache_size, head_dim]
+            cache_v = kv_cache["v"]
+            if cache_end > 0:
+                cached_k = cache_k[:, :, :cache_end, :]  # [B, n_kv_heads, end, head_dim]
+                cached_v = cache_v[:, :, :cache_end, :]
+                k_t = torch.cat([cached_k, k.transpose(1, 2)], dim=2)
+                v_t = torch.cat([cached_v, v.transpose(1, 2)], dim=2)
+            else:
+                k_t = k.transpose(1, 2)  # [B, n_kv_heads, L, head_dim]
+                v_t = v.transpose(1, 2)
+            q_t = q.transpose(1, 2)  # [B, n_heads, L, head_dim]
+            # No mask: spatial tokens are bidirectional; they can all see cache + current
+            attn_out = F.scaled_dot_product_attention(
+                q_t, k_t, v_t,
+                attn_mask=None,
+                dropout_p=0.0,
+                is_causal=False,
+                scale=self.scale,
+                enable_gqa=(self.n_kv_heads != self.n_heads),
+            )
+            attn_out = attn_out.transpose(1, 2)  # [B, L, n_heads, head_dim]
+            if update_cache:
+                self._write_kv_cache(kv_cache, k, v, L)
+        elif self.n_kv_heads != self.n_heads:
+            q_t = q.transpose(1, 2)
+            k_t = k.transpose(1, 2)
+            v_t = v.transpose(1, 2)
+            attn_out = F.scaled_dot_product_attention(
+                q_t, k_t, v_t,
+                attn_mask=None,
+                dropout_p=0.0,
+                is_causal=False,
+                scale=self.scale,
+                enable_gqa=True,
+            )
+            attn_out = attn_out.transpose(1, 2)
+        else:
+            q_t = q.transpose(1, 2)
+            k_t = k.transpose(1, 2)
+            v_t = v.transpose(1, 2)
+            attn_out = F.scaled_dot_product_attention(
+                q_t, k_t, v_t,
+                attn_mask=None,
+                dropout_p=0.0,
+                is_causal=False,
+                scale=self.scale,
+                enable_gqa=(self.n_kv_heads != self.n_heads),
+            )
+            attn_out = attn_out.transpose(1, 2)
+        # Official: gate attn output BEFORE out_proj
+        # attn_out is [B, L, n_heads, head_dim] here (already transposed)
         if self.gated_attn:
-            out_heads = out.view(B, L, self.n_heads, self.head_dim)
-            gate = self.gate_proj()
-            out_heads = torch.einsum('blhd,gh->blgd', out_heads, gate)
-            out = out_heads.reshape(B, L, D)
-        
-        return out
-    
-    def _apply_rope(self, x: torch.Tensor, pos_emb: torch.Tensor) -> torch.Tensor:
-        """Apply rotary position embeddings."""
-        # Simplified RoPE application
-        # pos_emb: [B, L, head_dim] or similar
-        # This is a placeholder - actual implementation depends on pos_emb format
-        return x
+            gates = torch.sigmoid(
+                self.gate_proj(x[..., : self.n_heads])
+            )  # [B, L, n_heads]
+            attn_out = attn_out * gates.unsqueeze(-1)
+
+        attn_out = attn_out.reshape(B, L, D)
+        return self.out_proj(attn_out)
+
+    def _write_kv_cache(
+        self,
+        kv_cache: dict,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        L: int,
+    ) -> None:
+        """Write current frame K/V into the layer cache (ring buffer)."""
+        cache_k = kv_cache["k"]
+        cache_v = kv_cache["v"]
+        cache_size = cache_k.shape[2]
+        end = kv_cache["end"]
+        k_t = k.transpose(1, 2)  # [B, n_kv_heads, L, head_dim]
+        v_t = v.transpose(1, 2)
+        if end + L <= cache_size:
+            cache_k[:, :, end : end + L, :] = k_t
+            cache_v[:, :, end : end + L, :] = v_t
+            kv_cache["end"] = end + L
+        else:
+            num_keep = cache_size - L
+            cache_k[:, :, :num_keep, :].copy_(
+                cache_k[:, :, end - num_keep : end, :]
+            )
+            cache_v[:, :, :num_keep, :].copy_(
+                cache_v[:, :, end - num_keep : end, :]
+            )
+            cache_k[:, :, num_keep:, :] = k_t
+            cache_v[:, :, num_keep:, :] = v_t
+            kv_cache["end"] = cache_size
 
 
 class CrossAttention(nn.Module):
@@ -401,17 +572,17 @@ class CrossAttention(nn.Module):
     ) -> torch.Tensor:
         B, L, _ = x.shape
         _, S, _ = context.shape
-        
+
         q = self.q_proj(x).view(B, L, self.n_heads, self.head_dim)
         k = self.k_proj(context).view(B, S, self.n_heads, self.head_dim)
         v = self.v_proj(context).view(B, S, self.n_heads, self.head_dim)
-        
-        # Attention via FastVideo LocalAttention
-        # forward_context should be set by caller (pipeline/denoising stage)
-        # Note: attention masking for padding handled via attn_metadata set in context
+        q, k = rms_norm(q), rms_norm(k)
+
+        # Official Waypoint cross-attention does NOT mask padding:
+        #   out = flex_attention(q, k, v)  — no mask arg.
+        # Match that behaviour here.
         attn_out = self.attn(q=q, k=k, v=v)
         attn_out = attn_out.reshape(B, L, self.context_dim)
-        
         return self.out_proj(attn_out)
 
 
@@ -421,7 +592,7 @@ class CrossAttention(nn.Module):
 
 class WaypointBlock(nn.Module):
     """Single Waypoint transformer block."""
-    
+
     def __init__(
         self,
         d_model: int,
@@ -436,11 +607,11 @@ class WaypointBlock(nn.Module):
         noise_conditioning: str,
         causal: bool = True,
         gated_attn: bool = True,
+        rope: Optional[OrthoRoPE] = None,
     ):
         super().__init__()
         self.layer_idx = layer_idx
-        
-        # Self-attention
+
         self.attn = GatedSelfAttention(
             d_model=d_model,
             n_heads=n_heads,
@@ -448,6 +619,7 @@ class WaypointBlock(nn.Module):
             layer_idx=layer_idx,
             causal=causal,
             gated_attn=gated_attn,
+            rope=rope,
         )
         
         # Feed-forward MLP
@@ -477,8 +649,9 @@ class WaypointBlock(nn.Module):
         prompt_emb: Optional[torch.Tensor] = None,
         prompt_pad_mask: Optional[torch.Tensor] = None,
         ctrl_emb: Optional[torch.Tensor] = None,
-        pos_emb: Optional[torch.Tensor] = None,
+        pos_emb: Optional[dict[str, torch.Tensor]] = None,
         kv_cache=None,
+        update_cache: bool = False,
     ) -> torch.Tensor:
         """
         Args:
@@ -487,16 +660,17 @@ class WaypointBlock(nn.Module):
             prompt_emb: [B, P, prompt_dim] prompt embeddings
             prompt_pad_mask: [B, P] prompt padding mask
             ctrl_emb: [B, N, D] control embeddings
-            pos_emb: Position embeddings for RoPE
-            kv_cache: KV cache for autoregressive generation
+            pos_emb: pos_ids dict (t_pos, y_pos, x_pos) for RoPE
+            kv_cache: Per-layer KV cache dict for autoregressive generation
+            update_cache: If True, write current K/V into cache (cache pass)
         """
-        # Get modulation vectors
         s0, b0, g0, s1, b1, g1 = self.cond_head(cond)
-        
-        # Self-attention with AdaLN
+
         residual = x
         x = ada_rmsnorm(x, s0, b0)
-        x = self.attn(x, pos_emb, kv_cache)
+        x = self.attn(
+            x, pos_ids=pos_emb, kv_cache=kv_cache, update_cache=update_cache
+        )
         x = ada_gate(x, g0) + residual
         
         # Cross-attention for prompts
@@ -522,12 +696,21 @@ class WaypointBlock(nn.Module):
 # =============================================================================
 
 class WaypointTransformer(nn.Module):
-    """Stack of Waypoint transformer blocks."""
-    
+    """Stack of Waypoint transformer blocks with shared OrthoRoPE."""
+
     def __init__(self, config):
         super().__init__()
         self.config = config
-        
+        head_dim = config.d_model // config.n_heads
+        # RoPE uses config.height / config.width directly (the PATCH grid
+        # dimensions, e.g. 16×16).  The official model builds OrthoRoPE with
+        # these same dimensions.  Do NOT multiply by patch size.
+        rope = OrthoRoPE(
+            height=config.height,
+            width=config.width,
+            n_frames=config.n_frames,
+            head_dim=head_dim,
+        )
         self.blocks = nn.ModuleList([
             WaypointBlock(
                 d_model=config.d_model,
@@ -542,17 +725,17 @@ class WaypointTransformer(nn.Module):
                 noise_conditioning=config.noise_conditioning,
                 causal=config.causal,
                 gated_attn=config.gated_attn,
+                rope=rope,
             )
             for idx in range(config.n_layers)
         ])
-        
-        # Share cond_head.cond_proj weights across all layers (Wan-style)
+
         if config.noise_conditioning in ("dit_air", "wan"):
             ref_proj = self.blocks[0].cond_head.cond_proj
             for blk in self.blocks[1:]:
                 for blk_mod, ref_mod in zip(blk.cond_head.cond_proj, ref_proj):
                     blk_mod.weight = ref_mod.weight
-    
+
     def forward(
         self,
         x: torch.Tensor,
@@ -560,11 +743,16 @@ class WaypointTransformer(nn.Module):
         prompt_emb: Optional[torch.Tensor] = None,
         prompt_pad_mask: Optional[torch.Tensor] = None,
         ctrl_emb: Optional[torch.Tensor] = None,
-        pos_emb: Optional[torch.Tensor] = None,
+        pos_emb: Optional[dict[str, torch.Tensor]] = None,
         kv_cache=None,
+        update_cache: bool = False,
     ) -> torch.Tensor:
-        for block in self.blocks:
-            x = block(x, cond, prompt_emb, prompt_pad_mask, ctrl_emb, pos_emb, kv_cache)
+        for i, block in enumerate(self.blocks):
+            layer_cache = kv_cache[i] if kv_cache is not None else None
+            x = block(
+                x, cond, prompt_emb, prompt_pad_mask, ctrl_emb, pos_emb,
+                kv_cache=layer_cache, update_cache=update_cache,
+            )
         return x
 
 
@@ -577,7 +765,7 @@ def is_blocks(name: str) -> bool:
     return ".blocks." in name
 
 
-class WaypointWorldModel(BaseDiT):
+class WaypointWorldModel(CachableDiT):
     """
     Waypoint World Model for interactive video generation.
     
@@ -588,11 +776,12 @@ class WaypointWorldModel(BaseDiT):
     - The current noise level
     """
     
-    # Required class attributes for BaseDiT (read from default config)
+    # Required class attributes for CachableDiT (read from default config)
     _fsdp_shard_conditions = _DEFAULT_WAYPOINT_ARCH._fsdp_shard_conditions
     _compile_conditions = []
     param_names_mapping = _DEFAULT_WAYPOINT_ARCH.param_names_mapping
     reverse_param_names_mapping = _DEFAULT_WAYPOINT_ARCH.reverse_param_names_mapping
+    lora_param_names_mapping: dict = {}
     
     def __init__(self, config, hf_config: dict = None):
         super().__init__(config=config, hf_config=hf_config or {})
@@ -655,6 +844,7 @@ class WaypointWorldModel(BaseDiT):
         button: Optional[torch.Tensor] = None,
         scroll: Optional[torch.Tensor] = None,
         kv_cache=None,
+        update_cache: bool = False,
     ) -> torch.Tensor:
         """
         Args:
@@ -667,6 +857,7 @@ class WaypointWorldModel(BaseDiT):
             button: [B, N, n_buttons] - button states
             scroll: [B, N, 1] - scroll wheel sign
             kv_cache: Optional KV cache for autoregressive generation
+            update_cache: If True, write current frame K/V into cache (cache pass)
             
         Returns:
             [B, N, C, H, W] - denoised latent frames
@@ -676,7 +867,17 @@ class WaypointWorldModel(BaseDiT):
         
         assert H % ph == 0 and W % pw == 0, f"H={H}, W={W} must be divisible by patch={self.patch}"
         Hp, Wp = H // ph, W // pw
-        
+        # Waypoint expects tokens_per_frame = 256 (16*16); latent must match.
+        expected_tokens = getattr(
+            self.config, "tokens_per_frame", None
+        )
+        if expected_tokens is not None and Hp * Wp != expected_tokens:
+            raise ValueError(
+                f"Token layout mismatch: Hp*Wp={Hp * Wp} but "
+                f"config.tokens_per_frame={expected_tokens}. "
+                "Pipeline must use latent_h,w so that (H//ph)*(W//pw)==tokens_per_frame."
+            )
+
         # Noise conditioning
         cond = self.denoise_step_emb(sigma)  # [B, N, d_model]
         
@@ -697,14 +898,30 @@ class WaypointWorldModel(BaseDiT):
         x = self.patchify(x)  # [B*N, d_model, Hp, Wp]
         x = x.view(B, N, self.config.d_model, Hp, Wp)
         x = x.permute(0, 1, 3, 4, 2).reshape(B, N * Hp * Wp, self.config.d_model)
-        
-        # Transformer
+
+        # Position IDs for RoPE: t_pos, y_pos, x_pos each [B, L]
+        # Official uses grid indices 0..width-1 and 0..height-1 (NOT multiplied
+        # by patch size). The OrthoRoPE normalises to [-1,1] internally.
+        L = N * Hp * Wp
+        idx = torch.arange(Hp * Wp, device=x.device, dtype=torch.long)
+        y_xy = idx // Wp       # 0..Hp-1  (matches official idx.div(width))
+        x_xy = idx % Wp        # 0..Wp-1  (matches official idx.remainder(width))
+        y_pos = (
+            y_xy.unsqueeze(0).unsqueeze(0).expand(B, N, -1).reshape(B, L)
+        )
+        x_pos = (
+            x_xy.unsqueeze(0).unsqueeze(0).expand(B, N, -1).reshape(B, L)
+        )
+        t_pos = (
+            frame_timestamp.unsqueeze(2).expand(-1, -1, Hp * Wp).reshape(B, L)
+        )
+        pos_ids = {"t_pos": t_pos, "y_pos": y_pos, "x_pos": x_pos}
+
         x = self.transformer(
             x, cond, prompt_emb, prompt_pad_mask, ctrl_emb,
-            pos_emb=None, kv_cache=kv_cache
+            pos_emb=pos_ids, kv_cache=kv_cache, update_cache=update_cache,
         )
-        
-        # Output norm and unpatchify
+
         x = F.silu(self.out_norm(x, cond))
         x = self.unpatchify(x)  # [B, N*Hp*Wp, C*ph*pw]
         
@@ -718,6 +935,10 @@ class WaypointWorldModel(BaseDiT):
     def from_config(cls, config):
         """Create model from config."""
         return cls(config)
+
+    def retrieve_cached_states(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        """No-op: Waypoint does not use TeaCache; return states unchanged."""
+        return hidden_states
 
 
 # Entry point for model registry
