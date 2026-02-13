@@ -167,6 +167,13 @@ class ForwardBatch:
     eta: float = 0.0
     sigmas: list[float] | None = None
 
+    # LTX-2 multi-modal CFG parameters
+    ltx2_cfg_scale_video: float = 1.0
+    ltx2_cfg_scale_audio: float = 1.0
+    ltx2_modality_scale_video: float = 1.0
+    ltx2_modality_scale_audio: float = 1.0
+    ltx2_rescale_scale: float = 0.0
+
     n_tokens: int | None = None
 
     # Other parameters that may be needed by specific schedulers
