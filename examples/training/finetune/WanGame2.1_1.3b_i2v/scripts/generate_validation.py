@@ -10,10 +10,12 @@ if train == "zelda":
     height = 480
     width = 832
     num_frames = 81
+    action_dir = "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81"
 elif train == "mc":
     height = 352
     width = 640
     num_frames = 77
+    action_dir = "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions"
 else:
     raise ValueError(f"Invalid train type: {train}")
 
@@ -32,10 +34,6 @@ fixed_fields = {
     "num_frames": num_frames,
 }
 
-if num_frames == 81:
-    action_dir = "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81"
-else:
-    action_dir = "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions"
 # WASDudlr: single key W.npy, single camera u.npy, key+camera w_u.npy
 still = os.path.join(action_dir, "still.npy")
 key_W = os.path.join(action_dir, "W.npy")
