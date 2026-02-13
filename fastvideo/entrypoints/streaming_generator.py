@@ -151,7 +151,7 @@ class StreamingVideoGenerator(VideoGenerator):
             self.block_dir = block_dir
             # Use model fps (e.g. 60 for Waypoint) and higher quality for less blur
             fps = getattr(self.sampling_param, "fps", 24)
-            quality = kwargs.get("video_quality", 8)
+            quality = getattr(self.sampling_param, "video_quality", 8)
             self.writer = IncrementalVideoWriter(
                 output_path, fps=fps, block_dir=block_dir, quality=quality
             )
@@ -288,6 +288,13 @@ class StreamingVideoGenerator(VideoGenerator):
             return []
 
         frames = []
+        target_h = getattr(self.sampling_param, "height", None)
+        target_w = getattr(self.sampling_param, "width", None)
+        pad_for_writer = (
+            self.writer is not None
+            and target_h is not None
+            and target_w is not None
+        )
         for x in videos:
             x = torchvision.utils.make_grid(x, nrow=1)
             x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
@@ -297,7 +304,14 @@ class StreamingVideoGenerator(VideoGenerator):
                 arr = x.cpu().numpy()
             else:
                 arr = (x.float().clamp(0.0, 1.0).cpu().numpy() * 255.0)
-            frames.append(arr.astype(np.uint8))
+            arr = arr.astype(np.uint8)
+            # Pad to target size so imageio does not resize (avoids macro_block_size warning)
+            if pad_for_writer and (arr.shape[0] != target_h or arr.shape[1] != target_w):
+                padded = np.zeros((target_h, target_w, arr.shape[2]),
+                                  dtype=arr.dtype)
+                padded[: arr.shape[0], : arr.shape[1], :] = arr
+                arr = padded
+            frames.append(arr)
 
         return frames
 

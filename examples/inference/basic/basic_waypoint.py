@@ -1,28 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Non-interactive Waypoint inference for RunPod / headless runs.
+Non-interactive Waypoint inference (e.g. RunPod / headless runs).
 
 Generates a short video with fixed controls and saves it to an MP4.
 Use this when you cannot provide interactive keyboard/mouse input
 (e.g. SSH, Jupyter, or CI). View the result in Jupyter Lab file browser,
 or download via SCP.
 
-Usage on RunPod:
+Usage (e.g. on RunPod):
   1. SSH:  ssh root@<POD_IP> -p <PORT> -i ~/.ssh/id_ed25519
   2. Clone: git clone https://github.com/.../FastVideo.git && cd FastVideo
   3. Install: pip install -e .   (if "Cannot uninstall blinker" use:
             pip install -e . --ignore-installed blinker   or use a venv)
-  4. Run:   python examples/inference/basic/basic_waypoint_runpod.py
+  4. Run:   python examples/inference/basic/basic_waypoint.py
   5. Video: video_samples_waypoint_runpod/waypoint_runpod.mp4
 
 In Jupyter Lab (port 8888): run this in a notebook cell, then open
 the output path in the file browser and play the video.
 
-  python examples/inference/basic/basic_waypoint_runpod.py --num_steps 10
+  python examples/inference/basic/basic_waypoint.py --num_steps 10
 
 If the video looks blurry: use --video-quality 9 or 10 for sharper MP4 encoding,
 --num_inference_steps 4 (default), and --height 368 --width 640 (multiples of 16).
-Use --output waypoint_runpod_7.mp4 (etc.) to keep multiple runs. --seed for repro.
+Use --output waypoint_7.mp4 (etc.) to keep multiple runs. --seed for repro.
 
 Memory: The model can exceed 16GB VRAM (the official HF Space also hits this).
 Use --low-memory to enable CPU offload and smaller buffers so it fits in 16GB.
@@ -30,7 +30,7 @@ Use --low-memory to enable CPU offload and smaller buffers so it fits in 16GB.
 
 # Avoid PyTorch 2.10 + Triton "duplicate template name" on some RunPod images.
 # Must be set before torch/fastvideo are imported. If you still see the error,
-# run from shell: TORCH_COMPILE_DISABLE=1 python examples/.../basic_waypoint_runpod.py
+# run from shell: TORCH_COMPILE_DISABLE=1 python examples/.../basic_waypoint.py
 import os
 os.environ["TORCH_COMPILE_DISABLE"] = "1"
 os.environ["TORCHDYNAMO_DISABLE"] = "1"
@@ -49,7 +49,7 @@ KEY_FORWARD = 17   # W
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Waypoint non-interactive run (e.g. RunPod)")
+    parser = argparse.ArgumentParser(description="Waypoint non-interactive run")
     parser.add_argument(
         "--model",
         default="FastVideo/Waypoint-1-Small-Diffusers",
@@ -64,7 +64,7 @@ def main():
         "--num_steps",
         type=int,
         default=60,
-        help="Number of streaming steps. Each step produces --frames-per-step frames (default 1). e.g. 60 steps x 1 = 60 frames (~1 s at 60 fps). Use 120 for ~2 s.",
+        help="Number of streaming steps. Each step produces --frames-per-step frames (default 1). At 60 fps: 60 steps = 1 s, 120 = 2 s, 7200 = 2 min.",
     )
     parser.add_argument(
         "--frames-per-step",
@@ -104,6 +104,8 @@ def main():
     )
     parser.add_argument(
         "--video-quality",
+        "--video_quality",
+        dest="video_quality",
         type=int,
         default=8,
         help="MP4 encoding quality 0-10 (higher = sharper, less blur). Default 8.",

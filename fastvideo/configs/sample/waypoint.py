@@ -29,3 +29,4 @@ class WaypointSamplingParam(SamplingParam):
 
     # Waypoint-specific parameters
     # Control inputs are passed separately during generation
+    video_quality: int = 8  # FFmpeg CRF-style quality (used by StreamingVideoGenerator)

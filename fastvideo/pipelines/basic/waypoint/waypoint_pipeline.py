@@ -299,6 +299,12 @@ class WaypointPipeline(ComposedPipelineBase):
 
         generated_frames: list[torch.Tensor] = []
 
+        # Multi-frame debug: log first N frames to trace white/yellow drift (set 0 to disable)
+        DEBUG_MULTIFRAME_MAX = 5
+        # Log last N frames to trace end-of-video blur (set 0 to disable)
+        DEBUG_LAST_N = 5
+        _log_last_frames = DEBUG_LAST_N > 0 and t > DEBUG_LAST_N
+
         # HF Waypoint expects latents [B, 1, 16, 32, 32] (32x32 -> 16x16 tokens/frame)
         if latent_h != 32 or latent_w != 32:
             logger.warning(
@@ -328,6 +334,27 @@ class WaypointPipeline(ComposedPipelineBase):
                 min(ctx.frame_index, mouse.shape[1] - 1)
                 if mouse.shape[1] > 0 else 0
             )
+
+            _is_last_window = (
+                _log_last_frames and ctx.frame_index >= t - DEBUG_LAST_N
+            )
+            if ctx.frame_index < DEBUG_MULTIFRAME_MAX:
+                m_slice = mouse[:, ctrl_step : ctrl_step + 1]
+                b_slice = button[:, ctrl_step : ctrl_step + 1]
+                logger.info(
+                    "DEBUG frame %d: ctrl_step=%d frame_ts=%s "
+                    "mouse mean=%.4f button sum=%.2f (cond slice)",
+                    ctx.frame_index,
+                    ctrl_step,
+                    frame_ts[0, 0].item(),
+                    m_slice.float().mean().item(),
+                    b_slice.float().sum().item(),
+                )
+            elif _is_last_window:
+                logger.info(
+                    "DEBUG (last) frame %d/%d: ctrl_step=%d frame_ts=%s",
+                    ctx.frame_index, t, ctrl_step, frame_ts[0, 0].item(),
+                )
 
             # Denoise through sigma schedule
             if ctx.frame_index == 0:
@@ -385,10 +412,20 @@ class WaypointPipeline(ComposedPipelineBase):
 
                 x = x + (sigma_next - sigma_curr) * v_pred
 
-            if ctx.frame_index == 0:
+            if ctx.frame_index < DEBUG_MULTIFRAME_MAX:
                 xf = x.float()
                 logger.info(
-                    "DEBUG denoised x: mean=%.4f std=%.4f min=%.4f max=%.4f",
+                    "DEBUG frame %d denoised x: mean=%.4f std=%.4f min=%.4f max=%.4f",
+                    ctx.frame_index,
+                    xf.mean().item(), xf.std().item(),
+                    xf.min().item(), xf.max().item(),
+                )
+            elif _is_last_window:
+                xf = x.float()
+                logger.info(
+                    "DEBUG (last) frame %d denoised x: mean=%.4f std=%.4f "
+                    "min=%.4f max=%.4f",
+                    ctx.frame_index,
                     xf.mean().item(), xf.std().item(),
                     xf.min().item(), xf.max().item(),
                 )
@@ -417,6 +454,12 @@ class WaypointPipeline(ComposedPipelineBase):
                         kv_cache=ctx.kv_cache,
                         update_cache=True,
                     )
+                    if ctx.frame_index < DEBUG_MULTIFRAME_MAX or _is_last_window:
+                        logger.info(
+                            "DEBUG %sframe %d: KV cache updated (sigma=0 pass done)",
+                            "(last) " if _is_last_window else "",
+                            ctx.frame_index,
+                        )
 
             # Decode latent to frame (WorldEngineVAE / OWL VAE).
             # CRITICAL: Do NOT resize/interpolate latents before decode. The VAE is a
@@ -447,20 +490,26 @@ class WaypointPipeline(ComposedPipelineBase):
                         shift = shift.to(latent_in.device, latent_in.dtype)
                     latent_in = latent_in + shift
                 if ctx.frame_index == 0:
-                    lf = latent_in.float()
-                    logger.info(
-                        "DEBUG VAE input: shape=%s dtype=%s vae_dtype=%s "
-                        "mean=%.4f std=%.4f min=%.4f max=%.4f "
-                        "scale=%.4f shift=%s",
-                        list(latent_in.shape), latent_in.dtype, vae_dtype,
-                        lf.mean().item(), lf.std().item(),
-                        lf.min().item(), lf.max().item(),
-                        float(scaling_factor),
-                        shift,
-                    )
                     logger.info(
                         "DEBUG VAE class: %s  type(vae)=%s",
                         type(vae).__name__, type(vae).__mro__,
+                    )
+                if ctx.frame_index < DEBUG_MULTIFRAME_MAX:
+                    lf = latent_in.float()
+                    logger.info(
+                        "DEBUG frame %d VAE input: mean=%.4f std=%.4f min=%.4f max=%.4f",
+                        ctx.frame_index,
+                        lf.mean().item(), lf.std().item(),
+                        lf.min().item(), lf.max().item(),
+                    )
+                elif _is_last_window:
+                    lf = latent_in.float()
+                    logger.info(
+                        "DEBUG (last) frame %d VAE input: mean=%.4f std=%.4f "
+                        "min=%.4f max=%.4f",
+                        ctx.frame_index,
+                        lf.mean().item(), lf.std().item(),
+                        lf.min().item(), lf.max().item(),
                     )
                 decoded = vae.decode(latent_in)
                 if ctx.frame_index == 0:
@@ -470,26 +519,32 @@ class WaypointPipeline(ComposedPipelineBase):
                         type(decoded).__name__,
                         hasattr(decoded, "sample"),
                     )
-                    _d = decoded.sample if hasattr(decoded, "sample") else decoded
-                    if isinstance(_d, torch.Tensor):
-                        _df = _d.float()
-                        logger.info(
-                            "DEBUG decoded tensor: shape=%s dtype=%s "
-                            "mean=%.4f std=%.4f min=%.4f max=%.4f",
-                            list(_d.shape), _d.dtype,
-                            _df.mean().item(), _df.std().item(),
-                            _df.min().item(), _df.max().item(),
-                        )
-                        # Check per-channel stats if 3 or 4D
-                        if _d.dim() >= 3:
-                            ch_dim = -1 if _d.shape[-1] <= 4 else -3
-                            if ch_dim == -1 and _d.shape[-1] == 3:
-                                for c in range(3):
-                                    ch = _df[..., c]
-                                    logger.info(
-                                        "DEBUG ch%d (RGB): mean=%.4f min=%.1f max=%.1f",
-                                        c, ch.mean().item(), ch.min().item(), ch.max().item(),
-                                    )
+                _d = decoded.sample if hasattr(decoded, "sample") else decoded
+                if isinstance(_d, torch.Tensor) and ctx.frame_index < DEBUG_MULTIFRAME_MAX:
+                    _df = _d.float()
+                    logger.info(
+                        "DEBUG frame %d decoded: mean=%.2f std=%.2f min=%.1f max=%.1f",
+                        ctx.frame_index,
+                        _df.mean().item(), _df.std().item(),
+                        _df.min().item(), _df.max().item(),
+                    )
+                    if _d.dim() >= 3 and _d.shape[-1] == 3:
+                        for c in range(3):
+                            ch = _df[..., c]
+                            logger.info(
+                                "DEBUG frame %d ch%d (RGB): mean=%.2f min=%.1f max=%.1f",
+                                ctx.frame_index, c,
+                                ch.mean().item(), ch.min().item(), ch.max().item(),
+                            )
+                elif isinstance(_d, torch.Tensor) and _is_last_window:
+                    _df = _d.float()
+                    logger.info(
+                        "DEBUG (last) frame %d decoded: mean=%.2f std=%.2f "
+                        "min=%.1f max=%.1f",
+                        ctx.frame_index,
+                        _df.mean().item(), _df.std().item(),
+                        _df.min().item(), _df.max().item(),
+                    )
 
                 frame = (
                     decoded.sample
@@ -522,11 +577,18 @@ class WaypointPipeline(ComposedPipelineBase):
                 else:
                     frame = frame.float().clamp(0.0, 1.0)
 
-                if ctx.frame_index == 0:
+                if ctx.frame_index < DEBUG_MULTIFRAME_MAX:
                     logger.info(
-                        "DEBUG final frame: shape=%s dtype=%s "
-                        "mean=%.4f min=%.4f max=%.4f",
-                        list(frame.shape), frame.dtype,
+                        "DEBUG frame %d final: mean=%.4f min=%.4f max=%.4f "
+                        "(drift to 1.0 = white, high mean = washout)",
+                        ctx.frame_index,
+                        frame.mean().item(), frame.min().item(), frame.max().item(),
+                    )
+                elif _is_last_window:
+                    logger.info(
+                        "DEBUG (last) frame %d final: mean=%.4f min=%.4f max=%.4f "
+                        "(blur/washout check)",
+                        ctx.frame_index,
                         frame.mean().item(), frame.min().item(), frame.max().item(),
                     )
                 generated_frames.append(frame)

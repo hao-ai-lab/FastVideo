@@ -74,8 +74,9 @@ class WaypointT2VConfig(PipelineConfig):
     # Control input settings
     n_buttons: int = 256
 
-    # KV cache for autoregressive history (number of frames to keep)
-    max_kv_cache_frames: int = 64
+    # KV cache for autoregressive history (number of frames to keep).
+    # Use >= num_steps to avoid eviction; 64 is default, 128 avoids eviction for 120-frame runs.
+    max_kv_cache_frames: int = 128
 
     def __post_init__(self):
         # Waypoint doesn't use standard VAE loading
