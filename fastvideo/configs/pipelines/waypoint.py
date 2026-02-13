@@ -61,11 +61,11 @@ class WaypointT2VConfig(PipelineConfig):
         default_factory=lambda: ("fp32", ))
 
     # Waypoint-specific settings
-    # Fixed sigma schedule (no flow shift)
+    # Fixed sigma schedule (no flow shift). Match HF/Overworld to avoid over-denoising blur:
+    # 4 sigmas = 3 denoising steps (more steps can over-smooth and blur output).
     flow_shift: float | None = None
     scheduler_sigmas: list[float] = field(
-        default_factory=lambda:
-        [1.0, 0.8609585762023926, 0.729332447052002, 0.3205108940601349, 0.0])
+        default_factory=lambda: [1.0, 0.94921875, 0.83984375, 0.0])
 
     # Interactive generation settings
     is_causal: bool = True
@@ -73,6 +73,9 @@ class WaypointT2VConfig(PipelineConfig):
 
     # Control input settings
     n_buttons: int = 256
+
+    # KV cache for autoregressive history (number of frames to keep)
+    max_kv_cache_frames: int = 64
 
     def __post_init__(self):
         # Waypoint doesn't use standard VAE loading

@@ -220,7 +220,7 @@ def test_waypoint_config_loading():
     assert config.is_causal is True
     assert config.base_fps == 60
     assert config.n_buttons == 256
-    assert len(config.scheduler_sigmas) == 5
+    assert len(config.scheduler_sigmas) == 4  # HF schedule: 3 denoising steps
     assert config.scheduler_sigmas[0] == 1.0
     assert config.scheduler_sigmas[-1] == 0.0
     

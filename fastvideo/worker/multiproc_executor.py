@@ -709,7 +709,12 @@ class WorkerMultiprocProc:
                             StreamingResult(task_type=StreamingTaskType.STEP,
                                             output_batch=batch))
                     except Exception as e:
-                        logger.error("Worker %d step error: %s", self.rank, e)
+                        logger.error(
+                            "Worker %d step error: %s\n%s",
+                            self.rank,
+                            e,
+                            get_exception_traceback(),
+                        )
                         self.streaming_output_queue.put(
                             StreamingResult(task_type=StreamingTaskType.STEP,
                                             error=e))
