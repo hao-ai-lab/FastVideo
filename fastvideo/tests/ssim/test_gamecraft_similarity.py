@@ -60,9 +60,15 @@ def _shutdown_executor(generator: VideoGenerator | None) -> None:
 # ---------------------------------------------------------------------------
 # Model parameters
 # ---------------------------------------------------------------------------
+# Same as basic_gamecraft.py: default HF path; set GAMECRAFT_MODEL_PATH for local weights.
+_GAMECRAFT_MODEL_PATH = os.environ.get(
+    "GAMECRAFT_MODEL_PATH",
+    "FastVideo/HunyuanGameCraft-Diffusers",
+)
+
 GAMECRAFT_T2V_PARAMS = {
     "num_gpus": 1,
-    "model_path": "official_weights/hunyuan-gamecraft-diffusers",
+    "model_path": _GAMECRAFT_MODEL_PATH,
     "height": 480,
     "width": 832,
     "num_frames": 33,
