@@ -27,17 +27,11 @@ Available actions:
     - down_rot: Rotate camera down (tilt)
 """
 import argparse
-import sys
-from pathlib import Path
 
 import torch
 
-# Add repo root to path for imports
-repo_root = Path(__file__).resolve().parents[3]
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
-
 from fastvideo import VideoGenerator
+from fastvideo.models.camera import create_camera_trajectory
 
 # Default prompts for demo
 DEFAULT_PROMPTS = {
@@ -62,68 +56,6 @@ ACTION_MAP = {
 OUTPUT_PATH = "video_samples_gamecraft"
 
 
-def create_camera_trajectory(
-    action: str,
-    height: int,
-    width: int,
-    num_frames: int,
-    action_speed: float = 0.2,
-    device: torch.device = torch.device("cpu"),
-    dtype: torch.dtype = torch.bfloat16,
-):
-    """
-    Create camera trajectory (Plücker coordinates) from an action.
-    
-    This function uses the official GameCraft camera trajectory generation code
-    to create Plücker embeddings for camera conditioning.
-    
-    Args:
-        action: One of 'forward', 'backward', 'left', 'right', 
-                'left_rot', 'right_rot', 'up_rot', 'down_rot'
-        height: Video height in pixels
-        width: Video width in pixels
-        num_frames: Number of video frames
-        action_speed: Speed of motion (default 0.2)
-        device: Torch device
-        dtype: Torch dtype
-        
-    Returns:
-        camera_states: [1, num_frames, 6, height, width] Plücker embeddings
-    """
-    # Add official GameCraft to path
-    official_path = repo_root / "Hunyuan-GameCraft-1.0"
-    if official_path.exists() and str(official_path) not in sys.path:
-        sys.path.insert(0, str(official_path))
-    
-    try:
-        from hymm_sp.sample_inference import (
-            ActionToPoseFromID,
-            GetPoseEmbedsFromPoses,
-        )
-    except ImportError as e:
-        raise ImportError(
-            f"Cannot import camera trajectory functions. "
-            f"Make sure Hunyuan-GameCraft-1.0 is available at {official_path}: {e}"
-        )
-    
-    # Convert action name to action ID
-    action_id = ACTION_MAP.get(action, action)
-    
-    # Generate poses from action
-    poses = ActionToPoseFromID(action_id, value=action_speed, duration=num_frames)
-    
-    # Convert to Plücker embeddings
-    plucker_embedding, _, _ = GetPoseEmbedsFromPoses(
-        poses, height, width, num_frames, flip=False, start_index=0
-    )
-    
-    # Add batch dimension and convert to target dtype/device
-    # Shape: [num_frames, 6, H, W] -> [1, num_frames, 6, H, W]
-    camera_states = plucker_embedding.unsqueeze(0).to(device=device, dtype=dtype)
-    
-    return camera_states
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="HunyuanGameCraft video generation with camera/action control"
@@ -131,7 +63,7 @@ def main():
     parser.add_argument(
         "--model-path",
         type=str,
-        default="official_weights/hunyuan-gamecraft-diffusers",  # Local converted model
+        default="tencent/HunyuanGameCraft",  # HuggingFace model path
         help="Path to GameCraft model (HuggingFace path or local directory)",
     )
     parser.add_argument(

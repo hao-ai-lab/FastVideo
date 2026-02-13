@@ -12,8 +12,6 @@ To create initial reference videos, run this test once and copy the
 generated videos into the appropriate reference folder.
 """
 import os
-import sys
-from pathlib import Path
 
 import torch
 import pytest
@@ -47,53 +45,9 @@ else:
     logger.warning(f"Unsupported device for ssim tests: {device_name}")
 
 # ---------------------------------------------------------------------------
-# Helpers – camera trajectory from the official GameCraft code
+# Helpers – camera trajectory (self-contained, no official repo dependency)
 # ---------------------------------------------------------------------------
-_REPO_ROOT = Path(__file__).resolve().parents[3]  # fastvideo/tests/ssim -> repo root
-_OFFICIAL_PATH = _REPO_ROOT / "Hunyuan-GameCraft-1.0"
-
-ACTION_MAP = {
-    "forward": "w",
-    "backward": "s",
-    "left": "a",
-    "right": "d",
-    "left_rot": "left_rot",
-    "right_rot": "right_rot",
-    "up_rot": "up_rot",
-    "down_rot": "down_rot",
-}
-
-
-def _create_camera_trajectory(
-    action: str,
-    height: int,
-    width: int,
-    num_frames: int,
-    action_speed: float = 0.2,
-    device: torch.device = torch.device("cpu"),
-    dtype: torch.dtype = torch.bfloat16,
-) -> torch.Tensor:
-    """Return Plücker embeddings [1, T, 6, H, W] for the given action."""
-    if _OFFICIAL_PATH.exists() and str(_OFFICIAL_PATH) not in sys.path:
-        sys.path.insert(0, str(_OFFICIAL_PATH))
-
-    try:
-        from hymm_sp.sample_inference import (
-            ActionToPoseFromID,
-            GetPoseEmbedsFromPoses,
-        )
-    except ImportError as exc:
-        pytest.skip(
-            f"Cannot import official camera trajectory functions "
-            f"(need Hunyuan-GameCraft-1.0 at {_OFFICIAL_PATH}): {exc}"
-        )
-
-    action_id = ACTION_MAP.get(action, action)
-    poses = ActionToPoseFromID(action_id, value=action_speed, duration=num_frames)
-    plucker_embedding, _, _ = GetPoseEmbedsFromPoses(
-        poses, height, width, num_frames, flip=False, start_index=0
-    )
-    return plucker_embedding.unsqueeze(0).to(device=device, dtype=dtype)
+from fastvideo.models.camera import create_camera_trajectory as _create_camera_trajectory
 
 
 def _shutdown_executor(generator: VideoGenerator | None) -> None:
