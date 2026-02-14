@@ -8,9 +8,31 @@ import torch
 from qat_attn import _attention
 from fused_attention import attention as fused_attention
 from math import sqrt
+from pathlib import Path
+
+from vsa_with_qat import vsa_qat_attention
+
+try:
+    from fastvideo_kernel.block_sparse_attn import block_sparse_attn as _ref_block_sparse_attn
+    from fastvideo_kernel.block_sparse_attn_cross import block_sparse_attn_cross as _ref_block_sparse_attn_cross
+except ModuleNotFoundError:
+    _kernel_python = Path(__file__).resolve().parent / "fastvideo-kernel" / "python"
+    if _kernel_python.exists():
+        import sys
+        sys.path.append(str(_kernel_python))
+        from fastvideo_kernel.block_sparse_attn import block_sparse_attn as _ref_block_sparse_attn
+        from fastvideo_kernel.block_sparse_attn_cross import block_sparse_attn_cross as _ref_block_sparse_attn_cross
+    else:
+        _ref_block_sparse_attn = None
+        _ref_block_sparse_attn_cross = None
 
 attention = _attention.apply
 DEVICE = torch.device("cuda")
+_VSA_PRECISION_SUMMARY = {
+    False: {"forward": [], "backward": []},
+    True: {"forward": [], "backward": []},
+}
+_VSA_LAST_IS_QAT = False
 
 
 def qat_attn_wrapper(q_BLHD, k_BLHD, v_BLHD, is_causal=False, sm_scale=None):
@@ -141,6 +163,497 @@ def naive_attention(q, k, v, causal, sm_scale):
     out = torch.matmul(attn_weights, v)
     
     return out
+
+
+def _make_random_block_map(B, H, q_blocks, kv_blocks, keep_prob=0.35, device=DEVICE):
+    block_map = (torch.rand((B, H, q_blocks, kv_blocks), device=device) < keep_prob)
+    # Ensure each query block attends to at least one kv block to avoid all -inf rows.
+    for qb in range(q_blocks):
+        block_map[:, :, qb, qb % kv_blocks] = True
+    return block_map
+
+
+def _rel_l2(x, y, eps=1e-6):
+    x_f = x.float().flatten()
+    y_f = y.float().flatten()
+    return (x_f - y_f).norm() / (y_f.norm() + eps)
+
+
+def _vsa_precision_report(name, got, ref):
+    global _VSA_LAST_IS_QAT
+    diff = (got - ref).abs()
+    max_diff = diff.max().item()
+    mean_diff = diff.mean().item()
+    cos = cosine_similarity(got, ref)
+    rel = _rel_l2(got, ref).item()
+    lower_name = name.lower()
+    if "forward" in lower_name:
+        _VSA_PRECISION_SUMMARY[_VSA_LAST_IS_QAT]["forward"].append({
+            "max_diff": max_diff,
+            "mean_diff": mean_diff,
+            "rel_l2": rel,
+            "cos": cos,
+            "name": name,
+        })
+    elif "backward" in lower_name:
+        _VSA_PRECISION_SUMMARY[_VSA_LAST_IS_QAT]["backward"].append({
+            "max_diff": max_diff,
+            "mean_diff": mean_diff,
+            "rel_l2": rel,
+            "cos": cos,
+            "name": name,
+        })
+    print(
+        f"  {name}: max={max_diff:.6f} "
+        f"mean={mean_diff:.6f} rel_l2={rel:.6f} cos={cos:.6f}"
+    )
+    return rel, cos
+
+
+def _print_vsa_precision_summary():
+    print("\nVSA precision aggregate summary")
+    print("-----------------------------")
+    for is_qat in (False, True):
+        print(f"  IS_QAT={is_qat}")
+        for phase in ("forward", "backward"):
+            runs = _VSA_PRECISION_SUMMARY[is_qat][phase]
+            if not runs:
+                print(f"    {phase}: no recorded runs")
+                continue
+            max_max_diff = max(r["max_diff"] for r in runs)
+            max_mean_diff = max(r["mean_diff"] for r in runs)
+            max_rel_l2 = max(r["rel_l2"] for r in runs)
+            min_cos = min(r["cos"] for r in runs)
+            print(
+                f"    {phase} ({len(runs)} runs): "
+                f"max max diff={max_max_diff:.6f}, "
+                f"max mean diff={max_mean_diff:.6f}, "
+                f"max rel_l2={max_rel_l2:.6f}, "
+                f"min cos similarity={min_cos:.6f}"
+            )
+
+
+def _run_vsa_forward_pair(
+    B,
+    H,
+    N_CTX_Q,
+    N_CTX_KV,
+    D,
+    *,
+    is_qat=False,
+    use_qat_qkv=False,
+    fake_quant_P=False,
+    two_level_quant_P=False,
+    use_global_sf_P=True,
+    use_global_sf_QKV=True,
+):
+    global _VSA_LAST_IS_QAT
+    _VSA_LAST_IS_QAT = is_qat
+    if _ref_block_sparse_attn is None:
+        print("  skipping: fastvideo_kernel.block_sparse_attn is not importable")
+        return None
+
+    q_blocks = N_CTX_Q // 64
+    kv_blocks = N_CTX_KV // 64
+    block_map = _make_random_block_map(B, H, q_blocks, kv_blocks)
+    variable_block_sizes = torch.randint(16, 65, (kv_blocks,), device=DEVICE, dtype=torch.int32)
+
+    q_ref = torch.randn((B, H, N_CTX_Q, D), dtype=torch.bfloat16, device=DEVICE, requires_grad=True)
+    k_ref = torch.randn((B, H, N_CTX_KV, D), dtype=torch.bfloat16, device=DEVICE, requires_grad=True)
+    v_ref = torch.randn((B, H, N_CTX_KV, D), dtype=torch.bfloat16, device=DEVICE, requires_grad=True)
+
+    q_new = q_ref.detach().clone().requires_grad_(True)
+    k_new = k_ref.detach().clone().requires_grad_(True)
+    v_new = v_ref.detach().clone().requires_grad_(True)
+
+    out_new = vsa_qat_attention(
+        q_new,
+        k_new,
+        v_new,
+        block_map,
+        variable_block_sizes,
+        use_qat_qkv=use_qat_qkv,
+        IS_QAT=is_qat,
+        fake_quant_P=fake_quant_P,
+        two_level_quant_P=two_level_quant_P,
+        use_global_sf_P=use_global_sf_P,
+        use_global_sf_QKV=use_global_sf_QKV,
+    )
+    try:
+        if N_CTX_Q == N_CTX_KV:
+            out_ref, _ = _ref_block_sparse_attn(q_ref, k_ref, v_ref, block_map, variable_block_sizes)
+        else:
+            if _ref_block_sparse_attn_cross is None:
+                print("  skipping: cross reference kernel is not importable")
+                return None
+            out_ref, _ = _ref_block_sparse_attn_cross(q_ref, k_ref, v_ref, block_map, variable_block_sizes)
+    except RuntimeError as e:
+        print(f"  skipping: reference block_sparse_attn not available for this config ({e})")
+        return None
+
+    return q_new, k_new, v_new, out_new, q_ref, k_ref, v_ref, out_ref
+
+
+def test_vsa_with_qat_vs_block_sparse_forward_precision_self():
+    """Precision test: new vsa_with_qat forward vs reference block_sparse_attn (self-attention)."""
+    if not torch.cuda.is_available():
+        print("  skipping: CUDA not available")
+        return
+
+    torch.manual_seed(123)
+    pack = _run_vsa_forward_pair(B=1, H=8, N_CTX_Q=256, N_CTX_KV=256, D=64)
+    if pack is None:
+        return
+
+    _, _, _, out_new, _, _, _, out_ref = pack
+    rel, cos = _vsa_precision_report("self-forward O", out_new, out_ref)
+    assert rel < 0.10, f"Self-attention forward rel_l2 too high: {rel:.6f}"
+    assert cos > 0.95, f"Self-attention forward cosine too low: {cos:.6f}"
+
+
+def test_vsa_with_qat_vs_block_sparse_backward_precision_self():
+    """Precision test: new vsa_with_qat backward vs reference block_sparse_attn (self-attention)."""
+    if not torch.cuda.is_available():
+        print("  skipping: CUDA not available")
+        return
+
+    torch.manual_seed(456)
+    pack = _run_vsa_forward_pair(B=1, H=8, N_CTX_Q=256, N_CTX_KV=256, D=64)
+    if pack is None:
+        return
+
+    q_new, k_new, v_new, out_new, q_ref, k_ref, v_ref, out_ref = pack
+    dout = torch.randn_like(out_new).contiguous()
+
+    out_new.backward(dout)
+    out_ref.backward(dout)
+
+    rel_dq, cos_dq = _vsa_precision_report("self-backward dQ", q_new.grad, q_ref.grad)
+    rel_dk, cos_dk = _vsa_precision_report("self-backward dK", k_new.grad, k_ref.grad)
+    rel_dv, cos_dv = _vsa_precision_report("self-backward dV", v_new.grad, v_ref.grad)
+
+    assert rel_dq < 0.15 and cos_dq > 0.90, f"Self dQ mismatch: rel={rel_dq:.6f}, cos={cos_dq:.6f}"
+    assert rel_dk < 0.15 and cos_dk > 0.90, f"Self dK mismatch: rel={rel_dk:.6f}, cos={cos_dk:.6f}"
+    assert rel_dv < 0.15 and cos_dv > 0.90, f"Self dV mismatch: rel={rel_dv:.6f}, cos={cos_dv:.6f}"
+
+
+def test_vsa_with_qat_vs_block_sparse_forward_precision_cross():
+    """Precision test: new vsa_with_qat forward vs reference block_sparse_attn (cross-attention)."""
+    if not torch.cuda.is_available():
+        print("  skipping: CUDA not available")
+        return
+
+    torch.manual_seed(789)
+    pack = _run_vsa_forward_pair(B=1, H=8, N_CTX_Q=128, N_CTX_KV=256, D=64)
+    if pack is None:
+        return
+
+    _, _, _, out_new, _, _, _, out_ref = pack
+    rel, cos = _vsa_precision_report("cross-forward O", out_new, out_ref)
+    assert rel < 0.12, f"Cross-attention forward rel_l2 too high: {rel:.6f}"
+    assert cos > 0.93, f"Cross-attention forward cosine too low: {cos:.6f}"
+
+
+def test_vsa_with_qat_vs_block_sparse_backward_precision_cross():
+    """Precision test: new vsa_with_qat backward vs reference block_sparse_attn (cross-attention)."""
+    if not torch.cuda.is_available():
+        print("  skipping: CUDA not available")
+        return
+
+    torch.manual_seed(321)
+    pack = _run_vsa_forward_pair(B=1, H=8, N_CTX_Q=128, N_CTX_KV=256, D=64)
+    if pack is None:
+        return
+
+    q_new, k_new, v_new, out_new, q_ref, k_ref, v_ref, out_ref = pack
+    dout = torch.randn_like(out_new).contiguous()
+
+    out_new.backward(dout)
+    out_ref.backward(dout)
+
+    rel_dq, cos_dq = _vsa_precision_report("cross-backward dQ", q_new.grad, q_ref.grad)
+    rel_dk, cos_dk = _vsa_precision_report("cross-backward dK", k_new.grad, k_ref.grad)
+    rel_dv, cos_dv = _vsa_precision_report("cross-backward dV", v_new.grad, v_ref.grad)
+
+    assert rel_dq < 0.18 and cos_dq > 0.85, f"Cross dQ mismatch: rel={rel_dq:.6f}, cos={cos_dq:.6f}"
+    assert rel_dk < 0.18 and cos_dk > 0.85, f"Cross dK mismatch: rel={rel_dk:.6f}, cos={cos_dk:.6f}"
+    assert rel_dv < 0.18 and cos_dv > 0.85, f"Cross dV mismatch: rel={rel_dv:.6f}, cos={cos_dv:.6f}"
+
+
+def test_vsa_with_qat_enabled_vs_block_sparse_forward_precision_self():
+    """Precision test: IS_QAT=True forward vs reference block_sparse_attn (self-attention)."""
+    if not torch.cuda.is_available():
+        print("  skipping: CUDA not available")
+        return
+
+    torch.manual_seed(1123)
+    pack = _run_vsa_forward_pair(
+        B=1,
+        H=8,
+        N_CTX_Q=256,
+        N_CTX_KV=256,
+        D=64,
+        is_qat=True,
+        use_qat_qkv=True,
+        fake_quant_P=True,
+        two_level_quant_P=False,
+    )
+    if pack is None:
+        return
+
+    _, _, _, out_new, _, _, _, out_ref = pack
+    rel, cos = _vsa_precision_report("self-forward O (IS_QAT=True)", out_new, out_ref)
+    assert rel < 0.25, f"Self-attention QAT forward rel_l2 too high: {rel:.6f}"
+    assert cos > 0.80, f"Self-attention QAT forward cosine too low: {cos:.6f}"
+
+
+def test_vsa_with_qat_enabled_vs_block_sparse_backward_precision_self():
+    """Precision test: IS_QAT=True backward vs reference block_sparse_attn (self-attention)."""
+    if not torch.cuda.is_available():
+        print("  skipping: CUDA not available")
+        return
+
+    torch.manual_seed(1456)
+    pack = _run_vsa_forward_pair(
+        B=1,
+        H=8,
+        N_CTX_Q=256,
+        N_CTX_KV=256,
+        D=64,
+        is_qat=True,
+        use_qat_qkv=False,
+        fake_quant_P=True,
+        two_level_quant_P=True,
+    )
+    if pack is None:
+        return
+
+    q_new, k_new, v_new, out_new, q_ref, k_ref, v_ref, out_ref = pack
+    dout = torch.randn_like(out_new).contiguous()
+    out_new.backward(dout)
+    out_ref.backward(dout)
+
+    rel_dq, cos_dq = _vsa_precision_report("self-backward dQ (IS_QAT=True)", q_new.grad, q_ref.grad)
+    rel_dk, cos_dk = _vsa_precision_report("self-backward dK (IS_QAT=True)", k_new.grad, k_ref.grad)
+    rel_dv, cos_dv = _vsa_precision_report("self-backward dV (IS_QAT=True)", v_new.grad, v_ref.grad)
+
+    assert rel_dq < 0.30 and cos_dq > 0.70, f"Self QAT dQ mismatch: rel={rel_dq:.6f}, cos={cos_dq:.6f}"
+    assert rel_dk < 0.30 and cos_dk > 0.70, f"Self QAT dK mismatch: rel={rel_dk:.6f}, cos={cos_dk:.6f}"
+    assert rel_dv < 0.30 and cos_dv > 0.70, f"Self QAT dV mismatch: rel={rel_dv:.6f}, cos={cos_dv:.6f}"
+
+
+def test_vsa_with_qat_enabled_vs_block_sparse_forward_precision_cross():
+    """Precision test: IS_QAT=True forward vs reference block_sparse_attn (cross-attention)."""
+    if not torch.cuda.is_available():
+        print("  skipping: CUDA not available")
+        return
+
+    torch.manual_seed(1789)
+    pack = _run_vsa_forward_pair(
+        B=1,
+        H=8,
+        N_CTX_Q=128,
+        N_CTX_KV=256,
+        D=64,
+        is_qat=True,
+        use_qat_qkv=False,
+        fake_quant_P=True,
+        two_level_quant_P=True,
+    )
+    if pack is None:
+        return
+
+    _, _, _, out_new, _, _, _, out_ref = pack
+    rel, cos = _vsa_precision_report("cross-forward O (IS_QAT=True)", out_new, out_ref)
+    assert rel < 0.30, f"Cross-attention QAT forward rel_l2 too high: {rel:.6f}"
+    assert cos > 0.75, f"Cross-attention QAT forward cosine too low: {cos:.6f}"
+
+
+def test_vsa_with_qat_enabled_vs_block_sparse_backward_precision_cross():
+    """Precision test: IS_QAT=True backward vs reference block_sparse_attn (cross-attention)."""
+    if not torch.cuda.is_available():
+        print("  skipping: CUDA not available")
+        return
+
+    torch.manual_seed(1321)
+    pack = _run_vsa_forward_pair(
+        B=1,
+        H=8,
+        N_CTX_Q=128,
+        N_CTX_KV=256,
+        D=64,
+        is_qat=True,
+        use_qat_qkv=False,
+        fake_quant_P=True,
+        two_level_quant_P=True,
+    )
+    if pack is None:
+        return
+
+    q_new, k_new, v_new, out_new, q_ref, k_ref, v_ref, out_ref = pack
+    dout = torch.randn_like(out_new).contiguous()
+    out_new.backward(dout)
+    out_ref.backward(dout)
+
+    rel_dq, cos_dq = _vsa_precision_report("cross-backward dQ (IS_QAT=True)", q_new.grad, q_ref.grad)
+    rel_dk, cos_dk = _vsa_precision_report("cross-backward dK (IS_QAT=True)", k_new.grad, k_ref.grad)
+    rel_dv, cos_dv = _vsa_precision_report("cross-backward dV (IS_QAT=True)", v_new.grad, v_ref.grad)
+
+    assert rel_dq < 0.35 and cos_dq > 0.65, f"Cross QAT dQ mismatch: rel={rel_dq:.6f}, cos={cos_dq:.6f}"
+    assert rel_dk < 0.35 and cos_dk > 0.65, f"Cross QAT dK mismatch: rel={rel_dk:.6f}, cos={cos_dk:.6f}"
+    assert rel_dv < 0.35 and cos_dv > 0.65, f"Cross QAT dV mismatch: rel={rel_dv:.6f}, cos={cos_dv:.6f}"
+
+
+def _run_vsa_shape_suite(
+    configs,
+    *,
+    suite_name,
+    is_qat=False,
+    use_qat_qkv=False,
+    fake_quant_P=False,
+    two_level_quant_P=False,
+    fwd_rel_max=1e-7,
+    fwd_cos_min=0.99999,
+    bwd_rel_max=1e-7,
+    bwd_cos_min=0.99999,
+):
+    if not torch.cuda.is_available():
+        print(f"  skipping {suite_name}: CUDA not available")
+        return
+
+    print(f"\n  {suite_name}")
+    print("  " + "-" * len(suite_name))
+    for i, (B, H, N_CTX_Q, N_CTX_KV, D) in enumerate(configs):
+        torch.manual_seed(2000 + i)
+        pack = _run_vsa_forward_pair(
+            B=B,
+            H=H,
+            N_CTX_Q=N_CTX_Q,
+            N_CTX_KV=N_CTX_KV,
+            D=D,
+            is_qat=is_qat,
+            use_qat_qkv=use_qat_qkv,
+            fake_quant_P=fake_quant_P,
+            two_level_quant_P=two_level_quant_P,
+        )
+        if pack is None:
+            print(f"  skipped config (B={B}, H={H}, Q={N_CTX_Q}, KV={N_CTX_KV}, D={D})")
+            continue
+
+        q_new, k_new, v_new, out_new, q_ref, k_ref, v_ref, out_ref = pack
+        tag = f"(B={B}, H={H}, Q={N_CTX_Q}, KV={N_CTX_KV}, D={D})"
+        rel_o, cos_o = _vsa_precision_report(f"{tag} forward O", out_new, out_ref)
+        assert rel_o < fwd_rel_max and cos_o > fwd_cos_min, (
+            f"{suite_name} forward mismatch {tag}: rel={rel_o:.6f}, cos={cos_o:.6f}"
+        )
+
+        dout = torch.randn_like(out_new).contiguous()
+        out_new.backward(dout)
+        out_ref.backward(dout)
+
+        rel_dq, cos_dq = _vsa_precision_report(f"{tag} backward dQ", q_new.grad, q_ref.grad)
+        rel_dk, cos_dk = _vsa_precision_report(f"{tag} backward dK", k_new.grad, k_ref.grad)
+        rel_dv, cos_dv = _vsa_precision_report(f"{tag} backward dV", v_new.grad, v_ref.grad)
+        assert rel_dq < bwd_rel_max and cos_dq > bwd_cos_min, (
+            f"{suite_name} dQ mismatch {tag}: rel={rel_dq:.6f}, cos={cos_dq:.6f}"
+        )
+        assert rel_dk < bwd_rel_max and cos_dk > bwd_cos_min, (
+            f"{suite_name} dK mismatch {tag}: rel={rel_dk:.6f}, cos={cos_dk:.6f}"
+        )
+        assert rel_dv < bwd_rel_max and cos_dv > bwd_cos_min, (
+            f"{suite_name} dV mismatch {tag}: rel={rel_dv:.6f}, cos={cos_dv:.6f}"
+        )
+
+
+def test_vsa_with_qat_vs_block_sparse_shape_sweep_self():
+    """Comprehensive self-attention shape sweep (IS_QAT=False), forward+backward parity."""
+    configs = [
+        (1, 2, 64, 64, 64),
+        (1, 4, 128, 128, 64),
+        (2, 8, 256, 256, 64),
+        (1, 8, 128, 128, 128),
+        (2, 4, 256, 256, 128),
+    ]
+    _run_vsa_shape_suite(
+        configs,
+        suite_name="VSA Self Shape Sweep (IS_QAT=False)",
+        is_qat=False,
+        use_qat_qkv=False,
+        fake_quant_P=False,
+        two_level_quant_P=False,
+        fwd_rel_max=1e-7,
+        fwd_cos_min=0.99999,
+        bwd_rel_max=1e-7,
+        bwd_cos_min=0.99999,
+    )
+
+
+def test_vsa_with_qat_vs_block_sparse_shape_sweep_cross():
+    """Comprehensive cross-attention shape sweep (IS_QAT=False), forward+backward parity."""
+    configs = [
+        (1, 2, 64, 128, 64),
+        (1, 4, 128, 64, 64),
+        (1, 8, 128, 256, 64),
+        (2, 4, 256, 128, 64),
+        (1, 4, 128, 256, 128),
+    ]
+    _run_vsa_shape_suite(
+        configs,
+        suite_name="VSA Cross Shape Sweep (IS_QAT=False)",
+        is_qat=False,
+        use_qat_qkv=False,
+        fake_quant_P=False,
+        two_level_quant_P=False,
+        fwd_rel_max=1e-7,
+        fwd_cos_min=0.99999,
+        bwd_rel_max=1e-7,
+        bwd_cos_min=0.99999,
+    )
+
+
+def test_vsa_with_qat_enabled_shape_sweep_self():
+    """Comprehensive self-attention shape sweep (IS_QAT=True), forward+backward precision."""
+    configs = [
+        (1, 2, 64, 64, 64),
+        (1, 4, 128, 128, 64),
+        (1, 8, 256, 256, 64),
+        (1, 4, 128, 128, 128),
+    ]
+    _run_vsa_shape_suite(
+        configs,
+        suite_name="VSA Self Shape Sweep (IS_QAT=True)",
+        is_qat=True,
+        use_qat_qkv=False,
+        fake_quant_P=True,
+        two_level_quant_P=True,
+        fwd_rel_max=0.35,
+        fwd_cos_min=0.70,
+        bwd_rel_max=0.40,
+        bwd_cos_min=0.60,
+    )
+
+
+def test_vsa_with_qat_enabled_shape_sweep_cross():
+    """Comprehensive cross-attention shape sweep (IS_QAT=True), forward+backward precision."""
+    configs = [
+        (1, 2, 64, 128, 64),
+        (1, 4, 128, 64, 64),
+        (1, 8, 128, 256, 64),
+        (1, 4, 128, 256, 128),
+    ]
+    _run_vsa_shape_suite(
+        configs,
+        suite_name="VSA Cross Shape Sweep (IS_QAT=True)",
+        is_qat=True,
+        use_qat_qkv=False,
+        fake_quant_P=True,
+        two_level_quant_P=True,
+        fwd_rel_max=0.40,
+        fwd_cos_min=0.60,
+        bwd_rel_max=0.45,
+        bwd_cos_min=0.55,
+    )
+
 
 def test_qat_attention_forward():
     """Test forward pass with QAT enabled vs disabled."""
@@ -1465,21 +1978,34 @@ if __name__ == "__main__":
     print(f"Device: {DEVICE}")
     print()
     
-    test_qat_attention_forward()
-    test_qat_attention_backward()
-    test_qat_attention_different_shapes()
-    test_qat_attention_non_causal()
-    test_qat_attention_causal()
-    test_qat_attention_causal_backward()
-    test_qat_attention_different_seq_lengths()
-    test_qat_attention_different_seq_lengths_backward()
-    test_qat_attention_wan_shape_forward()
-    test_qat_attention_wan_shape_backward()
-    test_qat_attention_wan_shape_non_divisible_64()
+    # test_qat_attention_forward()
+    # test_qat_attention_backward()
+    # test_qat_attention_different_shapes()
+    # test_qat_attention_non_causal()
+    # test_qat_attention_causal()
+    # test_qat_attention_causal_backward()
+    # test_qat_attention_different_seq_lengths()
+    # test_qat_attention_different_seq_lengths_backward()
+    # test_qat_attention_wan_shape_forward()
+    # test_qat_attention_wan_shape_backward()
+    # test_qat_attention_wan_shape_non_divisible_64()
+    test_vsa_with_qat_vs_block_sparse_forward_precision_self()
+    test_vsa_with_qat_vs_block_sparse_backward_precision_self()
+    test_vsa_with_qat_vs_block_sparse_forward_precision_cross()
+    test_vsa_with_qat_vs_block_sparse_backward_precision_cross()
+    test_vsa_with_qat_enabled_vs_block_sparse_forward_precision_self()
+    test_vsa_with_qat_enabled_vs_block_sparse_backward_precision_self()
+    test_vsa_with_qat_enabled_vs_block_sparse_forward_precision_cross()
+    test_vsa_with_qat_enabled_vs_block_sparse_backward_precision_cross()
+    test_vsa_with_qat_vs_block_sparse_shape_sweep_self()
+    test_vsa_with_qat_vs_block_sparse_shape_sweep_cross()
+    test_vsa_with_qat_enabled_shape_sweep_self()
+    test_vsa_with_qat_enabled_shape_sweep_cross()
+    _print_vsa_precision_summary()
     
-    print()
-    print("Running Fused attention tests...")
-    print()
+    # print()
+    # print("Running Fused attention tests...")
+    # print()
     
     # test_fused_attention_forward()
     # test_fused_attention_backward()
@@ -1501,4 +2027,3 @@ if __name__ == "__main__":
     
     print()
     print("All tests passed! ✓")
-
