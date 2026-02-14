@@ -141,20 +141,28 @@ def test_waypoint_transformer_forward():
         mouse = torch.zeros(batch_size, n_frames, 2, device=device, dtype=dtype)
         button = torch.zeros(batch_size, n_frames, n_buttons, device=device, dtype=dtype)
         scroll = torch.zeros(batch_size, n_frames, 1, device=device, dtype=dtype)
-        
-        # Forward pass
-        output = model(
-            x=x,
-            sigma=sigma,
-            frame_timestamp=frame_timestamp,
-            prompt_emb=prompt_emb,
-            prompt_pad_mask=prompt_pad_mask,
-            mouse=mouse,
-            button=button,
-            scroll=scroll,
-            kv_cache=None,
-        )
-    
+
+        # Forward context required for DistributedAttention (kv_cache=None path)
+        from fastvideo.forward_context import set_forward_context
+        from fastvideo.attention.backends.sdpa import SDPAMetadata
+
+        attn_metadata = SDPAMetadata(current_timestep=0, attn_mask=None)
+        with set_forward_context(
+            current_timestep=0, attn_metadata=attn_metadata, forward_batch=None
+        ):
+            # Forward pass
+            output = model(
+                x=x,
+                sigma=sigma,
+                frame_timestamp=frame_timestamp,
+                prompt_emb=prompt_emb,
+                prompt_pad_mask=prompt_pad_mask,
+                mouse=mouse,
+                button=button,
+                scroll=scroll,
+                kv_cache=None,
+            )
+
     # Check output shape matches input
     assert output.shape == x.shape, f"Expected {x.shape}, got {output.shape}"
     

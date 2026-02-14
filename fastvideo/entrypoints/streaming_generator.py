@@ -163,6 +163,7 @@ class StreamingVideoGenerator(VideoGenerator):
         batch_kw = shallow_asdict(self.sampling_param)
         batch_kw.pop("video_quality",
                      None)  # writer-only, not a ForwardBatch field
+        batch_kw.pop("max_kv_cache_frames", None)  # used by pipeline config
         self.batch = ForwardBatch(
             **batch_kw,
             eta=0.0,

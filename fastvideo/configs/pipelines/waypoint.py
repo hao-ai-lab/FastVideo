@@ -61,11 +61,16 @@ class WaypointT2VConfig(PipelineConfig):
         default_factory=lambda: ("fp32", ))
 
     # Waypoint-specific settings
-    # Fixed sigma schedule (no flow shift). Match HF/Overworld to avoid over-denoising blur:
-    # 4 sigmas = 3 denoising steps (more steps can over-smooth and blur output).
+    # Fixed sigma schedule (no flow shift). Match official Overworld transformer config.
+    # 5 sigmas = 4 denoising steps (official: Overworld/Waypoint-1-Small transformer config.json).
     flow_shift: float | None = None
-    scheduler_sigmas: list[float] = field(
-        default_factory=lambda: [1.0, 0.94921875, 0.83984375, 0.0])
+    scheduler_sigmas: list[float] = field(default_factory=lambda: [
+        1.0,
+        0.8609585762023926,
+        0.729332447052002,
+        0.3205108940601349,
+        0.0,
+    ])
 
     # Interactive generation settings
     is_causal: bool = True

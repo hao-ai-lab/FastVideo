@@ -3,6 +3,7 @@ default_stages:
   - manual # Run in CI
 exclude: |
   (?x)(
+    _rebase_backup/.*|
     fastvideo/third_party/.*|
     fastvideo-kernel/.*|
     assets/.*|
