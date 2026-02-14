@@ -283,8 +283,8 @@ class LTX2DenoisingStage(PipelineStage):
                     neg_audio = pos_audio
                     mod_denoised = pos_denoised
                     mod_audio = pos_audio
-                    ptb_denoised = None
-                    ptb_audio = None
+                    ptb_denoised = pos_denoised
+                    ptb_audio = pos_audio
 
                     # Pass 2: text CFG (negative prompt)
                     if do_cfg_text and neg_prompt_embeds is not None:
@@ -343,19 +343,15 @@ class LTX2DenoisingStage(PipelineStage):
                     vid = (pos_denoised + (cfg_scale_video - 1) *
                            (pos_denoised - neg_denoised) +
                            (modality_scale_video - 1) *
-                           (pos_denoised - mod_denoised))
-                    if ptb_denoised is not None:
-                        vid = vid + stg_scale_video * (pos_denoised -
-                                                       ptb_denoised)
+                           (pos_denoised - mod_denoised) + stg_scale_video *
+                           (pos_denoised - ptb_denoised))
                     aud = None
                     if pos_audio is not None:
                         aud = (pos_audio + (cfg_scale_audio - 1) *
                                (pos_audio - neg_audio) +
                                (modality_scale_audio - 1) *
-                               (pos_audio - mod_audio))
-                        if ptb_audio is not None:
-                            aud = aud + stg_scale_audio * (pos_audio -
-                                                           ptb_audio)
+                               (pos_audio - mod_audio) + stg_scale_audio *
+                               (pos_audio - ptb_audio))
 
                     # Guidance rescaling (prevents saturation).
                     if rescale_scale > 0:
