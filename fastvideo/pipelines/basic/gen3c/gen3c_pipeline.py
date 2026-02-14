@@ -5,6 +5,7 @@ Implements GEN3C video diffusion pipeline with 3D cache support for camera-contr
 
 import torch
 
+from fastvideo.distributed import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
 from fastvideo.forward_context import set_forward_context
 from fastvideo.logger import init_logger
@@ -40,6 +41,16 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
         """Prepare latents and encode 3D cache buffers."""
         # Get dimensions from pipeline config
         pipeline_config = fastvideo_args.pipeline_config
+        device = get_local_torch_device()
+
+        # Determine batch size (following base LatentPreparationStage pattern)
+        if isinstance(batch.prompt, list):
+            batch_size = len(batch.prompt)
+        elif batch.prompt is not None:
+            batch_size = 1
+        else:
+            batch_size = batch.prompt_embeds[0].shape[0]
+        batch_size *= batch.num_videos_per_prompt
 
         # Initialize latents
         num_channels_latents = getattr(self.transformer, 'num_channels_latents',
@@ -55,18 +66,13 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
         latent_width = width // 8
 
         # Generate initial noise latents
-        latents_shape = (
-            batch.batch_size,
+        latents = torch.randn(
+            batch_size,
             num_channels_latents,
             latent_frames,
             latent_height,
             latent_width,
-        )
-
-        latents = torch.randn(
-            latents_shape,
-            generator=batch.generator,
-            device=batch.device,
+            device=device,
             dtype=torch.float32,
         )
 
@@ -75,6 +81,7 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
             latents = latents * self.scheduler.init_noise_sigma
 
         batch.latents = latents
+        batch.batch_size = batch_size
         batch.height = height
         batch.width = width
         batch.latent_height = latent_height
@@ -83,39 +90,42 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
 
         # Prepare conditioning indicator (for video conditioning)
         # Default: no conditioning (will be set by conditioning stage if needed)
-        batch.cond_indicator = torch.zeros(batch.batch_size,
+        batch.cond_indicator = torch.zeros(batch_size,
                                            1,
                                            latent_frames,
                                            latent_height,
                                            latent_width,
-                                           device=batch.device,
+                                           device=device,
                                            dtype=torch.float32)
 
         # Prepare condition_video_input_mask (binary mask for conditioning frames)
-        batch.condition_video_input_mask = torch.zeros(batch.batch_size,
+        batch.condition_video_input_mask = torch.zeros(batch_size,
                                                        1,
                                                        latent_frames,
                                                        latent_height,
                                                        latent_width,
-                                                       device=batch.device,
+                                                       device=device,
                                                        dtype=torch.float32)
 
         # Prepare condition_video_pose (3D cache buffers - to be filled by cache rendering)
         frame_buffer_max = getattr(pipeline_config, 'frame_buffer_max', 2)
         buffer_channels = frame_buffer_max * 32  # Each buffer: 16 (frame) + 16 (mask)
 
-        batch.condition_video_pose = torch.zeros(batch.batch_size,
+        batch.condition_video_pose = torch.zeros(batch_size,
                                                  buffer_channels,
                                                  latent_frames,
                                                  latent_height,
                                                  latent_width,
-                                                 device=batch.device,
+                                                 device=device,
                                                  dtype=torch.float32)
 
         # Prepare augment sigma (for noise augmentation on condition frames)
-        batch.condition_video_augment_sigma = torch.zeros(batch.batch_size,
-                                                          device=batch.device,
+        batch.condition_video_augment_sigma = torch.zeros(batch_size,
+                                                          device=device,
                                                           dtype=torch.float32)
+
+        # Required by base stage verification
+        batch.raw_latent_shape = latents.shape
 
         return batch
 
@@ -388,7 +398,6 @@ class Gen3CPipeline(ComposedPipelineBase):
 
     _required_config_modules = [
         "text_encoder", "tokenizer", "vae", "transformer", "scheduler",
-        "safety_checker"
     ]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):

@@ -11,6 +11,7 @@ from fastvideo.configs.sample.stepvideo import StepVideoT2VSamplingParam
 
 from fastvideo.configs.sample.cosmos import Cosmos_Predict2_2B_Video2World_SamplingParam
 from fastvideo.configs.sample.cosmos2_5 import Cosmos_Predict2_5_2B_Diffusers_SamplingParam
+from fastvideo.configs.sample.gen3c import Gen3C_Cosmos_7B_SamplingParam
 from fastvideo.configs.sample.ltx2 import LTX2SamplingParam
 
 # isort: off
@@ -109,6 +110,9 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "Lightricks/LTX-2": LTX2SamplingParam,
     "FastVideo/LTX2-Distilled-Diffusers": LTX2SamplingParam,
 
+    # GEN3C models
+    "nvidia/GEN3C-Cosmos-7B": Gen3C_Cosmos_7B_SamplingParam,
+
     # Add other specific weight variants
 }
 
@@ -140,6 +144,8 @@ SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "cosmos" in id.lower() and "2_5" not in id.lower(),
     "ltx2":
     lambda id: "ltx2" in id.lower() or "ltx-2" in id.lower(),
+    "gen3c":
+    lambda id: "gen3c" in id.lower(),
     # Add other pipeline architecture detectors
 }
 
@@ -163,6 +169,7 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
     "cosmos25": Cosmos_Predict2_5_2B_Diffusers_SamplingParam,
     "cosmos": Cosmos_Predict2_2B_Video2World_SamplingParam,
     "ltx2": LTX2SamplingParam,
+    "gen3c": Gen3C_Cosmos_7B_SamplingParam,
     # Other fallbacks by architecture
 }
 

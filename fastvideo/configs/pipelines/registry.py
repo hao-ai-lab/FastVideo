@@ -141,6 +141,7 @@ PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "stepvideo": StepVideoT2VConfig,
     "turbodiffusion": TurboDiffusionT2V_1_3B_Config,
     "ltx2": LTX2T2VConfig,
+    "gen3c": Gen3CConfig,
     # Other fallbacks by architecture
 }
 
