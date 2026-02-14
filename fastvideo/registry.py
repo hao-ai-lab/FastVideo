@@ -18,6 +18,7 @@ from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.pipelines.cosmos import CosmosConfig
 from fastvideo.configs.pipelines.cosmos2_5 import Cosmos25Config
 from fastvideo.configs.pipelines.hunyuan import FastHunyuanConfig, HunyuanConfig
+from fastvideo.configs.pipelines.hunyuangamecraft import HunyuanGameCraftPipelineConfig
 from fastvideo.configs.pipelines.hunyuan15 import (
     Hunyuan15T2V480PConfig, Hunyuan15I2V480PStepDistilledConfig,
     Hunyuan15T2V720PConfig, Hunyuan15I2V720PConfig, Hunyuan15SR1080PConfig)
@@ -59,6 +60,7 @@ from fastvideo.configs.sample.hunyuan15 import (
     Hunyuan15_720P_SamplingParam, Hunyuan15_720P_Distilled_I2V_SamplingParam,
     Hunyuan15_SR_1080P_SamplingParam)
 from fastvideo.configs.sample.hyworld import HYWorld_SamplingParam
+from fastvideo.configs.sample.hunyuangamecraft import HunyuanGameCraftSamplingParam
 from fastvideo.configs.sample.lingbotworld import LingBotWorld_SamplingParam
 from fastvideo.configs.sample.ltx2 import (LTX2BaseSamplingParam,
                                            LTX2DistilledSamplingParam)
@@ -318,14 +320,18 @@ def _register_configs() -> None:
         ],
     )
 
-    # Hunyuan
+    # Hunyuan (excludes gamecraft, hyworld, and versioned models)
     register_configs(
         sampling_param_cls=HunyuanSamplingParam,
         pipeline_config_cls=HunyuanConfig,
         hf_model_paths=[
             "hunyuanvideo-community/HunyuanVideo",
         ],
-        model_detectors=[lambda path: "hunyuan" in path.lower()],
+        model_detectors=[
+            lambda path: "hunyuan" in path.lower()
+            and "gamecraft" not in path.lower() and "hyworld" not in path.lower(
+            ) and "1.5" not in path.lower() and "1-5" not in path.lower()
+        ],
     )
     register_configs(
         sampling_param_cls=FastHunyuanSamplingParam,
@@ -345,6 +351,15 @@ def _register_configs() -> None:
         model_detectors=[lambda path: "hyworld" in path.lower()],
     )
 
+    # HunyuanGameCraft
+    register_configs(
+        sampling_param_cls=HunyuanGameCraftSamplingParam,
+        pipeline_config_cls=HunyuanGameCraftPipelineConfig,
+        hf_model_paths=[
+            "FastVideo/HunyuanGameCraft-Diffusers",
+        ],
+        model_detectors=[lambda path: "gamecraft" in path.lower()],
+    )
     # LingBotWorld
     register_configs(
         sampling_param_cls=LingBotWorld_SamplingParam,

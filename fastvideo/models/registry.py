@@ -25,6 +25,8 @@ logger = init_logger(__name__)
 _TEXT_TO_VIDEO_DIT_MODELS = {
     "HunyuanVideoTransformer3DModel":
     ("dits", "hunyuanvideo", "HunyuanVideoTransformer3DModel"),
+    "HunyuanGameCraftTransformer3DModel":
+    ("dits", "hunyuangamecraft", "HunyuanGameCraftTransformer3DModel"),
     "HunyuanVideo15Transformer3DModel":
     ("dits", "hunyuanvideo15", "HunyuanVideo15Transformer3DModel"),
     "HYWorldTransformer3DModel":
@@ -75,6 +77,7 @@ _IMAGE_ENCODER_MODELS: dict[str, tuple] = {
 _VAE_MODELS = {
     "AutoencoderKLHunyuanVideo":
     ("vaes", "hunyuanvae", "AutoencoderKLHunyuanVideo"),
+    "AutoencoderKLCausal3D": ("vaes", "gamecraftvae", "GameCraftVAE"),
     "AutoencoderKLHYWorld": ("vaes", "hyworldvae", "AutoencoderKLHYWorld"),
     "AutoencoderKLHunyuanVideo15": ("vaes", "hunyuan15vae", "AutoencoderKLHunyuanVideo15"),
     "AutoencoderKLWan": ("vaes", "wanvae", "AutoencoderKLWan"),
