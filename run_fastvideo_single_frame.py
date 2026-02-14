@@ -9,7 +9,9 @@ Usage (local or RunPod):
 
 Output: waypoint_single_image.png in the current directory.
 """
+import contextlib
 import os
+
 os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")
 os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
@@ -26,14 +28,15 @@ DEFAULT_SEED = 42
 OUTPUT_PNG = "waypoint_single_image.png"
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate one FastVideo Waypoint frame for comparison with official model"
+        description=
+        "Generate one FastVideo Waypoint frame for comparison with official model"
     )
     parser.add_argument(
         "--prompt",
         default=DEFAULT_PROMPT,
-        help=f"Text prompt (default: same as official test)",
+        help="Text prompt (default: same as official test)",
     )
     parser.add_argument(
         "--seed",
@@ -85,16 +88,15 @@ def main():
     mouse_cond = torch.zeros((1, 1, 2), dtype=torch.float32)
 
     print("Generating 1 frame...")
-    frames, _ = generator.step(keyboard_cond=keyboard_cond, mouse_cond=mouse_cond)
+    frames, _ = generator.step(keyboard_cond=keyboard_cond,
+                               mouse_cond=mouse_cond)
 
     temp_mp4 = "temp_single_frame.mp4"
     generator.finalize(output_path=temp_mp4)
     generator.shutdown()
     if os.path.isfile(temp_mp4):
-        try:
+        with contextlib.suppress(OSError):
             os.remove(temp_mp4)
-        except OSError:
-            pass
 
     if not frames:
         raise SystemExit("No frames returned from pipeline.")
@@ -109,8 +111,10 @@ def main():
         raise SystemExit(f"Unexpected frame type: {type(img)}")
 
     print(f"Saved {OUTPUT_PNG}")
-    print("Compare with official_test_frame.png (same prompt + seed in test_official_model.py).")
+    print(
+        "Compare with official_test_frame.png (same prompt + seed in test_official_model.py)."
+    )
 
 
 if __name__ == "__main__":
-    main()
+    main()  # type: ignore[no-untyped-call]

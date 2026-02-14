@@ -117,18 +117,13 @@ class WaypointPipeline(ComposedPipelineBase):
         if vae is not None:
             pipeline_config = fastvideo_args.pipeline_config
             vae_precision = getattr(pipeline_config, "vae_precision", "fp32")
-            vae_dtype = (
-                PRECISION_TO_TYPE[vae_precision]
-                if vae_precision in PRECISION_TO_TYPE
-                else torch.float32
-            )
+            vae_dtype = PRECISION_TO_TYPE.get(vae_precision, torch.float32)
             vae.to(dtype=vae_dtype)
 
         logger.info("WaypointPipeline initialized for interactive generation")
 
-    def _create_waypoint_kv_cache(
-        self, batch: ForwardBatch, fastvideo_args: FastVideoArgs
-    ) -> list | None:
+    def _create_waypoint_kv_cache(self, batch: ForwardBatch,
+                                  fastvideo_args: FastVideoArgs) -> list | None:
         """Create per-layer KV cache for autoregressive cross-frame attention."""
         transformer = self.get_module("transformer", None)
         if transformer is None:
@@ -138,13 +133,10 @@ class WaypointPipeline(ComposedPipelineBase):
         arch = getattr(dit_config, "arch_config", dit_config)
         n_layers = getattr(arch, "n_layers", getattr(arch, "num_layers", 22))
         n_kv_heads = getattr(arch, "n_kv_heads", 20)
-        head_dim = getattr(
-            arch, "attention_head_dim", arch.d_model // arch.n_heads
-        )
+        head_dim = getattr(arch, "attention_head_dim",
+                           arch.d_model // arch.n_heads)
         tokens_per_frame = getattr(arch, "tokens_per_frame", 256)
-        max_frames = getattr(
-            pipeline_config, "max_kv_cache_frames", 64
-        )
+        max_frames = getattr(pipeline_config, "max_kv_cache_frames", 64)
         cache_size = max_frames * tokens_per_frame
         device = next(transformer.parameters()).device
         dtype = next(transformer.parameters()).dtype
@@ -152,15 +144,26 @@ class WaypointPipeline(ComposedPipelineBase):
         kv_cache = []
         for _ in range(n_layers):
             kv_cache.append({
-                "k": torch.zeros(
-                    B, n_kv_heads, cache_size, head_dim,
-                    device=device, dtype=dtype,
+                "k":
+                torch.zeros(
+                    B,
+                    n_kv_heads,
+                    cache_size,
+                    head_dim,
+                    device=device,
+                    dtype=dtype,
                 ),
-                "v": torch.zeros(
-                    B, n_kv_heads, cache_size, head_dim,
-                    device=device, dtype=dtype,
+                "v":
+                torch.zeros(
+                    B,
+                    n_kv_heads,
+                    cache_size,
+                    head_dim,
+                    device=device,
+                    dtype=dtype,
                 ),
-                "end": 0,
+                "end":
+                0,
             })
         return kv_cache
 
@@ -208,8 +211,7 @@ class WaypointPipeline(ComposedPipelineBase):
             prompt_emb = outputs.last_hidden_state
             # Zero out padding so cross-attention does not attend to pad tokens (match HF)
             prompt_emb = prompt_emb * attention_mask.unsqueeze(-1).to(
-                prompt_emb.dtype
-            )
+                prompt_emb.dtype)
             prompt_pad_mask = attention_mask.eq(0)
 
         # Build KV cache for autoregressive cross-frame attention (HF parity)
@@ -256,9 +258,9 @@ class WaypointPipeline(ComposedPipelineBase):
         pipeline_config = ctx.fastvideo_args.pipeline_config
         dit_config = pipeline_config.dit_config
         arch = getattr(dit_config, "arch_config", dit_config)
-        ph, pw = getattr(arch, "patch", (1, 1))
-        if not isinstance(ph, int):
-            ph, pw = ph[0], pw[1]
+        patch = getattr(arch, "patch", (1, 1))
+        ph, pw = (patch, patch) if isinstance(patch, int) else (patch[0],
+                                                                patch[1])
         latent_h = arch.height * ph
         latent_w = arch.width * pw
 
@@ -310,7 +312,8 @@ class WaypointPipeline(ComposedPipelineBase):
             logger.warning(
                 "Waypoint expects 32x32 latents (tokens_per_frame=256). "
                 "Got %dx%d; RoPE/attention may be wrong.",
-                latent_h, latent_w,
+                latent_h,
+                latent_w,
             )
 
         for _ in range(t):
@@ -330,17 +333,14 @@ class WaypointPipeline(ComposedPipelineBase):
                 device=device,
                 dtype=torch.long,
             )
-            ctrl_step = (
-                min(ctx.frame_index, mouse.shape[1] - 1)
-                if mouse.shape[1] > 0 else 0
-            )
+            ctrl_step = (min(ctx.frame_index, mouse.shape[1] -
+                             1) if mouse.shape[1] > 0 else 0)
 
-            _is_last_window = (
-                _log_last_frames and ctx.frame_index >= t - DEBUG_LAST_N
-            )
+            _is_last_window = (_log_last_frames
+                               and ctx.frame_index >= t - DEBUG_LAST_N)
             if ctx.frame_index < DEBUG_MULTIFRAME_MAX:
-                m_slice = mouse[:, ctrl_step : ctrl_step + 1]
-                b_slice = button[:, ctrl_step : ctrl_step + 1]
+                m_slice = mouse[:, ctrl_step:ctrl_step + 1]
+                b_slice = button[:, ctrl_step:ctrl_step + 1]
                 logger.info(
                     "DEBUG frame %d: ctrl_step=%d frame_ts=%s "
                     "mouse mean=%.4f button sum=%.2f (cond slice)",
@@ -353,7 +353,10 @@ class WaypointPipeline(ComposedPipelineBase):
             elif _is_last_window:
                 logger.info(
                     "DEBUG (last) frame %d/%d: ctrl_step=%d frame_ts=%s",
-                    ctx.frame_index, t, ctrl_step, frame_ts[0, 0].item(),
+                    ctx.frame_index,
+                    t,
+                    ctrl_step,
+                    frame_ts[0, 0].item(),
                 )
 
             # Denoise through sigma schedule
@@ -361,7 +364,8 @@ class WaypointPipeline(ComposedPipelineBase):
                 logger.info(
                     "DEBUG sigmas=%s  x_init: mean=%.4f std=%.4f",
                     [round(s.item(), 4) for s in sigmas],
-                    x.float().mean().item(), x.float().std().item(),
+                    x.float().mean().item(),
+                    x.float().std().item(),
                 )
             for i in range(len(sigmas) - 1):
                 sigma_curr = sigmas[i]
@@ -376,8 +380,11 @@ class WaypointPipeline(ComposedPipelineBase):
                 attn_metadata = SDPAMetadata(current_timestep=i, attn_mask=None)
 
                 # Ensure prompt tensors are on same device as transformer (needed with CPU offload)
-                prompt_emb = ctx.prompt_emb.to(device=device, dtype=dtype) if ctx.prompt_emb is not None else None
-                prompt_pad_mask = ctx.prompt_pad_mask.to(device=device) if ctx.prompt_pad_mask is not None else None
+                prompt_emb = ctx.prompt_emb.to(
+                    device=device,
+                    dtype=dtype) if ctx.prompt_emb is not None else None
+                prompt_pad_mask = ctx.prompt_pad_mask.to(
+                    device=device) if ctx.prompt_pad_mask is not None else None
                 with set_forward_context(
                         current_timestep=i,
                         attn_metadata=attn_metadata,
@@ -389,9 +396,9 @@ class WaypointPipeline(ComposedPipelineBase):
                         frame_timestamp=frame_ts,
                         prompt_emb=prompt_emb,
                         prompt_pad_mask=prompt_pad_mask,
-                        mouse=mouse[:, ctrl_step : ctrl_step + 1],
-                        button=button[:, ctrl_step : ctrl_step + 1],
-                        scroll=scroll[:, ctrl_step : ctrl_step + 1],
+                        mouse=mouse[:, ctrl_step:ctrl_step + 1],
+                        button=button[:, ctrl_step:ctrl_step + 1],
+                        scroll=scroll[:, ctrl_step:ctrl_step + 1],
                         kv_cache=ctx.kv_cache,
                     )
 
@@ -403,10 +410,15 @@ class WaypointPipeline(ComposedPipelineBase):
                         "DEBUG step %d: sigma=%.4f->%.4f  "
                         "v_pred mean=%.4f std=%.4f min=%.4f max=%.4f  "
                         "x mean=%.4f std=%.4f  dsig=%.4f",
-                        i, sigma_curr.item(), sigma_next.item(),
-                        vf.mean().item(), vf.std().item(),
-                        vf.min().item(), vf.max().item(),
-                        xf.mean().item(), xf.std().item(),
+                        i,
+                        sigma_curr.item(),
+                        sigma_next.item(),
+                        vf.mean().item(),
+                        vf.std().item(),
+                        vf.min().item(),
+                        vf.max().item(),
+                        xf.mean().item(),
+                        xf.std().item(),
                         dsig,
                     )
 
@@ -417,8 +429,10 @@ class WaypointPipeline(ComposedPipelineBase):
                 logger.info(
                     "DEBUG frame %d denoised x: mean=%.4f std=%.4f min=%.4f max=%.4f",
                     ctx.frame_index,
-                    xf.mean().item(), xf.std().item(),
-                    xf.min().item(), xf.max().item(),
+                    xf.mean().item(),
+                    xf.std().item(),
+                    xf.min().item(),
+                    xf.max().item(),
                 )
             elif _is_last_window:
                 xf = x.float()
@@ -426,20 +440,22 @@ class WaypointPipeline(ComposedPipelineBase):
                     "DEBUG (last) frame %d denoised x: mean=%.4f std=%.4f "
                     "min=%.4f max=%.4f",
                     ctx.frame_index,
-                    xf.mean().item(), xf.std().item(),
-                    xf.min().item(), xf.max().item(),
+                    xf.mean().item(),
+                    xf.std().item(),
+                    xf.min().item(),
+                    xf.max().item(),
                 )
 
             # Cache pass: run forward with sigma=0 to update KV cache for next frame
             if ctx.kv_cache is not None:
-                sigma_zero = torch.zeros(
-                    x.shape[0], 1, device=device, dtype=dtype
-                )
+                sigma_zero = torch.zeros(x.shape[0],
+                                         1,
+                                         device=device,
+                                         dtype=dtype)
                 with set_forward_context(
                         current_timestep=0,
-                        attn_metadata=SDPAMetadata(
-                            current_timestep=0, attn_mask=None
-                        ),
+                        attn_metadata=SDPAMetadata(current_timestep=0,
+                                                   attn_mask=None),
                         forward_batch=None,
                 ):
                     transformer(
@@ -448,9 +464,9 @@ class WaypointPipeline(ComposedPipelineBase):
                         frame_timestamp=frame_ts,
                         prompt_emb=prompt_emb,
                         prompt_pad_mask=prompt_pad_mask,
-                        mouse=mouse[:, ctrl_step : ctrl_step + 1],
-                        button=button[:, ctrl_step : ctrl_step + 1],
-                        scroll=scroll[:, ctrl_step : ctrl_step + 1],
+                        mouse=mouse[:, ctrl_step:ctrl_step + 1],
+                        button=button[:, ctrl_step:ctrl_step + 1],
+                        scroll=scroll[:, ctrl_step:ctrl_step + 1],
                         kv_cache=ctx.kv_cache,
                         update_cache=True,
                     )
@@ -472,17 +488,15 @@ class WaypointPipeline(ComposedPipelineBase):
                 assert latent_in.shape[-2:] == expected_spatial, (
                     "Latent spatial size must match DiT output; got "
                     f"{tuple(latent_in.shape[-2:])}, expected {expected_spatial}. "
-                    "Do not resize latents before decode."
-                )
+                    "Do not resize latents before decode.")
                 # WorldEngineVAE/OWL VAE: use VAE dtype (bf16/fp16), NOT float32.
                 vae_dtype = next(vae.parameters()).dtype
                 latent_in = latent_in.to(dtype=vae_dtype)
                 vae_config = getattr(vae, "config", None)
-                scaling_factor = (
-                    getattr(vae_config, "scaling_factor", None)
-                    or getattr(vae, "scaling_factor", 1.0)
-                )
-                if scaling_factor is not None and abs(float(scaling_factor) - 1.0) > 1e-5:
+                scaling_factor = (getattr(vae_config, "scaling_factor", None)
+                                  or getattr(vae, "scaling_factor", 1.0))
+                if scaling_factor is not None and abs(
+                        float(scaling_factor) - 1.0) > 1e-5:
                     latent_in = latent_in / float(scaling_factor)
                 shift = getattr(vae_config, "shift_factor", None)
                 if shift is not None:
@@ -492,15 +506,18 @@ class WaypointPipeline(ComposedPipelineBase):
                 if ctx.frame_index == 0:
                     logger.info(
                         "DEBUG VAE class: %s  type(vae)=%s",
-                        type(vae).__name__, type(vae).__mro__,
+                        type(vae).__name__,
+                        type(vae).__mro__,
                     )
                 if ctx.frame_index < DEBUG_MULTIFRAME_MAX:
                     lf = latent_in.float()
                     logger.info(
                         "DEBUG frame %d VAE input: mean=%.4f std=%.4f min=%.4f max=%.4f",
                         ctx.frame_index,
-                        lf.mean().item(), lf.std().item(),
-                        lf.min().item(), lf.max().item(),
+                        lf.mean().item(),
+                        lf.std().item(),
+                        lf.min().item(),
+                        lf.max().item(),
                     )
                 elif _is_last_window:
                     lf = latent_in.float()
@@ -508,8 +525,10 @@ class WaypointPipeline(ComposedPipelineBase):
                         "DEBUG (last) frame %d VAE input: mean=%.4f std=%.4f "
                         "min=%.4f max=%.4f",
                         ctx.frame_index,
-                        lf.mean().item(), lf.std().item(),
-                        lf.min().item(), lf.max().item(),
+                        lf.mean().item(),
+                        lf.std().item(),
+                        lf.min().item(),
+                        lf.max().item(),
                     )
                 decoded = vae.decode(latent_in)
                 if ctx.frame_index == 0:
@@ -520,21 +539,27 @@ class WaypointPipeline(ComposedPipelineBase):
                         hasattr(decoded, "sample"),
                     )
                 _d = decoded.sample if hasattr(decoded, "sample") else decoded
-                if isinstance(_d, torch.Tensor) and ctx.frame_index < DEBUG_MULTIFRAME_MAX:
+                if isinstance(_d, torch.Tensor
+                              ) and ctx.frame_index < DEBUG_MULTIFRAME_MAX:
                     _df = _d.float()
                     logger.info(
                         "DEBUG frame %d decoded: mean=%.2f std=%.2f min=%.1f max=%.1f",
                         ctx.frame_index,
-                        _df.mean().item(), _df.std().item(),
-                        _df.min().item(), _df.max().item(),
+                        _df.mean().item(),
+                        _df.std().item(),
+                        _df.min().item(),
+                        _df.max().item(),
                     )
                     if _d.dim() >= 3 and _d.shape[-1] == 3:
                         for c in range(3):
                             ch = _df[..., c]
                             logger.info(
                                 "DEBUG frame %d ch%d (RGB): mean=%.2f min=%.1f max=%.1f",
-                                ctx.frame_index, c,
-                                ch.mean().item(), ch.min().item(), ch.max().item(),
+                                ctx.frame_index,
+                                c,
+                                ch.mean().item(),
+                                ch.min().item(),
+                                ch.max().item(),
                             )
                 elif isinstance(_d, torch.Tensor) and _is_last_window:
                     _df = _d.float()
@@ -542,15 +567,14 @@ class WaypointPipeline(ComposedPipelineBase):
                         "DEBUG (last) frame %d decoded: mean=%.2f std=%.2f "
                         "min=%.1f max=%.1f",
                         ctx.frame_index,
-                        _df.mean().item(), _df.std().item(),
-                        _df.min().item(), _df.max().item(),
+                        _df.mean().item(),
+                        _df.std().item(),
+                        _df.min().item(),
+                        _df.max().item(),
                     )
 
-                frame = (
-                    decoded.sample
-                    if hasattr(decoded, "sample")
-                    else decoded
-                )
+                frame = (decoded.sample
+                         if hasattr(decoded, "sample") else decoded)
                 # Normalize to [B, C, H, W]
                 if frame.dim() == 3:
                     frame = frame.unsqueeze(0)
@@ -563,12 +587,15 @@ class WaypointPipeline(ComposedPipelineBase):
                         logger.warning(
                             "Waypoint VAE output is latent resolution %dx%d; "
                             "expected full-res (e.g. 384x256). Check VAE is spatial upscaler.",
-                            out_h, out_w,
+                            out_h,
+                            out_w,
                         )
                     else:
                         logger.info(
                             "Waypoint VAE decode: latent %s -> pixel %dx%d",
-                            expected_spatial, out_h, out_w,
+                            expected_spatial,
+                            out_h,
+                            out_w,
                         )
                 # Clamp only; do not rescale. Output in [0, 1] for streaming_generator.
                 if frame.dtype in (torch.uint8, torch.int8, torch.int16,
@@ -582,14 +609,18 @@ class WaypointPipeline(ComposedPipelineBase):
                         "DEBUG frame %d final: mean=%.4f min=%.4f max=%.4f "
                         "(drift to 1.0 = white, high mean = washout)",
                         ctx.frame_index,
-                        frame.mean().item(), frame.min().item(), frame.max().item(),
+                        frame.mean().item(),
+                        frame.min().item(),
+                        frame.max().item(),
                     )
                 elif _is_last_window:
                     logger.info(
                         "DEBUG (last) frame %d final: mean=%.4f min=%.4f max=%.4f "
                         "(blur/washout check)",
                         ctx.frame_index,
-                        frame.mean().item(), frame.min().item(), frame.max().item(),
+                        frame.mean().item(),
+                        frame.min().item(),
+                        frame.max().item(),
                     )
                 generated_frames.append(frame)
 

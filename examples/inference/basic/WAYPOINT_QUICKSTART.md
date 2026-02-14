@@ -14,7 +14,7 @@ Use this when you only have SSH (e.g. RunPod) and want a short video file.
    ```
 2. Run the batch script (generates 8 frames with “hold W”, saves MP4):
    ```bash
-   python examples/inference/basic/basic_waypoint_runpod.py
+   python examples/inference/basic/basic_waypoint.py
    ```
 3. Download the video (on your PC):
    ```powershell
@@ -63,7 +63,7 @@ Note: each step takes 1–3 seconds on a typical GPU, so it won’t feel like 30
 
 | Goal                         | Where to run | Script                          |
 |-----------------------------|--------------|----------------------------------|
-| Get a short clip (batch)   | RunPod / SSH | `basic_waypoint_runpod.py`       |
+| Get a short clip (batch)   | RunPod / SSH | `basic_waypoint.py`             |
 | Type keys, save video      | Local GPU    | `basic_waypoint_streaming.py`    |
 | Window + keys, see frames  | Local GPU    | `basic_waypoint_local_live.py`   |
 

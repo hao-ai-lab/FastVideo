@@ -12,8 +12,16 @@ from fastvideo.configs.models.dits.lingbotworld import LingBotWorldVideoConfig
 from fastvideo.configs.models.dits.waypoint_transformer import WaypointConfig
 
 __all__ = [
-    "HunyuanVideoConfig", "HunyuanVideo15Config", "HunyuanGameCraftConfig",
-    "WanVideoConfig", "StepVideoConfig", "CosmosVideoConfig",
-    "Cosmos25VideoConfig", "LongCatVideoConfig", "LTX2VideoConfig",
-    "HYWorldConfig", "LingBotWorldVideoConfig", "WaypointConfig",
+    "HunyuanVideoConfig",
+    "HunyuanVideo15Config",
+    "HunyuanGameCraftConfig",
+    "WanVideoConfig",
+    "StepVideoConfig",
+    "CosmosVideoConfig",
+    "Cosmos25VideoConfig",
+    "LongCatVideoConfig",
+    "LTX2VideoConfig",
+    "HYWorldConfig",
+    "LingBotWorldVideoConfig",
+    "WaypointConfig",
 ]
