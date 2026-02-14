@@ -28,6 +28,9 @@
     right: false
   };
 
+  let availableModels = [];
+  let selectedModelId = '';
+
   let frameBuffer = [];
   let isPlayingBuffer = false;
   let animationFrameId = null;
@@ -150,6 +153,8 @@
       ws.onopen = () => {
         connected = true;
         connecting = false;
+        // Send selected model to server
+        ws.send(JSON.stringify({ type: 'select_model', model_id: selectedModelId }));
       };
 
       let pendingFrames = new Map(); // Track frames in decode order
@@ -398,9 +403,19 @@
     if (event.key === 'ArrowRight') pressedArrows.right = false;
   }
 
-  onMount(() => {
+  onMount(async () => {
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+
+    // Fetch available models
+    try {
+      const res = await fetch('/models');
+      const data = await res.json();
+      availableModels = data.models;
+      selectedModelId = data.default_model_id;
+    } catch (e) {
+      console.error('Failed to fetch models:', e);
+    }
   });
 
   onDestroy(() => {
@@ -463,7 +478,17 @@
   </details>
 
   <div class="header-section">
-    <h2>Matrix-Game 2.0</h2>
+    <div class="model-selector">
+      {#if availableModels.length > 0}
+        <select bind:value={selectedModelId} disabled={sessionStarted}>
+          {#each availableModels as model}
+            <option value={model.id}>{model.name}</option>
+          {/each}
+        </select>
+      {:else}
+        <h2>Loading...</h2>
+      {/if}
+    </div>
     <div class="status">
       {#if connected && gpuAssigned && timeLeft !== null}
         <span class="time-left" class:warning={timeLeft <= 30}>
@@ -695,6 +720,31 @@
     max-width: 672px;
     margin-top: 2rem;
     margin-bottom: 0.5rem;
+  }
+
+  .model-selector {
+    justify-self: start;
+  }
+
+  .model-selector select {
+    background: #1f2937;
+    color: white;
+    border: 1px solid #374151;
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    appearance: auto;
+  }
+
+  .model-selector select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .model-selector select:hover:not(:disabled) {
+    border-color: #60a5fa;
   }
 
   .header-section h2 {

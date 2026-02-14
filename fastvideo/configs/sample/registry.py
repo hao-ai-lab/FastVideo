@@ -92,6 +92,9 @@ SAMPLING_PARAM_REGISTRY: dict[str, Any] = {
     "KyleShao/Cosmos-Predict2.5-2B-Diffusers":
     Cosmos_Predict2_5_2B_Diffusers_SamplingParam,
 
+    # WanGame models
+    "weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers": MatrixGame2_SamplingParam,
+
     # MatrixGame2.0 models
     "FastVideo/Matrix-Game-2.0-Base-Diffusers": MatrixGame2_SamplingParam,
     "FastVideo/Matrix-Game-2.0-GTA-Diffusers": MatrixGame2_SamplingParam,
@@ -130,6 +133,8 @@ SAMPLING_PARAM_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "wandmdpipeline" in id.lower(),
     "wancausaldmdpipeline":
     lambda id: "wancausaldmdpipeline" in id.lower(),
+    "wangame":
+    lambda id: "wangame" in id.lower(),
     "matrixgame":
     lambda id: "matrixgame" in id.lower() or "matrix-game" in id.lower(),
     "turbodiffusion":
@@ -157,6 +162,7 @@ SAMPLING_FALLBACK_PARAM: dict[str, Any] = {
     "wandmdpipeline": FastWanT2V480P_SamplingParam,
     "wancausaldmdpipeline": SelfForcingWan2_1_T2V_1_3B_480P_SamplingParam,
     "stepvideo": StepVideoT2VSamplingParam,
+    "wangame": MatrixGame2_SamplingParam,
     "matrixgame": MatrixGame2_SamplingParam,
     "turbodiffusion":
     TurboDiffusionT2V_1_3B_SamplingParam,  # Default to T2V for fallback

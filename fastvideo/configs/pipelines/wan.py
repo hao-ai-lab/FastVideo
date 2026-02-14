@@ -7,6 +7,7 @@ import torch
 from fastvideo.configs.models import DiTConfig, EncoderConfig, VAEConfig
 from fastvideo.configs.models.dits import WanVideoConfig
 from fastvideo.configs.models.dits.matrixgame import MatrixGameWanVideoConfig
+from fastvideo.configs.models.dits.wangamevideo import WanGameVideoConfig
 from fastvideo.configs.models.encoders import (BaseEncoderOutput,
                                                CLIPVisionConfig, T5Config,
                                                WAN2_1ControlCLIPVisionConfig)
@@ -217,3 +218,23 @@ class MatrixGameI2V480PConfig(WanI2V480PConfig):
     context_noise: int = 0
     num_frames_per_block: int = 3
     # sliding_window_num_frames: int = 15
+
+
+# =============================================
+# ============= WanGame ======================
+# =============================================
+@dataclass
+class WanGameI2V480PConfig(WanI2V480PConfig):
+    """Configuration for WanGame image-to-video pipeline."""
+    dit_config: DiTConfig = field(default_factory=WanGameVideoConfig)
+
+    image_encoder_config: EncoderConfig = field(
+        default_factory=WAN2_1ControlCLIPVisionConfig)
+
+    is_causal: bool = True
+    flow_shift: float | None = 5.0
+    dmd_denoising_steps: list[int] | None = field(
+        default_factory=lambda: [1000, 666, 333])
+    warp_denoising_step: bool = True
+    context_noise: int = 0
+    num_frames_per_block: int = 3

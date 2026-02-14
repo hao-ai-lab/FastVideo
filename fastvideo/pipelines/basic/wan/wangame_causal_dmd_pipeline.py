@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Matrix-Game causal DMD pipeline implementation."""
+"""WanGame causal DMD pipeline implementation."""
 
 from fastvideo.fastvideo_args import FastVideoArgs
 import torch
@@ -10,15 +10,14 @@ from fastvideo.pipelines.stages import (ConditioningStage, DecodingStage,
                                         InputValidationStage,
                                         LatentPreparationStage,
                                         TextEncodingStage,
-                                        MatrixGameImageEncodingStage,
                                         MatrixGameCausalDenoisingStage)
 from fastvideo.pipelines.stages.image_encoding import (
-    MatrixGameImageVAEEncodingStage)
+    MatrixGameImageEncodingStage, MatrixGameImageVAEEncodingStage)
 
 logger = init_logger(__name__)
 
 
-class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
+class WanGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
     _required_config_modules = [
         "vae", "transformer", "scheduler", "image_encoder", "image_processor"
     ]
@@ -67,8 +66,7 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         self.add_stage(stage_name="decoding_stage",
                        stage=DecodingStage(vae=self.get_module("vae")))
 
-        logger.info(
-            "MatrixGameCausalDMDPipeline initialized with action support")
+        logger.info("WanGameCausalDMDPipeline initialized")
 
     @torch.no_grad()
     def streaming_reset(self, batch: ForwardBatch,
@@ -76,7 +74,6 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
         if not self.post_init_called:
             self.post_init()
 
-        # 1. Run Pre-processing stages
         stages_to_run = [
             "input_validation_stage", "prompt_encoding_stage",
             "image_encoding_stage", "conditioning_stage",
@@ -88,54 +85,31 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
                 batch = self._stage_name_mapping[stage_name].forward(
                     batch, fastvideo_args)
 
-        # 2. Reset Denoising Stage
         denoiser = self._stage_name_mapping["denoising_stage"]
         denoiser.streaming_reset(batch, fastvideo_args)
-
-        # 3. Initialize VAE cache
         self._vae_cache = None
 
     def streaming_step(self, keyboard_action, mouse_action) -> ForwardBatch:
-        import time
         denoiser = self._stage_name_mapping["denoising_stage"]
         ctx = denoiser._streaming_ctx
         assert ctx is not None, "streaming_ctx must be set"
 
         start_idx = ctx.start_index
-
-        # Time DiT forward pass
-        torch.cuda.synchronize()
-        t0 = time.perf_counter()
         batch = denoiser.streaming_step(keyboard_action, mouse_action)
-        torch.cuda.synchronize()
-        dit_time_ms = (time.perf_counter() - t0) * 1000
-
         end_idx = ctx.start_index
 
-        # Decode only the new generated block
-        vae_time_ms = 0.0
         if end_idx > start_idx:
             current_latents = batch.latents[:, :, start_idx:end_idx, :, :]
             args = ctx.fastvideo_args
             decoder = self._stage_name_mapping["decoding_stage"]
-
-            # Time VAE decode
-            torch.cuda.synchronize()
-            t0 = time.perf_counter()
             decoded_frames, self._vae_cache = decoder.streaming_decode(
                 current_latents,
                 args,
                 cache=self._vae_cache,
                 is_first_chunk=(start_idx == 0))
-            torch.cuda.synchronize()
-            vae_time_ms = (time.perf_counter() - t0) * 1000
-
             batch.output = decoded_frames
         else:
             batch.output = None
-
-        # Store timings in batch for caller to access
-        batch.stage_timings = {"dit_ms": dit_time_ms, "vae_ms": vae_time_ms}
 
         return batch
 
@@ -145,5 +119,4 @@ class MatrixGameCausalDMDPipeline(LoRAPipeline, ComposedPipelineBase):
             denoiser.streaming_clear()
         self._vae_cache = None
 
-
-EntryClass = [MatrixGameCausalDMDPipeline]
+EntryClass = [WanGameCausalDMDPipeline]

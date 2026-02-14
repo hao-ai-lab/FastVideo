@@ -33,6 +33,8 @@ _PIPELINE_NAME_TO_ARCHITECTURE_NAME: dict[str, str] = {
     "Cosmos2_5Pipeline": "cosmos",
     "MatrixGamePipeline": "matrixgame",
     "MatrixGameCausalDMDPipeline": "matrixgame",
+    "WanGameActionImageToVideoPipeline": "wan",
+    "WanGameCausalDMDPipeline": "wan",
     "LongCatPipeline": "longcat",
     "LongCatImageToVideoPipeline": "longcat",
     "LongCatVideoContinuationPipeline": "longcat",

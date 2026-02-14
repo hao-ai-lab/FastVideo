@@ -171,7 +171,7 @@ class StreamingVideoGenerator(VideoGenerator):
 
     def step(
             self, keyboard_cond: torch.Tensor,
-            mouse_cond: torch.Tensor) -> tuple[list[np.ndarray], Future | None]:
+            mouse_cond: torch.Tensor) -> tuple[list[np.ndarray], Future | None, dict | None]:
         if self.batch is None:
             raise RuntimeError("Call reset() before step()")
 
@@ -195,7 +195,10 @@ class StreamingVideoGenerator(VideoGenerator):
                 # Returns Future for block file, or None if no block_dir
                 block_future = self.writer.add_frames(frames)
 
-        return frames, block_future
+        # Extract stage timings if available
+        stage_timings = getattr(output_batch, 'stage_timings', None)
+
+        return frames, block_future, stage_timings
 
     async def step_async(
             self, keyboard_cond: torch.Tensor,

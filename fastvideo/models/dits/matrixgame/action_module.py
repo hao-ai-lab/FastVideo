@@ -496,14 +496,14 @@ class ActionModule(nn.Module):
                         else:
                             local_end_index = kv_cache_keyboard["local_end_index"].item() + current_end - kv_cache_keyboard["global_end_index"].item()
                             local_start_index = local_end_index - num_new_tokens
-                        assert k.shape[0] == S # BS == 1 or the cache should not be saved/ load method should be modified
-                        kv_cache_keyboard["k"][:, local_start_index:local_end_index] = k[:1]
-                        kv_cache_keyboard["v"][:, local_start_index:local_end_index] = v[:1]
+                        assert k.shape[0] % S == 0  # BS >= 1
+                        kv_cache_keyboard["k"][:, local_start_index:local_end_index] = k[::S]
+                        kv_cache_keyboard["v"][:, local_start_index:local_end_index] = v[::S]
 
                         attn = self.keyboard_attn_layer(
                             q,
-                            kv_cache_keyboard["k"][:, max(0, local_end_index - max_attention_size):local_end_index].repeat(S, 1, 1, 1),
-                            kv_cache_keyboard["v"][:, max(0, local_end_index - max_attention_size):local_end_index].repeat(S, 1, 1, 1),
+                            kv_cache_keyboard["k"][:, max(0, local_end_index - max_attention_size):local_end_index].repeat_interleave(S, dim=0),
+                            kv_cache_keyboard["v"][:, max(0, local_end_index - max_attention_size):local_end_index].repeat_interleave(S, dim=0),
                         )
 
                         kv_cache_keyboard["global_end_index"].fill_(current_end)

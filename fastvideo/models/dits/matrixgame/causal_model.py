@@ -14,7 +14,7 @@ from torch.nn.attention.flex_attention import BlockMask
 from fastvideo.forward_context import get_forward_context
 
 flex_attention = torch.compile(
-    flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
+    flex_attention, dynamic=True, mode="max-autotune-no-cudagraphs")
 
 from fastvideo.attention import LocalAttention
 from fastvideo.configs.models.dits.matrixgame import MatrixGameWanVideoConfig
@@ -465,6 +465,7 @@ _DEFAULT_MATRIXGAME_CONFIG = MatrixGameWanVideoConfig()
 
 class CausalMatrixGameWanModel(BaseDiT):
     supports_action_input = True
+    _concatenates_image_latent = True  # Model handles image_latent internally via forward_context
 
     _fsdp_shard_conditions = _DEFAULT_MATRIXGAME_CONFIG._fsdp_shard_conditions
     _compile_conditions = _DEFAULT_MATRIXGAME_CONFIG._compile_conditions

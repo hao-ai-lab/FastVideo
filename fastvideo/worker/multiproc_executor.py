@@ -39,13 +39,17 @@ logger = init_logger(__name__)
 class StreamingTaskType(str, Enum):
     """
     Enumeration for different streaming task types.
-    
+
     Inherits from str to allow string comparison for backward compatibility.
     """
     RESET = "reset"
     STEP = "step"
     CLEAR = "clear"
     EXIT = "exit"
+    # Multi-user task types
+    USER_JOIN = "user_join"
+    USER_STEP = "user_step"
+    USER_LEAVE = "user_leave"
 
 
 @dataclass
@@ -58,6 +62,8 @@ class StreamingTask:
     # For RESET tasks:
     batch: ForwardBatch | None = None
     fastvideo_args: FastVideoArgs | None = None
+    # For multi-user tasks:
+    user_id: str | None = None
 
 
 @dataclass
@@ -66,6 +72,8 @@ class StreamingResult:
     task_type: StreamingTaskType
     output_batch: ForwardBatch | None = None
     error: Exception | None = None
+    # For multi-user results:
+    user_id: str | None = None
 
 
 class MultiprocExecutor(Executor):
@@ -183,6 +191,13 @@ class MultiprocExecutor(Executor):
         self.collective_rpc("start_streaming_queue_loop")
         self._streaming_enabled = True
 
+    def enable_multi_user_streaming(self) -> None:
+        if self._streaming_enabled:
+            return
+
+        self.collective_rpc("start_multi_user_streaming_loop")
+        self._streaming_enabled = True
+
     def disable_streaming(self) -> None:
         if not self._streaming_enabled:
             return
@@ -224,6 +239,42 @@ class MultiprocExecutor(Executor):
         if self._streaming_enabled and self._streaming_input_queue is not None:
             self._streaming_input_queue.put(
                 StreamingTask(task_type=StreamingTaskType.CLEAR))
+
+    def submit_user_join(self, user_id: str, forward_batch: ForwardBatch,
+                         fastvideo_args: FastVideoArgs) -> None:
+        if not self._streaming_enabled:
+            self.enable_streaming()
+
+        self._streaming_input_queue.put(
+            StreamingTask(
+                task_type=StreamingTaskType.USER_JOIN,
+                user_id=user_id,
+                batch=forward_batch,
+                fastvideo_args=fastvideo_args,
+            ))
+
+    def submit_user_step(self, user_id: str,
+                         keyboard_action: torch.Tensor | None,
+                         mouse_action: torch.Tensor | None) -> None:
+        if not self._streaming_enabled:
+            raise RuntimeError(
+                "Streaming mode not enabled. Call enable_streaming() first.")
+
+        self._streaming_input_queue.put(
+            StreamingTask(
+                task_type=StreamingTaskType.USER_STEP,
+                user_id=user_id,
+                keyboard_action=keyboard_action,
+                mouse_action=mouse_action,
+            ))
+
+    def submit_user_leave(self, user_id: str) -> None:
+        if self._streaming_enabled and self._streaming_input_queue is not None:
+            self._streaming_input_queue.put(
+                StreamingTask(
+                    task_type=StreamingTaskType.USER_LEAVE,
+                    user_id=user_id,
+                ))
 
     def get_result(self,
                    timeout: float | None = None) -> StreamingResult | None:
@@ -642,6 +693,11 @@ class WorkerMultiprocProc:
                             {"status": "streaming_queue_loop_started"})
                         self.streaming_queue_loop()
                         continue
+                    if method == "start_multi_user_streaming_loop":
+                        self.pipe.send(
+                            {"status": "multi_user_streaming_loop_started"})
+                        self.multi_user_streaming_loop()
+                        continue
                     if method == 'execute_forward':
                         forward_batch = kwargs['forward_batch']
                         fastvideo_args = kwargs['fastvideo_args']
@@ -715,10 +771,125 @@ class WorkerMultiprocProc:
                     self.worker.execute_streaming_clear()
                     self.streaming_output_queue.put(
                         StreamingResult(task_type=StreamingTaskType.CLEAR))
+                elif task.task_type in (StreamingTaskType.USER_JOIN,
+                                        StreamingTaskType.USER_STEP,
+                                        StreamingTaskType.USER_LEAVE):
+                    # Switch to multi-user mode
+                    self.multi_user_streaming_loop(first_task=task)
+                    break
             except Exception as e:
                 logger.error("Worker %d queue loop error: %s", self.rank, e)
                 self.streaming_output_queue.put(
                     StreamingResult(task_type=StreamingTaskType.STEP, error=e))
+
+    def multi_user_streaming_loop(
+        self, first_task: StreamingTask | None = None
+    ) -> None:
+        """ORCA-style multi-user streaming loop.
+
+        Processes USER_JOIN/USER_STEP/USER_LEAVE tasks and batches
+        compatible users together for each denoising step.
+        """
+        from fastvideo.pipelines.stages.multi_user_engine import MultiUserEngine
+
+        if self.streaming_input_queue is None or self.streaming_output_queue is None:
+            logger.error("Worker %d: streaming queues not initialized",
+                         self.rank)
+            return
+
+        pipeline = self.worker.get_pipeline()
+        try:
+            from ui.world_model.server.config import DISABLE_BATCHING
+        except ImportError:
+            DISABLE_BATCHING = False
+        engine = MultiUserEngine(pipeline, disable_batching=DISABLE_BATCHING)
+        logger.info("Worker %d: multi-user streaming loop started", self.rank)
+
+        def handle_task(task: StreamingTask) -> bool:
+            """Handle a single task. Returns False if should exit."""
+            if task.task_type == StreamingTaskType.EXIT:
+                return False
+            elif task.task_type == StreamingTaskType.USER_JOIN:
+                try:
+                    engine.add_user(
+                        task.user_id, task.batch, task.fastvideo_args)
+                    self.streaming_output_queue.put(
+                        StreamingResult(
+                            task_type=StreamingTaskType.USER_JOIN,
+                            user_id=task.user_id))
+                except Exception as e:
+                    logger.error("Worker %d user_join error for %s: %s",
+                                 self.rank, task.user_id, e)
+                    self.streaming_output_queue.put(
+                        StreamingResult(
+                            task_type=StreamingTaskType.USER_JOIN,
+                            user_id=task.user_id, error=e))
+            elif task.task_type == StreamingTaskType.USER_STEP:
+                try:
+                    engine.submit_step(
+                        task.user_id, task.keyboard_action, task.mouse_action)
+                except Exception as e:
+                    logger.error("Worker %d user_step submit error for %s: %s",
+                                 self.rank, task.user_id, e)
+                    self.streaming_output_queue.put(
+                        StreamingResult(
+                            task_type=StreamingTaskType.USER_STEP,
+                            user_id=task.user_id, error=e))
+            elif task.task_type == StreamingTaskType.USER_LEAVE:
+                engine.remove_user(task.user_id)
+                self.streaming_output_queue.put(
+                    StreamingResult(
+                        task_type=StreamingTaskType.USER_LEAVE,
+                        user_id=task.user_id))
+            return True
+
+        # Handle the first task that triggered the switch
+        if first_task is not None:
+            if not handle_task(first_task):
+                return
+
+        while True:
+            # 1. Drain input queue (non-blocking) for new requests
+            while True:
+                try:
+                    task = self.streaming_input_queue.get_nowait()
+                    if not handle_task(task):
+                        return
+                except queue.Empty:
+                    break
+
+            # 2. Run one ORCA iteration
+            if engine.has_pending_work():
+                try:
+                    completed = engine.run_iteration()
+                    for result in completed:
+                        self.streaming_output_queue.put(
+                            StreamingResult(
+                                task_type=StreamingTaskType.USER_STEP,
+                                user_id=result.user_id,
+                                output_batch=result.output_batch))
+                except Exception as e:
+                    logger.error("Worker %d ORCA iteration error: %s",
+                                 self.rank, e, exc_info=True)
+                    # Reset all pending users to prevent infinite error loop
+                    for uid, sess in engine.users.items():
+                        if sess.denoising_step >= 0:
+                            sess.denoising_step = -1
+                            sess.current_latents = None
+                            sess.noise_latents_btchw = None
+                            self.streaming_output_queue.put(
+                                StreamingResult(
+                                    task_type=StreamingTaskType.USER_STEP,
+                                    user_id=uid, error=e))
+
+            # 3. If no work, block on queue to avoid busy-waiting
+            if not engine.has_pending_work():
+                try:
+                    task = self.streaming_input_queue.get(timeout=0.1)
+                    if not handle_task(task):
+                        return
+                except queue.Empty:
+                    continue
 
     @staticmethod
     def setup_proc_title_and_log_prefix() -> None:

@@ -23,7 +23,7 @@ from fastvideo.configs.pipelines.wan import (
     Wan2_2_I2V_A14B_Config, Wan2_2_T2V_A14B_Config, Wan2_2_TI2V_5B_Config,
     WanI2V480PConfig, WanI2V720PConfig, WanT2V480PConfig, WanT2V720PConfig,
     SelfForcingWanT2V480PConfig, WANV2VConfig, SelfForcingWan2_2_T2V480PConfig,
-    MatrixGameI2V480PConfig)
+    MatrixGameI2V480PConfig, WanGameI2V480PConfig)
 # isort: on
 from fastvideo.logger import init_logger
 from fastvideo.utils import (maybe_download_model_index,
@@ -42,6 +42,7 @@ PIPE_NAME_TO_CONFIG: dict[str, type[PipelineConfig]] = {
     "FastVideo/HY-WorldPlay-Bidirectional-Diffusers": HYWorldConfig,
     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers": WanT2V480PConfig,
     "weizhou03/Wan2.1-Fun-1.3B-InP-Diffusers": WanI2V480PConfig,
+    "weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers": WanGameI2V480PConfig,
     "IRMChen/Wan2.1-Fun-1.3B-Control-Diffusers": WANV2VConfig,
     "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers": WanI2V480PConfig,
     "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers": WanI2V720PConfig,
@@ -93,6 +94,8 @@ PIPELINE_DETECTOR: dict[str, Callable[[str], bool]] = {
     lambda id: "hyworld" in id.lower(),
     "matrixgame":
     lambda id: "matrix-game" in id.lower() or "matrixgame" in id.lower(),
+    "wangameactionimagetovideo":
+    lambda id: "wangameactionimagetovideo" in id.lower(),
     "wanpipeline":
     lambda id: "wanpipeline" in id.lower(),
     "wanimagetovideo":
@@ -124,6 +127,7 @@ PIPELINE_FALLBACK_CONFIG: dict[str, type[PipelineConfig]] = {
     "hunyuan":
     HunyuanConfig,  # Base Hunyuan config as fallback for any Hunyuan variant
     "matrixgame": MatrixGameI2V480PConfig,
+    "wangameactionimagetovideo": WanGameI2V480PConfig,
     "hunyuan15":
     Hunyuan15T2V480PConfig,  # Base Hunyuan15 config as fallback for any Hunyuan15 variant
     "hyworld":

@@ -75,6 +75,10 @@ class Worker:
 
         self.pipeline = build_pipeline(self.fastvideo_args)
 
+    def get_pipeline(self):
+        """Return the loaded pipeline instance."""
+        return self.pipeline
+
     def execute_forward(self, forward_batch: ForwardBatch,
                         fastvideo_args: FastVideoArgs) -> ForwardBatch:
         output_batch = self.pipeline.forward(forward_batch, self.fastvideo_args)

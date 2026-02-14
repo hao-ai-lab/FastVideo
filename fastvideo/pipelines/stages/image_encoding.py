@@ -845,7 +845,18 @@ class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
             num_frames = batch.num_frames if isinstance(
                 batch.num_frames, int) else batch.num_frames[0]
 
+        def _gpu_mem(label=""):
+            a = torch.cuda.memory_allocated() / 1024**3
+            r = torch.cuda.memory_reserved() / 1024**3
+            logger.info("VAE stage [%s]: alloc=%.2fGiB, reserved=%.2fGiB", label, a, r)
+
+        _gpu_mem("before vae.to(GPU)")
         self.vae = self.vae.to(get_local_torch_device())
+        _gpu_mem("after vae.to(GPU)")
+        logger.info("VAE use_feature_cache=%s, use_tiling=%s, use_temporal_tiling=%s",
+                     getattr(self.vae, 'use_feature_cache', 'N/A'),
+                     getattr(self.vae, 'use_tiling', 'N/A'),
+                     getattr(self.vae, 'use_temporal_tiling', 'N/A'))
 
         # Process single image for I2V (latent dimensions computed but not used directly)
 
@@ -906,15 +917,23 @@ class MatrixGameImageVAEEncodingStage(ImageVAEEncodingStage):
         vae_autocast_enabled = (
             vae_dtype != torch.float32) and not fastvideo_args.disable_autocast
 
-        # Encode Image
-        with torch.autocast(device_type="cuda",
-                            dtype=vae_dtype,
-                            enabled=vae_autocast_enabled):
+        _gpu_mem("before encode")
+        logger.info("video_condition shape=%s dtype=%s device=%s",
+                     video_condition.shape, video_condition.dtype,
+                     video_condition.device)
+
+        # Encode Image (no_grad avoids autograd graph that would retain all
+        # intermediate activations across the feature-cache loop iterations)
+        with torch.no_grad(), torch.autocast(
+                device_type="cuda", dtype=vae_dtype,
+                enabled=vae_autocast_enabled):
             if fastvideo_args.pipeline_config.vae_tiling:
                 self.vae.enable_tiling()
             if not vae_autocast_enabled:
                 video_condition = video_condition.to(vae_dtype)
+            _gpu_mem("right before vae.encode()")
             encoder_output = self.vae.encode(video_condition)
+            _gpu_mem("after vae.encode()")
 
         # MatrixGame uses deterministic VAE encode for the first-frame conditioning.
         # Sampling would inject random noise into the cond_concat tensor and destroy the action guidance.

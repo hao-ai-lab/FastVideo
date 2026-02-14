@@ -11,7 +11,7 @@ import uuid
 
 from config import (
     KEYBOARD_MAP, CAMERA_MAP, MAX_BLOCKS, JPEG_QUALITY, BATCH_SIZE,
-    SESSION_TIMEOUT_SECONDS, MODEL_CONFIG
+    SESSION_TIMEOUT_SECONDS, MODEL_CONFIG, MODEL_REGISTRY, DEFAULT_MODEL_ID
 )
 from gpu_pool import GPUPool, GPUSlot, get_available_gpus
 
@@ -58,6 +58,21 @@ async def get_status():
     if gpu_pool is None:
         return {"error": "GPU pool not initialized"}
     return gpu_pool.get_status()
+
+
+@app.get("/models")
+async def get_models():
+    """Get available models and the currently active model."""
+    models = []
+    for model_id, config in MODEL_REGISTRY.items():
+        models.append({
+            "id": model_id,
+            "name": config["name"],
+        })
+    return {
+        "models": models,
+        "default_model_id": DEFAULT_MODEL_ID,
+    }
 
 
 def encode_frames(frames: list) -> list[str]:
@@ -114,31 +129,50 @@ async def websocket_endpoint(websocket: WebSocket):
             pass  # WebSocket may already be closed
 
     try:
-        # Acquire a GPU slot (may wait in queue)
+        # Wait for model selection from client
+        model_id = DEFAULT_MODEL_ID
+        model_config = MODEL_CONFIG
+        try:
+            init_data = await asyncio.wait_for(websocket.receive_json(), timeout=5.0)
+            if init_data.get("type") == "select_model":
+                model_id = init_data.get("model_id", DEFAULT_MODEL_ID)
+                if model_id in MODEL_REGISTRY:
+                    model_config = MODEL_REGISTRY[model_id]
+                    print(f"Client {client_id[:8]} selected model: {model_id}")
+        except asyncio.TimeoutError:
+            pass  # Use default model config
+
+        # Acquire a GPU slot (may wait in queue, may share with other users)
         gpu_id, slot = await gpu_pool.acquire(client_id, websocket)
 
         # Start session timeout
         timeout_task = asyncio.create_task(session_timeout())
+
+        # Join the multi-user engine on this GPU (triggers reload if model differs)
+        await slot.join_user(client_id, model_id=model_id)
 
         # Notify client they're connected to a GPU
         await websocket.send_json({
             "type": "gpu_assigned",
             "gpu_id": gpu_id,
             "session_timeout": SESSION_TIMEOUT_SECONDS,
-            "image_url": MODEL_CONFIG.get("image_url")
+            "image_url": model_config.get("image_url")
         })
 
-        # Generate and send initial frame (GPU is already reset and ready)
+        # Generate and send initial frame
         block_count = 0
         await websocket.send_json({"type": "block_count", "count": block_count, "max": MAX_BLOCKS})
 
         try:
-            frames = await slot.step([0, 0, 0, 0], [0, 0])
+            frames, timings = await slot.user_step(
+                client_id, [0, 0, 0, 0], [0, 0])
             block_count = 1
             await websocket.send_json({"type": "block_count", "count": block_count, "max": MAX_BLOCKS})
             await send_frames(websocket, frames)
+            if timings:
+                print(f"[GPU {gpu_id}] Initial ({client_id[:8]}): model={timings.get('model_step_ms', 0):.0f}ms")
         except Exception as e:
-            print(f"[GPU {gpu_id}] Initial frame error: {e}")
+            print(f"[GPU {gpu_id}] Initial frame error for {client_id[:8]}: {e}")
 
         # Main event loop
         while True:
@@ -150,14 +184,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json({"type": "reset_started"})
 
                 try:
-                    frames = await slot.reset()
+                    # Leave and rejoin to reset user state
+                    await slot.leave_user(client_id)
+                    await slot.join_user(client_id, model_id=model_id)
+
+                    frames, timings = await slot.user_step(
+                        client_id, [0, 0, 0, 0], [0, 0])
                     block_count = 1
                     await websocket.send_json({"type": "block_count", "count": block_count, "max": MAX_BLOCKS})
                     await send_frames(websocket, frames)
                     await websocket.send_json({"type": "reset_complete"})
-                    print(f"[GPU {gpu_id}] Reset complete")
+                    print(f"[GPU {gpu_id}] Reset complete for {client_id[:8]}")
                 except Exception as e:
-                    print(f"[GPU {gpu_id}] Reset error: {e}")
+                    print(f"[GPU {gpu_id}] Reset error for {client_id[:8]}: {e}")
                     await websocket.send_json({"type": "reset_complete"})
                 continue
 
@@ -171,10 +210,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     keyboard_vector = KEYBOARD_MAP.get(key, [0, 0, 0, 0])
                     mouse_vector = [0, 0]
 
-                print(f"[GPU {gpu_id}] Key '{key}' pressed, generating block {block_count + 1}...")
+                print(f"[GPU {gpu_id}] Key '{key}' from {client_id[:8]}, generating block {block_count + 1}...")
 
                 t_start = time.time()
-                frames = await slot.step(keyboard_vector, mouse_vector)
+                frames, timings = await slot.user_step(
+                    client_id, keyboard_vector, mouse_vector)
                 t_generation = time.time() - t_start
 
                 block_count += 1
@@ -183,9 +223,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 if frames:
                     t_encode_start = time.time()
                     await send_frames(websocket, frames)
-                    t_total = time.time() - t_encode_start
+                    t_encode = time.time() - t_encode_start
 
-                    print(f"[GPU {gpu_id}] Gen: {t_generation:.3f}s, Encode+Send: {t_total:.3f}s")
+                    dit_ms = timings.get('dit_ms', 0)
+                    vae_ms = timings.get('vae_ms', 0)
+                    print(f"[GPU {gpu_id}] ({client_id[:8]}) DiT: {dit_ms:.0f}ms, VAE: {vae_ms:.0f}ms, Encode+Send: {t_encode*1000:.0f}ms, Total: {t_generation*1000:.0f}ms")
 
     except WebSocketDisconnect:
         print(f"Client {client_id[:8]} disconnected")
@@ -205,12 +247,16 @@ async def websocket_endpoint(websocket: WebSocket):
             await gpu_pool.release(client_id)
 
 
+# Serve server-side assets (images, etc.)
+server_dir = os.path.dirname(os.path.abspath(__file__))
+app.mount("/server-assets", StaticFiles(directory=server_dir), name="server-assets")
+
 # Serve built frontend (must be after API/WebSocket routes)
-static_dir = os.path.join(os.path.dirname(__file__), "..", "client", "dist")
+static_dir = os.path.join(server_dir, "..", "client", "dist")
 if os.path.isdir(static_dir):
     app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)
