@@ -571,7 +571,7 @@ class WorkerMultiprocProc:
             shutdown_requested = True
             traceback = get_exception_traceback()
             logger.error("Worker %d hit an exception: %s", rank, traceback)
-            parent_process.send_signal(signal.SIGQUIT)
+            parent_process.send_signal(getattr(signal, "SIGQUIT", 3))
 
         finally:
             if ready_pipe is not None:
