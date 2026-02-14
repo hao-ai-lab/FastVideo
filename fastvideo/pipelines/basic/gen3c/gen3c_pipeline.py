@@ -109,14 +109,13 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
 
         # Prepare condition_video_pose (3D cache buffers - to be filled by cache rendering)
         frame_buffer_max = getattr(pipeline_config, 'frame_buffer_max', 2)
-        channels_per_buffer = getattr(
-            pipeline_config, 'dit_config', None)
+        channels_per_buffer = getattr(pipeline_config, 'dit_config', None)
         if channels_per_buffer is not None:
-            channels_per_buffer = getattr(
-                channels_per_buffer, 'arch_config', None)
+            channels_per_buffer = getattr(channels_per_buffer, 'arch_config',
+                                          None)
         if channels_per_buffer is not None:
-            channels_per_buffer = getattr(
-                channels_per_buffer, 'CHANNELS_PER_BUFFER', 32)
+            channels_per_buffer = getattr(channels_per_buffer,
+                                          'CHANNELS_PER_BUFFER', 32)
         else:
             channels_per_buffer = 32
         buffer_channels = frame_buffer_max * channels_per_buffer
@@ -170,11 +169,14 @@ class Gen3CLatentPreparationStage(LatentPreparationStage):
         num_buffers = condition_state.shape[2]
         for i in range(num_buffers):
             # Batch image and mask into a single VAE encode call per buffer
-            img_input = condition_state[:, :, i].permute(0, 2, 1, 3, 4).to(dtype)
-            mask_input = condition_state_mask[:, :, i].permute(0, 2, 1, 3, 4).to(dtype)
+            img_input = condition_state[:, :, i].permute(0, 2, 1, 3,
+                                                         4).to(dtype)
+            mask_input = condition_state_mask[:, :, i].permute(0, 2, 1, 3,
+                                                               4).to(dtype)
             batched_input = torch.cat([img_input, mask_input], dim=0)
             batched_latent = vae.encode(batched_input).contiguous()
-            current_video_latent, current_mask_latent = batched_latent.chunk(2, dim=0)
+            current_video_latent, current_mask_latent = batched_latent.chunk(
+                2, dim=0)
 
             latent_condition.append(current_video_latent)
             latent_condition.append(current_mask_latent)
@@ -406,7 +408,11 @@ class Gen3CPipeline(ComposedPipelineBase):
     """
 
     _required_config_modules = [
-        "text_encoder", "tokenizer", "vae", "transformer", "scheduler",
+        "text_encoder",
+        "tokenizer",
+        "vae",
+        "transformer",
+        "scheduler",
     ]
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
