@@ -17,13 +17,28 @@ generating multiple frames autoregressively.
 """
 
 import math
+import os
 from typing import Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+try:
+    from torch.nn.attention.flex_attention import (
+        create_block_mask,
+        flex_attention,
+        noop_mask,
+    )
+
+    _FLEX_ATTN_AVAILABLE = True
+except ImportError:
+    _FLEX_ATTN_AVAILABLE = False
+
 from fastvideo.attention import DistributedAttention, LocalAttention
+from fastvideo.layers.layernorm import AdaLN, rms_norm
+from fastvideo.layers.linear import ReplicatedLinear
+from fastvideo.layers.mlp import MLP
 from fastvideo.logger import init_logger
 from fastvideo.configs.models.dits.waypoint_transformer import (
     WaypointConfig,
@@ -31,11 +46,19 @@ from fastvideo.configs.models.dits.waypoint_transformer import (
 from fastvideo.models.dits.base import CachableDiT
 from fastvideo.platforms import AttentionBackendEnum
 
-# Default config instance used for class-level attributes (matches MatrixGame pattern)
+# Default config instance used for class-level attributes
 _DEFAULT_WAYPOINT_CONFIG = WaypointConfig()
 _DEFAULT_WAYPOINT_ARCH = _DEFAULT_WAYPOINT_CONFIG.arch_config
 
 logger = init_logger(__name__)
+_WAYPOINT_DEBUG = os.environ.get("WAYPOINT_DEBUG", "0") in ("1", "true", "yes")
+
+if _FLEX_ATTN_AVAILABLE:
+    _flex_attention = torch.compile(
+        flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs"
+    )
+else:
+    _flex_attention = None
 
 
 # =============================================================================
@@ -45,12 +68,8 @@ logger = init_logger(__name__)
 
 
 # =============================================================================
-# Helper Functions
+# Helper Functions (rms_norm from fastvideo.layers.layernorm)
 # =============================================================================
-
-def rms_norm(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
-    """RMS normalization without learnable parameters."""
-    return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)
 
 
 def ada_rmsnorm(
@@ -77,36 +96,19 @@ def ada_gate(x: torch.Tensor, gate: torch.Tensor) -> torch.Tensor:
 
 
 # =============================================================================
-# Basic Building Blocks
+# Basic Building Blocks (uses FastVideo MLP and AdaLN from layers)
 # =============================================================================
 
-class MLP(nn.Module):
-    """Simple 2-layer MLP with SiLU activation."""
-    
-    def __init__(self, in_features: int, hidden_features: int, out_features: int, bias: bool = False):
-        super().__init__()
-        self.fc1 = nn.Linear(in_features, hidden_features, bias=bias)
-        self.fc2 = nn.Linear(hidden_features, out_features, bias=bias)
-    
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.fc2(F.silu(self.fc1(x)))
-
-
-class AdaLN(nn.Module):
-    """Adaptive Layer Normalization for output; cond [B, N, D] per-frame scale/shift."""
-
-    def __init__(self, d_model: int):
-        super().__init__()
-        self.fc = nn.Linear(d_model, 2 * d_model, bias=False)
-
-    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
-        B, L, D = x.shape
-        N = cond.shape[1]
-        h = F.silu(cond)
-        ab = self.fc(h)
-        ab = ab.view(B, N, 1, 2 * D).expand(-1, -1, L // N, -1).reshape(B, L, 2 * D)
-        scale, shift = ab.chunk(2, dim=-1)
-        return rms_norm(x) * (1 + scale) + shift
+def _waypoint_mlp(in_dim: int, hidden_dim: int, out_dim: int,
+                  bias: bool = False) -> MLP:
+    """Create Waypoint-style 2-layer MLP with SiLU."""
+    return MLP(
+        input_dim=in_dim,
+        mlp_hidden_dim=hidden_dim,
+        output_dim=out_dim,
+        bias=bias,
+        act_type="silu",
+    )
 
 
 class CFG(nn.Module):
@@ -136,11 +138,11 @@ class CFG(nn.Module):
 
 class ControllerInputEmbedding(nn.Module):
     """Embeds controller inputs (mouse + buttons + scroll) into model dimension."""
-    
+
     def __init__(self, n_buttons: int, d_model: int, mlp_ratio: int = 4):
         super().__init__()
         # Input: mouse (2) + buttons (n_buttons) + scroll (1) = n_buttons + 3
-        self.mlp = MLP(n_buttons + 3, d_model * mlp_ratio, d_model)
+        self.mlp = _waypoint_mlp(n_buttons + 3, d_model * mlp_ratio, d_model)
     
     def forward(self, mouse: torch.Tensor, button: torch.Tensor, scroll: torch.Tensor) -> torch.Tensor:
         """
@@ -171,7 +173,7 @@ class NoiseConditioner(nn.Module):
         self.base = base
         half = freq_dim // 2
         assert half * 2 == freq_dim
-        self.mlp = MLP(freq_dim, d_model * 4, d_model)
+        self.mlp = _waypoint_mlp(freq_dim, d_model * 4, d_model)
 
     @torch.autocast("cuda", enabled=False)
     def forward(self, sigma: torch.Tensor) -> torch.Tensor:
@@ -311,11 +313,11 @@ class OrthoRoPE(nn.Module):
 
 class MLPFusion(nn.Module):
     """Fuses per-frame control conditioning into tokens via MLP."""
-    
+
     def __init__(self, d_model: int):
         super().__init__()
         # Input is concatenation of x and cond, each d_model
-        self.mlp = MLP(2 * d_model, d_model, d_model)
+        self.mlp = _waypoint_mlp(2 * d_model, d_model, d_model)
     
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
         """
@@ -328,17 +330,17 @@ class MLPFusion(nn.Module):
         B, L, D = x.shape
         N = cond.shape[1]
         tokens_per_frame = L // N
-        
-        # Split fc1 weights for efficient computation
-        Wx, Wc = self.mlp.fc1.weight.chunk(2, dim=1)
-        
+
+        # Split fc_in weights for efficient computation (fc_in = first layer)
+        Wx, Wc = self.mlp.fc_in.weight.chunk(2, dim=1)
+
         # Reshape x to [B, N, tokens_per_frame, D]
         x_reshaped = x.view(B, N, tokens_per_frame, D)
-        
-        # Compute: fc1_x(x) + fc1_c(cond).unsqueeze(2)
+
+        # Compute: fc_in_x(x) + fc_in_c(cond).unsqueeze(2)
         h = F.linear(x_reshaped, Wx) + F.linear(cond, Wc).unsqueeze(2)
         h = F.silu(h)
-        y = F.linear(h, self.mlp.fc2.weight)
+        y = F.linear(h, self.mlp.fc_out.weight)
         
         return y.flatten(1, 2)
 
@@ -355,10 +357,12 @@ class CondHead(nn.Module):
     def __init__(self, d_model: int, noise_conditioning: str = "wan"):
         super().__init__()
         self.bias_in = (
-            nn.Parameter(torch.zeros(d_model)) if noise_conditioning == "wan" else None
+            nn.Parameter(torch.zeros(d_model))
+            if noise_conditioning == "wan" else None
         )
         self.cond_proj = nn.ModuleList([
-            nn.Linear(d_model, d_model, bias=False) for _ in range(self.n_cond)
+            ReplicatedLinear(d_model, d_model, bias=False)
+            for _ in range(self.n_cond)
         ])
 
     def forward(self, cond: torch.Tensor):
@@ -366,7 +370,7 @@ class CondHead(nn.Module):
         if self.bias_in is not None:
             cond = cond + self.bias_in
         h = F.silu(cond)
-        return tuple(proj(h) for proj in self.cond_proj)
+        return tuple(proj(h)[0] for proj in self.cond_proj)
 
 
 # =============================================================================
@@ -396,10 +400,14 @@ class GatedSelfAttention(nn.Module):
         self.gated_attn = gated_attn
         self.rope = rope
 
-        self.q_proj = nn.Linear(d_model, d_model, bias=False)
-        self.k_proj = nn.Linear(d_model, n_kv_heads * self.head_dim, bias=False)
-        self.v_proj = nn.Linear(d_model, n_kv_heads * self.head_dim, bias=False)
-        self.out_proj = nn.Linear(d_model, d_model, bias=False)
+        self.q_proj = ReplicatedLinear(d_model, d_model, bias=False)
+        self.k_proj = ReplicatedLinear(
+            d_model, n_kv_heads * self.head_dim, bias=False
+        )
+        self.v_proj = ReplicatedLinear(
+            d_model, n_kv_heads * self.head_dim, bias=False
+        )
+        self.out_proj = ReplicatedLinear(d_model, d_model, bias=False)
 
         self.attn = DistributedAttention(
             num_heads=n_heads,
@@ -408,9 +416,8 @@ class GatedSelfAttention(nn.Module):
             causal=causal,
             supported_attention_backends=(AttentionBackendEnum.TORCH_SDPA,),
         )
-
         if gated_attn:
-            self.gate_proj = nn.Linear(n_heads, n_heads, bias=False)
+            self.gate_proj = ReplicatedLinear(n_heads, n_heads, bias=False)
             nn.init.zeros_(self.gate_proj.weight)
 
         self.scale = self.head_dim ** -0.5
@@ -424,9 +431,12 @@ class GatedSelfAttention(nn.Module):
     ) -> torch.Tensor:
         B, L, D = x.shape
 
-        q = self.q_proj(x).view(B, L, self.n_heads, self.head_dim)
-        k = self.k_proj(x).view(B, L, self.n_kv_heads, self.head_dim)
-        v = self.v_proj(x).view(B, L, self.n_kv_heads, self.head_dim)
+        q, _ = self.q_proj(x)
+        q = q.view(B, L, self.n_heads, self.head_dim)
+        k, _ = self.k_proj(x)
+        k = k.view(B, L, self.n_kv_heads, self.head_dim)
+        v, _ = self.v_proj(x)
+        v = v.view(B, L, self.n_kv_heads, self.head_dim)
 
         q, k = rms_norm(q), rms_norm(k)
 
@@ -434,8 +444,55 @@ class GatedSelfAttention(nn.Module):
             q = self.rope(q, pos_ids)
             k = self.rope(k, pos_ids)
 
-        # KV cache: prepend cached K/V for cross-frame causal attention
-        if kv_cache is not None:
+        # Use flex_attention when no KV cache (match WanVideo/MatrixGame pattern).
+        # With cache, use SDPA directly (DistributedAttention has no cache support).
+        if kv_cache is None:
+            if _FLEX_ATTN_AVAILABLE and _flex_attention is not None:
+                # Bidirectional spatial attention via flex_attention (like WanVideo)
+                padded_length = math.ceil(L / 128) * 128 - L
+                total_len = L + padded_length
+                block_mask = create_block_mask(
+                    noop_mask,
+                    B=None,
+                    H=None,
+                    Q_LEN=total_len,
+                    KV_LEN=total_len,
+                    device=q.device,
+                    _compile=False,
+                )
+                q_pad = F.pad(
+                    q.transpose(1, 2),
+                    (0, 0, 0, padded_length),
+                    value=0,
+                )
+                k_pad = F.pad(
+                    k.transpose(1, 2),
+                    (0, 0, 0, padded_length),
+                    value=0,
+                )
+                v_pad = F.pad(
+                    v.transpose(1, 2),
+                    (0, 0, 0, padded_length),
+                    value=0,
+                )
+                attn_out = _flex_attention(
+                    q_pad,
+                    k_pad,
+                    v_pad,
+                    block_mask=block_mask,
+                    scale=self.scale,
+                    enable_gqa=(self.n_kv_heads != self.n_heads),
+                )[:, :, :L].transpose(1, 2)
+            else:
+                # Fallback: DistributedAttention (sequence parallelism)
+                if self.n_kv_heads != self.n_heads:
+                    rep = self.n_heads // self.n_kv_heads
+                    k = k.repeat_interleave(rep, dim=2)
+                    v = v.repeat_interleave(rep, dim=2)
+                attn_out, _ = self.attn(
+                    q, k, v, freqs_cis=None, attention_mask=None
+                )
+        elif kv_cache is not None:
             cache_end = kv_cache["end"]
             if isinstance(cache_end, torch.Tensor):
                 cache_end = int(cache_end.item())
@@ -462,42 +519,17 @@ class GatedSelfAttention(nn.Module):
             attn_out = attn_out.transpose(1, 2)  # [B, L, n_heads, head_dim]
             if update_cache:
                 self._write_kv_cache(kv_cache, k, v, L)
-        elif self.n_kv_heads != self.n_heads:
-            q_t = q.transpose(1, 2)
-            k_t = k.transpose(1, 2)
-            v_t = v.transpose(1, 2)
-            attn_out = F.scaled_dot_product_attention(
-                q_t, k_t, v_t,
-                attn_mask=None,
-                dropout_p=0.0,
-                is_causal=False,
-                scale=self.scale,
-                enable_gqa=True,
-            )
-            attn_out = attn_out.transpose(1, 2)
-        else:
-            q_t = q.transpose(1, 2)
-            k_t = k.transpose(1, 2)
-            v_t = v.transpose(1, 2)
-            attn_out = F.scaled_dot_product_attention(
-                q_t, k_t, v_t,
-                attn_mask=None,
-                dropout_p=0.0,
-                is_causal=False,
-                scale=self.scale,
-                enable_gqa=(self.n_kv_heads != self.n_heads),
-            )
-            attn_out = attn_out.transpose(1, 2)
+
         # Official: gate attn output BEFORE out_proj
         # attn_out is [B, L, n_heads, head_dim] here (already transposed)
         if self.gated_attn:
-            gates = torch.sigmoid(
-                self.gate_proj(x[..., : self.n_heads])
-            )  # [B, L, n_heads]
+            gates, _ = self.gate_proj(x[..., : self.n_heads])
+            gates = torch.sigmoid(gates)  # [B, L, n_heads]
             attn_out = attn_out * gates.unsqueeze(-1)
 
         attn_out = attn_out.reshape(B, L, D)
-        return self.out_proj(attn_out)
+        out, _ = self.out_proj(attn_out)
+        return out
 
     def _write_kv_cache(
         self,
@@ -506,7 +538,12 @@ class GatedSelfAttention(nn.Module):
         v: torch.Tensor,
         L: int,
     ) -> None:
-        """Write current frame K/V into the layer cache (ring buffer)."""
+        """Write current frame K/V into the layer cache (ring buffer).
+        StaticKVCache semantics: no-op when cache is frozen (read-only during denoise).
+        """
+        frozen_ref = kv_cache.get("frozen_ref")
+        if frozen_ref is not None and frozen_ref[0]:
+            return
         cache_k = kv_cache["k"]
         cache_v = kv_cache["v"]
         cache_size = cache_k.shape[2]
@@ -519,6 +556,12 @@ class GatedSelfAttention(nn.Module):
             kv_cache["end"] = end + L
         else:
             num_keep = cache_size - L
+            if _WAYPOINT_DEBUG:
+                logger.info(
+                    "DEBUG [kv_cache] EVICTION: end=%d L=%d cache_size=%d "
+                    "num_keep=%d (rolling)",
+                    end, L, cache_size, num_keep,
+                )
             cache_k[:, :, :num_keep, :].copy_(
                 cache_k[:, :, end - num_keep : end, :]
             )
@@ -546,14 +589,14 @@ class CrossAttention(nn.Module):
         # Calculate n_heads from context_dim and head_dim
         assert context_dim % head_dim == 0, f"context_dim {context_dim} must be divisible by head_dim {head_dim}"
         self.n_heads = context_dim // head_dim
-        
+
         # Q: project from d_model to context_dim
-        self.q_proj = nn.Linear(d_model, context_dim, bias=False)
+        self.q_proj = ReplicatedLinear(d_model, context_dim, bias=False)
         # K, V: project from context_dim to context_dim
-        self.k_proj = nn.Linear(context_dim, context_dim, bias=False)
-        self.v_proj = nn.Linear(context_dim, context_dim, bias=False)
+        self.k_proj = ReplicatedLinear(context_dim, context_dim, bias=False)
+        self.v_proj = ReplicatedLinear(context_dim, context_dim, bias=False)
         # Out: project from context_dim back to d_model
-        self.out_proj = nn.Linear(context_dim, d_model, bias=False)
+        self.out_proj = ReplicatedLinear(context_dim, d_model, bias=False)
 
         # Use LocalAttention for cross-attention (local operation, no SP needed)
         self.attn = LocalAttention(
@@ -573,9 +616,12 @@ class CrossAttention(nn.Module):
         B, L, _ = x.shape
         _, S, _ = context.shape
 
-        q = self.q_proj(x).view(B, L, self.n_heads, self.head_dim)
-        k = self.k_proj(context).view(B, S, self.n_heads, self.head_dim)
-        v = self.v_proj(context).view(B, S, self.n_heads, self.head_dim)
+        q, _ = self.q_proj(x)
+        q = q.view(B, L, self.n_heads, self.head_dim)
+        k, _ = self.k_proj(context)
+        k = k.view(B, S, self.n_heads, self.head_dim)
+        v, _ = self.v_proj(context)
+        v = v.view(B, S, self.n_heads, self.head_dim)
         q, k = rms_norm(q), rms_norm(k)
 
         # Official Waypoint cross-attention does NOT mask padding:
@@ -583,7 +629,8 @@ class CrossAttention(nn.Module):
         # Match that behaviour here.
         attn_out = self.attn(q=q, k=k, v=v)
         attn_out = attn_out.reshape(B, L, self.context_dim)
-        return self.out_proj(attn_out)
+        out, _ = self.out_proj(attn_out)
+        return out
 
 
 # =============================================================================
@@ -621,9 +668,9 @@ class WaypointBlock(nn.Module):
             gated_attn=gated_attn,
             rope=rope,
         )
-        
+
         # Feed-forward MLP
-        self.mlp = MLP(d_model, d_model * mlp_ratio, d_model)
+        self.mlp = _waypoint_mlp(d_model, d_model * mlp_ratio, d_model)
         
         # Conditioning head (6 modulation vectors)
         self.cond_head = CondHead(d_model, noise_conditioning)
@@ -825,12 +872,12 @@ class WaypointWorldModel(CachableDiT):
             bias=False,
         )
         
-        self.unpatchify = nn.Linear(
+        self.unpatchify = ReplicatedLinear(
             config.d_model,
             config.channels * ph * pw,
             bias=True,
         )
-        
+
         self.out_norm = AdaLN(config.d_model)
     
     def forward(
@@ -923,7 +970,7 @@ class WaypointWorldModel(CachableDiT):
         )
 
         x = F.silu(self.out_norm(x, cond))
-        x = self.unpatchify(x)  # [B, N*Hp*Wp, C*ph*pw]
+        x, _ = self.unpatchify(x)  # [B, N*Hp*Wp, C*ph*pw]
         
         # Reshape back to image
         x = x.view(B, N, Hp, Wp, C, ph, pw)

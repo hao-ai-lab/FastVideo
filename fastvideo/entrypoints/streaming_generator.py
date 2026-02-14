@@ -145,7 +145,7 @@ class StreamingVideoGenerator(VideoGenerator):
             self.sampling_param.image_path = image_path
         self.sampling_param.num_frames = num_frames
 
-        if "output_path" in kwargs:
+        if kwargs.get("output_path"):
             output_path = self._prepare_output_path(kwargs["output_path"],
                                                     prompt)
             # Create block directory for individual block files
@@ -176,6 +176,7 @@ class StreamingVideoGenerator(VideoGenerator):
         batch_kw = shallow_asdict(self.sampling_param)
         batch_kw.pop("video_quality",
                      None)  # writer-only, not a ForwardBatch field
+        batch_kw.pop("max_kv_cache_frames", None)  # used by pipeline config
         self.batch = ForwardBatch(
             **batch_kw,
             eta=0.0,

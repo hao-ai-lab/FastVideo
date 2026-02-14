@@ -409,7 +409,6 @@ class ComposedPipelineBase(ABC):
             #     "transformer": ["diffusers", "WorldModel"]
             # - Modular pipelines (diffusers ModularPipeline style):
             #     "text_encoder": [null, null, {"pretrained_model_name_or_path": "google/umt5-xl", "type_hint": ["transformers","UMT5EncoderModel"]}]
-            transformers_or_diffusers: str
             component_model_path: str
             if (isinstance(module_spec, list | tuple)
                     and len(module_spec) == 2):
